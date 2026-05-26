@@ -1,0 +1,44 @@
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env/secrets
+.env
+.env.*
+!.env.example
+
+# Node/Tauri/build artifacts
+node_modules/
+dist/
+target/
+Cargo.lock
+
+# Logs/temp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+
+# Spike experiments
+spike/
+review-workflow/
+ANCHORING/
+
+# Internal docs / plans / notes
+.internal/
+.design-ideas/
+.claude/
+.shoulders.json
+plan-*.md
+!docs/plan-ai-*.md
+TODO.md
+
+# Sidecar binaries tracked via Git LFS (not gitignored)
+# src-tauri/binaries/ — tracked by LFS
+
+workflows-tbd/

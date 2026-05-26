@@ -1,0 +1,229 @@
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useSettingsStore } from './settings.js'
+
+// happy-dom localStorage is incomplete — provide a working mock
+const storage = new Map()
+const localStorageMock = {
+  getItem: (key) => storage.get(key) ?? null,
+  setItem: (key, val) => storage.set(key, String(val)),
+  removeItem: (key) => storage.delete(key),
+  clear: () => storage.clear(),
+}
+
+describe('settings store', () => {
+  beforeEach(() => {
+    storage.clear()
+    vi.stubGlobal('localStorage', localStorageMock)
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  // ── Defaults & Computed ──
+
+  it('initializes all settings with correct defaults', () => {
+    const store = useSettingsStore()
+
+    expect(store.editorFontFamily).toBe('mono')
+    expect(store.editorFontSize).toBe(16)
+    expect(store.editorTheme).toBe('parchment')
+    expect(store.editorWordWrap).toBe(true)
+    expect(store.editorAutoSave).toBe(true)
+    expect(store.editorSpellCheck).toBe(false)
+    expect(store.editorToolbarMode).toBe('top')
+    expect(store.editorLivePreview).toBe(true)
+    expect(store.aiGhostSuggestions).toBe(true)
+    expect(store.aiGhostModel).toBe('auto')
+    expect(store.aiInlineRewrite).toBe(true)
+    expect(store.exportFormat).toBe('pdf')
+    expect(store.exportPdfTemplate).toBe('clean')
+    expect(store.exportCitationStyle).toBe('apa')
+    expect(store.exportBibliography).toBe(true)
+    expect(store.exportPdfPageSize).toBe('a4')
+    expect(store.exportDocxFont).toBe('Calibri')
+    expect(store.exportDocxPageSize).toBe('a4')
+    expect(store.disabledTools).toEqual([])
+    expect(store.aiApprovalMode).toBe('normal')
+  })
+
+  it('isDarkTheme returns true for dark themes', () => {
+    const store = useSettingsStore()
+    store.set('editorTheme', 'slate')
+    expect(store.isDarkTheme).toBe(true)
+    store.set('editorTheme', 'monokai')
+    expect(store.isDarkTheme).toBe(true)
+  })
+
+  it('isDarkTheme returns false for light themes', () => {
+    const store = useSettingsStore()
+    store.set('editorTheme', 'parchment')
+    expect(store.isDarkTheme).toBe(false)
+    store.set('editorTheme', 'glacier')
+    expect(store.isDarkTheme).toBe(false)
+  })
+
+  it('settingsReady is true after initial load completes', async () => {
+    const store = useSettingsStore()
+    await Promise.resolve()
+    expect(store.settingsReady).toBe(true)
+  })
+
+  // ── set() ──
+
+  it('set() updates the setting value', () => {
+    const store = useSettingsStore()
+    expect(store.editorFontSize).toBe(16)
+    store.set('editorFontSize', 18)
+    expect(store.editorFontSize).toBe(18)
+  })
+
+  it('set() ignores unknown keys', () => {
+    const store = useSettingsStore()
+    store.set('nonExistentSetting', 'value')
+    expect(store.nonExistentSetting).toBeUndefined()
+  })
+
+  it('set() works for array settings', () => {
+    const store = useSettingsStore()
+    store.set('disabledTools', ['tool_a', 'tool_b'])
+    expect(store.disabledTools).toEqual(['tool_a', 'tool_b'])
+  })
+
+  // ── Debounced save ──
+
+  it('set() triggers debounced save to localStorage', async () => {
+    vi.useFakeTimers()
+    const store = useSettingsStore()
+    await store.load()
+
+    const setItemSpy = vi.spyOn(localStorageMock, 'setItem')
+    store.set('editorFontSize', 16)
+
+    expect(setItemSpy).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(setItemSpy).toHaveBeenCalled()
+    const persisted = JSON.parse(storage.get('shoulders:editor:settings:v1'))
+    expect(persisted.editorFontSize).toBe(16)
+  })
+
+  it('multiple rapid set() calls debounce to a single save', async () => {
+    vi.useFakeTimers()
+    const store = useSettingsStore()
+    await store.load()
+
+    const setItemSpy = vi.spyOn(localStorageMock, 'setItem')
+    store.set('editorFontSize', 14)
+    store.set('editorFontSize', 16)
+    store.set('editorFontSize', 18)
+
+    await vi.advanceTimersByTimeAsync(300)
+    expect(setItemSpy).toHaveBeenCalledTimes(1)
+    const persisted = JSON.parse(storage.get('shoulders:editor:settings:v1'))
+    expect(persisted.editorFontSize).toBe(18)
+  })
+
+  // ── load() must not trigger save (the bug we fixed) ──
+
+  it('load() does not trigger save', async () => {
+    vi.useFakeTimers()
+
+    storage.set('shoulders:editor:settings:v1', JSON.stringify({
+      editorFontSize: 20,
+      editorTheme: 'monokai',
+    }))
+
+    const store = useSettingsStore()
+    const saveSpy = vi.spyOn(store, 'save')
+    await store.load()
+
+    expect(store.editorFontSize).toBe(20)
+    expect(store.editorTheme).toBe('monokai')
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(saveSpy).not.toHaveBeenCalled()
+  })
+
+  // ── load() correctness ──
+
+  it('load() applies saved values over defaults', async () => {
+    storage.set('shoulders:editor:settings:v1', JSON.stringify({
+      editorFontSize: 16,
+      editorWordWrap: false,
+      editorTheme: 'slate',
+    }))
+
+    const store = useSettingsStore()
+    await store.load()
+
+    expect(store.editorFontSize).toBe(16)
+    expect(store.editorWordWrap).toBe(false)
+    expect(store.editorTheme).toBe('slate')
+    expect(store.editorFontFamily).toBe('mono')
+  })
+
+  it('load() tolerates empty localStorage', async () => {
+    const store = useSettingsStore()
+    await store.load()
+    expect(store.editorFontSize).toBe(16)
+    expect(store.settingsReady).toBe(true)
+  })
+
+  it('load() tolerates corrupt localStorage', async () => {
+    storage.set('shoulders:editor:settings:v1', 'not json')
+    const store = useSettingsStore()
+    await store.load()
+    expect(store.editorFontSize).toBe(16)
+    expect(store.settingsReady).toBe(true)
+  })
+
+  // ── save() ──
+
+  it('save() persists current values to localStorage', async () => {
+    const store = useSettingsStore()
+    await Promise.resolve()
+
+    store.set('editorFontSize', 22)
+    await store.save()
+
+    const raw = JSON.parse(storage.get('shoulders:editor:settings:v1'))
+    expect(raw.editorFontSize).toBe(22)
+  })
+
+  // ── Round-trip ──
+
+  it('set → save → load preserves values', async () => {
+    const store = useSettingsStore()
+    await Promise.resolve()
+
+    store.set('editorTheme', 'monokai')
+    store.set('editorFontSize', 18)
+    store.set('editorWordWrap', false)
+    await store.save()
+
+    store.set('editorTheme', 'parchment')
+    store.set('editorFontSize', 12)
+    store.set('editorWordWrap', true)
+
+    await store.load()
+    expect(store.editorTheme).toBe('monokai')
+    expect(store.editorFontSize).toBe(18)
+    expect(store.editorWordWrap).toBe(false)
+  })
+
+  it('set() before settingsReady does not schedule save', async () => {
+    vi.useFakeTimers()
+
+    const store = useSettingsStore()
+    // settingsReady is false until load() resolves
+    const saveSpy = vi.spyOn(store, 'save')
+    store.set('editorFontSize', 20)
+
+    expect(store.editorFontSize).toBe(20)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(saveSpy).not.toHaveBeenCalled()
+  })
+})

@@ -1,0 +1,390 @@
+/* CM6 theme bridge — maps design system tokens to the variable names
+   used by codemirror/core.js so the CM6 theme stays portable. */
+:root {
+  --ink: var(--color-ink);
+  --ink-strong: var(--color-ink);
+  --editor-paper: var(--color-surface);
+  --accent: var(--color-accent);
+  --muted: var(--color-ink-3);
+  --active-line: var(--color-line-soft);
+  --selection: var(--color-accent-soft);
+  --inline-code-bg: var(--color-chrome-mid);
+  --code: var(--color-ink-2);
+  --quote: var(--color-ink-3);
+  --line-strong: var(--color-rule);
+  --panel: var(--color-chrome-mid);
+  --shadow-low: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --syntax-keyword: #7c4dff;
+  --syntax-property: #6e56cf;
+  --syntax-string: #2e7d32;
+  --syntax-number: #e65100;
+  --editor-size: 14px;
+  --editor-line-height: 23px;
+}
+
+/* Ghost suggestion decorations */
+.ghost-text {
+  color: var(--color-ink-3);
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.ghost-loading {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 4px;
+  vertical-align: baseline;
+}
+
+.ghost-loading-dot {
+  color: var(--color-ink-3);
+  animation: ghost-pulse 1.2s ease-in-out infinite;
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.ghost-loading-dot:nth-child(2) { animation-delay: 0.15s; }
+.ghost-loading-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes ghost-pulse {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+
+.ghost-hint-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 2px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--color-ink-3);
+  user-select: none;
+}
+
+.ghost-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ghost-hint-item kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-ink-3);
+  background: var(--color-chrome-mid);
+  border: 1px solid var(--color-rule-light);
+  border-radius: 3px;
+  padding: 0 4px;
+  min-width: 16px;
+  height: 16px;
+  box-shadow: 0 1px 0 var(--color-rule-light);
+}
+
+.ghost-hint-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-accent);
+  margin-right: 4px;
+}
+
+.ghost-error-line {
+  color: var(--color-ink-3);
+}
+
+
+
+.editor-content div {
+  position: relative;
+  padding: 0 2px;
+  margin: 0 -2px;
+  line-height: 23px;
+}
+
+.editor-content div.line-active {
+  background: transparent;
+}
+
+.editor-content .md-h2 {
+  font-weight: 600;
+  color: var(--color-ink);
+  font-size: 13px;
+}
+
+.editor-content .md-h3 {
+  font-weight: 500;
+  color: var(--color-ink);
+  font-size: 12.5px;
+}
+
+.editor-content .md-hash {
+  color: var(--color-ink-3);
+}
+
+.editor-content .md-bold {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.editor-content .md-cite {
+  color: var(--color-accent);
+}
+
+.editor-content .md-blockquote {
+  border-left: 2px solid var(--color-rule);
+  padding-left: 14px;
+  color: var(--color-ink-3);
+  font-style: italic;
+}
+
+.editor-content .md-selection {
+  background: var(--color-accent-soft);
+  outline: 1px solid var(--color-accent);
+  border-radius: 1px;
+  padding: 0 2px;
+}
+
+/* Comment range decorations */
+.cm-comment-range {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 14%, transparent);
+}
+.cm-comment-range-active {
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--color-ink) 24%, transparent);
+}
+
+.cm-comment-block {
+  width: min(560px, calc(100% - 16px));
+  margin: 2px 0 4px 0;
+  padding: 4px 7px 5px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--color-rule) 50%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cm-comment-block:hover,
+.cm-comment-block:focus-within,
+.cm-comment-block.is-active {
+  background: color-mix(in srgb, var(--color-surface) 80%, var(--color-chrome-mid));
+  border-color: color-mix(in srgb, var(--color-rule) 80%, transparent);
+}
+
+.cm-comment-block.has-error {
+  border-color: color-mix(in srgb, var(--color-rem) 45%, var(--color-rule));
+}
+
+.cm-comment-block-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 18px;
+}
+
+.cm-comment-block-meta {
+  min-width: 0;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.cm-comment-block-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity .1s ease;
+}
+
+.cm-comment-block:hover .cm-comment-block-actions,
+.cm-comment-block:focus-within .cm-comment-block-actions,
+.cm-comment-block.is-active .cm-comment-block-actions {
+  opacity: 1;
+}
+
+.cm-comment-btn {
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ink-3);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  line-height: 16px;
+  cursor: default;
+}
+
+.cm-comment-btn:hover:not(:disabled) {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.cm-comment-btn:disabled {
+  opacity: .45;
+}
+
+.cm-comment-btn-primary {
+  border-color: color-mix(in srgb, var(--color-ink) 14%, var(--color-rule));
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.cm-comment-more {
+  position: relative;
+}
+
+.cm-comment-more-trigger {
+  display: flex;
+  height: 18px;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  list-style: none;
+  cursor: default;
+}
+
+.cm-comment-more-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.cm-comment-more-trigger:hover,
+.cm-comment-more[open] .cm-comment-more-trigger {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.cm-comment-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 20;
+  min-width: 142px;
+  padding: 3px;
+  border: 1px solid var(--color-rule);
+  border-radius: 5px;
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgba(0,0,0,.16);
+}
+
+.cm-comment-menu .cm-comment-btn {
+  display: block;
+  width: 100%;
+  height: 24px;
+  padding: 0 7px;
+  text-align: left;
+}
+
+.cm-comment-block-body {
+  margin-top: 2px;
+  color: var(--color-ink-2);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.cm-comment-replies {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cm-comment-reply {
+  display: flex;
+  gap: 5px;
+  padding-left: 6px;
+  border-left: 1px solid var(--color-rule-light);
+  color: var(--color-ink-2);
+  font-size: 11.5px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.cm-comment-reply-author {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-3);
+}
+
+.cm-comment-reply-trigger {
+  margin-top: 4px;
+  height: 20px;
+  width: 100%;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-ink-3);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  text-align: left;
+  padding: 0 5px;
+}
+
+.cm-comment-reply-trigger:hover {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink-2);
+}
+
+.cm-comment-compose {
+  margin-top: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.cm-comment-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 22px;
+  max-height: 96px;
+  resize: none;
+  padding: 3px 5px;
+  border: 1px solid var(--color-rule-light);
+  border-radius: 3px;
+  outline: none;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  line-height: 1.35;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.cm-comment-input:focus {
+  border-color: color-mix(in srgb, var(--color-ink) 20%, var(--color-rule));
+  background: var(--color-surface);
+}
+
+.cm-comment-error {
+  display: none;
+  margin-top: 4px;
+  color: var(--color-rem);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+}
+
+.cm-comment-block.has-error .cm-comment-error {
+  display: block;
+}

@@ -1,0 +1,65 @@
+/* Shoulders App SDK — Base Theme
+   Auto-injected into every app. Provides token fallbacks, reset, and utilities. */
+
+:root {
+  --color-ink: #1a1a18;
+  --color-ink-2: #4a4a44;
+  --color-ink-3: #8a8a80;
+  --color-ink-4: #b0b0a6;
+  --color-chrome: #ebe9e3;
+  --color-chrome-mid: #f3f1ec;
+  --color-chrome-high: #f9f8f5;
+  --color-surface: #ffffff;
+  --color-accent: #c05d3c;
+  --color-accent-soft: rgba(192, 93, 60, 0.08);
+  --color-accent-ink: #ffffff;
+  --color-accent-2: #a84830;
+  --color-rule: #d8d7d2;
+  --color-rule-light: #eae9e5;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif: 'Lora', 'Georgia', serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', monospace;
+  --font-slab: 'Zilla Slab', 'Georgia', serif;
+  --radius: 6px;
+}
+
+/* Reset */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+       color: var(--color-ink); background: var(--color-surface);
+       -webkit-font-smoothing: antialiased; }
+
+/* Base elements */
+button, input, select, textarea {
+  font: inherit; color: inherit; border-radius: var(--radius);
+}
+button {
+  border: 1px solid var(--color-rule); background: var(--color-chrome-high);
+  padding: 6px 14px;
+}
+button:hover { background: var(--color-chrome-mid); }
+button:active { background: var(--color-chrome); }
+input, select, textarea {
+  border: 1px solid var(--color-rule); background: var(--color-surface);
+  padding: 6px 10px; outline: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--color-accent); }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--color-rule-light); }
+th { font-weight: 600; color: var(--color-ink-2); }
+
+/* Utilities */
+.card {
+  border: 1px solid var(--color-rule-light); border-radius: var(--radius);
+  padding: 16px; background: var(--color-surface);
+}
+.drop-zone {
+  border: 2px dashed var(--color-rule); border-radius: var(--radius);
+  padding: 24px; text-align: center; color: var(--color-ink-3); transition: border-color 0.15s;
+}
+.drop-zone.drag-over { border-color: var(--color-accent); color: var(--color-ink); }
+
+/* Typography helpers */
+.text-sm { font-size: 12px; }
+.text-lg { font-size: 18px; }
+.text-muted { color: var(--color-ink-3); }

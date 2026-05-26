@@ -1,0 +1,273 @@
+/* Diff view — CodeMirror 6 merge view decorations
+   Uses design-system tokens (--color-add, --color-rem) via color-mix
+   so all five themes work automatically. */
+
+
+/* ── Gutter / line numbers ──────────────────────────────────────────── */
+
+.diff-view .cm-gutters {
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-rule-light);
+}
+
+.diff-view .cm-lineNumbers .cm-gutterElement {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-3);
+  padding: 0 8px 0 4px;
+  min-width: 28px;
+}
+
+.side-by-side-merge .cm-gutters {
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-rule-light);
+}
+
+.side-by-side-merge .cm-lineNumbers .cm-gutterElement {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-3);
+  padding: 0 8px 0 4px;
+  min-width: 28px;
+}
+
+
+/* ── Unified merge view ─────────────────────────────────────────────── */
+
+.cm-mergeView .cm-changedLine {
+  background: color-mix(in srgb, var(--color-add) 6%, transparent);
+}
+
+.cm-mergeView .cm-deletedLine {
+  background: color-mix(in srgb, var(--color-rem) 6%, transparent);
+}
+
+.cm-mergeView .cm-changedText {
+  background: color-mix(in srgb, var(--color-add) 18%, transparent);
+  border-radius: 2px;
+}
+
+.cm-mergeView .cm-deletedText {
+  background: color-mix(in srgb, var(--color-rem) 18%, transparent);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-rem) 40%, transparent);
+}
+
+/* Change gutter — thin 2px colored bar at the left edge */
+.cm-mergeView .cm-changeGutter {
+  width: 2px;
+  min-width: 2px;
+  border: none;
+}
+.cm-mergeView .cm-changeGutter .cm-gutterElement {
+  padding: 0;
+}
+
+/* Gutter markers by change type */
+.cm-mergeView .cm-changeGutter .cm-gutterElement[class*="insert"],
+.cm-mergeView .cm-changedLine .cm-changeGutter .cm-gutterElement {
+  background: var(--color-add);
+}
+.cm-mergeView .cm-changeGutter .cm-gutterElement[class*="delete"],
+.cm-mergeView .cm-deletedLine .cm-changeGutter .cm-gutterElement {
+  background: var(--color-rem);
+}
+
+
+/* ── Side-by-side merge view ────────────────────────────────────────── */
+
+.side-by-side-merge {
+  display: flex;
+  overflow: hidden;
+}
+.side-by-side-merge .cm-mergeView {
+  flex: 1;
+  min-width: 0;
+}
+.side-by-side-merge .cm-mergeViewEditor {
+  height: 100%;
+}
+
+/* Left pane (A) = original: red for removed/changed content */
+.cm-merge-a .cm-changedLine {
+  background: color-mix(in srgb, var(--color-rem) 6%, transparent);
+}
+.cm-merge-a .cm-changedText {
+  background: color-mix(in srgb, var(--color-rem) 18%, transparent);
+  border-radius: 2px;
+}
+
+/* Right pane (B) = modified: green for added/changed content */
+.cm-merge-b .cm-changedLine {
+  background: color-mix(in srgb, var(--color-add) 6%, transparent);
+}
+.cm-merge-b .cm-changedText {
+  background: color-mix(in srgb, var(--color-add) 18%, transparent);
+  border-radius: 2px;
+}
+
+/* Center column — narrow transparent strip with border lines */
+.cm-merge-revert {
+  width: 16px;
+  flex-shrink: 0;
+  background: transparent;
+  border-left: 1px solid var(--color-rule-light);
+  border-right: 1px solid var(--color-rule-light);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom chunk buttons (accept / reject) — shared base */
+.cm-merge-chunk-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 0;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+/* Show buttons on chunk row hover */
+.cm-merge-revert:hover .cm-merge-chunk-buttons,
+.cm-changedLine:hover ~ .cm-merge-revert .cm-merge-chunk-buttons {
+  opacity: 1;
+}
+
+.cm-merge-accept-btn,
+.cm-merge-revert-btn {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  color: var(--color-ink-3);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.cm-merge-accept-btn:hover {
+  background: color-mix(in srgb, var(--color-add) 10%, transparent);
+  color: var(--color-add);
+}
+
+.cm-merge-revert-btn:hover {
+  background: color-mix(in srgb, var(--color-rem) 10%, transparent);
+  color: var(--color-rem);
+}
+
+
+/* ── Collapsed unchanged regions ────────────────────────────────────── */
+
+.cm-collapsedLines {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-ink-3);
+  background: none;
+  border: none;
+  border-top: none;
+  border-bottom: none;
+  text-align: center;
+  user-select: none;
+  cursor: pointer;
+  position: relative;
+}
+
+/* Dashed line through the center */
+.cm-collapsedLines::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  height: 0;
+  border-top: 1px dashed var(--color-rule-light);
+}
+
+/* Text sits on top of the line with a gap */
+.cm-collapsedLines label,
+.cm-collapsedLines span,
+.cm-collapsedLines {
+  position: relative;
+  z-index: 1;
+}
+
+/* Create gap in dashed line around text via background match */
+.cm-collapsedLines {
+  justify-content: center;
+}
+
+.cm-collapsedLines:hover {
+  color: var(--color-ink-3);
+}
+
+
+/* ── Unified merge gutter — chunk accept/reject buttons ──────────── */
+
+.cm-mergeView .cm-merge-chunk-accept,
+.cm-mergeView .cm-merge-chunk-reject {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  font-size: 10px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.cm-mergeView .cm-changedLine:hover .cm-merge-chunk-accept,
+.cm-mergeView .cm-changedLine:hover .cm-merge-chunk-reject,
+.cm-mergeView .cm-deletedLine:hover .cm-merge-chunk-accept,
+.cm-mergeView .cm-deletedLine:hover .cm-merge-chunk-reject {
+  opacity: 1;
+}
+
+.cm-mergeView .cm-merge-chunk-accept:hover {
+  background: color-mix(in srgb, var(--color-add) 10%, transparent);
+  color: var(--color-add);
+}
+
+.cm-mergeView .cm-merge-chunk-reject:hover {
+  background: color-mix(in srgb, var(--color-rem) 10%, transparent);
+  color: var(--color-rem);
+}
+
+
+/* ── Read-only indicator ────────────────────────────────────────────── */
+
+.diff-readonly .cm-content {
+  cursor: default;
+}
+.diff-readonly .cm-cursor {
+  display: none !important;
+}
+
+
+/* ── Scrollbar match ────────────────────────────────────────────────── */
+
+.diff-view :deep(.cm-scroller)::-webkit-scrollbar {
+  width: 4px;
+}
+.diff-view :deep(.cm-scroller)::-webkit-scrollbar-thumb {
+  background: var(--color-rule);
+  border-radius: 2px;
+}
+
+.side-by-side-merge ::-webkit-scrollbar {
+  width: 4px;
+}
+.side-by-side-merge ::-webkit-scrollbar-thumb {
+  background: var(--color-rule);
+  border-radius: 2px;
+}

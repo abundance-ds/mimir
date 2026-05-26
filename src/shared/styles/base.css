@@ -1,0 +1,92 @@
+html {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-chrome);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'onum' 1;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--color-chrome);
+}
+
+@layer base {
+  button {
+    font-family: inherit;
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  input {
+    font-family: inherit;
+  }
+}
+
+[class*="overflow-y-auto"],
+[class*="overflow-y-scroll"],
+[class*="overflow-auto"] {
+  overscroll-behavior: contain;
+}
+
+.cm-content,
+.cm-line,
+.preview-content,
+.asst-text,
+.user-bubble,
+[class*="prose"],
+textarea,
+input,
+[contenteditable],
+pre,
+code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-rule);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-rule);
+  border-radius: 1px;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}

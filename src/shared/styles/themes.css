@@ -1,0 +1,281 @@
+/*
+ * Shoulders — Theme System
+ *
+ * Eight themes controlled by a `data-theme` attribute on :root (<html>).
+ * The attribute is set by useSettingsStore and persisted in settings.json.
+ *
+ *   <html data-theme="parchment">   — Light     (default, warm light)
+ *   <html data-theme="studio">      — Studio    (cool aluminium frame, warm paper)
+ *   <html data-theme="glacier">     — North     (cool blue-gray light)
+ *   <html data-theme="slate">       — Dark      (neutral dark)
+ *   <html data-theme="monokai">     — Monokai   (classic dark)
+ *   <html data-theme="dracula">     — Dracula   (deep purple-black, iconic palette)
+ *   <html data-theme="zenith">      — Zenith    (carbon charcoal, electric cyan)
+ *   <html data-theme="synthwave">   — Synthwave (purple void, neon magenta + cyan)
+ *
+ * Each block overrides the design-system tokens (--color-*) and the CM6
+ * bridge variables (--syntax-*, --selection).
+ *
+ * Default values live in app.css via Tailwind's @theme block (Parchment).
+ */
+
+
+/* ─── 1. Light (parchment)  ──────────────────────────────────────────
+   Warm, papery light theme. Terracotta accent. The default.            */
+
+:root[data-theme="parchment"] {
+  --color-ink:         #1a1a18;
+  --color-ink-2:       #4a4a44;
+  --color-ink-3:       #8a8a80;
+  --color-ink-4:       #b0b0a6;
+  --color-chrome:      #ebe9e3;
+  --color-chrome-mid:  #f3f1ec;
+  --color-chrome-high: #f9f8f5;
+  --color-surface:     #ffffff;
+  --color-accent:      #c05d3c;
+  --color-accent-soft: rgba(192, 93, 60, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #a84830;
+  --color-accent-tint: rgba(192, 93, 60, 0.06);
+  --color-add:         #5e8b3e;
+  --color-rem:         #c05d3c;
+  --color-rule:        #d8d7d2;
+  --color-rule-light:  #eae9e5;
+  --color-line-soft:   rgba(0, 0, 0, 0.04);
+  --color-line-hl:     rgba(192, 93, 60, 0.06);
+
+  --syntax-keyword: #7c4dff;
+  --syntax-property: #6e56cf;
+  --syntax-string:  #2e7d32;
+  --syntax-number:  #e65100;
+  --selection:      rgba(192, 93, 60, 0.12);
+}
+
+
+/* ─── 2. Studio  ─────────────────────────────────────────────────────
+   Cool aluminium frame, warm cream paper. TE orange accent.
+   Chrome is neutral/cool grey; surface is warm off-white.              */
+
+:root[data-theme="studio"] {
+  --color-ink:         #1C1B1A;
+  --color-ink-2:       #4A4845;
+  --color-ink-3:       #7A7875;
+  --color-ink-4:       #A3A09C;
+  --color-chrome:      #D9D9D7;
+  --color-chrome-mid:  #E5E5E3;
+  --color-chrome-high: #EDEDEB;
+  --color-surface:     #F7F5F0;
+  --color-accent:      #E86420;
+  --color-accent-soft: rgba(232, 100, 32, 0.10);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #CC5519;
+  --color-accent-tint: rgba(232, 100, 32, 0.06);
+  --color-add:         #3A7D44;
+  --color-rem:         #C0392B;
+  --color-rule:        #CBCBC9;
+  --color-rule-light:  #DCDCDA;
+  --color-line-soft:   rgba(0, 0, 0, 0.04);
+  --color-line-hl:     rgba(232, 100, 32, 0.06);
+
+  --syntax-keyword: #7c4dff;
+  --syntax-property: #6e56cf;
+  --syntax-string:  #2e7d32;
+  --syntax-number:  #b94d00;
+  --selection:      rgba(232, 100, 32, 0.14);
+}
+
+
+/* ─── 3. North (glacier)  ────────────────────────────────────────────
+   Cool blue-gray light theme. Steel-blue accent. Crisp, professional. */
+
+:root[data-theme="glacier"] {
+  --color-ink:         #1c1f24;
+  --color-ink-2:       #44494f;
+  --color-ink-3:       #7d838a;
+  --color-ink-4:       #a5abb2;
+  --color-chrome:      #e4e8ec;
+  --color-chrome-mid:  #edf0f4;
+  --color-chrome-high: #f4f6f8;
+  --color-surface:     #ffffff;
+  --color-accent:      #4a7c9b;
+  --color-accent-soft: rgba(74, 124, 155, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #3b6a86;
+  --color-accent-tint: rgba(74, 124, 155, 0.06);
+  --color-add:         #3a8a4a;
+  --color-rem:         #c05050;
+  --color-rule:        #d0d5db;
+  --color-rule-light:  #e2e6eb;
+  --color-line-soft:   rgba(0, 0, 0, 0.03);
+  --color-line-hl:     rgba(74, 124, 155, 0.06);
+
+  --syntax-keyword: #6e56cf;
+  --syntax-property: #4a7c9b;
+  --syntax-string:  #297a3a;
+  --syntax-number:  #b35c00;
+  --selection:      rgba(74, 124, 155, 0.14);
+}
+
+
+/* ─── 4. Dark (slate)  ───────────────────────────────────────────────
+   Dark charcoal theme. Muted teal accent. Understated, easy on eyes.  */
+
+:root[data-theme="slate"] {
+  --color-ink:         #e0e0dc;
+  --color-ink-2:       #b0b0aa;
+  --color-ink-3:       #8a8a84;
+  --color-ink-4:       #4a4a44;
+  --color-chrome:      #1e1e1e;
+  --color-chrome-mid:  #252525;
+  --color-chrome-high: #292929;
+  --color-surface:     #2c2c2c;
+  --color-accent:      #5a9e8f;
+  --color-accent-soft: rgba(90, 158, 143, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #4a887a;
+  --color-accent-tint: rgba(90, 158, 143, 0.10);
+  --color-add:         #7cc68a;
+  --color-rem:         #e07070;
+  --color-rule:        #383838;
+  --color-rule-light:  #333333;
+  --color-line-soft:   rgba(255, 255, 255, 0.04);
+  --color-line-hl:     rgba(90, 158, 143, 0.06);
+
+  --syntax-keyword: #b39dff;
+  --syntax-property: #82cfff;
+  --syntax-string:  #7cc68a;
+  --syntax-number:  #e8a36d;
+  --selection:      rgba(90, 158, 143, 0.18);
+}
+
+
+/* ─── 5. Monokai  ────────────────────────────────────────────────────
+   Near-black surfaces, vibrant warm orange accent. Classic coding feel
+   with rich, saturated syntax colors.                                  */
+
+:root[data-theme="monokai"] {
+  --color-ink:         #f8f8f2;
+  --color-ink-2:       #d5d3cb;
+  --color-ink-3:       #928e7c;
+  --color-ink-4:       #555248;
+  --color-chrome:      #1e1e1e;
+  --color-chrome-mid:  #252525;
+  --color-chrome-high: #262624;
+  --color-surface:     #272822;
+  --color-accent:      #f97316;
+  --color-accent-soft: rgba(249, 115, 22, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #e06510;
+  --color-accent-tint: rgba(249, 115, 22, 0.10);
+  --color-add:         #a6e22e;
+  --color-rem:         #f92672;
+  --color-rule:        #3e3d32;
+  --color-rule-light:  #353429;
+  --color-line-soft:   rgba(255, 255, 255, 0.04);
+  --color-line-hl:     rgba(249, 115, 22, 0.06);
+
+  --syntax-keyword: #ae81ff;
+  --syntax-property: #66d9ef;
+  --syntax-string:  #e6db74;
+  --syntax-number:  #fd971f;
+  --selection:      rgba(249, 115, 22, 0.16);
+}
+
+
+/* ─── 6. Dracula  ────────────────────────────────────────────────────
+   Deep purple-black canvas, evolved from the classic Dracula palette.
+   Violet accent, pink keywords, green strings. High-saturation syntax
+   on a low-saturation background for effortless readability.            */
+
+:root[data-theme="dracula"] {
+  --color-ink:         #f0eef8;
+  --color-ink-2:       #b8b4c8;
+  --color-ink-3:       #7e7a92;
+  --color-ink-4:       #4e4a60;
+  --color-chrome:      #151622;
+  --color-chrome-mid:  #1c1d2e;
+  --color-chrome-high: #22233a;
+  --color-surface:     #1e1f2e;
+  --color-accent:      #bd93f9;
+  --color-accent-soft: rgba(189, 147, 249, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #a87ee8;
+  --color-accent-tint: rgba(189, 147, 249, 0.10);
+  --color-add:         #50fa7b;
+  --color-rem:         #ff5555;
+  --color-rule:        #33344a;
+  --color-rule-light:  #2a2b3e;
+  --color-line-soft:   rgba(255, 255, 255, 0.04);
+  --color-line-hl:     rgba(189, 147, 249, 0.06);
+
+  --syntax-keyword: #ff79c6;
+  --syntax-string:  #50fa7b;
+  --syntax-number:  #ffb86c;
+  --selection:      rgba(189, 147, 249, 0.18);
+}
+
+
+/* ─── 7. Zenith  ─────────────────────────────────────────────────────
+   Ultra-deep cool charcoal, like carbon fibre under glass. Electric
+   cyan accent, triadic vivid syntax: hot pink keywords, neon green
+   strings, bright amber numbers. Monokai's boldness, rebuilt cold.    */
+
+:root[data-theme="zenith"] {
+  --color-ink:         #f0f4f8;
+  --color-ink-2:       #b8c4d0;
+  --color-ink-3:       #8494a6;
+  --color-ink-4:       #506070;
+  --color-chrome:      #0a0e14;
+  --color-chrome-mid:  #111820;
+  --color-chrome-high: #161e28;
+  --color-surface:     #0f1419;
+  --color-accent:      #22d3ee;
+  --color-accent-soft: rgba(34, 211, 238, 0.10);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #18b8d0;
+  --color-accent-tint: rgba(34, 211, 238, 0.12);
+  --color-add:         #4ade80;
+  --color-rem:         #f87171;
+  --color-rule:        #283848;
+  --color-rule-light:  #1e2e3c;
+  --color-line-soft:   rgba(255, 255, 255, 0.04);
+  --color-line-hl:     rgba(34, 211, 238, 0.06);
+
+  --syntax-keyword: #f472b6;
+  --syntax-string:  #4ade80;
+  --syntax-number:  #fbbf24;
+  --selection:      rgba(34, 211, 238, 0.18);
+}
+
+
+/* ─── 8. Synthwave  ─────────────────────────────────────────────────
+   Purple-black void with neon magenta accent. Electric cyan keywords,
+   warm amber strings, soft violet numbers. Mint-green diffs. The retro
+   future distilled into a genuinely readable, high-contrast palette.   */
+
+:root[data-theme="synthwave"] {
+  --color-ink:         #e8e6f0;
+  --color-ink-2:       #b5b3c0;
+  --color-ink-3:       #807e8e;
+  --color-ink-4:       #4e4c58;
+  --color-chrome:      #141416;
+  --color-chrome-mid:  #1a1a1e;
+  --color-chrome-high: #222226;
+  --color-surface:     #1a1a1e;
+  --color-accent:      #c678dd;
+  --color-accent-soft: rgba(198, 120, 221, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-2:    #b066c8;
+  --color-accent-tint: rgba(198, 120, 221, 0.10);
+  --color-add:         #72f1b8;
+  --color-rem:         #ff5572;
+  --color-rule:        #2a2a30;
+  --color-rule-light:  #232328;
+  --color-line-soft:   rgba(255, 255, 255, 0.04);
+  --color-line-hl:     rgba(198, 120, 221, 0.06);
+
+  --syntax-keyword: #36d7e0;
+  --syntax-string:  #ffd580;
+  --syntax-number:  #c792ea;
+  --selection:      rgba(198, 120, 221, 0.18);
+}

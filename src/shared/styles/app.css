@@ -1,0 +1,35 @@
+@import "tailwindcss";
+@import "./fonts.css";
+@import "./base.css";
+@import "./editor-content.css";
+@import "./preview-content.css";
+@import "./themes.css";
+@import "./diff.css";
+
+@theme {
+  --color-ink:         #1a1a18;
+  --color-ink-2:       #4a4a44;
+  --color-ink-3:       #8a8a80;
+  --color-ink-4:       #b0b0a6;
+  --color-chrome:      #ebe9e3;
+  --color-chrome-mid:  #f3f1ec;
+  --color-chrome-high: #f9f8f5;
+  --color-surface:     #ffffff;
+  --color-accent:      #c05d3c;
+  --color-accent-soft: rgba(192, 93, 60, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-rule:        #d8d7d2;
+  --color-rule-light:  #eae9e5;
+  --color-line-soft:   rgba(0, 0, 0, 0.04);
+  --color-line-hl:     rgba(192, 93, 60, 0.06);
+  --color-accent-2:    #a84830;
+  --color-accent-tint: rgba(192, 93, 60, 0.06);
+  --color-add:         #5e8b3e;
+  --color-rem:         #c05d3c;
+
+  --font-serif: 'Lora', 'Georgia', serif;
+  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --font-slab:  'Zilla Slab', 'Georgia', serif;
+  --font-brand: 'Georgia', serif;
+}
