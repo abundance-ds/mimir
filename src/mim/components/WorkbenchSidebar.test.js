@@ -299,13 +299,13 @@ describe('WorkbenchSidebar', () => {
       props: {
         apps: [{ id: 'preset:claude', title: 'Claude', icon: 'claude' }],
         activities: [{
-          id: 'app:scratch',
-          title: 'Scratch',
+          id: 'app:ledger',
+          title: 'Ledger',
           kind: 'app',
           status: 'ready',
           retention: 'durable',
           updatedAt: '2026-07-25T10:00:00Z',
-          source: { appId: 'scratch' },
+          source: { appId: 'ledger' },
           host: { type: 'app', mode: 'embedded' },
         }],
       },
@@ -313,14 +313,14 @@ describe('WorkbenchSidebar', () => {
 
     expect(wrapper.get('[data-sidebar-row="launcher:preset:claude"] svg').attributes('viewBox'))
       .toBe('110 145 292 222')
-    await wrapper.get('[data-activity-menu-button="app:scratch"]').trigger('click')
-    const menu = wrapper.get('[data-activity-menu="app:scratch"]')
+    await wrapper.get('[data-activity-menu-button="app:ledger"]').trigger('click')
+    const menu = wrapper.get('[data-activity-menu="app:ledger"]')
     expect(menu.text()).not.toContain('Stop / kill')
     expect(menu.text()).toContain('Archive')
     expect(menu.text()).toContain('Delete')
     const archive = menu.findAll('button').find((button) => button.text().includes('Archive'))
     expect(archive.attributes('disabled')).toBeUndefined()
     await archive.trigger('click')
-    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['app:scratch'])
+    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['app:ledger'])
   })
 })

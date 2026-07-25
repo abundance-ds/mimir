@@ -1,7 +1,7 @@
 # Apps
 
 Apps are local instruments launched from the Sidebar's Apps section. Mim ships
-Changes and Scratch; additional definitions live under `~/.mim/apps/`.
+Changes is built in; additional definitions live under `~/.mim/apps/`.
 
 There is no generic Apps Activity or launcher row. The Sidebar section contains
 the actual installed apps and configured CLI agent launchers. Its gear opens

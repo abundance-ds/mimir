@@ -111,7 +111,7 @@ mod tests {
 
         let settings = serde_json::json!({
             "editor": { "editorTheme": "parchment" },
-            "apps": { "scratch": { "expanded": true } }
+            "apps": { "ledger": { "expanded": true } }
         });
         save_settings_at(&path, &settings).unwrap();
         assert_eq!(load_settings_at(&path).unwrap().settings, settings);
@@ -153,7 +153,7 @@ mod tests {
             &path,
             &serde_json::json!({
                 "editor": { "editorTheme": "old" },
-                "apps": { "scratch": { "expanded": true } }
+                "apps": { "ledger": { "expanded": true } }
             }),
         )
         .unwrap();
@@ -167,7 +167,7 @@ mod tests {
             load_settings_at(&path).unwrap().settings,
             serde_json::json!({
                 "editor": { "editorTheme": "parchment", "editorFontSize": 16 },
-                "apps": { "scratch": { "expanded": true } }
+                "apps": { "ledger": { "expanded": true } }
             })
         );
         assert!(

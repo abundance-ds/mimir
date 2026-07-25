@@ -465,7 +465,6 @@ import {
   IconFolder,
   IconLayoutSidebarLeftCollapse,
   IconMathPi,
-  IconNote,
   IconSettings,
   IconRobot,
   IconTerminal2,
@@ -547,7 +546,6 @@ const icons = {
   terminal: IconTerminal2,
   apps: IconApps,
   changes: IconBrandGit,
-  scratch: IconNote,
   routines: IconClockPlay,
   default: IconSparkles,
 }

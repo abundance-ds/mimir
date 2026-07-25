@@ -13,8 +13,8 @@ const AppsSettingsStub = defineComponent({
   template: `
     <div>
       <input ref="input" data-apps-search-stub>
-      <button data-apps-settings @click="$emit('launchApp', { activity: { id: 'app:scratch' } })">Apps</button>
-      <button data-app-definition @click="$emit('openDefinition', '/apps/scratch/app.toml')">Definition</button>
+      <button data-apps-settings @click="$emit('launchApp', { activity: { id: 'app:ledger' } })">Apps</button>
+      <button data-app-definition @click="$emit('openDefinition', '/apps/ledger/app.toml')">Definition</button>
     </div>
   `,
 })
@@ -47,9 +47,9 @@ describe('SettingsDialog Apps ownership', () => {
 
     expect(wrapper.get('[data-apps-settings]').exists()).toBe(true)
     await wrapper.get('[data-apps-settings]').trigger('click')
-    expect(wrapper.emitted('launchApp')).toEqual([[{ activity: { id: 'app:scratch' } }]])
+    expect(wrapper.emitted('launchApp')).toEqual([[{ activity: { id: 'app:ledger' } }]])
     await wrapper.get('[data-app-definition]').trigger('click')
-    expect(wrapper.emitted('openDefinition')).toEqual([['/apps/scratch/app.toml']])
+    expect(wrapper.emitted('openDefinition')).toEqual([['/apps/ledger/app.toml']])
   })
 
   it('accepts an Apps deep link and puts keyboard focus in its catalog', async () => {

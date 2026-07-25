@@ -133,53 +133,26 @@ pub fn default_apps_dir() -> Result<PathBuf, String> {
 }
 
 pub fn builtin_apps() -> Vec<InstalledApp> {
-    vec![
-        InstalledApp {
-            definition: AppDefinition {
-                id: "changes".into(),
-                title: "Changes".into(),
-                description: "Review the workspace's current Git changes.".into(),
-                mode: AppMode::RustHelper,
-                entry: None,
-                command: None,
-                args: Vec::new(),
-                env: BTreeMap::new(),
-                preset: None,
-                helper: Some("git-changes".into()),
-                action_tool: None,
-                launch_only: false,
-                tools: Vec::new(),
-            },
-            directory: "builtin".into(),
-            manifest_path: "builtin:changes".into(),
-            builtin: true,
+    vec![InstalledApp {
+        definition: AppDefinition {
+            id: "changes".into(),
+            title: "Changes".into(),
+            description: "Review the workspace's current Git changes.".into(),
+            mode: AppMode::RustHelper,
+            entry: None,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            preset: None,
+            helper: Some("git-changes".into()),
+            action_tool: None,
+            launch_only: false,
+            tools: Vec::new(),
         },
-        InstalledApp {
-            definition: AppDefinition {
-                id: "scratch".into(),
-                title: "Scratch".into(),
-                description: "A fast workspace scratchpad with a live MCP tool.".into(),
-                mode: AppMode::Embedded,
-                entry: Some("mim://builtin/scratch".into()),
-                command: None,
-                args: Vec::new(),
-                env: BTreeMap::new(),
-                preset: None,
-                helper: None,
-                action_tool: None,
-                launch_only: false,
-                tools: vec![AppToolDefinition {
-                    name: "read".into(),
-                    description: "Read the current Scratch app text.".into(),
-                    input_schema: empty_object(),
-                    mcp_alias: Some("scratch_read".into()),
-                }],
-            },
-            directory: "builtin".into(),
-            manifest_path: "builtin:scratch".into(),
-            builtin: true,
-        },
-    ]
+        directory: "builtin".into(),
+        manifest_path: "builtin:changes".into(),
+        builtin: true,
+    }]
 }
 
 pub fn load_catalog(directory: &Path) -> AppCatalog {
@@ -1310,7 +1283,7 @@ entry = "index.html"
         let directory = tempdir().unwrap();
         write_embedded_app(directory.path(), "inspector", "Inspector");
         let catalog = load_catalog(directory.path());
-        assert_eq!(catalog.apps.len(), 3);
+        assert_eq!(catalog.apps.len(), 2);
         assert!(catalog
             .apps
             .iter()
@@ -1476,7 +1449,13 @@ entry = "index.html"
 
     #[test]
     fn tool_definitions_require_unique_names_and_object_schemas() {
-        let mut definition = builtin_apps()[1].definition.clone();
+        let mut definition = builtin_apps()[0].definition.clone();
+        definition.tools.push(AppToolDefinition {
+            name: "read".into(),
+            description: "Read the current value.".into(),
+            input_schema: empty_object(),
+            mcp_alias: None,
+        });
         definition.tools.push(AppToolDefinition {
             name: "read".into(),
             description: "Duplicate.".into(),
@@ -1558,7 +1537,7 @@ entry = "index.html"
                 .contains("already installed")
         );
         assert!(
-            duplicate_local_app(directory.path(), "scratch", "scratch-copy", None)
+            duplicate_local_app(directory.path(), "changes", "changes-copy", None)
                 .unwrap_err()
                 .contains("Built-in")
         );

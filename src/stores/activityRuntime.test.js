@@ -182,28 +182,28 @@ describe('activity runtime store', () => {
     const runtime = useActivityRuntimeStore()
     const store = useActivitiesStore()
     store.upsert({
-      id: 'app:scratch',
+      id: 'app:ledger',
       kind: 'app',
-      title: 'Scratch',
+      title: 'Ledger',
       workspacePath: '/w',
       status: 'ready',
       createdAt: '2026-07-25T10:00:00Z',
       updatedAt: '2026-07-25T10:00:00Z',
       retention: 'durable',
-      source: { appId: 'scratch' },
+      source: { appId: 'ledger' },
       host: { type: 'app', mode: 'embedded' },
       launch: {},
     })
 
-    await runtime.rename('app:scratch', 'Notes')
-    await runtime.setArchived('app:scratch', true)
-    expect(store.byId('app:scratch')).toMatchObject({
-      title: 'Notes',
+    await runtime.rename('app:ledger', 'Project ledger')
+    await runtime.setArchived('app:ledger', true)
+    expect(store.byId('app:ledger')).toMatchObject({
+      title: 'Project ledger',
       archivedAt: expect.any(String),
     })
-    await runtime.clear('app:scratch')
+    await runtime.clear('app:ledger')
 
-    expect(store.byId('app:scratch')).toBeNull()
+    expect(store.byId('app:ledger')).toBeNull()
     expect(api.renameActivity).not.toHaveBeenCalled()
     expect(api.setActivityArchived).not.toHaveBeenCalled()
     expect(api.clearActivity).not.toHaveBeenCalled()

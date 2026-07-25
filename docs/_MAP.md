@@ -68,7 +68,7 @@ See [files.md](files.md).
 - `src/shared/ui/settings/AppsSettingsSection.vue`: search, launch, diagnostics,
   local scaffold/duplicate/title/Trash operations, and definition navigation
 - `src/shared/ui/settings/AppSettingsSectionRows.vue`: keyboard catalog rows
-- `src/mim/apps/`: embedded host, launch-plan host, Changes, and Scratch
+- `src/mim/apps/`: embedded host, launch-plan host, Changes, and local app surfaces
 - `src/apps/sdk/mim-sdk.js`: app bridge for data, files, HTTP, tools, and editor
 - `src/apps/sdk/theme-base.css`: optional shared app theme base
 

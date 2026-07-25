@@ -22,25 +22,31 @@ describe('AppActivity', () => {
       mode: 'rust-helper',
       helper: 'git-changes',
     }, { helper: 'git-changes' })
-    const wrapper = mount(AppActivity, { props: { activity: record, active: true } })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { EmbeddedAppHost: true } },
+    })
 
     expect(wrapper.findComponent({ name: 'ChangesApp' }).exists()).toBe(true)
-    expect(wrapper.findComponent({ name: 'ScratchApp' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
   })
 
-  it('routes Scratch and gives its tool provider a stable instance identity', () => {
+  it('routes embedded apps and gives their host a stable instance identity', () => {
     const record = activity({
-      id: 'scratch',
-      title: 'Scratch',
+      id: 'ledger',
+      title: 'Ledger',
       mode: 'embedded',
-      entry: 'mim://builtin/scratch',
+      entry: 'index.html',
       tools: [],
-    }, { url: 'mim://builtin/scratch' })
-    const wrapper = mount(AppActivity, { props: { activity: record, active: true } })
-    const scratch = wrapper.findComponent({ name: 'ScratchApp' })
+    }, { url: 'mim-app://ledger/index.html' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { EmbeddedAppHost: true } },
+    })
+    const embedded = wrapper.findComponent({ name: 'EmbeddedAppHost' })
 
-    expect(scratch.exists()).toBe(true)
-    expect(scratch.props('instanceId')).toBe('app:scratch')
+    expect(embedded.exists()).toBe(true)
+    expect(embedded.props('instanceId')).toBe('app:ledger')
   })
 
   it('routes external launch plans through a callback event', async () => {

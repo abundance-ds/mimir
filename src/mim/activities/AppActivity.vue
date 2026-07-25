@@ -7,13 +7,6 @@
     @choose-workspace="$emit('chooseWorkspace')"
     @diagnostic="$emit('diagnostic', $event)"
   />
-  <ScratchApp
-    v-else-if="surface === 'scratch'"
-    :app="app"
-    :instance-id="instanceId"
-    :active="active"
-    @diagnostic="$emit('diagnostic', $event)"
-  />
   <EmbeddedAppHost
     v-else-if="surface === 'embedded'"
     :app="app"
@@ -54,7 +47,6 @@ import { IconAlertTriangle } from '@tabler/icons-vue'
 import ChangesApp from '../apps/ChangesApp.vue'
 import EmbeddedAppHost from '../apps/EmbeddedAppHost.vue'
 import LaunchPlanHost from '../apps/LaunchPlanHost.vue'
-import ScratchApp from '../apps/ScratchApp.vue'
 
 const props = defineProps({
   activity: { type: Object, required: true },
@@ -74,10 +66,6 @@ const surface = computed(() => {
     app.value.id === 'changes'
     || (plan.value.mode === 'rust-helper' && plan.value.helper === 'git-changes')
   ) return 'changes'
-  if (
-    app.value.id === 'scratch'
-    || (plan.value.mode === 'embedded' && plan.value.url === 'mim://builtin/scratch')
-  ) return 'scratch'
   if (plan.value.mode === 'embedded') return 'embedded'
   if (['terminal', 'process', 'window', 'action', 'rust-helper'].includes(plan.value.mode)) {
     return 'launch'

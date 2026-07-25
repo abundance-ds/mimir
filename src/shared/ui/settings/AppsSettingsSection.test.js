@@ -23,13 +23,13 @@ vi.mock('../../../services/appsCatalog.js', async (importOriginal) => ({
 }))
 
 const builtIn = {
-  id: 'scratch',
-  title: 'Scratch',
-  description: 'Fast notes',
-  mode: 'embedded',
+  id: 'changes',
+  title: 'Changes',
+  description: 'Workspace Git changes',
+  mode: 'rust-helper',
   builtin: true,
-  manifestPath: 'builtin:scratch',
-  tools: [{ name: 'read', mcpAlias: 'scratch_read' }],
+  manifestPath: 'builtin:changes',
+  tools: [],
 }
 const local = {
   id: 'ledger',
@@ -76,12 +76,12 @@ describe('AppsSettingsSection', () => {
     const wrapper = render()
     await flushPromises()
 
-    expect(wrapper.get('[data-app-settings-group="built-in"]').text()).toContain('Scratch')
+    expect(wrapper.get('[data-app-settings-group="built-in"]').text()).toContain('Changes')
     expect(wrapper.get('[data-app-settings-group="local"]').text()).toContain('Ledger')
     expect(wrapper.get('[data-app-diagnostics]').text()).toContain('Entry does not exist')
 
     await wrapper.get('[data-app-search]').setValue('ledger_total')
-    expect(wrapper.find('[data-app-settings-row="scratch"]').exists()).toBe(false)
+    expect(wrapper.find('[data-app-settings-row="changes"]').exists()).toBe(false)
     expect(wrapper.get('[data-app-settings-row="ledger"]').exists()).toBe(true)
 
     await wrapper.get('[data-app-settings-row="ledger"]').trigger('keydown', { key: 'Enter' })

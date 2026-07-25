@@ -39,7 +39,6 @@ import {
   IconBrandGit,
   IconCode,
   IconExternalLink,
-  IconNote,
   IconTerminal2,
   IconTool,
   IconWindow,
@@ -56,7 +55,6 @@ defineEmits(['select', 'launch'])
 
 function iconFor(app) {
   if (app.id === 'changes') return IconBrandGit
-  if (app.id === 'scratch') return IconNote
   return {
     embedded: IconCode,
     terminal: IconTerminal2,

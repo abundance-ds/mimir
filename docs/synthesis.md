@@ -46,7 +46,7 @@ reviewable diffs, and comments.
   providers.
 - **Files:** native metadata index ordered by modification time, fast path
   filtering, bounded content search, and Cmd/Ctrl+P.
-- **Apps:** built-in Changes and Scratch plus a searchable local instrument
+- **Apps:** built-in Changes plus a searchable catalog of local instruments
   manager for TOML definitions that embed UI, launch
   terminals/processes/windows, call tools, or use Rust helpers. Safe definition
   creation/duplication/title/Trash operations are shared with MCP; package

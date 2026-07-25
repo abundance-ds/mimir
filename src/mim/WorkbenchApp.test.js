@@ -233,18 +233,18 @@ describe('WorkbenchApp', () => {
       directory: '/home/me/.mim/apps',
       diagnostics: [],
       apps: [{
-        id: 'scratch',
-        title: 'Scratch',
-        description: 'Think quickly.',
+        id: 'ledger',
+        title: 'Ledger',
+        description: 'Project instrument.',
         mode: 'embedded',
-        builtin: true,
+        builtin: false,
         tools: [],
       }],
     })
     appsApi.resolveAppLaunch.mockResolvedValue({
       mode: 'embedded',
-      appId: 'scratch',
-      url: 'mim://builtin/scratch',
+      appId: 'ledger',
+      url: 'app://localhost/ledger/index.html',
     })
 
     fileApi.openWorkspaceIndex.mockResolvedValue(indexedFiles)
@@ -275,6 +275,7 @@ describe('WorkbenchApp', () => {
         stubs: {
           Teleport: true,
           Transition: false,
+          EmbeddedAppHost: true,
         },
       },
     })
@@ -298,7 +299,7 @@ describe('WorkbenchApp', () => {
       'launcher:core:routines',
       'launcher:preset:review',
       'launcher:preset:claude',
-      'launcher:app:scratch',
+      'launcher:app:ledger',
     ])
     expect(wrapper.get('[data-activity-surface="files"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="launcher:preset:review"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
@@ -440,12 +441,12 @@ describe('WorkbenchApp', () => {
   it('launches an installed app directly from its Apps-section row', async () => {
     const wrapper = await render({ workspace: '/w' })
 
-    await wrapper.get('[data-sidebar-row="launcher:app:scratch"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="launcher:app:ledger"]').trigger('click')
     await flushPromises()
 
-    expect(appsApi.resolveAppLaunch).toHaveBeenCalledWith('scratch', '/w')
-    expect(useWorkbenchStore().activeActivityId).toBe('app:scratch')
-    expect(wrapper.get('[data-activity-surface="app:scratch"]').exists()).toBe(true)
+    expect(appsApi.resolveAppLaunch).toHaveBeenCalledWith('ledger', '/w')
+    expect(useWorkbenchStore().activeActivityId).toBe('app:ledger')
+    expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
   })
 
   it('launches external Apps as one real PTY Activity from Sidebar, Settings, and MCP', async () => {
@@ -454,11 +455,11 @@ describe('WorkbenchApp', () => {
       diagnostics: [],
       apps: [
         {
-          id: 'scratch',
-          title: 'Scratch',
-          description: 'Think quickly.',
+          id: 'ledger',
+          title: 'Ledger',
+          description: 'Project instrument.',
           mode: 'embedded',
-          builtin: true,
+          builtin: false,
           tools: [],
         },
         {
@@ -480,7 +481,7 @@ describe('WorkbenchApp', () => {
             args: ['--app-flag'],
             env: { APP_CHANNEL: 'review', MIM_ACTIVITY_ID: 'must-not-win' },
           }
-        : { mode: 'embedded', appId: id, url: 'mim://builtin/scratch' }
+        : { mode: 'embedded', appId: id, url: 'app://localhost/ledger/index.html' }
     ))
     const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
@@ -542,7 +543,7 @@ describe('WorkbenchApp', () => {
 
   it('closes a renderer-hosted app locally with Cmd+W and never calls PTY lifecycle APIs', async () => {
     const wrapper = await render({ workspace: '/w' })
-    await wrapper.get('[data-sidebar-row="launcher:app:scratch"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="launcher:app:ledger"]').trigger('click')
     await flushPromises()
     activityApi.stopActivity.mockClear()
     activityApi.setActivityArchived.mockClear()
@@ -560,14 +561,14 @@ describe('WorkbenchApp', () => {
 
     expect(activityApi.stopActivity).not.toHaveBeenCalled()
     expect(activityApi.setActivityArchived).not.toHaveBeenCalled()
-    expect(useActivitiesStore().byId('app:scratch').archivedAt).toEqual(expect.any(String))
+    expect(useActivitiesStore().byId('app:ledger').archivedAt).toEqual(expect.any(String))
     expect(useWorkbenchStore().activeActivityId).toBe('files')
     expect(activityPane.attributes('data-pane-state')).toBe('rail')
 
-    await wrapper.get('[data-sidebar-row="launcher:app:scratch"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="launcher:app:ledger"]').trigger('click')
     await flushPromises()
-    expect(useActivitiesStore().byId('app:scratch').archivedAt).toBeNull()
-    expect(wrapper.get('[data-activity-surface="app:scratch"]').exists()).toBe(true)
+    expect(useActivitiesStore().byId('app:ledger').archivedAt).toBeNull()
+    expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
   })
 
   it('opens a Files result in the mounted Editor without changing Activity', async () => {

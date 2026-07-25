@@ -47,15 +47,15 @@ describe('appsCatalog service', () => {
   })
 
   it('maps manifest tools to canonical app-owned registry definitions', () => {
-    expect(dynamicToolDefinitions('scratch', [{
-      name: 'read',
-      description: 'Read the note.',
+    expect(dynamicToolDefinitions('ledger', [{
+      name: 'total',
+      description: 'Read the total.',
       inputSchema: { type: 'object', properties: {} },
-      mcpAlias: 'scratch_read',
+      mcpAlias: 'ledger_total',
     }])).toEqual([{
-      canonicalName: 'app.scratch.read',
-      mcpAlias: 'scratch_read',
-      description: 'Read the note.',
+      canonicalName: 'app.ledger.total',
+      mcpAlias: 'ledger_total',
+      description: 'Read the total.',
       inputSchema: { type: 'object', properties: {} },
     }])
   })
@@ -108,13 +108,13 @@ describe('appsCatalog service', () => {
       return vi.fn()
     })
     const onCall = vi.fn()
-    await listenForAppTools({ appId: 'scratch', instanceId: 'one', onCall })
+    await listenForAppTools({ appId: 'ledger', instanceId: 'one', onCall })
 
     listeners.get('mim://tool-relay-request')({
-      payload: { id: 'wrong', target: { kind: 'app', app_id: 'scratch', instance_id: 'two' } },
+      payload: { id: 'wrong', target: { kind: 'app', app_id: 'ledger', instance_id: 'two' } },
     })
     listeners.get('mim://tool-relay-request')({
-      payload: { id: 'right', target: { kind: 'app', app_id: 'scratch', instance_id: 'one' } },
+      payload: { id: 'right', target: { kind: 'app', app_id: 'ledger', instance_id: 'one' } },
     })
 
     expect(onCall).toHaveBeenCalledTimes(1)

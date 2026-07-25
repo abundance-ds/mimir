@@ -102,7 +102,7 @@ requirements; they do not replace runtime verification.
 - App-defined tools join the live registry and unregister with their instance.
 - Reloading an already-mounted embedded App replaces its exact tool provider
   and reloads its frame without accumulating listeners.
-- Changes and Scratch are functional built-in apps.
+- Changes is a functional built-in app.
 
 ## Routines
 

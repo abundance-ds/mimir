@@ -279,7 +279,7 @@ const appLauncherRows = computed(() => [
     title: app.title,
     icon: app.id === 'changes'
       ? 'changes'
-      : (app.id === 'scratch' ? 'scratch' : (app.mode === 'terminal' ? 'terminal' : 'apps')),
+      : (app.mode === 'terminal' ? 'terminal' : 'apps'),
     shortcut: '',
     available: true,
   })),
