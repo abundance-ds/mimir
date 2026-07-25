@@ -151,11 +151,7 @@ pub fn serve_app_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Re
         }
     };
 
-    let full_path = home
-        .join(".mim")
-        .join("apps")
-        .join(app_id)
-        .join(file_path);
+    let full_path = home.join(".mim").join("apps").join(app_id).join(file_path);
 
     match fs::read(&full_path) {
         Ok(content) => {

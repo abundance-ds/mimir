@@ -14,6 +14,7 @@ mod ai_providers;
 mod ai_proxy;
 mod ai_transport;
 mod ai_usage;
+mod activities;
 mod apps;
 mod audit;
 mod docx_worker;
@@ -21,10 +22,12 @@ mod file_open;
 mod file_search;
 mod git;
 mod pty;
+mod persistence;
 mod references;
 mod search;
 mod shell_exec;
 mod tool_server;
+mod tool_registry;
 mod typst_export;
 mod usage;
 
@@ -892,7 +895,11 @@ fn comments_submit(app: tauri::AppHandle, payload: serde_json::Value) -> Result<
 }
 
 #[tauri::command]
-fn board_send_to_agent(app: tauri::AppHandle, file_path: String, entry_id: String) -> Result<(), String> {
+fn board_send_to_agent(
+    app: tauri::AppHandle,
+    file_path: String,
+    entry_id: String,
+) -> Result<(), String> {
     if let Some(panel) = app.get_webview_window("main") {
         let payload = serde_json::json!({ "filePath": file_path, "entryId": entry_id });
         let _ = panel.emit("mim://board-send-to-agent", &payload);
@@ -1206,6 +1213,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(file_open::PendingFilePaths::default())
         .manage(tool_server::ToolServerState::default())
+        .manage(tool_registry::ToolRegistry::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             enable_macos_spellcheck();

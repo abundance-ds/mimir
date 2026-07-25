@@ -149,8 +149,8 @@ pub fn load_registry() -> Result<ModelRegistry, String> {
     let mut registry: ModelRegistry = serde_json::from_str(&content)
         .map_err(|err| format!("Invalid {}: {}", path.display(), err))?;
 
-    let defaults = parse_default_registry()
-        .map_err(|err| format!("Invalid embedded models: {}", err))?;
+    let defaults =
+        parse_default_registry().map_err(|err| format!("Invalid embedded models: {}", err))?;
 
     let mut changed = migrate_registry(&mut registry, &defaults);
     if registry.version < defaults.version {

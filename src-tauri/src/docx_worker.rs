@@ -1,6 +1,6 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::io::Write;
 
 fn find_docx_worker() -> Option<PathBuf> {
     // 1. Check next to the current executable (production bundle)
@@ -67,8 +67,11 @@ fn execute_sidecar_sync(request_json: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let output = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break child.wait_with_output()
-                .map_err(|e| format!("Failed to read docx-worker output: {}", e))?,
+            Ok(Some(_)) => {
+                break child
+                    .wait_with_output()
+                    .map_err(|e| format!("Failed to read docx-worker output: {}", e))?
+            }
             Ok(None) => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
@@ -92,7 +95,11 @@ fn execute_sidecar_sync(request_json: &str) -> Result<String, String> {
         return Err(format!(
             "docx-worker produced no output (exit code {:?}): {}",
             output.status.code(),
-            if stderr.is_empty() { "no error" } else { stderr.trim() }
+            if stderr.is_empty() {
+                "no error"
+            } else {
+                stderr.trim()
+            }
         ));
     }
 
