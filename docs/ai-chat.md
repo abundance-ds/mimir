@@ -36,7 +36,7 @@ Creates `ToolLoopAgent` + `DirectChatTransport` from `ai` package.
 | temperature | 0.4 | |
 | sendReasoning | true | |
 
-Export: `createShouldersChatTransport(getConfig)`.
+Export: `createMimChatTransport(getConfig)`.
 
 ## Hidden-From-User Tags (`<hfu>`)
 
@@ -51,7 +51,7 @@ Built by `buildInstructions()` in `systemPrompt.js`:
 1. **Core** — `coreSystemPrompt()`: role, product context, default workflow, today's date. Minimal and hardcoded.
 2. **Project instructions** — Two sources, merged into one `<project-instructions>` block:
    - `AGENTS.md` (workspace root) — shared with the team, committed to the repo.
-   - `instructions.md` (`~/.shoulders-v3/projects/{id}/`) — personal, never leaves the machine. For private preferences, style notes, or context you wouldn't put in a shared repo.
+   - `instructions.md` (`~/.mim/projects/{id}/`) — personal, never leaves the machine. For private preferences, style notes, or context you wouldn't put in a shared repo.
 3. **Workspace meta** — `<workspace-meta>` XML (file tree, refs, git status, 3K cap)
 4. **Skills catalog** — `<available-skills>` XML block (name + description per skill)
 5. **Skill prompt** — Full skill body if user pre-selected a skill
@@ -80,7 +80,7 @@ Pattern:
 2. Call `ai_proxy_stream` with request.
 3. Return `Response` with `ReadableStream` body.
 4. Error events include HTTP `status` → sets `Response.status`.
-5. Dummy auth: `'shoulders-local-key'` in all JS-side headers.
+5. Dummy auth: `'mim-local-key'` in all JS-side headers.
 
 ## Tools
 
@@ -106,7 +106,7 @@ Context-dependent availability:
 - `show` requires `projectId`
 - All others always available
 
-Assembler: `createShouldersTools(context)` in `tools/index.js`. Disabled tools (from `context.disabledTools[]`) are deleted.
+Assembler: `createMimTools(context)` in `tools/index.js`. Disabled tools (from `context.disabledTools[]`) are deleted.
 
 Path routing: `@editor`, `@library.json`, `@issues/`, `@knowledge/`, `@apps/`, `@skills/` paths are resolved by `pathHandlers.js`. `@issues/` and `@knowledge/` validate YAML frontmatter, bypass proposals, and reload the board store after writes.
 
@@ -146,11 +146,11 @@ Exposes allowlisted tools to external agents (e.g. Claude Code) via MCP Streamab
 
 **Endpoint**: `POST http://localhost:17532/mcp` — JSON-RPC 2.0, no auth (localhost only).
 
-**Protocol**: `initialize` → capabilities, `tools/list` → schemas from `generateToolSchema()`, `tools/call` → dispatches via same event bridge + `createShouldersTools()` as built-in chat. Tool context uses `approvalMode: 'bypass'`.
+**Protocol**: `initialize` → capabilities, `tools/list` → schemas from `generateToolSchema()`, `tools/call` → dispatches via same event bridge + `createMimTools()` as built-in chat. Tool context uses `approvalMode: 'bypass'`.
 
 **Allowlist**: `TOOL_SERVER_ALLOWLIST` in `toolServer.js`. Only domain-specific tools — file/shell/project tools excluded (agents have native equivalents).
 
-**Agent setup**: `claude mcp add shoulders --transport http http://localhost:17532/mcp`
+**Agent setup**: `claude mcp add mim-terminal --transport http http://localhost:17532/mcp`
 
 ## Path Permission Gate (`pathPermission.js`)
 
@@ -186,7 +186,7 @@ Two failure modes:
 
 `cleanMessagesForPersist()` in `src/stores/panel/helpers.js`: strips stuck parts, compacts oversized tool output (>2KB) with `_truncatedAt` marker. Concurrent persist guard serializes async writes.
 
-Session export/import: `shoulders-session-v1` JSON format.
+Session export/import: `mim-session-v1` JSON format.
 
 ## Budget Gating
 
@@ -214,7 +214,7 @@ All model IDs, ordering, and legacy mappings live in [`ai-models.json`](../src-t
 
 `buildWorkspaceMeta(context)` → `<workspace-meta>` XML, 3K cap.
 
-Includes: open tabs, active file, file tree (2 levels, 40 entries), reference library (15 most recent), git branch, git status (filters `.shoulders/`, max 20).
+Includes: open tabs, active file, file tree (2 levels, 40 entries), reference library (15 most recent), git branch, git status (filters `.mim/`, max 20).
 
 ## Tool Input Schema Rule
 

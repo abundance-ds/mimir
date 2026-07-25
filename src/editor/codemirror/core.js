@@ -84,6 +84,48 @@ export const editorTheme = EditorView.theme({
     background: 'var(--color-accent)',
     color: 'var(--color-accent-ink)',
   },
+  '.cm-panels': {
+    backgroundColor: 'var(--color-chrome)',
+    color: 'var(--color-ink)',
+    fontFamily: 'var(--font-sans)',
+    fontSize: '12px',
+  },
+  '.cm-panels.cm-panels-top': {
+    borderBottom: '1px solid var(--color-rule-light)',
+  },
+  '.cm-panels.cm-panels-bottom': {
+    borderTop: '1px solid var(--color-rule-light)',
+  },
+  '.cm-search label': {
+    color: 'var(--color-ink-2)',
+  },
+  '.cm-textfield': {
+    backgroundColor: 'var(--color-surface)',
+    color: 'var(--color-ink)',
+    border: '1px solid var(--color-rule)',
+    borderRadius: '3px',
+    outline: 'none',
+  },
+  '.cm-textfield:focus': {
+    borderColor: 'var(--color-accent)',
+  },
+  '.cm-button': {
+    backgroundColor: 'var(--color-chrome-mid)',
+    color: 'var(--color-ink-2)',
+    border: '1px solid var(--color-rule)',
+    borderRadius: '3px',
+    backgroundImage: 'none',
+  },
+  '.cm-button:hover': {
+    backgroundColor: 'var(--color-chrome)',
+    color: 'var(--color-ink)',
+  },
+  '.cm-button:active, .cm-button[aria-checked="true"]': {
+    backgroundColor: 'var(--color-accent-soft)',
+  },
+  '.cm-search .cm-button': {
+    fontSize: '85%',
+  },
 }, { dark: false })
 
 export const editorHighlightStyle = HighlightStyle.define([
@@ -105,6 +147,7 @@ export const editorHighlightStyle = HighlightStyle.define([
 export const wrapCompartment = new Compartment()
 export const spellcheckCompartment = new Compartment()
 export const languageCompartment = new Compartment()
+export const darkModeCompartment = new Compartment()
 
 const editorInputAttributes = {
   autocorrect: 'off',
@@ -196,6 +239,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
 
   const showWordWrap = initialSettings?.wordWrap ?? true
   const showSpellcheck = initialSettings?.spellCheck ?? false
+  const isDark = initialSettings?.isDark ?? false
 
   const state = EditorState.create({
     doc,
@@ -214,6 +258,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
       highlightSelectionMatches(),
       languageCompartment.of(languageExtensionForPath(path)),
       editorTheme,
+      darkModeCompartment.of(isDark ? EditorView.darkTheme.of(true) : []),
       syntaxHighlighting(editorHighlightStyle),
       keymap.of([
         indentWithTab,

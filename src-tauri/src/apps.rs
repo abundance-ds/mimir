@@ -46,7 +46,7 @@ fn home_dir() -> Result<PathBuf, String> {
 }
 
 fn apps_dir() -> Result<PathBuf, String> {
-    Ok(home_dir()?.join(".shoulders-v3").join("apps"))
+    Ok(home_dir()?.join(".mim").join("apps"))
 }
 
 fn app_dir(app_id: &str) -> Result<PathBuf, String> {
@@ -76,7 +76,7 @@ fn validate_path(path: &str) -> Result<(), String> {
 // --- Protocol handler ---
 
 fn inject_sdk(html: &str) -> String {
-    let sdk_tags = "<link rel=\"stylesheet\" href=\"/_sdk/theme.css\"><script src=\"/_sdk/shoulders-sdk.js\"></script>";
+    let sdk_tags = "<link rel=\"stylesheet\" href=\"/_sdk/theme.css\"><script src=\"/_sdk/mim-sdk.js\"></script>";
     if let Some(pos) = html.find("</head>") {
         format!("{}{}{}", &html[..pos], sdk_tags, &html[pos..])
     } else if let Some(pos) = html.find("<body") {
@@ -87,7 +87,7 @@ fn inject_sdk(html: &str) -> String {
 }
 
 fn sdk_js_content() -> &'static str {
-    include_str!("../../src/apps/sdk/shoulders-sdk.js")
+    include_str!("../../src/apps/sdk/mim-sdk.js")
 }
 
 fn theme_css_content() -> &'static str {
@@ -105,7 +105,7 @@ pub fn serve_app_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Re
     }
 
     // SDK virtual routes
-    if path == "_sdk/shoulders-sdk.js" || path.ends_with("/_sdk/shoulders-sdk.js") {
+    if path == "_sdk/mim-sdk.js" || path.ends_with("/_sdk/mim-sdk.js") {
         return tauri::http::Response::builder()
             .status(200)
             .header("Content-Type", "application/javascript")
@@ -152,7 +152,7 @@ pub fn serve_app_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Re
     };
 
     let full_path = home
-        .join(".shoulders-v3")
+        .join(".mim")
         .join("apps")
         .join(app_id)
         .join(file_path);

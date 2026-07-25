@@ -14,7 +14,7 @@ pub struct SearchResult {
 
 fn data_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".shoulders-v3"))
+    Some(PathBuf::from(home).join(".mim"))
 }
 
 fn extract_match_excerpt(text: &str, query_lower: &str, context_chars: usize) -> Option<String> {

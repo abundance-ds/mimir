@@ -27,9 +27,8 @@
   --color-add:         #5e8b3e;
   --color-rem:         #c05d3c;
 
-  --font-serif: 'Lora', 'Georgia', serif;
-  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
-  --font-slab:  'Zilla Slab', 'Georgia', serif;
-  --font-brand: 'Georgia', serif;
+  --font-serif: 'IBM Plex Serif', 'Georgia', serif;
+  --font-sans:  'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:  'IBM Plex Mono', ui-monospace, monospace;
+  --font-brand: 'IBM Plex Sans', sans-serif;
 }

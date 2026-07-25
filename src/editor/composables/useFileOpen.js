@@ -28,7 +28,7 @@ export function useFileOpen() {
     const pending = await invoke('take_pending_files')
     if (pending.length) await openPaths(pending)
 
-    unlistenOpenFile = await getCurrentWindow().listen('shoulders://open-file', (event) => {
+    unlistenOpenFile = await getCurrentWindow().listen('mim://open-file', (event) => {
       const paths = Array.isArray(event.payload) ? event.payload : [event.payload]
       openPaths(paths)
     })

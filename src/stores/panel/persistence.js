@@ -28,7 +28,7 @@ import { useSessionStore } from './sessions.js'
 import { useChatStore } from './chat.js'
 import { useBoardStore } from './board.js'
 
-const STORAGE_KEY = 'shoulders:panel:sessions:v1'
+const STORAGE_KEY = 'mim:panel:sessions:v1'
 const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
 // F4: Concurrent persist guard
@@ -298,10 +298,10 @@ export function applyThemeFromSettings() {
       document.documentElement.setAttribute('data-theme', 'parchment')
     })
   } else {
-    const theme = localStorage.getItem('shoulders:theme') || 'parchment'
+    const theme = localStorage.getItem('mim:theme') || 'parchment'
     document.documentElement.setAttribute('data-theme', theme)
     window.addEventListener('storage', (e) => {
-      if (e.key === 'shoulders:theme' && e.newValue) {
+      if (e.key === 'mim:theme' && e.newValue) {
         document.documentElement.setAttribute('data-theme', e.newValue)
       }
     })
@@ -405,7 +405,7 @@ export async function initializePanelStores() {
   // 9. Tauri event listeners
   if (isTauri) {
     import('@tauri-apps/api/event').then(({ listen }) => {
-      listen('shoulders://proposal-result', (event) => {
+      listen('mim://proposal-result', (event) => {
         const result = event.payload
         const proposal = sessionStore.findProposalById(result.id)
         if (!proposal) return
@@ -419,27 +419,27 @@ export async function initializePanelStores() {
           sessionStore.setProposalStatus(proposal, 'failed', result.detail || 'Apply failed')
         }
       })
-      listen('shoulders://proposals-state', (event) => {
+      listen('mim://proposals-state', (event) => {
         const proposals = Array.isArray(event.payload) ? event.payload : []
         for (const proposal of proposals) {
           sessionStore.upsertProposalFromCoordinator(proposal)
         }
       })
-      listen('shoulders://theme-changed', (event) => {
+      listen('mim://theme-changed', (event) => {
         const theme = event.payload?.theme || 'parchment'
         document.documentElement.setAttribute('data-theme', theme)
       })
-      listen('shoulders://board-changed', () => {
+      listen('mim://board-changed', () => {
         const boardStore = useBoardStore()
         if (boardStore.activeProjectId) boardStore.loadBoard(boardStore.activeProjectId)
       })
-      listen('shoulders://document-changed', (event) => {
+      listen('mim://document-changed', (event) => {
         const payload = event.payload
         if (payload && typeof payload.content === 'string') {
           chatStore._documentContext = { content: payload.content, path: payload.path || '' }
         }
       })
-      listen('shoulders://board-send-to-agent', async (event) => {
+      listen('mim://board-send-to-agent', async (event) => {
         const { filePath, entryId } = event.payload || {}
         if (!entryId) return
 
@@ -468,7 +468,7 @@ export async function initializePanelStores() {
         panelUI.pushHistory(session.id)
         schedulePersist()
       })
-      listen('shoulders://comments-submit', async (event) => {
+      listen('mim://comments-submit', async (event) => {
         const { filePath, comments, documentContent, target } = event.payload || {}
         if (!comments?.length) return
         const projStore = useProjectStore()

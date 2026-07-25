@@ -1,8 +1,7 @@
 export const EDITOR_FONTS = [
-  { key: 'sans',  label: 'Sans',  family: "'Inter', ui-sans-serif, system-ui, sans-serif" },
-  { key: 'serif', label: 'Serif', family: "'Lora', Georgia, serif" },
-  { key: 'mono',  label: 'Mono',  family: "'JetBrains Mono', ui-monospace, monospace" },
-  { key: 'slab',  label: 'Slab',  family: "'Zilla Slab', Georgia, serif" },
+  { key: 'sans',  label: 'Sans',  family: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" },
+  { key: 'serif', label: 'Serif', family: "'IBM Plex Serif', Georgia, serif" },
+  { key: 'mono',  label: 'Mono',  family: "'IBM Plex Mono', ui-monospace, monospace" },
 ]
 
 const fontMap = Object.fromEntries(EDITOR_FONTS.map(f => [f.key, f.family]))

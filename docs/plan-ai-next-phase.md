@@ -94,20 +94,20 @@ JS:
 
 3. **Promote Panel persistence from prototype to project-scoped storage** — **Done.**
    - `usePanelStore.js` dual-path persistence: Tauri disk via `dataDir.js`, localStorage fallback.
-   - Storage: `~/.shoulders-v3/projects/{projectId}/sessions/{sessionId}.json`.
+   - Storage: `~/.mim/projects/{projectId}/sessions/{sessionId}.json`.
    - Integration test still needed.
 
 4. **Connect proposals to Editor review/apply flow** — Still pending.
    - Owned by Editor agent. Needs cross-window event bridge (Rust commands + Tauri events).
 
 5. ~~**Replace prototype tool data sources**~~ — **Done (2026-05-11).**
-   - `read` now reads file path from `localStorage` (`shoulders:doc:path`).
+   - `read` now reads file path from `localStorage` (`mim:doc:path`).
    - `search` uses Tauri `ref_list` when available, localStorage fallback.
    - Removed `sampleDocument` dependency — tools return empty state when no data.
    - Consolidated into: `search_web` (OpenAlex, CrossRef, arXiv), `search` (scope: references).
 
 6. ~~**Persist usage ledger**~~ — **Done (2026-05-11).**
-   - `src-tauri/src/usage.rs`: SQLite at `~/.shoulders-v3/usage.db`.
+   - `src-tauri/src/usage.rs`: SQLite at `~/.mim/usage.db`.
    - Commands: `usage_record`, `usage_query_month`, `usage_get_setting`, `usage_set_setting`.
    - JS wiring: `usePanelStore.js` `recordUsage` calls `usage_record` on each AI step finish.
 

@@ -12,14 +12,14 @@ export function createAppBridge(iframeEl, { appId, projectId }) {
     _listener = async (event) => {
       // Only accept messages from our iframe
       if (event.source !== iframeEl?.contentWindow) return
-      if (event.data?.type !== 'shoulders:invoke') return
+      if (event.data?.type !== 'mim:invoke') return
 
       const { id, command, args } = event.data
 
       // Validate command is whitelisted
       if (!ALLOWED_COMMANDS.has(command)) {
         iframeEl.contentWindow.postMessage({
-          type: 'shoulders:result',
+          type: 'mim:result',
           id,
           error: `Command not allowed: ${command}`,
         }, '*')
@@ -36,13 +36,13 @@ export function createAppBridge(iframeEl, { appId, projectId }) {
         }
         const result = await invoke(command, safeArgs)
         iframeEl.contentWindow?.postMessage({
-          type: 'shoulders:result',
+          type: 'mim:result',
           id,
           result,
         }, '*')
       } catch (err) {
         iframeEl.contentWindow?.postMessage({
-          type: 'shoulders:result',
+          type: 'mim:result',
           id,
           error: err?.message || String(err),
         }, '*')

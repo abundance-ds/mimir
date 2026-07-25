@@ -184,13 +184,13 @@ const boardEntries = computed(() =>
 )
 
 const hasDocument = computed(() => {
-  try { return Boolean(localStorage.getItem('shoulders:doc')) }
+  try { return Boolean(localStorage.getItem('mim:doc')) }
   catch { return false }
 })
 
 const documentName = computed(() => {
   try {
-    const path = localStorage.getItem('shoulders:doc:path') || ''
+    const path = localStorage.getItem('mim:doc:path') || ''
     return path.split('/').pop() || 'Untitled'
   } catch { return 'Untitled' }
 })
@@ -338,7 +338,7 @@ function onSend({ text, attachments }) {
   const docChip = chips.find(c => c.type === 'document')
   if (docChip) {
     try {
-      const content = localStorage.getItem('shoulders:doc') || ''
+      const content = localStorage.getItem('mim:doc') || ''
       if (content) {
         const name = documentName.value || 'document.md'
         attachments = [...attachments, { filename: name, mediaType: 'text/markdown', content, type: 'text', size: content.length }]
@@ -429,9 +429,6 @@ async function sendDiffOpen(invoke, payload) {
 
 async function reviewProposal(proposal) {
   try {
-    const { openOrFocusEditorWindow } = await import('../agentsWindow.js')
-    await openOrFocusEditorWindow()
-
     const { invoke } = await import('@tauri-apps/api/core')
 
     if (proposal.absolutePath && (proposal.type === 'edit' || proposal.type === 'create')) {
@@ -509,8 +506,6 @@ async function openBatchReview() {
   }
 
   try {
-    const { openOrFocusEditorWindow } = await import('../agentsWindow.js')
-    await openOrFocusEditorWindow()
     const { invoke } = await import('@tauri-apps/api/core')
     const { findTargetText } = await import('../../services/ai/tools/textMatch.js')
 

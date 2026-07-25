@@ -4,7 +4,7 @@ Status: Feature-complete (2026-05-11). 56/56 features audited and passing. All 5
 
 ## Architecture Overview
 
-The editor is a Vue 3 application with CodeMirror 6 as the editing surface. File I/O and reference storage go through Tauri commands. Session state, settings, comments, and references persist to disk at `~/.shoulders-v3/`.
+The editor is a Vue 3 application with CodeMirror 6 as the editing surface. File I/O and reference storage go through Tauri commands. Session state, settings, comments, and references persist to disk at `~/.mim/`.
 
 ```
 App.vue  →  useEditorUIStore (UI shell)
@@ -16,8 +16,8 @@ App.vue  →  useEditorUIStore (UI shell)
          →  editorExtensions (computed: ghost + citations + comments + formatting)
          →  nativeMenu.js (macOS desktop TOP TITLE menu; Windows APP HEADER handled by AppHeader)
          →  fileSystem.js → Tauri commands → disk
-         →  session.js → Tauri commands → ~/.shoulders-v3/session.json
-         →  references.js → Tauri commands → ~/.shoulders-v3/references/library.json
+         →  session.js → Tauri commands → ~/.mim/session.json
+         →  references.js → Tauri commands → ~/.mim/references/library.json
          →  export/pdf.js → Tauri command → typst_export.rs → PDF
          →  export/docx.js → JS docx package → write_binary_file → DOCX
 ```
@@ -60,9 +60,9 @@ Pinia stores (in `src/stores/`):
 
 | File | Lines | Purpose |
 |---|---:|---|
-| `stores/settings.js` | 115 | `useSettingsStore` — unified settings (Pinia, app-level). Loads from `~/.shoulders-v3/settings.json` (Tauri) or localStorage (browser). Persists via explicit `set(key, value)` with 300ms debounce. Applies theme, cross-window sync via `shoulders://settings-changed` Tauri event (emits to other windows only). Exposes `isDarkTheme` computed. Notable keys: `aiGhostModel`, `disabledTools`, `editorToolbarMode` (`top`/`none`, default: `top`). |
+| `stores/settings.js` | 115 | `useSettingsStore` — unified settings (Pinia, app-level). Loads from `~/.mim/settings.json` (Tauri) or localStorage (browser). Persists via explicit `set(key, value)` with 300ms debounce. Applies theme, cross-window sync via `mim://settings-changed` Tauri event (emits to other windows only). Exposes `isDarkTheme` computed. Notable keys: `aiGhostModel`, `disabledTools`, `editorToolbarMode` (`top`/`none`, default: `top`). |
 | `stores/editorUI.js` | 83 | `useEditorUIStore` — UI shell state: sidebar visibility, active panel, view mode, and zoom level. Includes narrow-window panel close helpers. Does not own file/content state. (Toolbar mode moved to settings store as `editorToolbarMode`.) |
-| `stores/files.js` | 287 | `useFileStore` — tab-file lifecycle: open files array, active file index, recent-file tracking, dirty tracking, save-state/error tracking, save/save-as/close actions. Calls `fileSystem.js` for I/O. Auto-save scheduling lives in `src/editor/autoSaveController.js`. Board files (`path.includes('/board/')`) get frontmatter parsed on open — `file.meta` holds the YAML metadata, `file.content` holds the body only. On save, `serializeEntry(meta, body)` reconstructs the full file. `updateMeta(fileId, updates)` merges changes, stamps `updated`, and marks dirty. After saving a board file, emits `shoulders://board-changed` for kanban refresh. |
+| `stores/files.js` | 287 | `useFileStore` — tab-file lifecycle: open files array, active file index, recent-file tracking, dirty tracking, save-state/error tracking, save/save-as/close actions. Calls `fileSystem.js` for I/O. Auto-save scheduling lives in `src/editor/autoSaveController.js`. Board files (`path.includes('/board/')`) get frontmatter parsed on open — `file.meta` holds the YAML metadata, `file.content` holds the body only. On save, `serializeEntry(meta, body)` reconstructs the full file. `updateMeta(fileId, updates)` merges changes, stamps `updated`, and marks dirty. After saving a board file, emits `mim://board-changed` for kanban refresh. |
 | `stores/comments.js` | 133 | `useCommentsStore` — thin reactive mirror of inline `<comment>` tags parsed by the CM6 extension. Active comment tracking for editor highlight sync. No persistence logic — the document text is the single source of truth. |
 | `stores/saveFeedback.js` | 72 | `useSaveFeedbackStore` — save feedback state machine. Manages footer UI state (`savingVisible`, `savedVisible`, `savedLabel`) with timed transitions for "Saving..." / "Saved" / "Saved as X" feedback. |
 
@@ -72,7 +72,7 @@ Composables (in `src/editor/composables/`):
 |---|---:|---|
 | `composables/useDeferredMarkdownPreview.js` | 139 | Deferred Markdown preview renderer. Custom `Marked` instance injects `data-source-line` attributes on block elements for scroll sync. Schedules work after edit sync/idle and renders immediately only when switching into split/preview. |
 | `composables/useScrollSync.js` | 93 | Editor→preview scroll sync. Reads CM6 top visible line, interpolates between `[data-source-line]` anchors in the preview DOM, snaps to bottom. Active in split mode only. |
-| `composables/useDocumentBridge.js` | 58 | Throttled document-context bridge. Writes browser fallback `shoulders:doc` and emits Tauri `document_context_send` outside the immediate edit path. |
+| `composables/useDocumentBridge.js` | 58 | Throttled document-context bridge. Writes browser fallback `mim:doc` and emits Tauri `document_context_send` outside the immediate edit path. |
 | `composables/useSidebarResize.js` | 43 | Pointer drag logic for sidebar width. |
 | `composables/useCommentPositions.js` | — | Comment position tracking for sidebar scroll sync. |
 | `composables/useKeyboardShortcuts.js` | — | Centralized keyboard shortcut registration. |
@@ -113,7 +113,7 @@ All in `src/services/`. 3318 lines total across 24 files.
 | `services/references.js` | 57 | Reference library CRUD: loadLibrary, addReference, removeReference, importBibtex, searchReferences, extractCitedKeys. Wraps Rust ref_* commands. |
 | `services/ai/context.js` | 53 | Prefix/suffix extraction, documentIdFromPath. |
 | `services/ai/tools/textMatch.js` | 51 | Text matching utilities for tools. |
-| `services/session.js` | 48 | Saves and restores session state (open file paths, recent file paths, active index, sidebar, view mode, zoom) to ~/.shoulders-v3/session.json. (Toolbar mode moved to settings persistence.) |
+| `services/session.js` | 48 | Saves and restores session state (open file paths, recent file paths, active index, sidebar, view mode, zoom) to ~/.mim/session.json. (Toolbar mode moved to settings persistence.) |
 | `services/ai/recovery.js` | 47 | AI error recovery logic. |
 | `services/ai/rewrite.js` | 45 | Selection rewrite prompts: requestSelectionRewrite. |
 | `services/ai/client.js` | 44 | Tauri invoke wrapper for AI commands. |
@@ -154,11 +154,11 @@ All in `src/services/`. 3318 lines total across 24 files.
 | `ai_proxy.rs` | 391 | AI SDK streaming bridge, cancel, cleanup. |
 | `ai_keys.rs` | 274 | Keychain/env/debug key fallback resolver. |
 | `ai_models.rs` | 271 | Model registry/config loader and migration. |
-| `usage.rs` | 258 | Usage ledger (SQLite at ~/.shoulders-v3/usage.db). Commands: usage_record, usage_query_month, usage_get_setting, usage_set_setting. |
+| `usage.rs` | 258 | Usage ledger (SQLite at ~/.mim/usage.db). Commands: usage_record, usage_query_month, usage_get_setting, usage_set_setting. |
 | `lib.rs` | 225 | Tauri command registration, file commands, plugin setup, devtools. macOS spellcheck: `enable_macos_spellcheck()` (NSUserDefaults), `spell_suggest()` (NSSpellChecker via objc2). |
-| `references.rs` | 163 | Reference library read/write/import at ~/.shoulders-v3/references/library.json. Commands: ref_list, ref_add, ref_remove, ref_import_bibtex. Cite key generation (lastName+year+suffix). |
+| `references.rs` | 163 | Reference library read/write/import at ~/.mim/references/library.json. Commands: ref_list, ref_add, ref_remove, ref_import_bibtex. Cite key generation (lastName+year+suffix). |
 | `ai.rs` | 128 | AI command surface (Tauri commands for ai_generate, ai_models, etc.). |
-| `git.rs` | 102 | Git operations exposed as Tauri commands: clone, init, status, `git_file_log` (commit history for a file), `git_file_at_revision` (file content at a specific commit). Version history relies on user-managed git; Shoulders does not create commits. |
+| `git.rs` | 102 | Git operations exposed as Tauri commands: clone, init, status, `git_file_log` (commit history for a file), `git_file_at_revision` (file content at a specific commit). Version history relies on user-managed git; mim terminal does not create commits. |
 | `ai_transport.rs` | 96 | HTTP allowlist/timeout/redaction for AI requests. |
 | `ai_usage.rs` | 68 | Usage normalization helpers. |
 | `main.rs` | 3 | App entrypoint (calls lib::run). |
@@ -198,7 +198,7 @@ Disk → fileSystem.readFile() → useFileStore.openFile() → openFiles[i].cont
           → auto-save controller flushes latest CM6 content, then fileSystem.saveFile() → Disk
           → saveStatus.js maps save state to tab/footer attention
 
-Close → session.save() → ~/.shoulders-v3/session.json
+Close → session.save() → ~/.mim/session.json
 Launch → session.restore() → setRecentFiles → for each open path: readFile → openFile
 ```
 
@@ -214,7 +214,7 @@ Performance contract and timing budgets are documented in [editor-performance.md
 useSettingsStore() → Pinia store (app-level, no provide/inject)
   │
   ├─ SettingsDialog.vue → useSettingsStore() → reads/writes reactive refs (font, size, wrap, etc.)
-  │   → auto-save (300ms debounce) → ~/.shoulders-v3/settings.json
+  │   → auto-save (300ms debounce) → ~/.mim/settings.json
   │
   └─ EditorSurface.vue → useSettingsStore() → watches settings refs
       → reconfigures CM6 Compartments (fontFamily, fontSize, lineNumbers, lineWrapping, spellcheck)
@@ -266,7 +266,7 @@ Rewrite:
 ```
 Reference Library Load:
   App.vue onMounted → loadLibrary() → Tauri invoke ref_list
-    → Rust reads ~/.shoulders-v3/references/library.json
+    → Rust reads ~/.mim/references/library.json
       → CSL-JSON array → referenceLibrary ref
 
 Citation Autocomplete:
@@ -285,7 +285,7 @@ BibTeX Import:
         → reloadReferenceLibrary() → UI updates
 ```
 
-References are global (`~/.shoulders-v3/references/`), not project-scoped.
+References are global (`~/.mim/references/`), not project-scoped.
 
 ### 5. Export
 
@@ -352,7 +352,7 @@ Content retrieval:
     → Rust git.rs reads blob at revision → file content string
 ```
 
-Relies on user-managed git. Shoulders does not create commits.
+Relies on user-managed git. mim terminal does not create commits.
 
 ### 8. Board File Editing
 
@@ -375,7 +375,7 @@ Save:
   writeFile(file) detects file.meta
     → serializeEntry(meta, body) → "---\nyaml\n---\n\nbody"
       → saveFile(path, fullContent) → disk
-    → emit('shoulders://board-changed', { entryId })
+    → emit('mim://board-changed', { entryId })
       → Panel board store reloads kanban
 
 Send to Agent:

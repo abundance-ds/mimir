@@ -1,6 +1,6 @@
 # Design System
 
-This document defines the visual language, layout architecture, and component system for the Shoulders editor family. It is written so that a sister application with a different structure can map the same design essence — the chrome gradient, typographic hierarchy, density, and restraint — without copying layout verbatim.
+This document defines the visual language, layout architecture, and component system for the mim terminal editor family. It is written so that a sister application with a different structure can map the same design essence — the chrome gradient, typographic hierarchy, density, and restraint — without copying layout verbatim.
 
 ---
 
@@ -46,7 +46,7 @@ Theme definitions live in `src/shared/styles/themes.css`. The Tailwind `@theme` 
 
 Use Tailwind utility classes for all new styling. In Vue templates, prefer `text-ink-3`, `bg-chrome-mid`, `border-rule-light` over `var()` arbitrary values. Reserve vanilla CSS (`<style>` blocks) only for things Tailwind cannot express: `@keyframes` animations, vendor-prefixed properties (`-webkit-app-region`), and `:deep()` selectors for rendered markdown or CodeMirror content.
 
-Theme is stored in `~/.shoulders-v3/settings.json` under `editor.editorTheme`. When changed in the editor, a Tauri event (`shoulders://theme-changed`) notifies the panel window. Browser fallback uses `localStorage` `shoulders:theme` key and the `storage` event.
+Theme is stored in `~/.mim/settings.json` under `editor.editorTheme`. When changed in the editor, a Tauri event (`mim://theme-changed`) notifies the panel window. Browser fallback uses `localStorage` `mim:theme` key and the `storage` event.
 
 ### 2.1 Chrome Gradient (3 levels)
 
@@ -127,7 +127,7 @@ Five CSS variables, each with a strict role. Never cross roles.
 | Content body | `--font-serif` | Lora | Chat messages, preview pane body text, preview headings, rewrite overlay |
 | Code / data | `--font-mono` | JetBrains Mono | Editor source, line numbers, file paths, tab labels, footer readouts, metadata, timestamps, ref keys, zoom level, kbd hints |
 | Alt body | `--font-slab` | Zilla Slab | Editor font option (user-selectable) |
-| Brand display | `--font-brand` | Georgia | Product name ("Shoulders"), hero headings (NewChat, About). Shoulders' brand typeface is Crimson Text, but Georgia is used at runtime to avoid bundling a font for two headings. |
+| Brand display | `--font-brand` | Georgia | Product name ("mim terminal"), hero headings (NewChat, About). mim terminal uses IBM Plex Sans for brand display. |
 
 Editor font is user-selectable via Settings > Editor > Font. Four semantic options: Sans, Serif, Mono, Slab. Setting key: `editorFontFamily` stores `'sans'`/`'serif'`/`'mono'`/`'slab'`. Single source of truth: `src/shared/fonts.js`.
 

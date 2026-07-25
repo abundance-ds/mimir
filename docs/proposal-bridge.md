@@ -11,25 +11,25 @@ Rust owns the runtime proposal lifecycle. Panel and Editor are clients: they cal
 ```txt
 Panel: AI tool returns pending_review, emits onProposal
   -> Panel invokes proposal_create
-  -> Rust stores proposal and broadcasts shoulders://proposals-state
+  -> Rust stores proposal and broadcasts mim://proposals-state
   -> Panel mirrors proposal into sessions[].proposals
-  -> Editor receives pending proposal list via shoulders://proposals-changed
+  -> Editor receives pending proposal list via mim://proposals-changed
 
 Panel: user clicks Accept in ProposalActionBar
   -> invoke('proposal_apply', { id })
   -> Rust sets status applying
   -> Rust resolves target owner
      -> direct file path: validate/apply/write/notify
-     -> active dirty editor buffer or @editor: delegate via shoulders://proposal-apply
+     -> active dirty editor buffer or @editor: delegate via mim://proposal-apply
      -> inactive dirty editor buffer: conflict
   -> Rust broadcasts final status
 
 Panel: user clicks Review in ProposalActionBar
   -> invoke('diff_open', { path, original, modified })
-  -> Rust emits 'shoulders://diff-open' to editor windows
+  -> Rust emits 'mim://diff-open' to editor windows
   -> Editor opens diff view (accept/reject from DiffBar)
   -> Editor invokes 'proposal_respond'
-  -> Panel receives 'shoulders://proposal-result'
+  -> Panel receives 'mim://proposal-result'
   -> Panel updates proposal status
 ```
 
@@ -98,7 +98,7 @@ All in `src-tauri/src/lib.rs`.
 
 `proposal_create(app, state, proposal)`:
 - Upserts a proposal into the coordinator store
-- Broadcasts `shoulders://proposals-state` to Panel and pending `shoulders://proposals-changed` to Editor windows
+- Broadcasts `mim://proposals-state` to Panel and pending `mim://proposals-changed` to Editor windows
 - Called by `onProposal()` in `src/stores/panel/chat.js`
 
 `proposal_apply(app, state, id)`:
@@ -115,7 +115,7 @@ All in `src-tauri/src/lib.rs`.
 `proposal_respond(app, state, result)`:
 - Completes delegated editor-buffer applies
 - Maps `applied -> accepted`, `not-found -> stale`, `conflict -> conflict`, `rejected -> rejected`
-- Broadcasts state and forwards `shoulders://proposal-result` for Panel compatibility
+- Broadcasts state and forwards `mim://proposal-result` for Panel compatibility
 
 `proposal_register_editor(state, window_label, documents)`:
 - Editors publish open document ownership: `{ path, dirty, active }`
@@ -125,7 +125,7 @@ All in `src-tauri/src/lib.rs`.
 - Returns the current coordinator proposal list
 
 `diff_open(app, payload)`:
-- Emits `shoulders://diff-open` to editor windows
+- Emits `mim://diff-open` to editor windows
 - Supports single-file payload (`{ id, path, original, modified, ... }`) and batch payload (`{ batch: true, files: [...] }`)
 - Used by `reviewProposal()` (single file) and `openBatchReview()` (batch) in Panel
 
@@ -144,7 +144,7 @@ Panel sync (`syncProposalsToRust` in `src/stores/panel/sessions.js`):
 - New runtime proposals are created through `proposal_create`
 
 Editor auto-diff (`src/editor/App.vue`):
-- Listens for `shoulders://proposals-changed` — when proposals match the active file, stashes `reviews` on the file object and activates diff via `activateDiffFromReviews()`
+- Listens for `mim://proposals-changed` — when proposals match the active file, stashes `reviews` on the file object and activates diff via `activateDiffFromReviews()`
 - Watches `activeFileIndex` — queries Rust via `get_proposals_for_path` on tab switch
 - When proposals are cleared from Rust (e.g. all accepted/rejected), auto-deactivates diff
 
@@ -167,8 +167,8 @@ Important: Panel `sessions[].proposals` is now a mirror used for rendering and p
 - Enriches proposals with `threadId`, mirrors them into Panel state, and invokes `proposal_create`
 
 `src/stores/panel/persistence.js`
-- Listens for `shoulders://proposals-state` and upserts coordinator proposals into Panel session state
-- Listens for `shoulders://proposal-result` for backward-compatible status updates
+- Listens for `mim://proposals-state` and upserts coordinator proposals into Panel session state
+- Listens for `mim://proposal-result` for backward-compatible status updates
 
 `src/panel/components/ChatView.vue`
 - `applyProposal(proposal)`: invokes `proposal_apply`; it does not write proposal edits directly
@@ -180,11 +180,11 @@ Important: Panel `sessions[].proposals` is now a mirror used for rendering and p
 
 `src/editor/App.vue`
 - Registers open editor ownership through `proposal_register_editor`
-- Listens for `shoulders://proposals-changed` and activates auto-diff for matching pending proposals
+- Listens for `mim://proposals-changed` and activates auto-diff for matching pending proposals
 
 `src/editor/composables/useProposalBridge.js`
-- Listens for `shoulders://diff-open` and activates diff view in Editor
-- Listens for delegated `shoulders://proposal-apply` requests and responds via `proposal_respond`
+- Listens for `mim://diff-open` and activates diff view in Editor
+- Listens for delegated `mim://proposal-apply` requests and responds via `proposal_respond`
 - Handles four payload shapes: batch (array of files), file-edit review (targetText+replacement), legacy (pre-computed original/modified), single-file compute
 - Normalizes proposal diff metadata to `reviewMeta.ids`
 - Exports `computeDiffFromReview(review, fileContent)` — applies a single review to file content, returns `{ original, modified }` or null
@@ -297,7 +297,7 @@ Proposal response handlers (`onDiffRejectAll`, `respondToDiffReview`, `onBatchAl
 | Case | Handling |
 |------|----------|
 | Editor not open | `proposal_apply` writes closed file targets directly from Rust |
-| Active dirty editor buffer | `proposal_apply` delegates to owning editor window via `shoulders://proposal-apply` |
+| Active dirty editor buffer | `proposal_apply` delegates to owning editor window via `mim://proposal-apply` |
 | Inactive dirty editor buffer | `proposal_apply` marks `conflict`; it does not write over unsaved editor state |
 | Target text changed | direct apply marks `stale` unless the replacement is already present exactly once |
 | Ambiguous target text | direct apply marks `conflict` |
@@ -311,5 +311,5 @@ No changes needed. `core:event:default` (in `src-tauri/capabilities/default.json
 
 ## Future Work
 
-- **Replace localStorage bridge**: The `shoulders:doc` prototype bridge (editor -> panel for `read` tool) should eventually use Tauri events. Separate concern from proposal bridge.
+- **Replace localStorage bridge**: The `mim:doc` prototype bridge (editor -> panel for `read` tool) should eventually use Tauri events. Separate concern from proposal bridge.
 - **Policy/audit**: Proposal apply could go through a policy gate before writing.

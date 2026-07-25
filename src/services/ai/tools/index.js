@@ -13,7 +13,7 @@ import { limitText, MAX_TOOL_OUTPUT_CHARS } from './helpers'
 
 export { limitText, MAX_TOOL_OUTPUT_CHARS }
 
-export function createShouldersTools(context = {}) {
+export function createMimTools(context = {}) {
   const tools = {
     ...createReadTool(context),
     ...createListTool(context),

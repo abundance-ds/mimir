@@ -75,9 +75,9 @@ function recentMenuItems(recentFiles, actions) {
 function buildMenuItems(recentFiles, actions) {
   return [
     {
-      text: 'Shoulders Editor',
+      text: 'mim terminal editor',
       items: [
-        { item: { About: { name: 'Shoulders Editor' } } },
+        { item: { About: { name: 'mim terminal editor' } } },
         separator(),
         item('editor:settings', 'Settings...', 'CmdOrCtrl+,', actions.openSettings),
         separator(),
@@ -142,7 +142,7 @@ function buildMenuItems(recentFiles, actions) {
     {
       text: 'Help',
       items: [
-        item('editor:help-about', 'About Shoulders Editor', null, null, { enabled: false }),
+        item('editor:help-about', 'About mim terminal editor', null, null, { enabled: false }),
       ],
     },
   ]

@@ -4,7 +4,7 @@ import { useChatStore } from '../../stores/panel/chat.js'
 
 // Mock all transitive deps pulled in by the chat store
 vi.mock('@ai-sdk/vue', () => ({ Chat: vi.fn() }))
-vi.mock('../../services/ai/chatTransport', () => ({ createShouldersChatTransport: vi.fn() }))
+vi.mock('../../services/ai/chatTransport', () => ({ createMimChatTransport: vi.fn() }))
 vi.mock('../../services/ai/sdkAdapter', () => ({ addUsage: vi.fn() }))
 vi.mock('../../services/ai/recovery', () => ({ recoverPoisonedMessages: vi.fn() }))
 vi.mock('../../services/ai/client', () => ({ generateAiText: vi.fn() }))

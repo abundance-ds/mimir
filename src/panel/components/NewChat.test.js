@@ -4,7 +4,7 @@ import { nextTick } from 'vue'
 
 vi.mock('@ai-sdk/vue', () => ({ Chat: vi.fn() }))
 vi.mock('ai', () => ({ lastAssistantMessageIsCompleteWithToolCalls: vi.fn() }))
-vi.mock('../../services/ai/chatTransport', () => ({ createShouldersChatTransport: vi.fn() }))
+vi.mock('../../services/ai/chatTransport', () => ({ createMimChatTransport: vi.fn() }))
 vi.mock('../../services/ai/sdkAdapter', () => ({ addUsage: vi.fn() }))
 vi.mock('../../services/ai/recovery', () => ({ recoverPoisonedMessages: vi.fn() }))
 vi.mock('../../services/ai/client', () => ({ generateAiText: vi.fn() }))
@@ -41,7 +41,7 @@ vi.mock('../../stores/panel/apps.js', () => {
 vi.mock('../../services/skills/loader', () => ({
   discoverSkills: vi.fn(() => Promise.resolve([
     { id: 'peer-review', name: 'Peer Review', description: 'Multi-agent academic manuscript review' },
-    { id: 'shoulders-meta', name: 'Shoulders Meta', description: 'App reference and contextual help' },
+    { id: 'mim-meta', name: 'mim Meta', description: 'App reference and contextual help' },
     { id: 'workflow-builder', name: 'Workflow Builder', description: 'Chat-guided workflow creation' },
     { id: 'code-review', name: 'Code Review', description: 'Structured review with checklist' },
     { id: 'latex-helper', name: 'LaTeX Helper', description: 'Formatting and equations' },

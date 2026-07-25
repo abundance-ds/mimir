@@ -16,7 +16,6 @@ export function macWindowChromeOptions({
   }
 }
 
-export const editorWindowChromeOptions = macWindowChromeOptions()
 export const panelWindowChromeOptions = macWindowChromeOptions({
   trafficLightPosition: PANEL_TRAFFIC_LIGHT_POSITION,
   backgroundColor: PANEL_WINDOW_BACKGROUND,

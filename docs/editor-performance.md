@@ -42,7 +42,7 @@ Relevant source:
 
 - **Outline extraction moved into CM6.** `outlineExtension()` reads the CM6 document after edits settle, then emits heading data to Vue. `SidebarOutline.vue` is presentational and no longer parses Markdown during render.
 - **Markdown preview is deferred.** `useDeferredMarkdownPreview()` delays `marked()` work and skips it entirely in source-only mode. Switching into split/preview renders immediately for correctness.
-- **Panel document context is throttled.** `useDocumentBridge()` batches browser fallback `shoulders:doc` writes and Tauri `document_context_send` events outside the immediate edit path.
+- **Panel document context is throttled.** `useDocumentBridge()` batches browser fallback `mim:doc` writes and Tauri `document_context_send` events outside the immediate edit path.
 - **Citation diagnostics are lighter in the editor.** CM6 citation wiring gets reference items and duplicate-key diagnostics. Full cited-key scans remain in refs/export surfaces where the content is needed.
 - **Save feedback is derived, not polled.** The footer reads cheap save-state refs and a delayed feedback flag. It does not serialize editor content or perform disk work during typing.
 

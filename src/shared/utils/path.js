@@ -8,8 +8,8 @@ export function dirname(path) {
   const dir = parts.join('/')
   if (!dir) return 'Local file'
   const home =
-    typeof window !== 'undefined' && window.__SHOULDERS_HOME__
-      ? window.__SHOULDERS_HOME__
+    typeof window !== 'undefined' && window.__MIM_HOME__
+      ? window.__MIM_HOME__
       : ''
   return home && dir.startsWith(home) ? `~${dir.slice(home.length)}` : dir
 }

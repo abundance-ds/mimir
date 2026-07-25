@@ -157,7 +157,7 @@ onMounted(async () => {
       }
     } catch {}
 
-    // Load personal instructions (~/.shoulders-v3/projects/{id}/instructions.md)
+    // Load personal instructions (~/.mim/projects/{id}/instructions.md)
     try {
       const { projectDir } = await import('../../../services/dataDir')
       const personalPath = `${await projectDir(props.projectId)}/instructions.md`

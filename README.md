@@ -1,10 +1,10 @@
-# Shoulders
+# mim terminal
 
-Agents and editor for research teams.
+Part of mim, the AI-native OS for companies.
 
-## Company & Product Context
+## Product Context
 
-**Shoulders** is a two-surface desktop product for senior HEOR researchers and consultants ("standing on the shoulders of giants"):
+**mim terminal** is a two-surface desktop tool for research teams:
 
 - The **Editor** (Where you *plan* and *review* work) is a Markdown editor (citations, inline AI, comments, diff review, export). 
 - The **Panel** (Where you *direct* work) is an agent orchestrator (streaming AI chat, tool use, file proposals, context-window donut, unified composer, inline approval mode picker). 
@@ -15,12 +15,14 @@ Desktop-only. Local-first. File-based. Built with Tauri v2 + Vue 3 + CodeMirror 
 
 **Audience**: teams of research consultants in HEOR, RWE, health economics, biotech, and pharma.
 
+The website lives in [shoulders-ai/mim-web](https://github.com/shoulders-ai/mim-web), the minimal Nuxt site for `mim.shoulde.rs`. It presents mim OS, links to current release downloads, and keeps the invite-only surface intentionally sparse.
+
 
 ## Product Philosophy
 
-Shoulders is part of the enabling infrastructure research teams need to adopt AI-native workflows. It is supposed to be a home for agentic workflows and integrations, for creating plans and reviewing artefacts. At the same time, it is supposed to remain lean, simple, light and easily hackable.
+mim terminal is part of the enabling infrastructure research teams need to adopt AI-native workflows. It is supposed to be a home for agentic workflows and integrations, for creating plans and reviewing artefacts. At the same time, it is supposed to remain lean, simple, light and easily hackable.
 
-Shoulders is built in response to fundamental hypotheses about the changing nature of research and research-adjacebt work:
+mim terminal is built in response to fundamental hypotheses about the changing nature of research and research-adjacebt work:
 
 1 AI won't be a feature, but the medium, integrated as an intelligence layer across organisations.
 
@@ -63,10 +65,10 @@ Shoulders is built in response to fundamental hypotheses about the changing natu
 
 ## Naming
 
-- **Shoulders** = product.
+- **mim terminal** = product.
 - Primary window (label `main`): the Panel. Opens on launch.
 - Editor windows (labels `editor-*`): opened on demand.
-- Internal package/Cargo names are `shoulders`. localStorage keys use `shoulders:` prefix.
+- Internal package/Cargo names are `mim-terminal`. localStorage keys use `mim:` prefix.
 
 ## Coding Conventions
 
@@ -112,7 +114,7 @@ If Tauri opens stale code, check for a leftover Vite server on port 1420: `lsof 
 
 ## AI Key Setup
 
-Debug builds: Rust key resolver reads `.env` in repo root, then `~/.shoulders-v3/keys.env` as fallback. Production uses OS keychain.
+Debug builds: Rust key resolver reads `.env` in repo root, then `~/.mim/keys.env` as fallback. Production uses OS keychain.
 
 ## Navigation
 

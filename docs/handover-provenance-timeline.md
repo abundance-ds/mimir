@@ -22,7 +22,7 @@ The audit layer (built 2026-05-18) provides the data foundation. See `docs/audit
 
 ### Data available now
 
-Every event in `~/.shoulders-v3/audit.db` has:
+Every event in `~/.mim/audit.db` has:
 - `id`, `timestamp`, `event_type`, `project_id`, `session_id`, `actor`
 - `payload` (JSON) with event-specific fields
 - `content_hash` (SHA-256 for tamper evidence)

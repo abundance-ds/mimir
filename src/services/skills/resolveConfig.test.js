@@ -24,7 +24,7 @@ vi.mock('ai', () => ({
 }))
 
 vi.mock('../../services/ai/chatTransport', () => ({
-  createShouldersChatTransport: vi.fn(),
+  createMimChatTransport: vi.fn(),
 }))
 
 vi.mock('../../services/ai/sdkAdapter', () => ({
@@ -90,11 +90,11 @@ describe('resolveSkillConfig', () => {
 
   it('falls back to project defaults when skill has no config overrides', () => {
     mockStore.getSkillMeta.mockReturnValue({
-      id: 'shoulders',
-      name: 'Shoulders',
+      id: 'mim',
+      name: 'mim terminal',
     })
 
-    const session = { skill: 'shoulders', projectId: 'proj-1' }
+    const session = { skill: 'mim', projectId: 'proj-1' }
 
     expect(resolveSkillConfig(session, 'maxSteps')).toBe(12)
     expect(resolveSkillConfig(session, 'maxOutputTokens')).toBe(16000)
@@ -102,11 +102,11 @@ describe('resolveSkillConfig', () => {
 
   it('falls back to base defaults when skill has no config and no project', () => {
     mockStore.getSkillMeta.mockReturnValue({
-      id: 'shoulders',
-      name: 'Shoulders',
+      id: 'mim',
+      name: 'mim terminal',
     })
 
-    const session = { skill: 'shoulders' }
+    const session = { skill: 'mim' }
 
     expect(resolveSkillConfig(session, 'maxSteps')).toBe(8)
     expect(resolveSkillConfig(session, 'maxOutputTokens')).toBe(1800)

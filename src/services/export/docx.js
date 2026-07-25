@@ -423,7 +423,7 @@ export async function exportDocx(markdown, options = {}) {
   const h3Size = Math.round(fontSizeHp * 1.09)
 
   const doc = new Document({
-    creator: 'Shoulders',
+    creator: 'mim terminal',
     title,
     styles: {
       default: {

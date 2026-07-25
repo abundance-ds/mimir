@@ -31,7 +31,6 @@
       @close-tab="onCloseTab"
       @add-tab="onNewFile"
       @reorder-tab="onReorderTab"
-      @tab-drag-out="onTabDragOut"
     />
 
     <div class="editor-body flex-1 flex min-h-0 bg-chrome">
@@ -489,7 +488,7 @@ const proposalBridge = useProposalBridge({
 // Listen for proposal changes from the panel (via Rust broadcast)
 if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
   import('@tauri-apps/api/event').then(({ listen }) => {
-    listen('shoulders://file-updated', (event) => {
+    listen('mim://file-updated', (event) => {
       const { path, content } = event.payload || {}
       if (!path) return
       const file = fileManager.openFiles.find(f => f.path === path)
@@ -502,10 +501,11 @@ if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
       }
     })
 
-    listen('shoulders://proposals-changed', (event) => {
+    listen('mim://proposals-changed', (event) => {
       const proposals = event.payload || []
       const file = fileManager.currentFile
       if (!file?.path) return
+      flushEditorContent()
 
       const matches = proposals.filter(p =>
         p.path === file.path || p.absolutePath === file.path
@@ -532,6 +532,7 @@ if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
 
 function activateDiffFromReviews(file) {
   if (!file?.reviews?.length) return false
+  if (fileManager.currentFile === file) flushEditorContent()
   const content = file.content || ''
   const diff = file.reviews.length === 1
     ? computeDiffFromReview(file.reviews[0], content)
@@ -631,7 +632,6 @@ const editorExtensions = computed(() => [
 
 let nativeMenuTimer = null
 let unlistenNativeMenuFocus = null
-let unlistenTabReceive = null
 
 const contentSync = useContentSync({
   editorSurfaceRef,
@@ -690,7 +690,7 @@ const tabMgmt = useTabManagement({
   flushEditorContent,
   saveCurrentFile,
 })
-const { closeConfirmFile, closeConfirmFileName, arrivedTabIndex, onSelectTab, onCloseTab, onCloseConfirm, onNewFile, onReorderTab, onTabDragOut, receiveTransferredFile } = tabMgmt
+const { closeConfirmFile, closeConfirmFileName, arrivedTabIndex, onSelectTab, onCloseTab, onCloseConfirm, onNewFile, onReorderTab } = tabMgmt
 
 watch(closeConfirmFile, (v) => {
   if (v) nextTick(() => closeOverlayRef.value?.focus())
@@ -964,8 +964,8 @@ async function onInlineCommentAction({ type, id, text }) {
   }
 
   if (type === 'terminal-prompt') {
-    if (!window.__shoulders_terminalPaste) return { ok: false, error: 'Terminal not available.' }
-    const ok = await window.__shoulders_terminalPaste(commentPrompt(id))
+    if (!window.__mim_terminalPaste) return { ok: false, error: 'Terminal not available.' }
+    const ok = await window.__mim_terminalPaste(commentPrompt(id))
     if (!ok) return { ok: false, error: 'No active terminal. Open a terminal tab first.' }
     return { ok: true }
   }
@@ -1184,6 +1184,10 @@ async function mimSave() {
   return { saved, active: mimActive() }
 }
 
+function mimCloseActiveTab() {
+  onCloseTab(activeFileIndex.value)
+}
+
 defineExpose({
   mimOpen,
   mimActive,
@@ -1194,6 +1198,7 @@ defineExpose({
   mimSetContent,
   mimReveal,
   mimSave,
+  mimCloseActiveTab,
 })
 
 // --- Diff review ---
@@ -1278,66 +1283,42 @@ onMounted(async () => {
   // Load reference library
   loadLibrary().then(lib => { referenceLibrary.value = lib })
 
-  // Check for tab transfer FIRST — if this window was opened for a transfer,
-  // skip session restore (otherwise we'd load ALL files from the session + the transferred one)
-  const myLabel = new URLSearchParams(location.search).get('window') || ''
-  const transferKey = `shoulders:tab-transfer:${myLabel}`
-  const transferJson = localStorage.getItem(transferKey)
-  const isTransferWindow = Boolean(transferJson)
-
-  if (isTransferWindow) {
-    localStorage.removeItem(transferKey)
-    try {
-      const data = JSON.parse(transferJson)
-      receiveTransferredFile(data)
-    } catch { /* corrupt data, ignore */ }
-  } else {
-    // Restore session (only for windows opened normally, not via tab transfer)
-    const session = await loadSession()
-    if (session?.recentFiles?.length) {
-      fileManager.setRecentFiles(session.recentFiles)
+  // Restore session
+  const session = await loadSession()
+  if (session?.recentFiles?.length) {
+    fileManager.setRecentFiles(session.recentFiles)
+  }
+  if (session?.openFiles?.length) {
+    for (const entry of session.openFiles) {
+      const path = typeof entry === 'string' ? entry : entry.path
+      if (path) {
+        try {
+          const content = await readFile(path)
+          await fileManager.openFile(path, content)
+        } catch {
+          // File no longer exists, skip
+        }
+      } else if (entry.content) {
+        fileManager.newFile()
+        fileManager.updateContent(entry.content)
+      }
     }
-    if (session?.openFiles?.length) {
-      for (const entry of session.openFiles) {
-        const path = typeof entry === 'string' ? entry : entry.path
-        if (path) {
-          try {
-            const content = await readFile(path)
-            await fileManager.openFile(path, content)
-          } catch {
-            // File no longer exists, skip
-          }
-        } else if (entry.content) {
-          fileManager.newFile()
-          fileManager.updateContent(entry.content)
-        }
-      }
-      if (session.activeFileIndex != null) {
-        fileManager.setActiveTab(session.activeFileIndex)
-      }
-      if (session.viewMode) state.viewMode = session.viewMode
-      if (session.zoomLevel) state.zoomLevel = session.zoomLevel
-      if (session.sidebar) {
-        state.sidebarVisible = true
-        const panel = session.sidebar.panel ?? 'outline'
-        state.activePanel = ['outline', 'notes', 'refs', 'history'].includes(panel) ? panel : 'outline'
-        state.panelOpen = session.sidebar.panelOpen ?? true
-        if (session.sidebar.visible === false && session.sidebar.panelOpen !== false) {
-          state.panelOpen = false
-        }
+    if (session.activeFileIndex != null) {
+      fileManager.setActiveTab(session.activeFileIndex)
+    }
+    if (session.viewMode) state.viewMode = session.viewMode
+    if (session.zoomLevel) state.zoomLevel = session.zoomLevel
+    if (session.sidebar) {
+      state.sidebarVisible = true
+      const panel = session.sidebar.panel ?? 'outline'
+      state.activePanel = ['outline', 'notes', 'refs', 'history'].includes(panel) ? panel : 'outline'
+      state.panelOpen = session.sidebar.panelOpen ?? true
+      if (session.sidebar.visible === false && session.sidebar.panelOpen !== false) {
+        state.panelOpen = false
       }
     }
   }
   if (narrowEditorQuery?.matches) closePanel()
-
-  // Listen for cross-window tab transfers via Tauri events (window-scoped)
-  if (window.__TAURI_INTERNALS__) {
-    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-      getCurrentWindow().listen('shoulders://tab-receive', (event) => {
-        receiveTransferredFile(event.payload)
-      }).then(fn => { unlistenTabReceive = fn })
-    })
-  }
 
   // If no files restored, start with a blank file
   if (!fileManager.hasOpenFiles) {
@@ -1387,7 +1368,6 @@ onUnmounted(() => {
   unregisterProposalEditor()
   saveFeedback.dispose()
   if (unlistenNativeMenuFocus) unlistenNativeMenuFocus()
-  if (unlistenTabReceive) unlistenTabReceive()
   if (sessionPersistCleanup) sessionPersistCleanup()
   documentBridge.dispose()
   preview.dispose()

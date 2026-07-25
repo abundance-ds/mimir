@@ -1,29 +1,29 @@
 # Apps System
 
-Apps are developer-built programs that run inside Shoulders. They provide deterministic or semi-deterministic automation with a UI — unlike Skills, which augment the autonomous AI agent.
+Apps are developer-built programs that run inside mim terminal. They provide deterministic or semi-deterministic automation with a UI — unlike Skills, which augment the autonomous AI agent.
 
-An app is installed globally at `~/.shoulders-v3/apps/{appId}/`. Launching it creates an **app session** scoped to a project. App sessions appear in the sidebar alongside chat sessions and inherit the same lifecycle: status indicators, archive/done, persistence.
+An app is installed globally at `~/.mim/apps/{appId}/`. Launching it creates an **app session** scoped to a project. App sessions appear in the sidebar alongside chat sessions and inherit the same lifecycle: status indicators, archive/done, persistence.
 
 ## Two UI Modes
 
 | | Standard UI | Custom UI |
 |---|---|---|
 | Developer writes | `index.js` exporting `run(ctx)` | `index.html` + CSS + JS |
-| Shoulders provides | Progress timeline (setup → steps → result) | Thin toolbar + iframe host |
-| Runtime API | `ctx.*` (passed to `run()`) | `window.shoulders.*` (auto-injected SDK) |
+| mim terminal provides | Progress timeline (setup → steps → result) | Thin toolbar + iframe host |
+| Runtime API | `ctx.*` (passed to `run()`) | `window.mim.*` (auto-injected SDK) |
 | AI model access | Yes (`ctx.model.generate()`) | No |
 | DOCX access | Yes (`ctx.docx.*`) | No |
 | Progress reporting | Yes (`ctx.progress.*`) | No |
-| Persistent data | Yes (`ctx.data.*`) | Yes (`shoulders.data.*`) |
-| File system I/O | Read from app dir (`ctx.files.*`) | Full read/write (`shoulders.fs.*`) |
-| External HTTP | Yes (`ctx.http.fetch()`) | Yes (`shoulders.http.fetch()`) |
-| Native dialogs | No | Yes (`shoulders.ui.*`) |
+| Persistent data | Yes (`ctx.data.*`) | Yes (`mim.data.*`) |
+| File system I/O | Read from app dir (`ctx.files.*`) | Full read/write (`mim.fs.*`) |
+| External HTTP | Yes (`ctx.http.fetch()`) | Yes (`mim.http.fetch()`) |
+| Native dialogs | No | Yes (`mim.ui.*`) |
 | Use case | Multi-step AI processes | Interactive tools and SPAs |
 
 ## App Structure
 
 ```
-~/.shoulders-v3/apps/{appId}/
+~/.mim/apps/{appId}/
 ├── manifest.json          # required
 ├── index.js               # required for standard UI (exports run)
 ├── index.html             # required for custom UI (entry point)
@@ -96,7 +96,7 @@ When a setup field of type `file` contains a `.docx` path, the runtime automatic
 
 ## Standard-UI Apps
 
-Standard-UI apps export a `run(ctx)` function. Shoulders loads the module, calls `run()`, and displays progress in a timeline view.
+Standard-UI apps export a `run(ctx)` function. mim terminal loads the module, calls `run()`, and displays progress in a timeline view.
 
 ### Entry point
 
@@ -189,7 +189,7 @@ await ctx.data.delete('results')
 const keys = await ctx.data.keys()              // → string[]
 ```
 
-Storage: `~/.shoulders-v3/apps/{appId}/data/{projectId}/{key}.json`
+Storage: `~/.mim/apps/{appId}/data/{projectId}/{key}.json`
 
 #### ctx.docx
 
@@ -211,7 +211,7 @@ const result = await ctx.docx.flushComments()
 // result.outputPath — path to the annotated copy
 ```
 
-The optional third parameter sets the comment author in the DOCX (defaults to `'Shoulders AI'`).
+The optional third parameter sets the comment author in the DOCX (defaults to `'mim'`).
 
 #### ctx.knowledge
 
@@ -298,7 +298,7 @@ const usage = ctx.usage
 
 ## Custom-UI Apps
 
-Custom-UI apps provide their own HTML interface. Shoulders loads `index.html` in an iframe inside the Panel, with the SDK and theme CSS auto-injected.
+Custom-UI apps provide their own HTML interface. mim terminal loads `index.html` in an iframe inside the Panel, with the SDK and theme CSS auto-injected.
 
 ### Entry point
 
@@ -318,68 +318,68 @@ Custom-UI apps provide their own HTML interface. Shoulders loads `index.html` in
 </html>
 ```
 
-### SDK — `window.shoulders`
+### SDK — `window.mim`
 
 Auto-injected into every custom-UI app. No imports needed. Available immediately when the script runs.
 
-#### shoulders.app
+#### mim.app
 
 ```javascript
-shoulders.app.id          // app's slug ID
-shoulders.app.projectId   // current project ID
-shoulders.app.sessionId   // current session ID
+mim.app.id          // app's slug ID
+mim.app.projectId   // current project ID
+mim.app.sessionId   // current session ID
 ```
 
-#### shoulders.data
+#### mim.data
 
 Same persistent key-value store as the standard-UI runtime. Scoped per app per project.
 
 ```javascript
-await shoulders.data.save('notes', { text: '...', savedAt: new Date().toISOString() })
-const notes = await shoulders.data.load('notes')  // → object or null
-await shoulders.data.delete('notes')
-const keys = await shoulders.data.keys()           // → string[]
+await mim.data.save('notes', { text: '...', savedAt: new Date().toISOString() })
+const notes = await mim.data.load('notes')  // → object or null
+await mim.data.delete('notes')
+const keys = await mim.data.keys()           // → string[]
 ```
 
-#### shoulders.ui
+#### mim.ui
 
 Native desktop dialogs. These open real OS dialogs, not browser alerts.
 
 ```javascript
-await shoulders.ui.alert('Operation complete')
+await mim.ui.alert('Operation complete')
 
-const confirmed = await shoulders.ui.confirm('Delete all entries?')
+const confirmed = await mim.ui.confirm('Delete all entries?')
 // → true (Yes) or false (No)
 
-const path = await shoulders.ui.openFile({
+const path = await mim.ui.openFile({
   filters: [{ name: 'CSV', extensions: ['csv'] }],
   multiple: false,
 })
 // → file path string or null
 
-const savePath = await shoulders.ui.saveFile({
+const savePath = await mim.ui.saveFile({
   defaultPath: 'export.csv',
   filters: [{ name: 'CSV', extensions: ['csv'] }],
 })
 // → file path string or null
 ```
 
-#### shoulders.fs
+#### mim.fs
 
 Full filesystem read/write access.
 
 ```javascript
-const content = await shoulders.fs.readText('/path/to/file.csv')
-await shoulders.fs.writeText('/path/to/output.json', JSON.stringify(data))
-const exists = await shoulders.fs.exists('/path/to/check')
+const content = await mim.fs.readText('/path/to/file.csv')
+await mim.fs.writeText('/path/to/output.json', JSON.stringify(data))
+const exists = await mim.fs.exists('/path/to/check')
 ```
 
-#### shoulders.http
+#### mim.http
 
 External HTTP requests, proxied through the Rust backend. Bypasses CORS restrictions.
 
 ```javascript
-const resp = await shoulders.http.fetch('https://api.example.com/data', {
+const resp = await mim.http.fetch('https://api.example.com/data', {
   method: 'POST',
   headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
   body: JSON.stringify({ query: 'test' }),
@@ -391,11 +391,11 @@ const data = resp.json()
 
 Same permission model as `ctx.http.fetch()`: requires `"http:domain"` in the manifest. The domain entry covers subdomains (e.g. `"http:example.com"` allows `api.example.com`). Use `"http:*"` only when domains are user-configured.
 
-> **CORS limitation**: Browser `fetch()` cannot make authenticated cross-origin requests from the webview. Always use `shoulders.http.fetch()` for external API calls in custom-UI apps.
+> **CORS limitation**: Browser `fetch()` cannot make authenticated cross-origin requests from the webview. Always use `mim.http.fetch()` for external API calls in custom-UI apps.
 
 ### Theme
 
-The SDK injects `theme-base.css` with CSS custom properties matching the active Shoulders theme:
+The SDK injects `theme-base.css` with CSS custom properties matching the active mim terminal theme:
 
 ```
 --color-ink          main text
@@ -424,10 +424,10 @@ Utility classes: `.card`, `.drop-zone` (with `.drag-over`), `.text-sm`, `.text-l
 
 Custom-UI apps render in an iframe inside the Panel. The iframe is sandboxed with `allow-scripts allow-same-origin allow-popups allow-forms`.
 
-The SDK communicates with Shoulders via a postMessage bridge:
-1. SDK sends `{ type: 'shoulders:invoke', id, command, args }` to parent
+The SDK communicates with mim terminal via a postMessage bridge:
+1. SDK sends `{ type: 'mim:invoke', id, command, args }` to parent
 2. Parent validates against a command whitelist and proxies to Tauri
-3. Parent sends `{ type: 'shoulders:result', id, result }` (or `error`) back
+3. Parent sends `{ type: 'mim:result', id, result }` (or `error`) back
 4. SDK resolves/rejects the promise
 
 Whitelisted commands: `app_data_load`, `app_data_save`, `app_data_delete`, `app_data_keys`, `app_http_request`, `read_text_file`, `write_text_file`, `path_exists`, `plugin:dialog|message`, `plugin:dialog|open`, `plugin:dialog|save`.
@@ -456,7 +456,7 @@ Multiple instances of the same app can run in parallel, in different projects.
 
 ### Multi-agent review (docx-review)
 
-The production pattern for document review apps. See `~/.shoulders-v3/apps/docx-review/` for the reference implementation.
+The production pattern for document review apps. See `~/.mim/apps/docx-review/` for the reference implementation.
 
 ```
 docx-review/
@@ -519,12 +519,12 @@ export async function run(ctx) {
   <button onclick="save()">Save</button>
   <script>
     async function load() {
-      const data = await shoulders.data.load('doc')
+      const data = await mim.data.load('doc')
       if (data) document.getElementById('editor').value = data.text
     }
     async function save() {
       const text = document.getElementById('editor').value
-      await shoulders.data.save('doc', { text, at: new Date().toISOString() })
+      await mim.data.save('doc', { text, at: new Date().toISOString() })
     }
     load()
   </script>
@@ -572,9 +572,9 @@ The seeder also creates subdirectories for nested file paths (e.g., `agents/revi
 
 ## Discovery and MRU
 
-Apps are discovered by scanning `~/.shoulders-v3/apps/` on Panel mount. The NewChat screen shows the 3 most recently used apps as cards, with a "Show all" overlay for the full list. MRU order is persisted in user settings.
+Apps are discovered by scanning `~/.mim/apps/` on Panel mount. The NewChat screen shows the 3 most recently used apps as cards, with a "Show all" overlay for the full list. MRU order is persisted in user settings.
 
-To install a new app: create a directory in `~/.shoulders-v3/apps/` with a valid `manifest.json`. The app appears in the NewChat grid on next Panel mount or page reload.
+To install a new app: create a directory in `~/.mim/apps/` with a valid `manifest.json`. The app appears in the NewChat grid on next Panel mount or page reload.
 
 ## File Map
 
@@ -585,7 +585,7 @@ To install a new app: create a directory in `~/.shoulders-v3/apps/` with a valid
 | `src/apps/runner.js` | App execution handle (start, cancel, promise) |
 | `src/apps/runtime.js` | Standard-UI runtime: ctx.* API (model, data, docx, knowledge, progress, abort, files) |
 | `src/apps/bridge.js` | Parent-side postMessage proxy for custom-UI iframe |
-| `src/apps/sdk/shoulders-sdk.js` | Custom-UI SDK: dual-mode (iframe postMessage / standalone Tauri invoke) |
+| `src/apps/sdk/mim-sdk.js` | Custom-UI SDK: dual-mode (iframe postMessage / standalone Tauri invoke) |
 | `src/apps/sdk/theme-base.css` | Theme tokens + reset injected into custom-UI apps |
 | `src/stores/panel/apps.js` | Pinia store: global discovery, MRU tracking |
 | `src/stores/panel/actions.js` | `launchApp()` action: creates session, tracks MRU |
@@ -602,11 +602,11 @@ To install a new app: create a directory in `~/.shoulders-v3/apps/` with a valid
 
 ## Debugging Custom-UI Apps
 
-**Clearing app data**: `shoulders.data` persists across reloads. Bad state (failed lookups, stale IDs) sticks until explicitly cleared. To reset: delete `~/.shoulders-v3/apps/{appId}/data/` and re-launch the app.
+**Clearing app data**: `mim.data` persists across reloads. Bad state (failed lookups, stale IDs) sticks until explicitly cleared. To reset: delete `~/.mim/apps/{appId}/data/` and re-launch the app.
 
-**Encoding**: `shoulders.fs.readText(path)` reads as UTF-8. For Latin-1/ISO-8859-1 files (e.g. GLS Bank .supa exports), use `shoulders.fs.readText(path, 'latin1')` — this reads binary via `read_binary_file` and decodes in JS. Try UTF-8 first, fall back to latin1 on failure.
+**Encoding**: `mim.fs.readText(path)` reads as UTF-8. For Latin-1/ISO-8859-1 files (e.g. GLS Bank .supa exports), use `mim.fs.readText(path, 'latin1')` — this reads binary via `read_binary_file` and decodes in JS. Try UTF-8 first, fall back to latin1 on failure.
 
-**HTTP proxy**: `shoulders.http.fetch()` proxies through Rust. Response shape: `resp.body` is a string, `resp.json()` parses it. The proxy may behave differently from direct `curl`/`fetch` — always `console.log` the raw response when debugging API integrations.
+**HTTP proxy**: `mim.http.fetch()` proxies through Rust. Response shape: `resp.body` is a string, `resp.json()` parses it. The proxy may behave differently from direct `curl`/`fetch` — always `console.log` the raw response when debugging API integrations.
 
 ## Known Limitations
 

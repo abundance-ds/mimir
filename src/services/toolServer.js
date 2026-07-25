@@ -1,7 +1,7 @@
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { z } from 'zod'
-import { createShouldersTools } from './ai/tools/index.js'
+import { createMimTools } from './ai/tools/index.js'
 import { getToolMeta } from './ai/tools/gate.js'
 
 const TOOL_SERVER_ALLOWLIST = new Set([
@@ -48,7 +48,7 @@ export async function initToolServer(findProjectFn, editorController = null) {
         onProposal: () => {},
       }
 
-      const tools = createShouldersTools(context)
+      const tools = createMimTools(context)
       if (!tools[tool]) {
         await invoke('tool_call_response', { id, result: null, error: `Tool '${tool}' not found.` })
         return
@@ -82,7 +82,7 @@ function generateToolSchema() {
     onProposal: () => {},
   }
 
-  const tools = createShouldersTools(context)
+  const tools = createMimTools(context)
   const schema = []
 
   for (const name of TOOL_SERVER_ALLOWLIST) {

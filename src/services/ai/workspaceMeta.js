@@ -65,8 +65,8 @@ export function buildWorkspaceMeta(context = {}) {
   }
 
   if (gitStatus?.length > 0) {
-    // Filter out .shoulders/ config noise
-    const filtered = gitStatus.filter(e => !e.path.startsWith('.shoulders/'))
+    // Filter out .mim/ config noise
+    const filtered = gitStatus.filter(e => !e.path.startsWith('.mim/'))
     if (filtered.length > 0) {
       const lines = filtered.slice(0, 20).map(e => `  ${e.status} ${e.path}`)
       let section = 'Git status:\n' + lines.join('\n')

@@ -155,7 +155,7 @@ export function createAppRuntime(app, { onProgress, signal, project = null, inpu
           type: 'add_comment',
           anchorText: strip(c.anchorText),
           commentText: c.text,
-          author: c.author || 'Shoulders AI',
+          author: c.author || 'mim',
         }))
         ctx._pendingComments = []
         const result = await annotateDocx(docxPath, ops)
@@ -267,7 +267,7 @@ let _appBasePathCache = null
 async function getAppBasePath(appId) {
   if (_appBasePathCache) return `${_appBasePathCache}/${appId}`
   const home = await getHomeDir()
-  _appBasePathCache = `${home}/.shoulders-v3/apps`
+  _appBasePathCache = `${home}/.mim/apps`
   return `${_appBasePathCache}/${appId}`
 }
 

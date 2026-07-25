@@ -77,7 +77,7 @@ describe('createAppBridge', () => {
     it('ignores messages from wrong source', async () => {
       const handler = startAndGetListener()
       const event = makeMessageEvent({ not: 'the iframe' }, {
-        type: 'shoulders:invoke',
+        type: 'mim:invoke',
         id: '1',
         command: 'app_data_load',
         args: {},
@@ -102,7 +102,7 @@ describe('createAppBridge', () => {
     it('rejects non-whitelisted commands with error postMessage', async () => {
       const handler = startAndGetListener()
       const event = makeMessageEvent(iframe.contentWindow, {
-        type: 'shoulders:invoke',
+        type: 'mim:invoke',
         id: 'req-1',
         command: 'dangerous_command',
         args: {},
@@ -112,7 +112,7 @@ describe('createAppBridge', () => {
       expect(invoke).not.toHaveBeenCalled()
       expect(iframe.contentWindow.postMessage).toHaveBeenCalledWith(
         {
-          type: 'shoulders:result',
+          type: 'mim:result',
           id: 'req-1',
           error: 'Command not allowed: dangerous_command',
         },
@@ -124,7 +124,7 @@ describe('createAppBridge', () => {
       invoke.mockResolvedValue('loaded-data')
       const handler = startAndGetListener()
       const event = makeMessageEvent(iframe.contentWindow, {
-        type: 'shoulders:invoke',
+        type: 'mim:invoke',
         id: 'req-2',
         command: 'read_text_file',
         args: { path: '/some/file' },
@@ -134,7 +134,7 @@ describe('createAppBridge', () => {
       expect(invoke).toHaveBeenCalledWith('read_text_file', { path: '/some/file' })
       expect(iframe.contentWindow.postMessage).toHaveBeenCalledWith(
         {
-          type: 'shoulders:result',
+          type: 'mim:result',
           id: 'req-2',
           result: 'loaded-data',
         },
@@ -146,7 +146,7 @@ describe('createAppBridge', () => {
       invoke.mockRejectedValue(new Error('disk full'))
       const handler = startAndGetListener()
       const event = makeMessageEvent(iframe.contentWindow, {
-        type: 'shoulders:invoke',
+        type: 'mim:invoke',
         id: 'req-3',
         command: 'write_text_file',
         args: { path: '/some/file', content: 'data' },
@@ -155,7 +155,7 @@ describe('createAppBridge', () => {
 
       expect(iframe.contentWindow.postMessage).toHaveBeenCalledWith(
         {
-          type: 'shoulders:result',
+          type: 'mim:result',
           id: 'req-3',
           error: 'disk full',
         },
@@ -168,7 +168,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue('data')
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-4',
           command: 'app_data_load',
           args: { key: 'settings', appId: 'forged-id' },
@@ -187,7 +187,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue(undefined)
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-5',
           command: 'app_data_save',
           args: { key: 'k', value: 'v' },
@@ -206,7 +206,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue(undefined)
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-6',
           command: 'app_data_delete',
           args: { key: 'k' },
@@ -224,7 +224,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue([])
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-7',
           command: 'app_data_keys',
           args: {},
@@ -241,7 +241,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue('content')
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-8',
           command: 'read_text_file',
           args: { path: '/some/file' },
@@ -258,7 +258,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue(true)
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-9',
           command: 'path_exists',
           args: { path: '/check' },
@@ -276,7 +276,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue({ status: 200, headers: {}, body: '' })
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'http-1',
           command: 'app_http_request',
           args: { url: 'https://example.com' },
@@ -285,7 +285,7 @@ describe('createAppBridge', () => {
 
         expect(invoke).toHaveBeenCalled()
         const posted = iframe.contentWindow.postMessage.mock.calls[0][0]
-        expect(posted.type).toBe('shoulders:result')
+        expect(posted.type).toBe('mim:result')
         expect(posted).not.toHaveProperty('error')
         expect(posted).toHaveProperty('result')
       })
@@ -294,7 +294,7 @@ describe('createAppBridge', () => {
         invoke.mockResolvedValue({ status: 200, headers: {}, body: '' })
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'http-2',
           command: 'app_http_request',
           args: { url: 'https://example.com', method: 'GET', appId: 'forged-id' },
@@ -323,7 +323,7 @@ describe('createAppBridge', () => {
           invoke.mockResolvedValue(undefined)
           const handler = startAndGetListener()
           const event = makeMessageEvent(iframe.contentWindow, {
-            type: 'shoulders:invoke',
+            type: 'mim:invoke',
             id: `test-${cmd}`,
             command: cmd,
             args: {},
@@ -333,7 +333,7 @@ describe('createAppBridge', () => {
           expect(invoke).toHaveBeenCalled()
           // Should post result, not error
           const posted = iframe.contentWindow.postMessage.mock.calls[0][0]
-          expect(posted.type).toBe('shoulders:result')
+          expect(posted.type).toBe('mim:result')
           expect(posted).not.toHaveProperty('error')
           expect(posted).toHaveProperty('result')
         })
@@ -342,7 +342,7 @@ describe('createAppBridge', () => {
       it('rejects unlisted command: shell_exec', async () => {
         const handler = startAndGetListener()
         const event = makeMessageEvent(iframe.contentWindow, {
-          type: 'shoulders:invoke',
+          type: 'mim:invoke',
           id: 'req-bad',
           command: 'shell_exec',
           args: { cmd: 'rm -rf /' },

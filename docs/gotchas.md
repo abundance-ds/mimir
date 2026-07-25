@@ -36,15 +36,15 @@ This gotcha was resolved by the Pinia migration — `useSettingsStore` (in `src/
 
 Source: `src/stores/settings.js`, `src/services/ai/ghost.js`.
 
-### `~/.shoulders-v3` is the v0.3 data root
+### `~/.mim` is the v0.3 data root
 
-v0.3 uses `~/.shoulders-v3` as its centralized data root (config, projects, references). All project data lives here; workspace folders get only a `.shoulders.json` marker. Before production replacement, migrate/promote intentionally to `~/.shoulders` and archive the old root.
+v0.3 uses `~/.mim` as its centralized data root (config, projects, references). All project data lives here; workspace folders get only a `.mim.json` marker. Before production replacement, data root is `~/.mim`.
 
 Source: `src-tauri/src/ai_models.rs`.
 
 ### `.env` and plaintext API key fallbacks are debug-only
 
-Key resolution reads repo `.env` and `~/.shoulders-v3/keys.env` only in debug builds. Production uses OS keychain or process env and refuses plaintext key storage if keychain write fails.
+Key resolution reads repo `.env` and `~/.mim/keys.env` only in debug builds. Production uses OS keychain or process env and refuses plaintext key storage if keychain write fails.
 
 Source: `src-tauri/src/ai_keys.rs`.
 
@@ -192,7 +192,7 @@ Source: `src/services/ai/tools/index.js`.
 
 ### Panel and Editor share localStorage
 
-Same Tauri origin means both windows read/write the same `shoulders:` keys. The Panel reads `shoulders:doc` for prototype document access. This works but is fragile — avoid relying on cross-window localStorage for anything beyond prototyping.
+Same Tauri origin means both windows read/write the same `mim:` keys. The Panel reads `mim:doc` for prototype document access. This works but is fragile — avoid relying on cross-window localStorage for anything beyond prototyping.
 
 Source: `src/panel/App.vue`, `src/editor/App.vue`.
 
@@ -218,7 +218,7 @@ Source: `src-tauri/src/lib.rs`, `src/editor/composables/useDiffReview.js`, `src/
 
 ### `audit.db` is separate from `usage.db`
 
-The audit log lives in `~/.shoulders-v3/audit.db`, not in `usage.db`. This is intentional: usage analytics and compliance audit have independent lifecycles. The audit DB may be exported to clients or auditors; the usage DB stays local. Do not merge them.
+The audit log lives in `~/.mim/audit.db`, not in `usage.db`. This is intentional: usage analytics and compliance audit have independent lifecycles. The audit DB may be exported to clients or auditors; the usage DB stays local. Do not merge them.
 
 Source: `src-tauri/src/audit.rs`, `src-tauri/src/usage.rs`.
 
@@ -282,11 +282,11 @@ Do not add a second Vite entry unless there is a clear reason.
 
 ## Prototype State
 
-### `shoulders:` localStorage keys are prototype state
+### `mim:` localStorage keys are prototype state
 
-localStorage uses `shoulders:` prefix keys for prototype persistence. Do not treat these as final persistence schema.
+localStorage uses `mim:` prefix keys for prototype persistence. Do not treat these as final persistence schema.
 
-### `?new=1` editor windows should not write `shoulders:doc`
+### `?new=1` editor windows should not write `mim:doc`
 
 New editor windows opened from the agents panel are intended to be empty, unsaved, in-memory documents until native Save As exists.
 
@@ -310,7 +310,7 @@ Setting `opacity: 0` on the dragged tab leaves it occupying space in the flex la
 
 ### New windows from tab transfer must skip session restore
 
-`createEditorWindowWithFile` stores transfer data in `localStorage` under `shoulders:tab-transfer:{label}`. On mount, the new window must check for this key BEFORE calling `loadSession()`. If present, skip session restore — otherwise the window loads all session files plus the transferred one.
+`createEditorWindowWithFile` stores transfer data in `localStorage` under `mim:tab-transfer:{label}`. On mount, the new window must check for this key BEFORE calling `loadSession()`. If present, skip session restore — otherwise the window loads all session files plus the transferred one.
 
 Source: `src/editor/App.vue` onMounted.
 
@@ -352,9 +352,9 @@ Source: `.github/workflows/build.yml`, `.gitattributes`.
 
 ### Updater signing keypair is shared with v0.2.x
 
-The Tauri updater keypair at `~/.tauri/shoulders.key` is the same one used by v0.2.x. The public key is embedded in `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. Do NOT regenerate — existing installs would reject updates signed with a different key.
+The Tauri updater keypair at `~/.tauri/mim-terminal.key` is the same one used by v0.2.x. The public key is embedded in `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. Do NOT regenerate — existing installs would reject updates signed with a different key.
 
-Source: `src-tauri/tauri.conf.json`, `~/.tauri/shoulders.key`.
+Source: `src-tauri/tauri.conf.json`, `~/.tauri/mim-terminal.key`.
 
 ### `createUpdaterArtifacts` required for auto-updates
 

@@ -1,4 +1,4 @@
-const ENDPOINT = 'https://v3.shoulde.rs/api/v1/telemetry/events'
+const ENDPOINT = 'https://mim.shoulde.rs/api/v1/telemetry/events'
 const FLUSH_INTERVAL = 60_000
 const MAX_BATCH = 50
 

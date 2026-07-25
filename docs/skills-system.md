@@ -4,7 +4,7 @@ File-based expertise packages that extend the AI with domain-specific instructio
 
 ## What Skills Are
 
-A skill is a folder in `~/.shoulders-v3/skills/` containing a single `SKILL.md` file. The file has YAML frontmatter (metadata) and a markdown body (the prompt the AI receives). Skills follow the [agentskills.io](https://agentskills.io) standard.
+A skill is a folder in `~/.mim/skills/` containing a single `SKILL.md` file. The file has YAML frontmatter (metadata) and a markdown body (the prompt the AI receives). Skills follow the [agentskills.io](https://agentskills.io) standard.
 
 Skills are different from Apps. Skills are prompt instructions (the agent reads guidance). Apps are standalone UI tools (the agent writes code, the user runs it). See [apps-system.md](apps-system.md).
 
@@ -53,7 +53,7 @@ Three skills are seeded on first launch via `src/services/skills/bundled.js`:
 |----|---------|----------|-----------------|
 | `app-builder` | Builds standalone HTML+JS+CSS apps in native desktop windows | 12 | 16000 |
 | `peer-review` | Multi-agent academic manuscript review with 5 evaluation dimensions | 10 | 8000 |
-| `shoulders` | App manual and contextual help placeholder | (default) | (default) |
+| `mim` | App manual and contextual help placeholder | (default) | (default) |
 
 Seeding logic: `seedDefaultSkills()` in `loader.js`, called from `persistence.js` on first mount.
 
@@ -111,7 +111,7 @@ The `session.skill` field is persisted in `snapshotSession()` and restored on lo
 
 ## Future / Not Yet Implemented
 
-- Project-scoped skills (`.shoulders/skills/`)
+- Project-scoped skills (`.mim/skills/`)
 - Skill versioning
 - Install from URL
 - AI-assisted skill creation

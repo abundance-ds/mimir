@@ -47,7 +47,7 @@ Replace `aarch64-apple-darwin` with the appropriate target triple for your platf
 
 ## AI Dev Environment
 
-In debug builds, Rust reads API keys in this order: OS keychain, process env, repo `.env`, then `~/.shoulders-v3/keys.env`.
+In debug builds, Rust reads API keys in this order: OS keychain, process env, repo `.env`, then `~/.mim/keys.env`.
 
 If this repo has `ANTHROPIC_API_KEY` in `.env`, this is enough:
 
@@ -58,11 +58,11 @@ bun run tauri dev
 Persistent debug fallback:
 
 ```bash
-mkdir -p ~/.shoulders-v3
-cp .env ~/.shoulders-v3/keys.env
+mkdir -p ~/.mim
+cp .env ~/.mim/keys.env
 ```
 
-Production builds do not use plaintext `~/.shoulders-v3/keys.env` fallback.
+Production builds do not use plaintext `~/.mim/keys.env` fallback.
 
 ## Dev Server Port
 
@@ -132,10 +132,10 @@ A build profile determines which skills and apps are bundled into the installer.
 
 ```json
 {
-  "name": "Shoulders",
+  "name": "mim terminal",
   "skills": [],
   "apps": [],
-  "bundleSkills": ["app-builder", "peer-review", "shoulders"]
+  "bundleSkills": ["app-builder", "peer-review", "mim"]
 }
 ```
 
@@ -241,7 +241,7 @@ CI imports a `.p12` certificate from the `APPLE_CERTIFICATE` secret (base64-enco
 
 ### Tauri updater signing
 
-The updater keypair lives at `~/.tauri/shoulders.key` (local) and in the `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub secrets. This keypair is shared with v0.2.x — do not regenerate it.
+The updater keypair lives at `~/.tauri/mim-terminal.key` (local) and in the `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub secrets. This keypair is shared with v0.2.x — do not regenerate it.
 
 The public key is embedded in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`.
 

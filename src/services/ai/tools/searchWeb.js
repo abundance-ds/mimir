@@ -25,7 +25,7 @@ export function createSearchWebTool(context) {
       execute: withGate('search_web', async ({ source, query, limit = 5 }) => {
 
         if (source === 'openalex') {
-          const mailto = context.userEmail || 'shoulders-editor@users.noreply'
+          const mailto = context.userEmail || 'mim-terminal@users.noreply'
           const url = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per_page=${limit}&mailto=${mailto}`
           try {
             const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(15000) })

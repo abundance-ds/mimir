@@ -66,7 +66,7 @@ describe('useFileOpen', () => {
     expect(filesStore.openFiles[1].path).toBe('/docs/notes.txt')
   })
 
-  it('opens files from shoulders://open-file event', async () => {
+  it('opens files from mim://open-file event', async () => {
     mountComposable(() => useFileOpen())
     await vi.waitFor(() => {
       expect(listenCallback).toBeTruthy()

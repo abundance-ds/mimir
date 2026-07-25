@@ -46,7 +46,7 @@ fn refs_dir() -> Result<std::path::PathBuf, String> {
     let base = dirs::data_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join(".local/share")))
         .ok_or("Could not determine data directory")?;
-    let dir = base.join("shoulders-v3").join("references");
+    let dir = base.join("mim").join("references");
     Ok(dir)
 }
 

@@ -24,7 +24,7 @@ Comments are inline XML in the markdown file:
 Some text <comment id="c-..." author="user" text="Fix this" created="2025-...">annotated passage<reply id="r-..." author="ai" text="Done" ts="2025-..."/></comment> more text.
 ```
 
-No external files, no `~/.shoulders-v3/comments/` directory. The document is the single source of truth.
+No external files, no `~/.mim/comments/` directory. The document is the single source of truth.
 
 ## Data Model
 
@@ -167,7 +167,7 @@ Cards are absolutely positioned inside a container whose height matches `editorS
 1. Reads document content — from the editor context for `@editor`, from disk via `read_text_file` for file paths.
 2. For `add`: parses existing tags to get clean text + offset map, finds anchor in clean text, maps back to raw positions via `cleanToRawPos`, checks for overlap with existing comments, wraps the anchor with a `<comment>` tag built by `buildCommentTag`.
 3. For `reply`: parses tags via `parseCommentTags`, finds comment by ID, inserts a `<reply>` element before `</comment>`.
-4. Writes modified content back to disk, emits `shoulders://file-updated` — the Editor's file-update listener reloads the document.
+4. Writes modified content back to disk, emits `mim://file-updated` — the Editor's file-update listener reloads the document.
 
 `read("@editor", { show_comments: true })` returns the raw document with inline `<comment>` tags intact. Without `show_comments`, `stripCommentTags` removes them.
 

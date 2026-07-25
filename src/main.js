@@ -16,22 +16,7 @@ document.documentElement.classList.toggle('platform-macos', /mac|iphone|ipad|ipo
 document.documentElement.classList.toggle('chrome-calibrate', ['1', 'true'].includes(params.get('chromeCalibrate')))
 
 
-if (params.get('view') === 'ghost') {
-  const text = localStorage.getItem('shoulders:ghost-text') || 'Tab'
-  document.body.style.cssText = 'margin:0;background:transparent;overflow:hidden'
-  document.getElementById('app').innerHTML = `<div style="
-    padding: 4px 12px;
-    border-radius: 6px;
-    background: rgba(255,255,255,0.92);
-    border: 1px solid rgba(0,0,0,0.1);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.08);
-    font: 500 11px/1 ui-monospace, monospace;
-    white-space: nowrap;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: #333;
-  ">${text}</div>`
-} else if (params.get('view') === 'editor') {
+if (params.get('view') === 'editor') {
   import('./editor/App.vue').then(m => {
     createApp(m.default).use(createPinia()).mount('#app')
   })

@@ -2,7 +2,7 @@ import { Chat } from '@ai-sdk/vue'
 import { generateText, lastAssistantMessageIsCompleteWithToolCalls, tool } from 'ai'
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { createShouldersChatTransport } from '../../services/ai/chatTransport'
+import { createMimChatTransport } from '../../services/ai/chatTransport'
 import { useSkillsStore } from './skills.js'
 import { addUsage, createSdkModel, buildProviderOptions } from '../../services/ai/sdkAdapter'
 import { recoverPoisonedMessages } from '../../services/ai/recovery'
@@ -75,7 +75,7 @@ export const useChatStore = defineStore('panelChat', () => {
     const chat = new Chat({
       id: session.id,
       messages: sanitizeLoadedMessages(session._savedMessages || []),
-      transport: createShouldersChatTransport(() => buildChatConfig(session)),
+      transport: createMimChatTransport(() => buildChatConfig(session)),
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
       onError(error) {
         session.lastError = error?.message || String(error)
@@ -243,8 +243,8 @@ export const useChatStore = defineStore('panelChat', () => {
   function getDocumentContext() {
     const ctx = _documentContext.value
     if (ctx.content) return { content: ctx.content, path: ctx.path }
-    const content = localStorage.getItem('shoulders:doc') || ''
-    const path = localStorage.getItem('shoulders:doc:path') || ''
+    const content = localStorage.getItem('mim:doc') || ''
+    const path = localStorage.getItem('mim:doc:path') || ''
     return { content, path }
   }
 
@@ -319,7 +319,7 @@ export const useChatStore = defineStore('panelChat', () => {
           }
         } catch {}
 
-        // G4: Personal instructions (~/.shoulders-v3/projects/{id}/instructions.md — local only)
+        // G4: Personal instructions (~/.mim/projects/{id}/instructions.md — local only)
         try {
           const { projectDir } = await import('../../services/dataDir')
           const personalPath = `${await projectDir(session.projectId)}/instructions.md`

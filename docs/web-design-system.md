@@ -1,4 +1,4 @@
-# Shoulders — Website Style Guide
+# mim terminal — Website Style Guide
 
 Reference document for the website design system (./web/*)
 
@@ -121,7 +121,7 @@ This formula gives wider logos proportionally more width, but compressed by the 
 
 - Title: descriptive, not clever ("What researchers use today")
 - "The usual way" column accumulates tool names — this IS the argument
-- "With Shoulders" column: clean checkmarks, 3-4 selective qualifiers on strongest differentiators
+- "With mim terminal" column: clean checkmarks, 3-4 selective qualifiers on strongest differentiators
 - Punchline below: "That's 15+ applications. Or one."
 
 ---

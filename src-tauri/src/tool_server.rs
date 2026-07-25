@@ -200,7 +200,7 @@ async fn handle_mcp(
                 serde_json::json!({
                     "protocolVersion": "2025-03-26",
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "shoulders", "version": "0.3.0" }
+                    "serverInfo": { "name": "mim-terminal", "version": "0.3.0" }
                 }),
             );
             (

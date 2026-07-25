@@ -47,7 +47,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQ0YwMzUyMDNFMkE1NUEKUldSYXBlSURVZ1BQa3Z1OEFCVU1lZG1IZlltYmtiVTl0MGMwOVM0cnVDWnhHS0hHQnY0U1lYd3QK",
       "endpoints": [
-        "https://v3.shoulde.rs/api/updates/latest.json"
+        "https://mim.dev/api/updates/latest.json"
       ]
     }
   }

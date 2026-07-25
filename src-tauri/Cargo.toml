@@ -6,7 +6,7 @@ authors = ["Mim"]
 edition = "2021"
 
 [lib]
-name = "shoulders_lib"
+name = "mim_terminal"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -2,7 +2,7 @@ import { generateAiText } from './client'
 import { escapePromptXml } from './context'
 
 export async function requestSelectionRewrite({ text, instruction, contextBefore = '', contextAfter = '', documentId }) {
-  const system = `You rewrite selected Markdown text inside Shoulders Editor.
+  const system = `You rewrite selected Markdown text inside mim terminal editor.
 
 Return JSON only:
 {
@@ -45,7 +45,7 @@ Rules:
 }
 
 export async function requestInlineQuestion({ text, question, contextBefore = '', contextAfter = '', documentId }) {
-  const system = `You answer questions about selected text in Shoulders Editor.
+  const system = `You answer questions about selected text in mim terminal editor.
 
 Return JSON only:
 {

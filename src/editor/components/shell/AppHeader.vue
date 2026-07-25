@@ -2,18 +2,19 @@
     <div
         ref="headerRef"
         data-tauri-drag-region="deep"
-        class="relative z-40 h-10 shrink-0 flex items-center gap-0 px-[14px] bg-chrome whitespace-nowrap overflow-visible drag-region"
+        class="relative z-40 h-10 shrink-0 flex items-center gap-0 px-[14px] bg-chrome whitespace-nowrap overflow-visible drag-region border-b border-rule-light"
         @keydown.esc="closeMenu"
     >
         <!-- Left: traffic-light spacer -->
         <div
+            v-if="!hideSidebar"
             data-tauri-drag-region="deep"
             class="relative w-[56px] shrink-0 self-stretch"
             aria-hidden="true"
         ></div>
 
         <!-- Gap between traffic lights and tabs -->
-        <div data-tauri-drag-region class="w-7 shrink-0 self-stretch"></div>
+        <div v-if="!hideSidebar" data-tauri-drag-region class="w-7 shrink-0 self-stretch"></div>
 
         <!-- File tabs -->
         <TabStrip
@@ -24,7 +25,6 @@
             @close-tab="$emit('close-tab', $event)"
             @add-tab="$emit('add-tab')"
             @reorder-tab="(from, to) => $emit('reorder-tab', from, to)"
-            @tab-drag-out="(idx, x, y) => $emit('tab-drag-out', idx, x, y)"
         />
 
         <!-- App menus (Windows/Linux only) -->
@@ -242,30 +242,30 @@
         </nav>
 
         <!-- Right: fixed gap before buttons -->
-        <div
-            data-tauri-drag-region
-            class="w-7 shrink-0 self-stretch"
-        ></div>
+        <div data-tauri-drag-region :class="hideSidebar ? 'flex-1 self-stretch' : 'w-7 shrink-0 self-stretch'"></div>
 
-        <!-- MimPanel mode: collapse + panel toggles -->
-        <template v-if="hideSidebar && mimToggles">
+        <button
+            v-if="hideSidebar && mimToggles"
+            class="mim-collapse-btn no-drag mr-2"
+            :title="mimToggles.terminalVisible?.value ? 'Expand panel' : 'Show terminal'"
+            @click="mimToggles.collapse()"
+        >
+            <component
+                :is="mimToggles.terminalVisible?.value ? IconLayoutSidebarLeftCollapse : IconLayoutSidebarLeftExpand"
+                :size="14"
+            />
+        </button>
+
+        <!-- MimPanel mode: panel toggles -->
+        <div v-if="hideSidebar && mimToggles" class="mim-panel-toggles no-drag">
             <button
-                class="mim-collapse-btn no-drag"
-                title="Collapse panel"
-                @click="mimToggles.collapse()"
-            >
-                <IconLayoutSidebarRightCollapse :size="14" />
-            </button>
-            <div class="mim-panel-toggles no-drag">
-                <button
-                    v-for="p in mimToggles.panels"
-                    :key="p.id"
-                    class="mim-ptoggle"
-                    :class="{ active: mimToggles.rightPanel.value === p.id }"
-                    @click="mimToggles.setRightPanel(p.id)"
-                >{{ p.label }}</button>
-            </div>
-        </template>
+                v-for="p in mimToggles.panels"
+                :key="p.id"
+                class="mim-ptoggle"
+                :class="{ active: mimToggles.rightPanel.value === p.id }"
+                @click="mimToggles.setRightPanel(p.id)"
+            >{{ p.label }}</button>
+        </div>
 
         <!-- Standalone mode: export + sidebar toggle -->
         <div v-else-if="!hideSidebar" class="flex items-center gap-[6px] shrink-0">
@@ -331,6 +331,8 @@ import {
     IconLayoutSidebarRightExpand,
     IconLayoutSidebarRight,
     IconLayoutSidebarRightFilled,
+    IconLayoutSidebarLeftCollapse,
+    IconLayoutSidebarLeftExpand,
     IconChevronDown,
     IconClipboard,
     IconCopy,
@@ -375,7 +377,6 @@ const emit = defineEmits([
     "close-tab",
     "add-tab",
     "reorder-tab",
-    "tab-drag-out",
 ]);
 
 const headerRef = ref(null);

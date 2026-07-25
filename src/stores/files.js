@@ -59,7 +59,7 @@ export const useFileStore = defineStore('files', () => {
       if (file.meta && window.__TAURI_INTERNALS__) {
         const entryId = file.path?.split('/').pop()?.replace(/\.md$/, '') || ''
         import('@tauri-apps/api/event').then(({ emit }) => {
-          emit('shoulders://board-changed', { entryId })
+          emit('mim://board-changed', { entryId })
         })
       }
 

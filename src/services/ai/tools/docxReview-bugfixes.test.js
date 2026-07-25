@@ -61,10 +61,10 @@ describe('Bug B: annotateDocx path permission enforcement', () => {
 // ── Bug D: disabledTools must be enforced in tool creation ──
 
 describe('Bug D: disabledTools enforcement', () => {
-  it('createShouldersTools excludes tools in disabledTools list', async () => {
-    const { createShouldersTools } = await import('./index')
+  it('createMimTools excludes tools in disabledTools list', async () => {
+    const { createMimTools } = await import('./index')
 
-    const tools = createShouldersTools({
+    const tools = createMimTools({
       sessionId: 'test',
       workspacePath: '/proj',
       projectId: 'p1',
@@ -77,10 +77,10 @@ describe('Bug D: disabledTools enforcement', () => {
     expect(tools).toHaveProperty('read')
   })
 
-  it('createShouldersTools includes all tools when disabledTools is empty', async () => {
-    const { createShouldersTools } = await import('./index')
+  it('createMimTools includes all tools when disabledTools is empty', async () => {
+    const { createMimTools } = await import('./index')
 
-    const tools = createShouldersTools({
+    const tools = createMimTools({
       sessionId: 'test',
       workspacePath: '/proj',
       projectId: 'p1',

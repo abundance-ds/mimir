@@ -80,7 +80,6 @@ const emit = defineEmits([
     "close-tab",
     "add-tab",
     "reorder-tab",
-    "tab-drag-out",
 ]);
 
 const stripEl = ref(null);
@@ -198,81 +197,8 @@ function removeGhost() {
     }
 }
 
-/* ── Native ghost (outside window) ── */
-
-let nativeGhost = null;
-let nativeGhostReady = false;
-let ghostOffsetX = 0;
-let ghostOffsetY = 0;
-
-async function showNativeGhost(tabName, screenX, screenY) {
-    if (!window.__TAURI_INTERNALS__) return;
-    if (nativeGhost) {
-        moveNativeGhost(screenX, screenY);
-        return;
-    }
-    try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const [osX, osY] = await invoke("get_cursor_position", {
-            screenX,
-            screenY,
-        });
-        ghostOffsetX = osX - screenX;
-        ghostOffsetY = osY - screenY;
-
-        localStorage.setItem("shoulders:ghost-text", tabName);
-        const { WebviewWindow } = await import(
-            "@tauri-apps/api/webviewWindow"
-        );
-        nativeGhost = new WebviewWindow("tab-ghost", {
-            url: "/?view=ghost",
-            width: 160,
-            height: 30,
-            x: osX - 60,
-            y: osY - 15,
-            decorations: false,
-            transparent: true,
-            alwaysOnTop: true,
-            skipTaskbar: true,
-            shadow: false,
-            resizable: false,
-            focus: false,
-            visible: true,
-        });
-        nativeGhost.once("tauri://created", () => {
-            nativeGhostReady = true;
-        });
-        nativeGhost.once("tauri://error", () => {
-            nativeGhost = null;
-        });
-    } catch {
-        nativeGhost = null;
-    }
-}
-
-async function moveNativeGhost(screenX, screenY) {
-    if (!nativeGhost || !nativeGhostReady) return;
-    try {
-        const { LogicalPosition } = await import("@tauri-apps/api/dpi");
-        await nativeGhost.setPosition(
-            new LogicalPosition(
-                screenX + ghostOffsetX - 60,
-                screenY + ghostOffsetY - 15,
-            ),
-        );
-    } catch {}
-}
-
-async function hideNativeGhost() {
-    if (!nativeGhost) return;
-    try {
-        await nativeGhost.close();
-    } catch {}
-    nativeGhost = null;
-    nativeGhostReady = false;
-}
-
 /* ── Pointer handlers ── */
+
 
 function onPointerDown(index, e) {
     if (e.button !== 0) return;
@@ -320,12 +246,8 @@ function onPointerMove(e) {
         dragState.dropTarget = -1;
         floatGhost();
         showGhost(tabEl, e.clientX, e.clientY);
-        const tabName = props.tabs[dragState.fromIndex]?.name || "Tab";
-        showNativeGhost(tabName, e.screenX, e.screenY);
         return;
     }
-
-    hideNativeGhost();
 
     const buttons = getTabButtons();
     let target = -1;
@@ -376,7 +298,6 @@ function onPointerUp(e) {
 
     if (outsideStrip) {
         resetDrag();
-        emit("tab-drag-out", from, e.screenX, e.screenY);
         return;
     }
 
@@ -413,7 +334,6 @@ function resetDrag() {
     dragState.active = false;
     document.body.style.cursor = "";
     removeGhost();
-    hideNativeGhost();
 }
 
 onUnmounted(() => {

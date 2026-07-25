@@ -290,6 +290,44 @@ function getXtermTheme() {
   }
 }
 
+const _isMac = /Mac/.test(navigator.platform || '')
+
+function handleTerminalKeyEvent(event, tab) {
+  if (event.type !== 'keydown') return true
+  if (tab.ptyId == null) return true
+  if (!_isMac) return true
+
+  const { key, metaKey, altKey, ctrlKey, shiftKey } = event
+
+  if (metaKey && !altKey && !ctrlKey && key === 'ArrowLeft') {
+    event.preventDefault()
+    writeToPty(tab.ptyId, '\x01')
+    return false
+  }
+  if (metaKey && !altKey && !ctrlKey && key === 'ArrowRight') {
+    event.preventDefault()
+    writeToPty(tab.ptyId, '\x05')
+    return false
+  }
+  if (metaKey && !altKey && !ctrlKey && key === 'Backspace') {
+    event.preventDefault()
+    writeToPty(tab.ptyId, '\x15')
+    return false
+  }
+  if (metaKey && !altKey && !ctrlKey && !shiftKey && key === 'k') {
+    event.preventDefault()
+    writeToPty(tab.ptyId, '\x0c')
+    return false
+  }
+  if (shiftKey && !metaKey && !altKey && !ctrlKey && key === 'Enter') {
+    event.preventDefault()
+    writeToPty(tab.ptyId, '\x16\x0a')
+    return false
+  }
+
+  return true
+}
+
 async function writeToPty(ptyId, data) {
   if (data.length < 2048) {
     await invoke('pty_write', { id: ptyId, data })
@@ -328,7 +366,7 @@ async function initXterm(tab) {
   const fitAddon = new FitAddon()
   const terminal = new Terminal({
     theme: getXtermTheme(),
-    fontFamily: 'IBM Plex Mono, JetBrains Mono, ui-monospace, monospace',
+    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
     fontSize: terminalFontSize.value,
     scrollback: 10000,
     cursorBlink: true,
@@ -340,6 +378,7 @@ async function initXterm(tab) {
   terminal.loadAddon(new WebLinksAddon())
   terminal.open(surface)
   fitAddon.fit()
+  terminal.attachCustomKeyEventHandler((event) => handleTerminalKeyEvent(event, tab))
 
   tab.terminal = terminal
   tab.fitAddon = fitAddon
@@ -369,6 +408,21 @@ async function initXterm(tab) {
       rows: terminal.rows,
     })
     tab.ptyId = ptyId
+
+    // TODO: remove after diagnosing dead key bug (~ + space → s)
+    terminal.onData((data) => {
+      const bytes = [...data].map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
+      if (bytes.some(b => ['7e', '73', '6e', '1b', '20'].includes(b))) {
+        console.log('[term-debug] onData', { data: JSON.stringify(data), bytes })
+      }
+    })
+    if (terminal.textarea) {
+      for (const evtType of ['compositionstart', 'compositionupdate', 'compositionend']) {
+        terminal.textarea.addEventListener(evtType, (e) => {
+          console.log(`[term-debug] ${evtType}`, { data: e.data, textareaValue: terminal.textarea.value })
+        })
+      }
+    }
 
     const dataDisposable = terminal.onData((data) => {
       writeToPty(ptyId, data)
@@ -491,7 +545,7 @@ watch(activeIndex, () => {
 let unlistenTheme = null
 async function setupThemeListener() {
   try {
-    unlistenTheme = await listen('shoulders://theme-changed', () => {
+    unlistenTheme = await listen('mim://theme-changed', () => {
       const theme = getXtermTheme()
       for (const tab of tabs.value) {
         if (tab.terminal) tab.terminal.options.theme = theme

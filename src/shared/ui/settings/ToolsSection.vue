@@ -168,12 +168,7 @@ function confirmRemoveSkill(skill) {
 
 async function onCreateSkill() {
   const path = await skillsStore.createSkill()
-  if (path) {
-    try {
-      const { openOrFocusEditorWindow } = await import('../../../panel/agentsWindow.js')
-      openOrFocusEditorWindow(`${path}/SKILL.md`)
-    } catch { /* not in panel context */ }
-  }
+  if (!path) return
 }
 
 // ─── Lifecycle ───

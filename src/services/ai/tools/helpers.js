@@ -10,8 +10,8 @@ export async function readDocument(contextGetDocument) {
     if (ctx && ctx.content) { content = ctx.content; path = ctx.path || null }
   }
   if (!content) {
-    content = localStorage.getItem('shoulders:doc')
-    path = localStorage.getItem('shoulders:doc:path') || null
+    content = localStorage.getItem('mim:doc')
+    path = localStorage.getItem('mim:doc:path') || null
   }
   if (content) {
     return {
@@ -34,7 +34,7 @@ export async function readReferences() {
     }
   }
   try {
-    const raw = localStorage.getItem('shoulders:refs')
+    const raw = localStorage.getItem('mim:refs')
     if (raw) return JSON.parse(raw)
   } catch (e) {
     console.warn('[tools] corrupt reference data in localStorage:', e)

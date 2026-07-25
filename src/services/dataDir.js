@@ -160,21 +160,21 @@ export async function bootstrapDataDir() {
 }
 
 // ---------------------------------------------------------------------------
-// Shoulder markers (.shoulders.json)
+// Shoulder markers (.mim.json)
 // ---------------------------------------------------------------------------
 
 export async function writeShoulderMarker(folderPath, data) {
-  await writeJson(`${folderPath}/.shoulders.json`, data)
+  await writeJson(`${folderPath}/.mim.json`, data)
 }
 
 export async function readShoulderMarker(folderPath) {
-  const markerPath = `${folderPath}/.shoulders.json`
+  const markerPath = `${folderPath}/.mim.json`
   if (!await exists(markerPath)) return null
   try { return await readJson(markerPath) } catch { return null }
 }
 
 export async function deleteShoulderMarker(folderPath) {
-  const markerPath = `${folderPath}/.shoulders.json`
+  const markerPath = `${folderPath}/.mim.json`
   if (await exists(markerPath)) await remove(markerPath)
 }
 
@@ -191,7 +191,7 @@ const IGNORE_DIRS = new Set([
   'node_modules', '.git', '.output', 'dist', 'build', '.next', '.nuxt',
   '__pycache__', '.venv', 'venv', 'target', '.turbo', '.cache',
 ])
-const IGNORE_FILES = new Set(['.DS_Store', '.shoulders.json', 'Thumbs.db'])
+const IGNORE_FILES = new Set(['.DS_Store', '.mim.json', 'Thumbs.db'])
 const IGNORE_EXTS = new Set(['.pyc'])
 
 export async function indexProjectFiles(folderPath, maxFiles = 500) {

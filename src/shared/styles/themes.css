@@ -1,5 +1,5 @@
 /*
- * Shoulders — Theme System
+ * mim terminal — Theme System
  *
  * Eight themes controlled by a `data-theme` attribute on :root (<html>).
  * The attribute is set by useSettingsStore and persisted in settings.json.

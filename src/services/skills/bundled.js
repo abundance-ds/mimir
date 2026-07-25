@@ -9,38 +9,38 @@ maxOutputTokens: 16000
 ---
 
 <skill name="App Builder">
-You build apps — interactive tools that run inside the Shoulders Panel. Apps are for reusable, persistent things: forms, dashboards, processors, trackers. A chat answer is consumed once; an app gets reused for months.
+You build apps — interactive tools that run inside the mim terminal. Apps are for reusable, persistent things: forms, dashboards, processors, trackers. A chat answer is consumed once; an app gets reused for months.
 
 ## Architecture
 - Apps render inside the Panel (not a separate window)
 - Custom-UI apps: you write HTML+JS+CSS, loaded in an iframe with the SDK auto-injected
-- Apps are installed at ~/.shoulders-v3/apps/{appId}/
+- Apps are installed at ~/.mim/apps/{appId}/
 - Write vanilla HTML + JS + CSS only. No build step. No CDN links. No npm packages.
 - Data persists per app per project — the same app stores different data for different projects
 
-## SDK API — window.shoulders (auto-injected, do not import)
+## SDK API — window.mim (auto-injected, do not import)
 
-### shoulders.data (persistent key-value store — survives app close/restart)
-- await shoulders.data.save(key, value) — save any JSON-serializable value
-- await shoulders.data.load(key) → value | null
-- await shoulders.data.delete(key)
-- await shoulders.data.keys() → string[]
+### mim.data (persistent key-value store — survives app close/restart)
+- await mim.data.save(key, value) — save any JSON-serializable value
+- await mim.data.load(key) → value | null
+- await mim.data.delete(key)
+- await mim.data.keys() → string[]
 
-### shoulders.ui (native OS dialogs)
-- await shoulders.ui.alert(message) — native alert dialog
-- await shoulders.ui.confirm(message) → boolean — native yes/no
-- await shoulders.ui.openFile({ filters: [{ name: 'CSV', extensions: ['csv'] }] }) → path | null
-- await shoulders.ui.saveFile({ defaultPath: 'export.csv' }) → path | null
+### mim.ui (native OS dialogs)
+- await mim.ui.alert(message) — native alert dialog
+- await mim.ui.confirm(message) → boolean — native yes/no
+- await mim.ui.openFile({ filters: [{ name: 'CSV', extensions: ['csv'] }] }) → path | null
+- await mim.ui.saveFile({ defaultPath: 'export.csv' }) → path | null
 
-### shoulders.fs (file system — full read/write)
-- await shoulders.fs.readText(path) → string
-- await shoulders.fs.writeText(path, content)
-- await shoulders.fs.exists(path) → boolean
+### mim.fs (file system — full read/write)
+- await mim.fs.readText(path) → string
+- await mim.fs.writeText(path, content)
+- await mim.fs.exists(path) → boolean
 
-### shoulders.app (identity)
-- shoulders.app.id — app slug ID
-- shoulders.app.projectId — current project ID
-- shoulders.app.sessionId — current session ID
+### mim.app (identity)
+- mim.app.id — app slug ID
+- mim.app.projectId — current project ID
+- mim.app.sessionId — current session ID
 
 ## File structure
 Always provide via create("@apps/APP_ID/FILENAME"):
@@ -82,18 +82,18 @@ Always include a version field (semver). The seeder uses it to update existing i
 
 ## Persistence pattern
 
-    const state = await shoulders.data.load('state') || { entries: [] }
+    const state = await mim.data.load('state') || { entries: [] }
     render(state)
 
     async function saveState() {
-      await shoulders.data.save('state', state)
+      await mim.data.save('state', state)
     }
 
 ## File drop zone pattern
 
     zone.addEventListener('click', async () => {
-      const path = await shoulders.ui.openFile({ filters: [{ name: 'CSV', extensions: ['csv'] }] })
-      if (path) { const text = await shoulders.fs.readText(path); processData(text) }
+      const path = await mim.ui.openFile({ filters: [{ name: 'CSV', extensions: ['csv'] }] })
+      if (path) { const text = await mim.fs.readText(path); processData(text) }
     })
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
     zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
@@ -163,14 +163,14 @@ Be constructive, specific, and fair. Reference specific sections, paragraphs, or
 </skill>`,
   },
   {
-    id: 'shoulders',
+    id: 'mim',
     content: `---
-name: Shoulders
-description: App reference, manual, and contextual help for the Shoulders editor
+name: mim terminal
+description: App reference, manual, and contextual help for mim terminal
 ---
 
-<skill name="Shoulders">
-You are the built-in help system for the Shoulders editor application. This skill will contain the full Shoulders app manual in a future update. For now, use read("@editor") and your general knowledge to help the user with Shoulders features, workflows, and capabilities.
+<skill name="mim terminal">
+You are the built-in help system for mim terminal. This skill will contain the full mim terminal manual in a future update. For now, use read("@editor") and your general knowledge to help the user with mim terminal features, workflows, and capabilities.
 
 If the user asks about a specific feature, explain how it works based on what you know about the application. If you are unsure about a specific detail, say so and suggest the user check the documentation or ask for clarification.
 </skill>`,

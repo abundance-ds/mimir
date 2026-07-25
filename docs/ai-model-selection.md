@@ -101,7 +101,7 @@ Use the Panel:
 For each provider family:
 
 - Check raw provider usage is present.
-- Normalize into Shoulders usage shape.
+- Normalize into mim terminal usage shape.
 - Estimate cost from registry pricing.
 - Confirm no zero-cost output when output tokens are reported.
 - Confirm cached-token fields do not break when absent.

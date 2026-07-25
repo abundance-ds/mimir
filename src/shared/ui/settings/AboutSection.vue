@@ -1,7 +1,7 @@
 <template>
   <div class="about-page">
     <div class="about-hero">
-      <span class="about-title">Shoulders</span>
+      <span class="about-title">mim terminal</span>
       <span class="about-version">v0.3.0-alpha</span>
     </div>
 
@@ -36,7 +36,7 @@
     <div class="telemetry-section">
       <div class="setting-row last">
         <div class="setting-label">
-          Help improve Shoulders
+          Help improve mim terminal
           <span class="setting-desc">Anonymous usage data. No file contents or personal information.</span>
         </div>
         <button

@@ -24,7 +24,7 @@ vi.mock('ai', () => ({
 }))
 
 vi.mock('../../services/ai/chatTransport', () => ({
-  createShouldersChatTransport: vi.fn(() => ({})),
+  createMimChatTransport: vi.fn(() => ({})),
 }))
 
 vi.mock('../../services/ai/sdkAdapter', () => ({

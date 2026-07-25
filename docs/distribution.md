@@ -1,6 +1,6 @@
 # Distribution System
 
-Shoulders ships custom builds to design partner clients via a private CI pipeline and authenticated web portal.
+mim terminal ships custom builds to design partner clients via a private CI pipeline and authenticated web portal.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ Client installs              auto-updates via Tauri updater plugin
 
 ## Key Design Decision
 
-All profiles share the same core app binary. Profiles only control which skills and apps are **seeded on first install** — they persist in `~/.shoulders-v3/` and survive updates. This means one update channel for all clients.
+All profiles share the same core app binary. Profiles only control which skills and apps are **seeded on first install** — they persist in `~/.mim/` and survive updates. This means one update channel for all clients.
 
 ## Build Profiles
 
@@ -45,7 +45,7 @@ Implementation: `src/stores/panel/persistence.js` (seeding block), `src/services
 ### Signing
 
 Updates are signed with a minisign keypair shared with v0.2.x:
-- Private key: `~/.tauri/shoulders.key` (local) + `TAURI_SIGNING_PRIVATE_KEY` (CI secret)
+- Private key: `~/.tauri/mim-terminal.key` (local) + `TAURI_SIGNING_PRIVATE_KEY` (CI secret)
 - Public key: embedded in `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
 - Do NOT regenerate — existing installs would reject updates signed with a different key
 
@@ -75,27 +75,27 @@ A single AWS EC2 instance runs both the v0.2.x site and the v3 web portal, separ
 
 | Domain | Backend | Port | Directory |
 |---|---|---|---|
-| `shoulde.rs` | v0.2.x site | 3000 | `~/shoulders/` |
-| `v3.shoulde.rs` | v3 web portal | 3002 | `~/shoulders-v3/` |
+| `mim.dev` | v0.2.x site | 3000 | `~/.mim/` |
+| `mim.dev` | v3 web portal | 3002 | `~/.mim/` |
 
 Caddy handles TLS termination and reverse proxying for both domains.
 
 ### Systemd service
 
-The v3 portal runs as `shoulders-v3-web.service` (port 3002). Environment variables are loaded from `~/shoulders-v3/web/.env`:
+The v3 portal runs as `mim-web.service` (port 3002). Environment variables are loaded from `~/.mim/web/.env`:
 
 | Variable | Value |
 |---|---|
-| `NUXT_GITHUB_REPO` | `shoulders-ai/shoulders-private` |
+| `NUXT_GITHUB_REPO` | `mim/mim-terminal` |
 | `NUXT_GITHUB_TOKEN` | Fine-grained PAT with release read access |
 | `PORT` | `3002` |
 
 Service management:
 
 ```bash
-sudo systemctl restart shoulders-v3-web
-sudo systemctl status shoulders-v3-web
-journalctl -u shoulders-v3-web -f
+sudo systemctl restart mim-web
+sudo systemctl status mim-web
+journalctl -u mim-web -f
 ```
 
 ## CI/CD for Web Portal
@@ -104,13 +104,13 @@ journalctl -u shoulders-v3-web -f
 
 **Flow:**
 1. SSHs to the EC2 server using `SERVER_HOST`, `SERVER_USER`, `SERVER_SSH_KEY` secrets
-2. Pulls latest changes in `~/shoulders-v3/`
-3. Runs `bun install && bun run build` in `~/shoulders-v3/web/`
-4. Restarts `shoulders-v3-web.service`
+2. Pulls latest changes in `~/.mim/`
+3. Runs `bun install && bun run build` in `~/.mim/web/`
+4. Restarts `mim-web.service`
 
 ## Web Portal
 
-Minimal Nuxt 3 app at `web/`, deployed to `v3.shoulde.rs`. See [../web/README.md](../web/README.md) for setup and deployment.
+Minimal Nuxt 3 app at `web/`, deployed to `mim.dev`. See [../web/README.md](../web/README.md) for setup and deployment.
 
 ### Pages
 
@@ -134,7 +134,7 @@ See [../web/README.md](../web/README.md) for setup and token management.
 ```
 1. Create profiles/client-name.json (list skills, apps, bundleSkills)
 2. Add any custom skills to profiles/skills/, apps to profiles/apps/
-3. Push to shoulders-private
+3. Push to mim-terminal
 4. GitHub → Actions → Build & Release → Run workflow → profile: client-name
 5. Release created with signed macOS + Windows + Linux builds
 6. Issue JWT: node scripts/admin.mjs (or node scripts/issue-token.mjs "Client" --platforms=macos-arm,windows)

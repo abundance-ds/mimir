@@ -6,7 +6,7 @@ Status: two-app split implemented. Editor Vue shell ported from mock, Panel comp
 
 | File | Role |
 |---|---|
-| `src/panel/App.vue` | Shoulders Panel root shell (primary window, label `main`) |
+| `src/panel/App.vue` | mim terminal root shell (primary window, label `main`) |
 | `src/panel/components/` | Panel navigator, chat, composer, model/control pickers, tool/proposal display |
 | `src/stores/panel/` | Panel stores: sessions, chat instances, projects, workflows, persistence, cross-store actions |
 | `src/editor/App.vue` | Editor shell (secondary, labels `editor-*`) |
@@ -18,7 +18,7 @@ Status: two-app split implemented. Editor Vue shell ported from mock, Panel comp
 | `src-tauri/tauri.conf.json` | Product/window title, dimensions, file associations |
 | `src-tauri/capabilities/default.json` | Tauri window/webview permissions |
 | `src-tauri/src/file_open.rs` | `PendingFilePaths` state, `take_pending_files` command, `filter_file_args()`, `open_files_in_editor()`, `create_editor_window()` |
-| `src/editor/composables/useFileOpen.js` | Listens for `shoulders://open-file` event, checks `take_pending_files` on mount |
+| `src/editor/composables/useFileOpen.js` | Listens for `mim://open-file` event, checks `take_pending_files` on mount |
 
 ## Current Shell
 
@@ -46,19 +46,19 @@ The shell is intentionally dense and grounded:
 
 ## Naming
 
-Visible product name: `Shoulders`
+Visible product name: `mim terminal`
 
 - Primary window (label `main`): the Panel — opens on launch
 - Editor windows (labels `editor-*`): opened on demand from the Panel
 
-Internal package/library names now use `shoulders`.
+Internal package/library names now use `mim-terminal`.
 
 ## Multi-Window Model
 
 Window labels:
 
 ```txt
-main                Shoulders Panel (primary window, opens on launch)
+main                mim terminal (primary window, opens on launch)
 editor-*            Editor windows (opened on demand from Panel)
 ```
 
@@ -75,7 +75,7 @@ File association and opening:
 - `tauri.conf.json` `bundle.fileAssociations` registers `.md`, `.markdown`, `.txt` — OS double-click opens in the Editor.
 - `tauri-plugin-single-instance` routes file args from a second launch to the running instance.
 - `src-tauri/src/file_open.rs` holds `PendingFilePaths` state and exposes `take_pending_files`, `filter_file_args()`, `open_files_in_editor()`, `create_editor_window()`.
-- `src/editor/composables/useFileOpen.js` listens for `shoulders://open-file` and checks `take_pending_files` on mount.
+- `src/editor/composables/useFileOpen.js` listens for `mim://open-file` and checks `take_pending_files` on mount.
 - macOS `RunEvent::Opened` handler in `src-tauri/src/lib.rs` routes `file://` URLs to `open_files_in_editor()`.
 
 Important files:
@@ -93,7 +93,7 @@ Rust event routing:
 
 - `proposal_send` emits to `editor-*` windows.
 - `proposal_respond` and `document_context_send` emit to `main` (the Panel).
-- `tab_drag_resolve` hit-tests cursor position against all `editor-*` windows, emits `shoulders://tab-receive` via `emit_to` (window-scoped) to the target. JS listeners use `getCurrentWindow().listen()` to avoid receiving events meant for other windows.
+- `tab_drag_resolve` hit-tests cursor position against all `editor-*` windows, emits `mim://tab-receive` via `emit_to` (window-scoped) to the target. JS listeners use `getCurrentWindow().listen()` to avoid receiving events meant for other windows.
 - Document bridge includes `windowLabel` in its payload.
 
 Tab drag mechanics:
@@ -118,23 +118,23 @@ When multi-window behavior fails in Tauri but works in browser fallback, check `
 
 ## Current Persistence
 
-The new editor shell uses static data modules (`src/editor/data/`) — no persistence yet. The old `src/App.vue` shell used `localStorage` with `shoulders:` prefix (prototype naming, not a final settings schema).
+The new editor shell uses static data modules (`src/editor/data/`) — no persistence yet. The old `src/App.vue` shell used `localStorage` with `mim:` prefix (prototype naming, not a final settings schema).
 
 Old shell localStorage keys (for reference during port):
 
-- `shoulders:doc`
-- `shoulders:comments`
-- `shoulders:refs`
-- `shoulders:theme`
-- `shoulders:editorSize`
-- `shoulders:author`
-- `shoulders:referencesPath`
-- `shoulders:commentsPath`
-- `shoulders:panel:sessions:v1` for prototype Panel projects, session metadata, messages, usage, and proposal card statuses
+- `mim:doc`
+- `mim:comments`
+- `mim:refs`
+- `mim:theme`
+- `mim:editorSize`
+- `mim:author`
+- `mim:referencesPath`
+- `mim:commentsPath`
+- `mim:panel:sessions:v1` for prototype Panel projects, session metadata, messages, usage, and proposal card statuses
 
-`?new=1` editor windows are intentionally in-memory and bypass save-to-`shoulders:doc`.
+`?new=1` editor windows are intentionally in-memory and bypass save-to-`mim:doc`.
 
-Panel persistence is prototype-only. Durable session JSON belongs under `~/.shoulders-v3/projects/{project_id}/sessions/` once the project/session store lands.
+Panel persistence is prototype-only. Durable session JSON belongs under `~/.mim/projects/{project_id}/sessions/` once the project/session store lands.
 
 ## Conventions
 

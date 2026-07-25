@@ -2,7 +2,7 @@ import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 
 const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
-const STORAGE_KEY = 'shoulders:editor:settings:v1'
+const STORAGE_KEY = 'mim:editor:settings:v1'
 
 const DARK_THEMES = ['slate', 'monokai', 'dracula', 'zenith', 'synthwave']
 
@@ -115,10 +115,10 @@ export const useSettingsStore = defineStore('settings', () => {
     document.documentElement.setAttribute('data-theme', t)
     if (isTauri) {
       import('@tauri-apps/api/event').then(({ emit }) => {
-        emit('shoulders://theme-changed', { theme: t })
+        emit('mim://theme-changed', { theme: t })
       }).catch(() => {})
     }
-    try { localStorage.setItem('shoulders:theme', t) } catch {}
+    try { localStorage.setItem('mim:theme', t) } catch {}
   }
 
   watch(settings.editorTheme, (val) => applyTheme(val))
@@ -126,7 +126,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ── Cross-window sync (Tauri only) ──
   if (isTauri) {
     import('@tauri-apps/api/event').then(({ listen }) => {
-      listen('shoulders://settings-changed', async () => {
+      listen('mim://settings-changed', async () => {
         await load()
         applyTheme(settings.editorTheme.value)
       })

@@ -24,7 +24,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef } fr
 import { EditorView } from '@codemirror/view'
 import { undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
-import { createEditor, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
+import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { fontFamilyForKey } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
@@ -221,6 +221,7 @@ onMounted(() => {
     initialSettings: {
       wordWrap: settings.editorWordWrap,
       spellCheck: settings.editorSpellCheck,
+      isDark: settings.isDarkTheme,
     },
   })
 })
@@ -252,6 +253,13 @@ watch(() => props.path, (path) => {
   if (!view.value) return
   view.value.dispatch({
     effects: languageCompartment.reconfigure(languageExtensionForPath(path)),
+  })
+})
+
+watch(() => settings.isDarkTheme, (dark) => {
+  if (!view.value) return
+  view.value.dispatch({
+    effects: darkModeCompartment.reconfigure(dark ? EditorView.darkTheme.of(true) : []),
   })
 })
 

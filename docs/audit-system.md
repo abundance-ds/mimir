@@ -4,7 +4,7 @@ Audience: coding agents. Purpose: understand, locate, and extend the audit/compl
 
 ## What It Is
 
-An append-only event log that records every significant action in the app: AI requests, tool executions (with approval decisions), session/project lifecycle, and document exports. The log lives in a separate SQLite database (`~/.shoulders-v3/audit.db`) with per-row SHA-256 content hashes for tamper evidence.
+An append-only event log that records every significant action in the app: AI requests, tool executions (with approval decisions), session/project lifecycle, and document exports. The log lives in a separate SQLite database (`~/.mim/audit.db`) with per-row SHA-256 content hashes for tamper evidence.
 
 The system serves two audiences:
 - **Compliance officers** see a per-project activity timeline, compliance indicators, and can export a one-click DOCX compliance report.
@@ -17,7 +17,7 @@ Instrumentation points          Service layer              Storage
 ─────────────────────           ─────────────              ───────
 gate.js (tool approval) ──┐
 ai_proxy.rs (AI req/res) ──┼──▸ audit.js (logAudit) ──▸ audit.rs (SQLite)
-actions.js (session/proj) ──┤     or                      ~/.shoulders-v3/audit.db
+actions.js (session/proj) ──┤     or                      ~/.mim/audit.db
 SidebarExport.vue (export) ─┘   audit_log_internal()
 ```
 
@@ -39,7 +39,7 @@ SidebarExport.vue (export) ─┘   audit_log_internal()
 
 ## Database Schema
 
-One table in `~/.shoulders-v3/audit.db`:
+One table in `~/.mim/audit.db`:
 
 ```sql
 audit_events (

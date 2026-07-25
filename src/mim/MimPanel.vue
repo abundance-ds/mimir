@@ -1,10 +1,10 @@
 <template>
-  <main class="mim-frame" :class="{ 'is-panel-hidden': !panelVisible }">
-    <section ref="terminalSectionRef" class="mim-terminal">
+  <main class="mim-frame" :class="{ 'is-panel-hidden': !panelVisible, 'is-terminal-hidden': !terminalVisible }">
+    <!-- Terminal (left panel) -->
+    <section v-show="terminalVisible" ref="terminalSectionRef" class="mim-terminal">
       <header class="mim-terminal-header drag-region" data-tauri-drag-region="deep">
         <div class="mim-traffic-spacer" data-tauri-drag-region aria-hidden="true" />
         <div class="mim-terminal-title" data-tauri-drag-region>
-          <span class="mim-terminal-kicker">Mim Panel</span>
           <button class="mim-folder-btn no-drag" @click="openFolder" :title="workspaceFolder || 'Open a folder'">
             <IconFolder :size="12" />
             <span class="mim-folder-name">{{ folderDisplayName }}</span>
@@ -13,13 +13,19 @@
             <IconX :size="10" />
           </button>
         </div>
+        <button class="mim-header-btn no-drag" :title="panelVisible ? 'Expand terminal' : 'Show panel'" @click="togglePanel">
+          <component :is="panelVisible ? IconLayoutSidebarRightCollapse : IconLayoutSidebarRightExpand" :size="14" />
+        </button>
+        <div class="flex-1 self-stretch" data-tauri-drag-region />
       </header>
       <TerminalPanel
+        v-if="settingsLoaded"
         ref="terminalPanelRef"
         visible
         dock="side"
         :side-width="terminalWidth"
         :default-cwd="workspaceFolder"
+        @close="onTerminalAllClosed"
       />
       <div
         class="mim-resize"
@@ -28,18 +34,16 @@
       />
     </section>
 
+    <!-- Right panel -->
     <section v-show="panelVisible" class="mim-right-panel">
-      <!-- Editor view -->
       <EditorApp v-show="rightPanel === 'editor'" ref="editorRef" hide-sidebar />
 
-      <!-- Issues view -->
       <div v-show="rightPanel === 'issues'" class="mim-view">
         <header class="mim-view-header drag-region" data-tauri-drag-region="deep">
-          <button class="mim-collapse-btn no-drag" title="Collapse panel" @click="panelVisible = false">
-            <IconLayoutSidebarRightCollapse :size="14" />
+          <div class="flex-1 self-stretch" data-tauri-drag-region />
+          <button class="mim-collapse-btn no-drag" :title="terminalVisible ? 'Expand panel' : 'Show terminal'" @click="toggleTerminal">
+            <component :is="terminalVisible ? IconLayoutSidebarLeftCollapse : IconLayoutSidebarLeftExpand" :size="14" />
           </button>
-          <span class="mim-view-title" data-tauri-drag-region>Issues</span>
-          <div class="mim-view-header-fill" data-tauri-drag-region />
           <div class="mim-panel-toggles no-drag">
             <button v-for="p in panels" :key="p.id" class="mim-ptoggle" :class="{ active: rightPanel === p.id }" @click="setRightPanel(p.id)">{{ p.label }}</button>
           </div>
@@ -51,26 +55,18 @@
         </div>
         <template v-else>
           <div v-if="boardStore.selectedEntry && boardStore.selectedEntry.meta.type === 'issue'" class="flex-1 overflow-y-auto">
-            <EntryDetail
-              :entry="boardStore.selectedEntry"
-              back-label="Board"
-              @close="boardStore.clearSelection()"
-              @save="onSaveEntry"
-              @delete="onDeleteEntry"
-            />
+            <EntryDetail :entry="boardStore.selectedEntry" back-label="Board" @close="boardStore.clearSelection()" @save="onSaveEntry" @delete="onDeleteEntry" />
           </div>
           <KanbanView v-else />
         </template>
       </div>
 
-      <!-- Knowledge view -->
       <div v-show="rightPanel === 'knowledge'" class="mim-view">
         <header class="mim-view-header drag-region" data-tauri-drag-region="deep">
-          <button class="mim-collapse-btn no-drag" title="Collapse panel" @click="panelVisible = false">
-            <IconLayoutSidebarRightCollapse :size="14" />
+          <div class="flex-1 self-stretch" data-tauri-drag-region />
+          <button class="mim-collapse-btn no-drag" :title="terminalVisible ? 'Expand panel' : 'Show terminal'" @click="toggleTerminal">
+            <component :is="terminalVisible ? IconLayoutSidebarLeftCollapse : IconLayoutSidebarLeftExpand" :size="14" />
           </button>
-          <span class="mim-view-title" data-tauri-drag-region>Knowledge</span>
-          <div class="mim-view-header-fill" data-tauri-drag-region />
           <div class="mim-panel-toggles no-drag">
             <button v-for="p in panels" :key="p.id" class="mim-ptoggle" :class="{ active: rightPanel === p.id }" @click="setRightPanel(p.id)">{{ p.label }}</button>
           </div>
@@ -82,28 +78,13 @@
         </div>
         <template v-else>
           <div v-if="boardStore.selectedEntry && boardStore.selectedEntry.meta.type === 'knowledge'" class="flex-1 overflow-y-auto">
-            <EntryDetail
-              :entry="boardStore.selectedEntry"
-              back-label="Knowledge"
-              @close="boardStore.clearSelection()"
-              @save="onSaveEntry"
-              @delete="onDeleteEntry"
-            />
+            <EntryDetail :entry="boardStore.selectedEntry" back-label="Knowledge" @close="boardStore.clearSelection()" @save="onSaveEntry" @delete="onDeleteEntry" />
           </div>
           <KnowledgeView v-else />
         </template>
       </div>
     </section>
 
-    <!-- Expand button when panel is hidden -->
-    <button
-      v-if="!panelVisible"
-      class="mim-expand-btn"
-      title="Show panel"
-      @click="panelVisible = true"
-    >
-      <IconLayoutSidebarRightExpand :size="14" />
-    </button>
   </main>
 </template>
 
@@ -114,6 +95,8 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconFolder,
   IconX,
   IconBook,
@@ -125,16 +108,20 @@ import KnowledgeView from '../panel/components/board/KnowledgeView.vue'
 import EntryDetail from '../panel/components/board/EntryDetail.vue'
 import { initializePanelStores } from '../stores/panel/persistence.js'
 import { useSettingsStore } from '../stores/settings.js'
+import { useFileStore } from '../stores/files.js'
 import { useBoardStore } from '../stores/panel/board.js'
 import { useSidebarResize } from '../shared/composables/useSidebarResize.js'
 
 const settings = useSettingsStore()
+const fileStore = useFileStore()
 const boardStore = useBoardStore()
 const editorRef = ref(null)
 const terminalPanelRef = ref(null)
 const terminalSectionRef = ref(null)
 const panelVisible = ref(true)
+const terminalVisible = ref(true)
 
+const settingsLoaded = ref(false)
 const workspaceFolder = ref('')
 const rightPanel = ref('editor')
 
@@ -154,7 +141,8 @@ const mimPanelToggles = {
   rightPanel,
   setRightPanel,
   panelVisible,
-  collapse: () => { panelVisible.value = false },
+  terminalVisible,
+  collapse: () => toggleTerminal(),
 }
 
 provide('mimWorkspaceFolder', workspaceFolder)
@@ -169,11 +157,94 @@ watch(terminalDragging, (isDragging) => {
   if (!isDragging) settings.set('mimTerminalWidth', terminalWidth.value)
 })
 
+// ── Panel toggle logic ──
+// Each button toggles the OTHER panel.
+// Both visible → icon means "expand me" (hide other). Solo → icon means "bring back other".
+
+function togglePanel() {
+  if (panelVisible.value) {
+    panelVisible.value = false
+  } else {
+    panelVisible.value = true
+    if (rightPanel.value === 'editor' && fileStore.openFiles.length === 0) {
+      nextTick(() => fileStore.newFile())
+    }
+  }
+}
+
+function toggleTerminal() {
+  if (terminalVisible.value) {
+    terminalVisible.value = false
+  } else {
+    terminalVisible.value = true
+    nextTick(() => terminalPanelRef.value?.addTab?.())
+  }
+}
+
+// ── Panel switching ──
+
 function setRightPanel(panel) {
   rightPanel.value = panel
   settings.set('mimRightPanel', panel)
   boardStore.clearSelection()
 }
+
+// ── Cmd+W / tab close logic ──
+
+let _cmdDown = false
+
+function isTerminalFocused() {
+  return Boolean(
+    terminalPanelRef.value?.hasFocus?.() ||
+    terminalSectionRef.value?.contains(document.activeElement),
+  )
+}
+
+function onTerminalAllClosed() {
+  if (panelVisible.value) {
+    terminalVisible.value = false
+  } else {
+    closeWindow()
+  }
+}
+
+watch(() => fileStore.openFiles.length, (count, prev) => {
+  if (count === 0 && prev > 0 && rightPanel.value === 'editor') {
+    if (terminalVisible.value) {
+      panelVisible.value = false
+    } else {
+      closeWindow()
+    }
+  }
+})
+
+async function closeWindow() {
+  if (!window.__TAURI_INTERNALS__) return
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    getCurrentWindow().destroy()
+  } catch {}
+}
+
+async function setupCloseInterceptor() {
+  if (!window.__TAURI_INTERNALS__) return
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    await getCurrentWindow().onCloseRequested((event) => {
+      if (!_cmdDown) return
+      event.preventDefault()
+      _cmdDown = false
+
+      if (isTerminalFocused() && terminalVisible.value) {
+        terminalPanelRef.value?.closeActiveTab?.()
+      } else if (panelVisible.value && rightPanel.value === 'editor') {
+        editorRef.value?.mimCloseActiveTab?.()
+      }
+    })
+  } catch {}
+}
+
+// ── Folder ──
 
 async function openFolder() {
   if (!window.__TAURI_INTERNALS__) return
@@ -197,6 +268,8 @@ function clearFolder() {
   boardStore.loadBoardFromFolder('')
 }
 
+// ── Board entry handlers ──
+
 async function onSaveEntry({ entryId, meta, body }) {
   await boardStore.updateEntry(entryId, meta, body)
 }
@@ -204,6 +277,8 @@ async function onSaveEntry({ entryId, meta, body }) {
 async function onDeleteEntry(entryId) {
   await boardStore.removeEntry(entryId)
 }
+
+// ── Tool server ──
 
 async function startToolServer() {
   if (!window.__TAURI_INTERNALS__) return
@@ -216,12 +291,12 @@ async function startToolServer() {
   }
 }
 
+// ── Keyboard shortcuts ──
+
 function onKeydown(event) {
+  if (event.key === 'Meta' || event.key === 'Control') _cmdDown = true
   const primary = event.metaKey || event.ctrlKey
-  const terminalFocused = Boolean(
-    terminalPanelRef.value?.hasFocus?.() ||
-    terminalSectionRef.value?.contains(document.activeElement),
-  )
+  const terminalFocused = isTerminalFocused()
   const key = event.key.toLowerCase()
 
   if (primary && terminalFocused && !event.shiftKey && (key === 't' || key === 'n')) {
@@ -253,37 +328,67 @@ function onKeydown(event) {
     return
   }
 
-  if (primary && terminalFocused && !event.shiftKey && key === 'w') {
+  // Cmd+W: close active tab in focused panel
+  if (primary && !event.shiftKey && key === 'w') {
     event.preventDefault()
     event.stopImmediatePropagation()
-    terminalPanelRef.value?.closeActiveTab?.()
+    if (terminalFocused && terminalVisible.value) {
+      terminalPanelRef.value?.closeActiveTab?.()
+    } else if (panelVisible.value && rightPanel.value === 'editor') {
+      editorRef.value?.mimCloseActiveTab?.()
+    }
     return
   }
 
+  // Cmd+`: focus or show terminal
   if (primary && event.key === '`') {
     event.preventDefault()
     event.stopImmediatePropagation()
-    terminalPanelRef.value?.focus?.()
+    if (terminalVisible.value) {
+      terminalPanelRef.value?.focus?.()
+    } else {
+      toggleTerminal()
+    }
+  }
+
+  // Cmd+\: toggle terminal
+  if (primary && event.key === '\\') {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    toggleTerminal()
   }
 }
 
-window.__shoulders_terminalPaste = async (text) => {
+function onKeyup(event) {
+  if (event.key === 'Meta' || event.key === 'Control') _cmdDown = false
+}
+
+function onWindowBlur() {
+  _cmdDown = false
+}
+
+window.__mim_terminalPaste = async (text) => {
   if (!text) return false
   return (await terminalPanelRef.value?.pasteText?.(text)) || false
 }
 
+// ── Lifecycle ──
+
 onMounted(async () => {
   await initializePanelStores()
   await nextTick()
-  // Re-read persisted settings after stores have loaded
   if (settings.mimWorkspaceFolder) {
     workspaceFolder.value = settings.mimWorkspaceFolder
   }
   if (settings.mimRightPanel) {
     rightPanel.value = settings.mimRightPanel
   }
+  settingsLoaded.value = true
   await startToolServer()
   document.addEventListener('keydown', onKeydown, true)
+  document.addEventListener('keyup', onKeyup, true)
+  window.addEventListener('blur', onWindowBlur)
+  await setupCloseInterceptor()
   if (workspaceFolder.value) {
     boardStore.loadBoardFromFolder(workspaceFolder.value)
   }
@@ -291,7 +396,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown, true)
-  delete window.__shoulders_terminalPaste
+  document.removeEventListener('keyup', onKeyup, true)
+  window.removeEventListener('blur', onWindowBlur)
+  delete window.__mim_terminalPaste
   if (window.__TAURI_INTERNALS__) {
     import('../services/toolServer.js').then(({ destroyToolServer }) => destroyToolServer())
     invoke('tool_server_stop').catch(() => {})
@@ -312,15 +419,10 @@ onUnmounted(() => {
 
 .mim-terminal {
   position: relative;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: none;
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.mim-right-panel {
-  flex: 1 1 0;
 }
 
 .mim-right-panel {
@@ -357,15 +459,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   overflow: hidden;
-  flex: 1;
-}
-
-.mim-terminal-kicker {
-  font-family: "IBM Plex Mono", var(--font-mono);
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--color-ink);
-  white-space: nowrap;
+  flex: none;
 }
 
 .mim-folder-btn {
@@ -413,13 +507,33 @@ onUnmounted(() => {
   color: var(--color-ink);
 }
 
+.mim-header-btn {
+  width: 28px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-ink-3);
+  transition: color 140ms, background 140ms, border-color 140ms;
+}
+
+.mim-header-btn:hover {
+  color: var(--color-ink);
+  background: var(--color-chrome-mid);
+  border-color: var(--color-rule-light);
+}
+
 .mim-terminal :deep(.tp-side) {
   flex: 1;
-  width: 100% !important;
-  max-width: none;
   height: auto;
   min-height: 0;
 }
+
+/* ── Panel hidden states ── */
 
 .mim-frame.is-panel-hidden .mim-terminal {
   flex: 1;
@@ -431,6 +545,10 @@ onUnmounted(() => {
 }
 
 .mim-frame.is-panel-hidden .mim-resize {
+  display: none;
+}
+
+.mim-frame.is-terminal-hidden .mim-resize {
   display: none;
 }
 
@@ -461,29 +579,6 @@ onUnmounted(() => {
   opacity: 1;
 }
 
-/* ── Expand button (shown when panel hidden) ── */
-
-.mim-expand-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 10;
-  width: 28px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-rule-light);
-  border-radius: 5px;
-  background: var(--color-chrome-high);
-  color: var(--color-ink-3);
-}
-
-.mim-expand-btn:hover {
-  background: var(--color-chrome-mid);
-  color: var(--color-ink);
-}
-
 /* ── View container (issues / knowledge) ── */
 
 .mim-view {
@@ -504,6 +599,7 @@ onUnmounted(() => {
   gap: 0;
   padding: 0 14px;
   background: var(--color-chrome);
+  border-bottom: 1px solid var(--color-rule-light);
   white-space: nowrap;
   overflow: visible;
 }
@@ -527,19 +623,6 @@ onUnmounted(() => {
   color: var(--color-ink);
   background: var(--color-chrome-mid);
   border-color: var(--color-rule-light);
-}
-
-.mim-view-title {
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-ink-2);
-  flex-shrink: 0;
-}
-
-.mim-view-header-fill {
-  flex: 1;
-  align-self: stretch;
 }
 
 /* ── Panel toggles (inside view headers) ── */

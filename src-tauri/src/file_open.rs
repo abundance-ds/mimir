@@ -69,7 +69,7 @@ pub fn do_open_files_in_editor(app: &tauri::AppHandle, paths: Vec<String>) {
         .map(|(_, w)| w);
 
     if let Some(win) = editor_win {
-        let _ = win.emit("shoulders://open-file", &paths);
+        let _ = win.emit("mim://open-file", &paths);
         let _ = win.set_focus();
     } else {
         let state = app.state::<PendingFilePaths>();
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn filters_md_and_txt_files() {
         let args = vec![
-            "/usr/bin/shoulders".into(),
+            "/usr/bin/mim-terminal".into(),
             "/docs/readme.md".into(),
             "/docs/notes.txt".into(),
             "/docs/image.png".into(),
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn skips_binary_path() {
-        let args = vec!["/usr/bin/shoulders".into()];
+        let args = vec!["/usr/bin/mim-terminal".into()];
         assert!(filter_file_args(&args).is_empty());
     }
 

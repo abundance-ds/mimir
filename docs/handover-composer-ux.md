@@ -6,7 +6,7 @@ A Don Norman-inspired UX refactor of the Panel's Composer (chat input) and surro
 
 ## Motivation
 
-The Composer had accumulated UX debt: two divergent input implementations (NewChat used `<input>`, ChatView used `<textarea>`), stale branding ("Ask Shoulders Panel..."), redundant status chrome, opaque picker labels, no token usage visibility, and no inline access to the AI approval mode. The refactor unifies the experience and adds progressive disclosure for power-user information.
+The Composer had accumulated UX debt: two divergent input implementations (NewChat used `<input>`, ChatView used `<textarea>`), stale branding ("Ask mim terminal..."), redundant status chrome, opaque picker labels, no token usage visibility, and no inline access to the AI approval mode. The refactor unifies the experience and adds progressive disclosure for power-user information.
 
 ## Changes by area
 

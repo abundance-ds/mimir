@@ -123,7 +123,7 @@ Each `chat.sendMessage()` call goes through the transport:
 
 ```
 chat.sendMessage({ text })
-  → createShouldersChatTransport (chatTransport.js)
+  → createMimChatTransport (chatTransport.js)
     → ToolLoopAgent + DirectChatTransport
       → createSdkModel (sdkAdapter.js)
         → @ai-sdk/anthropic (or openai/google) with bridgeFetch
@@ -180,7 +180,7 @@ The AI SDK shallow-clones message objects (`{ ...message }`) when updating but m
 
 12 tools, each in its own file under `src/services/ai/tools/`: `read`, `list`, `search`, `edit`, `create`, `comment_add`, `comment_reply`, `comment_resolve`, `search_web`, `annotate_docx`, `show`, `shell`.
 
-`index.js` assembles all tools via `createShouldersTools(context)`. `helpers.js` provides shared utilities (`limitText`, `readDocument`, `readReferences`, etc.).
+`index.js` assembles all tools via `createMimTools(context)`. `helpers.js` provides shared utilities (`limitText`, `readDocument`, `readReferences`, etc.).
 
 Use `tool()` from `ai` with `inputSchema` (not `parameters`):
 
@@ -226,7 +226,7 @@ Messages are shallow-cloned (including each part) to avoid storing reactive prox
 
 On restore, saved messages are passed via `_savedMessages` on the session object, then fed to `new Chat({ messages: session._savedMessages })` when the Chat is created.
 
-Storage: `~/.shoulders-v3/projects/{projectId}/sessions/{sessionId}.json` (Tauri) or `localStorage` (browser fallback).
+Storage: `~/.mim/projects/{projectId}/sessions/{sessionId}.json` (Tauri) or `localStorage` (browser fallback).
 
 ### Persistence Hardening
 
@@ -238,8 +238,8 @@ A concurrent persist guard serializes async writes to prevent interleaved disk w
 
 ### Session Export/Import
 
-Sessions can be exported as `shoulders-session-v1` JSON files and re-imported:
-- Export: `exportData = { _format: 'shoulders-session-v1', exportedAt, session }` written via Tauri save dialog.
+Sessions can be exported as `mim-session-v1` JSON files and re-imported:
+- Export: `exportData = { _format: 'mim-session-v1', exportedAt, session }` written via Tauri save dialog.
 - Import: reads JSON file via Tauri open dialog, validates `_format` field, creates a new session from the snapshot.
 
 ## Streaming Cancel/Abort
@@ -279,7 +279,7 @@ These existed in `~/Desktop/hugin-munin/src/stores/chat.js` and components:
 | `src/services/ai/systemPrompt.js` | Core system prompt and instruction assembly |
 | `src/services/ai/sdkAdapter.js` | Model factory: createSdkModel(), lazy-loaded provider adapters, usage normalization |
 | `src/services/ai/bridgeFetch.js` | Fetch bridge: makes Tauri invoke look like fetch() for AI SDK, uses HTTP status from Rust errors |
-| `src/services/ai/tools/index.js` | Tool assembler: `createShouldersTools()`, 12 tools from individual files |
+| `src/services/ai/tools/index.js` | Tool assembler: `createMimTools()`, 12 tools from individual files |
 | `src/services/ai/tools/read.js` | `read` — @editor, @library.json, .docx, project files |
 | `src/services/ai/tools/edit.js` | `edit` — search-and-replace with proposal flow |
 | `src/services/ai/tools/create.js` | `create` — new file with proposal flow |

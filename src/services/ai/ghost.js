@@ -44,7 +44,7 @@ export async function requestGhostSuggestions({ before, after, documentId, fallb
     ? '\n- The user appears to be citing. Suggest a citation in [@key] format if appropriate, e.g. " [@authorYear]" or " [@key]".'
     : ''
 
-  const system = `You are the inline completion engine for Shoulders Editor.
+  const system = `You are the inline completion engine for mim terminal editor.
 
 Return JSON only:
 {

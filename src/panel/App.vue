@@ -53,7 +53,6 @@ import { createSessionWithChat, doneSession, unarchiveSession } from '../stores/
 import { sessionStatusKind } from '../stores/panel/helpers.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useSidebarResize } from '../shared/composables/useSidebarResize.js'
-import { autoRestoreEditorWindow } from './agentsWindow.js'
 import PanelHeader from './components/PanelHeader.vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatView from './components/ChatView.vue'
@@ -161,7 +160,6 @@ async function installPanelMenu() {
 
 onMounted(async () => {
   await initializePanelStores()
-  autoRestoreEditorWindow()
   initTelemetry(settingsStore)
   installPanelMenu()
   narrowPanelQuery = window.matchMedia?.(NARROW_PANEL_QUERY) || null

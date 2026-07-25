@@ -401,7 +401,7 @@ fn pending_proposals(store: &ProposalStore) -> Vec<serde_json::Value> {
 
 fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[serde_json::Value]) {
     if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("shoulders://proposals-state", proposals);
+        let _ = panel.emit("mim://proposals-state", proposals);
     }
     let pending: Vec<serde_json::Value> = proposals
         .iter()
@@ -410,7 +410,7 @@ fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[serde_json::Val
         .collect();
     for window in app.webview_windows().values() {
         if window.label().starts_with("editor-") {
-            let _ = window.emit("shoulders://proposals-changed", &pending);
+            let _ = window.emit("mim://proposals-changed", &pending);
         }
     }
 }
@@ -428,7 +428,7 @@ fn broadcast_proposal_result(
             "status": status,
             "detail": detail,
         });
-        let _ = panel.emit("shoulders://proposal-result", &result);
+        let _ = panel.emit("mim://proposal-result", &result);
     }
 }
 
@@ -704,7 +704,7 @@ fn proposal_apply(
     if let Some((label, should_delegate)) = owner {
         if should_delegate {
             if let Some(window) = app.get_webview_window(&label) {
-                let _ = window.emit("shoulders://proposal-apply", &proposal);
+                let _ = window.emit("mim://proposal-apply", &proposal);
                 return Ok(serde_json::json!({ "status": "delegated", "target": label }));
             }
             let proposals_snapshot = {
@@ -789,7 +789,7 @@ fn proposal_send(
     for window in app.webview_windows().values() {
         let label = window.label().to_string();
         if label.starts_with("editor-") {
-            let _ = window.emit("shoulders://proposal-apply", &payload);
+            let _ = window.emit("mim://proposal-apply", &payload);
             targets.push(label);
         }
     }
@@ -808,7 +808,7 @@ fn diff_open(
     for window in app.webview_windows().values() {
         let label = window.label().to_string();
         if label.starts_with("editor-") {
-            let _ = window.emit("shoulders://diff-open", &payload);
+            let _ = window.emit("mim://diff-open", &payload);
             targets.push(label);
         }
     }
@@ -859,7 +859,7 @@ fn proposal_respond(
     };
     broadcast_proposal_state(&app, &proposals_snapshot);
     if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("shoulders://proposal-result", &result);
+        let _ = panel.emit("mim://proposal-result", &result);
     }
     Ok(())
 }
@@ -869,7 +869,7 @@ fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> 
     let payload = serde_json::json!({ "path": path, "content": content });
     for window in app.webview_windows().values() {
         if window.label().starts_with("editor-") {
-            let _ = window.emit("shoulders://file-updated", &payload);
+            let _ = window.emit("mim://file-updated", &payload);
         }
     }
     Ok(())
@@ -878,7 +878,7 @@ fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> 
 #[tauri::command]
 fn document_context_send(app: tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
     if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("shoulders://document-changed", &payload);
+        let _ = panel.emit("mim://document-changed", &payload);
     }
     Ok(())
 }
@@ -886,7 +886,7 @@ fn document_context_send(app: tauri::AppHandle, payload: serde_json::Value) -> R
 #[tauri::command]
 fn comments_submit(app: tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
     if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("shoulders://comments-submit", &payload);
+        let _ = panel.emit("mim://comments-submit", &payload);
     }
     Ok(())
 }
@@ -895,7 +895,7 @@ fn comments_submit(app: tauri::AppHandle, payload: serde_json::Value) -> Result<
 fn board_send_to_agent(app: tauri::AppHandle, file_path: String, entry_id: String) -> Result<(), String> {
     if let Some(panel) = app.get_webview_window("main") {
         let payload = serde_json::json!({ "filePath": file_path, "entryId": entry_id });
-        let _ = panel.emit("shoulders://board-send-to-agent", &payload);
+        let _ = panel.emit("mim://board-send-to-agent", &payload);
         let _ = panel.set_focus();
     }
     Ok(())
@@ -939,7 +939,7 @@ fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
     let caller = window.label().to_string();
     for (label, w) in window.app_handle().webview_windows() {
         if label != caller {
-            let _ = w.emit("shoulders://settings-changed", ());
+            let _ = w.emit("mim://settings-changed", ());
         }
     }
     Ok(())
@@ -1012,7 +1012,7 @@ fn tab_drag_resolve(
         let hit = sx >= x && sx <= x + w && sy >= y && sy <= y + h;
 
         if hit {
-            let _ = app.emit_to(&label, "shoulders://tab-receive", &file_data);
+            let _ = app.emit_to(&label, "mim://tab-receive", &file_data);
             let _ = window.set_focus();
             return Ok("transferred".to_string());
         }
@@ -1160,7 +1160,7 @@ fn serve_workflow_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::R
     };
 
     let file_path = PathBuf::from(home)
-        .join(".shoulders-v3")
+        .join(".mim")
         .join("workflows")
         .join(path);
 

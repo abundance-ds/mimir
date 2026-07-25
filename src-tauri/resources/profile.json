@@ -2,5 +2,5 @@
   "name": "Mim Panel",
   "skills": [],
   "apps": [],
-  "bundleSkills": ["app-builder", "peer-review", "shoulders"]
+  "bundleSkills": ["app-builder", "peer-review", "mim"]
 }

@@ -1,6 +1,6 @@
 # Panel System
 
-Audience: coding agents. Purpose: understand, locate, and extend the Shoulders Panel.
+Audience: coding agents. Purpose: understand, locate, and extend the mim terminal.
 
 ## What The Panel Is
 
@@ -15,7 +15,7 @@ Agent file changes appear as compact `FileChangeCard`s in the Panel chat. Accept
 
 ## Current Status
 
-**Working:** Two-column layout (sidebar + chat), AI SDK streaming chat through Rust transport, session/project CRUD with dual-path persistence (`~/.shoulders-v3/` disk + localStorage fallback), tool calls (`read`, `search`, `edit`), proposal cards with accept/reject, model picker with Auto + effort/thinking controls, NewChat landing, Project Home view (includes new-chat creation), session management (pin/rename/archive/delete/export), drag-and-drop session reordering, attention states with status strip, file indexing with @ autocomplete, git clone, SQLite usage ledger.
+**Working:** Two-column layout (sidebar + chat), AI SDK streaming chat through Rust transport, session/project CRUD with dual-path persistence (`~/.mim/` disk + localStorage fallback), tool calls (`read`, `search`, `edit`), proposal cards with accept/reject, model picker with Auto + effort/thinking controls, NewChat landing, Project Home view (includes new-chat creation), session management (pin/rename/archive/delete/export), drag-and-drop session reordering, attention states with status strip, file indexing with @ autocomplete, git clone, SQLite usage ledger.
 
 **Not yet built:** Cross-window event bridge, Editor diff overlay for proposals.
 
@@ -115,9 +115,9 @@ Both Editor and Panel import from here. Panel uses the streaming path; Editor us
 |---|---|---|
 | `bridgeFetch.js` | **Yes** | Fetch-compatible wrapper → Rust `ai_proxy_stream`. Sets Tauri event listeners, returns `ReadableStream`. Sends dummy auth; Rust replaces with real keys. |
 | `sdkAdapter.js` | **Yes** | `createSdkModel()` factory, `buildProviderOptions()`, `normalizeSdkUsage()`, `addUsage()`. Creates AI SDK provider models using bridgeFetch. |
-| `chatTransport.js` | **Yes** | `createShouldersChatTransport()`. Wraps `ToolLoopAgent` + `DirectChatTransport`. Fresh agent per request, up to 8 tool steps. |
+| `chatTransport.js` | **Yes** | `createMimChatTransport()`. Wraps `ToolLoopAgent` + `DirectChatTransport`. Fresh agent per request, up to 8 tool steps. |
 | `modelControls.js` | **Yes** | `modelMenuItems()`, `controlForModel()`, `resolveConcreteModel()`, `AUTO_MODEL_ID`. Drives model/control picker UI. |
-| `tools/index.js` | **Yes** | `createShouldersTools()`: 12 tools (read, list, search, edit, create, comment_*, search_web, annotate_docx, show, shell). Tools execute in Panel JS process. |
+| `tools/index.js` | **Yes** | `createMimTools()`: 12 tools (read, list, search, edit, create, comment_*, search_web, annotate_docx, show, shell). Tools execute in Panel JS process. |
 | `client.js` | **Yes** | Thin Tauri invoke wrappers for `ai_config_dir`, `ai_model_registry`, `ai_key_status`, `ai_set_api_key`. Used for settings. |
 | `ghost.js` | No | Ghost suggestion prompt. Editor-only. |
 | `rewrite.js` | No | Selection rewrite prompt. Editor-only. |
@@ -130,8 +130,8 @@ Both Editor and Panel import from here. Panel uses the streaming path; Editor us
 |---|---|
 | `ai_proxy.rs` | **Streaming bridge for Panel.** `ai_proxy_stream`, `ai_abort`, `ai_cleanup`. Resolves API key, validates host, streams raw provider bytes via Tauri events keyed by `correlationId`. |
 | `ai.rs` | Non-streaming `ai_generate` for ghost/rewrite. Not used by Panel chat. |
-| `ai_models.rs` | Model registry. Creates `~/.shoulders-v3/models.json`. Default models, pricing, capabilities. |
-| `ai_keys.rs` | Key resolution: keychain → env → `.env` → `keys.env` (debug). Keychain service `com.shoulders.v3`. |
+| `ai_models.rs` | Model registry. Creates `~/.mim/models.json`. Default models, pricing, capabilities. |
+| `ai_keys.rs` | Key resolution: keychain → env → `.env` → `keys.env` (debug). Keychain service `com.mim.terminal`. |
 | `ai_providers.rs` | Rust-native provider adapters for `ai_generate` only. Do not extend for Panel. |
 | `ai_transport.rs` | Shared HTTP helpers: `post_json`, `build_headers`, `validate_url_host`, `redact_error`. Host allowlist. |
 | `ai_usage.rs` | Normalized usage shape with cache-aware cost calculation. |
@@ -146,7 +146,7 @@ User types in Composer → Composer emits "send" →
       chat.sendMessage({ text }) (NOT awaited) →
         AI SDK Chat pushes user message to messagesRef →
           Vue reactivity triggers re-render (NewChat → ChatView) →
-        createShouldersChatTransport (chatTransport.js) →
+        createMimChatTransport (chatTransport.js) →
           ToolLoopAgent.stream() → streamText() →
             createSdkModel (sdkAdapter.js) →
               @ai-sdk/anthropic (or openai/google) →
@@ -212,7 +212,7 @@ See [ai-sdk-vue-integration.md](ai-sdk-vue-integration.md) for chat reactivity a
 
 ### Persistence
 
-Current: dual-path. In Tauri, sessions persist to `~/.shoulders-v3/projects/{project_id}/sessions/{id}.json` via `dataDir.js`. In browser, falls back to localStorage key `shoulders:panel:sessions:v1`. Debounced 500ms writes.
+Current: dual-path. In Tauri, sessions persist to `~/.mim/projects/{project_id}/sessions/{id}.json` via `dataDir.js`. In browser, falls back to localStorage key `mim:panel:sessions:v1`. Debounced 500ms writes.
 
 ## What To Build Next
 

@@ -41,7 +41,7 @@ describe('annotateDocx tool', () => {
       expect(Object.keys(tools)).toHaveLength(1)
     })
 
-    it('annotate_docx defaults author to Shoulders', async () => {
+    it('annotate_docx defaults author to mim terminal', async () => {
       mockAnnotateDocx.mockResolvedValue({
         success: true,
         outputPath: '/workspace/project/out.docx',
@@ -58,7 +58,7 @@ describe('annotateDocx tool', () => {
       expect(mockAnnotateDocx).toHaveBeenCalledWith(
         '/workspace/project/test.docx',
         expect.arrayContaining([
-          expect.objectContaining({ author: 'Shoulders' }),
+          expect.objectContaining({ author: 'mim terminal' }),
         ]),
       )
     })

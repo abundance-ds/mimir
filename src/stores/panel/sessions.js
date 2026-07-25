@@ -522,7 +522,7 @@ export const useSessionStore = defineStore('panelSessions', () => {
     const session = sessions.value.find((s) => s.id === sessionId)
     if (!session) return
     const snapshot = snapshotSession(session)
-    const exportData = { _format: 'shoulders-session-v1', exportedAt: new Date().toISOString(), session: snapshot }
+    const exportData = { _format: 'mim-session-v1', exportedAt: new Date().toISOString(), session: snapshot }
     const json = JSON.stringify(exportData, null, 2)
     const filename = `${(session.label || 'session').replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
     if (isTauri) {
@@ -575,7 +575,7 @@ export const useSessionStore = defineStore('panelSessions', () => {
   function _processImportedJson(jsonText, targetProject) {
     let data
     try { data = JSON.parse(jsonText) } catch { return null }
-    if (data._format !== 'shoulders-session-v1' || !data.session) return null
+    if (data._format !== 'mim-session-v1' || !data.session) return null
     const imported = data.session
     if (!imported.id || !imported.messages) return null
     const session = createSession(imported.modelId, {

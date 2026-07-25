@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
 
-// Temporary v0.3 namespace. Promote/migrate this to ~/.shoulders before replacing legacy Shoulders.
-const CONFIG_DIR_NAME: &str = ".shoulders-v3";
+// Temporary v0.3 namespace. Promote/migrate this to ~/.mim.
+const CONFIG_DIR_NAME: &str = ".mim";
 const DEFAULT_MODELS_JSON: &str = include_str!("../resources/ai-models.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -19,7 +19,7 @@ UI layer                              State                Service layer        
 ProjectBoard.vue (5-tab hub)    ┐
   BoardHeader.vue (pill nav)    │
   KanbanView.vue + Column/Card │
-  KnowledgeView.vue + Card     ├──▸ board.js store ──▸ loader.js (I/O) ──▸ ~/.shoulders-v3/
+  KnowledgeView.vue + Card     ├──▸ board.js store ──▸ loader.js (I/O) ──▸ ~/.mim/
   HistoryView.vue              │    (Pinia)              board.js (AI)      projects/{id}/issues/
   EntryDetail.vue (full-page)  ┘                                            or knowledge/
                                                                             {entryId}.md
@@ -105,8 +105,8 @@ The `@issues/` and `@knowledge/` path handlers validate YAML frontmatter (enforc
 ## Data Model
 
 Storage paths:
-- Issues: `~/.shoulders-v3/projects/{projectId}/issues/{entryId}.md`
-- Knowledge: `~/.shoulders-v3/projects/{projectId}/knowledge/{entryId}.md`
+- Issues: `~/.mim/projects/{projectId}/issues/{entryId}.md`
+- Knowledge: `~/.mim/projects/{projectId}/knowledge/{entryId}.md`
 
 Each file is markdown with YAML frontmatter:
 
@@ -152,4 +152,4 @@ Date format across board components: `en-GB` locale, "21 May 2026" style (`{ day
 
 **Column visibility** — Kanban columns can be soft-hidden via `toggleColumnHidden`. Hidden columns collapse to a vertical pill showing status dot, count, and label. Collapsed columns accept drag-and-drop (cards can be moved to a hidden column). Visibility state is persisted on the project object as `hiddenColumns` array.
 
-**Editor integration** — Board files opened in the editor get their YAML frontmatter parsed and stripped; CodeMirror shows only the markdown body. An `IssueContextBar` (`src/editor/components/IssueContextBar.vue`) renders above the editor with inline-editable title, status dropdown, priority dropdown, and a "Send to Agent" button. Metadata changes go through `fileStore.updateMeta()`, which marks the file dirty. On save, `serializeEntry(meta, body)` reconstructs the full YAML+markdown file and emits `shoulders://board-changed` for kanban refresh. "Send to Agent" uses the shared `useSubmitReview` composable (`src/editor/composables/useSubmitReview.js`) to bundle comments + document content to the Panel chat via the `comments_submit` bridge.
+**Editor integration** — Board files opened in the editor get their YAML frontmatter parsed and stripped; CodeMirror shows only the markdown body. An `IssueContextBar` (`src/editor/components/IssueContextBar.vue`) renders above the editor with inline-editable title, status dropdown, priority dropdown, and a "Send to Agent" button. Metadata changes go through `fileStore.updateMeta()`, which marks the file dirty. On save, `serializeEntry(meta, body)` reconstructs the full YAML+markdown file and emits `mim://board-changed` for kanban refresh. "Send to Agent" uses the shared `useSubmitReview` composable (`src/editor/composables/useSubmitReview.js`) to bundle comments + document content to the Panel chat via the `comments_submit` bridge.

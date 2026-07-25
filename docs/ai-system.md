@@ -19,7 +19,7 @@ Panel chat / tools / streaming / inline AI
 AI SDK owns: provider wire formats, tool-call protocol, streaming parsing, ToolLoopAgent steps, UI message parts.
 Rust owns: API key resolution, auth header replacement, host allowlist, stream cancellation, audit logging.
 
-JS uses dummy auth (`shoulders-local-key`). Rust overwrites `authorization`, `x-api-key`, `x-goog-api-key` before upstream.
+JS uses dummy auth (`mim-local-key`). Rust overwrites `authorization`, `x-api-key`, `x-goog-api-key` before upstream.
 
 ## Docs Map
 
@@ -65,5 +65,5 @@ bun run test
 ## Current Limits
 
 - No enterprise policy engine (per-project tool whitelist exists, not centralized).
-- No hosted Shoulders proxy route.
+- No hosted mim terminal proxy route.
 - Rust-native `ai_generate` does not stream.

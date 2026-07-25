@@ -59,7 +59,7 @@ Quote anchor text exactly as it appears in the document. The writer uses normali
         if (denied) return denied
         try {
           const { annotateDocx } = await import('../../docx/writer')
-          const ops = operations.map(op => ({ author: 'Shoulders', ...op }))
+          const ops = operations.map(op => ({ author: 'mim terminal', ...op }))
           const result = await annotateDocx(resolved, ops)
           if (!result.success) return { error: result.error }
           return {

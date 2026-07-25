@@ -106,7 +106,7 @@
             </template>
             <template v-else>
               <div class="flex items-center gap-1.5">
-                <span class="text-[10.5px] font-semibold" :class="reply.author === 'ai' ? 'text-accent' : 'text-ink'">{{ reply.author === 'ai' ? 'Shoulders' : 'You' }}</span>
+                <span class="text-[10.5px] font-semibold" :class="reply.author === 'ai' ? 'text-accent' : 'text-ink'">{{ reply.author === 'ai' ? 'mim' : 'You' }}</span>
                 <span class="text-[10px] text-ink-3">{{ timeAgo(reply.ts || reply.timestamp) }}</span>
                 <div class="flex-1"></div>
                 <button
@@ -233,7 +233,7 @@ const replyMenuStyle = ref({})
 const replyMenuTargetId = ref(null)
 
 const isAi = computed(() => props.comment.author === 'ai')
-const authorLabel = computed(() => (isAi.value ? 'Shoulders' : 'You'))
+const authorLabel = computed(() => (isAi.value ? 'mim' : 'You'))
 const replyCount = computed(() => props.comment.replies?.length || 0)
 
 const mode = computed(() => {

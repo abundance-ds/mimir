@@ -186,7 +186,6 @@ import { usePanelUIStore } from "../../stores/panel/ui.js";
 import { useSessionStore } from "../../stores/panel/sessions.js";
 import { useProjectStore } from "../../stores/panel/projects.js";
 import * as actions from "../../stores/panel/actions.js";
-import { openOrFocusEditorWindow } from "../agentsWindow.js";
 
 const props = defineProps({
     sidebarOpen: { type: Boolean, default: true },
@@ -295,9 +294,7 @@ function navigateForward() {
     actions.navigateHistory('forward');
 }
 
-async function openEditor() {
-    await openOrFocusEditorWindow();
-}
+function openEditor() {}
 
 async function revealProjectFolder() {
     if (!projectPath.value) return

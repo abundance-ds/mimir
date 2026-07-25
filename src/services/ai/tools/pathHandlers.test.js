@@ -14,18 +14,18 @@ vi.mock('../../../stores/panel/skills.js', () => ({
 }))
 
 vi.mock('../../dataDir.js', () => ({
-  getDataDir: () => Promise.resolve('/data/shoulders'),
-  projectDir: (id) => Promise.resolve(`/data/shoulders/projects/${id}`),
+  getDataDir: () => Promise.resolve('/data/mim'),
+  projectDir: (id) => Promise.resolve(`/data/mim/projects/${id}`),
 }))
 
 vi.mock('../../board/loader.js', async (importOriginal) => {
   const orig = await importOriginal()
   return {
     ...orig,
-    issuesDir: (projectId) => Promise.resolve(`/data/shoulders/projects/${projectId}/issues`),
-    ensureIssuesDir: (projectId) => Promise.resolve(`/data/shoulders/projects/${projectId}/issues`),
-    knowledgeDir: (projectId) => Promise.resolve(`/data/shoulders/projects/${projectId}/knowledge`),
-    ensureKnowledgeDir: (projectId) => Promise.resolve(`/data/shoulders/projects/${projectId}/knowledge`),
+    issuesDir: (projectId) => Promise.resolve(`/data/mim/projects/${projectId}/issues`),
+    ensureIssuesDir: (projectId) => Promise.resolve(`/data/mim/projects/${projectId}/issues`),
+    knowledgeDir: (projectId) => Promise.resolve(`/data/mim/projects/${projectId}/knowledge`),
+    ensureKnowledgeDir: (projectId) => Promise.resolve(`/data/mim/projects/${projectId}/knowledge`),
   }
 })
 
@@ -72,7 +72,7 @@ describe('isAtPath', () => {
 describe('resolveAtPath', () => {
   it('resolves @issues/ paths correctly', async () => {
     const result = await resolveAtPath('@issues/issue-123.md', { projectId: 'proj-1' })
-    expect(result.absolutePath).toBe('/data/shoulders/projects/proj-1/issues/issue-123.md')
+    expect(result.absolutePath).toBe('/data/mim/projects/proj-1/issues/issue-123.md')
     expect(result.relative).toBe('issue-123.md')
     expect(result.handler).toBeDefined()
     expect(result.handler.bypassProposals).toBe(true)
@@ -80,7 +80,7 @@ describe('resolveAtPath', () => {
 
   it('resolves @knowledge/ paths correctly', async () => {
     const result = await resolveAtPath('@knowledge/note-1.md', { projectId: 'proj-1' })
-    expect(result.absolutePath).toBe('/data/shoulders/projects/proj-1/knowledge/note-1.md')
+    expect(result.absolutePath).toBe('/data/mim/projects/proj-1/knowledge/note-1.md')
     expect(result.relative).toBe('note-1.md')
     expect(result.handler).toBeDefined()
     expect(result.handler.bypassProposals).toBe(true)
@@ -88,14 +88,14 @@ describe('resolveAtPath', () => {
 
   it('resolves @apps/ paths correctly', async () => {
     const result = await resolveAtPath('@apps/my-app/index.html', {})
-    expect(result.absolutePath).toBe('/data/shoulders/apps/my-app/index.html')
+    expect(result.absolutePath).toBe('/data/mim/apps/my-app/index.html')
     expect(result.relative).toBe('my-app/index.html')
     expect(result.handler).toBeDefined()
   })
 
   it('resolves @skills/ paths correctly', async () => {
     const result = await resolveAtPath('@skills/summarize/prompt.md', {})
-    expect(result.absolutePath).toBe('/data/shoulders/skills/summarize/prompt.md')
+    expect(result.absolutePath).toBe('/data/mim/skills/summarize/prompt.md')
     expect(result.relative).toBe('summarize/prompt.md')
   })
 

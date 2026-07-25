@@ -4,7 +4,7 @@ import { shallowMount, flushPromises } from '@vue/test-utils'
 // Mock all transitive deps pulled in by the chat store / actions
 vi.mock('@ai-sdk/vue', () => ({ Chat: vi.fn() }))
 vi.mock('ai', () => ({ lastAssistantMessageIsCompleteWithToolCalls: vi.fn() }))
-vi.mock('../../services/ai/chatTransport', () => ({ createShouldersChatTransport: vi.fn() }))
+vi.mock('../../services/ai/chatTransport', () => ({ createMimChatTransport: vi.fn() }))
 vi.mock('../../services/ai/sdkAdapter', () => ({ addUsage: vi.fn() }))
 vi.mock('../../services/ai/recovery', () => ({ recoverPoisonedMessages: vi.fn() }))
 vi.mock('../../services/ai/client', () => ({ generateAiText: vi.fn() }))

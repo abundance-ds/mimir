@@ -1,10 +1,10 @@
 import { DirectChatTransport, ToolLoopAgent, stepCountIs } from 'ai'
 import { createSdkModel, buildProviderOptions, normalizeSdkUsage } from './sdkAdapter'
-import { createShouldersTools } from './tools'
+import { createMimTools } from './tools'
 import { mapAiError } from './errors'
 import { buildInstructions } from './systemPrompt'
 
-export function createShouldersChatTransport(getConfig) {
+export function createMimChatTransport(getConfig) {
   return {
     async sendMessages({ messages, abortSignal }) {
       try {
@@ -22,7 +22,7 @@ export function createShouldersChatTransport(getConfig) {
         const agent = new ToolLoopAgent({
           model,
           instructions,
-          tools: createShouldersTools(config.toolContext),
+          tools: createMimTools(config.toolContext),
           stopWhen: stepCountIs(Math.min(Math.max(config.maxSteps || 50, 1), 100)),
           providerOptions: buildProviderOptions(modelConfig, config.controlId),
           onStepFinish(event) {
@@ -55,7 +55,7 @@ export function createShouldersChatTransport(getConfig) {
     },
 
     async reconnectToStream() {
-      throw new Error('Stream reconnection is not supported in Shoulders chat transport')
+      throw new Error('Stream reconnection is not supported in mim terminal chat transport')
     },
   }
 }

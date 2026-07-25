@@ -12,8 +12,8 @@ export function useDocumentBridge({ delay = 650 } = {}) {
 
   function writeLocalStorage(content, path) {
     try {
-      localStorage.setItem('shoulders:doc', content)
-      localStorage.setItem('shoulders:doc:path', path || '')
+      localStorage.setItem('mim:doc', content)
+      localStorage.setItem('mim:doc:path', path || '')
     } catch {}
   }
 

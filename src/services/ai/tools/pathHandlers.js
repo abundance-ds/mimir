@@ -110,7 +110,7 @@ const handlers = {
     },
 
     afterWrite() {
-      window.dispatchEvent(new CustomEvent('shoulders:apps-changed'))
+      window.dispatchEvent(new CustomEvent('mim:apps-changed'))
     },
   },
 

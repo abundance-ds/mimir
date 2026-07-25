@@ -4,19 +4,19 @@
 
 ## What This Is
 
-**Mim Panel** is a desktop app: terminal on the left, markdown editor on the right, MCP tool server bridging them to Claude Code. Built with Tauri v2 + Vue 3 + CodeMirror 6. Forked from "Shoulders" (an AI chat + editor product for HEOR research teams). The Shoulders codebase carried over a massive amount of dead code — the entire Panel/Chat/Board/Skills/Apps system is unused. See "Live vs Dead" below.
+**Mim Panel** is a desktop app: terminal on the left, markdown editor on the right, MCP tool server bridging them to Claude Code. Built with Tauri v2 + Vue 3 + CodeMirror 6. Forked from "Shoulders" (legacy). See "Live vs Dead" below.
 
 ## Entry Point
 
 `src/main.js` reads `?view=` URL param. Only the default matters:
 - **(default) → `src/mim/MimPanel.vue`** — THE APP. Terminal left + editor right + MCP tool server on port 17532.
 - `editor` → `src/editor/App.vue` — standalone editor window (spawned for additional editor windows)
-- `panel` → **DEAD** — `src/panel/App.vue` — legacy Shoulders AI chat panel, never launched
+- `panel` → **DEAD** — `src/panel/App.vue` — legacy mim chat panel, never launched
 - `ghost` → floating tab drag preview
 
 ## Live vs Dead Code
 
-~60% of the JS/Vue codebase is dead. The app is MimPanel.vue which uses only: editor, terminal, tool server, and shared utilities. Everything else is leftover from Shoulders.
+~60% of the JS/Vue codebase is dead. The app is MimPanel.vue which uses only: editor, terminal, tool server, and shared utilities. Everything else is leftover from mim terminal.
 
 ### LIVE — always executes in Mim Panel
 
@@ -35,7 +35,7 @@
 | References | `src/services/references.js`, `bibtexParser.js`, `citationFormatter.js` | Bibliography |
 | Shared | `src/shared/**` (all) | Utilities, styles, composables, UI components, icons |
 | Audit | `src/services/audit.js` | Tool execution audit logging (used by gate.js) |
-| Data | `src/services/dataDir.js` | ~/.shoulders-v3/ path resolution |
+| Data | `src/services/dataDir.js` | ~/.mim/ path resolution |
 | CLI | `bin/mimx.mjs` | CLI for Claude Code to control editor |
 | Rust | `src-tauri/src/*` (most modules) | Backend: PTY, file I/O, tool server, AI proxy, audit, usage, git, refs, export |
 
@@ -120,7 +120,7 @@ Note: `ai_generate` is live (ghost suggestions). `shell_exec`, `search_file_cont
 
 ## Directory Structure
 
-`[DEAD]` = unreachable from MimPanel, leftover from Shoulders. `[GHOST]` = editor AI feature, needs API keys.
+`[DEAD]` = unreachable from MimPanel, leftover from mim terminal. `[GHOST]` = editor AI feature, needs API keys.
 
 ```
 src/
@@ -166,7 +166,7 @@ src/
       systemPrompt.js              # [DEAD] system prompt builder
       workspaceMeta.js             # [DEAD] workspace metadata for AI context
     ai/tools/                      # LIVE — exposed to Claude Code via MCP tool server
-      index.js                     # Tool assembler: createShouldersTools(context)
+      index.js                     # Tool assembler: createMimTools(context)
       read.js, list.js, search.js  # Read tools (file, dir, project search)
       edit.js, create.js           # Write tools
       shell.js                     # Shell execution
@@ -199,7 +199,7 @@ src/
     attachmentPicker.js            # [DEAD] chat attachment picker
     appUpdater.js                  # [DEAD] auto-update checker
     telemetry.js                   # [DEAD] anonymous telemetry
-    dataDir.js                     # LIVE — ~/.shoulders-v3/ path resolution
+    dataDir.js                     # LIVE — ~/.mim/ path resolution
     bibtexParser.js                # LIVE — BibTeX → JSON parser
     citationFormatter.js           # LIVE — citation style formatting
   stores/
@@ -225,7 +225,7 @@ src/
     bridge.js                      # [DEAD] iframe postMessage bridge
     runner.js                      # [DEAD] app lifecycle orchestrator
     runtime.js                     # [DEAD] runtime context
-    sdk/shoulders-sdk.js           # [DEAD] auto-injected SDK
+    sdk/mim-sdk.js           # [DEAD] auto-injected SDK
     sdk/theme-base.css             # [DEAD] app iframe theme
   shared/
     hfu.js                         # "Hidden From User" — wraps/strips <hfu> tags for context injection
@@ -300,14 +300,14 @@ All file access through Tauri invoke wrappers (`src/services/fileSystem.js`). Ne
 Pinia setup stores. Only editor stores (`files.js`, `diff.js`, `comments.js`, `editorUI.js`) and `settings.js` are meaningfully used. Panel stores are loaded by `initializePanelStores()` but mostly idle — TerminalPanel only reads `activeProject` from sessions store for cwd.
 
 ### Data Directory
-`~/.shoulders-v3/` — references, keys.env fallback. Sessions/skills/projects dirs exist but unused.
+`~/.mim/` — references, keys.env fallback. Sessions/skills/projects dirs exist but unused.
 
 ## Branding
 
 - Desktop app: **Mim Panel** (tauri.conf.json, window header)
 - Tauri identifier: `dev.mim.panel`
-- Internal package/Cargo: `shoulders` (legacy)
-- localStorage prefix: `shoulders:` (legacy)
+- Internal package/Cargo: `mim_terminal`
+- localStorage prefix: `mim:` (legacy)
 
 ---
 
@@ -401,6 +401,7 @@ Pinia setup stores. Only editor stores (`files.js`, `diff.js`, `comments.js`, `e
 | Issues | [issues.md](issues.md) |
 | Agent setup (Claude Code) | [agent-setup.md](agent-setup.md) |
 | Roadmap | [mim-panel-roadmap.md](mim-panel-roadmap.md) |
+| Synthesis (target feature set) | [synthesis.md](synthesis.md) |
 
 **Dead systems (reference only):**
 

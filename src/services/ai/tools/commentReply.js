@@ -50,7 +50,7 @@ export function createCommentReplyTool(context = {}) {
           const modified = rawContent.slice(0, insertPos) + replyTag + rawContent.slice(insertPos)
 
           await invoke('write_text_file', { path: resolvedPath, content: modified })
-          await emit('shoulders://file-updated', { path: resolvedPath, content: modified })
+          await emit('mim://file-updated', { path: resolvedPath, content: modified })
 
           return { reply_id: replyId, comment_id, status: 'replied' }
         } catch (err) {

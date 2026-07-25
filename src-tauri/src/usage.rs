@@ -17,7 +17,7 @@ fn get_db_path() -> Result<String, String> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .ok_or("Cannot find home directory")?;
-    let dir = std::path::PathBuf::from(home).join(".shoulders-v3");
+    let dir = std::path::PathBuf::from(home).join(".mim");
     if !dir.exists() {
         std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
     }

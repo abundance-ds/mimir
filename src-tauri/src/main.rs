@@ -1,3 +1,3 @@
 fn main() {
-    shoulders_lib::run()
+    mim_terminal::run()
 }

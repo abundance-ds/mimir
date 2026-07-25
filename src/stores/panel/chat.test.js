@@ -31,7 +31,7 @@ vi.mock('ai', () => ({
 }))
 
 vi.mock('../../services/ai/chatTransport', () => ({
-  createShouldersChatTransport: vi.fn(() => ({})),
+  createMimChatTransport: vi.fn(() => ({})),
 }))
 
 vi.mock('../../services/ai/sdkAdapter', () => ({
@@ -469,23 +469,23 @@ describe('chat store', () => {
     const store = useChatStore()
     store._documentContext = { content: '', path: '' }
 
-    localStorage.setItem('shoulders:doc', 'stored content')
-    localStorage.setItem('shoulders:doc:path', '/stored/path.md')
+    localStorage.setItem('mim:doc', 'stored content')
+    localStorage.setItem('mim:doc:path', '/stored/path.md')
 
     const ctx = store.getDocumentContext()
     expect(ctx.content).toBe('stored content')
     expect(ctx.path).toBe('/stored/path.md')
 
     // Clean up
-    localStorage.removeItem('shoulders:doc')
-    localStorage.removeItem('shoulders:doc:path')
+    localStorage.removeItem('mim:doc')
+    localStorage.removeItem('mim:doc:path')
   })
 
   it('getDocumentContext returns _documentContext directly when it has content', () => {
     const store = useChatStore()
     // Set localStorage to something — should be ignored
-    localStorage.setItem('shoulders:doc', 'should be ignored')
-    localStorage.setItem('shoulders:doc:path', '/ignored.md')
+    localStorage.setItem('mim:doc', 'should be ignored')
+    localStorage.setItem('mim:doc:path', '/ignored.md')
 
     store._documentContext = { content: 'direct content', path: '/direct.md' }
     const ctx = store.getDocumentContext()
@@ -493,8 +493,8 @@ describe('chat store', () => {
     expect(ctx.path).toBe('/direct.md')
 
     // Clean up
-    localStorage.removeItem('shoulders:doc')
-    localStorage.removeItem('shoulders:doc:path')
+    localStorage.removeItem('mim:doc')
+    localStorage.removeItem('mim:doc:path')
   })
 
   // ---- activeError computed ----

@@ -6,7 +6,7 @@
 
   // If we're not in an iframe and there's no Tauri, bail
   if (!isIframe && !T) {
-    console.warn('[shoulders-sdk] Not running in Tauri or iframe')
+    console.warn('[mim-sdk] Not running in Tauri or iframe')
     return
   }
 
@@ -21,7 +21,7 @@
       const id = `sdk_${++_msgId}_${Date.now()}`
       _pending.set(id, { resolve, reject })
       window.parent.postMessage({
-        type: 'shoulders:invoke',
+        type: 'mim:invoke',
         id,
         command,
         args: args || {},
@@ -31,7 +31,7 @@
 
   if (isIframe) {
     window.addEventListener('message', (event) => {
-      if (event.data?.type !== 'shoulders:result') return
+      if (event.data?.type !== 'mim:result') return
       const { id, result, error } = event.data
       const pending = _pending.get(id)
       if (!pending) return
@@ -56,7 +56,7 @@
   const sessionId = urlParams.get('sessionId') || ''
 
   if (!appId) {
-    console.warn('[shoulders-sdk] Could not parse app identity from URL:', window.location.href)
+    console.warn('[mim-sdk] Could not parse app identity from URL:', window.location.href)
   }
 
   // ── SDK ───────────────────────────────────────────────────────
@@ -148,5 +148,5 @@
   }
 
   Object.freeze(sdk)
-  window.shoulders = sdk
+  window.mim = sdk
 })()

@@ -79,7 +79,7 @@ describe('CommentCard', () => {
       active: true,
     })
     expect(w.text()).toContain('I fixed it')
-    expect(w.text()).toContain('Shoulders')
+    expect(w.text()).toContain('mim')
   })
 
   it('expanded: reply input always visible without needing a Reply button click', () => {

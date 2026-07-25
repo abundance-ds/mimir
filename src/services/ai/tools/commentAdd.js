@@ -54,7 +54,7 @@ export function createCommentAddTool(context = {}) {
           const modified = rawContent.slice(0, rawFrom) + tag + rawContent.slice(rawTo)
 
           await invoke('write_text_file', { path: resolvedPath, content: modified })
-          await emit('shoulders://file-updated', { path: resolvedPath, content: modified })
+          await emit('mim://file-updated', { path: resolvedPath, content: modified })
 
           return { comment_id: id, status: 'created', anchor: anchor_text.slice(0, 80) }
         } catch (err) {

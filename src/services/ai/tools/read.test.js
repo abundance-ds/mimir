@@ -100,7 +100,7 @@ describe('read tool', () => {
   describe('@library.json path', () => {
     it('reads library file via invoke', async () => {
       vi.mocked(resolveAtPath).mockResolvedValue({
-        absolutePath: '/data/shoulders/references/library.json',
+        absolutePath: '/data/mim/references/library.json',
         handler: {},
         relative: '',
       })
@@ -116,7 +116,7 @@ describe('read tool', () => {
       expect(result.path).toBe('@library.json')
       expect(result.content).toContain('smith2024')
       expect(mockInvoke).toHaveBeenCalledWith('read_text_file', {
-        path: '/data/shoulders/references/library.json',
+        path: '/data/mim/references/library.json',
       })
     })
   })
