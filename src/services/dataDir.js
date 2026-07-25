@@ -1,28 +1,19 @@
 import { invoke } from '@tauri-apps/api/core'
 
-let dataDir = null
-
 export async function getDataDir() {
-  if (dataDir) return dataDir
-  dataDir = await invoke('ai_config_dir')
-  return dataDir
+  return invoke('ai_config_dir')
 }
 
 export async function loadSettings() {
-  const path = `${await getDataDir()}/settings.json`
-  try {
-    if (!await invoke('path_exists', { path })) return {}
-    const { content } = await invoke('read_text_file', { path })
-    return JSON.parse(content)
-  } catch {
-    return {}
-  }
+  const result = await invoke('settings_load')
+  if (result?.diagnostic) console.warn(`[settings] ${result.diagnostic}`)
+  return result?.settings || {}
 }
 
 export async function saveSettings(settings) {
-  const path = `${await getDataDir()}/settings.json`
-  await invoke('write_text_file', {
-    path,
-    content: JSON.stringify(settings, null, 2),
-  })
+  await invoke('settings_save', { settings })
+}
+
+export async function saveEditorSettings(editor) {
+  await invoke('settings_save_editor', { editor })
 }

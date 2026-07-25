@@ -15,9 +15,16 @@ It implements MCP `initialize`, `ping`, `tools/list`, and `tools/call`.
 `tools/list` returns MCP aliases and preserves the canonical name, owner,
 source, and registry revision in `_meta`.
 
+The server negotiates the stable `2025-06-18` and `2025-03-26` protocol
+versions. It is intentionally stateless and therefore does not issue or
+require MCP session ids. Registry changes are observed through the revision in
+`tools/list`; the server does not advertise `listChanged` because this compact
+HTTP transport has no outbound notification channel.
+
 The endpoint binds only to `127.0.0.1`. The older `/api/tools` routes exist for
 local debugging and require the runtime bearer token; agents and `mimx` use
-`/mcp`.
+`/mcp`. The MCP endpoint is a trusted-local capability surface: it has no
+per-agent tokens or role policy, and must not be exposed beyond loopback.
 
 ## Registry contract
 
@@ -39,19 +46,34 @@ removes its tools and cancels outstanding calls.
 
 | Canonical domain | Purpose |
 |---|---|
-| `files.*` | read, list, search, propose exact edits, create text files |
+| `files.*` | text tools plus workspace-safe browse, folder, rename, duplicate, and Trash operations |
 | `editor.*` | open/reveal/save, tabs, content, selection, editor mutations |
 | `comments.*` | add, reply, resolve, reopen, and delete pseudo-XML threads |
 | `shell.*` | bounded workspace shell execution |
 | `web.*` | OpenAlex, Crossref, and arXiv metadata search |
 | `activities.*` | list, spawn, stop, rename, archive, and clear Activities |
-| `apps.*` | list and launch local Apps |
-| `routines.*` | list schedules and run a Routine now |
+| `apps.*` | list, launch, reload, create, duplicate, display-rename, and Trash local Apps |
+| `routines.*` | list, run, create, revision-guarded update/duplicate, and Trash |
 | `settings.*` | read and update public workbench/editor settings |
 
 Agents see stable MCP aliases such as `read`, `edit`, `editor_open`,
 `comment_resolve`, `activities_list`, and `routines_run`. Canonical names are
 used inside Mim and are also accepted by the registry.
+
+File-manager aliases are namespaced (`files_browse`, `files_create_folder`,
+`files_rename`, `files_duplicate`, `files_trash`) so the long-standing
+`create` alias remains the text-file tool. Routine mutation aliases are
+`routines_create`, `routines_update`, `routines_duplicate`, and
+`routines_trash`. Routine update/duplicate/Trash calls must pass the
+`sourceRevision` returned by `routines.list` as `expected_revision`; stale
+callers receive a structured `invalid_input` error instead of overwriting
+external edits.
+
+App definition aliases are likewise explicit: `apps_reload`, `apps_create`,
+`apps_duplicate`, `apps_update`, and `apps_trash`. They invoke the same native
+catalog operations as Settings > Apps and return its refreshed catalog.
+`apps.update` changes the display title while keeping the id stable because
+that id owns app data, Activity identity, and generated app-tool names.
 
 Substantial file edits are routed into the stable Editor as proposals so the
 user can accept or reject a full diff. Direct editor selection/content tools
@@ -68,3 +90,7 @@ are explicit lower-level operations.
   connection.
 
 See [agent-setup.md](agent-setup.md) and [apps-system.md](apps-system.md).
+
+MCP results carry both human-readable `content` and machine-readable
+`structuredContent`. `mimx` returns `structuredContent` when present and keeps
+the text form only as a compatibility fallback.

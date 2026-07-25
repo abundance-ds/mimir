@@ -26,6 +26,8 @@ describe('embedded editor header', () => {
     const wrapper = render()
     const workbench = useWorkbenchStore()
     expect(wrapper.classes()).toContain('h-11')
+    expect(wrapper.find('[data-header-drag-spacer]').exists()).toBe(false)
+    expect(wrapper.get('[data-editor-tabs-region]').classes()).toContain('flex-1')
 
     workbench.setPaneState('sidebar', 'rail')
     workbench.setPaneState('activity', 'rail')
@@ -34,5 +36,82 @@ describe('embedded editor header', () => {
     expect(wrapper.find('[data-editor-action="restore-sidebar"]').exists()).toBe(true)
     await wrapper.get('[data-editor-action="restore-activity"]').trigger('click')
     expect(workbench.paneLayout.activity.state).toBe('expanded')
+  })
+
+  it('shows only the restore controls owned by the current rail combination', async () => {
+    const wrapper = render()
+    const workbench = useWorkbenchStore()
+
+    expect(wrapper.find('[data-editor-restore-cluster]').exists()).toBe(false)
+
+    workbench.setPaneState('activity', 'rail')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-editor-action="restore-sidebar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-editor-action="restore-activity"]').exists()).toBe(true)
+
+    workbench.setPaneState('sidebar', 'rail')
+    await wrapper.vm.$nextTick()
+    const cluster = wrapper.get('[data-editor-restore-cluster]')
+    expect(cluster.findAll('button').map(button => button.attributes('data-editor-action')))
+      .toEqual(['restore-sidebar', 'restore-activity'])
+
+    workbench.setPaneState('activity', 'expanded')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-editor-restore-cluster]').exists()).toBe(false)
+  })
+
+  it('keeps the generic drag spacer only in the standalone window header', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppHeader, {
+      props: { embedded: false, hideSidebar: true, tabs: [] },
+      global: { plugins: [pinia] },
+    })
+
+    expect(wrapper.get('[data-header-drag-spacer]').exists()).toBe(true)
+  })
+
+  it('expands Editor into focus, restores the split, and keeps collapse separate', async () => {
+    const wrapper = render()
+    const workbench = useWorkbenchStore()
+
+    await wrapper.get('[data-editor-action="expand"]').trigger('click')
+    expect(workbench.paneLayout.activity.state).toBe('rail')
+    expect(workbench.paneLayout.editor.state).toBe('expanded')
+    expect(wrapper.get('[data-editor-action="expand"]').attributes('title')).toBe('Restore split')
+
+    await wrapper.get('[data-editor-action="expand"]').trigger('click')
+    expect(workbench.paneLayout.activity.state).toBe('expanded')
+    expect(workbench.paneLayout.editor.state).toBe('expanded')
+
+    await wrapper.get('[data-editor-action="collapse"]').trigger('click')
+    expect(workbench.paneLayout.editor.state).toBe('rail')
+  })
+
+  it('hands focus to the restored pane and to the Editor rail after collapse', async () => {
+    const activityButton = document.createElement('button')
+    const activityHeader = document.createElement('div')
+    activityHeader.dataset.paneHeader = 'activity'
+    activityHeader.append(activityButton)
+    const editorRail = document.createElement('button')
+    editorRail.dataset.paneRestore = 'editor'
+    document.body.append(activityHeader, editorRail)
+
+    const wrapper = render()
+    const workbench = useWorkbenchStore()
+    workbench.setPaneState('activity', 'rail')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.get('[data-editor-action="restore-activity"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(document.activeElement).toBe(activityButton)
+
+    await wrapper.get('[data-editor-action="collapse"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(document.activeElement).toBe(editorRail)
+
+    wrapper.unmount()
+    activityHeader.remove()
+    editorRail.remove()
   })
 })

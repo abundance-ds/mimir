@@ -15,6 +15,10 @@ const VALID_TAURI_COMMANDS = new Set([
   'ai_config_dir', 'ai_model_registry', 'ai_key_status', 'ai_set_api_key', 'ai_generate',
   // ai_proxy
   'ai_proxy_stream', 'ai_abort', 'ai_cleanup',
+  // editor session persistence
+  'session_load', 'session_save',
+  // local workbench/editor settings persistence
+  'settings_load', 'settings_save', 'settings_save_editor',
   // filesystem (top-level)
   'read_text_file', 'read_binary_file', 'write_text_file', 'write_binary_file',
   'path_exists', 'create_dir', 'list_dir',
@@ -24,6 +28,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'proposal_create', 'proposal_list', 'proposal_register_editor', 'proposal_apply', 'proposal_reject',
   'proposal_respond', 'notify_file_updated', 'get_proposals_for_path',
   'document_context_send', 'comments_submit', 'settings_changed', 'focus_main_window',
+  'app_quit_confirmed',
   // spell
   'spell_suggest',
   // shell_exec
@@ -37,9 +42,11 @@ const VALID_TAURI_COMMANDS = new Set([
   'take_pending_files', 'open_files_in_editor',
   // apps
   'app_open_window', 'app_data_load', 'app_data_save', 'app_data_delete',
-  'app_catalog', 'app_resolve', 'app_http_request',
+  'app_catalog', 'app_reload', 'app_create', 'app_duplicate', 'app_update_title', 'app_trash',
+  'app_resolve', 'app_http_request',
   // routines
-  'routine_catalog', 'routine_reload', 'routine_run_now',
+  'routine_catalog', 'routine_reload', 'routine_run_now', 'routine_create', 'routine_update',
+  'routine_duplicate', 'routine_trash', 'routine_reveal',
   // canonical dynamic tool providers
   'tool_server_start', 'tool_server_stop', 'tool_server_status', 'tool_call_response',
   'tool_registry_snapshot', 'tool_registry_list', 'tool_registry_call',
@@ -50,6 +57,9 @@ const VALID_TAURI_COMMANDS = new Set([
   // file indexing and content search
   'file_index_open', 'file_index_files', 'file_index_filter', 'file_index_refresh',
   'file_index_begin_search', 'file_index_cancel_search', 'file_index_search',
+  'workspace_file_list_directory', 'workspace_file_create', 'workspace_file_rename',
+  'workspace_file_duplicate', 'workspace_file_trash', 'workspace_file_open_native',
+  'workspace_file_reveal',
   'search_file_content',
   // reveal
   'reveal_in_finder',

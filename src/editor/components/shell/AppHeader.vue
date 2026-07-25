@@ -18,7 +18,8 @@
         <div v-if="!hideSidebar" data-tauri-drag-region class="w-7 shrink-0 self-stretch"></div>
 
         <div
-            v-if="embedded && (activityRailed || (sidebarRailed && activityRailed))"
+            v-if="embedded && activityRailed"
+            data-editor-restore-cluster
             class="no-drag mr-1 flex shrink-0 items-center border-r border-rule pr-1"
         >
             <button
@@ -28,9 +29,9 @@
                 class="sidebar-toggle no-drag"
                 title="Restore sidebar"
                 aria-label="Restore sidebar"
-                @click="workbench.setPaneState('sidebar', 'expanded')"
+                @click="restorePane('sidebar')"
             >
-                <IconLayoutSidebarLeftExpand :size="17" />
+                <IconArrowBarRight :size="15" :stroke-width="1.9" />
             </button>
             <button
                 v-if="activityRailed"
@@ -39,7 +40,7 @@
                 class="sidebar-toggle no-drag"
                 title="Restore activity"
                 aria-label="Restore activity"
-                @click="workbench.setPaneState('activity', 'expanded')"
+                @click="restorePane('activity')"
             >
                 <IconLayoutSidebarLeftExpand :size="17" />
             </button>
@@ -47,6 +48,7 @@
 
         <!-- File tabs -->
         <TabStrip
+            data-editor-tabs-region
             :tabs="tabs"
             :activeTab="activeTab"
             :arrivedTabIndex="arrivedTabIndex"
@@ -271,25 +273,44 @@
         </nav>
 
         <!-- Right: fixed gap before buttons -->
-        <div data-tauri-drag-region class="flex-1 self-stretch"></div>
+        <div
+            v-if="!embedded"
+            data-header-drag-spacer
+            data-tauri-drag-region
+            class="flex-1 self-stretch"
+        ></div>
 
         <!-- Standalone editor sidebar toggle. Workbench pane controls live outside the editor. -->
         <button
             v-if="embedded"
             type="button"
+            data-editor-action="expand"
+            class="sidebar-toggle no-drag"
+            :class="{ 'is-open': editorExpanded }"
+            :title="editorExpanded ? 'Restore split' : 'Expand Editor'"
+            :aria-label="editorExpanded ? 'Restore split' : 'Expand Editor'"
+            @click="workbench.setEditorExpanded(!editorExpanded)"
+        >
+            <IconArrowsMinimize v-if="editorExpanded" :size="15" :stroke-width="1.8" />
+            <IconArrowsMaximize v-else :size="15" :stroke-width="1.8" />
+        </button>
+        <button
+            v-if="embedded"
+            type="button"
+            data-editor-action="collapse"
             class="sidebar-toggle no-drag"
             title="Collapse editor"
             aria-label="Collapse editor"
-            @click="workbench.setPaneState('editor', 'rail')"
+            @click="collapseEditor"
         >
-            <IconLayoutSidebarRightCollapse :size="17" />
+            <IconArrowBarToRight :size="15" :stroke-width="1.8" />
         </button>
 
     </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { platformKind } from "../../../shared/platform.js";
 import { basename, dirname } from "../../../shared/utils/path.js";
 import { useWorkbenchStore } from "../../../stores/workbench.js";
@@ -297,7 +318,10 @@ import TabStrip from "../workspace/TabStrip.vue";
 import {
     IconArrowBackUp,
     IconArrowForwardUp,
-    IconLayoutSidebarRightCollapse,
+    IconArrowBarToRight,
+    IconArrowBarRight,
+    IconArrowsMaximize,
+    IconArrowsMinimize,
     IconLayoutSidebarLeftExpand,
     IconChevronDown,
     IconClipboard,
@@ -348,6 +372,10 @@ const openMenu = ref(null);
 const isMac = computed(() => platformKind() === "macos");
 const sidebarRailed = computed(() => workbench.paneLayout.sidebar.state === "rail");
 const activityRailed = computed(() => workbench.paneLayout.activity.state === "rail");
+const editorExpanded = computed(
+    () => workbench.paneLayout.editor.state === "expanded"
+        && workbench.paneLayout.activity.state === "rail",
+);
 const clippedRecentFiles = computed(() => props.recentFiles.slice(0, 7));
 
 function closeMenu() {
@@ -392,6 +420,21 @@ function runEditAction(action) {
         return;
     }
     emit("edit-command", action);
+}
+
+async function restorePane(pane) {
+    workbench.setPaneState(pane, "expanded");
+    await nextTick();
+    const target = pane === "sidebar"
+        ? document.querySelector("[data-sidebar-collapse], [data-sidebar-workspace]")
+        : document.querySelector('[data-pane-header="activity"] button:not(:disabled), [data-pane="activity"] button:not(:disabled)');
+    target?.focus();
+}
+
+async function collapseEditor() {
+    workbench.setPaneState("editor", "rail");
+    await nextTick();
+    document.querySelector('[data-pane-restore="editor"]')?.focus();
 }
 
 function onPointerDown(event) {

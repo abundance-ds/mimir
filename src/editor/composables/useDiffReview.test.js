@@ -99,6 +99,28 @@ describe('useDiffReview proposal responses', () => {
     expect(currentFile.value.reviews).toBeNull()
   })
 
+  it('keeps a single-file review open and exposes a retryable lifecycle error', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    diffStore.activate({
+      original: 'old text',
+      modified: 'new text',
+      path: '/doc.md',
+      review: { id: 'p1', sessionId: 's1', path: '/doc.md' },
+    })
+    invoke.mockRejectedValue(new Error('registry offline'))
+
+    const result = await review.onDiffRejectAll()
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining('registry offline'),
+    })
+    expect(diffStore.active).toBe(true)
+    expect(diffStore.reviewError).toContain('registry offline')
+    expect(fileManager.clearFileReviews).not.toHaveBeenCalled()
+    expect(currentFile.value.content).toBe('old text')
+  })
+
   it('durably writes every accepted non-active batch file before resolving proposals', async () => {
     const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
     currentFile.value.path = '/work/active.md'

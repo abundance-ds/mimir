@@ -139,7 +139,7 @@ function snapshot(overrides = {}) {
 
 function render(props = {}) {
   return mount(TerminalActivity, {
-    props: { activity: agent, ...props },
+    props: { activity: agent, active: true, ...props },
     global: {
       stubs: {
         IconClipboard: true,
@@ -325,6 +325,62 @@ describe('TerminalActivity', () => {
     expect(api.snapshot).toHaveBeenCalledTimes(1)
     expect(terminal.options.fontSize).toBe(14)
     expect(terminal.focus).toHaveBeenCalled()
+  })
+
+  it('suspends hidden listeners and observers, then catches up from native scrollback', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    const firstObserver = resizeObservers[0]
+
+    await wrapper.setProps({ active: false })
+    expect(api.unlisten).toHaveBeenCalledTimes(1)
+    expect(firstObserver.disconnect).toHaveBeenCalledTimes(1)
+
+    api.snapshot.mockResolvedValueOnce(snapshot({
+      scrollback: {
+        chunks: [{ sequence: 3, bytes: [65] }],
+        lastSequence: 3,
+      },
+    }))
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(api.listen).toHaveBeenCalledTimes(2)
+    expect(api.snapshot).toHaveBeenLastCalledWith('agent:one', 2)
+    expect(writtenBytes(terminal).at(-1)).toEqual([65])
+    expect(xterm.terminals).toHaveLength(1)
+  })
+
+  it('cannot strand a rapid active-inactive-active surface without a listener', async () => {
+    let releaseFirst
+    const firstStop = vi.fn()
+    const secondStop = vi.fn()
+    api.listen
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        releaseFirst = () => resolve(firstStop)
+      }))
+      .mockImplementationOnce(async (callback) => {
+        api.callback = callback
+        return secondStop
+      })
+
+    const wrapper = render({ active: true })
+    await flushPromises()
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(api.listen).toHaveBeenCalledTimes(2)
+    expect(api.snapshot).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await flushPromises()
+    expect(firstStop).toHaveBeenCalledTimes(1)
+    expect(secondStop).not.toHaveBeenCalled()
+    expect(api.snapshot).toHaveBeenCalledTimes(1)
+
+    api.callback({ type: 'output', activityId: 'agent:one', sequence: 3, bytes: [65] })
+    expect(writtenBytes(xterm.terminals[0]).at(-1)).toEqual([65])
   })
 
   it('detaches cleanly without stopping the supervised process', async () => {

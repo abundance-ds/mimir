@@ -126,7 +126,7 @@ class CommentBlockWidget extends WidgetType {
     const collapseButton = makeButton(draft.collapsed ? '+' : '−', 'collapse', {
       title: draft.collapsed ? 'Expand discussion' : 'Minimize discussion',
     })
-    const terminalButton = makeButton('Tag', 'terminal-prompt', { title: 'Paste a comment prompt into the terminal' })
+    const terminalButton = makeButton('Agent', 'terminal-prompt', { title: 'Send this comment prompt to the active agent terminal' })
     const resolveButton = makeButton(resolved ? 'Reopen' : 'Resolve', resolved ? 'reopen' : 'resolve', {
       title: resolved ? 'Reopen this discussion' : 'Resolve this discussion',
     })
@@ -142,6 +142,9 @@ class CommentBlockWidget extends WidgetType {
       wrap.append(body)
     }
 
+    const error = document.createElement('div')
+    error.className = 'cm-comment-error'
+
     if (c.replies?.length) {
       const replies = document.createElement('div')
       replies.className = 'cm-comment-replies'
@@ -152,8 +155,75 @@ class CommentBlockWidget extends WidgetType {
         who.className = 'cm-comment-reply-author'
         who.textContent = reply.author || 'agent'
         const text = document.createElement('span')
+        text.className = 'cm-comment-reply-text'
         text.textContent = reply.text || ''
-        item.append(who, text)
+        const replyActions = document.createElement('span')
+        replyActions.className = 'cm-comment-reply-actions'
+        const editReply = makeButton('Edit', 'edit-reply', { title: 'Edit reply' })
+        const deleteReply = makeButton('Delete', 'delete-reply', { title: 'Delete reply' })
+        replyActions.append(editReply, deleteReply)
+
+        const replyEditor = document.createElement('span')
+        replyEditor.className = 'cm-comment-reply-editor'
+        replyEditor.hidden = true
+        const replyInput = document.createElement('textarea')
+        replyInput.className = 'cm-comment-input'
+        replyInput.rows = 1
+        replyInput.value = reply.text || ''
+        const saveReply = makeButton('Save', 'update-reply', { primary: true })
+        const cancelReply = makeButton('Cancel', 'cancel-reply')
+        replyEditor.append(replyInput, saveReply, cancelReply)
+
+        editReply.addEventListener('mousedown', stopWidgetMouse)
+        editReply.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          text.hidden = true
+          replyActions.hidden = true
+          replyEditor.hidden = false
+          requestAnimationFrame(() => replyInput.focus())
+        })
+        cancelReply.addEventListener('mousedown', stopWidgetMouse)
+        cancelReply.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          replyInput.value = reply.text || ''
+          replyEditor.hidden = true
+          text.hidden = false
+          replyActions.hidden = false
+        })
+        replyInput.addEventListener('mousedown', event => event.stopPropagation())
+        replyInput.addEventListener('click', event => event.stopPropagation())
+        replyInput.addEventListener('keydown', (event) => {
+          event.stopPropagation()
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault()
+            saveReply.click()
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            cancelReply.click()
+          }
+        })
+        wireWidgetButton(saveReply, {
+          view,
+          widget: this,
+          wrap,
+          action: 'update-reply',
+          payload: { replyId: reply.id },
+          text: () => replyInput.value.trim(),
+          error,
+          onBefore: () => Boolean(replyInput.value.trim()),
+        })
+        wireWidgetButton(deleteReply, {
+          view,
+          widget: this,
+          wrap,
+          action: 'delete-reply',
+          payload: { replyId: reply.id },
+          error,
+        })
+
+        item.append(who, text, replyActions, replyEditor)
         replies.append(item)
       }
       wrap.append(replies)
@@ -180,9 +250,6 @@ class CommentBlockWidget extends WidgetType {
     input.placeholder = hasText ? 'Reply' : 'Comment'
     const saveAction = hasText ? 'reply' : 'save-text'
     const saveButton = makeButton(hasText ? 'Reply' : 'Save', saveAction, { primary: true })
-
-    const error = document.createElement('div')
-    error.className = 'cm-comment-error'
 
     const syncDraft = () => {
       draft.text = input.value
@@ -413,7 +480,18 @@ function wireWidgetButton(button, opts) {
   })
 }
 
-function runWidgetAction({ view, widget, wrap, action, text = '', button, error, onBeforeAction, onOk }) {
+function runWidgetAction({
+  view,
+  widget,
+  wrap,
+  action,
+  text = '',
+  payload = {},
+  button,
+  error,
+  onBeforeAction,
+  onOk,
+}) {
   wrap.classList.remove('has-error')
   error.textContent = ''
   if (button) button.disabled = true
@@ -421,7 +499,12 @@ function runWidgetAction({ view, widget, wrap, action, text = '', button, error,
   if (onBeforeAction) rollback = onBeforeAction()
   widget.onCommentClick?.(widget.comment.id)
 
-  Promise.resolve(widget.onCommentAction?.({ type: action, id: widget.comment.id, text }))
+  Promise.resolve(widget.onCommentAction?.({
+    type: action,
+    id: widget.comment.id,
+    text,
+    ...payload,
+  }))
     .then((result) => {
       if (result?.ok === false) {
         rollback?.()
@@ -445,6 +528,10 @@ function createInlineCommentBlocks(onCommentClick, onCommentAction) {
   const drafts = new Map()
   return EditorView.decorations.compute([commentTagField], (state) => {
     const { comments, activeId } = state.field(commentTagField)
+    const liveIds = new Set(comments.map(comment => comment.id))
+    for (const id of drafts.keys()) {
+      if (!liveIds.has(id)) drafts.delete(id)
+    }
     const decos = []
     const docLen = state.doc.length
 

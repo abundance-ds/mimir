@@ -218,6 +218,135 @@ describe('files store', () => {
     expect(store.openFiles).toHaveLength(1)
   })
 
+  it('claims session hydration once and never appends over a populated HMR store', async () => {
+    const store = useFileStore()
+    expect(await store.hydrateSession(() => {
+      store.restoreDraft({ content: 'kept', draftId: 'draft-kept' })
+    })).toBe(true)
+
+    expect(await store.hydrateSession(() => {
+      store.restoreDraft({ content: 'must not appear', draftId: 'duplicate' })
+    })).toBe(false)
+    expect(store.openFiles).toHaveLength(1)
+    expect(store.currentFile.draftId).toBe('draft-kept')
+  })
+
+  it('shares one in-flight session hydration across overlapping HMR mounts', async () => {
+    const store = useFileStore()
+    let releaseHydration
+    let hydrationCalls = 0
+    const gate = new Promise((resolve) => {
+      releaseHydration = resolve
+    })
+
+    const first = store.hydrateSession(async () => {
+      hydrationCalls++
+      await gate
+      store.restoreDraft({ content: 'one restored draft', draftId: 'restored' })
+    })
+    const second = store.hydrateSession(async () => {
+      hydrationCalls++
+      store.restoreDraft({ content: 'must not appear', draftId: 'duplicate' })
+    })
+
+    await Promise.resolve()
+    expect(hydrationCalls).toBe(1)
+
+    releaseHydration()
+    await Promise.all([first, second])
+    expect(store.openFiles).toHaveLength(1)
+    expect(store.currentFile).toMatchObject({
+      content: 'one restored draft',
+      draftId: 'restored',
+    })
+
+    const skipped = await store.hydrateSession(() => {
+      hydrationCalls++
+    })
+    expect(skipped).toBe(false)
+    expect(hydrationCalls).toBe(1)
+  })
+
+  it('rolls back a partial failed hydration and allows the next mount to retry', async () => {
+    const store = useFileStore()
+    store.setRecentFiles(['/before.md'])
+
+    await expect(store.hydrateSession(() => {
+      store.restoreDraft({ content: 'partial', draftId: 'partial' })
+      store.setRecentFiles(['/partial.md'])
+      throw new Error('session disk unavailable')
+    })).rejects.toThrow('session disk unavailable')
+
+    expect(store.openFiles).toEqual([])
+    expect(store.recentFiles).toEqual(['/before.md'])
+    expect(store.sessionHydrated).toBe(false)
+
+    expect(await store.hydrateSession(() => {
+      store.restoreDraft({ content: 'recovered', draftId: 'recovered' })
+    })).toBe(true)
+    expect(store.currentFile).toMatchObject({
+      content: 'recovered',
+      draftId: 'recovered',
+    })
+  })
+
+  it('collapses already-live legacy draft clones while retaining the active clone', async () => {
+    const store = useFileStore()
+    store.newFile()
+    store.updateContent('duplicated by HMR')
+    const first = store.currentFile
+    delete first.draftId
+    store.newFile()
+    store.updateContent('duplicated by HMR')
+    const activeClone = store.currentFile
+    delete activeClone.draftId
+    store.newFile()
+    store.updateContent('distinct draft')
+    delete store.currentFile.draftId
+    store.setActiveTab(1)
+
+    expect(await store.hydrateSession(() => {})).toBe(false)
+
+    expect(store.openFiles.map((file) => file.content)).toEqual([
+      'duplicated by HMR',
+      'distinct draft',
+    ])
+    expect(store.currentFile).toBe(activeClone)
+    expect(store.currentFile.draftId).toEqual(expect.any(String))
+  })
+
+  it('preserves intentional same-content drafts once they have stable ids', () => {
+    const store = useFileStore()
+    store.restoreDraft({ content: 'same', draftId: 'draft-one' })
+    store.restoreDraft({ content: 'same', draftId: 'draft-two' })
+
+    store.collapseLegacyDuplicateDrafts()
+
+    expect(store.openFiles.map((file) => file.draftId)).toEqual([
+      'draft-one',
+      'draft-two',
+    ])
+  })
+
+  it('restores a dirty path-backed document without changing recent-file order', () => {
+    const store = useFileStore()
+    store.setRecentFiles(['/recent-first.md', '/older.md'])
+
+    const file = store.restorePath({
+      path: '/draft.md',
+      content: 'unsaved recovery',
+      dirty: true,
+    })
+
+    expect(file).toMatchObject({
+      path: '/draft.md',
+      content: 'unsaved recovery',
+      dirty: true,
+      saveState: 'dirty',
+    })
+    expect(store.recentFiles).toEqual(['/recent-first.md', '/older.md'])
+  })
+
   // save() on file with path
   it('save() writes file and clears dirty flag', async () => {
     saveFile.mockResolvedValue(undefined)
@@ -255,6 +384,75 @@ describe('files store', () => {
     expect(store.openFiles[0].dirty).toBe(false)
   })
 
+  it('does not mark edits made during a disk write as saved', async () => {
+    let resolveFirst
+    saveFile
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve
+      }))
+      .mockResolvedValueOnce(undefined)
+
+    const store = useFileStore()
+    await store.openFile('/tmp/race.md', 'before')
+    store.updateContent('first snapshot')
+    const firstSave = store.save()
+    store.updateContent('newer edit')
+
+    resolveFirst()
+    expect(await firstSave).toBe(false)
+    expect(store.currentFile).toMatchObject({
+      content: 'newer edit',
+      dirty: true,
+      saveState: 'dirty',
+    })
+    expect(saveFile).toHaveBeenNthCalledWith(1, '/tmp/race.md', 'first snapshot')
+
+    expect(await store.save()).toBe(true)
+    expect(saveFile).toHaveBeenNthCalledWith(2, '/tmp/race.md', 'newer edit')
+    expect(store.currentFile).toMatchObject({ dirty: false, saveState: 'saved' })
+  })
+
+  it('serializes overlapping saves for one file in snapshot order', async () => {
+    let resolveFirst
+    saveFile
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve
+      }))
+      .mockResolvedValueOnce(undefined)
+
+    const store = useFileStore()
+    await store.openFile('/tmp/ordered.md', 'before')
+    store.updateContent('one')
+    const firstSave = store.save()
+    store.updateContent('two')
+    const secondSave = store.save()
+
+    expect(saveFile).toHaveBeenCalledTimes(1)
+    resolveFirst()
+    await Promise.all([firstSave, secondSave])
+
+    expect(saveFile.mock.calls).toEqual([
+      ['/tmp/ordered.md', 'one'],
+      ['/tmp/ordered.md', 'two'],
+    ])
+    expect(store.currentFile).toMatchObject({ content: 'two', dirty: false, saveState: 'saved' })
+  })
+
+  it('can save an explicit tab even after focus moves elsewhere', async () => {
+    saveFile.mockResolvedValue(undefined)
+    const store = useFileStore()
+    await store.openFile('/tmp/a.md', 'A')
+    store.updateContent('A changed')
+    const a = store.currentFile
+    await store.openFile('/tmp/b.md', 'B')
+
+    await store.save(a)
+
+    expect(saveFile).toHaveBeenCalledWith('/tmp/a.md', 'A changed')
+    expect(a.dirty).toBe(false)
+    expect(store.currentFile.path).toBe('/tmp/b.md')
+  })
+
   it('save() marks failed saves and keeps dirty state', async () => {
     const error = new Error('disk full')
     saveFile.mockRejectedValue(error)
@@ -282,6 +480,7 @@ describe('files store', () => {
     expect(saveFileDialog).toHaveBeenCalledWith('untitled.md')
     expect(saveFile).toHaveBeenCalledWith('/tmp/new-name.md', 'hello world')
     expect(store.openFiles[0].path).toBe('/tmp/new-name.md')
+    expect(store.openFiles[0].draftId).toBeNull()
     expect(store.openFiles[0].dirty).toBe(false)
   })
 
@@ -371,6 +570,92 @@ describe('files store', () => {
     })
   })
 
+  describe('workspace file lifecycle', () => {
+    it('waits for affected writes before a workspace mutation may continue', async () => {
+      let resolveSave
+      saveFile.mockReturnValue(new Promise((resolve) => {
+        resolveSave = resolve
+      }))
+      const store = useFileStore()
+      await store.openFile('/w/docs/a.md', 'A')
+      store.updateContent('A changed')
+      const saving = store.save()
+      let mutationReady = false
+      const waiting = store.waitForWorkspacePaths(['/w/docs']).then(() => {
+        mutationReady = true
+      })
+
+      await Promise.resolve()
+      expect(mutationReady).toBe(false)
+      resolveSave()
+      await Promise.all([saving, waiting])
+      expect(mutationReady).toBe(true)
+    })
+
+    it('updates open and recent paths after a file or folder rename', async () => {
+      const store = useFileStore()
+      await store.openFile('/w/docs/a.md', 'A')
+      await store.openFile('/w/docs/nested/b.md', 'B')
+      await store.openFile('/w/other.md', 'Other')
+
+      store.moveWorkspacePath('/w/docs', '/w/research')
+
+      expect(store.openFiles.map((file) => file.path)).toEqual([
+        '/w/research/a.md',
+        '/w/research/nested/b.md',
+        '/w/other.md',
+      ])
+      expect(store.recentFiles).toContain('/w/research/a.md')
+      expect(store.recentFiles).not.toContain('/w/docs/a.md')
+    })
+
+    it('uses separator-agnostic boundaries for Windows folder rename and Trash', async () => {
+      const store = useFileStore()
+      await store.openFile('C:\\work\\docs\\a.md', 'A')
+      await store.openFile('C:\\work\\docs/nested\\dirty.md', 'draft')
+      store.updateContent('unsaved draft')
+      await store.openFile('C:\\work\\docs-other\\keep.md', 'keep')
+
+      store.moveWorkspacePath('C:\\work\\docs\\', 'D:\\research\\')
+
+      expect(store.openFiles.map((file) => file.path)).toEqual([
+        'D:\\research\\a.md',
+        'D:\\research/nested\\dirty.md',
+        'C:\\work\\docs-other\\keep.md',
+      ])
+      expect(store.recentFiles).toContain('D:\\research\\a.md')
+
+      store.handleWorkspaceTrash(['D:\\research/'])
+
+      expect(store.openFiles).toHaveLength(2)
+      expect(store.openFiles[0]).toMatchObject({
+        path: null,
+        content: 'unsaved draft',
+        dirty: true,
+      })
+      expect(store.openFiles[1].path).toBe('C:\\work\\docs-other\\keep.md')
+      expect(store.recentFiles).not.toContain('D:\\research\\a.md')
+    })
+
+    it('closes clean trashed tabs but preserves dirty text as an untitled document', async () => {
+      const store = useFileStore()
+      await store.openFile('/w/clean.md', 'clean')
+      await store.openFile('/w/folder/dirty.md', 'draft')
+      store.updateContent('unsaved draft')
+
+      store.handleWorkspaceTrash(['/w/clean.md', '/w/folder'])
+
+      expect(store.openFiles).toHaveLength(1)
+      expect(store.openFiles[0]).toMatchObject({
+        path: null,
+        content: 'unsaved draft',
+        dirty: true,
+        draftId: expect.any(String),
+      })
+      expect(store.recentFiles).toEqual([])
+    })
+  })
+
   // ── removeTabForTransfer ──
 
   describe('removeTabForTransfer', () => {
@@ -440,8 +725,14 @@ describe('files store', () => {
 
     it('converts empty string path to null', () => {
       const store = useFileStore()
-      store.addFileFromTransfer({ path: '', content: '', dirty: false })
+      store.addFileFromTransfer({
+        path: '',
+        content: '',
+        dirty: false,
+        draftId: 'draft-transferred',
+      })
       expect(store.openFiles[0].path).toBeNull()
+      expect(store.openFiles[0].draftId).toBe('draft-transferred')
     })
 
     it('adds to existing tabs without replacing', () => {

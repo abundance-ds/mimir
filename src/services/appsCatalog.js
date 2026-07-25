@@ -8,6 +8,45 @@ export async function loadAppsCatalog() {
   return normalizeCatalog(await invoke('app_catalog'))
 }
 
+export async function reloadAppsCatalog() {
+  return normalizeCatalog(await invoke('app_reload'))
+}
+
+export async function createLocalApp({ id, title, description = '' }) {
+  return normalizeCatalog(await invoke('app_create', {
+    id,
+    title,
+    description: description || null,
+  }))
+}
+
+export async function duplicateLocalApp(appId, { id, title = '' }) {
+  return normalizeCatalog(await invoke('app_duplicate', {
+    appId,
+    newId: id,
+    title: title || null,
+  }))
+}
+
+export async function updateLocalAppTitle(appId, title) {
+  return normalizeCatalog(await invoke('app_update_title', { appId, title }))
+}
+
+export async function trashLocalApp(appId) {
+  return normalizeCatalog(await invoke('app_trash', { appId }))
+}
+
+export function revealAppsDirectory(path) {
+  return invoke('reveal_in_finder', { path })
+}
+
+export function revealAppDefinition(app) {
+  if (!app?.manifestPath || app.builtin) {
+    return Promise.reject(new Error('Only local app definitions can be revealed.'))
+  }
+  return invoke('reveal_in_finder', { path: app.manifestPath })
+}
+
 export function resolveAppLaunch(appId, workspacePath = '') {
   return invoke('app_resolve', {
     appId,

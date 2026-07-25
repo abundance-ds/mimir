@@ -69,6 +69,12 @@ Agent-specific connection is added unless the preset already supplies it:
 - Claude receives an inline `--mcp-config` HTTP server definition.
 - Pi receives `--extension ~/.mim/pi/mim-tools.ts`.
 
+Detection understands both two-argument and `--mcp-config=…` Claude forms, so
+preconfigured flags are kept verbatim and never injected twice. Terminal
+presets and agent presets with an exact binary path resolve without running
+unrelated agent/version probes; the launcher settings screen is the explicit
+detection refresh boundary.
+
 The Pi extension discovers the live registry at session start and registers
 each tool with a `mim_` prefix. `/mim-refresh` discovers tools contributed after
 the session began.

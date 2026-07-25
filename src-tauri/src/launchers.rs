@@ -5,10 +5,44 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, OnceLock},
 };
 
 const CONFIG_VERSION: u32 = 1;
 const DEFAULT_MIM_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
+static DETECTED_AGENTS: OnceLock<AgentDetectionCache> = OnceLock::new();
+
+#[derive(Default)]
+struct AgentDetectionCache {
+    detected: Mutex<Option<Vec<DetectedAgent>>>,
+}
+
+impl AgentDetectionCache {
+    fn cached_or_detect_with(
+        &self,
+        detect: impl FnOnce() -> Vec<DetectedAgent>,
+    ) -> Vec<DetectedAgent> {
+        let mut cached = self
+            .detected
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(detected) = cached.as_ref() {
+            return detected.clone();
+        }
+        let detected = detect();
+        *cached = Some(detected.clone());
+        detected
+    }
+
+    fn refresh_with(&self, detect: impl FnOnce() -> Vec<DetectedAgent>) -> Vec<DetectedAgent> {
+        let detected = detect();
+        *self
+            .detected
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(detected.clone());
+        detected
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -230,6 +264,15 @@ pub fn validate_config(config: &LauncherConfig) -> Result<(), String> {
         if preset.args.iter().any(|arg| arg.contains('\0')) {
             return Err(format!("{at}.args must not contain NUL bytes."));
         }
+        if preset
+            .binary
+            .as_deref()
+            .is_some_and(|binary| binary.trim().is_empty() || binary.contains('\0'))
+        {
+            return Err(format!(
+                "{at}.binary must be a non-empty command or path without NUL bytes."
+            ));
+        }
         for (key, value) in &preset.env {
             if key.is_empty() || key.contains('=') || key.contains('\0') || value.contains('\0') {
                 return Err(format!("{at}.env contains an invalid environment entry."));
@@ -314,6 +357,7 @@ pub fn resolve_launch(
                 .map(|agent| agent.resume_strategy)
                 .unwrap_or(ResumeStrategy::None);
             let command = if let Some(binary) = &preset.binary {
+                validate_explicit_binary(binary)?;
                 binary.clone()
             } else {
                 let found = detected
@@ -335,7 +379,7 @@ pub fn resolve_launch(
     let inherited_path = std::env::var_os("PATH");
     let current_path = environment
         .get("PATH")
-        .map(|value| OsStr::new(value))
+        .map(OsStr::new)
         .or(inherited_path.as_deref());
     let path = crate::mimx::path_with_mimx_at(home_path, current_path)?;
     environment.insert("PATH".into(), path.to_string_lossy().into_owned());
@@ -358,6 +402,36 @@ pub fn resolve_launch(
     })
 }
 
+fn validate_explicit_binary(binary: &str) -> Result<(), String> {
+    let path = Path::new(binary);
+    let has_path_components = path.is_absolute() || path.components().count() > 1;
+    if !has_path_components {
+        // A bare command intentionally resolves through the child PATH.
+        return Ok(());
+    }
+
+    let metadata = path.metadata().map_err(|error| {
+        format!("Configured launcher binary is unavailable at {binary}: {error}")
+    })?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "Configured launcher binary is not a file: {binary}"
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(format!(
+                "Configured launcher binary is not executable: {binary}"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: &mut Vec<String>) {
     match agent_id {
         "codex" if !args.iter().any(|arg| arg.contains("mcp_servers.mim.")) => {
@@ -370,7 +444,11 @@ fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: 
                 ),
             ]);
         }
-        "claude" if !args.iter().any(|arg| arg == "--mcp-config") => {
+        "claude"
+            if !args
+                .iter()
+                .any(|arg| arg == "--mcp-config" || arg.starts_with("--mcp-config=")) =>
+        {
             let config = serde_json::json!({
                 "mcpServers": {
                     "mim": {
@@ -398,6 +476,32 @@ pub fn detect_agents() -> Vec<DetectedAgent> {
         .into_iter()
         .map(detect_agent)
         .collect::<Vec<_>>()
+}
+
+fn detection_cache() -> &'static AgentDetectionCache {
+    DETECTED_AGENTS.get_or_init(AgentDetectionCache::default)
+}
+
+fn cached_detect_agents() -> Vec<DetectedAgent> {
+    detection_cache().cached_or_detect_with(detect_agents)
+}
+
+fn refresh_detected_agents() -> Vec<DetectedAgent> {
+    detection_cache().refresh_with(detect_agents)
+}
+
+fn detected_agents_for_resolution(
+    preset: &LauncherPreset,
+    detect: impl FnOnce() -> Vec<DetectedAgent>,
+) -> Vec<DetectedAgent> {
+    // Terminal resolution only needs the configured/default shell. A custom
+    // agent binary is already exact. Neither path should pay for unrelated
+    // login-shell probes or `--version` processes.
+    if preset.kind == LauncherKind::Terminal || preset.binary.is_some() {
+        Vec::new()
+    } else {
+        detect()
+    }
 }
 
 fn detect_agent(definition: AgentDefinition) -> DetectedAgent {
@@ -473,8 +577,7 @@ fn absolute_binary_from_output(value: &str) -> Option<String> {
     value
         .lines()
         .map(str::trim)
-        .filter(|line| Path::new(line).is_absolute())
-        .next_back()
+        .rfind(|line| Path::new(line).is_absolute())
         .map(str::to_string)
 }
 
@@ -497,7 +600,9 @@ fn first_version(value: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn launcher_detect_agents() -> Result<Vec<DetectedAgent>, String> {
-    tauri::async_runtime::spawn_blocking(detect_agents)
+    // Opening/reloading launcher settings is the explicit refresh boundary, so
+    // installing or removing an agent is visible without restarting Mim.
+    tauri::async_runtime::spawn_blocking(refresh_detected_agents)
         .await
         .map_err(|error| format!("Agent detection task failed: {error}"))
 }
@@ -518,7 +623,7 @@ pub async fn launcher_resolve(
     workspace_path: Option<String>,
 ) -> Result<ResolvedLaunch, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let detected = detect_agents();
+        let detected = detected_agents_for_resolution(&preset, cached_detect_agents);
         let home = dirs::home_dir()
             .ok_or_else(|| "Could not resolve the home directory for this launcher.".to_string())?;
         let shell = default_shell_path();
@@ -636,6 +741,10 @@ mod tests {
         assert!(validate_config(&config)
             .unwrap_err()
             .contains("environment"));
+
+        let mut config = default_config();
+        config.presets[0].binary = Some(" ".into());
+        assert!(validate_config(&config).unwrap_err().contains("binary"));
     }
 
     #[test]
@@ -692,6 +801,143 @@ mod tests {
             launch.env.get("MIMX_MCP_URL").map(String::as_str),
             Some("http://127.0.0.1:29999/mcp")
         );
+    }
+
+    #[test]
+    fn terminal_and_exact_binary_resolution_run_zero_agent_probes() {
+        let mut terminal_probes = 0;
+        let terminal = default_config()
+            .presets
+            .into_iter()
+            .find(|preset| preset.kind == LauncherKind::Terminal)
+            .unwrap();
+        let detected = detected_agents_for_resolution(&terminal, || {
+            terminal_probes += 1;
+            detect_agents()
+        });
+        assert!(detected.is_empty());
+        assert_eq!(terminal_probes, 0);
+
+        let mut exact_agent = default_config().presets[0].clone();
+        exact_agent.binary = Some("/opt/bin/codex".into());
+        let mut exact_probes = 0;
+        let detected = detected_agents_for_resolution(&exact_agent, || {
+            exact_probes += 1;
+            detect_agents()
+        });
+        assert!(detected.is_empty());
+        assert_eq!(exact_probes, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exact_binary_paths_fail_precisely_without_running_a_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir().unwrap();
+        let mut preset = default_config().presets[0].clone();
+        let binary = directory.path().join("custom-codex");
+        preset.binary = Some(binary.to_string_lossy().into_owned());
+
+        let missing = resolve_launch(
+            &preset,
+            &[],
+            Some(directory.path().to_str().unwrap()),
+            directory.path(),
+            Path::new("/bin/sh"),
+            DEFAULT_MIM_MCP_URL,
+        )
+        .unwrap_err();
+        assert!(missing.contains("unavailable"));
+
+        std::fs::write(&binary, b"#!/bin/sh\n").unwrap();
+        let not_executable = resolve_launch(
+            &preset,
+            &[],
+            Some(directory.path().to_str().unwrap()),
+            directory.path(),
+            Path::new("/bin/sh"),
+            DEFAULT_MIM_MCP_URL,
+        )
+        .unwrap_err();
+        assert!(not_executable.contains("not executable"));
+
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+        let resolved = resolve_launch(
+            &preset,
+            &[],
+            Some(directory.path().to_str().unwrap()),
+            directory.path(),
+            Path::new("/bin/sh"),
+            DEFAULT_MIM_MCP_URL,
+        )
+        .unwrap();
+        assert_eq!(resolved.command, binary.to_string_lossy());
+    }
+
+    #[test]
+    fn detected_agent_resolution_requests_the_shared_catalog_once() {
+        let agent = default_config().presets[0].clone();
+        let mut probes = 0;
+        let detected = detected_agents_for_resolution(&agent, || {
+            probes += 1;
+            vec![DetectedAgent {
+                definition: agent_catalog()[0].clone(),
+                installed: true,
+                binary_path: Some("/opt/bin/codex".into()),
+                version: None,
+                diagnostic: None,
+            }]
+        });
+
+        assert_eq!(probes, 1);
+        assert_eq!(detected[0].binary_path.as_deref(), Some("/opt/bin/codex"));
+    }
+
+    #[test]
+    fn detection_cache_reuses_launch_data_but_explicit_refresh_updates_it() {
+        let cache = AgentDetectionCache::default();
+        let definition = agent_catalog()[0].clone();
+        let old = DetectedAgent {
+            definition: definition.clone(),
+            installed: true,
+            binary_path: Some("/old/codex".into()),
+            version: Some("1.0.0".into()),
+            diagnostic: None,
+        };
+        let new = DetectedAgent {
+            definition,
+            installed: true,
+            binary_path: Some("/new/codex".into()),
+            version: Some("2.0.0".into()),
+            diagnostic: None,
+        };
+        let mut probes = 0;
+
+        let first = cache.cached_or_detect_with(|| {
+            probes += 1;
+            vec![old.clone()]
+        });
+        let reused = cache.cached_or_detect_with(|| {
+            probes += 1;
+            Vec::new()
+        });
+        let refreshed = cache.refresh_with(|| {
+            probes += 1;
+            vec![new.clone()]
+        });
+        let reused_refresh = cache.cached_or_detect_with(|| {
+            probes += 1;
+            Vec::new()
+        });
+
+        assert_eq!(first[0].binary_path.as_deref(), Some("/old/codex"));
+        assert_eq!(reused[0].binary_path.as_deref(), Some("/old/codex"));
+        assert_eq!(refreshed[0].binary_path.as_deref(), Some("/new/codex"));
+        assert_eq!(reused_refresh[0].version.as_deref(), Some("2.0.0"));
+        assert_eq!(probes, 2);
     }
 
     #[test]
@@ -753,5 +999,38 @@ mod tests {
         assert_eq!(codex.len(), 2);
         assert_eq!(claude.len(), 2);
         assert_eq!(pi.len(), 2);
+    }
+
+    #[test]
+    fn preconfigured_connection_flags_are_preserved_without_duplicate_injection() {
+        let home = Path::new("/Users/mim");
+        let mcp_url = "http://127.0.0.1:29999/mcp";
+
+        let mut codex = vec![
+            "--full-auto".into(),
+            "-c".into(),
+            r#"mcp_servers.mim.url="http://custom.example/mcp""#.into(),
+        ];
+        let mut claude = vec![
+            "--dangerously-skip-permissions".into(),
+            "--mcp-config=/tmp/mim-mcp.json".into(),
+        ];
+        let mut pi = vec![
+            "--model".into(),
+            "anthropic/claude-sonnet-4".into(),
+            "--extension".into(),
+            "/Users/mim/.mim/pi/mim-tools.ts".into(),
+        ];
+        let expected_codex = codex.clone();
+        let expected_claude = claude.clone();
+        let expected_pi = pi.clone();
+
+        append_mim_connection_args("codex", home, mcp_url, &mut codex);
+        append_mim_connection_args("claude", home, mcp_url, &mut claude);
+        append_mim_connection_args("pi", home, mcp_url, &mut pi);
+
+        assert_eq!(codex, expected_codex);
+        assert_eq!(claude, expected_claude);
+        assert_eq!(pi, expected_pi);
     }
 }

@@ -1,7 +1,11 @@
+use crate::persistence::{load_json_optional_quarantining, write_json_atomic, QuarantinedLoad};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
-// Temporary v0.3 namespace. Promote/migrate this to ~/.mim.
 const CONFIG_DIR_NAME: &str = ".mim";
 const DEFAULT_MODELS_JSON: &str = include_str!("../resources/ai-models.json");
 
@@ -134,23 +138,32 @@ pub fn ensure_config_dir() -> Result<PathBuf, String> {
 
 pub fn load_registry() -> Result<ModelRegistry, String> {
     let dir = ensure_config_dir()?;
-    let path = dir.join("models.json");
-    if !path.exists() {
-        let registry = default_registry();
-        let content = serde_json::to_string_pretty(&registry)
-            .map_err(|err| format!("Could not serialize default models: {}", err))?;
-        fs::write(&path, content)
-            .map_err(|err| format!("Could not write {}: {}", path.display(), err))?;
-        return Ok(registry);
-    }
+    load_registry_at(&dir.join("models.json"))
+}
 
-    let content = fs::read_to_string(&path)
-        .map_err(|err| format!("Could not read {}: {}", path.display(), err))?;
-    let mut registry: ModelRegistry = serde_json::from_str(&content)
-        .map_err(|err| format!("Invalid {}: {}", path.display(), err))?;
-
+fn load_registry_at(path: &Path) -> Result<ModelRegistry, String> {
     let defaults =
         parse_default_registry().map_err(|err| format!("Invalid embedded models: {}", err))?;
+    let mut registry = match load_json_optional_quarantining::<ModelRegistry>(path)
+        .map_err(|error| error.to_string())?
+    {
+        QuarantinedLoad::Loaded(registry) => registry,
+        QuarantinedLoad::Missing => {
+            write_json_atomic(path, &defaults).map_err(|error| error.to_string())?;
+            return Ok(defaults);
+        }
+        QuarantinedLoad::Quarantined {
+            path: quarantined,
+            reason,
+        } => {
+            eprintln!(
+                "[ai_models] Invalid model registry moved to {}: {reason}",
+                quarantined.display()
+            );
+            write_json_atomic(path, &defaults).map_err(|error| error.to_string())?;
+            return Ok(defaults);
+        }
+    };
 
     let mut changed = migrate_registry(&mut registry, &defaults);
     if registry.version < defaults.version {
@@ -164,10 +177,7 @@ pub fn load_registry() -> Result<ModelRegistry, String> {
     registry.legacy_ids = defaults.legacy_ids.clone();
 
     if changed {
-        let updated = serde_json::to_string_pretty(&registry)
-            .map_err(|err| format!("Could not serialize migrated models: {}", err))?;
-        fs::write(&path, updated)
-            .map_err(|err| format!("Could not migrate {}: {}", path.display(), err))?;
+        write_json_atomic(path, &registry).map_err(|error| error.to_string())?;
     }
 
     Ok(registry)
@@ -270,10 +280,49 @@ pub fn provider_hosts(registry: &ModelRegistry) -> Vec<String> {
         .collect()
 }
 
-fn default_registry() -> ModelRegistry {
-    parse_default_registry().expect("embedded AI model registry must be valid JSON")
-}
-
 fn parse_default_registry() -> Result<ModelRegistry, serde_json::Error> {
     serde_json::from_str(DEFAULT_MODELS_JSON)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn missing_registry_materializes_atomically() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("nested").join("models.json");
+
+        let loaded = load_registry_at(&path).unwrap();
+        let persisted: ModelRegistry =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+
+        assert_eq!(persisted.version, loaded.version);
+        assert_eq!(persisted.models.len(), loaded.models.len());
+        assert!(std::fs::read_to_string(path).unwrap().ends_with('\n'));
+    }
+
+    #[test]
+    fn corrupt_registry_is_quarantined_before_defaults_recover() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("models.json");
+        let corrupt = b"{\"models\":";
+        std::fs::write(&path, corrupt).unwrap();
+
+        let loaded = load_registry_at(&path).unwrap();
+
+        assert!(!loaded.models.is_empty());
+        let quarantined = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|candidate| {
+                candidate
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().contains(".corrupt-"))
+            })
+            .unwrap();
+        assert_eq!(std::fs::read(quarantined).unwrap(), corrupt);
+        assert!(serde_json::from_slice::<ModelRegistry>(&std::fs::read(path).unwrap()).is_ok());
+    }
 }

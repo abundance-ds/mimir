@@ -20,17 +20,24 @@ export function createAutoSaveController({
   function schedule() {
     clear()
     if (!isAutoSaveEnabled()) return
-    if (!getFile()?.path) return
+    const scheduledFile = getFile()
+    if (!scheduledFile?.path) return
 
     timer = setTimeoutFn(async () => {
       timer = null
-      flush({ bridge: 'flush' })
+      // Switching tabs flushes the old editor before changing active identity.
+      // If the scheduled file is still active, synchronize the last pending
+      // CodeMirror transaction here as well.
+      if (getFile() === scheduledFile) flush({ bridge: 'flush' })
 
-      const file = getFile()
-      if (!isAutoSaveEnabled() || !file?.path || !file.dirty) return
+      if (
+        !isAutoSaveEnabled()
+        || !scheduledFile.path
+        || !scheduledFile.dirty
+      ) return
 
       try {
-        await save({ source: 'auto' })
+        await save({ source: 'auto', file: scheduledFile })
       } catch (error) {
         onError(error)
       }

@@ -55,7 +55,10 @@ export function useKeyboardShortcuts({
     }
     if (mod && e.key === '/') {
       e.preventDefault()
-      settings.editorToolbarMode = settings.editorToolbarMode === 'none' ? 'top' : 'none'
+      settings.set(
+        'editorToolbarMode',
+        settings.editorToolbarMode === 'none' ? 'top' : 'none',
+      )
     }
     if (mod && e.shiftKey && key === 'b') {
       e.preventDefault()
@@ -86,6 +89,7 @@ export function useKeyboardShortcuts({
       onFormat('blockquote')
     }
     if (mod && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      if (!editorHasFocus()) return
       e.preventDefault()
       const len = files.openFiles.length
       if (len > 1) {
@@ -119,6 +123,7 @@ export function useKeyboardShortcuts({
       onNewFile()
     }
     if (mod && !e.shiftKey && key === 'w') {
+      if (!editorHasFocus()) return
       e.preventDefault()
       onCloseTab()
     }

@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { basename } from '../../shared/utils/path.js'
 
 export function useTabManagement({
   fileManager,
@@ -9,6 +10,9 @@ export function useTabManagement({
   activeFileIndex,
   flushEditorContent,
   saveCurrentFile,
+  requestWindowClose,
+  embedded = false,
+  onEmpty,
 }) {
   const closeConfirmFile = ref(null)
   let closeConfirmResolve = null
@@ -17,7 +21,7 @@ export function useTabManagement({
   const closeConfirmFileName = computed(() => {
     const f = closeConfirmFile.value
     if (!f) return ''
-    return f.path ? f.path.split('/').pop() : 'Untitled'
+    return f.path ? basename(f.path) : 'Untitled'
   })
 
   function onSelectTab(idx) {
@@ -54,25 +58,40 @@ export function useTabManagement({
     const file = fileManager.openFiles[idx]
     if (!file) return
 
-    if (file.dirty) {
-      const action = await showCloseConfirmation(file)
-      if (action === 'cancel') return
-      if (action === 'save') {
-        if (idx !== activeFileIndex.value) fileManager.setActiveTab(idx)
-        try {
-          const didSave = await saveCurrentFile({ source: 'manual' })
-          if (!didSave) return
-        } catch {
-          return
-        }
-      }
-    }
+    const decision = await confirmFileClose(file)
+    if (decision === 'cancel') return false
 
     if (fileManager.openFiles.length === 1) {
-      closeEditorWindow()
+      if (!embedded) {
+        return await requestWindowClose?.({
+          confirmedFiles: [file],
+          discardedFiles: decision === 'discard' ? [file] : [],
+        })
+          ?? await closeEditorWindow()
+      }
+      fileManager.closeFile(idx, { ensureOne: false })
+      onEmpty?.()
     } else {
       fileManager.closeFile(idx)
     }
+    return true
+  }
+
+  async function confirmFileClose(file) {
+    if (!file?.dirty) return 'clean'
+    const action = await showCloseConfirmation(file)
+    if (action === 'cancel') return 'cancel'
+    if (action === 'save') {
+      const index = fileManager.openFiles.indexOf(file)
+      if (index < 0) return 'cancel'
+      if (index !== activeFileIndex.value) fileManager.setActiveTab(index)
+      try {
+        return await saveCurrentFile({ source: 'manual' }) ? 'saved' : 'cancel'
+      } catch {
+        return 'cancel'
+      }
+    }
+    return 'discard'
   }
 
   function showCloseConfirmation(file) {
@@ -93,7 +112,7 @@ export function useTabManagement({
   async function closeEditorWindow() {
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      getCurrentWindow().close()
+      await getCurrentWindow().close()
     } catch {
       window.close()
     }
@@ -115,6 +134,7 @@ export function useTabManagement({
     arrivedTabIndex,
     onSelectTab,
     onCloseTab,
+    confirmFileClose,
     onCloseConfirm,
     onNewFile,
     onReorderTab,

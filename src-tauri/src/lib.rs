@@ -23,15 +23,18 @@ mod file_open;
 mod file_search;
 mod git;
 mod launchers;
+mod local_settings;
 pub mod mimx;
 mod persistence;
 pub mod routine_runtime;
 pub mod routines;
+mod session;
 mod shell_exec;
 pub mod tool_bridge;
 pub mod tool_registry;
 mod tool_runtime;
 mod tool_server;
+mod workspace_files;
 
 #[cfg(target_os = "macos")]
 fn enable_macos_spellcheck() {
@@ -39,54 +42,6 @@ fn enable_macos_spellcheck() {
     let defaults = NSUserDefaults::standardUserDefaults();
     let key = NSString::from_str("WebContinuousSpellCheckingEnabled");
     defaults.setBool_forKey(true, &key);
-}
-
-#[cfg(target_os = "macos")]
-fn ensure_traffic_lights_visible(ns_ptr_val: usize) {
-    use objc2_app_kit::{NSWindow, NSWindowButton};
-
-    let ns_window: &NSWindow = unsafe { &*(ns_ptr_val as *const NSWindow) };
-
-    let close = ns_window.standardWindowButton(NSWindowButton::CloseButton);
-    log::debug!("[traffic-lights] close button exists: {}", close.is_some());
-
-    if let Some(close) = close {
-        let frame = close.frame();
-        log::debug!(
-            "[traffic-lights] close btn frame: x={} y={} w={} h={}",
-            frame.origin.x,
-            frame.origin.y,
-            frame.size.width,
-            frame.size.height
-        );
-        log::debug!(
-            "[traffic-lights] close btn hidden={} alpha={}",
-            close.isHidden(),
-            close.alphaValue()
-        );
-
-        unsafe {
-            let mut depth = 0;
-            let mut view_opt = close.superview();
-            while let Some(view) = view_opt {
-                let vf = view.frame();
-                log::debug!(
-                    "[traffic-lights]   ancestor[{}]: hidden={} alpha={:.2} frame={}x{} at ({},{})",
-                    depth,
-                    view.isHidden(),
-                    view.alphaValue(),
-                    vf.size.width,
-                    vf.size.height,
-                    vf.origin.x,
-                    vf.origin.y
-                );
-                view.setHidden(false);
-                view.setAlphaValue(1.0);
-                view_opt = view.superview();
-                depth += 1;
-            }
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -150,11 +105,8 @@ fn read_text_file(path: String) -> Result<ReadTextResponse, String> {
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     let path_buf = PathBuf::from(&path);
-    if let Some(parent) = path_buf.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Could not create {}: {}", parent.display(), err))?;
-    }
-    fs::write(&path_buf, content).map_err(|err| format!("Could not write {}: {}", path, err))
+    persistence::write_bytes_atomic(&path_buf, content.as_bytes())
+        .map_err(|err| format!("Could not write {}: {}", path, err))
 }
 
 #[tauri::command]
@@ -169,11 +121,8 @@ fn write_binary_file(path: String, data_base64: String) -> Result<(), String> {
         .decode(&data_base64)
         .map_err(|e| format!("Invalid base64: {}", e))?;
     let path_buf = PathBuf::from(&path);
-    if let Some(parent) = path_buf.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Could not create {}: {}", parent.display(), err))?;
-    }
-    fs::write(&path_buf, bytes).map_err(|err| format!("Could not write {}: {}", path, err))
+    persistence::write_bytes_atomic(&path_buf, &bytes)
+        .map_err(|err| format!("Could not write {}: {}", path, err))
 }
 
 #[tauri::command]
@@ -822,6 +771,11 @@ fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn app_quit_confirmed(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 pub fn run() {
     let tool_registry = tool_registry::ToolRegistry::default();
     let tool_runtime = tool_runtime::ToolRuntime::new(tool_registry.clone());
@@ -837,8 +791,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("app", |_app, request| apps::serve_app_file(request))
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let paths = file_open::filter_file_args(&args);
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let paths = file_open::resolve_file_args(&args, std::path::Path::new(&cwd));
             file_open::do_open_files_in_editor(app, paths);
         }))
         .manage(ProposalState::default())
@@ -865,10 +819,12 @@ pub fn run() {
                 .initialize(app.handle())
                 .map_err(std::io::Error::other)?;
 
-            let cli_files = file_open::filter_file_args(&std::env::args().collect::<Vec<_>>());
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let cli_files =
+                file_open::resolve_file_args(&std::env::args().collect::<Vec<_>>(), &cwd);
             if !cli_files.is_empty() {
                 let state = app.state::<file_open::PendingFilePaths>();
-                *state.0.lock().unwrap() = cli_files;
+                state.0.lock().unwrap().extend(cli_files);
             }
 
             Ok(())
@@ -881,33 +837,13 @@ pub fn run() {
                     app.state::<tool_runtime::ToolRuntime>()
                         .disconnect_window(&window_id)
                         .await;
-                });
-            }
-
-            #[cfg(target_os = "macos")]
-            if let tauri::WindowEvent::Focused(false) = event {
-                log::debug!(
-                    "[traffic-lights] window='{}' lost focus, scheduling fix in 200ms",
-                    window.label()
-                );
-                let ns_ptr = window.ns_window().ok().map(|p| p as usize);
-                let handle = window.app_handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    log::debug!(
-                        "[traffic-lights] 200ms elapsed, running fix (ptr={})",
-                        ns_ptr.is_some()
-                    );
-                    if let Some(ptr) = ns_ptr {
-                        let _ = handle.run_on_main_thread(move || {
-                            ensure_traffic_lights_visible(ptr);
-                        });
+                    if window_id == "main" {
+                        tool_server::shutdown_all(
+                            app.state::<tool_server::ToolServerState>().inner(),
+                        )
+                        .await;
                     }
                 });
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = (window, event);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -919,6 +855,11 @@ pub fn run() {
             ai_proxy::ai_proxy_stream,
             ai_proxy::ai_abort,
             ai_proxy::ai_cleanup,
+            session::session_load,
+            session::session_save,
+            local_settings::settings_load,
+            local_settings::settings_save,
+            local_settings::settings_save_editor,
             read_text_file,
             read_binary_file,
             write_text_file,
@@ -937,6 +878,7 @@ pub fn run() {
             proposal_respond,
             notify_file_updated,
             settings_changed,
+            app_quit_confirmed,
             spell_suggest,
             shell_exec::shell_exec,
             activity_commands::activity_list,
@@ -957,6 +899,11 @@ pub fn run() {
             routine_runtime::routine_catalog,
             routine_runtime::routine_reload,
             routine_runtime::routine_run_now,
+            routine_runtime::routine_create,
+            routine_runtime::routine_update,
+            routine_runtime::routine_duplicate,
+            routine_runtime::routine_trash,
+            routine_runtime::routine_reveal,
             file_open::take_pending_files,
             file_open::open_files_in_editor,
             file_index_commands::file_index_open,
@@ -966,7 +913,19 @@ pub fn run() {
             file_index_commands::file_index_begin_search,
             file_index_commands::file_index_cancel_search,
             file_index_commands::file_index_search,
+            workspace_files::workspace_file_list_directory,
+            workspace_files::workspace_file_create,
+            workspace_files::workspace_file_rename,
+            workspace_files::workspace_file_duplicate,
+            workspace_files::workspace_file_trash,
+            workspace_files::workspace_file_open_native,
+            workspace_files::workspace_file_reveal,
             apps::app_catalog,
+            apps::app_reload,
+            apps::app_create,
+            apps::app_duplicate,
+            apps::app_update_title,
+            apps::app_trash,
             apps::app_resolve,
             apps::app_open_window,
             apps::app_data_load,
@@ -992,28 +951,47 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mim")
-        .run(|app_handle, event| {
-            if matches!(
-                &event,
-                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-            ) {
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
+                if code.is_none() {
+                    if let Some(main) = app_handle.get_webview_window("main") {
+                        api.prevent_exit();
+                        let _ = main.emit("mim://quit-requested", ());
+                        let _ = main.set_focus();
+                    }
+                }
+            }
+            tauri::RunEvent::Exit => {
                 app_handle
                     .state::<routine_runtime::RoutineRuntime>()
                     .stop_background();
+                let supervisor = app_handle.state::<activities::ActivitySupervisor>();
+                match supervisor.shutdown(std::time::Duration::from_millis(750)) {
+                    Ok(report) if report.remaining > 0 => log::warn!(
+                        "{} of {} interrupted activities had not settled before exit",
+                        report.remaining,
+                        report.interrupted
+                    ),
+                    Err(error) => {
+                        log::error!("Could not flush activity persistence before exit: {error}")
+                    }
+                    _ => {}
+                }
             }
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = event {
-                let paths: Vec<String> = urls
-                    .into_iter()
-                    .filter_map(|u| {
-                        if u.scheme() == "file" {
-                            Some(u.path().to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+            tauri::RunEvent::Opened { urls } => {
+                let paths = file_open::file_paths_from_urls(&urls);
                 file_open::do_open_files_in_editor(app_handle, paths);
             }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                if let Some(main) = app_handle.get_webview_window("main") {
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                } else if let Err(error) = create_main_window(app_handle) {
+                    log::error!("Could not recreate the main window: {error}");
+                }
+            }
+            _ => {}
         });
 }

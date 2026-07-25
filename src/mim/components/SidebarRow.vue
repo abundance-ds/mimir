@@ -15,7 +15,10 @@
     <button
       type="button"
       class="flex h-full min-w-0 flex-1 items-center text-left"
+      :aria-label="collapsed ? label : undefined"
       :aria-current="active ? 'page' : undefined"
+      :aria-disabled="$attrs['aria-disabled']"
+      :title="$attrs.title"
     >
       <span class="ml-3 grid size-7 shrink-0 place-items-center">
         <slot />

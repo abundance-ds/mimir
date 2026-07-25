@@ -31,7 +31,7 @@ editor's inline agent and ghost completion.
 The workbench is a three-pane Sidebar / Activity / Editor layout. Every pane
 resizes, every pane can become a mounted rail, and at least one content pane
 remains expanded. The Sidebar's collapsed rail preserves launcher icons,
-Activity monograms, ordering, and status.
+Activity source icons, ordering, and status.
 
 The Sidebar owns launch and navigation. The Activity pane owns execution and
 local instruments. The Editor owns authored files, inline model interaction,
@@ -46,8 +46,11 @@ reviewable diffs, and comments.
   providers.
 - **Files:** native metadata index ordered by modification time, fast path
   filtering, bounded content search, and Cmd/Ctrl+P.
-- **Apps:** built-in Changes and Scratch plus local TOML definitions that can
-  embed UI, launch terminals/processes/windows, call tools, or use Rust helpers.
+- **Apps:** built-in Changes and Scratch plus a searchable local instrument
+  manager for TOML definitions that embed UI, launch
+  terminals/processes/windows, call tools, or use Rust helpers. Safe definition
+  creation/duplication/title/Trash operations are shared with MCP; package
+  management, trust, permission, and team ceremony are intentionally absent.
 - **Routines:** TOML cron schedules that resolve launcher presets and create
   ordinary durable agent Activities.
 - **Editor:** CodeMirror Markdown, tabs, formatting, autosave, live in-editor

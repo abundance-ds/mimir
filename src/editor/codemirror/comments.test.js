@@ -132,4 +132,57 @@ describe('commentsExtension inline widget', () => {
     expect(view.state.doc.toString()).toContain('status="resolved"')
     view.destroy()
   })
+
+  it('labels the prompt handoff as Agent and emits the terminal action', async () => {
+    const actions = []
+    const { parent, view } = mountCommentEditor({
+      doc: '<comment id="c1" author="user" text="Clarify">World</comment>',
+      onCommentAction: action => {
+        actions.push(action)
+        return { ok: true }
+      },
+    })
+
+    const button = buttonByAction(parent, 'terminal-prompt')
+    expect(button.textContent).toBe('Agent')
+    expect(button.getAttribute('aria-label')).toContain('active agent terminal')
+    button.click()
+    await Promise.resolve()
+    expect(actions).toEqual([{ type: 'terminal-prompt', id: 'c1', text: '' }])
+    view.destroy()
+  })
+
+  it('edits and deletes replies through explicit structured actions', async () => {
+    const actions = []
+    const { parent, view } = mountCommentEditor({
+      doc: '<comment id="c1" author="user" text="Clarify">World<reply id="r1" author="agent" text="Old"/></comment>',
+      onCommentAction: action => {
+        actions.push(action)
+        return { ok: true }
+      },
+    })
+
+    buttonByAction(parent, 'edit-reply').click()
+    const input = parent.getElementsByClassName('cm-comment-reply-editor')[0]
+      .getElementsByTagName('textarea')[0]
+    writeInput(input, 'Revised')
+    buttonByAction(parent, 'update-reply').click()
+    await Promise.resolve()
+    expect(actions[0]).toEqual({
+      type: 'update-reply',
+      id: 'c1',
+      replyId: 'r1',
+      text: 'Revised',
+    })
+
+    buttonByAction(parent, 'delete-reply').click()
+    await Promise.resolve()
+    expect(actions[1]).toEqual({
+      type: 'delete-reply',
+      id: 'c1',
+      replyId: 'r1',
+      text: '',
+    })
+    view.destroy()
+  })
 })

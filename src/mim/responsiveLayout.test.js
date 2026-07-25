@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkbenchStore } from '../stores/workbench.js'
-import { applyResponsiveZone, responsiveZoneFor } from './responsiveLayout.js'
+import {
+  applyResponsiveZone,
+  CONTENT_PANE_MIN_WIDTH,
+  fittedEditorWidth,
+  responsiveZoneFor,
+} from './responsiveLayout.js'
 
 describe('responsive workbench layout', () => {
   beforeEach(() => {
@@ -31,6 +36,22 @@ describe('responsive workbench layout', () => {
     applyResponsiveZone(workbench, 'focus', { preferEditor: false, desktopLayout: desktop })
     expect(workbench.paneLayout.activity.state).toBe('expanded')
     expect(workbench.paneLayout.editor.state).toBe('rail')
+  })
+
+  it.each([
+    [760, 372],
+    [800, 412],
+    [900, 512],
+  ])('fits a large remembered Editor at %ipx without clipping content panes', (viewport, expected) => {
+    const editor = fittedEditorWidth(viewport, 900, 52)
+
+    expect(editor).toBe(expected)
+    expect(52 + CONTENT_PANE_MIN_WIDTH + editor).toBe(viewport)
+  })
+
+  it('clamps a large persisted Editor width at desktop size without rewriting the preference', () => {
+    expect(fittedEditorWidth(1280, 900, 240)).toBe(704)
+    expect(fittedEditorWidth(1600, 900, 240)).toBe(900)
   })
 
   it('restores the user desktop layout after leaving a narrow window', () => {

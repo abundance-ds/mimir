@@ -6,10 +6,13 @@ use crate::{
     launchers::{
         self, AgentDefinition, DetectedAgent, LauncherKind, LauncherPreset, ResolvedLaunch,
     },
-    persistence::{load_json_optional_quarantining, write_json_atomic, QuarantinedLoad},
+    persistence::{
+        load_json_optional_quarantining, write_bytes_atomic, write_json_atomic, QuarantinedLoad,
+    },
     routines::{
-        load_catalog, reconcile_tick, RoutineCatalog, RoutineDefinition, RoutineDiagnostic,
-        RoutineOverlap, RoutinePlannerState, RoutineSkip, RoutineTick,
+        load_catalog, reconcile_tick, source_revision, validate_definition, RoutineCatalog,
+        RoutineDefinition, RoutineDiagnostic, RoutineOverlap, RoutinePlannerState, RoutineSkip,
+        RoutineSource, RoutineTick,
     },
 };
 use chrono::{DateTime, Utc};
@@ -18,7 +21,9 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
+    io::Write,
     path::{Component, Path, PathBuf},
+    process::Command,
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc, Arc, Mutex, MutexGuard,
@@ -75,6 +80,8 @@ pub struct RoutineRuntimeEntry {
     pub running_activity_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    pub path: String,
+    pub source_revision: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -284,6 +291,108 @@ impl RoutineRuntime {
         self.reload_at(Utc::now())
     }
 
+    pub fn create_definition(
+        &self,
+        definition: RoutineDefinition,
+    ) -> Result<RoutineRuntimeCatalog, String> {
+        validate_definition(&definition).map_err(definition_error)?;
+        self.refresh_if_changed()?;
+        let path = self
+            .inner
+            .config
+            .routines_dir
+            .join(format!("{}.toml", definition.id));
+        {
+            let state = lock(&self.inner.state);
+            if state.catalog.sources.contains_key(&definition.id) || path.exists() {
+                return Err(format!("Routine '{}' already exists.", definition.id));
+            }
+        }
+        write_new_definition(&path, &definition)?;
+        self.reload()
+    }
+
+    pub fn update_definition(
+        &self,
+        routine_id: &str,
+        expected_revision: &str,
+        definition: RoutineDefinition,
+    ) -> Result<RoutineRuntimeCatalog, String> {
+        if definition.id != routine_id {
+            return Err(
+                "A routine id cannot be changed in place. Duplicate it with a new id instead."
+                    .into(),
+            );
+        }
+        validate_definition(&definition).map_err(definition_error)?;
+        let source = self.checked_source(routine_id, expected_revision)?;
+        write_definition(Path::new(&source.path), &definition)?;
+        self.reload()
+    }
+
+    pub fn duplicate_definition(
+        &self,
+        routine_id: &str,
+        expected_revision: &str,
+        new_id: String,
+        title: Option<String>,
+    ) -> Result<RoutineRuntimeCatalog, String> {
+        self.checked_source(routine_id, expected_revision)?;
+        let mut definition = {
+            let state = lock(&self.inner.state);
+            state
+                .catalog
+                .routines
+                .iter()
+                .find(|routine| routine.id == routine_id)
+                .cloned()
+                .ok_or_else(|| format!("Routine '{routine_id}' was not found."))?
+        };
+        // Copies are deliberately paused: duplicating a scheduled definition must
+        // never create an accidental second automatic fire.
+        definition.id = new_id;
+        definition.title = title
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("{} copy", definition.title));
+        definition.enabled = false;
+        self.create_definition(definition)
+    }
+
+    pub fn trash_definition(
+        &self,
+        routine_id: &str,
+        expected_revision: &str,
+    ) -> Result<RoutineRuntimeCatalog, String> {
+        self.trash_definition_with(routine_id, expected_revision, |path| {
+            trash::delete(path).map_err(|error| {
+                format!(
+                    "Could not move routine definition {} to the Trash: {error}",
+                    path.display()
+                )
+            })
+        })
+    }
+
+    fn trash_definition_with(
+        &self,
+        routine_id: &str,
+        expected_revision: &str,
+        move_to_trash: impl FnOnce(&Path) -> Result<(), String>,
+    ) -> Result<RoutineRuntimeCatalog, String> {
+        let source = self.checked_source(routine_id, expected_revision)?;
+        move_to_trash(Path::new(&source.path))?;
+        self.reload()
+    }
+
+    pub fn reveal(&self, routine_id: Option<&str>) -> Result<(), String> {
+        self.refresh_if_changed()?;
+        let target = match routine_id {
+            Some(routine_id) => PathBuf::from(self.source_for(routine_id)?.path),
+            None => self.inner.config.routines_dir.clone(),
+        };
+        reveal_path(&target, routine_id.is_some())
+    }
+
     pub(crate) fn reload_at(
         &self,
         observed_at: DateTime<Utc>,
@@ -431,6 +540,39 @@ impl RoutineRuntime {
             self.reload_inputs()?;
         }
         Ok(())
+    }
+
+    fn source_for(&self, routine_id: &str) -> Result<RoutineSource, String> {
+        lock(&self.inner.state)
+            .catalog
+            .sources
+            .get(routine_id)
+            .cloned()
+            .ok_or_else(|| format!("Routine '{routine_id}' was not found."))
+    }
+
+    fn checked_source(
+        &self,
+        routine_id: &str,
+        expected_revision: &str,
+    ) -> Result<RoutineSource, String> {
+        self.refresh_if_changed()?;
+        let source = self.source_for(routine_id)?;
+        if expected_revision.trim().is_empty() {
+            return Err(format!(
+                "Routine '{routine_id}' is missing its source revision. Reload before changing it."
+            ));
+        }
+        let contents = fs::read(&source.path).map_err(|error| {
+            format!("Could not read routine definition {}: {error}", source.path)
+        })?;
+        let current_revision = source_revision(&contents);
+        if current_revision != expected_revision {
+            return Err(format!(
+                "Routine '{routine_id}' changed on disk. Reload it before saving your changes."
+            ));
+        }
+        Ok(source)
     }
 
     fn reload_inputs(&self) -> Result<(), String> {
@@ -612,12 +754,17 @@ impl RoutineRuntime {
                 .cloned()
                 .map(|definition| {
                     let routine_id = definition.id.clone();
+                    let source = state.catalog.sources.get(&routine_id);
                     RoutineRuntimeEntry {
                         available: state.resolved.contains_key(&routine_id),
                         next_fire: state.planner.next_fires.get(&routine_id).cloned(),
                         diagnostic: state.unavailable.get(&routine_id).cloned(),
                         running_activity_ids: running.get(&routine_id).cloned().unwrap_or_default(),
                         last_error: state.last_errors.get(&routine_id).cloned(),
+                        path: source.map(|source| source.path.clone()).unwrap_or_default(),
+                        source_revision: source
+                            .map(|source| source.revision.clone())
+                            .unwrap_or_default(),
                         definition,
                     }
                 })
@@ -663,6 +810,117 @@ impl RoutineRuntime {
     }
 }
 
+fn definition_error((field, message): (String, String)) -> String {
+    format!("Invalid routine {field}: {message}")
+}
+
+fn write_definition(path: &Path, definition: &RoutineDefinition) -> Result<(), String> {
+    let contents = definition_contents(definition)?;
+    write_bytes_atomic(path, &contents).map_err(|error| {
+        format!(
+            "Could not save routine definition {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn write_new_definition(path: &Path, definition: &RoutineDefinition) -> Result<(), String> {
+    let contents = definition_contents(definition)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The routines directory could not be resolved.".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "Could not create routines directory {}: {error}",
+            parent.display()
+        )
+    })?;
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "The routine definition filename is not valid UTF-8.".to_string())?;
+    let pending = parent.join(format!(".{name}.new-{}", Uuid::new_v4()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&pending)
+            .map_err(|error| format!("Could not stage routine definition: {error}"))?;
+        file.write_all(&contents)
+            .map_err(|error| format!("Could not stage routine definition: {error}"))?;
+        file.flush()
+            .map_err(|error| format!("Could not flush routine definition: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("Could not sync routine definition: {error}"))?;
+        fs::hard_link(&pending, path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("Routine '{}' already exists.", definition.id)
+            } else {
+                format!(
+                    "Could not publish routine definition {}: {error}",
+                    path.display()
+                )
+            }
+        })?;
+        #[cfg(unix)]
+        fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                format!(
+                    "Could not sync routines directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&pending);
+    result
+}
+
+fn definition_contents(definition: &RoutineDefinition) -> Result<Vec<u8>, String> {
+    let mut contents = toml::to_string_pretty(definition)
+        .map_err(|error| format!("Could not serialize routine '{}': {error}", definition.id))?
+        .into_bytes();
+    contents.push(b'\n');
+    Ok(contents)
+}
+
+fn reveal_path(target: &Path, select_file: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        if select_file {
+            command.arg("-R");
+        }
+        command.arg(target);
+        command
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(if select_file {
+            target.parent().unwrap_or(target)
+        } else {
+            target
+        });
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer");
+        if select_file {
+            command.arg("/select,");
+        }
+        command.arg(target);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not reveal {}: {error}", target.display()))
+}
+
 fn unavailable_message(state: &RuntimeState, routine_id: &str) -> String {
     if let Some(message) = state.unavailable.get(routine_id) {
         return format!("Routine '{routine_id}' is unavailable: {message}");
@@ -678,16 +936,20 @@ fn is_live_routine(record: &ActivityRecord, routine_id: &str) -> bool {
             .is_some_and(|session| session.exit.is_none())
 }
 
-fn load_and_resolve(
-    config: &RoutineRuntimeConfig,
-) -> Result<
-    (
-        RoutineCatalog,
-        BTreeMap<String, ResolvedRoutine>,
-        BTreeMap<String, String>,
-    ),
+type ResolvedCatalog = (
+    RoutineCatalog,
+    BTreeMap<String, ResolvedRoutine>,
+    BTreeMap<String, String>,
+);
+
+type ConsistentInputs = (
+    RoutineCatalog,
+    BTreeMap<String, ResolvedRoutine>,
+    BTreeMap<String, String>,
     String,
-> {
+);
+
+fn load_and_resolve(config: &RoutineRuntimeConfig) -> Result<ResolvedCatalog, String> {
     let mut catalog = load_catalog(&config.routines_dir);
     let presets = match launchers::load_config(&config.launcher_config_path) {
         Ok(response) => {
@@ -735,17 +997,7 @@ fn load_and_resolve(
     Ok((catalog, resolved, unavailable))
 }
 
-fn load_consistent_inputs(
-    config: &RoutineRuntimeConfig,
-) -> Result<
-    (
-        RoutineCatalog,
-        BTreeMap<String, ResolvedRoutine>,
-        BTreeMap<String, String>,
-        String,
-    ),
-    String,
-> {
+fn load_consistent_inputs(config: &RoutineRuntimeConfig) -> Result<ConsistentInputs, String> {
     let mut recovery_diagnostics = Vec::new();
     for _ in 0..3 {
         let before = input_fingerprint(config)?;
@@ -1002,6 +1254,70 @@ pub async fn routine_run_now(
     tauri::async_runtime::spawn_blocking(move || runtime.run_now(&routine_id))
         .await
         .map_err(|error| format!("Routine launch task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn routine_create(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    definition: RoutineDefinition,
+) -> Result<RoutineRuntimeCatalog, String> {
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.create_definition(definition))
+        .await
+        .map_err(|error| format!("Routine creation task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn routine_update(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    routine_id: String,
+    expected_revision: String,
+    definition: RoutineDefinition,
+) -> Result<RoutineRuntimeCatalog, String> {
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime.update_definition(&routine_id, &expected_revision, definition)
+    })
+    .await
+    .map_err(|error| format!("Routine update task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn routine_duplicate(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    routine_id: String,
+    expected_revision: String,
+    new_id: String,
+    title: Option<String>,
+) -> Result<RoutineRuntimeCatalog, String> {
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime.duplicate_definition(&routine_id, &expected_revision, new_id, title)
+    })
+    .await
+    .map_err(|error| format!("Routine duplication task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn routine_trash(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    routine_id: String,
+    expected_revision: String,
+) -> Result<RoutineRuntimeCatalog, String> {
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime.trash_definition(&routine_id, &expected_revision)
+    })
+    .await
+    .map_err(|error| format!("Routine trash task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn routine_reveal(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    routine_id: Option<String>,
+) -> Result<(), String> {
+    runtime.reveal(routine_id.as_deref())
 }
 
 #[cfg(test)]
@@ -1312,6 +1628,91 @@ mod tests {
         assert_eq!(catalog.routines[0].definition.title, edited.title);
         assert_eq!(catalog.routines[0].definition.prompt, edited.prompt);
         assert!(catalog.routines[0].next_fire.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_backed_crud_is_atomic_source_aware_and_duplicates_start_paused() {
+        let harness = Harness::new();
+        harness.write_presets(vec![harness.preset()]);
+        let runtime = harness.runtime();
+
+        let created = runtime.create_definition(harness.routine()).unwrap();
+        let created_entry = &created.routines[0];
+        assert!(Path::new(&created_entry.path).is_file());
+        assert!(!created_entry.source_revision.is_empty());
+        assert_eq!(
+            created_entry.source_revision,
+            source_revision(&fs::read(&created_entry.path).unwrap())
+        );
+
+        let mut edited = created_entry.definition.clone();
+        edited.title = "Sharper daily review".into();
+        let updated = runtime
+            .update_definition(
+                "daily-review",
+                &created_entry.source_revision,
+                edited.clone(),
+            )
+            .unwrap();
+        assert_eq!(updated.routines[0].definition.title, edited.title);
+        assert_ne!(
+            updated.routines[0].source_revision,
+            created_entry.source_revision
+        );
+
+        let duplicated = runtime
+            .duplicate_definition(
+                "daily-review",
+                &updated.routines[0].source_revision,
+                "daily-review-copy".into(),
+                Some("Daily review copy".into()),
+            )
+            .unwrap();
+        let copy = duplicated
+            .routines
+            .iter()
+            .find(|routine| routine.definition.id == "daily-review-copy")
+            .unwrap();
+        assert_eq!(copy.definition.title, "Daily review copy");
+        assert!(!copy.definition.enabled);
+        assert!(Path::new(&copy.path).is_file());
+
+        let copy_revision = copy.source_revision.clone();
+        let without_copy = runtime
+            .trash_definition_with("daily-review-copy", &copy_revision, |path| {
+                fs::remove_file(path).map_err(|error| error.to_string())
+            })
+            .unwrap();
+        assert!(without_copy
+            .routines
+            .iter()
+            .all(|routine| routine.definition.id != "daily-review-copy"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_definition_edits_are_rejected_without_overwriting_disk() {
+        let harness = Harness::new();
+        harness.write_presets(vec![harness.preset()]);
+        harness.write_routine(&harness.routine());
+        let runtime = harness.runtime();
+        let original = runtime.catalog().routines[0].clone();
+
+        let mut external = original.definition.clone();
+        external.title = "Edited outside Mim".into();
+        harness.write_routine(&external);
+
+        let mut stale_edit = original.definition.clone();
+        stale_edit.title = "Stale UI edit".into();
+        let error = runtime
+            .update_definition("daily-review", &original.source_revision, stale_edit)
+            .unwrap_err();
+
+        assert!(error.contains("changed on disk"));
+        let persisted: RoutineDefinition =
+            toml::from_str(&fs::read_to_string(&original.path).unwrap()).unwrap();
+        assert_eq!(persisted.title, "Edited outside Mim");
     }
 
     #[cfg(unix)]

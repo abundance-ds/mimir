@@ -148,4 +148,33 @@ describe('EmbeddedAppHost', () => {
     expect(unlisten).toHaveBeenCalled()
     expect(unregisterAppTools).toHaveBeenCalledWith('ledger', 'app:ledger')
   })
+
+  it('reconciles changed manifest tools and reloads the mounted frame without duplicate listeners', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const firstFrame = wrapper.get('iframe').element
+    const updatedTools = [{
+      name: 'forecast',
+      description: 'Forecast the total.',
+      inputSchema: { type: 'object', properties: { days: { type: 'number' } } },
+    }]
+
+    await wrapper.setProps({
+      app: { ...app, tools: updatedTools },
+      launch: { ...launch, url: 'about:blank?revision=2' },
+    })
+    await flushPromises()
+
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    expect(unregisterAppTools).toHaveBeenCalledWith('ledger', 'app:ledger')
+    expect(listenForAppTools).toHaveBeenCalledTimes(2)
+    expect(reconcileAppTools).toHaveBeenLastCalledWith({
+      appId: 'ledger',
+      instanceId: 'app:ledger',
+      tools: updatedTools,
+    })
+    expect(wrapper.get('iframe').element).not.toBe(firstFrame)
+    expect(wrapper.get('iframe').attributes('src')).toContain('revision=2')
+    wrapper.unmount()
+  })
 })

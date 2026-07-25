@@ -49,7 +49,7 @@ describe('auto-save controller', () => {
   })
 
   it('saves named dirty files after the pause delay', async () => {
-    const { controller, flush, save } = setup()
+    const { controller, flush, save, state } = setup()
 
     controller.schedule()
     await vi.advanceTimersByTimeAsync(999)
@@ -57,7 +57,7 @@ describe('auto-save controller', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(flush).toHaveBeenCalledWith({ bridge: 'flush' })
-    expect(save).toHaveBeenCalledWith({ source: 'auto' })
+    expect(save).toHaveBeenCalledWith({ source: 'auto', file: state.file })
   })
 
   it('debounces repeated edits', async () => {
@@ -77,7 +77,7 @@ describe('auto-save controller', () => {
     const { controller, save, state } = setup()
 
     controller.schedule()
-    state.file = { path: '/tmp/doc.md', dirty: false }
+    state.file.dirty = false
     await vi.advanceTimersByTimeAsync(1000)
 
     expect(save).not.toHaveBeenCalled()
@@ -92,5 +92,36 @@ describe('auto-save controller', () => {
     await vi.advanceTimersByTimeAsync(1000)
 
     expect(onError).toHaveBeenCalledWith(error)
+  })
+
+  it('keeps the save bound to the edited file when another tab becomes active', async () => {
+    const fileA = { id: 'a', path: '/tmp/a.md', dirty: true }
+    const fileB = { id: 'b', path: '/tmp/b.md', dirty: true }
+    const { controller, flush, save, state } = setup({ file: fileA })
+
+    controller.schedule()
+    state.file = fileB
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(flush).not.toHaveBeenCalled()
+    expect(save).toHaveBeenCalledWith({ source: 'auto', file: fileA })
+  })
+
+  it('retains stable file identity across tab reorder and ignores a later close cleanly', async () => {
+    const file = { id: 'stable', path: '/tmp/a.md', dirty: true }
+    const { controller, save, state } = setup({ file })
+
+    controller.schedule()
+    state.file = null
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(save).toHaveBeenCalledWith({ source: 'auto', file })
+
+    save.mockClear()
+    file.dirty = true
+    state.file = file
+    controller.schedule()
+    file.path = null
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(save).not.toHaveBeenCalled()
   })
 })

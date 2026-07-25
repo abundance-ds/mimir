@@ -72,6 +72,9 @@ function onContextMenu(e) {
 }
 
 defineExpose({
+  focus() {
+    view.value?.focus()
+  },
   getContent() {
     return view.value?.state.doc.toString() ?? ''
   },

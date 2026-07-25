@@ -6,15 +6,26 @@
         class="fixed inset-0 bg-black/30 z-[100] flex items-center justify-center"
         @click.self="$emit('close')"
       >
-        <div class="settings-dialog settings-card">
+        <div
+          ref="dialog"
+          class="settings-dialog settings-card outline-none"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-dialog-title"
+          tabindex="-1"
+          @keydown="onDialogKeydown"
+        >
           <!-- Sidebar nav -->
-          <nav class="settings-nav">
+          <nav ref="settingsNav" class="settings-nav" aria-label="Settings sections" @keydown="onNavKeydown">
             <div class="nav-header">Settings</div>
             <template v-for="(group, gi) in navGroups" :key="gi">
               <div v-if="gi > 0" class="nav-separator" />
               <button
                 v-for="item in group"
                 :key="item.id"
+                type="button"
+                :data-settings-section="item.id"
+                :aria-current="activeSection === item.id ? 'page' : undefined"
                 class="nav-item"
                 :class="activeSection === item.id ? 'nav-item-active' : ''"
                 @click="activeSection = item.id"
@@ -28,19 +39,30 @@
           <!-- Content -->
           <div class="settings-main">
             <div class="settings-header">
-              <span class="settings-title">{{ activeLabel }}</span>
+              <span id="settings-dialog-title" class="settings-title">{{ activeLabel }}</span>
               <button
+                type="button"
+                aria-label="Close settings"
                 class="settings-close"
                 @click="$emit('close')"
               >
                 <IconX :size="14" />
               </button>
             </div>
-            <div class="settings-body scrollbar-thin">
+            <div
+              class="settings-body scrollbar-thin"
+              :class="{ 'settings-body-apps': activeSection === 'apps' }"
+            >
               <AppearanceSection v-if="activeSection === 'appearance'" />
               <EditorSection v-else-if="activeSection === 'editor'" />
               <AISection v-else-if="activeSection === 'ai'" />
               <LaunchersSection v-else-if="activeSection === 'launchers'" />
+              <AppsSettingsSection
+                v-else-if="activeSection === 'apps'"
+                ref="appsSection"
+                @launch-app="$emit('launchApp', $event)"
+                @open-definition="$emit('openDefinition', $event)"
+              />
               <ShortcutsSection v-else-if="activeSection === 'shortcuts'" />
               <AboutSection v-else-if="activeSection === 'about'" />
             </div>
@@ -52,12 +74,13 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import './settings/settings-form.css'
 import AppearanceSection from './settings/AppearanceSection.vue'
 import EditorSection from './settings/EditorSection.vue'
 import AISection from './settings/AISection.vue'
 import LaunchersSection from './settings/LaunchersSection.vue'
+import AppsSettingsSection from './settings/AppsSettingsSection.vue'
 import ShortcutsSection from './settings/ShortcutsSection.vue'
 import AboutSection from './settings/AboutSection.vue'
 import {
@@ -68,13 +91,14 @@ import {
   IconKeyboard,
   IconInfoCircle,
   IconRocket,
+  IconApps,
 } from '@tabler/icons-vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   initialSection: { type: String, default: 'appearance' },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'launchApp', 'openDefinition'])
 
 const navGroups = [
   [
@@ -82,6 +106,7 @@ const navGroups = [
     { id: 'editor',     label: 'Editor',     icon: IconPencil },
     { id: 'ai',         label: 'Models',     icon: IconSparkles },
     { id: 'launchers',  label: 'Launchers',  icon: IconRocket },
+    { id: 'apps',       label: 'Apps',       icon: IconApps },
   ],
   [
     { id: 'shortcuts',  label: 'Shortcuts',  icon: IconKeyboard },
@@ -93,19 +118,33 @@ const navItems = navGroups.flat()
 
 const activeSection = ref(mapSection(props.initialSection))
 const activeLabel = computed(() => navItems.find(i => i.id === activeSection.value)?.label ?? '')
+const dialog = ref(null)
+const settingsNav = ref(null)
+const appsSection = ref(null)
+let previousFocus = null
 
-watch(() => props.open, (val) => {
-  if (val && props.initialSection) activeSection.value = mapSection(props.initialSection)
+watch(() => props.open, async (val) => {
+  if (val) {
+    previousFocus = document.activeElement
+    if (props.initialSection) activeSection.value = mapSection(props.initialSection)
+    await focusInitial()
+  } else {
+    restoreFocus()
+  }
 })
 
 watch(() => props.initialSection, (section) => {
-  if (props.open && section) activeSection.value = mapSection(section)
+  if (props.open && section) {
+    activeSection.value = mapSection(section)
+    void focusInitial()
+  }
 })
 
 function mapSection(section) {
   if (['appearance', 'general'].includes(section)) return 'appearance'
   if (['models', 'ai'].includes(section)) return 'ai'
   if (['launchers', 'agents'].includes(section)) return 'launchers'
+  if (['apps', 'applications'].includes(section)) return 'apps'
   if (['shortcuts'].includes(section)) return 'shortcuts'
   if (['about', 'info'].includes(section)) return 'about'
   if (['editor', 'writing'].includes(section)) return 'editor'
@@ -119,8 +158,79 @@ function onKeydown(e) {
   }
 }
 
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onKeydown))
+function onDialogKeydown(event) {
+  if (event.key !== 'Tab') return
+  const focusable = focusableElements()
+  if (!focusable.length) {
+    event.preventDefault()
+    dialog.value?.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable.at(-1)
+  if (event.shiftKey && (document.activeElement === first || !dialog.value?.contains(document.activeElement))) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function onNavKeydown(event) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  let index = navItems.findIndex(item => item.id === activeSection.value)
+  if (event.key === 'Home') index = 0
+  else if (event.key === 'End') index = navItems.length - 1
+  else {
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    index = (index + delta + navItems.length) % navItems.length
+  }
+  activeSection.value = navItems[index].id
+  nextTick(() => settingsNav.value
+    ?.querySelector(`[data-settings-section="${navItems[index].id}"]`)
+    ?.focus())
+}
+
+async function focusInitial() {
+  await nextTick()
+  if (!props.open) return
+  if (activeSection.value === 'apps' && appsSection.value?.focusInitial) {
+    appsSection.value.focusInitial()
+    return
+  }
+  const selected = settingsNav.value
+    ?.querySelector(`[data-settings-section="${activeSection.value}"]`)
+  ;(selected || dialog.value)?.focus()
+}
+
+function focusableElements() {
+  if (!dialog.value) return []
+  return Array.from(dialog.value.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+  )).filter(element => element.getAttribute('aria-hidden') !== 'true')
+}
+
+function restoreFocus() {
+  const target = previousFocus
+  previousFocus = null
+  if (target && target.isConnected && typeof target.focus === 'function') {
+    nextTick(() => target.focus())
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onKeydown)
+  if (props.open) {
+    previousFocus = document.activeElement
+    void focusInitial()
+  }
+})
+onUnmounted(() => {
+  document.removeEventListener('keydown', onKeydown)
+  restoreFocus()
+})
 </script>
 
 <style scoped>
@@ -247,5 +357,10 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   flex: 1;
   overflow-y: auto;
   padding: 24px 28px;
+}
+
+.settings-body-apps {
+  overflow: hidden;
+  padding: 0;
 }
 </style>

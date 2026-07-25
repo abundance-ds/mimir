@@ -1,7 +1,7 @@
 <template>
   <div class="relative h-full min-h-0 w-full min-w-0 overflow-hidden bg-chrome-high">
     <section
-      v-for="activity in activities"
+      v-for="activity in mountedActivities"
       :key="activity.id"
       :data-activity-surface="activity.id"
       class="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
@@ -46,7 +46,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   activities: { type: Array, default: () => [] },
@@ -58,4 +58,24 @@ defineEmits(['recover'])
 const activeActivity = computed(
   () => props.activities.find((activity) => activity.id === props.activeId) || null,
 )
+
+// Creating every xterm surface at startup scales linearly with Activity
+// history. Mount on first visit, then retain that surface so its selection,
+// viewport, and input state survive switching. Removed/archived Activities
+// are released and reconstruct from authoritative native scrollback on return.
+const mountedIds = ref([])
+watch(
+  () => [props.activeId, props.activities.map((activity) => activity.id)],
+  ([activeId, availableIds]) => {
+    const available = new Set(availableIds)
+    const retained = mountedIds.value.filter((id) => available.has(id))
+    if (available.has(activeId) && !retained.includes(activeId)) retained.push(activeId)
+    mountedIds.value = retained
+  },
+  { immediate: true },
+)
+const mountedActivities = computed(() => {
+  const mounted = new Set(mountedIds.value)
+  return props.activities.filter((activity) => mounted.has(activity.id))
+})
 </script>

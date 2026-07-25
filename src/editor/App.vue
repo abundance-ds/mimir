@@ -1,29 +1,30 @@
 <template>
   <div
+    ref="editorShellRef"
     class="editor-shell h-full w-full flex flex-col bg-surface overflow-hidden"
   >
     <AppHeader
       :embedded="embedded"
       :showAppMenus="showAppMenus"
       :recentFiles="fileManager.recentFiles"
-      :canSave="Boolean(currentFile?.path)"
+      :canSave="Boolean(currentFile)"
       :hasSelection="Boolean(selectionText)"
       :tabs="displayTabs"
       :activeTab="displayActiveTab"
       :arrivedTabIndex="arrivedTabIndex"
       :hideSidebar="hideSidebar"
-      @new-file="onNewFile"
+      @new-file="createBlankFile"
       @open-file="onOpenDialog"
       @save="onSave"
       @save-as="onSaveAs"
-      @close-file="() => onCloseTab(activeFileIndex)"
+      @close-file="() => closeEditorTab(activeFileIndex)"
       @open-recent="onOpenRecent"
       @clear-recent="onClearRecent"
       @edit-command="onEditCommand"
       @rewrite-selection="onRewriteSelection"
-      @select-tab="onSelectTab"
-      @close-tab="onCloseTab"
-      @add-tab="onNewFile"
+      @select-tab="selectEditorTab"
+      @close-tab="closeEditorTab"
+      @add-tab="openNewTabPage"
       @reorder-tab="onReorderTab"
     />
 
@@ -35,16 +36,18 @@
           :selection="inlineAIState"
           :documentId="documentIdFromPath(currentFile?.path)"
           :getDocument="getDocumentForInlineAI"
-          :projectPath="currentFile?.path ? currentFile.path.replace(/\/[^/]*$/, '') : null"
+          :projectPath="inlineAIProjectPath"
+          :escapeBlocked="editorModalOpen"
           @apply="onInlineAIApply"
           @activate-diff="onInlineAIActivateDiff"
           @deactivate-diff="onInlineAIDeactivateDiff"
           @close="closeInlineAI"
+          @configure-models="openSettings('models')"
         />
         <DiffBar
           v-else-if="diffStore.active && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
-          @accept-all="onDiffAcceptAll"
-          @reject-all="onDiffRejectAll"
+          @accept-all="acceptDiffAndFocus"
+          @reject-all="rejectDiffAndFocus"
           @navigate-chunk="onDiffNavigateChunk"
           @navigate-file="onDiffNavigateFile"
         />
@@ -59,7 +62,10 @@
             ref="diffViewRef"
             @accept="onDiffChunksResolved"
           />
-          <NewTabPage v-if="isNewTabPage && !diffStore.active" />
+          <NewTabPage
+            v-if="isNewTabPage && !diffStore.active"
+            @activated="restoreEditorFocus"
+          />
           <EditorSurface
             ref="editorSurfaceRef"
             v-show="!isNewTabPage && (!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
@@ -99,6 +105,8 @@
       :open="state.settingsOpen"
       :initial-section="settingsInitialSection"
       @close="closeSettings"
+      @launch-app="onSettingsAppLaunch"
+      @open-definition="onSettingsOpenDefinition"
     />
 
 
@@ -107,20 +115,25 @@
         <div
           v-if="closeConfirmFile"
           ref="closeOverlayRef"
-          tabindex="-1"
           class="fixed inset-0 bg-black/30 z-[200] flex items-center justify-center outline-none"
           @click.self="onCloseConfirm('cancel')"
-          @keydown.escape="onCloseConfirm('cancel')"
         >
-          <div class="close-confirm-card">
-            <p class="close-confirm-title">Save changes?</p>
-            <p class="close-confirm-body">
+          <div
+            class="close-confirm-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="close-confirm-title"
+            aria-describedby="close-confirm-description"
+            @keydown="onModalKeydown($event, () => onCloseConfirm('cancel'))"
+          >
+            <p id="close-confirm-title" class="close-confirm-title">Save changes?</p>
+            <p id="close-confirm-description" class="close-confirm-body">
               "{{ closeConfirmFileName }}" has unsaved changes that will be lost if you close without saving.
             </p>
             <div class="close-confirm-actions">
-              <button class="close-confirm-btn btn-cancel" @click="onCloseConfirm('cancel')">Cancel</button>
-              <button class="close-confirm-btn btn-discard" @click="onCloseConfirm('discard')">Don't Save</button>
-              <button class="close-confirm-btn btn-save" @click="onCloseConfirm('save')">Save</button>
+              <button type="button" data-modal-initial class="close-confirm-btn btn-cancel" @click="onCloseConfirm('cancel')">Cancel</button>
+              <button type="button" class="close-confirm-btn btn-discard" @click="onCloseConfirm('discard')">Don't Save</button>
+              <button type="button" class="close-confirm-btn btn-save" @click="onCloseConfirm('save')">Save</button>
             </div>
           </div>
         </div>
@@ -132,19 +145,24 @@
         <div
           v-if="restoreConfirmMeta"
           ref="restoreOverlayRef"
-          tabindex="-1"
           class="fixed inset-0 bg-black/30 z-[200] flex items-center justify-center outline-none"
           @click.self="onRestoreConfirm('cancel')"
-          @keydown.escape="onRestoreConfirm('cancel')"
         >
-          <div class="close-confirm-card">
-            <p class="close-confirm-title">Restore this version?</p>
-            <p class="close-confirm-body">
+          <div
+            class="close-confirm-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restore-confirm-title"
+            aria-describedby="restore-confirm-description"
+            @keydown="onModalKeydown($event, () => onRestoreConfirm('cancel'))"
+          >
+            <p id="restore-confirm-title" class="close-confirm-title">Restore this version?</p>
+            <p id="restore-confirm-description" class="close-confirm-body">
               Your document will revert to how it was {{ restoreTimeLabel }}. Use {{ modKey }}Z to undo.
             </p>
             <div class="close-confirm-actions">
-              <button class="close-confirm-btn btn-cancel" @click="onRestoreConfirm('cancel')">Cancel</button>
-              <button class="close-confirm-btn btn-save" @click="onRestoreConfirm('restore')">Restore</button>
+              <button type="button" data-modal-initial class="close-confirm-btn btn-cancel" @click="onRestoreConfirm('cancel')">Cancel</button>
+              <button type="button" class="close-confirm-btn btn-save" @click="onRestoreConfirm('restore')">Restore</button>
             </div>
           </div>
         </div>
@@ -156,14 +174,19 @@
         <div
           v-if="commentGateVisible"
           ref="commentGateOverlayRef"
-          tabindex="-1"
           class="fixed inset-0 bg-black/30 z-[200] flex items-center justify-center outline-none"
           @click.self="onCommentGateConfirm(false)"
-          @keydown.escape="onCommentGateConfirm(false)"
         >
-          <div class="close-confirm-card">
-            <p class="close-confirm-title">Comments modify your file</p>
-            <p class="close-confirm-body">
+          <div
+            class="close-confirm-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comment-gate-title"
+            aria-describedby="comment-gate-description"
+            @keydown="onModalKeydown($event, () => onCommentGateConfirm(false))"
+          >
+            <p id="comment-gate-title" class="close-confirm-title">Comments modify your file</p>
+            <p id="comment-gate-description" class="close-confirm-body">
               This will modify your document file. Comments may not display correctly in other applications. You can remove all comments at any time.
             </p>
             <label class="flex items-center gap-2 mb-4 font-sans text-[12px] text-ink-2">
@@ -171,8 +194,8 @@
               Don't show again
             </label>
             <div class="close-confirm-actions">
-              <button class="close-confirm-btn btn-cancel" @click="onCommentGateConfirm(false)">Cancel</button>
-              <button class="close-confirm-btn btn-save" @click="onCommentGateConfirm(true)">Add comment</button>
+              <button type="button" data-modal-initial class="close-confirm-btn btn-cancel" @click="onCommentGateConfirm(false)">Cancel</button>
+              <button type="button" class="close-confirm-btn btn-save" @click="onCommentGateConfirm(true)">Add comment</button>
             </div>
           </div>
         </div>
@@ -190,11 +213,15 @@ import { useFileStore } from '../stores/files.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useDocumentBridge } from './composables/useDocumentBridge.js'
 import { installNativeEditorMenu, shouldInstallNativeEditorMenu } from './nativeMenu.js'
-import { platformKind } from '../shared/platform.js'
+import { isTauriRuntime, platformKind } from '../shared/platform.js'
 import { relativeTime } from '../shared/time.js'
+import { basename, parentPath } from '../shared/utils/path.js'
 import { readFile } from '../services/fileSystem.js'
 import { loadSession, saveSession } from '../services/session.js'
-import { createSessionPersist } from './sessionPersist.js'
+import { createSessionPersist, createSessionSnapshot } from './sessionPersist.js'
+import { loadSessionEntries, normalizeSessionEntries } from './sessionRestore.js'
+import { createWindowCloseGuard } from './windowCloseGuard.js'
+import { completeNativeQuit } from './appQuit.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
 import { commentsExtension, setActiveComment as setActiveCommentEffect, getCommentsFromState, commentMutation } from './codemirror/comments.js'
@@ -229,6 +256,8 @@ const props = defineProps({
   hideSidebar: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
 })
+const emit = defineEmits(['closeRequest', 'empty', 'launchApp', 'navigateEditor'])
+const editorShellRef = ref(null)
 
 const editorUI = useEditorUIStore()
 const state = editorUI
@@ -236,6 +265,9 @@ const { zoomIn, zoomOut, setZoomLevel } = editorUI
 const showAppMenus = platformKind() !== 'macos'
 
 const editorSettings = useSettingsStore()
+const releaseEditorSettingsSync = props.embedded
+  ? null
+  : editorSettings.startSync()
 
 const fileManager = useFileStore()
 const { currentFile, openFiles, activeFileIndex } = storeToRefs(fileManager)
@@ -254,24 +286,39 @@ const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
 const isNewTabPage = computed(() => currentFile.value?.newTab === true)
+const inlineAIProjectPath = computed(() => parentPath(currentFile.value?.path))
 const closeOverlayRef = ref(null)
 const restoreConfirmMeta = ref(null)
 const restoreOverlayRef = ref(null)
 const commentGateVisible = ref(false)
 const commentGateDontAsk = ref(false)
 const commentGateOverlayRef = ref(null)
+const editorModalOpen = computed(() => Boolean(
+  state.settingsOpen
+  || closeConfirmFile?.value
+  || restoreConfirmMeta.value
+  || commentGateVisible.value
+))
 let commentGateResolve = null
+let modalReturnFocus = null
 
-watch(restoreConfirmMeta, (v) => {
-  if (v) nextTick(() => restoreOverlayRef.value?.focus())
-})
-watch(commentGateVisible, (v) => {
-  if (v) nextTick(() => commentGateOverlayRef.value?.focus())
-})
 let sessionPersistCleanup = null
+let editorDisposed = false
+let editorHydrationPromise = Promise.resolve()
+
+function reportSessionError(error) {
+  console.error('[session] persistence failed', error)
+}
 
 const documentBridge = useDocumentBridge()
-useFileOpen()
+const nativeFileOpen = useFileOpen({
+  autoStart: false,
+  onOpened: (path) => {
+    emit('navigateEditor', { path })
+    restoreEditorFocus()
+  },
+  onError: error => console.error('[file-open]', error),
+})
 
 const editorLineWidthMap = {
   normal: '80ch',
@@ -329,11 +376,15 @@ const displayActiveTab = computed(() => {
 })
 
 const saveFeedback = useSaveFeedbackStore()
+const feedbackMatchesCurrentFile = computed(() => (
+  Boolean(currentFile.value?.id)
+  && saveFeedback.fileId === currentFile.value.id
+))
 const footerSave = computed(() => footerSaveStatus({
   file: currentFile.value,
   autoSaveEnabled: editorSettings.editorAutoSave,
-  savingVisible: saveFeedback.savingVisible,
-  savedVisible: saveFeedback.savedVisible,
+  savingVisible: feedbackMatchesCurrentFile.value && saveFeedback.savingVisible,
+  savedVisible: feedbackMatchesCurrentFile.value && saveFeedback.savedVisible,
   savedLabel: saveFeedback.savedLabel,
 }))
 const settingsInitialSection = ref('appearance')
@@ -531,6 +582,7 @@ const editorExtensions = computed(() => [
 
 let nativeMenuTimer = null
 let unlistenNativeMenuFocus = null
+let unlistenQuitRequested = null
 
 const contentSync = useContentSync({
   editorSurfaceRef,
@@ -540,18 +592,24 @@ const contentSync = useContentSync({
 })
 const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot } = contentSync
 
-async function saveCurrentFile({ source = 'manual', mode = 'save' } = {}) {
-  const feedbackMode = mode === 'saveAs' || !currentFile.value?.path ? 'saveAs' : 'save'
-  saveFeedback.begin(source)
-  saveFeedback.setMode(feedbackMode)
+async function saveCurrentFile({ source = 'manual', mode = 'save', file = null } = {}) {
+  const targetFile = file || currentFile.value
+  if (!targetFile) return false
+  const feedbackMode = mode === 'saveAs' || !targetFile.path ? 'saveAs' : 'save'
+  const feedbackToken = saveFeedback.begin(source, targetFile.id)
+  saveFeedback.setMode(feedbackMode, feedbackToken)
   try {
     const didSave = mode === 'saveAs'
-      ? await fileManager.saveAs()
-      : await fileManager.save()
-    saveFeedback.finish(didSave, currentFile.value?.path ? fileDisplayName(currentFile.value) : 'Saved')
+      ? await fileManager.saveAs(targetFile)
+      : await fileManager.save(targetFile)
+    saveFeedback.finish(
+      didSave,
+      targetFile.path ? fileDisplayName(targetFile) : 'Saved',
+      feedbackToken,
+    )
     return didSave
   } catch (error) {
-    saveFeedback.finish(false)
+    saveFeedback.finish(false, 'Saved', feedbackToken)
     throw error
   }
 }
@@ -586,11 +644,180 @@ const tabMgmt = useTabManagement({
   activeFileIndex,
   flushEditorContent,
   saveCurrentFile,
+  requestWindowClose: requestEditorWindowClose,
+  embedded: props.embedded,
+  onEmpty: () => emit('empty'),
 })
-const { closeConfirmFile, closeConfirmFileName, arrivedTabIndex, onSelectTab, onCloseTab, onCloseConfirm, onNewFile, onReorderTab } = tabMgmt
+const {
+  closeConfirmFile,
+  closeConfirmFileName,
+  arrivedTabIndex,
+  onSelectTab,
+  onCloseTab,
+  onCloseConfirm,
+  onNewFile,
+  onReorderTab,
+  confirmFileClose,
+} = tabMgmt
 
-watch(closeConfirmFile, (v) => {
-  if (v) nextTick(() => closeOverlayRef.value?.focus())
+const windowCloseGuard = createWindowCloseGuard({
+  getWindow: async () => {
+    if (!isTauriRuntime()) return null
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    return getCurrentWindow()
+  },
+  flushContent: () => flushEditorContent({ bridge: 'flush' }),
+  getDirtyFiles: () => openFiles.value.filter(file => file.dirty),
+  confirmFile: file => confirmFileClose(file),
+  awaitReady: () => editorHydrationPromise,
+  onError: reportSessionError,
+  beforeNativeClose: () => editorSettings.flush(),
+  flushSession: async (discardedFiles = []) => {
+    const snapshot = createSessionSnapshot({
+      openFiles,
+      recentFiles: computed(() => fileManager.recentFiles),
+      activeFileIndex,
+      zoomLevel: computed(() => state.zoomLevel),
+    }, { discardedFiles })
+    if (sessionPersistCleanup) {
+      await sessionPersistCleanup.flush(snapshot)
+      return
+    }
+    await saveSession(snapshot)
+  },
+})
+
+async function requestEditorWindowClose(options) {
+  const guarded = await windowCloseGuard.requestClose(options)
+  if (guarded !== null) return guarded
+  window.close()
+  return true
+}
+
+async function closeEditorTab(index) {
+  if (await dismissEditorSurface()) return false
+  const closed = await onCloseTab(index)
+  if (closed) {
+    await Promise.resolve(sessionPersistCleanup?.flush?.()).catch(reportSessionError)
+  }
+  if (openFiles.value.length) restoreEditorFocus()
+  return closed
+}
+
+function restoreEditorFocus() {
+  void nextTick(() => editorSurfaceRef.value?.focus?.())
+}
+
+function selectEditorTab(index) {
+  const tab = displayTabs.value[index]
+  onSelectTab(index)
+  if (tab?.type !== 'review') restoreEditorFocus()
+}
+
+function createBlankFile() {
+  onNewFile()
+  restoreEditorFocus()
+}
+
+function openNewTabPage() {
+  flushEditorContent({ bridge: 'flush' })
+  fileManager.newTab()
+}
+
+async function dismissEditorSurface() {
+  if (state.settingsOpen) {
+    closeSettings()
+    return true
+  }
+  if (closeConfirmFile.value) {
+    onCloseConfirm('cancel')
+    return true
+  }
+  if (restoreConfirmMeta.value) {
+    onRestoreConfirm('cancel')
+    return true
+  }
+  if (commentGateVisible.value) {
+    onCommentGateConfirm(false)
+    return true
+  }
+  if (inlineAIState.value) {
+    closeInlineAI()
+    restoreEditorFocus()
+    return true
+  }
+  if (diffStore.active) {
+    await onDiffRejectAll()
+    restoreEditorFocus()
+    return true
+  }
+  return false
+}
+
+async function requestEmbeddedClose() {
+  if (await dismissEditorSurface()) return true
+  emit('closeRequest')
+  return false
+}
+
+function focusModal(container) {
+  if (!container) return
+  if (!modalReturnFocus || !modalReturnFocus.isConnected) {
+    modalReturnFocus = document.activeElement
+  }
+  nextTick(() => {
+    const target = container.querySelector('[data-modal-initial], button:not(:disabled), input:not(:disabled)')
+    target?.focus()
+  })
+}
+
+function restoreModalReturnFocus() {
+  const target = modalReturnFocus
+  modalReturnFocus = null
+  nextTick(() => {
+    if (target?.isConnected && typeof target.focus === 'function') target.focus()
+    else restoreEditorFocus()
+  })
+}
+
+function onModalKeydown(event, onCancel) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    onCancel()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const dialog = event.currentTarget
+  const focusable = [...dialog.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  )].filter(element => !element.hidden)
+  if (!focusable.length) {
+    event.preventDefault()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+watch(closeConfirmFile, (value, previous) => {
+  if (value) nextTick(() => focusModal(closeOverlayRef.value))
+  else if (previous) restoreModalReturnFocus()
+})
+watch(restoreConfirmMeta, (value, previous) => {
+  if (value) nextTick(() => focusModal(restoreOverlayRef.value))
+  else if (previous) restoreModalReturnFocus()
+})
+watch(commentGateVisible, (value, previous) => {
+  if (value) nextTick(() => focusModal(commentGateOverlayRef.value))
+  else if (previous) restoreModalReturnFocus()
 })
 
 const restoreTimeLabel = computed(() => {
@@ -599,7 +826,7 @@ const restoreTimeLabel = computed(() => {
   return relativeTime(meta.timestamp)
 })
 
-const modKey = computed(() => platformKind() === 'mac' ? '⌘' : 'Ctrl+')
+const modKey = computed(() => platformKind() === 'macos' ? '⌘' : 'Ctrl+')
 
 async function onOpenDialog() {
   flushEditorContent({ bridge: 'flush' })
@@ -644,6 +871,16 @@ function closeSettings() {
   settingsInitialSection.value = 'appearance'
 }
 
+function onSettingsAppLaunch(payload) {
+  closeSettings()
+  emit('launchApp', payload)
+}
+
+async function onSettingsOpenDefinition(path) {
+  closeSettings()
+  if (path) await mimOpen(path)
+}
+
 async function onSaveStatusClick(status) {
   if (status.action === 'settings') {
     openSettings('writing')
@@ -678,13 +915,16 @@ watch(() => state.settingsOpen, (open) => {
 
 function nativeMenuActions() {
   return {
-    newFile: onNewFile,
+    newFile: createBlankFile,
     openFile: onOpenDialog,
     openRecent: onOpenRecent,
     clearRecent: onClearRecent,
     save: onSave,
     saveAs: onSaveAs,
-    closeTab: () => onCloseTab(activeFileIndex.value),
+    closeTab: props.embedded
+      ? requestEmbeddedClose
+      : () => closeEditorTab(activeFileIndex.value),
+    quit: requestAppQuit,
     editCommand: onEditCommand,
     rewriteSelection: onRewriteSelection,
     openSettings,
@@ -712,12 +952,42 @@ async function bindNativeMenuFocusSync() {
   if (!shouldInstallNativeEditorMenu()) return
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    unlistenNativeMenuFocus = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    const unlisten = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       if (focused) syncNativeMenu()
     })
+    if (editorDisposed) {
+      unlisten()
+      return
+    }
+    unlistenNativeMenuFocus = unlisten
   } catch (error) {
     console.error('[nativeMenu] focus binding failed', error)
   }
+}
+
+async function requestAppQuit() {
+  if (!isTauriRuntime()) return requestEditorWindowClose()
+  return completeNativeQuit({
+    requestClose: options => windowCloseGuard.requestClose(options),
+    flushSettings: () => editorSettings.flush(),
+    confirmQuit: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('app_quit_confirmed')
+    },
+  })
+}
+
+async function bindNativeQuitGuard() {
+  if (!isTauriRuntime()) return
+  const { listen } = await import('@tauri-apps/api/event')
+  const stop = await listen('mim://quit-requested', () => {
+    void requestAppQuit().catch(reportSessionError)
+  })
+  if (editorDisposed) {
+    stop()
+    return
+  }
+  unlistenQuitRequested = stop
 }
 
 watch(() => fileManager.recentFiles.slice(), () => {
@@ -767,7 +1037,7 @@ async function onComment() {
   const sel = view.state.selection.main
   if (sel.from === sel.to) return
 
-  const existing = commentManager.findActiveByRange(null, sel.from, sel.to)
+  const existing = commentManager.findActiveByRange(sel.from, sel.to)
   if (existing) {
     commentManager.setActiveComment(existing.id)
     return
@@ -797,7 +1067,6 @@ async function onComment() {
   })
 
   commentManager.setActiveComment(id)
-  commentManager.commentAdded()
 }
 
 function commentPrompt(commentId) {
@@ -809,7 +1078,7 @@ function commentPrompt(commentId) {
   return buildCommentsPrompt({ comments, filePath: path, focusId: commentId, focusLine: line })
 }
 
-async function onInlineCommentAction({ type, id, text }) {
+async function onInlineCommentAction({ type, id, text, replyId }) {
   if (!type || !id) return { ok: false, error: 'Missing comment action.' }
   const trimmed = (text || '').trim()
 
@@ -821,6 +1090,19 @@ async function onInlineCommentAction({ type, id, text }) {
   if (type === 'reply') {
     if (!trimmed) return { ok: false, error: 'Write a reply before saving.' }
     return commentMutations.addReply?.(id, trimmed) || { ok: false, error: 'Comment mutation unavailable.' }
+  }
+
+  if (type === 'update-reply') {
+    if (!replyId) return { ok: false, error: 'Missing reply id.' }
+    if (!trimmed) return { ok: false, error: 'A reply cannot be empty.' }
+    return commentMutations.updateReply?.(id, replyId, trimmed)
+      || { ok: false, error: 'Comment mutation unavailable.' }
+  }
+
+  if (type === 'delete-reply') {
+    if (!replyId) return { ok: false, error: 'Missing reply id.' }
+    return commentMutations.deleteReply?.(id, replyId)
+      || { ok: false, error: 'Comment mutation unavailable.' }
   }
 
   if (type === 'delete') {
@@ -844,7 +1126,10 @@ async function onInlineCommentAction({ type, id, text }) {
 
   if (type === 'copy-prompt') {
     try {
-      await navigator.clipboard?.writeText(commentPrompt(id))
+      if (!navigator.clipboard?.writeText) {
+        return { ok: false, error: 'Clipboard access is unavailable.' }
+      }
+      await navigator.clipboard.writeText(commentPrompt(id))
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err?.message || 'Could not copy prompt.' }
@@ -885,7 +1170,7 @@ function buildSelectionContext(sel) {
 function getDocumentForInlineAI() {
   const content = editorSurfaceRef.value?.getContent?.() || ''
   const path = currentFile.value?.path || null
-  const title = path ? path.split('/').pop() : 'Untitled'
+  const title = path ? basename(path) : 'Untitled'
   return { content, path, title, documentId: documentIdFromPath(path) }
 }
 
@@ -940,6 +1225,16 @@ function closeInlineAI() {
   inlineAIState.value = null
 }
 
+async function acceptDiffAndFocus() {
+  await onDiffAcceptAll()
+  restoreEditorFocus()
+}
+
+async function rejectDiffAndFocus() {
+  await onDiffRejectAll()
+  restoreEditorFocus()
+}
+
 async function mimOpen(path) {
   if (!path) throw new Error('path is required')
   flushEditorContent({ bridge: 'flush' })
@@ -947,6 +1242,8 @@ async function mimOpen(path) {
   await fileManager.openFile(path, content)
   await nextTick()
   editorSurfaceRef.value?.scrollToPos(0)
+  emit('navigateEditor', { path })
+  restoreEditorFocus()
   return mimActive()
 }
 
@@ -957,7 +1254,7 @@ function mimActive({ includeContent = false } = {}) {
   const content = editorSurfaceRef.value?.getContent?.() ?? file.content ?? ''
   return {
     path: file.path || null,
-    name: file.path ? file.path.split('/').pop() : 'Untitled.md',
+    name: editorTabs.value[activeFileIndex.value]?.name || basename(file.path),
     dirty: Boolean(file.dirty),
     index: activeFileIndex.value,
     cursor: editorSurfaceRef.value?.getCursor?.() || null,
@@ -970,7 +1267,7 @@ function mimTabs() {
   return openFiles.value.map((file, index) => ({
     index,
     path: file.path || null,
-    name: file.path ? file.path.split('/').pop() : `Untitled-${index + 1}.md`,
+    name: editorTabs.value[index]?.name || basename(file.path),
     dirty: Boolean(file.dirty),
     active: index === activeFileIndex.value,
   }))
@@ -1002,14 +1299,23 @@ function mimComments() {
           text: reply.text || '',
           timestamp: reply.ts || null,
         })),
+        prompt: commentPrompt(comment.id),
+        actions: [
+          { id: 'reply', label: 'Reply', requiresText: true },
+          comment.status === 'resolved'
+            ? { id: 'reopen', label: 'Reopen', requiresText: false }
+            : { id: 'resolve', label: 'Resolve', requiresText: false },
+          { id: 'delete', label: 'Delete', requiresText: false },
+        ],
       }
     }),
     prompt: commentPrompt(comments[0]?.id),
   }
 }
 
-function mimCommentAction(action, commentId) {
+function mimCommentAction(action, commentId, text = '') {
   const handlers = {
+    reply: id => commentMutations.addReply(id, text),
     resolve: commentMutations.resolve,
     reopen: commentMutations.reopen,
     delete: commentMutations.delete,
@@ -1027,6 +1333,7 @@ function mimReplaceSelection(text = '') {
 }
 
 function mimSetContent(content = '') {
+  if (!currentFile.value) throw new Error('No document is open.')
   const current = editorSurfaceRef.value?.getContent?.() || ''
   editorSurfaceRef.value?.replaceRange(0, current.length, content)
   return mimActive()
@@ -1062,19 +1369,25 @@ function mimReviewProposal(proposal) {
   return { proposalId: review.proposalId, status: 'pending_review' }
 }
 
-function mimReveal({ path, line, offset } = {}) {
+async function mimReveal({ path, line, offset } = {}) {
   if (path) {
     const idx = openFiles.value.findIndex(file => file.path === path)
-    if (idx >= 0) fileManager.setActiveTab(idx)
-  }
-  nextTick(() => {
-    const view = editorSurfaceRef.value?.getView?.()
-    let pos = Number.isFinite(offset) ? offset : 0
-    if (view && Number.isFinite(line) && line > 0) {
-      pos = view.state.doc.line(Math.min(line, view.state.doc.lines)).from
+    if (idx >= 0) {
+      flushEditorContent({ bridge: 'flush' })
+      fileManager.setActiveTab(idx)
+      emit('navigateEditor', { path })
+    } else {
+      await mimOpen(path)
     }
-    editorSurfaceRef.value?.scrollToPos(pos)
-  })
+  }
+  await nextTick()
+  const view = editorSurfaceRef.value?.getView?.()
+  let pos = Number.isFinite(offset) ? offset : 0
+  if (view && Number.isFinite(line) && line > 0) {
+    pos = view.state.doc.line(Math.min(line, view.state.doc.lines)).from
+  }
+  editorSurfaceRef.value?.scrollToPos(pos)
+  restoreEditorFocus()
   return mimActive()
 }
 
@@ -1084,8 +1397,25 @@ async function mimSave() {
   return { saved, active: mimActive() }
 }
 
-function mimCloseActiveTab() {
-  onCloseTab(activeFileIndex.value)
+function mimOwnsFocus() {
+  return Boolean(editorShellRef.value?.contains(document.activeElement))
+}
+
+function mimCycleTab(direction = 1) {
+  const length = openFiles.value.length
+  if (length < 2) return false
+  const next = (activeFileIndex.value + direction + length) % length
+  fileManager.setActiveTab(next)
+  return true
+}
+
+async function mimCloseActiveTab() {
+  if (await dismissEditorSurface()) return true
+  return closeEditorTab(activeFileIndex.value)
+}
+
+function mimOpenSettings(section = 'appearance') {
+  openSettings(section)
 }
 
 defineExpose({
@@ -1100,7 +1430,10 @@ defineExpose({
   mimReviewProposal,
   mimReveal,
   mimSave,
+  mimOwnsFocus,
+  mimCycleTab,
   mimCloseActiveTab,
+  mimOpenSettings,
 })
 
 // --- Diff review ---
@@ -1126,9 +1459,9 @@ useKeyboardShortcuts({
   onSave,
   onSaveAs,
   onOpenDialog,
-  onNewFile,
-  onNewTab: () => fileManager.newTab(),
-  onCloseTab: () => onCloseTab(activeFileIndex.value),
+  onNewFile: createBlankFile,
+  onNewTab: openNewTabPage,
+  onCloseTab: () => closeEditorTab(activeFileIndex.value),
   onRewriteSelection,
   editorHasFocus: () => Boolean(editorSurfaceRef.value?.hasFocus?.()),
 })
@@ -1137,19 +1470,26 @@ useKeyboardShortcuts({
 
 function onBeforeUnload() {
   flushEditorContent({ bridge: 'flush' })
+  void Promise.resolve(sessionPersistCleanup?.flush?.()).catch(reportSessionError)
 }
 
 function onEditorKeydown(event) {
   if (event.key === 'Escape' && diffStore.active) {
-    if (diffStore.isBatchFileFocused) {
-      diffStore.clearBatchFocus()
-      reviewTabActive.value = true
-    } else if (diffStore.isBatch) {
-      diffStore.deactivate()
-      reviewTabActive.value = false
-    } else {
-      diffStore.deactivate()
-    }
+    event.preventDefault()
+    void rejectDiffAndFocus().catch((error) => {
+      diffStore.setReviewError(error?.message || error)
+    })
+    return
+  }
+  if (
+    diffStore.active
+    && event.key === 'Enter'
+    && (event.metaKey || event.ctrlKey)
+  ) {
+    event.preventDefault()
+    void acceptDiffAndFocus().catch((error) => {
+      diffStore.setReviewError(error?.message || error)
+    })
     return
   }
   if (diffStore.active && diffStore.viewMode === 'diff') {
@@ -1169,39 +1509,75 @@ function onEditorKeydown(event) {
 // --- Lifecycle ---
 
 onMounted(async () => {
+  editorDisposed = false
   window.addEventListener('beforeunload', onBeforeUnload)
   document.addEventListener('keydown', onEditorKeydown)
+  void windowCloseGuard.setup().catch(reportSessionError)
 
-  // Restore session
-  const session = await loadSession()
-  if (session?.recentFiles?.length) {
-    fileManager.setRecentFiles(session.recentFiles)
-  }
-  if (session?.openFiles?.length) {
-    for (const entry of session.openFiles) {
-      const path = typeof entry === 'string' ? entry : entry.path
-      if (path) {
-        try {
-          const content = await readFile(path)
-          await fileManager.openFile(path, content)
-        } catch {
-          // File no longer exists, skip
+  editorHydrationPromise = fileManager.hydrateSession(async () => {
+    const session = await loadSession()
+    if (session?.recentFiles?.length) {
+      fileManager.setRecentFiles(session.recentFiles)
+    }
+    if (session?.openFiles?.length) {
+      const restored = normalizeSessionEntries(
+        session.openFiles,
+        session.activeFileIndex,
+      )
+      const loadedEntries = await loadSessionEntries(restored.entries, readFile)
+      for (const { entry, content, error } of loadedEntries) {
+        const path = entry.path
+        if (path) {
+          if (!error) {
+            fileManager.restorePath({
+              path,
+              content: entry.dirty ? entry.content : content,
+              dirty: entry.dirty,
+            })
+          } else if (entry.dirty) {
+            // The path disappeared after the last session, but the user's
+            // unsaved text is still recoverable as a stable draft.
+            fileManager.restoreDraft({ content: entry.content })
+          }
+        } else {
+          fileManager.restoreDraft(entry)
         }
-      } else if (entry.content) {
-        fileManager.newFile()
-        fileManager.updateContent(entry.content)
+      }
+      fileManager.activateSessionEntry(restored.activeEntry)
+      if (session.zoomLevel) state.zoomLevel = session.zoomLevel
+      if (restored.changed) {
+        // Commit legacy migration immediately. Persistence starts after restore
+        // and is intentionally not immediate, so without this write a corrupt
+        // multi-clone session could remain on disk until an unrelated edit.
+        try {
+          await saveSession(createSessionSnapshot({
+            openFiles,
+            recentFiles: computed(() => fileManager.recentFiles),
+            activeFileIndex,
+            zoomLevel: computed(() => state.zoomLevel),
+          }))
+        } catch (error) {
+          console.error('[session] could not persist migrated session', error)
+        }
       }
     }
-    if (session.activeFileIndex != null) {
-      fileManager.setActiveTab(session.activeFileIndex)
-    }
-    if (session.zoomLevel) state.zoomLevel = session.zoomLevel
+
+    // Creating the fallback is part of the shared transaction too. A new
+    // mount must never race a pending disk restore by fabricating a blank.
+    if (!fileManager.hasOpenFiles) fileManager.newFile()
+  })
+  try {
+    await editorHydrationPromise
+  } catch (error) {
+    reportSessionError(error)
+    if (!fileManager.hasOpenFiles) fileManager.newFile()
+    editorHydrationPromise = Promise.resolve(false)
   }
 
-  // If no files restored, start with a blank file
-  if (!fileManager.hasOpenFiles) {
-    fileManager.newFile()
-  }
+  // An async onMounted callback is not canceled by Vue. If this component was
+  // replaced during hydration, the replacement owns persistence and native
+  // listeners; this stale instance must not install them after unmount.
+  if (editorDisposed) return
 
   // Persist session state reactively (debounced on any change)
   sessionPersistCleanup = createSessionPersist({
@@ -1211,9 +1587,15 @@ onMounted(async () => {
     zoomLevel: computed(() => state.zoomLevel),
   }, saveSession)
 
+  await nativeFileOpen.setup()
+  if (editorDisposed) return
   syncOpenFileSnapshot()
   await syncNativeMenu()
+  if (editorDisposed) return
   await bindNativeMenuFocusSync()
+  if (editorDisposed) return
+  await bindNativeQuitGuard()
+  if (editorDisposed) return
 
   // Dev: expose diff activation for console testing
   if (import.meta.env.DEV) {
@@ -1230,8 +1612,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  editorDisposed = true
+  // Synchronize the latest CodeMirror transaction before canceling its
+  // debounce and before any replacement HMR instance reads the shared store.
+  flushEditorContent({ bridge: 'unmount' })
   window.removeEventListener('beforeunload', onBeforeUnload)
   document.removeEventListener('keydown', onEditorKeydown)
+  windowCloseGuard.dispose()
   autoSave.clear()
   contentSync.dispose()
   clearTimeout(nativeMenuTimer)
@@ -1239,7 +1626,11 @@ onUnmounted(() => {
   unregisterProposalEditor()
   saveFeedback.dispose()
   if (unlistenNativeMenuFocus) unlistenNativeMenuFocus()
-  if (sessionPersistCleanup) sessionPersistCleanup()
+  if (unlistenQuitRequested) unlistenQuitRequested()
+  releaseEditorSettingsSync?.()
+  if (sessionPersistCleanup) {
+    void Promise.resolve(sessionPersistCleanup()).catch(reportSessionError)
+  }
   documentBridge.dispose()
 })
 </script>

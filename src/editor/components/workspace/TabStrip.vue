@@ -1,6 +1,8 @@
 <template>
     <div
         ref="stripEl"
+        role="tablist"
+        aria-label="Open editor tabs"
         class="relative flex items-end flex-1 min-w-0 gap-0 whitespace-nowrap mt-auto"
         :style="dragState.active ? { '--drag-tab-w': dragTabWidth + 'px' } : {}"
     >
@@ -12,19 +14,33 @@
             tag="div"
             class="tab-scroll flex-1 min-w-0 flex items-end gap-0 overflow-x-auto overflow-y-hidden"
         >
-            <button
+            <div
                 v-for="(tab, i) in tabs"
                 :key="tab.id"
-                class="file-tab no-drag min-w-[80px] h-[28px] flex items-center gap-1 px-2 rounded-t-[5px] select-none whitespace-nowrap overflow-hidden font-mono text-[11.5px] relative"
+                class="file-tab-wrap no-drag min-w-[80px] h-[28px] relative"
                 :class="[
-                    activeTab === i ? 'tab-active' : 'tab-inactive',
                     dragState.active && dragState.fromIndex === i ? 'tab-dragging' : '',
                     dragState.dropTarget === i ? 'tab-drop-gap' : '',
                     arrivedTabIndex === i ? 'tab-arrived' : '',
+                ]"
+            >
+              <button
+                class="file-tab w-full h-full flex items-center gap-1 pl-2 pr-7 rounded-t-[5px] select-none whitespace-nowrap overflow-hidden font-mono text-[11.5px] relative"
+                :class="[
+                    activeTab === i ? 'tab-active' : 'tab-inactive',
                     tab.type === 'review' ? 'tab-review' : '',
                 ]"
+                role="tab"
+                :aria-selected="activeTab === i"
+                :tabindex="activeTab === i ? 0 : -1"
                 @pointerdown="onPointerDown(i, $event)"
-            >
+                @keydown.left.prevent.stop="selectKeyboardTab(i, -1)"
+                @keydown.right.prevent.stop="selectKeyboardTab(i, 1)"
+                @keydown.home.prevent.stop="selectKeyboardTab(i, -i)"
+                @keydown.end.prevent.stop="selectKeyboardTab(i, tabs.length - 1 - i)"
+                @keydown.enter.prevent.stop="selectKeyboardTab(i, 0)"
+                @keydown.space.prevent.stop="selectKeyboardTab(i, 0)"
+              >
                 <span
                     class="flex-1 min-w-0 overflow-hidden text-ellipsis"
                     >{{ tab.name }}</span
@@ -41,13 +57,14 @@
                             : 'Unsaved changes'
                     "
                 ></span>
-                <span
-                    v-if="tabs.length > 1"
-                    class="tab-close"
-                    @click.stop="$emit('close-tab', i)"
-                    >&times;</span
-                >
-            </button>
+              </button>
+              <button
+                  class="tab-close"
+                  :aria-label="`Close ${tab.name}`"
+                  title="Close tab"
+                  @click.stop="$emit('close-tab', i)"
+              >&times;</button>
+            </div>
 
             <button
                 key="__add__"
@@ -67,7 +84,6 @@ import { IconPlus } from "@tabler/icons-vue";
 import { ref, reactive, computed, watch, nextTick, onUnmounted } from "vue";
 
 const DRAG_THRESHOLD = 5;
-const TEAR_OFF_DISTANCE = 40;
 
 const props = defineProps({
     tabs: { type: Array, required: true },
@@ -95,6 +111,9 @@ let startX = 0;
 let startY = 0;
 let ghostEl = null;
 const dragTabWidth = ref(0);
+let bodyAffordanceActive = false;
+let previousBodyCursor = "";
+let previousBodyUserSelect = "";
 
 function getScrollEl() {
     const r = scrollRef.value;
@@ -124,7 +143,7 @@ watch(
             const active = buttons[props.activeTab];
             if (active && getScrollEl()) {
                 active.scrollIntoView({
-                    behavior: "smooth",
+                    behavior: "auto",
                     block: "nearest",
                     inline: "nearest",
                 });
@@ -135,27 +154,15 @@ watch(
 
 function getTabButtons() {
     if (!stripEl.value) return [];
-    return Array.from(stripEl.value.querySelectorAll(".file-tab"));
+    return Array.from(stripEl.value.querySelectorAll("button.file-tab"));
 }
 
 /* ── Ghost ── */
-
-function showGhost(tabEl, x, y) {
-    if (!ghostEl) {
-        ghostEl = tabEl.cloneNode(true);
-        ghostEl.className = "tab-drag-ghost floating";
-        ghostEl.querySelectorAll(".tab-close").forEach((el) => el.remove());
-        document.body.appendChild(ghostEl);
-    }
-    ghostEl.style.left = `${x - ghostEl.offsetWidth / 2}px`;
-    ghostEl.style.top = `${y - ghostEl.offsetHeight / 2}px`;
-}
 
 function snapGhost(tabEl, targetBtn) {
     if (!ghostEl) {
         ghostEl = tabEl.cloneNode(true);
         ghostEl.className = "tab-drag-ghost snapped";
-        ghostEl.querySelectorAll(".tab-close").forEach((el) => el.remove());
         document.body.appendChild(ghostEl);
     }
     if (!ghostEl.classList.contains("snapped")) {
@@ -171,7 +178,6 @@ function snapGhostAfterLast(tabEl, lastBtn) {
     if (!ghostEl) {
         ghostEl = tabEl.cloneNode(true);
         ghostEl.className = "tab-drag-ghost snapped";
-        ghostEl.querySelectorAll(".tab-close").forEach((el) => el.remove());
         document.body.appendChild(ghostEl);
     }
     if (!ghostEl.classList.contains("snapped")) {
@@ -181,13 +187,6 @@ function snapGhostAfterLast(tabEl, lastBtn) {
     const r = lastBtn.getBoundingClientRect();
     ghostEl.style.left = `${r.right + 2}px`;
     ghostEl.style.top = `${r.top}px`;
-}
-
-function floatGhost() {
-    if (ghostEl && !ghostEl.classList.contains("floating")) {
-        ghostEl.classList.remove("snapped");
-        ghostEl.classList.add("floating");
-    }
 }
 
 function removeGhost() {
@@ -202,11 +201,11 @@ function removeGhost() {
 
 function onPointerDown(index, e) {
     if (e.button !== 0) return;
-    if (e.target.closest(".tab-close")) return;
     if (props.tabs[index]?.type === "review") {
         emit("select-tab", index);
         return;
     }
+    cancelDrag();
 
     const tabEl = getTabButtons()[index];
     dragTabWidth.value = tabEl ? tabEl.offsetWidth : 80;
@@ -218,6 +217,7 @@ function onPointerDown(index, e) {
 
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerCancel);
     document.addEventListener("keydown", onKeyDown);
 }
 
@@ -229,25 +229,11 @@ function onPointerMove(e) {
         if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD)
             return;
         dragState.active = true;
-        document.body.style.cursor = "grabbing";
+        beginBodyAffordance();
     }
 
     const tabEl = getTabButtons()[dragState.fromIndex];
     if (!tabEl) return;
-
-    const stripRect = stripEl.value?.getBoundingClientRect();
-    if (!stripRect) return;
-
-    const outsideStrip =
-        e.clientY < stripRect.top - TEAR_OFF_DISTANCE ||
-        e.clientY > stripRect.bottom + TEAR_OFF_DISTANCE;
-
-    if (outsideStrip) {
-        dragState.dropTarget = -1;
-        floatGhost();
-        showGhost(tabEl, e.clientX, e.clientY);
-        return;
-    }
 
     const buttons = getTabButtons();
     let target = -1;
@@ -277,7 +263,7 @@ function onPointerMove(e) {
     }
 }
 
-function onPointerUp(e) {
+function onPointerUp() {
     removeListeners();
     removeGhost();
 
@@ -289,17 +275,6 @@ function onPointerUp(e) {
     }
 
     const from = dragState.fromIndex;
-
-    const stripRect = stripEl.value?.getBoundingClientRect();
-    const outsideStrip =
-        !stripRect ||
-        e.clientY < stripRect.top - TEAR_OFF_DISTANCE ||
-        e.clientY > stripRect.bottom + TEAR_OFF_DISTANCE;
-
-    if (outsideStrip) {
-        resetDrag();
-        return;
-    }
 
     if (dragState.dropTarget >= 0) {
         let to = dragState.dropTarget;
@@ -315,31 +290,61 @@ function onPointerUp(e) {
 }
 
 function onKeyDown(e) {
-    if (e.key === "Escape" && dragState.active) {
+    if (e.key === "Escape" && dragState.fromIndex >= 0) {
         e.preventDefault();
-        removeListeners();
-        resetDrag();
+        cancelDrag();
     }
+}
+
+function onPointerCancel() {
+    cancelDrag();
+}
+
+function selectKeyboardTab(index, delta) {
+    if (!props.tabs.length) return;
+    const next = (index + delta + props.tabs.length) % props.tabs.length;
+    emit("select-tab", next);
+    nextTick(() => getTabButtons()[next]?.focus());
 }
 
 function removeListeners() {
     document.removeEventListener("pointermove", onPointerMove);
     document.removeEventListener("pointerup", onPointerUp);
+    document.removeEventListener("pointercancel", onPointerCancel);
     document.removeEventListener("keydown", onKeyDown);
+}
+
+function beginBodyAffordance() {
+    if (!document.body || bodyAffordanceActive) return;
+    previousBodyCursor = document.body.style.cursor;
+    previousBodyUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    bodyAffordanceActive = true;
+}
+
+function endBodyAffordance() {
+    if (!document.body || !bodyAffordanceActive) return;
+    document.body.style.cursor = previousBodyCursor;
+    document.body.style.userSelect = previousBodyUserSelect;
+    bodyAffordanceActive = false;
+}
+
+function cancelDrag() {
+    removeListeners();
+    resetDrag();
 }
 
 function resetDrag() {
     dragState.fromIndex = -1;
     dragState.dropTarget = -1;
     dragState.active = false;
-    document.body.style.cursor = "";
+    endBodyAffordance();
     removeGhost();
 }
 
 onUnmounted(() => {
-    removeListeners();
-    document.body.style.cursor = "";
-    removeGhost();
+    cancelDrag();
 });
 </script>
 
@@ -381,11 +386,15 @@ onUnmounted(() => {
 }
 
 /* Tab sizing: equal share of available space, clamped 80–172px */
-.file-tab {
+.file-tab-wrap {
     flex-grow: 1;
     flex-shrink: 1;
     flex-basis: 0;
     max-width: 172px;
+}
+
+.file-tab {
+    min-width: 0;
 }
 
 /* Tab separator line — pseudo-element + :has() require vanilla CSS */
@@ -400,14 +409,18 @@ onUnmounted(() => {
 }
 
 .file-tab.tab-active::after,
-.file-tab:has(+ .tab-active)::after,
 .file-tab:hover::after,
-.file-tab:has(+ .file-tab:hover)::after {
+.file-tab-wrap:has(+ .file-tab-wrap .tab-active) .file-tab::after,
+.file-tab-wrap:has(+ .file-tab-wrap:hover) .file-tab::after {
     opacity: 0;
 }
 
 /* Tab close button — child selector + hover cascade */
 .tab-close {
+    position: absolute;
+    z-index: 1;
+    right: 6px;
+    top: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -422,8 +435,9 @@ onUnmounted(() => {
     opacity: 0;
 }
 
-.file-tab:hover .tab-close,
-.tab-active .tab-close {
+.file-tab-wrap:hover .tab-close,
+.file-tab-wrap:focus-within .tab-close,
+.file-tab-wrap:has(.tab-active) .tab-close {
     opacity: 1;
 }
 
@@ -504,19 +518,6 @@ onUnmounted(() => {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.tab-drag-ghost.floating {
-    padding: 4px 12px;
-    border-radius: 6px;
-    background: var(--color-surface, #fff);
-    border: 1px solid var(--color-rule-light, #ddd);
-    box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.22),
-        0 2px 6px rgba(0, 0, 0, 0.1);
-    opacity: 0.92;
-    transform: scale(1.04);
-    backdrop-filter: blur(4px);
 }
 
 .tab-drag-ghost.snapped {

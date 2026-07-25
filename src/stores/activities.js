@@ -107,7 +107,7 @@ export const useActivitiesStore = defineStore('activities', () => {
 
   function remove(id) {
     const activity = requireActivity(id)
-    if (LIVE_STATUSES.has(activity.status)) {
+    if (activity.host?.type === 'pty' && LIVE_STATUSES.has(activity.status)) {
       throw new Error(`Cannot remove live Activity '${id}'. Stop it first.`)
     }
     records.value = records.value.filter((item) => item.id !== id)

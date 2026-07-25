@@ -20,16 +20,20 @@ Mim has one three-pane window:
 +----------------+---------------------------+---------------------------+
 ```
 
-- **Sidebar** launches Codex, Claude, Pi, terminals, Files, Apps, and Routines.
-  It also tracks live, finished, and archived Activities.
+- **Sidebar** opens Files and Routines, launches configured CLI agents and
+  installed apps from its Apps section, and tracks live, finished, and
+  archived Activities. Apps are managed in a searchable Settings catalog—with
+  a runnable local scaffold, definition actions, diagnostics, and live Sidebar
+  refresh—rather than through a generic destination row.
 - **Activity** is the universal execution surface. Each terminal, agent run,
   app, and scheduled routine run has one stable Activity identity.
 - **Editor** remains mounted while Activities change. Agents can inspect and
   edit it through Mim's MCP tools, while substantial edits open as reviewable
   diffs.
 
-All panes resize. The Sidebar collapses to a 52px live rail; Activity and Editor
-collapse to 44px rails without losing their state.
+All panes resize. Editor is visible on startup. The Sidebar collapses to a 52px
+live rail; Activity and Editor collapse to 44px rails without losing their
+state, and either content pane can expand into focus and restore the split.
 
 ## Capability layer
 
@@ -72,6 +76,8 @@ Mim creates and uses:
 - `~/.mim/routines/` for routine TOML files
 - `~/.mim/routines-state.json` for scheduler state
 - `~/.mim/settings.json` for workbench, editor, model, and workspace settings
+- `~/.mim/session.json` for open tabs, unsaved drafts, recents, and zoom
+- `~/.mim/models.json` for inline and ghost AI model configuration
 - `~/.mim/bin/mimx` for the installed CLI
 - `~/.mim/pi/mim-tools.ts` for Pi's dynamic Mim tool extension
 

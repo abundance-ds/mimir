@@ -207,6 +207,12 @@ pub struct ActivitySupervisor {
     inner: Arc<SupervisorInner>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivityShutdownReport {
+    pub interrupted: usize,
+    pub remaining: usize,
+}
+
 struct SupervisorInner {
     config: ActivitySupervisorConfig,
     activities: Mutex<HashMap<String, Arc<ManagedActivity>>>,
@@ -291,7 +297,7 @@ struct PersistenceQueue {
 enum PersistenceCommand {
     Save {
         path: PathBuf,
-        value: PersistedActivity,
+        value: Box<PersistedActivity>,
     },
     Delete {
         path: PathBuf,
@@ -746,6 +752,28 @@ impl ActivitySupervisor {
         self.inner.persistence.flush()
     }
 
+    /// Interrupt live PTYs, give their readers a short bounded window to
+    /// persist final scrollback/exit metadata, then flush the ordered writer.
+    pub fn shutdown(&self, timeout: Duration) -> Result<ActivityShutdownReport, SupervisorError> {
+        let interrupted = self.interrupt_all();
+        let deadline = Instant::now() + timeout;
+        let remaining = loop {
+            let live = lock(&self.inner.activities)
+                .values()
+                .filter(|activity| lock(&activity.command_tx).is_some())
+                .count();
+            if live == 0 || Instant::now() >= deadline {
+                break live;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        self.flush_persistence()?;
+        Ok(ActivityShutdownReport {
+            interrupted,
+            remaining,
+        })
+    }
+
     pub fn take_persistence_errors(&self) -> Vec<String> {
         std::mem::take(&mut *lock(&self.inner.persistence.errors))
     }
@@ -1071,7 +1099,10 @@ impl PersistenceQueue {
     }
 
     fn save(&self, path: PathBuf, value: PersistedActivity) {
-        let _ = self.tx.send(PersistenceCommand::Save { path, value });
+        let _ = self.tx.send(PersistenceCommand::Save {
+            path,
+            value: Box::new(value),
+        });
     }
 
     fn delete(&self, path: PathBuf) -> Result<(), SupervisorError> {
@@ -1105,7 +1136,7 @@ impl PersistenceQueue {
 
 fn persistence_loop(receiver: mpsc::Receiver<PersistenceCommand>, errors: Arc<Mutex<Vec<String>>>) {
     struct PendingPersistence {
-        value: Option<PersistedActivity>,
+        value: Option<Box<PersistedActivity>>,
         delete_acks: Vec<mpsc::Sender<Result<(), String>>>,
     }
 
@@ -1523,6 +1554,43 @@ mod tests {
         assert!(!String::from_utf8_lossy(&left).contains("RIGHT"));
         assert!(String::from_utf8_lossy(&right).contains("RIGHT-299"));
         assert!(!String::from_utf8_lossy(&right).contains("LEFT"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_interrupts_live_ptys_and_flushes_the_final_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let record = durable_record(
+            "quit",
+            "/bin/sh",
+            vec!["-c".into(), "printf before-quit; sleep 30".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(record, 80, 24))
+            .unwrap();
+
+        let report = supervisor.shutdown(Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            report,
+            ActivityShutdownReport {
+                interrupted: 1,
+                remaining: 0,
+            }
+        );
+        let snapshot = supervisor.snapshot("quit", None).unwrap();
+        assert_eq!(snapshot.record.status, ActivityStatus::Interrupted);
+        assert_eq!(
+            snapshot.record.session.unwrap().exit.unwrap().reason,
+            SessionExitReason::Interrupted
+        );
+
+        drop(supervisor);
+        let restarted = create_supervisor(&temp);
+        assert_eq!(
+            restarted.snapshot("quit", None).unwrap().record.status,
+            ActivityStatus::Interrupted
+        );
     }
 
     #[cfg(unix)]

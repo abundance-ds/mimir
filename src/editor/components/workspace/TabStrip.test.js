@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TabStrip from './TabStrip.vue'
 
@@ -7,8 +7,8 @@ const twoDocs = [
   { id: 'tab-2', name: 'notes.md', dirty: true },
 ]
 
-function mountStrip(props = {}) {
-  return mount(TabStrip, { props: { tabs: twoDocs, ...props } })
+function mountStrip(props = {}, options = {}) {
+  return mount(TabStrip, { ...options, props: { tabs: twoDocs, ...props } })
 }
 
 /** Helper: returns the file-tab buttons (excludes nav ‹›  and + buttons) */
@@ -59,11 +59,7 @@ describe('TabStrip', () => {
 
   it('emits close-tab with index on close button click', async () => {
     const w = mountStrip()
-    // close button is the × span inside the first tab
-    const closeBtn = fileTabs(w)[0]
-      .findAll('span')
-      .find(s => s.text() === '×')
-    expect(closeBtn).toBeTruthy()
+    const closeBtn = w.get('button[aria-label="Close doc.md"]')
     await closeBtn.trigger('click')
     expect(w.emitted('close-tab')).toBeTruthy()
     expect(w.emitted('close-tab')[0]).toEqual([0])
@@ -79,11 +75,10 @@ describe('TabStrip', () => {
     expect(w.emitted('add-tab')).toBeTruthy()
   })
 
-  it('hides close button when only one tab', () => {
+  it('keeps the last-tab close affordance available for embedded pane collapse', () => {
     const w = mountStrip({ tabs: [{ id: 'tab-solo', name: 'solo.md', dirty: false }] })
-    const tab = fileTabs(w)[0]
-    const closeSpan = tab.findAll('span').find(s => s.text() === '×')
-    expect(closeSpan).toBeUndefined()
+    const closeButton = w.get('button[aria-label="Close solo.md"]')
+    expect(closeButton.attributes('title')).toBe('Close tab')
   })
 
   it('applies active class to selected tab', () => {
@@ -91,5 +86,76 @@ describe('TabStrip', () => {
     const tabs = fileTabs(w)
     expect(tabs[0].classes()).not.toContain('tab-active')
     expect(tabs[1].classes()).toContain('tab-active')
+  })
+
+  it('uses a valid tablist with sibling keyboard-operable close buttons', async () => {
+    const w = mountStrip({ activeTab: 1 })
+    const tabs = fileTabs(w)
+    expect(w.get('[role="tablist"]').attributes('aria-label')).toBe('Open editor tabs')
+    expect(tabs.map(tab => tab.attributes('role'))).toEqual(['tab', 'tab'])
+    expect(tabs.map(tab => tab.attributes('aria-selected'))).toEqual(['false', 'true'])
+    expect(tabs.map(tab => tab.attributes('tabindex'))).toEqual(['-1', '0'])
+    expect(tabs[0].find('button').exists()).toBe(false)
+
+    const close = w.get('button[aria-label="Close notes.md"]')
+    await close.trigger('keydown', { key: 'Enter' })
+    await close.trigger('click')
+    expect(w.emitted('close-tab').at(-1)).toEqual([1])
+  })
+
+  it('moves tab focus and selection with horizontal, Home, and End keys', async () => {
+    const w = mountStrip({}, { attachTo: document.body })
+    const tabs = fileTabs(w)
+
+    await tabs[0].trigger('keydown', { key: 'ArrowRight' })
+    await w.vm.$nextTick()
+    expect(w.emitted('select-tab').at(-1)).toEqual([1])
+    expect(document.activeElement).toBe(tabs[1].element)
+
+    await tabs[1].trigger('keydown', { key: 'Home' })
+    await w.vm.$nextTick()
+    expect(w.emitted('select-tab').at(-1)).toEqual([0])
+    expect(document.activeElement).toBe(tabs[0].element)
+
+    await tabs[0].trigger('keydown', { key: 'End' })
+    expect(w.emitted('select-tab').at(-1)).toEqual([1])
+
+    await tabs[0].trigger('keydown', { key: 'ArrowLeft' })
+    expect(w.emitted('select-tab').at(-1)).toEqual([1])
+    w.unmount()
+  })
+
+  it('scrolls a newly active tab into view immediately', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const w = mountStrip()
+    await w.setProps({ activeTab: 1 })
+    await w.vm.$nextTick()
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'auto',
+      block: 'nearest',
+      inline: 'nearest',
+    })
+  })
+
+  it('cancels a drag on Escape and pointercancel without reordering', async () => {
+    const w = mountStrip({}, { attachTo: document.body })
+    document.body.style.cursor = 'crosshair'
+    document.body.style.userSelect = 'text'
+    const tab = fileTabs(w)[0]
+    await tab.trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: 30, clientY: 10 }))
+    expect(document.body.style.cursor).toBe('grabbing')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(document.body.style.cursor).toBe('crosshair')
+    expect(document.body.style.userSelect).toBe('text')
+    expect(w.emitted('reorder-tab')).toBeFalsy()
+
+    await tab.trigger('pointerdown', { button: 0, clientX: 10, clientY: 10 })
+    document.dispatchEvent(new PointerEvent('pointercancel'))
+    expect(w.emitted('select-tab')).toBeFalsy()
+    expect(w.emitted('reorder-tab')).toBeFalsy()
+    w.unmount()
   })
 })

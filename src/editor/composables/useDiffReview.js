@@ -30,17 +30,29 @@ export function useDiffReview({
   async function respondToDiffReview(status) {
     const meta = diffStore.reviewMeta
     const ids = proposalIdsFromReviewMeta(meta)
-    if (ids.length === 0) return
+    if (ids.length === 0) return { ok: true }
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         ids.map(id =>
           invoke('proposal_respond', {
             result: { id, sessionId: meta.sessionId, status, detail: status === 'applied' ? 'User accepted the change' : 'User rejected the change' },
           })
         )
       )
-    } catch {}
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure) {
+        const error = `The edit decision could not be reported: ${failure.reason?.message || failure.reason}`
+        diffStore.setReviewError?.(error)
+        return { ok: false, error }
+      }
+      diffStore.setReviewError?.('')
+      return { ok: true }
+    } catch (cause) {
+      const error = `The edit decision could not be reported: ${cause?.message || cause}`
+      diffStore.setReviewError?.(error)
+      return { ok: false, error }
+    }
   }
 
   async function onBatchAllResolved() {
@@ -142,9 +154,11 @@ export function useDiffReview({
       applyDiffResult(diffStore.modifiedContent)
       inlineAIState.value = null
     } else {
-      await respondToDiffReview('applied')
+      const lifecycle = await respondToDiffReview('applied')
+      if (!lifecycle.ok) return lifecycle
       fileManager.clearFileReviews(currentFile.value)
       applyDiffResult(diffStore.modifiedContent)
+      return { ok: true }
     }
   }
 
@@ -172,9 +186,11 @@ export function useDiffReview({
     } else if (diffStore.reviewMeta?.type === 'inline-ai') {
       diffStore.deactivate()
     } else {
-      await respondToDiffReview('rejected')
+      const lifecycle = await respondToDiffReview('rejected')
+      if (!lifecycle.ok) return lifecycle
       fileManager.clearFileReviews(currentFile.value)
       applyDiffResult(diffStore.originalContent)
+      return { ok: true }
     }
   }
 
@@ -192,7 +208,8 @@ export function useDiffReview({
     if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
     else if (proposalIdsFromReviewMeta(diffStore.reviewMeta).length > 0) {
       const status = content === diffStore.originalContent ? 'rejected' : 'applied'
-      await respondToDiffReview(status)
+      const lifecycle = await respondToDiffReview(status)
+      if (!lifecycle.ok) return lifecycle
       fileManager.clearFileReviews(currentFile.value)
     }
     applyDiffResult(content)

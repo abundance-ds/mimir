@@ -1,6 +1,8 @@
 #[cfg(debug_assertions)]
 use crate::ai_models::ensure_config_dir;
 use crate::ai_models::{AiProviderConfig, ModelRegistry};
+#[cfg(debug_assertions)]
+use crate::persistence::write_secret_bytes_atomic;
 use serde::Serialize;
 #[cfg(debug_assertions)]
 use std::{collections::HashMap, fs, path::PathBuf};
@@ -137,12 +139,12 @@ pub fn set_api_key(
                 let mut file_keys = load_file_keys().unwrap_or_default();
                 file_keys.insert(config.api_key_env.clone(), trimmed);
                 save_file_keys(&file_keys)?;
-                return Ok(AiKeyStatus {
+                Ok(AiKeyStatus {
                     provider: provider.to_string(),
                     key_env: config.api_key_env.clone(),
                     configured: true,
                     source: Some("file".to_string()),
-                });
+                })
             }
             #[cfg(not(debug_assertions))]
             {
@@ -262,13 +264,11 @@ fn save_file_keys(keys: &HashMap<String, String>) -> Result<(), String> {
         .map(|(key, value)| format!("{}={}", key, value))
         .collect::<Vec<_>>()
         .join("\n");
-    fs::write(
-        &path,
-        if content.is_empty() {
-            content
-        } else {
-            format!("{}\n", content)
-        },
-    )
-    .map_err(|err| format!("Could not write {}: {}", path.display(), err))
+    let content = if content.is_empty() {
+        content
+    } else {
+        format!("{}\n", content)
+    };
+    write_secret_bytes_atomic(&path, content.as_bytes())
+        .map_err(|err| format!("Could not write {}: {}", path.display(), err))
 }

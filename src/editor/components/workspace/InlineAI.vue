@@ -4,6 +4,7 @@
     <div class="flex items-center gap-1.5 min-h-[34px] px-[14px]">
       <form @submit.prevent="onSubmit" class="flex items-center gap-1.5 flex-1 min-w-0">
         <span class="shrink-0 font-mono text-[10px] text-ink-3 bg-chrome border border-rule rounded px-1 py-px leading-[14px]">⌘K</span>
+        <span class="shrink-0 font-mono text-[9px] text-ink-3" data-inline-ai-scope>{{ selectionScope }}</span>
         <textarea
           ref="inputRef"
           v-model="input"
@@ -23,7 +24,7 @@
           type="submit"
           aria-label="Send inline AI instruction"
           class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-semibold text-accent-ink bg-accent hover:opacity-90 disabled:opacity-30"
-          :disabled="!input.trim() || isLoading"
+          :disabled="!canSend"
         >Send</button>
       </form>
       <ModelPicker
@@ -44,7 +45,7 @@
 
     <!-- Row 2: Status / Response / Error -->
     <div
-      v-if="isLoading || responseText || chatError"
+      v-if="isLoading || responseText || pendingEdit || chatError || modelStateMessage"
       aria-live="polite"
       class="flex items-start gap-1.5 min-h-[34px] px-[14px] py-1.5 border-t border-rule-light"
     >
@@ -64,8 +65,8 @@
       </template>
 
       <!-- Response -->
-      <template v-else-if="responseText">
-        <p class="flex-1 min-w-0 font-sans text-[11px] leading-snug text-ink-2">{{ responseText }}</p>
+      <template v-else-if="responseText || pendingEdit">
+        <p class="flex-1 min-w-0 font-sans text-[11px] leading-snug text-ink-2">{{ responseText || 'Review the proposed edit.' }}</p>
         <template v-if="pendingEdit">
           <button class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-medium text-ink-3 iai-reject-btn" @mousedown.prevent @click="onReject">Reject</button>
           <button
@@ -77,6 +78,16 @@
           >Accept</button>
         </template>
       </template>
+
+      <template v-else>
+        <span class="font-sans text-[11px] text-ink-2 flex-1 leading-snug">{{ modelStateMessage }}</span>
+        <button
+          v-if="modelsReady && !resolvedModel"
+          type="button"
+          class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10px] font-medium text-accent hover:bg-chrome-high"
+          @click="$emit('configure-models')"
+        >Configure AI</button>
+      </template>
     </div>
   </div>
 </template>
@@ -87,7 +98,7 @@ import { Chat } from '@ai-sdk/vue'
 import { lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { getModelRegistry, getAiKeyStatus } from '../../../services/ai/client.js'
-import { modelMenuItems } from '../../../services/ai/modelControls.js'
+import { modelMenuItems, resolveConcreteModel } from '../../../services/ai/modelControls.js'
 import { createInlineAITransport, buildInlineSystemPrompt } from '../../../services/ai/inlineTransport.js'
 import ModelPicker from '../../../shared/ui/ModelPicker.vue'
 import { inlineAIKeyAction } from './inlineAIKeys.js'
@@ -107,27 +118,56 @@ const props = defineProps({
   documentId: { type: String, default: null },
   getDocument: { type: Function, default: null },
   projectPath: { type: String, default: null },
+  escapeBlocked: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['apply', 'activate-diff', 'deactivate-diff', 'close'])
+const emit = defineEmits(['apply', 'activate-diff', 'deactivate-diff', 'close', 'configure-models'])
 
 const inputRef = ref(null)
 const modelList = ref([])
 const pendingEdit = ref(null)
 const toolStatus = ref('')
 let lastInstruction = ''
-let registry = null
+const registry = ref(null)
+const keyStatuses = ref([])
+const modelsReady = ref(false)
+const modelLoadError = ref('')
+const localError = ref('')
 
 const input = ref('')
 
 let chatInstance = null
 const _chatVersion = ref(0)
 
-const currentModelId = computed(() => {
-  const stored = settings.aiInlineModel
-  if (stored && stored !== 'auto') return stored
-  const first = modelList.value.find(m => m.id !== 'auto' && !m.disabled)
-  return first?.id || stored || 'auto'
+const resolvedModel = computed(() => resolveConcreteModel(
+  registry.value,
+  keyStatuses.value,
+  settings.aiInlineModel,
+  'rewrite',
+))
+
+const currentModelId = computed(() => (
+  resolvedModel.value?.id || settings.aiInlineModel || 'auto'
+))
+
+const modelStateMessage = computed(() => {
+  if (!modelsReady.value) return modelLoadError.value || 'Loading configured AI models…'
+  if (!resolvedModel.value) return 'Configure an AI provider key to use inline rewrite.'
+  return ''
+})
+
+const canSend = computed(() => (
+  Boolean(input.value.trim())
+  && !isLoading.value
+  && Boolean(resolvedModel.value)
+))
+
+const selectionScope = computed(() => {
+  const text = props.selection.text || ''
+  if (!text) return 'Cursor'
+  const lines = text.split('\n').length
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0
+  return lines > 1 ? `${lines} lines` : `${words} ${words === 1 ? 'word' : 'words'}`
 })
 
 const placeholder = computed(() => {
@@ -139,7 +179,7 @@ const placeholder = computed(() => {
 function getConfig() {
   return {
     modelId: currentModelId.value,
-    registry,
+    registry: registry.value,
     system: buildInlineSystemPrompt({
       text: props.selection.text,
       contextBefore: props.selection.contextBefore || '',
@@ -174,7 +214,7 @@ function createChat() {
     transport: createInlineAITransport(() => getConfig()),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     onError(error) {
-      console.error('[inline-ai]', error)
+      localError.value = error?.message || String(error)
     },
     onFinish() {
       toolStatus.value = ''
@@ -191,6 +231,7 @@ const isLoading = computed(() => {
 })
 
 const chatError = computed(() => {
+  if (localError.value) return localError.value
   void _chatVersion.value
   if (!chatInstance) return null
   const err = chatInstance.state.errorRef.value
@@ -217,15 +258,28 @@ watch(() => { void _chatVersion.value; return chatInstance?.state.messagesRef.va
   for (const msg of msgs) {
     if (msg.role !== 'assistant') continue
     for (const part of (msg.parts || [])) {
-      if (part.type === 'tool-invocation' && part.toolInvocation?.state === 'call') {
-        toolStatus.value = TOOL_LABELS[part.toolInvocation.toolName] || 'Working'
-      }
+      const activeTool = activeToolName(part)
+      if (activeTool) toolStatus.value = TOOL_LABELS[activeTool] || 'Working'
     }
   }
 }, { deep: true })
 
+function activeToolName(part) {
+  if (part?.type === 'tool-invocation' && part.toolInvocation?.state === 'call') {
+    return part.toolInvocation.toolName
+  }
+  const activeStates = new Set(['call', 'input-streaming', 'input-available'])
+  if (!activeStates.has(part?.state)) return ''
+  if (part.type === 'dynamic-tool') return part.toolName || ''
+  if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
+    return part.toolName || part.type.slice(5)
+  }
+  return ''
+}
+
 function onModelChange(id) {
   settings.set('aiInlineModel', id)
+  localError.value = ''
 }
 
 function autoResize() {
@@ -262,17 +316,27 @@ function onInputKeydown(e) {
 
 function onSubmit() {
   const instruction = input.value.trim()
-  if (!instruction || isLoading.value) return
+  if (!instruction || isLoading.value || !resolvedModel.value) return
 
   lastInstruction = instruction
   resetInput()
   pendingEdit.value = null
   toolStatus.value = ''
+  localError.value = ''
 
   emit('deactivate-diff')
 
   if (!chatInstance) createChat()
-  chatInstance.sendMessage({ text: instruction })
+  try {
+    const sending = chatInstance.sendMessage({ text: instruction })
+    if (sending?.catch) {
+      void sending.catch((error) => {
+        localError.value = error?.message || String(error)
+      })
+    }
+  } catch (error) {
+    localError.value = error?.message || String(error)
+  }
 }
 
 function onCancel() {
@@ -303,6 +367,7 @@ function onClose() {
 }
 
 function onGlobalKeydown(e) {
+  if (props.escapeBlocked) return
   if (e.key === 'Escape') {
     e.preventDefault()
     e.stopPropagation()
@@ -313,14 +378,15 @@ function onGlobalKeydown(e) {
 
 async function loadModels() {
   try {
-    const [reg, keyStatuses] = await Promise.all([getModelRegistry(), getAiKeyStatus()])
-    registry = reg
-    modelList.value = modelMenuItems(reg, keyStatuses)
-    if (settings.aiInlineModel === 'auto' && modelList.value.length > 0) {
-      const first = modelList.value.find(m => m.id !== 'auto' && !m.disabled)
-      if (first) settings.set('aiInlineModel', first.id)
-    }
-  } catch {}
+    const [reg, statuses] = await Promise.all([getModelRegistry(), getAiKeyStatus()])
+    registry.value = reg
+    keyStatuses.value = statuses
+    modelList.value = modelMenuItems(reg, statuses)
+  } catch (error) {
+    modelLoadError.value = `AI models could not be loaded: ${error?.message || error}`
+  } finally {
+    modelsReady.value = true
+  }
 }
 
 onMounted(async () => {

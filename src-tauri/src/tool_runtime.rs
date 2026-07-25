@@ -583,6 +583,68 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             ),
         ),
         definition(
+            "files.browse",
+            "files_browse",
+            "List the immediate children of one workspace directory with file metadata. Paths are workspace-relative or exact paths inside the open workspace.",
+            object_schema(
+                json!({
+                    "directory": { "type": "string", "maxLength": 1000 }
+                }),
+                &[],
+            ),
+        ),
+        definition(
+            "files.create_folder",
+            "files_create_folder",
+            "Create one new folder at a workspace-relative path without overwriting anything.",
+            object_schema(
+                json!({
+                    "path": { "type": "string", "minLength": 1, "maxLength": 1000 }
+                }),
+                &["path"],
+            ),
+        ),
+        definition(
+            "files.rename",
+            "files_rename",
+            "Rename one exact file or folder inside the open workspace without moving it or overwriting another item.",
+            object_schema(
+                json!({
+                    "path": { "type": "string", "minLength": 1, "maxLength": 1000 },
+                    "new_name": { "type": "string", "minLength": 1, "maxLength": 255 }
+                }),
+                &["path", "new_name"],
+            ),
+        ),
+        definition(
+            "files.duplicate",
+            "files_duplicate",
+            "Duplicate one exact file or folder inside the open workspace to a deterministic available copy name.",
+            object_schema(
+                json!({
+                    "path": { "type": "string", "minLength": 1, "maxLength": 1000 }
+                }),
+                &["path"],
+            ),
+        ),
+        definition(
+            "files.trash",
+            "files_trash",
+            "Move the exact listed workspace files or folders to the operating-system Trash. This is destructive to their workspace locations but recoverable from Trash; the workspace root and paths outside it are always rejected.",
+            object_schema(
+                json!({
+                    "paths": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "uniqueItems": true,
+                        "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+                    }
+                }),
+                &["paths"],
+            ),
+        ),
+        definition(
             "comments.add",
             "comment_add",
             "Add a pseudo-XML review comment anchored to an exact text passage.",
@@ -699,7 +761,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         editor_definition(
             "editor.comments",
             "editor_comments",
-            "Return fixed pseudo-XML comments for the active document.",
+            "Return canonical pseudo-XML comments for the active document.",
             json!({}),
             &[],
         ),
@@ -815,6 +877,69 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             ),
         ),
         definition(
+            "apps.reload",
+            "apps_reload",
+            "Reload local app definitions and return the current catalog and diagnostics.",
+            object_schema(json!({}), &[]),
+        ),
+        definition(
+            "apps.create",
+            "apps_create",
+            "Create a usable local embedded app scaffold under ~/.mim/apps.",
+            object_schema(
+                json!({
+                    "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+                    "description": { "type": "string", "maxLength": 500 }
+                }),
+                &["id", "title"],
+            ),
+        ),
+        definition(
+            "apps.duplicate",
+            "apps_duplicate",
+            "Duplicate one local app definition and its package files under a new stable id.",
+            object_schema(
+                json!({
+                    "app_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+                    "new_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "title": { "type": "string", "minLength": 1, "maxLength": 120 }
+                }),
+                &["app_id", "new_id"],
+            ),
+        ),
+        definition(
+            "apps.update",
+            "apps_update",
+            "Rename a local app's display title while preserving its stable id, data, tools, and activities.",
+            object_schema(
+                json!({
+                    "app_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+                    "title": { "type": "string", "minLength": 1, "maxLength": 120 }
+                }),
+                &["app_id", "title"],
+            ),
+        ),
+        definition(
+            "apps.trash",
+            "apps_trash",
+            "Move one exact local app definition or package to the operating-system Trash.",
+            object_schema(
+                json!({ "app_id": { "type": "string", "minLength": 1, "maxLength": 64 } }),
+                &["app_id"],
+            ),
+        ),
+        definition(
             "routines.list",
             "routines_list",
             "List file-defined scheduled routines and their next run.",
@@ -827,6 +952,54 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             object_schema(
                 json!({ "routine_id": { "type": "string", "minLength": 1 } }),
                 &["routine_id"],
+            ),
+        ),
+        definition(
+            "routines.create",
+            "routines_create",
+            "Create one canonical TOML-backed scheduled routine. The stable id also becomes its definition filename.",
+            object_schema(
+                json!({ "definition": routine_definition_schema() }),
+                &["definition"],
+            ),
+        ),
+        definition(
+            "routines.update",
+            "routines_update",
+            "Atomically replace one routine definition while preserving its stable id. Pass the source_revision returned by routines.list; stale revisions are rejected.",
+            object_schema(
+                json!({
+                    "routine_id": routine_id_schema(),
+                    "expected_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+                    "definition": routine_definition_schema()
+                }),
+                &["routine_id", "expected_revision", "definition"],
+            ),
+        ),
+        definition(
+            "routines.duplicate",
+            "routines_duplicate",
+            "Copy one routine to a new stable id. The copy is always created paused so it cannot accidentally double-fire.",
+            object_schema(
+                json!({
+                    "routine_id": routine_id_schema(),
+                    "expected_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+                    "new_id": routine_id_schema(),
+                    "title": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }),
+                &["routine_id", "expected_revision", "new_id"],
+            ),
+        ),
+        definition(
+            "routines.trash",
+            "routines_trash",
+            "Move one exact routine TOML definition to the operating-system Trash. Pass its current source_revision; stale revisions are rejected. Live Activities are not killed.",
+            object_schema(
+                json!({
+                    "routine_id": routine_id_schema(),
+                    "expected_revision": { "type": "string", "minLength": 1, "maxLength": 128 }
+                }),
+                &["routine_id", "expected_revision"],
             ),
         ),
         definition(
@@ -845,6 +1018,35 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             object_schema(json!({ "values": { "type": "object" } }), &["values"]),
         ),
     ]
+}
+
+fn routine_id_schema() -> Value {
+    json!({
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9_-]+$"
+    })
+}
+
+fn routine_definition_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "id": routine_id_schema(),
+            "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "timezone": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "preset": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "prompt": { "type": "string", "minLength": 1, "maxLength": 100000 },
+            "overlap": { "enum": ["skip", "parallel"] },
+            "missed": { "enum": ["skip", "run-once"] },
+            "workspace": { "type": ["string", "null"], "minLength": 1, "maxLength": 1000 }
+        },
+        "required": ["id", "title", "schedule", "timezone", "preset", "prompt"]
+    })
 }
 
 fn editor_definition(
@@ -956,6 +1158,83 @@ mod tests {
         for legacy in legacy_tool_aliases() {
             assert!(aliases.contains(legacy), "missing legacy alias {legacy}");
         }
+    }
+
+    #[test]
+    fn routine_and_files_mutation_contracts_are_explicit_and_revision_safe() {
+        let definitions = core_tool_definitions();
+        let by_name = |name: &str| {
+            definitions
+                .iter()
+                .find(|definition| definition.canonical_name == name)
+                .unwrap()
+        };
+
+        assert_eq!(by_name("files.browse").mcp_alias, "files_browse");
+        assert_eq!(
+            by_name("files.create").mcp_alias,
+            "create",
+            "the existing text-file creation alias is backwards compatible"
+        );
+        let trash = by_name("files.trash");
+        assert!(trash.description.contains("operating-system Trash"));
+        assert!(trash.description.contains("workspace root"));
+        assert_eq!(trash.input_schema["properties"]["paths"]["minItems"], 1);
+
+        for name in [
+            "routines.create",
+            "routines.update",
+            "routines.duplicate",
+            "routines.trash",
+        ] {
+            assert!(by_name(name).mcp_alias.starts_with("routines_"));
+        }
+        let update = by_name("routines.update");
+        assert!(update.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("expected_revision")));
+        assert_eq!(
+            update.input_schema["properties"]["definition"]["additionalProperties"],
+            json!(false)
+        );
+        assert!(by_name("routines.duplicate")
+            .description
+            .contains("created paused"));
+    }
+
+    #[test]
+    fn local_app_operations_have_stable_namespaced_mcp_contracts() {
+        let definitions = core_tool_definitions();
+        let by_name = |name: &str| {
+            definitions
+                .iter()
+                .find(|definition| definition.canonical_name == name)
+                .unwrap()
+        };
+        for name in [
+            "apps.reload",
+            "apps.create",
+            "apps.duplicate",
+            "apps.update",
+            "apps.trash",
+        ] {
+            assert_eq!(
+                by_name(name).mcp_alias,
+                name.replace('.', "_"),
+                "{name} must use its stable namespaced alias"
+            );
+        }
+        assert_eq!(
+            by_name("apps.create").input_schema["properties"]["id"]["pattern"],
+            json!("^[A-Za-z0-9_-]+$")
+        );
+        assert!(by_name("apps.update")
+            .description
+            .contains("preserving its stable id"));
+        assert!(by_name("apps.trash")
+            .description
+            .contains("operating-system Trash"));
     }
 
     #[test]

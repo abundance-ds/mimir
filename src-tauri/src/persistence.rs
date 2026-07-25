@@ -81,14 +81,61 @@ where
 
 /// Atomically replace `path` with already-serialized bytes.
 pub fn write_bytes_atomic(path: impl AsRef<Path>, contents: &[u8]) -> Result<(), PersistenceError> {
-    let path = path.as_ref();
+    write_bytes_atomic_inner(path.as_ref(), contents, false)
+}
+
+/// Atomically replace a secret file and enforce owner-only permissions on
+/// Unix before any secret bytes are written to its temporary file.
+#[cfg(debug_assertions)]
+pub fn write_secret_bytes_atomic(
+    path: impl AsRef<Path>,
+    contents: &[u8],
+) -> Result<(), PersistenceError> {
+    write_bytes_atomic_inner(path.as_ref(), contents, true)
+}
+
+fn write_bytes_atomic_inner(
+    path: &Path,
+    contents: &[u8],
+    owner_only: bool,
+) -> Result<(), PersistenceError> {
     validate_file_name(path)?;
 
     let parent = parent_directory(path);
     fs::create_dir_all(parent)
         .map_err(|source| io_error("create parent directory for", parent, source))?;
 
+    let existing_permissions = match fs::metadata(path) {
+        Ok(metadata) => {
+            let permissions = metadata.permissions();
+            if !owner_only && permissions.readonly() {
+                return Err(io_error(
+                    "replace read-only file at",
+                    path,
+                    io::Error::new(io::ErrorKind::PermissionDenied, "file is read-only"),
+                ));
+            }
+            Some(permissions)
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+        Err(source) => return Err(io_error("inspect file before replacing", path, source)),
+    };
+
     let mut pending = create_pending_file(path)?;
+    #[cfg(unix)]
+    if owner_only {
+        use std::os::unix::fs::PermissionsExt;
+        pending
+            .file_mut()
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|source| {
+                io_error(
+                    "set owner-only permissions on temporary secret file",
+                    pending.path(),
+                    source,
+                )
+            })?;
+    }
     pending
         .file_mut()
         .write_all(contents)
@@ -97,6 +144,20 @@ pub fn write_bytes_atomic(path: impl AsRef<Path>, contents: &[u8]) -> Result<(),
         .file_mut()
         .flush()
         .map_err(|source| io_error("flush temporary persistence file", pending.path(), source))?;
+    if !owner_only {
+        if let Some(permissions) = existing_permissions {
+            pending
+                .file_mut()
+                .set_permissions(permissions)
+                .map_err(|source| {
+                    io_error(
+                        "preserve replaced file permissions for",
+                        pending.path(),
+                        source,
+                    )
+                })?;
+        }
+    }
     pending
         .file_mut()
         .sync_all()
@@ -450,6 +511,33 @@ mod tests {
         assert!(!raw.contains("previous"));
         assert!(!raw.contains("gamma"));
         assert!(temporary_siblings(&path).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_replacement_preserves_mode_and_secret_replacement_enforces_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir().unwrap();
+        let document = directory.path().join("script.sh");
+        fs::write(&document, b"old").unwrap();
+        fs::set_permissions(&document, fs::Permissions::from_mode(0o755)).unwrap();
+        write_bytes_atomic(&document, b"new").unwrap();
+        assert_eq!(
+            fs::metadata(&document).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+
+        let secret = directory.path().join("keys.env");
+        fs::write(&secret, b"OLD=value\n").unwrap();
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o644)).unwrap();
+        write_secret_bytes_atomic(&secret, b"NEW=secret\n").unwrap();
+        assert_eq!(fs::read(&secret).unwrap(), b"NEW=secret\n");
+        assert_eq!(
+            fs::metadata(&secret).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(temporary_siblings(&secret).is_empty());
     }
 
     #[test]

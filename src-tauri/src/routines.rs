@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use cron::Schedule;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
@@ -54,12 +55,21 @@ pub struct RoutineDiagnostic {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutineSource {
+    pub path: String,
+    pub revision: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutineCatalog {
     pub directory: String,
     pub routines: Vec<RoutineDefinition>,
     pub diagnostics: Vec<RoutineDiagnostic>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sources: BTreeMap<String, RoutineSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,6 +182,13 @@ pub fn load_catalog(directory: &Path) -> RoutineCatalog {
             });
             continue;
         }
+        catalog.sources.insert(
+            definition.id.clone(),
+            RoutineSource {
+                path: display_path,
+                revision: source_revision(source.as_bytes()),
+            },
+        );
         catalog.routines.push(definition);
     }
 
@@ -179,6 +196,10 @@ pub fn load_catalog(directory: &Path) -> RoutineCatalog {
         .routines
         .sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     catalog
+}
+
+pub fn source_revision(contents: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(contents))
 }
 
 pub fn validate_definition(definition: &RoutineDefinition) -> Result<(), (String, String)> {
@@ -483,6 +504,12 @@ prompt = "Try."
         let catalog = load_catalog(directory.path());
         assert_eq!(catalog.routines.len(), 1);
         assert_eq!(catalog.routines[0].id, "review");
+        let source = catalog.sources.get("review").unwrap();
+        assert!(source.path.ends_with("review.toml"));
+        assert_eq!(
+            source.revision,
+            source_revision(&fs::read(&source.path).unwrap())
+        );
         assert_eq!(catalog.diagnostics.len(), 1);
         assert_eq!(catalog.diagnostics[0].field.as_deref(), Some("schedule"));
         assert!(catalog.diagnostics[0].path.ends_with("broken.toml"));

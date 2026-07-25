@@ -45,6 +45,27 @@ describe('canonical renderer tool runtime', () => {
     expect(runtime.started).toBe(true)
   })
 
+  it('keeps relay listeners installed until the native MCP server stops', async () => {
+    let startedClientId
+    invoke.mockImplementation(async command => {
+      if (command === 'tool_server_start') {
+        startedClientId = invoke.mock.calls.at(-1)[1].clientId
+      }
+      if (command === 'tool_server_stop') {
+        expect(listeners.has('mim://tool-relay-request')).toBe(true)
+        expect(listeners.has('mim://tool-relay-cancel')).toBe(true)
+        expect(invoke.mock.calls.at(-1)[1].clientId).toBe(startedClientId)
+      }
+    })
+    const runtime = createToolRuntime()
+    await runtime.start()
+    await runtime.stop()
+
+    expect(runtime.started).toBe(false)
+    expect(listeners.has('mim://tool-relay-request')).toBe(false)
+    expect(listeners.has('mim://tool-relay-cancel')).toBe(false)
+  })
+
   it('routes editor calls without replacing or hiding dirty editor state', async () => {
     const editor = {
       mimActive: vi.fn(() => ({ path: '/work/a.md', dirty: true, content: 'draft' })),
@@ -94,6 +115,156 @@ describe('canonical renderer tool runtime', () => {
       { tool: 'routines.run', input: { routine_id: 'review' } },
       { runRoutine },
     )).toEqual({ id: 'review' })
+  })
+
+  it('exposes local app definition operations through the canonical MCP runtime', async () => {
+    const reloadApps = vi.fn(async () => ({ apps: ['notes'] }))
+    const createApp = vi.fn(async input => ({ created: input.id }))
+    const duplicateApp = vi.fn(async (id, input) => ({ from: id, to: input.id }))
+    const updateApp = vi.fn(async (id, title) => ({ id, title }))
+    const trashApp = vi.fn(async id => ({ trashed: id }))
+    const options = { reloadApps, createApp, duplicateApp, updateApp, trashApp }
+
+    await expect(executeToolRequest({ tool: 'apps.reload', input: {} }, options))
+      .resolves.toEqual({ apps: ['notes'] })
+    await expect(executeToolRequest({
+      tool: 'apps.create',
+      input: { id: 'notes', title: 'Notes', description: 'A note.' },
+    }, options)).resolves.toEqual({ created: 'notes' })
+    await expect(executeToolRequest({
+      tool: 'apps.duplicate',
+      input: { app_id: 'notes', new_id: 'notes-copy', title: 'Notes Copy' },
+    }, options)).resolves.toEqual({ from: 'notes', to: 'notes-copy' })
+    await expect(executeToolRequest({
+      tool: 'apps.update',
+      input: { app_id: 'notes', title: 'Field Notes' },
+    }, options)).resolves.toEqual({ id: 'notes', title: 'Field Notes' })
+    await expect(executeToolRequest({
+      tool: 'apps.trash',
+      input: { app_id: 'notes-copy' },
+    }, options)).resolves.toEqual({ trashed: 'notes-copy' })
+  })
+
+  it('routes source-aware routine definition mutations through the native runtime', async () => {
+    invoke.mockResolvedValue({ revision: 9, routines: [] })
+    const definition = {
+      id: 'review',
+      title: 'Review',
+      schedule: '0 9 * * 1-5',
+      timezone: 'Europe/Berlin',
+      preset: 'codex',
+      prompt: 'Review the tree.',
+    }
+
+    await executeToolRequest({ tool: 'routines.create', input: { definition } })
+    await executeToolRequest({
+      tool: 'routines.update',
+      input: {
+        routine_id: 'review',
+        expected_revision: 'sha-1',
+        definition: { ...definition, title: 'Sharper review' },
+      },
+    })
+    await executeToolRequest({
+      tool: 'routines.duplicate',
+      input: {
+        routine_id: 'review',
+        expected_revision: 'sha-2',
+        new_id: 'review-copy',
+      },
+    })
+    await executeToolRequest({
+      tool: 'routines.trash',
+      input: { routine_id: 'review-copy', expected_revision: 'sha-3' },
+    })
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'routine_create', {
+      definition: {
+        ...definition,
+        enabled: true,
+        overlap: 'skip',
+        missed: 'run-once',
+        workspace: null,
+      },
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'routine_update', {
+      routineId: 'review',
+      expectedRevision: 'sha-1',
+      definition: expect.objectContaining({ id: 'review', title: 'Sharper review' }),
+    })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'routine_duplicate', {
+      routineId: 'review',
+      expectedRevision: 'sha-2',
+      newId: 'review-copy',
+      title: null,
+    })
+    expect(invoke).toHaveBeenNthCalledWith(4, 'routine_trash', {
+      routineId: 'review-copy',
+      expectedRevision: 'sha-3',
+    })
+
+    await expect(executeToolRequest({
+      tool: 'routines.update',
+      input: {
+        routine_id: 'review',
+        expected_revision: 'sha-4',
+        definition: { ...definition, id: 'different-id' },
+      },
+    })).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('must match'),
+    })
+    expect(invoke).toHaveBeenCalledTimes(4)
+  })
+
+  it('routes workspace-safe Files manager operations and preserves structured path errors', async () => {
+    invoke
+      .mockResolvedValueOnce([{ relativePath: 'docs', isDirectory: true }])
+      .mockResolvedValueOnce({ relativePath: 'notes', isDirectory: true })
+      .mockResolvedValueOnce({ relativePath: 'renamed.md' })
+      .mockResolvedValueOnce({ relativePath: 'renamed copy.md' })
+      .mockResolvedValueOnce(['renamed copy.md'])
+
+    await expect(executeToolRequest({
+      tool: 'files.browse',
+      input: { directory: 'docs' },
+    })).resolves.toEqual({
+      directory: 'docs',
+      entries: [{ relativePath: 'docs', isDirectory: true }],
+    })
+    await expect(executeToolRequest({
+      tool: 'files.create_folder',
+      input: { path: 'notes' },
+    })).resolves.toEqual({ entry: { relativePath: 'notes', isDirectory: true } })
+    await executeToolRequest({
+      tool: 'files.rename',
+      input: { path: 'draft.md', new_name: 'renamed.md' },
+    })
+    await executeToolRequest({
+      tool: 'files.duplicate',
+      input: { path: 'renamed.md' },
+    })
+    await expect(executeToolRequest({
+      tool: 'files.trash',
+      input: { paths: ['renamed copy.md'] },
+    })).resolves.toEqual({ trashedPaths: ['renamed copy.md'] })
+
+    expect(invoke.mock.calls).toEqual([
+      ['workspace_file_list_directory', { directory: 'docs' }],
+      ['workspace_file_create', { relativePath: 'notes', directory: true }],
+      ['workspace_file_rename', { path: 'draft.md', newName: 'renamed.md' }],
+      ['workspace_file_duplicate', { path: 'renamed.md' }],
+      ['workspace_file_trash', { paths: ['renamed copy.md'] }],
+    ])
+
+    invoke.mockRejectedValueOnce('The path must stay inside the open workspace.')
+    await expect(executeToolRequest({
+      tool: 'files.rename',
+      input: { path: '../escape.md', new_name: 'oops.md' },
+    })).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('inside the open workspace'),
+    })
   })
 
   it('exposes the complete durable Activity lifecycle', async () => {

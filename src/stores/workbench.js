@@ -23,6 +23,7 @@ const WIDTH_RANGES = Object.freeze({
 export const useWorkbenchStore = defineStore('workbench', () => {
   const paneLayout = reactive(cloneDefaultLayout())
   const activityHistory = ref(createHistory('files'))
+  const singlePaneMode = ref(false)
 
   const activeActivityId = computed(() => activityHistory.value.current)
   const canGoPreviousActivity = computed(() => activityHistory.value.back.length > 0)
@@ -36,6 +37,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     if (!PANE_STATES.has(state)) throw new Error(`Unknown pane state '${state}'.`)
 
     paneLayout[pane].state = state
+    if (state === 'expanded' && singlePaneMode.value && pane === 'activity') {
+      paneLayout.editor.state = 'rail'
+    }
+    if (state === 'expanded' && singlePaneMode.value && pane === 'editor') {
+      paneLayout.activity.state = 'rail'
+    }
     if (state === 'rail' && pane === 'activity' && paneLayout.editor.state === 'rail') {
       paneLayout.editor.state = 'expanded'
     }
@@ -53,6 +60,29 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   function setPaneWidth(pane, width) {
     assertPane(pane)
     paneLayout[pane].width = clampPaneWidth(pane, width)
+  }
+
+  function setSinglePaneMode(enabled) {
+    singlePaneMode.value = Boolean(enabled)
+    if (
+      singlePaneMode.value
+      && paneLayout.activity.state === 'expanded'
+      && paneLayout.editor.state === 'expanded'
+    ) {
+      paneLayout.activity.state = 'rail'
+    }
+  }
+
+  function setActivityExpanded(expanded) {
+    paneLayout.activity.state = 'expanded'
+    paneLayout.editor.state = (expanded || singlePaneMode.value) ? 'rail' : 'expanded'
+    normalizeLayout()
+  }
+
+  function setEditorExpanded(expanded) {
+    paneLayout.editor.state = 'expanded'
+    paneLayout.activity.state = (expanded || singlePaneMode.value) ? 'rail' : 'expanded'
+    normalizeLayout()
   }
 
   function restoreLayout(value) {
@@ -133,9 +163,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     canGoPreviousActivity,
     canGoNextActivity,
     expandedPanes,
+    singlePaneMode,
     setPaneState,
     togglePane,
     setPaneWidth,
+    setSinglePaneMode,
+    setActivityExpanded,
+    setEditorExpanded,
     restoreLayout,
     layoutSnapshot,
     openActivity,

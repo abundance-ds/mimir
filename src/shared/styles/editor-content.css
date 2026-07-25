@@ -371,6 +371,41 @@
   color: var(--color-ink-3);
 }
 
+.cm-comment-reply-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.cm-comment-reply-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0;
+}
+
+.cm-comment-reply:hover .cm-comment-reply-actions,
+.cm-comment-reply:focus-within .cm-comment-reply-actions {
+  opacity: 1;
+}
+
+.cm-comment-reply-actions .cm-comment-btn {
+  height: 18px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+.cm-comment-reply-editor {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.cm-comment-reply-editor[hidden] {
+  display: none;
+}
+
 .cm-comment-reply-trigger {
   margin-top: 4px;
   height: 20px;

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 pub struct FileIndexState(Mutex<Option<Arc<WorkspaceFileIndex>>>);
 
 impl FileIndexState {
-    fn index(&self) -> Result<Arc<WorkspaceFileIndex>, String> {
+    pub(crate) fn index(&self) -> Result<Arc<WorkspaceFileIndex>, String> {
         self.0
             .lock()
             .map_err(|error| error.to_string())?

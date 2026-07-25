@@ -72,7 +72,7 @@ function recentMenuItems(recentFiles, actions) {
   ]
 }
 
-function buildMenuItems(recentFiles, actions) {
+export function buildNativeEditorMenuItems(recentFiles, actions) {
   return [
     {
       text: 'Mim',
@@ -85,7 +85,7 @@ function buildMenuItems(recentFiles, actions) {
         { item: 'HideOthers' },
         { item: 'ShowAll' },
         separator(),
-        { item: 'Quit' },
+        item('editor:quit', 'Quit Mim', 'CmdOrCtrl+Q', actions.quit),
       ],
     },
     {
@@ -146,7 +146,7 @@ export async function installNativeEditorMenu({ recentFiles = [], actions = {} }
   if (!shouldInstallNativeEditorMenu()) return false
 
   const { Menu } = await import('@tauri-apps/api/menu')
-  const menu = await Menu.new({ items: buildMenuItems(recentFiles, actions) })
+  const menu = await Menu.new({ items: buildNativeEditorMenuItems(recentFiles, actions) })
   await menu.setAsAppMenu()
   return true
 }

@@ -2,12 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import {
+  createRoutineDefinition,
+  duplicateRoutineDefinition,
   listenToRoutineEvents,
   loadRoutineCatalog,
   normalizeRoutineCatalog,
+  revealRoutineDefinition,
   reloadRoutineCatalog,
   ROUTINES_CHANGED_EVENT,
   runRoutineNow,
+  trashRoutineDefinition,
+  updateRoutineDefinition,
 } from './routines.js'
 
 describe('routines service', () => {
@@ -45,6 +50,8 @@ describe('routines service', () => {
           timezone: 'Europe/Berlin',
           preset: 'codex',
           prompt: 'Review.',
+          path: '/home/me/.mim/routines/a-morning.toml',
+          sourceRevision: 'rev-morning',
           available: true,
           nextFire: '2026-07-27T07:00:00Z',
         },
@@ -72,6 +79,10 @@ describe('routines service', () => {
       lastError: 'Previous run failed.',
       overlap: 'parallel',
       missed: 'skip',
+    })
+    expect(catalog.routines[0]).toMatchObject({
+      path: '/home/me/.mim/routines/a-morning.toml',
+      sourceRevision: 'rev-morning',
     })
     expect(catalog.lastTick.fires[0].routineId).toBe('a-morning')
     expect(catalog.diagnostics[0].field).toBe('schedule')
@@ -115,6 +126,62 @@ describe('routines service', () => {
       activity: { id: 'agent:run', kind: 'agent' },
       scheduledFor: '2026-07-25T08:00:00Z',
     })
+  })
+
+  it('routes complete source-aware CRUD and reveal commands', async () => {
+    const definition = {
+      id: 'review',
+      title: 'Review',
+      enabled: true,
+      schedule: '0 9 * * 1-5',
+      timezone: 'Europe/Berlin',
+      preset: 'codex',
+      prompt: 'Review.',
+      overlap: 'skip',
+      missed: 'run-once',
+      workspace: '',
+      available: false,
+      sourceRevision: 'ignored',
+    }
+    vi.mocked(invoke).mockResolvedValue({ routines: [] })
+
+    await createRoutineDefinition(definition)
+    await updateRoutineDefinition('review', 'rev-1', { ...definition, title: 'Sharper' })
+    await duplicateRoutineDefinition('review', 'rev-2', 'review-copy', 'Review copy')
+    await trashRoutineDefinition('review-copy', 'rev-3')
+    await revealRoutineDefinition('review')
+    await revealRoutineDefinition()
+
+    const serialized = {
+      id: 'review',
+      title: 'Review',
+      enabled: true,
+      schedule: '0 9 * * 1-5',
+      timezone: 'Europe/Berlin',
+      preset: 'codex',
+      prompt: 'Review.',
+      overlap: 'skip',
+      missed: 'run-once',
+      workspace: null,
+    }
+    expect(invoke).toHaveBeenNthCalledWith(1, 'routine_create', { definition: serialized })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'routine_update', {
+      routineId: 'review',
+      expectedRevision: 'rev-1',
+      definition: { ...serialized, title: 'Sharper' },
+    })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'routine_duplicate', {
+      routineId: 'review',
+      expectedRevision: 'rev-2',
+      newId: 'review-copy',
+      title: 'Review copy',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(4, 'routine_trash', {
+      routineId: 'review-copy',
+      expectedRevision: 'rev-3',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(5, 'routine_reveal', { routineId: 'review' })
+    expect(invoke).toHaveBeenNthCalledWith(6, 'routine_reveal', { routineId: null })
   })
 
   it('normalizes native change events before delivery', async () => {

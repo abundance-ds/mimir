@@ -90,7 +90,7 @@ describe('comments store (thin reactive mirror)', () => {
     store.updateCommentsFromState([
       makeComment({ id: 'c1', contentFrom: 10, contentTo: 20 }),
     ])
-    const found = store.findActiveByRange('/test.md', 10, 20)
+    const found = store.findActiveByRange(10, 20)
     expect(found).toBeTruthy()
     expect(found.id).toBe('c1')
   })
@@ -100,7 +100,15 @@ describe('comments store (thin reactive mirror)', () => {
     store.updateCommentsFromState([
       makeComment({ id: 'c1', contentFrom: 10, contentTo: 20 }),
     ])
-    expect(store.findActiveByRange('/test.md', 10, 25)).toBe(null)
-    expect(store.findActiveByRange('/test.md', 15, 20)).toBe(null)
+    expect(store.findActiveByRange(10, 25)).toBe(null)
+    expect(store.findActiveByRange(15, 20)).toBe(null)
+  })
+
+  it('clears a stale active id when CodeMirror removes its comment', () => {
+    const store = useCommentsStore()
+    store.updateCommentsFromState([makeComment({ id: 'c1' })])
+    store.setActiveComment('c1')
+    store.updateCommentsFromState([])
+    expect(store.activeCommentId).toBe(null)
   })
 })

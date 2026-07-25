@@ -1,19 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  createRoutineDefinition,
+  duplicateRoutineDefinition,
   listenToRoutineEvents,
   loadRoutineCatalog,
+  revealRoutineDefinition,
   reloadRoutineCatalog,
   runRoutineNow,
+  trashRoutineDefinition,
+  updateRoutineDefinition,
 } from '../services/routines.js'
+import { stopActivity } from '../services/activities.js'
 import { useRoutinesStore } from './routines.js'
 
 vi.mock('../services/routines.js', () => ({
+  createRoutineDefinition: vi.fn(),
+  duplicateRoutineDefinition: vi.fn(),
   listenToRoutineEvents: vi.fn(),
   loadRoutineCatalog: vi.fn(),
+  revealRoutineDefinition: vi.fn(),
   reloadRoutineCatalog: vi.fn(),
   runRoutineNow: vi.fn(),
+  trashRoutineDefinition: vi.fn(),
+  updateRoutineDefinition: vi.fn(),
 }))
+vi.mock('../services/activities.js', () => ({ stopActivity: vi.fn() }))
 
 const baseCatalog = {
   directory: '/home/me/.mim/routines',
@@ -31,6 +43,8 @@ const baseCatalog = {
       overlap: 'skip',
       missed: 'run-once',
       workspace: null,
+      path: '/home/me/.mim/routines/morning.toml',
+      sourceRevision: 'rev-morning',
       available: true,
       nextFire: '2026-07-27T07:00:00Z',
       diagnostic: null,
@@ -48,6 +62,8 @@ const baseCatalog = {
       overlap: 'parallel',
       missed: 'skip',
       workspace: '/work',
+      path: '/home/me/.mim/routines/nightly.toml',
+      sourceRevision: 'rev-nightly',
       available: true,
       nextFire: null,
       diagnostic: null,
@@ -78,6 +94,12 @@ describe('routines store', () => {
       activity: { id: 'agent:manual', title: 'Morning review' },
       scheduledFor: '2026-07-25T08:00:00Z',
     })
+    vi.mocked(createRoutineDefinition).mockReset().mockResolvedValue(structuredClone(baseCatalog))
+    vi.mocked(updateRoutineDefinition).mockReset().mockResolvedValue(structuredClone(baseCatalog))
+    vi.mocked(duplicateRoutineDefinition).mockReset().mockResolvedValue(structuredClone(baseCatalog))
+    vi.mocked(trashRoutineDefinition).mockReset().mockResolvedValue(structuredClone(baseCatalog))
+    vi.mocked(revealRoutineDefinition).mockReset().mockResolvedValue()
+    vi.mocked(stopActivity).mockReset().mockResolvedValue()
   })
 
   it('subscribes before loading and exposes catalog summaries', async () => {
@@ -186,5 +208,52 @@ describe('routines store', () => {
 
     expect(reloadRoutineCatalog).toHaveBeenCalledTimes(1)
     expect(store.revision).toBe(3)
+  })
+
+  it('routes source-aware create, update, duplicate, trash, reveal, and run cancellation', async () => {
+    const store = useRoutinesStore()
+    await store.initialize()
+    vi.mocked(createRoutineDefinition).mockResolvedValue({
+      ...structuredClone(baseCatalog),
+      routines: [...structuredClone(baseCatalog.routines), {
+        ...structuredClone(baseCatalog.routines[0]),
+        id: 'created',
+        title: 'Created',
+        sourceRevision: 'rev-created',
+      }],
+    })
+    await store.create({ ...baseCatalog.routines[0], id: 'created', title: 'Created' })
+    expect(createRoutineDefinition).toHaveBeenCalledWith(expect.objectContaining({ id: 'created' }))
+    expect(store.selectedId).toBe('created')
+
+    store.select('morning')
+    await store.update('morning', { ...baseCatalog.routines[0], title: 'Sharper' })
+    expect(updateRoutineDefinition).toHaveBeenCalledWith(
+      'morning',
+      'rev-morning',
+      expect.objectContaining({ title: 'Sharper' }),
+    )
+    await store.duplicate('morning', 'morning-copy', 'Morning copy')
+    expect(duplicateRoutineDefinition).toHaveBeenCalledWith(
+      'morning',
+      'rev-morning',
+      'morning-copy',
+      'Morning copy',
+    )
+    await store.trash('morning')
+    expect(trashRoutineDefinition).toHaveBeenCalledWith('morning', 'rev-morning')
+    await store.reveal('nightly')
+    await store.reveal()
+    expect(revealRoutineDefinition).toHaveBeenNthCalledWith(1, 'nightly')
+    expect(revealRoutineDefinition).toHaveBeenNthCalledWith(2, null)
+
+    store.applyCatalog({
+      ...structuredClone(baseCatalog),
+      routines: [{ ...baseCatalog.routines[0], runningActivityIds: ['agent:one', 'agent:two'] }],
+    })
+    await expect(store.stopRuns('morning')).resolves.toBe(2)
+    expect(stopActivity).toHaveBeenCalledWith('agent:one')
+    expect(stopActivity).toHaveBeenCalledWith('agent:two')
+    expect(store.routines[0].runningActivityIds).toEqual([])
   })
 })

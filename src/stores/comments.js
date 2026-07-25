@@ -12,11 +12,17 @@ export const useCommentsStore = defineStore('comments', () => {
 
   function updateCommentsFromState(parsedComments) {
     comments.value = parsedComments
+    if (
+      activeCommentId.value
+      && !parsedComments.some(comment => comment.id === activeCommentId.value)
+    ) {
+      activeCommentId.value = null
+    }
   }
 
-  function commentsForFile(filePath) {
+  function commentsForFile() {
     return comments.value
-      .filter(c => !filePath || true)
+      .slice()
       .sort((a, b) => (a.contentFrom ?? 0) - (b.contentFrom ?? 0))
   }
 
@@ -24,14 +30,11 @@ export const useCommentsStore = defineStore('comments', () => {
     activeCommentId.value = id
   }
 
-  function findActiveByRange(filePath, from, to) {
+  function findActiveByRange(from, to) {
     return comments.value.find(c =>
       c.contentFrom === from &&
       c.contentTo === to
     ) || null
-  }
-
-  function commentAdded() {
   }
 
   return {
@@ -42,6 +45,5 @@ export const useCommentsStore = defineStore('comments', () => {
     commentsForFile,
     setActiveComment,
     findActiveByRange,
-    commentAdded,
   }
 })

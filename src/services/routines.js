@@ -17,6 +17,43 @@ export async function runRoutineNow(routineId) {
   return normalizeRunResult(await invoke('routine_run_now', { routineId: id }))
 }
 
+export async function createRoutineDefinition(definition) {
+  return normalizeRoutineCatalog(await invoke('routine_create', {
+    definition: serializeDefinition(definition),
+  }))
+}
+
+export async function updateRoutineDefinition(routineId, expectedRevision, definition) {
+  const id = requiredId(routineId)
+  return normalizeRoutineCatalog(await invoke('routine_update', {
+    routineId: id,
+    expectedRevision: requiredRevision(expectedRevision),
+    definition: serializeDefinition({ ...definition, id }),
+  }))
+}
+
+export async function duplicateRoutineDefinition(routineId, expectedRevision, newId, title) {
+  const normalizedTitle = title == null ? null : String(title).trim() || null
+  return normalizeRoutineCatalog(await invoke('routine_duplicate', {
+    routineId: requiredId(routineId),
+    expectedRevision: requiredRevision(expectedRevision),
+    newId: requiredId(newId),
+    title: normalizedTitle,
+  }))
+}
+
+export async function trashRoutineDefinition(routineId, expectedRevision) {
+  return normalizeRoutineCatalog(await invoke('routine_trash', {
+    routineId: requiredId(routineId),
+    expectedRevision: requiredRevision(expectedRevision),
+  }))
+}
+
+export function revealRoutineDefinition(routineId = null) {
+  const normalized = routineId == null ? null : requiredId(routineId)
+  return invoke('routine_reveal', { routineId: normalized })
+}
+
 export async function listenToRoutineEvents(onEvent) {
   if (typeof onEvent !== 'function') throw new Error('A routine event handler is required.')
   return listen(ROUTINES_CHANGED_EVENT, (event) => {
@@ -64,6 +101,8 @@ function normalizeRoutine(value) {
     overlap: String(routine.overlap || 'skip'),
     missed: String(routine.missed || 'run-once'),
     workspace: routine.workspace == null ? null : String(routine.workspace),
+    path: String(routine.path || ''),
+    sourceRevision: String(routine.sourceRevision || routine.source_revision || ''),
     available: routine.available !== false,
     nextFire: optionalString(routine.nextFire ?? routine.next_fire),
     diagnostic: optionalString(routine.diagnostic),
@@ -76,6 +115,35 @@ function normalizeRoutine(value) {
     ).map(String),
     lastError: optionalString(routine.lastError ?? routine.last_error),
   }
+}
+
+function serializeDefinition(value) {
+  const definition = isPlainObject(value) ? value : {}
+  const workspace = definition.workspace == null ? '' : String(definition.workspace).trim()
+  return {
+    id: requiredId(definition.id),
+    title: String(definition.title || '').trim(),
+    enabled: definition.enabled !== false,
+    schedule: String(definition.schedule || '').trim(),
+    timezone: String(definition.timezone || 'UTC').trim(),
+    preset: String(definition.preset || '').trim(),
+    prompt: String(definition.prompt || ''),
+    overlap: String(definition.overlap || 'skip'),
+    missed: String(definition.missed || 'run-once'),
+    workspace: workspace || null,
+  }
+}
+
+function requiredId(value) {
+  const id = String(value || '').trim()
+  if (!id) throw new Error('A routine id is required.')
+  return id
+}
+
+function requiredRevision(value) {
+  const revision = String(value || '').trim()
+  if (!revision) throw new Error('Reload this routine before changing it.')
+  return revision
 }
 
 function normalizeDiagnostic(value) {

@@ -43,6 +43,18 @@ not enforcement.
 Core tools relay from Rust to the renderer. `src/services/toolRuntime.js`
 subscribes to request and cancellation events before `tool_server_start`.
 Reversing the order creates a race where an early call has no handler.
+Shutdown keeps those listeners installed until `tool_server_stop` has closed
+the native accept loop, then aborts remaining calls and removes listeners.
+Every renderer mount owns a client lease. Vite HMR may briefly overlap old and
+new mounts, so releasing the old lease must not stop the server while the new
+lease is active.
+
+### The loopback MCP endpoint is deliberately stateless
+
+Do not add an `mcp-session-id` header without also implementing and validating
+the complete session lifecycle. The current direct launcher clients do not
+need sessions. The server negotiates only its explicitly supported stable
+protocol versions instead of echoing arbitrary client input.
 
 ### Registry names and aliases are separate
 
@@ -82,8 +94,9 @@ text, replies, and `status` belong in the Markdown pseudo-XML.
 ### Proposed edits must complete their Rust lifecycle
 
 The Editor diff is presentation; the native proposal coordinator is lifecycle
-authority. Proposal-backed accept/reject paths must report their outcome after
-applying or discarding the review.
+authority. Proposal-backed accept/reject paths must report their outcome before
+dismissing the review. If reporting fails, leave the diff open with a visible
+retryable error.
 
 ### Ghost positions become stale on any edit
 
@@ -91,16 +104,41 @@ A ghost completion is tied to one document offset. The extension cancels an
 active request or suggestion when another edit or pointer action changes that
 context. Preserve the request serial checks around async completion.
 
+The `++` trigger must not consume identifier-adjacent increment/C++ syntax or
+fire without a completion provider. Alt+Right partial acceptance must be
+checked before whole-suggestion ArrowRight acceptance, and Enter dismisses the
+ghost while remaining available to CodeMirror.
+
+### Auto is a policy, not a model id
+
+Inline AI keeps `aiInlineModel = "auto"` stored and resolves the first
+configured entry from `defaults.rewrite` for each request. Do not replace Auto
+with the first menu row or send the literal `auto` when no provider is
+configured.
+
 ## Persistence and settings
 
 ### Use atomic writers for runtime state
 
-Launcher config, durable Activities, Routine state, and app data use helpers in
-`src-tauri/src/persistence.rs`. Keep temporary files beside the target so rename
-is atomic on the same filesystem.
+Launcher config, durable Activities, Routine state, app data, AI model
+configuration, session state, settings, and editor document writes use helpers
+in `src-tauri/src/persistence.rs`. Keep temporary files beside the target so
+rename is atomic on the same filesystem. Ordinary document replacement
+preserves an existing file's permissions.
 
 Loaders that quarantine corrupt JSON preserve the original bytes under a
 diagnostic filename before regenerating defaults.
+
+Editor session writes are serialized so a slow older snapshot cannot overwrite
+a newer close flush. Dirty named files include recovery content; a deliberate
+Don't Save writes only the disk path and omits discarded untitled drafts.
+Compare discarded files by stable path/draft identity because Pinia may expose
+reactive proxies rather than the raw confirmation object.
+
+Dock/system Quit is asynchronous: native `ExitRequested` emits
+`mim://quit-requested`, the Editor completes dirty-document and session guards,
+and only then invokes `app_quit_confirmed`. Never allow the first exit request
+to bypass renderer confirmation.
 
 ### Settings writes go through `settings.set`
 
@@ -112,7 +150,8 @@ debounced disk write.
 
 Production key writes use the OS keychain. Repository `.env` and
 `~/.mim/keys.env` are read only by debug builds; do not make them the release
-storage path.
+storage path. Its atomic writer enforces owner-only permissions on Unix before
+secret bytes are written.
 
 ## Files and platform
 
@@ -122,11 +161,19 @@ Workspace content searches have native tokens. Starting a new query must cancel
 the previous token and ignore late reports, including reports from a refreshed
 index generation.
 
+### File-open events are queue notifications
+
+Startup arguments, Finder/file-association events, and second-instance
+arguments append absolute decoded paths to one native queue. The renderer
+installs `mim://open-files-pending` before draining `take_pending_files`; do not
+send paths only as an event payload or reintroduce the listen/drain race.
+
 ### Guard platform-only window APIs
 
 macOS titlebar, traffic-light, and native spellcheck APIs require
 `#[cfg(target_os = "macos")]`. Linux CI compiles the Rust app, so unguarded
-platform calls break verification.
+platform calls break verification. Never retain a raw native-window pointer
+across an async delay; a closed window makes it invalid.
 
 ### Keep product identity synchronized
 

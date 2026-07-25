@@ -1,4 +1,5 @@
 import { SAVE_STATE } from '../shared/saveState.js'
+import { basename } from '../shared/utils/path.js'
 
 function status(label, tone, action = null, title = '', detail = '', detailTone = '') {
   const next = { label, tone, action, title }
@@ -11,7 +12,7 @@ function status(label, tone, action = null, title = '', detail = '', detailTone 
 
 export function fileDisplayName(file, { untitledIndex } = {}) {
   if (!file) return ''
-  if (file.path) return file.path.split('/').pop()
+  if (file.path) return basename(file.path)
   const n = untitledIndex ?? 1
   return n === 1 ? 'Untitled.md' : `Untitled-${n}.md`
 }

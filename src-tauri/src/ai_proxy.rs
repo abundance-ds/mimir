@@ -310,7 +310,7 @@ fn resolve_proxy_model(
         .is_some()
     {
         return resolve_model(
-            &registry,
+            registry,
             request.feature.as_deref().unwrap_or("chat"),
             request.model_id.as_deref(),
         );
@@ -326,11 +326,7 @@ fn resolve_proxy_model(
         }
     }
 
-    resolve_model(
-        &registry,
-        request.feature.as_deref().unwrap_or("chat"),
-        None,
-    )
+    resolve_model(registry, request.feature.as_deref().unwrap_or("chat"), None)
 }
 
 fn authenticated_headers(

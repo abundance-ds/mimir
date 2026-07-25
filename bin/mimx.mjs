@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { pathToFileURL } from 'node:url'
+
 const DEFAULT_URL = process.env.MIMX_MCP_URL || 'http://127.0.0.1:17532/mcp'
 
 const commands = {
@@ -52,10 +54,18 @@ async function main() {
   printResult(result)
 }
 
-async function callTool(name, args) {
+export async function callTool(name, args) {
   const body = await request('tools/call', { name, arguments: args })
   const text = body?.content?.[0]?.text ?? ''
-  if (body?.isError) throw new Error(text)
+  if (body?.isError) {
+    const error = new Error(body?.structuredContent?.message || text || 'Tool call failed.')
+    error.code = body?.structuredContent?.error
+    error.data = body?.structuredContent?.data
+    throw error
+  }
+  if (body && Object.prototype.hasOwnProperty.call(body, 'structuredContent')) {
+    return body.structuredContent
+  }
   try {
     return JSON.parse(text)
   } catch {
@@ -155,7 +165,12 @@ Environment:
   MIMX_MCP_URL  defaults to ${DEFAULT_URL}`)
 }
 
-main().catch((error) => {
-  console.error(error.message || String(error))
-  process.exit(1)
-})
+const invokedAsScript = process.argv[1]
+  && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (invokedAsScript) {
+  main().catch((error) => {
+    console.error(error.message || String(error))
+    process.exit(1)
+  })
+}

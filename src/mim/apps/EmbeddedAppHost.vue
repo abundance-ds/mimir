@@ -80,7 +80,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IconAlertTriangle, IconRefresh } from '@tabler/icons-vue'
 import {
   embeddedAppUrl,
@@ -109,6 +109,9 @@ const reloadToken = ref(0)
 const pendingToolCalls = new Set()
 let unlistenTools = null
 let disposed = false
+let mounted = false
+let toolSetupGeneration = 0
+let registeredTools = null
 
 const baseUrl = computed(() => embeddedAppUrl(props.app, props.launch))
 const frameUrl = computed(() => withContext(baseUrl.value, {
@@ -126,34 +129,86 @@ const displayUrl = computed(() => {
     return frameUrl.value || 'No entry'
   }
 })
+const toolSignature = computed(() => JSON.stringify({
+  appId: props.app.id,
+  instanceId: props.instanceId,
+  tools: props.app.tools || [],
+}))
+const manifestSignature = computed(() => JSON.stringify({
+  app: props.app,
+  launch: props.launch,
+}))
 
 onMounted(async () => {
+  mounted = true
   window.addEventListener('message', onMessage)
-  if (!props.app.tools?.length) {
+  await configureTools()
+})
+
+watch(toolSignature, () => {
+  if (mounted && !disposed) void configureTools()
+})
+
+watch(manifestSignature, (_next, previous) => {
+  if (mounted && !disposed && previous !== undefined) reload()
+})
+
+async function configureTools() {
+  const generation = ++toolSetupGeneration
+  toolsReady.value = false
+  try {
+    await teardownTools()
+  } catch (cause) {
+    if (!disposed && generation === toolSetupGeneration) {
+      reportError(`Previous app tools could not stop cleanly: ${errorMessage(cause)}`)
+    }
+  }
+  if (disposed || generation !== toolSetupGeneration) return
+
+  const tools = Array.isArray(props.app.tools) ? props.app.tools : []
+  if (!tools.length) {
     toolsReady.value = true
     return
   }
+
+  const target = {
+    appId: props.app.id,
+    instanceId: props.instanceId,
+  }
   try {
-    unlistenTools = await listenForAppTools({
-      appId: props.app.id,
-      instanceId: props.instanceId,
+    const unlisten = await listenForAppTools({
+      ...target,
       onCall: forwardToolCall,
       onCancel: forwardToolCancellation,
     })
-    if (disposed) {
-      unlistenTools()
+    if (disposed || generation !== toolSetupGeneration) {
+      unlisten()
       return
     }
+    unlistenTools = unlisten
+    registeredTools = target
     await reconcileAppTools({
-      appId: props.app.id,
-      instanceId: props.instanceId,
-      tools: props.app.tools,
+      ...target,
+      tools,
     })
-    if (!disposed) toolsReady.value = true
+    if (!disposed && generation === toolSetupGeneration) toolsReady.value = true
   } catch (cause) {
-    reportError(`App tools could not start: ${errorMessage(cause)}`)
+    if (!disposed && generation === toolSetupGeneration) {
+      reportError(`App tools could not start: ${errorMessage(cause)}`)
+    }
   }
-})
+}
+
+async function teardownTools() {
+  const target = registeredTools
+  registeredTools = null
+  unlistenTools?.()
+  unlistenTools = null
+  pendingToolCalls.clear()
+  if (target) {
+    await unregisterAppTools(target.appId, target.instanceId)
+  }
+}
 
 function onFrameLoad() {
   frameReady.value = true
@@ -295,11 +350,16 @@ function errorMessage(cause) {
 
 onUnmounted(() => {
   disposed = true
+  mounted = false
+  toolSetupGeneration += 1
   window.removeEventListener('message', onMessage)
   unlistenTools?.()
+  unlistenTools = null
   pendingToolCalls.clear()
-  if (props.app.tools?.length) {
-    void unregisterAppTools(props.app.id, props.instanceId).catch(() => {})
+  if (registeredTools) {
+    const target = registeredTools
+    registeredTools = null
+    void unregisterAppTools(target.appId, target.instanceId).catch(() => {})
   }
 })
 </script>

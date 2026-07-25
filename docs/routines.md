@@ -57,15 +57,53 @@ At fire time the runtime:
 5. records the scheduled time and routine origin on the Activity.
 
 Run now uses the same launch path with the current time as its scheduled time.
+The returned process-backed `routine` record opens in the terminal surface;
+only the stable `routines` core Activity renders the manager. “Run again” on
+an ended run resolves the current TOML definition, so updated prompt, flags,
+workspace, overlap, and launcher policy are not silently replaced by stale
+PTY argv.
 
 ## UI and tools
 
 The Routines Activity shows enabled/running state, schedule, timezone, preset,
 next fire, prompt, policy, workspace, and per-definition diagnostics. It
-supports keyboard selection, double-click/Enter run, Run now, and reload.
+is a complete control surface over the same TOML files:
 
-MCP exposes `routines.list` and `routines.run`; aliases are `routines_list` and
-`routines_run`.
+- New and Edit expose the lean routine definition rather than a separate
+  database model.
+- Open TOML and double-click keep direct source editing first-class.
+- Duplicate creates a paused copy so a copied schedule cannot double-fire.
+- Trash moves the exact definition to the operating-system Trash.
+- Row and empty-surface context menus expose run, stop, edit, open, duplicate,
+  reveal, copy path, reload, and Trash actions.
+- Live runs stop through the ordinary Activity lifecycle.
+
+Arrow keys, Home/End, and Enter navigate and run the selected routine.
+Cmd/Ctrl+N creates, Cmd/Ctrl+R reloads, Cmd/Ctrl+O opens the TOML, F2 edits,
+Cmd/Ctrl+. stops live runs, Cmd/Ctrl+Backspace/Delete confirms Trash, and
+Shift+F10 opens the accessible row menu.
+
+The UI does not poll. The native scheduler publishes changes when definitions,
+launcher availability, planner state, or runs change; reopening the surface
+also performs one explicit refresh.
+
+Every catalog entry carries its exact source path and a SHA-256
+`sourceRevision`. Update, duplicate, and Trash require that revision, so a UI
+or MCP caller cannot silently overwrite a definition edited elsewhere.
+
+MCP exposes:
+
+| Canonical | Alias | Notes |
+|---|---|---|
+| `routines.list` | `routines_list` | catalog, status, source path/revision |
+| `routines.run` | `routines_run` | launch now as a durable Activity |
+| `routines.create` | `routines_create` | create canonical TOML |
+| `routines.update` | `routines_update` | atomic, revision-guarded replace |
+| `routines.duplicate` | `routines_duplicate` | new id, always initially paused |
+| `routines.trash` | `routines_trash` | revision-guarded system Trash |
+
+Reveal stays UI-local because it controls Finder/Explorer rather than routine
+state.
 
 ## Relevant code
 

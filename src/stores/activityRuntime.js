@@ -18,6 +18,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   const workbench = useWorkbenchStore()
   const ready = ref(false)
   const error = ref('')
+  const lastLaunchMetrics = ref(null)
   let unlisten = null
 
   async function initialize() {
@@ -34,7 +35,9 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   }
 
   async function launchPreset(preset, workspacePath, options = {}) {
+    const startedAt = monotonicNow()
     const resolved = await resolveLauncher(preset, workspacePath)
+    const resolvedAt = monotonicNow()
     const kind = options.kind || resolved.kind
     const resumeStrategy = normalizedResumeStrategy(
       options.resumeStrategy || resolved.resumeStrategy,
@@ -70,14 +73,23 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         cwd: resolved.cwd,
         env: {
           ...(resolved.env || {}),
+          ...(options.env || {}),
           MIM_ACTIVITY_ID: id,
           MIMX_MCP_URL: 'http://127.0.0.1:17532/mcp',
         },
       },
     }
     const snapshot = await spawnActivity(record)
+    const spawnedAt = monotonicNow()
     activities.upsert(snapshot.record)
     workbench.openActivity(id)
+    recordLaunchMetrics({
+      presetId: resolved.presetId,
+      kind,
+      resolveMs: resolvedAt - startedAt,
+      spawnMs: spawnedAt - resolvedAt,
+      totalMs: spawnedAt - startedAt,
+    })
     return snapshot.record
   }
 
@@ -128,14 +140,33 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   }
 
   async function rename(id, title) {
+    const activity = activities.byId(id)
+    if (activity && activity.host?.type !== 'pty') {
+      activities.upsert({
+        ...activity,
+        title,
+        updatedAt: new Date().toISOString(),
+      })
+      return
+    }
     activities.upsert(await renameActivity(id, title))
   }
 
   async function setArchived(id, archived) {
+    const activity = activities.byId(id)
+    if (activity && activity.host?.type !== 'pty') {
+      activities.setArchived(id, archived)
+      return
+    }
     activities.upsert(await setActivityArchived(id, archived))
   }
 
   async function clear(id) {
+    const activity = activities.byId(id)
+    if (activity && activity.host?.type !== 'pty') {
+      activities.remove(id)
+      return
+    }
     await clearActivity(id)
     activities.remove(id)
   }
@@ -164,6 +195,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   return {
     ready,
     error,
+    lastLaunchMetrics,
     initialize,
     launchPreset,
     launchCommand,
@@ -172,6 +204,23 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     setArchived,
     clear,
     dispose,
+  }
+
+  function recordLaunchMetrics(metrics) {
+    const rounded = Object.fromEntries(Object.entries(metrics).map(([key, value]) => [
+      key,
+      typeof value === 'number' ? Math.round(value * 10) / 10 : value,
+    ]))
+    lastLaunchMetrics.value = rounded
+    try {
+      performance.measure('mim.activity.launch', {
+        start: performance.now() - metrics.totalMs,
+        end: performance.now(),
+        detail: rounded,
+      })
+    } catch {
+      // The reactive metric remains available in WebViews without MeasureOptions.
+    }
   }
 })
 
@@ -194,4 +243,8 @@ export function resumeArguments(args = [], strategy = 'none') {
 
 function normalizedResumeStrategy(value) {
   return ['codex', 'claude', 'pi'].includes(value) ? value : 'none'
+}
+
+function monotonicNow() {
+  return globalThis.performance?.now?.() ?? Date.now()
 }

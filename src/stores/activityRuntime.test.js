@@ -77,7 +77,9 @@ describe('activity runtime store', () => {
       args: ['review'],
       env: {},
       cwd: { mode: 'workspace' },
-    }, '/w')
+    }, '/w', {
+      env: { APP_CHANNEL: 'review', MIM_ACTIVITY_ID: 'must-not-win' },
+    })
 
     expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
       id: 'agent:new-id',
@@ -86,10 +88,34 @@ describe('activity runtime store', () => {
         command: '/bin/codex',
         args: ['review'],
         cwd: '/w',
+        env: expect.objectContaining({
+          APP_CHANNEL: 'review',
+          MIM_ACTIVITY_ID: 'agent:new-id',
+        }),
       }),
     }))
     expect(record.status).toBe('idle')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:new-id')
+  })
+
+  it('instruments native resolve and spawn latency as separate launch stages', async () => {
+    const clock = vi.spyOn(performance, 'now')
+    clock
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(112)
+      .mockReturnValueOnce(155)
+      .mockReturnValue(155)
+    const runtime = useActivityRuntimeStore()
+
+    await runtime.launchPreset({ id: 'review' }, '/w')
+
+    expect(runtime.lastLaunchMetrics).toMatchObject({
+      presetId: 'review',
+      kind: 'agent',
+      resolveMs: 12,
+      spawnMs: 43,
+      totalMs: 55,
+    })
   })
 
   it.each([
@@ -150,5 +176,36 @@ describe('activity runtime store', () => {
 
     expect(api.stopActivity).toHaveBeenCalledWith('agent:one')
     expect(useActivitiesStore().byId('agent:one').status).toBe('working')
+  })
+
+  it('renames, archives, and deletes renderer-hosted app Activities without fake PTY calls', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    store.upsert({
+      id: 'app:scratch',
+      kind: 'app',
+      title: 'Scratch',
+      workspacePath: '/w',
+      status: 'ready',
+      createdAt: '2026-07-25T10:00:00Z',
+      updatedAt: '2026-07-25T10:00:00Z',
+      retention: 'durable',
+      source: { appId: 'scratch' },
+      host: { type: 'app', mode: 'embedded' },
+      launch: {},
+    })
+
+    await runtime.rename('app:scratch', 'Notes')
+    await runtime.setArchived('app:scratch', true)
+    expect(store.byId('app:scratch')).toMatchObject({
+      title: 'Notes',
+      archivedAt: expect.any(String),
+    })
+    await runtime.clear('app:scratch')
+
+    expect(store.byId('app:scratch')).toBeNull()
+    expect(api.renameActivity).not.toHaveBeenCalled()
+    expect(api.setActivityArchived).not.toHaveBeenCalled()
+    expect(api.clearActivity).not.toHaveBeenCalled()
   })
 })

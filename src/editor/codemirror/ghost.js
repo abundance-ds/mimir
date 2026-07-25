@@ -173,6 +173,7 @@ const ghostDecorations = EditorView.decorations.compute([ghostField], (state) =>
 
 export function ghostExtension(options = {}) {
   let lastPlusAt = 0
+  let lastPlusPos = -1
   let requestSerial = 0
   let disposed = false
   const getSuggestions = options.getSuggestions
@@ -208,16 +209,22 @@ export function ghostExtension(options = {}) {
           if (ghost.pending && event.key !== 'Escape') {
             return false
           }
-          if (event.key === 'Tab' || event.key === 'ArrowRight' || event.key === 'Enter') {
+          if (event.altKey && event.key === 'ArrowRight') {
+            event.preventDefault()
+            requestSerial++
+            acceptNextWord(view)
+            return true
+          }
+          if (event.key === 'Tab' || event.key === 'ArrowRight') {
             event.preventDefault()
             requestSerial++
             acceptGhost(view)
             return true
           }
-          if (event.altKey && event.key === 'ArrowRight') {
-            event.preventDefault()
-            acceptNextWord(view)
-            return true
+          if (event.key === 'Enter') {
+            requestSerial++
+            view.dispatch({ effects: clearGhost.of(null) })
+            return false
           }
           if (event.key === 'ArrowUp') {
             event.preventDefault()
@@ -242,47 +249,54 @@ export function ghostExtension(options = {}) {
 
         if (event.key === '+' && !event.metaKey && !event.ctrlKey && !event.altKey) {
           const now = Date.now()
-          if (now - lastPlusAt < 320) {
+          const pos = view.state.selection.main.head
+          if (now - lastPlusAt < 320 && pos === lastPlusPos + 1) {
+            lastPlusAt = 0
+            lastPlusPos = -1
+            // Preserve ordinary increment/C++ syntax and never consume the
+            // trigger when no AI completion source is available.
+            const beforeTrigger = view.state.sliceDoc(Math.max(0, pos - 2), Math.max(0, pos - 1))
+            if (!getSuggestions || /[\p{L}\p{N}_$]/u.test(beforeTrigger)) return false
             event.preventDefault()
-            const pos = view.state.selection.main.head
             view.dispatch({ changes: { from: Math.max(0, pos - 1), to: pos } })
             const suggestionPos = Math.max(0, pos - 1)
-            const fallback = buildLocalSuggestions(view, suggestionPos)
             view.dispatch({
               effects: setGhost.of({
                 pos: suggestionPos,
-                pending: Boolean(getSuggestions),
-                suggestions: getSuggestions ? [] : fallback,
+                pending: true,
+                suggestions: [],
               }),
             })
-            if (getSuggestions) {
-              const requestId = ++requestSerial
-              const before = view.state.sliceDoc(Math.max(0, suggestionPos - 5000), suggestionPos)
-              const after = view.state.sliceDoc(suggestionPos, Math.min(view.state.doc.length, suggestionPos + 1000))
-              getSuggestions({ before, after, fallback, pos: suggestionPos })
-                .then((result) => {
-                  if (disposed || requestId !== requestSerial) return
-                  const current = view.state.field(ghostField)
-                  if (!current.active || current.pos !== suggestionPos) return
-                  if (result && typeof result === 'object' && !Array.isArray(result) && result.error) {
-                    view.dispatch({ effects: setGhost.of({ pos: suggestionPos, suggestions: [], error: result.error }) })
-                    return
-                  }
-                  const items = Array.isArray(result) ? result : (result?.suggestions || [])
-                  const clean = cleanSuggestions(items)
-                  view.dispatch({ effects: setGhost.of({ pos: suggestionPos, suggestions: clean.length > 0 ? clean : fallback }) })
+            const requestId = ++requestSerial
+            const before = view.state.sliceDoc(Math.max(0, suggestionPos - 5000), suggestionPos)
+            const after = view.state.sliceDoc(suggestionPos, Math.min(view.state.doc.length, suggestionPos + 1000))
+            Promise.resolve(getSuggestions({ before, after, pos: suggestionPos }))
+              .then((result) => {
+                if (disposed || requestId !== requestSerial) return
+                const current = view.state.field(ghostField)
+                if (!current.active || current.pos !== suggestionPos) return
+                if (result && typeof result === 'object' && !Array.isArray(result) && result.error) {
+                  view.dispatch({ effects: setGhost.of({ pos: suggestionPos, suggestions: [], error: result.error }) })
+                  return
+                }
+                const items = Array.isArray(result) ? result : (result?.suggestions || [])
+                const clean = cleanSuggestions(items)
+                view.dispatch({
+                  effects: clean.length
+                    ? setGhost.of({ pos: suggestionPos, suggestions: clean })
+                    : clearGhost.of(null),
                 })
-                .catch(() => {
-                  if (disposed || requestId !== requestSerial) return
-                  const current = view.state.field(ghostField)
-                  if (!current.active || current.pos !== suggestionPos) return
-                  view.dispatch({ effects: setGhost.of({ pos: suggestionPos, suggestions: fallback }) })
-                })
-            }
-            lastPlusAt = 0
+              })
+              .catch(() => {
+                if (disposed || requestId !== requestSerial) return
+                const current = view.state.field(ghostField)
+                if (!current.active || current.pos !== suggestionPos) return
+                view.dispatch({ effects: clearGhost.of(null) })
+              })
             return true
           }
           lastPlusAt = now
+          lastPlusPos = pos
         }
 
         return false
@@ -340,20 +354,4 @@ function acceptNextWord(view) {
     effects: rest ? setGhost.of({ pos: ghost.pos + insert.length, suggestions: [rest] }) : clearGhost.of(null),
     annotations: ghostAccept.of(true),
   })
-}
-
-function buildLocalSuggestions(view, pos) {
-  const before = view.state.sliceDoc(Math.max(0, pos - 800), pos).toLowerCase()
-  if (before.includes('ai') || before.includes('rewrite')) {
-    return [
-      ' The editor should show the proposed change first, then let the writer decide whether it belongs.',
-      ' Trust comes from making every substantial model edit reversible and inspectable.',
-      ' Small completions can be accepted directly; larger changes need review.',
-    ]
-  }
-  return [
-    ' The practical test is whether a writer can stay in flow while still seeing what needs attention.',
-    ' The product should feel calm under pressure: fast, exact, and unwilling to steal focus.',
-    ' That restraint is what separates a serious writing instrument from another productivity surface.',
-  ]
 }

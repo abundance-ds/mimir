@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, onUnmounted } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -23,16 +23,18 @@ describe('useFileOpen', () => {
   let filesStore
   let listenCallback
   let unlisten
+  let pendingQueue
 
   beforeEach(() => {
     setActivePinia(createPinia())
     filesStore = useFileStore()
     unlisten = vi.fn()
     listenCallback = null
+    pendingQueue = []
 
     invoke.mockReset()
     invoke.mockImplementation((cmd, args) => {
-      if (cmd === 'take_pending_files') return Promise.resolve([])
+      if (cmd === 'take_pending_files') return Promise.resolve(pendingQueue.splice(0))
       if (cmd === 'read_text_file') return Promise.resolve({ content: `content of ${args.path}` })
       return Promise.resolve()
     })
@@ -66,13 +68,14 @@ describe('useFileOpen', () => {
     expect(filesStore.openFiles[1].path).toBe('/docs/notes.txt')
   })
 
-  it('opens files from mim://open-file event', async () => {
+  it('drains the native queue when mim://open-files-pending signals', async () => {
     mountComposable(() => useFileOpen())
     await vi.waitFor(() => {
       expect(listenCallback).toBeTruthy()
     })
 
-    listenCallback({ payload: ['/new/file.md'] })
+    pendingQueue.push('/new/file.md')
+    listenCallback({ payload: null })
     await vi.waitFor(() => {
       expect(filesStore.openFiles).toHaveLength(1)
     })
@@ -88,7 +91,8 @@ describe('useFileOpen', () => {
       expect(listenCallback).toBeTruthy()
     })
 
-    listenCallback({ payload: ['/existing.md'] })
+    pendingQueue.push('/existing.md')
+    listenCallback({ payload: null })
     await vi.waitFor(() => {
       expect(filesStore.activeFileIndex).toBe(0)
     })
@@ -133,5 +137,47 @@ describe('useFileOpen', () => {
       expect(listenCallback).toBeTruthy()
     })
     expect(filesStore.openFiles).toHaveLength(0)
+  })
+
+  it('waits for hydration before applying queued launch files', async () => {
+    let releaseHydration
+    const ready = new Promise(resolve => {
+      releaseHydration = resolve
+    })
+    pendingQueue.push('/after-session.md')
+
+    mountComposable(() => useFileOpen({ awaitReady: () => ready }))
+    await vi.waitFor(() => expect(listenCallback).toBeTruthy())
+    expect(filesStore.openFiles).toHaveLength(0)
+
+    releaseHydration()
+    await vi.waitFor(() => expect(filesStore.openFiles[0]?.path).toBe('/after-session.md'))
+  })
+
+  it('unlistens when setup resolves after the component was already unmounted', async () => {
+    let releaseListen
+    getCurrentWindow.mockReturnValue({
+      listen: vi.fn(() => new Promise(resolve => {
+        releaseListen = () => resolve(unlisten)
+      })),
+    })
+    const { wrapper } = mountComposable(() => useFileOpen())
+    await vi.waitFor(() => expect(releaseListen).toBeTypeOf('function'))
+
+    wrapper.unmount()
+    releaseListen()
+    await vi.waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1))
+    expect(invoke).not.toHaveBeenCalledWith('take_pending_files')
+  })
+
+  it('reports setup failures without leaking an unhandled rejection', async () => {
+    const onError = vi.fn()
+    getCurrentWindow.mockImplementation(() => {
+      throw new Error('window unavailable')
+    })
+
+    mountComposable(() => useFileOpen({ onError }))
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled())
+    expect(onError.mock.calls[0][0].message).toBe('window unavailable')
   })
 })

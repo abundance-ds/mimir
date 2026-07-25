@@ -61,6 +61,45 @@ describe('workbench store', () => {
     expect(store.paneLayout.activity.state).toBe('expanded')
   })
 
+  it('expands either content pane into focus and restores the split deterministically', () => {
+    const store = useWorkbenchStore()
+
+    store.setActivityExpanded(true)
+    expect(store.paneLayout.activity.state).toBe('expanded')
+    expect(store.paneLayout.editor.state).toBe('rail')
+
+    store.setActivityExpanded(false)
+    expect(store.paneLayout.activity.state).toBe('expanded')
+    expect(store.paneLayout.editor.state).toBe('expanded')
+
+    store.setEditorExpanded(true)
+    expect(store.paneLayout.activity.state).toBe('rail')
+    expect(store.paneLayout.editor.state).toBe('expanded')
+
+    store.setEditorExpanded(false)
+    expect(store.paneLayout.activity.state).toBe('expanded')
+    expect(store.paneLayout.editor.state).toBe('expanded')
+  })
+
+  it('keeps every restore and expand path single-pane while focus mode is active', () => {
+    const store = useWorkbenchStore()
+    store.setSinglePaneMode(true)
+    expect(store.paneLayout.activity.state).toBe('rail')
+    expect(store.paneLayout.editor.state).toBe('expanded')
+
+    store.setPaneState('activity', 'expanded')
+    expect(store.paneLayout.activity.state).toBe('expanded')
+    expect(store.paneLayout.editor.state).toBe('rail')
+
+    store.setEditorExpanded(false)
+    expect(store.paneLayout.activity.state).toBe('rail')
+    expect(store.paneLayout.editor.state).toBe('expanded')
+
+    store.setActivityExpanded(false)
+    expect(store.paneLayout.activity.state).toBe('expanded')
+    expect(store.paneLayout.editor.state).toBe('rail')
+  })
+
   it('recovers to expanded Activity if a restored snapshot rails every pane', () => {
     const store = useWorkbenchStore()
 

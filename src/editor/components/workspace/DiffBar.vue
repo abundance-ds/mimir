@@ -12,18 +12,19 @@
           :key="f.path"
           class="batch-dot"
           :class="'batch-dot-' + f.status"
-          :title="f.path.split('/').pop()"
+          :title="basename(f.path)"
+          :aria-label="`Review ${basename(f.path)}: ${f.status}`"
           @mousedown.prevent
           @click="emit('navigate-file', f.path)"
         ></button>
       </div>
 
       <div class="flex items-center gap-0.5">
-        <button class="chunk-nav-btn" :disabled="diff.pendingFiles.length === 0" @mousedown.prevent @click="onPrevPending">&#8592;</button>
+        <button class="chunk-nav-btn" aria-label="Previous pending file" title="Previous pending file" :disabled="diff.pendingFiles.length === 0" @mousedown.prevent @click="onPrevPending">&#8592;</button>
         <span class="font-mono text-[9px] text-ink-3 min-w-[28px] text-center">
           {{ diff.resolvedCount }}<span class="text-ink-3 mx-px">/</span>{{ diff.files.length }}
         </span>
-        <button class="chunk-nav-btn" :disabled="diff.pendingFiles.length === 0" @mousedown.prevent @click="onNextPending">&#8594;</button>
+        <button class="chunk-nav-btn" aria-label="Next pending file" title="Next pending file" :disabled="diff.pendingFiles.length === 0" @mousedown.prevent @click="onNextPending">&#8594;</button>
       </div>
     </template>
 
@@ -36,6 +37,7 @@
           :key="m.value"
           class="seg-btn"
           :class="{ active: diff.viewMode === m.value }"
+          :aria-pressed="diff.viewMode === m.value"
           @mousedown.prevent
           @click="diff.setViewMode(m.value)"
         >{{ m.label }}</button>
@@ -46,12 +48,14 @@
         <button
           class="seg-btn"
           :class="{ active: diff.layout === 'unified' }"
+          :aria-pressed="diff.layout === 'unified'"
           @mousedown.prevent
           @click="diff.setLayout('unified')"
         >Unified</button>
         <button
           class="seg-btn"
           :class="{ active: diff.layout === 'split' }"
+          :aria-pressed="diff.layout === 'split'"
           @mousedown.prevent
           @click="diff.setLayout('split')"
         >Split</button>
@@ -59,13 +63,20 @@
 
       <!-- Chunk navigation (only in diff mode with chunks) -->
       <div v-if="diff.viewMode === 'diff' && diff.chunkCount > 0" class="flex items-center gap-0.5">
-        <button class="chunk-nav-btn" @mousedown.prevent @click="onPrevChunk">&#8592;</button>
+        <button class="chunk-nav-btn" aria-label="Previous change" title="Previous change" @mousedown.prevent @click="onPrevChunk">&#8592;</button>
         <span class="chunk-counter">{{ diff.currentChunk + 1 }}<span class="chunk-sep">/</span>{{ diff.chunkCount }}</span>
-        <button class="chunk-nav-btn" @mousedown.prevent @click="onNextChunk">&#8594;</button>
+        <button class="chunk-nav-btn" aria-label="Next change" title="Next change" @mousedown.prevent @click="onNextChunk">&#8594;</button>
       </div>
     </template>
 
     <div class="flex-1"></div>
+
+    <span
+      v-if="diff.reviewError"
+      role="alert"
+      class="max-w-[320px] truncate font-sans text-[10px] text-rem"
+      :title="diff.reviewError"
+    >{{ diff.reviewError }}</span>
 
     <!-- Actions (both modes) -->
     <template v-if="isHistory">
@@ -89,6 +100,7 @@
 import { computed } from 'vue'
 import { useDiffStore } from '../../../stores/diff.js'
 import { relativeTime } from '../../../shared/time.js'
+import { basename } from '../../../shared/utils/path.js'
 
 const diff = useDiffStore()
 const emit = defineEmits(['accept-all', 'reject-all', 'navigate-chunk', 'navigate-file'])

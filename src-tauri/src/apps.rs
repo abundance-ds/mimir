@@ -7,6 +7,9 @@ use std::{
     time::Duration,
 };
 
+const MAX_DUPLICATE_FILES: usize = 512;
+const MAX_DUPLICATE_BYTES: u64 = 32 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AppMode {
@@ -99,6 +102,7 @@ pub enum ResolvedAppLaunch {
         app_id: String,
         preset: String,
         args: Vec<String>,
+        env: BTreeMap<String, String>,
     },
     Process {
         app_id: String,
@@ -276,6 +280,476 @@ pub fn load_catalog(directory: &Path) -> AppCatalog {
     catalog
 }
 
+pub fn create_local_app(
+    directory: &Path,
+    id: &str,
+    title: &str,
+    description: Option<&str>,
+) -> Result<AppCatalog, String> {
+    validate_id(id)?;
+    validate_title(title)?;
+    fs::create_dir_all(directory).map_err(|error| {
+        format!(
+            "Could not create apps directory {}: {error}",
+            directory.display()
+        )
+    })?;
+    ensure_id_available(directory, id)?;
+
+    let target = directory.join(id);
+    if target.exists() {
+        return Err(format!("App path '{}' already exists.", target.display()));
+    }
+    let staging = directory.join(format!(".{id}.creating-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir(&staging)
+        .map_err(|error| format!("Could not stage app '{}': {error}", staging.display()))?;
+
+    let result = (|| {
+        let description = description
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("A small local instrument built for this workbench.");
+        crate::persistence::write_bytes_atomic(
+            staging.join("app.toml"),
+            starter_manifest(id, title.trim(), description).as_bytes(),
+        )
+        .map_err(|error| format!("Could not write app manifest: {error}"))?;
+        crate::persistence::write_bytes_atomic(
+            staging.join("index.html"),
+            starter_html(title.trim()).as_bytes(),
+        )
+        .map_err(|error| format!("Could not write app entry: {error}"))?;
+        fs::rename(&staging, &target)
+            .map_err(|error| format!("Could not install app '{}': {error}", target.display()))?;
+        Ok::<(), String>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result?;
+    Ok(load_catalog(directory))
+}
+
+pub fn duplicate_local_app(
+    directory: &Path,
+    app_id: &str,
+    new_id: &str,
+    title: Option<&str>,
+) -> Result<AppCatalog, String> {
+    validate_id(new_id)?;
+    let catalog = load_catalog(directory);
+    let source = find_local_app(&catalog, app_id)?;
+    ensure_id_available(directory, new_id)?;
+    let new_title = title
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{} Copy", source.definition.title));
+    validate_title(&new_title)?;
+
+    let source_manifest = PathBuf::from(&source.manifest_path);
+    let package_directory = source_manifest.file_name().and_then(|value| value.to_str())
+        == Some("app.toml")
+        && source_manifest.parent() != Some(directory);
+    let staging = directory.join(format!(
+        ".{new_id}.duplicating-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let target = if package_directory {
+        directory.join(new_id)
+    } else {
+        directory.join(format!("{new_id}.toml"))
+    };
+    if target.exists() {
+        return Err(format!("App path '{}' already exists.", target.display()));
+    }
+
+    let result = (|| {
+        let target_manifest = if package_directory {
+            copy_tree_limited(
+                source_manifest
+                    .parent()
+                    .ok_or_else(|| "App package has no parent directory.".to_string())?,
+                &staging,
+            )?;
+            staging.join("app.toml")
+        } else {
+            fs::create_dir(&staging)
+                .map_err(|error| format!("Could not stage app duplicate: {error}"))?;
+            let staged_manifest = staging.join(format!("{new_id}.toml"));
+            fs::copy(&source_manifest, &staged_manifest)
+                .map_err(|error| format!("Could not copy app manifest: {error}"))?;
+            staged_manifest
+        };
+        update_manifest_identity(&target_manifest, app_id, Some(new_id), Some(&new_title))?;
+        let definition = read_definition(&target_manifest)?;
+        let definition_directory = if package_directory {
+            target_manifest.parent().unwrap_or(directory)
+        } else {
+            directory
+        };
+        validate_definition(&definition, definition_directory)
+            .map_err(|(field, message)| format!("{field}: {message}"))?;
+
+        if package_directory {
+            fs::rename(&staging, &target)
+                .map_err(|error| format!("Could not install app duplicate: {error}"))?;
+        } else {
+            let staged_manifest = staging.join(format!("{new_id}.toml"));
+            fs::rename(&staged_manifest, &target)
+                .map_err(|error| format!("Could not install app duplicate: {error}"))?;
+            fs::remove_dir(&staging)
+                .map_err(|error| format!("Could not finish app duplicate: {error}"))?;
+        }
+        Ok::<(), String>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result?;
+    Ok(load_catalog(directory))
+}
+
+pub fn update_local_app_title(
+    directory: &Path,
+    app_id: &str,
+    title: &str,
+) -> Result<AppCatalog, String> {
+    validate_title(title)?;
+    let catalog = load_catalog(directory);
+    let app = find_local_app(&catalog, app_id)?;
+    let manifest = PathBuf::from(&app.manifest_path);
+    update_manifest_identity(&manifest, app_id, None, Some(title.trim()))?;
+    let definition = read_definition(&manifest)?;
+    validate_definition(&definition, manifest.parent().unwrap_or(directory))
+        .map_err(|(field, message)| format!("{field}: {message}"))?;
+    Ok(load_catalog(directory))
+}
+
+pub fn trash_local_app_with(
+    directory: &Path,
+    app_id: &str,
+    move_to_trash: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<AppCatalog, String> {
+    let catalog = load_catalog(directory);
+    let app = find_local_app(&catalog, app_id)?;
+    let manifest = PathBuf::from(&app.manifest_path);
+    let target = if manifest.file_name().and_then(|value| value.to_str()) == Some("app.toml")
+        && manifest.parent() != Some(directory)
+    {
+        manifest
+            .parent()
+            .ok_or_else(|| "App package has no parent directory.".to_string())?
+            .to_path_buf()
+    } else {
+        manifest
+    };
+    let parent = target
+        .parent()
+        .ok_or_else(|| "App definition has no parent directory.".to_string())?;
+    if parent != directory {
+        return Err("Refusing to Trash an app outside the apps directory.".into());
+    }
+    move_to_trash(&target)?;
+    Ok(load_catalog(directory))
+}
+
+fn find_local_app<'a>(catalog: &'a AppCatalog, app_id: &str) -> Result<&'a InstalledApp, String> {
+    catalog
+        .apps
+        .iter()
+        .find(|app| app.definition.id == app_id && !app.builtin)
+        .ok_or_else(|| {
+            if catalog
+                .apps
+                .iter()
+                .any(|app| app.definition.id == app_id && app.builtin)
+            {
+                format!("Built-in app '{app_id}' cannot be modified.")
+            } else {
+                format!("Local app '{app_id}' was not found.")
+            }
+        })
+}
+
+fn ensure_id_available(directory: &Path, id: &str) -> Result<(), String> {
+    if load_catalog(directory)
+        .apps
+        .iter()
+        .any(|app| app.definition.id == id)
+    {
+        return Err(format!("App id '{id}' is already installed."));
+    }
+    Ok(())
+}
+
+fn validate_title(title: &str) -> Result<(), String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Title must not be empty.".into());
+    }
+    if title.chars().count() > 120 {
+        return Err("Title must be at most 120 characters.".into());
+    }
+    if title.contains(['\0', '\n', '\r']) {
+        return Err("Title must be one line without NUL bytes.".into());
+    }
+    Ok(())
+}
+
+fn read_definition(path: &Path) -> Result<AppDefinition, String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read app manifest '{}': {error}", path.display()))?;
+    toml::from_str(&source)
+        .map_err(|error| format!("Invalid app manifest '{}': {error}", path.display()))
+}
+
+fn update_manifest_identity(
+    path: &Path,
+    expected_id: &str,
+    new_id: Option<&str>,
+    new_title: Option<&str>,
+) -> Result<(), String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read app manifest '{}': {error}", path.display()))?;
+    let current: AppDefinition = toml::from_str(&source)
+        .map_err(|error| format!("Invalid app manifest '{}': {error}", path.display()))?;
+    if current.id != expected_id {
+        return Err(format!(
+            "App manifest changed: expected id '{expected_id}', found '{}'.",
+            current.id
+        ));
+    }
+
+    let mut replaced_id = new_id.is_none();
+    let mut replaced_title = new_title.is_none();
+    let had_newline = source.ends_with('\n');
+    let mut output = Vec::new();
+    let mut in_top_level = true;
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            in_top_level = false;
+        }
+        let key = in_top_level
+            .then(|| trimmed.split_once('=').map(|(key, _)| key.trim()))
+            .flatten();
+        if key == Some("id") {
+            if let Some(value) = new_id {
+                let indent = &line[..line.len() - trimmed.len()];
+                output.push(format!("{indent}id = {}", toml_string(value)));
+                replaced_id = true;
+                continue;
+            }
+        }
+        if key == Some("title") {
+            if let Some(value) = new_title {
+                let indent = &line[..line.len() - trimmed.len()];
+                output.push(format!("{indent}title = {}", toml_string(value)));
+                replaced_title = true;
+                continue;
+            }
+        }
+        output.push(line.to_string());
+    }
+    if !replaced_id || !replaced_title {
+        return Err("App manifest must define top-level id and title fields.".into());
+    }
+    let mut updated = output.join("\n");
+    if had_newline {
+        updated.push('\n');
+    }
+    let parsed: AppDefinition = toml::from_str(&updated)
+        .map_err(|error| format!("Updated app manifest would be invalid: {error}"))?;
+    if parsed.id != new_id.unwrap_or(expected_id) {
+        return Err("Updated app manifest did not preserve the expected id.".into());
+    }
+    crate::persistence::write_bytes_atomic(path, updated.as_bytes())
+        .map_err(|error| format!("Could not update app manifest: {error}"))
+}
+
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_string()).to_string()
+}
+
+fn copy_tree_limited(source: &Path, target: &Path) -> Result<(), String> {
+    if fs::symlink_metadata(source)
+        .map_err(|error| format!("Could not inspect app package: {error}"))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("App duplicate does not follow a symlinked package directory.".into());
+    }
+    let mut entries = 0usize;
+    let mut bytes = 0u64;
+    copy_tree_entry(source, target, &mut entries, &mut bytes)
+}
+
+fn copy_tree_entry(
+    source: &Path,
+    target: &Path,
+    entries: &mut usize,
+    bytes: &mut u64,
+) -> Result<(), String> {
+    fs::create_dir(target).map_err(|error| {
+        format!(
+            "Could not stage app directory '{}': {error}",
+            target.display()
+        )
+    })?;
+    for entry in fs::read_dir(source).map_err(|error| {
+        format!(
+            "Could not read app directory '{}': {error}",
+            source.display()
+        )
+    })? {
+        let entry = entry.map_err(|error| format!("Could not read app entry: {error}"))?;
+        *entries += 1;
+        if *entries > MAX_DUPLICATE_FILES {
+            return Err(format!(
+                "App duplicate exceeds the {} entry safety limit.",
+                MAX_DUPLICATE_FILES
+            ));
+        }
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| format!("Could not inspect app entry: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "App duplicate does not follow symlink '{}'.",
+                entry.path().display()
+            ));
+        }
+        let destination = target.join(entry.file_name());
+        if metadata.is_dir() {
+            copy_tree_entry(&entry.path(), &destination, entries, bytes)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(format!(
+                "App duplicate cannot copy special entry '{}'.",
+                entry.path().display()
+            ));
+        }
+        *bytes = bytes.saturating_add(metadata.len());
+        if *bytes > MAX_DUPLICATE_BYTES {
+            return Err(format!(
+                "App duplicate exceeds the {}MB safety limit.",
+                MAX_DUPLICATE_BYTES / 1024 / 1024
+            ));
+        }
+        fs::copy(entry.path(), destination)
+            .map_err(|error| format!("Could not copy app entry: {error}"))?;
+    }
+    Ok(())
+}
+
+fn starter_manifest(id: &str, title: &str, description: &str) -> String {
+    let alias = if id
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+    {
+        format!("{id}_read")
+    } else {
+        format!("app_{id}_read")
+    };
+    format!(
+        r#"id = {}
+title = {}
+description = {}
+mode = "embedded"
+entry = "index.html"
+
+[[tools]]
+name = "read"
+mcpAlias = {}
+description = "Read this instrument's current note."
+inputSchema = {{ type = "object", properties = {{}} }}
+"#,
+        toml_string(id),
+        toml_string(title),
+        toml_string(description),
+        toml_string(&alias),
+    )
+}
+
+fn starter_html(title: &str) -> String {
+    let title = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    format!(
+        r#"<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    html, body {{ height: 100%; }}
+    body {{ background: var(--color-chrome-high); padding: 18px; }}
+    main {{ display: flex; height: 100%; flex-direction: column; border: 1px solid var(--color-rule); background: var(--color-surface); }}
+    header, footer {{ display: flex; align-items: center; gap: 16px; padding: 12px 14px; background: var(--color-chrome-high); }}
+    header {{ border-bottom: 1px solid var(--color-rule); }}
+    footer {{ border-top: 1px solid var(--color-rule); color: var(--color-ink-3); font-size: 11px; }}
+    header div {{ flex: 1; }}
+    h1 {{ margin: 2px 0 0; font-family: var(--font-serif); font-size: 19px; }}
+    small, #state {{ color: var(--color-ink-3); font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; }}
+    textarea {{ min-height: 0; flex: 1; resize: none; border: 0; border-radius: 0; padding: 18px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; }}
+    footer span {{ min-width: 0; flex: 1; }}
+    footer button {{ padding: 5px 10px; font-size: 11px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <small>LOCAL INSTRUMENT</small>
+        <h1>{title}</h1>
+      </div>
+      <span id="state">Ready</span>
+    </header>
+    <textarea id="note" aria-label="{title} note" placeholder="Shape this instrument into whatever you need."></textarea>
+    <footer>
+      <span>Autosaves locally · MCP tool <code>read</code> is live while open</span>
+      <button id="save">Save now</button>
+    </footer>
+  </main>
+  <script>
+    const note = document.querySelector('#note')
+    const state = document.querySelector('#state')
+    let timer
+    async function save() {{
+      clearTimeout(timer)
+      state.textContent = 'Saving'
+      await mim.data.save('note', {{ text: note.value, updatedAt: new Date().toISOString() }})
+      state.textContent = 'Saved'
+    }}
+    note.addEventListener('input', () => {{
+      state.textContent = 'Unsaved'
+      clearTimeout(timer)
+      timer = setTimeout(save, 350)
+    }})
+    document.querySelector('#save').addEventListener('click', save)
+    mim.tools.handle('read', () => ({{
+      value: {{ text: note.value, characters: note.value.length }},
+      displayText: note.value || '(The instrument is empty.)'
+    }}))
+    mim.data.load('note').then(saved => {{
+      note.value = saved?.text || ''
+      state.textContent = 'Ready'
+      note.focus()
+    }}).catch(error => {{
+      state.textContent = error.message
+    }})
+  </script>
+</body>
+</html>
+"#
+    )
+}
+
 pub fn validate_definition(
     definition: &AppDefinition,
     app_directory: &Path,
@@ -376,6 +850,7 @@ pub fn resolve_launch(
             app_id,
             preset: definition.preset.clone().unwrap(),
             args: definition.args.clone(),
+            env: definition.env.clone(),
         }),
         AppMode::Process => {
             let cwd = workspace
@@ -581,6 +1056,63 @@ pub async fn app_catalog() -> Result<AppCatalog, String> {
     })
     .await
     .map_err(|error| format!("App catalog task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn app_reload() -> Result<AppCatalog, String> {
+    app_catalog().await
+}
+
+#[tauri::command]
+pub async fn app_create(
+    id: String,
+    title: String,
+    description: Option<String>,
+) -> Result<AppCatalog, String> {
+    let directory = default_apps_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        create_local_app(&directory, &id, &title, description.as_deref())
+    })
+    .await
+    .map_err(|error| format!("App creation task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn app_duplicate(
+    app_id: String,
+    new_id: String,
+    title: Option<String>,
+) -> Result<AppCatalog, String> {
+    let directory = default_apps_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        duplicate_local_app(&directory, &app_id, &new_id, title.as_deref())
+    })
+    .await
+    .map_err(|error| format!("App duplication task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn app_update_title(app_id: String, title: String) -> Result<AppCatalog, String> {
+    let directory = default_apps_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        update_local_app_title(&directory, &app_id, &title)
+    })
+    .await
+    .map_err(|error| format!("App update task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn app_trash(app_id: String) -> Result<AppCatalog, String> {
+    let directory = default_apps_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        trash_local_app_with(&directory, &app_id, |path| {
+            trash::delete(path).map_err(|error| {
+                format!("Could not move app '{}' to Trash: {error}", path.display())
+            })
+        })
+    })
+    .await
+    .map_err(|error| format!("App Trash task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -893,6 +1425,56 @@ entry = "index.html"
     }
 
     #[test]
+    fn terminal_launch_plan_preserves_manifest_environment() {
+        let directory = tempdir().unwrap();
+        let app = InstalledApp {
+            definition: AppDefinition {
+                id: "reviewer".into(),
+                title: "Reviewer".into(),
+                description: String::new(),
+                mode: AppMode::Terminal,
+                entry: None,
+                command: None,
+                args: vec!["--app-flag".into()],
+                env: BTreeMap::from([
+                    ("REVIEW_MODE".into(), "focused".into()),
+                    ("WITH_SPACE".into(), "exact value".into()),
+                ]),
+                preset: Some("codex".into()),
+                helper: None,
+                action_tool: None,
+                launch_only: false,
+                tools: Vec::new(),
+            },
+            directory: directory.path().to_string_lossy().into_owned(),
+            manifest_path: directory
+                .path()
+                .join("app.toml")
+                .to_string_lossy()
+                .into_owned(),
+            builtin: false,
+        };
+
+        let plan = resolve_launch(&app, Some(directory.path())).unwrap();
+        assert_eq!(
+            plan,
+            ResolvedAppLaunch::Terminal {
+                app_id: "reviewer".into(),
+                preset: "codex".into(),
+                args: vec!["--app-flag".into()],
+                env: BTreeMap::from([
+                    ("REVIEW_MODE".into(), "focused".into()),
+                    ("WITH_SPACE".into(), "exact value".into()),
+                ]),
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(plan).unwrap()["env"]["REVIEW_MODE"],
+            "focused"
+        );
+    }
+
+    #[test]
     fn tool_definitions_require_unique_names_and_object_schemas() {
         let mut definition = builtin_apps()[1].definition.clone();
         definition.tools.push(AppToolDefinition {
@@ -904,5 +1486,127 @@ entry = "index.html"
         let error = validate_definition(&definition, Path::new("builtin")).unwrap_err();
         assert!(error.0.contains("name"));
         assert!(error.1.contains("Duplicate"));
+    }
+
+    #[test]
+    fn creates_a_runnable_local_instrument_with_a_live_tool() {
+        let directory = tempdir().unwrap();
+
+        let catalog = create_local_app(
+            directory.path(),
+            "field-notes",
+            "Field Notes",
+            Some("A tiny working notebook."),
+        )
+        .unwrap();
+
+        let app = catalog
+            .apps
+            .iter()
+            .find(|app| app.definition.id == "field-notes")
+            .unwrap();
+        assert!(!app.builtin);
+        assert_eq!(app.definition.mode, AppMode::Embedded);
+        assert_eq!(
+            app.definition.tools[0].mcp_alias.as_deref(),
+            Some("field-notes_read")
+        );
+        assert!(directory.path().join("field-notes/index.html").is_file());
+        let html = fs::read_to_string(directory.path().join("field-notes/index.html")).unwrap();
+        assert!(html.contains("mim.data.save"));
+        assert!(html.contains("mim.tools.handle('read'"));
+
+        let numeric = create_local_app(directory.path(), "24-hours", "24 Hours", None).unwrap();
+        let numeric = numeric
+            .apps
+            .iter()
+            .find(|app| app.definition.id == "24-hours")
+            .unwrap();
+        assert_eq!(
+            numeric.definition.tools[0].mcp_alias.as_deref(),
+            Some("app_24-hours_read")
+        );
+    }
+
+    #[test]
+    fn duplicate_clones_assets_but_rejects_existing_and_builtin_ids() {
+        let directory = tempdir().unwrap();
+        write_embedded_app(directory.path(), "inspector", "Inspector");
+        fs::write(
+            directory.path().join("inspector/details.js"),
+            "export const detail = 1",
+        )
+        .unwrap();
+
+        let catalog = duplicate_local_app(
+            directory.path(),
+            "inspector",
+            "inspector-copy",
+            Some("Inspector Copy"),
+        )
+        .unwrap();
+        let copy = catalog
+            .apps
+            .iter()
+            .find(|app| app.definition.id == "inspector-copy")
+            .unwrap();
+        assert_eq!(copy.definition.title, "Inspector Copy");
+        assert!(directory.path().join("inspector-copy/details.js").is_file());
+        assert!(
+            duplicate_local_app(directory.path(), "inspector", "inspector-copy", None)
+                .unwrap_err()
+                .contains("already installed")
+        );
+        assert!(
+            duplicate_local_app(directory.path(), "scratch", "scratch-copy", None)
+                .unwrap_err()
+                .contains("Built-in")
+        );
+    }
+
+    #[test]
+    fn title_update_preserves_stable_identity_and_manifest_comments() {
+        let directory = tempdir().unwrap();
+        write_embedded_app(directory.path(), "inspector", "Inspector");
+        let manifest = directory.path().join("inspector/app.toml");
+        let mut source = fs::read_to_string(&manifest).unwrap();
+        source.insert_str(0, "# keep this human note\n");
+        fs::write(&manifest, source).unwrap();
+
+        let catalog =
+            update_local_app_title(directory.path(), "inspector", "Project Inspector").unwrap();
+        let app = catalog
+            .apps
+            .iter()
+            .find(|app| app.definition.id == "inspector")
+            .unwrap();
+        assert_eq!(app.definition.title, "Project Inspector");
+        let updated = fs::read_to_string(manifest).unwrap();
+        assert!(updated.starts_with("# keep this human note\n"));
+        assert!(updated.contains("id = \"inspector\""));
+    }
+
+    #[test]
+    fn trash_targets_one_exact_local_definition_and_never_builtins() {
+        let directory = tempdir().unwrap();
+        write_embedded_app(directory.path(), "inspector", "Inspector");
+        let mut trashed = None;
+
+        let catalog = trash_local_app_with(directory.path(), "inspector", |path| {
+            trashed = Some(path.to_path_buf());
+            fs::remove_dir_all(path).map_err(|error| error.to_string())
+        })
+        .unwrap();
+
+        assert_eq!(trashed, Some(directory.path().join("inspector")));
+        assert!(!catalog
+            .apps
+            .iter()
+            .any(|app| app.definition.id == "inspector"));
+        assert!(
+            trash_local_app_with(directory.path(), "changes", |_| Ok(()))
+                .unwrap_err()
+                .contains("Built-in")
+        );
     }
 }

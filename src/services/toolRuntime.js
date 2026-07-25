@@ -14,7 +14,10 @@ const CORE_TOOL_ALIASES = Object.freeze({
   'shell.run': 'shell',
 })
 
+let nextRuntimeClientId = 1
+
 export function createToolRuntime(options = {}) {
+  const clientId = `renderer-${Date.now()}-${nextRuntimeClientId++}`
   const pending = new Map()
   let unlistenRequest = null
   let unlistenCancel = null
@@ -31,7 +34,7 @@ export function createToolRuntime(options = {}) {
       pending.delete(payload?.id)
     })
     try {
-      await invoke('tool_server_start', {})
+      await invoke('tool_server_start', { clientId })
       started = true
     } catch (error) {
       unlistenRequest?.()
@@ -43,14 +46,17 @@ export function createToolRuntime(options = {}) {
   }
 
   async function stop() {
+    // Keep relay listeners alive until the native accept loop is closed. A
+    // request already in flight can still complete; anything pending after the
+    // stop signal is then aborted before listeners are removed.
+    if (started) await invoke('tool_server_stop', { clientId }).catch(() => {})
+    started = false
     for (const controller of pending.values()) controller.abort()
     pending.clear()
     unlistenRequest?.()
     unlistenCancel?.()
     unlistenRequest = null
     unlistenCancel = null
-    if (started) await invoke('tool_server_stop', {}).catch(() => {})
-    started = false
   }
 
   async function handle(request) {
@@ -134,6 +140,40 @@ export async function executeToolRequest(request, options = {}) {
     case 'apps.launch':
       if (!options.launchApp) throw unavailableError('No app host is attached.')
       return options.launchApp(input.app_id, input.mode)
+    case 'apps.reload':
+      return options.reloadApps
+        ? options.reloadApps()
+        : invoke('app_reload')
+    case 'apps.create':
+      return options.createApp
+        ? options.createApp(input)
+        : invoke('app_create', {
+            id: input.id,
+            title: input.title,
+            description: input.description || null,
+          })
+    case 'apps.duplicate':
+      return options.duplicateApp
+        ? options.duplicateApp(input.app_id, {
+            id: input.new_id,
+            title: input.title || '',
+          })
+        : invoke('app_duplicate', {
+            appId: input.app_id,
+            newId: input.new_id,
+            title: input.title || null,
+          })
+    case 'apps.update':
+      return options.updateApp
+        ? options.updateApp(input.app_id, input.title)
+        : invoke('app_update_title', {
+            appId: input.app_id,
+            title: input.title,
+          })
+    case 'apps.trash':
+      return options.trashApp
+        ? options.trashApp(input.app_id)
+        : invoke('app_trash', { appId: input.app_id })
     case 'routines.list':
       return options.listRoutines
         ? options.listRoutines()
@@ -142,12 +182,112 @@ export async function executeToolRequest(request, options = {}) {
       return options.runRoutine
         ? options.runRoutine(input.routine_id)
         : invoke('routine_run_now', { routineId: input.routine_id })
+    case 'routines.create':
+      return invokeNativeTool('routine_create', {
+        definition: normalizeRoutineDefinition(input.definition),
+      })
+    case 'routines.update':
+      requireMatchingRoutineId(input.routine_id, input.definition?.id)
+      return invokeNativeTool('routine_update', {
+        routineId: input.routine_id,
+        expectedRevision: input.expected_revision,
+        definition: normalizeRoutineDefinition({
+          ...input.definition,
+          id: input.routine_id,
+        }),
+      })
+    case 'routines.duplicate':
+      return invokeNativeTool('routine_duplicate', {
+        routineId: input.routine_id,
+        expectedRevision: input.expected_revision,
+        newId: input.new_id,
+        title: input.title || null,
+      })
+    case 'routines.trash':
+      return invokeNativeTool('routine_trash', {
+        routineId: input.routine_id,
+        expectedRevision: input.expected_revision,
+      })
+    case 'files.browse':
+      return {
+        directory: input.directory || '',
+        entries: await invokeNativeTool('workspace_file_list_directory', {
+          directory: input.directory || '',
+        }),
+      }
+    case 'files.create_folder':
+      return {
+        entry: await invokeNativeTool('workspace_file_create', {
+          relativePath: input.path,
+          directory: true,
+        }),
+      }
+    case 'files.rename':
+      return {
+        entry: await invokeNativeTool('workspace_file_rename', {
+          path: input.path,
+          newName: input.new_name,
+        }),
+      }
+    case 'files.duplicate':
+      return {
+        entry: await invokeNativeTool('workspace_file_duplicate', {
+          path: input.path,
+        }),
+      }
+    case 'files.trash':
+      return {
+        trashedPaths: await invokeNativeTool('workspace_file_trash', {
+          paths: input.paths,
+        }),
+      }
     case 'settings.get':
       return readSettings(options.settings, input.keys)
     case 'settings.update':
       return updateSettings(options.settings, input.values)
     default:
       return executeWorkspaceTool(request, options)
+  }
+}
+
+function requireMatchingRoutineId(routineId, definitionId) {
+  if (routineId !== definitionId) {
+    throw invalidInputError(
+      'definition.id must match routine_id. Duplicate the routine to create a new stable id.',
+    )
+  }
+}
+
+function normalizeRoutineDefinition(value = {}) {
+  return {
+    id: String(value.id || '').trim(),
+    title: String(value.title || '').trim(),
+    enabled: value.enabled !== false,
+    schedule: String(value.schedule || '').trim(),
+    timezone: String(value.timezone || 'UTC').trim(),
+    preset: String(value.preset || '').trim(),
+    prompt: String(value.prompt || ''),
+    overlap: String(value.overlap || 'skip'),
+    missed: String(value.missed || 'run-once'),
+    workspace: value.workspace == null || !String(value.workspace).trim()
+      ? null
+      : String(value.workspace).trim(),
+  }
+}
+
+async function invokeNativeTool(command, args) {
+  try {
+    return await invoke(command, args)
+  } catch (error) {
+    if (error?.code && error?.message) throw error
+    const message = error?.message || String(error || `${command} failed.`)
+    if (/inside the open workspace|workspace root|folder separators|changed on disk|missing its source revision|already exists|invalid routine|cannot be changed in place/i.test(message)) {
+      throw invalidInputError(message)
+    }
+    if (/was not found|does not exist|cannot be accessed/i.test(message)) {
+      throw notFoundError(message)
+    }
+    throw toolError('handler', message)
   }
 }
 
@@ -236,7 +376,7 @@ async function executeEditorTool(editor, tool, input) {
     case 'editor.set_content':
       return editor.mimSetContent(input.content || '')
     case 'editor.reveal':
-      return editor.mimReveal(input)
+      return await editor.mimReveal(input)
     case 'editor.save':
       return editor.mimSave()
     default:

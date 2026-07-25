@@ -1,8 +1,9 @@
 # Activities
 
 Activity is Mim's universal execution and navigation record. Terminals, CLI
-agents, Apps, Files, and Routines all occupy the same Activity pane and sidebar
-history.
+agents, app instances, and routine runs occupy the Activity pane and sidebar
+history. Files and Routines remain stable launch surfaces; Apps owns a
+collapsible launcher section rather than a synthetic core Activity row.
 
 ## Record
 
@@ -20,8 +21,8 @@ Statuses are `ready`, `starting`, `working`, `needs-input`, `idle`, `done`,
 
 ## Lifecycle
 
-`ActivitySupervisor` owns PTYs and child processes. The renderer subscribes to
-one ordered event stream for record upserts, output, status, and exit.
+`ActivitySupervisor` owns PTYs and child processes. The runtime store keeps one
+ordered record subscription for upserts, status, and exit.
 
 - PTY output is stored as raw byte chunks so split UTF-8 sequences survive.
 - Replay uses monotonically increasing sequence numbers and can continue after
@@ -30,6 +31,12 @@ one ordered event stream for record upserts, output, status, and exit.
 - Stop is safe to repeat.
 - Live agent status is inferred from output and silence without changing PTY
   ownership.
+- Activity surfaces mount on first visit, not once per saved record.
+- Only the active terminal surface owns an output subscription, resize
+  observer, and theme observer. A hidden surface releases them and requests
+  sequence-incremental native scrollback when selected again. A generation
+  token prevents rapid active/inactive switching from stranding a surface
+  without a listener.
 
 Plain terminals are ephemeral. Agent and routine runs are durable and persist
 bounded scrollback under `~/.mim/activities/`. Durable records restore after
@@ -38,12 +45,30 @@ pretend that an old PTY is still attached.
 
 ## Sidebar operations
 
-Live Activities can be selected, renamed, or stopped. Durable ended Activities
-can be archived and restored. Clear permanently removes an ended record and its
-persisted scrollback.
+- Every dynamic and archived row can be renamed from double-click, F2,
+  right-click, or its always-discoverable actions button.
+- Source metadata selects recognizable Codex/OpenAI, Claude/Anthropic, Pi,
+  Terminal, App, and Routine marks in expanded and rail layouts.
+- A process-backed live Activity can be stopped. A renderer-hosted app is not
+  presented as a process merely because its stable status is `ready`.
+- Durable non-running Activities can be archived and restored. Delete
+  permanently removes a non-running record and its persisted scrollback.
+- Manual pointer drag, Shift+Alt+Up/Down, and Move Up/Down actions update a
+  stable-id order without rewriting record identity or status. New Activities
+  appear above an established manual order.
+- Manual, most-recent, needs-attention, and name sorts are available and the
+  chosen mode/order persist in editor settings.
 
-Core Files, Apps, and Routines records are renderer-hosted destinations and do
-not use the native PTY lifecycle.
+Option/Alt+Cmd/Ctrl+Left/Right switches the adjacent vertical Activity row when
+the Activity pane or Sidebar owns focus. Sidebar focus moves with the selected
+row. The same chord stays horizontal inside Editor tabs. Cmd/Ctrl+W closes the
+focused dynamic Activity (stop then archive/delete as appropriate) and rails
+the Activity pane when the last closable row is gone. Editor focus closes its
+tab instead; closing the last embedded tab rails Editor and never closes Mim.
+The macOS native menu accelerator delegates through the same focus-aware path.
+Open Settings, confirmation dialogs, and Quick Open consume close first.
+Collapsing and restoring panes also hands focus to visible rail/header controls,
+so later shortcuts never target aria-hidden content.
 
 ## Resume
 
@@ -52,6 +77,19 @@ strategy. Restarting an ended agent Activity resolves its current preset,
 preserves exact argv, and adds the CLI-specific continuation flag. The new run
 is a new Activity; the previous durable record remains reviewable until
 archived or cleared.
+
+Ended routine runs restart through the current routine definition. Ended plain
+terminal, process-App, and terminal-App Activities rerun their exact stored
+command, argv, cwd, environment, retention, kind, and source into a fresh
+Activity; host-required Activity/MCP environment keys are regenerated once.
+
+Terminal resolution performs no agent detection. Launcher Settings explicitly
+refreshes the installed-agent catalog; repeated agent launches reuse that
+refreshable cache, preserving exact command/argv/MCP flags without the former
+login-shell and `--version` work on every click. Each launch records separate
+resolve, supervisor-spawn, and total timing in
+`activityRuntime.lastLaunchMetrics` and the `mim.activity.launch` performance
+measure.
 
 ## Relevant code
 

@@ -11,7 +11,7 @@
         </button>
         <button
           class="flex items-center gap-1.5 text-[13px] font-sans text-ink-2 hover:text-ink transition-colors duration-75"
-          @click="files.openDialog()"
+          @click="openFile"
         >
           Open File...
           <kbd class="text-[10px] text-ink-3 bg-chrome-mid border border-rule-light rounded px-1 py-px">{{ modKey }}O</kbd>
@@ -63,23 +63,25 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useFileStore } from '../../../stores/files.js'
 import { readFile } from '../../../services/fileSystem.js'
 import { platformKind } from '../../../shared/platform.js'
+import { basename } from '../../../shared/utils/path.js'
 
 const files = useFileStore()
+const emit = defineEmits(['activated'])
 
 const inputRef = ref(null)
 const query = ref('')
 const selectedIndex = ref(0)
 
-const modKey = platformKind() === 'mac' ? '⌘' : 'Ctrl+'
+const modKey = platformKind() === 'macos' ? '⌘' : 'Ctrl+'
 
 function fileNameFromPath(path) {
   if (!path) return 'Untitled'
-  return path.split('/').pop()
+  return basename(path)
 }
 
 function dirFromPath(path) {
   if (!path) return ''
-  const parts = path.split('/')
+  const parts = path.split(/[/\\]/)
   if (parts.length <= 2) return '/'
   return parts.slice(-3, -1).join('/')
 }
@@ -123,6 +125,7 @@ async function openRecent(path) {
   try {
     const content = await readFile(path)
     await files.openFile(path, content)
+    emit('activated')
   } catch {
     files.removeRecentFile(path)
   }
@@ -130,7 +133,14 @@ async function openRecent(path) {
 
 function startBlankFile() {
   const f = files.currentFile
-  if (f) f.newTab = false
+  if (!f) return
+  f.newTab = false
+  emit('activated')
+}
+
+async function openFile() {
+  await files.openDialog()
+  if (!files.currentFile?.newTab) emit('activated')
 }
 
 watch(query, () => {

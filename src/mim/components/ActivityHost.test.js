@@ -14,7 +14,7 @@ const StatefulActivity = defineComponent({
 })
 
 describe('ActivityHost', () => {
-  it('keeps every created Activity surface mounted while switching', async () => {
+  it('lazily mounts a surface on first visit, then preserves it while switching', async () => {
     const wrapper = mount(ActivityHost, {
       props: {
         activities: [
@@ -29,14 +29,32 @@ describe('ActivityHost', () => {
       },
     })
     const files = wrapper.get('[data-stateful-activity="files"]').element
-    const agent = wrapper.get('[data-stateful-activity="agent"]').element
+    expect(wrapper.find('[data-stateful-activity="agent"]').exists()).toBe(false)
 
     await wrapper.setProps({ activeId: 'agent:one' })
+    const agent = wrapper.get('[data-stateful-activity="agent"]').element
 
     expect(wrapper.get('[data-stateful-activity="files"]').element).toBe(files)
     expect(wrapper.get('[data-stateful-activity="agent"]').element).toBe(agent)
     expect(wrapper.get('[data-activity-surface="files"]').attributes('aria-hidden')).toBe('true')
     expect(wrapper.get('[data-activity-surface="agent:one"]').attributes('aria-hidden')).toBe('false')
+  })
+
+  it('mounts O(1) surfaces for a large unvisited Activity history', () => {
+    const activities = Array.from({ length: 100 }, (_, index) => ({
+      id: `terminal:${index}`,
+      title: `Terminal ${index}`,
+    }))
+    const wrapper = mount(ActivityHost, {
+      props: { activities, activeId: 'terminal:42' },
+      slots: Object.fromEntries(activities.map((activity) => [
+        `activity-${activity.id}`,
+        () => h(StatefulActivity, { label: activity.id }),
+      ])),
+    })
+
+    expect(wrapper.findAll('[data-activity-surface]')).toHaveLength(1)
+    expect(wrapper.get('[data-activity-surface="terminal:42"]').exists()).toBe(true)
   })
 
   it('renders an actionable missing state for an unknown selection', () => {

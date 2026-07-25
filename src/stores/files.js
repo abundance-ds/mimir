@@ -5,6 +5,7 @@ import { SAVE_STATE } from '../shared/saveState.js'
 
 const RECENT_LIMIT = 12
 let nextFileId = 1
+let nextDraftId = 1
 
 export const useFileStore = defineStore('files', () => {
   const openFiles = ref([])
@@ -13,13 +14,23 @@ export const useFileStore = defineStore('files', () => {
   // path is null for unsaved/new files
 
   const activeFileIndex = ref(0)
+  const sessionHydrated = ref(false)
+  let sessionHydrationPromise = null
+  const writesByFileId = new Map()
 
   const currentFile = computed(() => openFiles.value[activeFileIndex.value] || null)
 
-  function makeFile({ path, content = '', dirty = false, newTab = false }) {
+  function makeFile({
+    path,
+    content = '',
+    dirty = false,
+    newTab = false,
+    draftId = null,
+  }) {
     return {
       id: nextFileId++,
       path,
+      draftId: path ? null : (draftId || createDraftId()),
       content,
       dirty,
       newTab,
@@ -41,21 +52,44 @@ export const useFileStore = defineStore('files', () => {
 
   async function writeFile(file) {
     if (!file?.path) return false
+    const targetPath = file.path
+    const targetContent = file.content
+    const previous = writesByFileId.get(file.id) || Promise.resolve()
     file.saveState = SAVE_STATE.saving
     file.saveError = null
-    try {
-      await saveFile(file.path, file.content)
-      file.dirty = false
-      file.saveState = SAVE_STATE.saved
-      file.saveError = null
-      addRecentFile(file.path)
-      return true
-    } catch (error) {
-      file.dirty = true
-      file.saveState = SAVE_STATE.failed
-      file.saveError = normalizeSaveError(error)
-      throw error
-    }
+    let operation
+    const execute = async () => {
+        try {
+          await saveFile(targetPath, targetContent)
+          addRecentFile(targetPath)
+          const isLatestWrite = writesByFileId.get(file.id) === operation
+          const isCurrentSnapshot = file.path === targetPath && file.content === targetContent
+          if (isLatestWrite) {
+            file.dirty = !isCurrentSnapshot
+            file.saveState = isCurrentSnapshot ? SAVE_STATE.saved : SAVE_STATE.dirty
+            file.saveError = null
+          }
+          return isCurrentSnapshot
+        } catch (error) {
+          if (writesByFileId.get(file.id) === operation) {
+            file.dirty = true
+            file.saveState = SAVE_STATE.failed
+            file.saveError = normalizeSaveError(error)
+          }
+          throw error
+        }
+      }
+    operation = writesByFileId.has(file.id)
+      ? previous.catch(() => {}).then(execute)
+      : execute()
+    operation = operation
+      .finally(() => {
+        if (writesByFileId.get(file.id) === operation) {
+          writesByFileId.delete(file.id)
+        }
+      })
+    writesByFileId.set(file.id, operation)
+    return operation
   }
 
   const tabList = computed(() => {
@@ -118,6 +152,7 @@ export const useFileStore = defineStore('files', () => {
 
     if (active?.newTab) {
       active.path = path
+      active.draftId = null
       active.content = content
       active.newTab = false
       active.dirty = false
@@ -144,6 +179,113 @@ export const useFileStore = defineStore('files', () => {
     activeFileIndex.value = openFiles.value.length - 1
   }
 
+  function restoreDraft({ content = '', draftId = null } = {}) {
+    const file = makeFile({
+      path: null,
+      content: String(content),
+      dirty: Boolean(content),
+      draftId,
+    })
+    openFiles.value.push(file)
+    activeFileIndex.value = openFiles.value.length - 1
+    return file
+  }
+
+  function restorePath({ path, content = '', dirty = false } = {}) {
+    if (!path) return null
+    const existing = openFiles.value.find((file) => file.path === path)
+    if (existing) {
+      activeFileIndex.value = openFiles.value.indexOf(existing)
+      return existing
+    }
+    const file = makeFile({ path, content: String(content), dirty: Boolean(dirty) })
+    openFiles.value.push(file)
+    activeFileIndex.value = openFiles.value.length - 1
+    return file
+  }
+
+  function hydrateSession(hydrate) {
+    collapseLegacyDuplicateDrafts()
+    if (sessionHydrationPromise) return sessionHydrationPromise
+    if (sessionHydrated.value || openFiles.value.length > 0) {
+      sessionHydrated.value = true
+      return Promise.resolve(false)
+    }
+
+    const beforeFiles = [...openFiles.value]
+    const beforeRecent = [...recentFiles.value]
+    const beforeActiveIndex = activeFileIndex.value
+
+    // Own the async restore at store scope, not component scope. During Vite
+    // HMR the old Editor can unmount while loadSession() is still pending and
+    // a new Editor mounts against the same Pinia store. Both mounts await this
+    // one operation instead of each appending the saved drafts.
+    sessionHydrated.value = true
+    const pending = Promise.resolve()
+      .then(() => hydrate())
+      .then(() => true)
+      .catch((error) => {
+        openFiles.value = beforeFiles
+        recentFiles.value = beforeRecent
+        activeFileIndex.value = beforeActiveIndex
+        sessionHydrated.value = false
+        throw error
+      })
+      .finally(() => {
+        if (sessionHydrationPromise === pending) sessionHydrationPromise = null
+      })
+    sessionHydrationPromise = pending
+    return pending
+  }
+
+  function activateSessionEntry(entry) {
+    if (!entry) return false
+    const index = entry.path
+      ? openFiles.value.findIndex((file) => file.path === entry.path)
+      : openFiles.value.findIndex((file) => file.draftId === entry.draftId)
+    if (index < 0) return false
+    activeFileIndex.value = index
+    return true
+  }
+
+  function collapseLegacyDuplicateDrafts() {
+    const active = currentFile.value
+    const byContent = new Map()
+    const duplicateIds = new Set()
+
+    for (const file of openFiles.value) {
+      if (file.path || file.draftId) continue
+      const key = String(file.content || '')
+      const existing = byContent.get(key)
+      if (!existing) {
+        byContent.set(key, file)
+        continue
+      }
+      if (file === active) {
+        duplicateIds.add(existing.id)
+        byContent.set(key, file)
+      } else {
+        duplicateIds.add(file.id)
+      }
+    }
+
+    if (duplicateIds.size) {
+      openFiles.value = openFiles.value.filter((file) => !duplicateIds.has(file.id))
+    }
+    for (const file of openFiles.value) {
+      if (!file.path && !file.draftId) file.draftId = createDraftId()
+    }
+    const activeIndex = active
+      ? openFiles.value.findIndex((file) => file === active)
+      : -1
+    if (activeIndex >= 0) activeFileIndex.value = activeIndex
+    else if (openFiles.value.length) {
+      activeFileIndex.value = Math.min(activeFileIndex.value, openFiles.value.length - 1)
+    } else {
+      activeFileIndex.value = 0
+    }
+  }
+
   // Update content (called on editor change)
   function updateContent(content) {
     const file = currentFile.value
@@ -167,13 +309,14 @@ export const useFileStore = defineStore('files', () => {
   }
 
   // Close tab without confirmation (caller is responsible for confirming).
-  function closeFile(idx) {
+  function closeFile(idx, { ensureOne = true } = {}) {
     const file = openFiles.value[idx]
     if (!file) return
 
     openFiles.value.splice(idx, 1)
     if (openFiles.value.length === 0) {
-      newFile()
+      activeFileIndex.value = 0
+      if (ensureOne) newFile()
     } else if (activeFileIndex.value >= openFiles.value.length) {
       activeFileIndex.value = openFiles.value.length - 1
     } else if (activeFileIndex.value > idx) {
@@ -184,24 +327,24 @@ export const useFileStore = defineStore('files', () => {
   }
 
   // Save current file
-  async function save() {
-    const file = currentFile.value
+  async function save(file = currentFile.value) {
     if (!file) return false
     if (file.path) {
       return await writeFile(file)
     } else {
-      return await saveAs()
+      return await saveAs(file)
     }
   }
 
   // Save As
-  async function saveAs() {
-    const file = currentFile.value
+  async function saveAs(file = currentFile.value) {
     if (!file) return false
     const defaultPath = file.path || 'untitled.md'
     const path = await saveFileDialog(defaultPath)
     if (!path) return false
+    if (!openFiles.value.includes(file)) return false
     file.path = path
+    file.draftId = null
     return await writeFile(file)
   }
 
@@ -228,7 +371,12 @@ export const useFileStore = defineStore('files', () => {
     if (openFiles.value.length <= 1) return null
     const file = openFiles.value[idx]
     if (!file) return null
-    const removed = { path: file.path, content: file.content, dirty: file.dirty }
+    const removed = {
+      path: file.path,
+      content: file.content,
+      dirty: file.dirty,
+      draftId: file.draftId,
+    }
     openFiles.value.splice(idx, 1)
     if (activeFileIndex.value >= openFiles.value.length) {
       activeFileIndex.value = openFiles.value.length - 1
@@ -240,9 +388,79 @@ export const useFileStore = defineStore('files', () => {
     return removed
   }
 
-  function addFileFromTransfer({ path, content, dirty }) {
-    openFiles.value.push(makeFile({ path: path || null, content: content || '', dirty: !!dirty }))
+  function addFileFromTransfer({ path, content, dirty, draftId }) {
+    openFiles.value.push(makeFile({
+      path: path || null,
+      content: content || '',
+      dirty: !!dirty,
+      draftId,
+    }))
     activeFileIndex.value = openFiles.value.length - 1
+  }
+
+  function pathSuffixInside(path, parent) {
+    const candidate = String(path || '').replace(/\\/g, '/')
+    const boundary = String(parent || '').replace(/\\/g, '/').replace(/\/+$/, '')
+    if (!candidate || !boundary) return null
+    if (candidate === boundary) return ''
+    if (!candidate.startsWith(`${boundary}/`)) return null
+    return String(path).slice(boundary.length)
+  }
+
+  function pathIsInside(path, parent) {
+    return pathSuffixInside(path, parent) !== null
+  }
+
+  async function waitForWorkspacePaths(paths = []) {
+    const targets = paths.filter(Boolean)
+    if (!targets.length) return
+    while (true) {
+      const pending = [...new Set(openFiles.value
+        .filter(file => file.path && targets.some(target => pathIsInside(file.path, target)))
+        .map(file => writesByFileId.get(file.id))
+        .filter(Boolean))]
+      if (!pending.length) return
+      await Promise.all(pending)
+    }
+  }
+
+  function moveWorkspacePath(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return
+    for (const file of openFiles.value) {
+      if (!file.path) continue
+      const suffix = pathSuffixInside(file.path, oldPath)
+      if (suffix === null) continue
+      file.path = `${String(newPath).replace(/[\\/]+$/, '')}${suffix}`
+    }
+    recentFiles.value = recentFiles.value.map((path) => {
+      const suffix = pathSuffixInside(path, oldPath)
+      return suffix === null
+        ? path
+        : `${String(newPath).replace(/[\\/]+$/, '')}${suffix}`
+    })
+  }
+
+  function handleWorkspaceTrash(paths = []) {
+    const targets = paths.filter(Boolean)
+    if (!targets.length) return
+    for (let index = openFiles.value.length - 1; index >= 0; index--) {
+      const file = openFiles.value[index]
+      if (!file.path || !targets.some((target) => pathIsInside(file.path, target))) continue
+      if (file.dirty) {
+        file.path = null
+        file.draftId ||= createDraftId()
+        file.newTab = false
+        file.saveState = SAVE_STATE.dirty
+        file.saveError = null
+      } else {
+        openFiles.value.splice(index, 1)
+      }
+    }
+    recentFiles.value = recentFiles.value.filter((path) => (
+      !targets.some((target) => pathIsInside(path, target))
+    ))
+    if (!openFiles.value.length) newFile()
+    activeFileIndex.value = Math.min(activeFileIndex.value, openFiles.value.length - 1)
   }
 
   function setFileReviews(file, reviews) {
@@ -257,12 +475,18 @@ export const useFileStore = defineStore('files', () => {
     openFiles,
     recentFiles,
     activeFileIndex,
+    sessionHydrated,
     currentFile,
     tabList,
     hasOpenFiles,
     openFile,
     newFile,
     newTab,
+    restoreDraft,
+    restorePath,
+    hydrateSession,
+    activateSessionEntry,
+    collapseLegacyDuplicateDrafts,
     updateContent,
     markDirty,
     setActiveTab,
@@ -276,7 +500,14 @@ export const useFileStore = defineStore('files', () => {
     moveTab,
     removeTabForTransfer,
     addFileFromTransfer,
+    waitForWorkspacePaths,
+    moveWorkspacePath,
+    handleWorkspaceTrash,
     setFileReviews,
     clearFileReviews,
   }
 })
+
+function createDraftId() {
+  return globalThis.crypto?.randomUUID?.() || `draft-${nextDraftId++}`
+}

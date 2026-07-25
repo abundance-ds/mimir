@@ -8,11 +8,13 @@ export const useSaveFeedbackStore = defineStore('saveFeedback', () => {
   const savingVisible = ref(false)
   const savedVisible = ref(false)
   const savedLabel = ref('')
+  const fileId = ref(null)
 
   let pendingSaveSource = 'auto'
   let pendingSaveMode = 'save'
   let saveSavingTimer = null
   let saveSavedTimer = null
+  let activeToken = null
 
   function clearTimers() {
     clearTimeout(saveSavingTimer)
@@ -21,8 +23,10 @@ export const useSaveFeedbackStore = defineStore('saveFeedback', () => {
     saveSavedTimer = null
   }
 
-  function begin(source = 'auto') {
+  function begin(source = 'auto', nextFileId = null) {
     clearTimers()
+    activeToken = Symbol('save-feedback')
+    fileId.value = nextFileId
     pendingSaveSource = source
     pendingSaveMode = 'save'
     savedVisible.value = false
@@ -33,13 +37,16 @@ export const useSaveFeedbackStore = defineStore('saveFeedback', () => {
         savingVisible.value = true
       }, SAVE_SAVING_DELAY)
     }
+    return activeToken
   }
 
-  function setMode(mode) {
+  function setMode(mode, token = null) {
+    if (token && token !== activeToken) return
     pendingSaveMode = mode
   }
 
-  function finish(didSave, fileLabel = 'Saved') {
+  function finish(didSave, fileLabel = 'Saved', token = null) {
+    if (token && token !== activeToken) return
     clearTimeout(saveSavingTimer)
     saveSavingTimer = null
     const label = pendingSaveMode === 'saveAs' && fileLabel !== 'Saved'
@@ -58,12 +65,15 @@ export const useSaveFeedbackStore = defineStore('saveFeedback', () => {
 
   function dispose() {
     clearTimers()
+    activeToken = null
+    fileId.value = null
   }
 
   return {
     savingVisible,
     savedVisible,
     savedLabel,
+    fileId,
     begin,
     setMode,
     finish,

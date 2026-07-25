@@ -6,7 +6,11 @@ use axum::{
     Router,
 };
 use serde::Deserialize;
-use tokio::sync::{watch, Mutex};
+use std::collections::HashSet;
+use tokio::{
+    sync::{watch, Mutex},
+    task::JoinHandle,
+};
 
 use crate::{
     tool_registry::{
@@ -17,19 +21,28 @@ use crate::{
 };
 
 pub struct ToolServerState {
-    shutdown_tx: Mutex<Option<watch::Sender<bool>>>,
-    port: Mutex<u16>,
-    token: Mutex<String>,
+    lifecycle: Mutex<ToolServerLifecycle>,
 }
 
 impl Default for ToolServerState {
     fn default() -> Self {
         Self {
-            shutdown_tx: Mutex::new(None),
-            port: Mutex::new(0),
-            token: Mutex::new(String::new()),
+            lifecycle: Mutex::new(ToolServerLifecycle::default()),
         }
     }
+}
+
+#[derive(Default)]
+struct ToolServerLifecycle {
+    running: Option<RunningToolServer>,
+}
+
+struct RunningToolServer {
+    shutdown_tx: watch::Sender<bool>,
+    task: JoinHandle<()>,
+    port: u16,
+    token: String,
+    clients: HashSet<String>,
 }
 
 #[derive(Deserialize)]
@@ -170,6 +183,20 @@ fn tool_error_name(code: ToolErrorCode) -> &'static str {
 
 // ── MCP (Model Context Protocol) ─────────────────────────────────
 
+const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
+const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] = [LATEST_PROTOCOL_VERSION, "2025-03-26"];
+
+fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|version| {
+            SUPPORTED_PROTOCOL_VERSIONS
+                .iter()
+                .copied()
+                .find(|supported| supported == &version)
+        })
+        .unwrap_or(LATEST_PROTOCOL_VERSION)
+}
+
 fn jsonrpc_ok(id: &serde_json::Value, result: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
@@ -250,28 +277,20 @@ async fn handle_mcp(
 
     match method {
         "initialize" => {
-            let session_id = uuid::Uuid::new_v4().to_string();
-            let requested_protocol = request
-                .pointer("/params/protocolVersion")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("2025-03-26");
-            let body = jsonrpc_ok(
+            let protocol_version = negotiate_protocol_version(
+                request
+                    .pointer("/params/protocolVersion")
+                    .and_then(serde_json::Value::as_str),
+            );
+            Json(jsonrpc_ok(
                 id,
                 serde_json::json!({
-                    "protocolVersion": requested_protocol,
+                    "protocolVersion": protocol_version,
                     "capabilities": { "tools": {} },
                     "serverInfo": { "name": "mim", "version": env!("CARGO_PKG_VERSION") }
                 }),
-            );
-            (
-                [(
-                    axum::http::header::HeaderName::from_static("mcp-session-id"),
-                    axum::http::HeaderValue::from_str(&session_id)
-                        .expect("UUID is a valid header value"),
-                )],
-                Json(body),
-            )
-                .into_response()
+            ))
+            .into_response()
         }
         "ping" => Json(jsonrpc_ok(id, serde_json::json!({}))).into_response(),
         "tools/list" => {
@@ -322,7 +341,7 @@ async fn start_server(
     registry: ToolRegistry,
     port: u16,
     token: String,
-) -> Result<(watch::Sender<bool>, u16), String> {
+) -> Result<(watch::Sender<bool>, JoinHandle<()>, u16), String> {
     let state = AppState { registry, token };
     let router = Router::new()
         .route("/api/tools/call", post(handle_call))
@@ -340,7 +359,7 @@ async fn start_server(
         .port();
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let server = axum::serve(listener, router);
         tokio::select! {
             result = server => {
@@ -352,41 +371,106 @@ async fn start_server(
         }
     });
     eprintln!("[tool_server] MCP at http://127.0.0.1:{bound_port}/mcp");
-    Ok((shutdown_tx, bound_port))
+    Ok((shutdown_tx, task, bound_port))
 }
 
 // ── Tauri commands ───────────────────────────────────────────────
+
+fn runtime_client_id(client_id: Option<String>) -> String {
+    client_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "legacy-renderer".into())
+}
+
+async fn acquire_server(
+    state: &ToolServerState,
+    registry: ToolRegistry,
+    port: Option<u16>,
+    client_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client_id = runtime_client_id(client_id);
+    let mut lifecycle = state.lifecycle.lock().await;
+    if let Some(running) = lifecycle.running.as_mut() {
+        running.clients.insert(client_id);
+        return Ok(serde_json::json!({
+            "port": running.port,
+            "token": running.token,
+            "clients": running.clients.len(),
+        }));
+    }
+
+    let requested_port = port.unwrap_or(DEFAULT_PORT);
+    let token = uuid::Uuid::new_v4().to_string();
+    let (shutdown_tx, task, bound_port) =
+        start_server(registry, requested_port, token.clone()).await?;
+    let clients = HashSet::from([client_id]);
+    lifecycle.running = Some(RunningToolServer {
+        shutdown_tx,
+        task,
+        port: bound_port,
+        token: token.clone(),
+        clients,
+    });
+    Ok(serde_json::json!({ "port": bound_port, "token": token, "clients": 1 }))
+}
+
+async fn stop_running_server(running: RunningToolServer) {
+    let _ = running.shutdown_tx.send(true);
+    let _ = running.task.await;
+}
+
+async fn release_server(state: &ToolServerState, client_id: Option<String>) {
+    let client_id = runtime_client_id(client_id);
+    let mut lifecycle = state.lifecycle.lock().await;
+    let Some(running) = lifecycle.running.as_mut() else {
+        return;
+    };
+    running.clients.remove(&client_id);
+    if !running.clients.is_empty() {
+        return;
+    }
+    if let Some(running) = lifecycle.running.take() {
+        // Keep the lifecycle lock until the listener has actually closed so a
+        // dev-HMR replacement cannot race a new bind against the old server.
+        stop_running_server(running).await;
+    }
+}
+
+pub(crate) async fn shutdown_all(state: &ToolServerState) {
+    let mut lifecycle = state.lifecycle.lock().await;
+    if let Some(running) = lifecycle.running.take() {
+        stop_running_server(running).await;
+    }
+}
+
+async fn server_status(state: &ToolServerState, revision: u64) -> serde_json::Value {
+    let lifecycle = state.lifecycle.lock().await;
+    let running = lifecycle.running.as_ref();
+    serde_json::json!({
+        "running": running.is_some(),
+        "port": running.map_or(0, |server| server.port),
+        "clients": running.map_or(0, |server| server.clients.len()),
+        "registryRevision": revision,
+    })
+}
 
 #[tauri::command]
 pub async fn tool_server_start(
     state: tauri::State<'_, ToolServerState>,
     registry: tauri::State<'_, ToolRegistry>,
     port: Option<u16>,
+    client_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    if state.shutdown_tx.lock().await.is_some() {
-        let port = *state.port.lock().await;
-        let token = state.token.lock().await.clone();
-        return Ok(serde_json::json!({ "port": port, "token": token }));
-    }
-
-    let requested_port = port.unwrap_or(DEFAULT_PORT);
-    let token = uuid::Uuid::new_v4().to_string();
-    let (shutdown_tx, bound_port) =
-        start_server(registry.inner().clone(), requested_port, token.clone()).await?;
-
-    *state.shutdown_tx.lock().await = Some(shutdown_tx);
-    *state.port.lock().await = bound_port;
-    *state.token.lock().await = token.clone();
-    Ok(serde_json::json!({ "port": bound_port, "token": token }))
+    acquire_server(state.inner(), registry.inner().clone(), port, client_id).await
 }
 
 #[tauri::command]
-pub async fn tool_server_stop(state: tauri::State<'_, ToolServerState>) -> Result<(), String> {
-    if let Some(shutdown_tx) = state.shutdown_tx.lock().await.take() {
-        let _ = shutdown_tx.send(true);
-    }
-    *state.port.lock().await = 0;
-    *state.token.lock().await = String::new();
+pub async fn tool_server_stop(
+    state: tauri::State<'_, ToolServerState>,
+    client_id: Option<String>,
+) -> Result<(), String> {
+    release_server(state.inner(), client_id).await;
     Ok(())
 }
 
@@ -395,13 +479,7 @@ pub async fn tool_server_status(
     state: tauri::State<'_, ToolServerState>,
     registry: tauri::State<'_, ToolRegistry>,
 ) -> Result<serde_json::Value, String> {
-    let running = state.shutdown_tx.lock().await.is_some();
-    let port = *state.port.lock().await;
-    Ok(serde_json::json!({
-        "running": running,
-        "port": port,
-        "registryRevision": registry.revision(),
-    }))
+    Ok(server_status(state.inner(), registry.revision()).await)
 }
 
 /// Compatibility response command used by the existing editor tool service.
@@ -459,6 +537,120 @@ mod tests {
         assert_eq!(rendered["isError"], true);
         assert_eq!(rendered["structuredContent"]["error"], "invalid_input");
         assert_eq!(rendered["structuredContent"]["data"]["path"], "$.path");
+    }
+
+    #[test]
+    fn protocol_negotiation_accepts_supported_versions_and_rejects_blind_echoes() {
+        assert_eq!(negotiate_protocol_version(Some("2025-03-26")), "2025-03-26");
+        assert_eq!(
+            negotiate_protocol_version(Some("2025-06-18")),
+            LATEST_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            negotiate_protocol_version(Some("2099-01-01")),
+            LATEST_PROTOCOL_VERSION
+        );
+        assert_eq!(negotiate_protocol_version(None), LATEST_PROTOCOL_VERSION);
+    }
+
+    #[tokio::test]
+    async fn initialize_is_stateless_and_returns_the_negotiated_version() {
+        let state = AppState {
+            registry: ToolRegistry::new(),
+            token: "unused-for-mcp".into(),
+        };
+        let response = handle_mcp(
+            State(state),
+            Json(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": { "protocolVersion": "2099-01-01" }
+            })),
+        )
+        .await
+        .into_response();
+
+        assert!(response.headers().get("mcp-session-id").is_none());
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["result"]["protocolVersion"], LATEST_PROTOCOL_VERSION);
+        assert_eq!(json["result"]["capabilities"]["tools"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn notifications_are_accepted_without_a_jsonrpc_body() {
+        let state = AppState {
+            registry: ToolRegistry::new(),
+            token: "unused-for-mcp".into(),
+        };
+        let response = handle_mcp(
+            State(state),
+            Json(json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            })),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn renderer_leases_survive_hmr_and_release_the_port_before_restart() {
+        let state = ToolServerState::default();
+        let registry = ToolRegistry::new();
+
+        let first = acquire_server(
+            &state,
+            registry.clone(),
+            Some(0),
+            Some("renderer-old".into()),
+        )
+        .await
+        .unwrap();
+        let port = first["port"].as_u64().unwrap() as u16;
+        assert_ne!(port, 0);
+
+        let second = acquire_server(
+            &state,
+            registry.clone(),
+            Some(0),
+            Some("renderer-new".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(second["port"], first["port"]);
+        assert_eq!(second["clients"], 2);
+
+        release_server(&state, Some("renderer-old".into())).await;
+        let active = server_status(&state, registry.revision()).await;
+        assert_eq!(active["running"], true);
+        assert_eq!(active["clients"], 1);
+
+        release_server(&state, Some("renderer-new".into())).await;
+        assert_eq!(
+            server_status(&state, registry.revision()).await["running"],
+            false
+        );
+
+        let restarted = acquire_server(
+            &state,
+            registry.clone(),
+            Some(port),
+            Some("renderer-restarted".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(restarted["port"], port);
+        shutdown_all(&state).await;
     }
 
     #[test]

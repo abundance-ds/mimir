@@ -12,6 +12,7 @@ export const useDiffStore = defineStore('diff', () => {
   const proposalIds = ref([])
   const batchId = ref(null)
   const reviewMeta = ref(null)
+  const reviewError = ref('')
 
   // Batch state
   const files = ref([]) // { path, original, modified, proposalId, status: 'pending'|'accepted'|'rejected' }
@@ -39,6 +40,7 @@ export const useDiffStore = defineStore('diff', () => {
     proposalIds.value = proposals
     batchId.value = batch
     reviewMeta.value = review || null
+    reviewError.value = ''
     files.value = []
     viewMode.value = 'diff'
     chunkCount.value = 0
@@ -60,6 +62,7 @@ export const useDiffStore = defineStore('diff', () => {
     }))
     batchId.value = batch
     reviewMeta.value = sessionId ? { sessionId } : null
+    reviewError.value = ''
     originalContent.value = ''
     modifiedContent.value = ''
     filePath.value = ''
@@ -81,6 +84,7 @@ export const useDiffStore = defineStore('diff', () => {
     proposalIds.value = []
     batchId.value = null
     reviewMeta.value = null
+    reviewError.value = ''
     focusedFile.value = null
     files.value = []
     chunkCount.value = 0
@@ -186,6 +190,10 @@ export const useDiffStore = defineStore('diff', () => {
     }
   }
 
+  function setReviewError(error = '') {
+    reviewError.value = String(error || '')
+  }
+
   function setChunkCount(count) {
     chunkCount.value = count
     if (currentChunk.value >= count) {
@@ -206,7 +214,7 @@ export const useDiffStore = defineStore('diff', () => {
   return {
     active, mode, isBatch,
     originalContent, modifiedContent, filePath,
-    proposalIds, batchId, reviewMeta,
+    proposalIds, batchId, reviewMeta, reviewError,
     focusedFile, isBatchFileFocused,
     files, pendingFiles, resolvedCount, allResolved,
     viewMode, layout, chunkCount, currentChunk, hasChunks,
@@ -214,7 +222,7 @@ export const useDiffStore = defineStore('diff', () => {
     acceptFile, rejectFile, acceptAllFiles, rejectAllFiles, resetFile,
     markFileApplied, markFileLifecycleResolved, markFileFailed,
     focusBatchFile, clearBatchFocus,
-    setViewMode, setLayout,
+    setViewMode, setLayout, setReviewError,
     setChunkCount, nextChunk, prevChunk,
   }
 })

@@ -73,6 +73,15 @@ describe('settings store', () => {
     expect(store.settingsReady).toBe(true)
   })
 
+  it('deduplicates concurrent startup loads', async () => {
+    const getItem = vi.spyOn(localStorageMock, 'getItem')
+    const store = useSettingsStore()
+
+    await Promise.all([store.load(), store.load()])
+
+    expect(getItem).toHaveBeenCalledTimes(1)
+  })
+
   // ── set() ──
 
   it('set() updates the setting value', () => {

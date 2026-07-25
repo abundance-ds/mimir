@@ -1,11 +1,17 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  createRoutineDefinition,
+  duplicateRoutineDefinition,
   listenToRoutineEvents,
   loadRoutineCatalog,
+  revealRoutineDefinition,
   reloadRoutineCatalog,
   runRoutineNow,
+  trashRoutineDefinition,
+  updateRoutineDefinition,
 } from '../services/routines.js'
+import { stopActivity } from '../services/activities.js'
 
 export const useRoutinesStore = defineStore('routines', () => {
   const directory = ref('')
@@ -20,6 +26,8 @@ export const useRoutinesStore = defineStore('routines', () => {
   const loaded = ref(false)
   const error = ref('')
   const pendingRuns = ref({})
+  const pendingChanges = ref({})
+  const pendingStops = ref({})
   const runErrors = ref({})
   let unlisten = null
   let initializing = null
@@ -112,6 +120,69 @@ export const useRoutinesStore = defineStore('routines', () => {
     }
   }
 
+  async function create(definition) {
+    const id = String(definition?.id || '').trim()
+    return change(`create:${id}`, async () => {
+      applyCatalog(await createRoutineDefinition(definition))
+      selectedId.value = id
+      return selectedRoutine.value
+    })
+  }
+
+  async function update(id, definition) {
+    const routine = requireRoutine(id)
+    return change(id, async () => {
+      applyCatalog(await updateRoutineDefinition(id, routine.sourceRevision, definition))
+      selectedId.value = id
+      return selectedRoutine.value
+    })
+  }
+
+  async function duplicate(id, newId, title) {
+    const routine = requireRoutine(id)
+    return change(id, async () => {
+      applyCatalog(await duplicateRoutineDefinition(
+        id,
+        routine.sourceRevision,
+        newId,
+        title,
+      ))
+      selectedId.value = newId
+      return selectedRoutine.value
+    })
+  }
+
+  async function trash(id) {
+    const routine = requireRoutine(id)
+    return change(id, async () => {
+      applyCatalog(await trashRoutineDefinition(id, routine.sourceRevision))
+      return routine
+    })
+  }
+
+  async function stopRuns(id) {
+    const routine = requireRoutine(id)
+    if (!routine.runningActivityIds.length || pendingStops.value[id]) return 0
+    pendingStops.value = { ...pendingStops.value, [id]: true }
+    try {
+      const ids = [...routine.runningActivityIds]
+      await Promise.all(ids.map((activityId) => stopActivity(activityId)))
+      const current = requireRoutine(id)
+      replaceRoutine(id, {
+        ...current,
+        runningActivityIds: current.runningActivityIds.filter((activityId) => !ids.includes(activityId)),
+      })
+      return ids.length
+    } finally {
+      pendingStops.value = withoutKey(pendingStops.value, id)
+    }
+  }
+
+  function reveal(id = null) {
+    if (id != null) requireRoutine(id)
+    return revealRoutineDefinition(id)
+  }
+
   function select(id) {
     if (routines.value.some((routine) => routine.id === id)) selectedId.value = id
   }
@@ -157,6 +228,26 @@ export const useRoutinesStore = defineStore('routines', () => {
     routines.value = routines.value.map((entry) => entry.id === id ? routine : entry)
   }
 
+  function requireRoutine(id) {
+    const routine = routines.value.find((entry) => entry.id === id)
+    if (!routine) throw new Error(`Routine '${id}' is no longer available.`)
+    return routine
+  }
+
+  async function change(key, operation) {
+    if (pendingChanges.value[key]) return null
+    pendingChanges.value = { ...pendingChanges.value, [key]: true }
+    error.value = ''
+    try {
+      return await operation()
+    } catch (cause) {
+      error.value = message(cause)
+      throw cause
+    } finally {
+      pendingChanges.value = withoutKey(pendingChanges.value, key)
+    }
+  }
+
   function dispose() {
     unlisten?.()
     unlisten = null
@@ -177,6 +268,8 @@ export const useRoutinesStore = defineStore('routines', () => {
     loaded,
     error,
     pendingRuns,
+    pendingChanges,
+    pendingStops,
     runErrors,
     selectedRoutine,
     runningCount,
@@ -185,6 +278,12 @@ export const useRoutinesStore = defineStore('routines', () => {
     load,
     reload,
     runNow,
+    create,
+    update,
+    duplicate,
+    trash,
+    stopRuns,
+    reveal,
     select,
     moveSelection,
     selectEdge,

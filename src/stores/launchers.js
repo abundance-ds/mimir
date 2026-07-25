@@ -17,6 +17,14 @@ export const useLaunchersStore = defineStore('launchers', () => {
 
   const decoratedPresets = computed(() => presets.value.map((preset) => {
     if (preset.kind !== 'agent') return { ...preset, available: true, unavailableReason: '' }
+    if (String(preset.binary || '').trim()) {
+      return {
+        ...preset,
+        available: true,
+        unavailableReason: '',
+        detectedAgent: null,
+      }
+    }
     const agent = agents.value.find((candidate) => candidate.id === preset.agentId)
     const available = Boolean(agent?.installed && agent?.binaryPath)
     return {

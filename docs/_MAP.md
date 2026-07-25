@@ -10,8 +10,8 @@ Mim is one Tauri window with three mounted panes:
 
 | Pane | Owner | Contents |
 |---|---|---|
-| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | launchers, core surfaces, live and archived Activities |
-| Activity | `src/mim/components/ActivityHost.vue` | terminal/agent PTYs, Files, Apps, Routines, app instances |
+| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | core surfaces, installed Apps/CLI launchers, live and archived Activities, Settings |
+| Activity | `src/mim/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, and launched app instances |
 | Editor | `src/editor/App.vue` | Markdown tabs, inline AI, ghost completion, diff review, comments |
 
 `src/mim/WorkbenchApp.vue` composes the panes and connects them to the Rust
@@ -35,10 +35,11 @@ navigation history.
 - `src/mim/WorkbenchApp.vue`: top-level orchestration and core Activity records
 - `src/mim/components/`: three-pane shell, rails, sidebar, quick-open, pane host
 - `src/mim/activities/TerminalActivity.vue`: xterm-backed terminal and agent UI
-- `src/mim/activities/FilesActivity.vue`: recent-first file inbox and search
-- `src/mim/activities/AppsActivity.vue`: local app catalog
+- `src/mim/activities/FilesActivity.vue`: recent-first inbox, actionable folder
+  browser, multi-selection, context menus, and keyboard file operations
 - `src/mim/activities/AppActivity.vue`: app-instance host selection
-- `src/mim/activities/RoutinesActivity.vue`: schedules, diagnostics, and run-now
+- `src/mim/activities/RoutinesActivity.vue`: complete file-backed routine CRUD,
+  run/stop state, diagnostics, context menus, and keyboard control
 - `src/stores/activities.js`: renderer Activity records
 - `src/stores/activityRuntime.js`: native lifecycle, PTY I/O, resume, events
 - `src/stores/launchers.js`: agent detection and launcher presets
@@ -49,8 +50,11 @@ See [activities.md](activities.md) and [agent-setup.md](agent-setup.md).
 
 ### Files
 
-- `src/stores/workspaceFiles.js`: workspace index, filters, selection, searches
+- `src/stores/workspaceFiles.js`: workspace index, directory navigation,
+  filters, selection, explicit refresh, and bounded searches
 - `src/services/fileIndex.js`: native index/search wrappers
+- `src/services/workspaceFileOperations.js`: create, rename, duplicate, Trash,
+  reveal, default-app open, and folder-list wrappers
 - `src/mim/components/QuickOpen.vue`: global Cmd/Ctrl+P file jump
 - `src/services/fileSystem.js`: editor open/save wrappers
 - `src/stores/files.js`: open tabs, dirty state, recent editor files
@@ -61,6 +65,9 @@ See [files.md](files.md).
 
 - `src/stores/appsCatalog.js`: catalog selection and Activity preparation
 - `src/services/appsCatalog.js`: native catalog, launch, data, and tool relay
+- `src/shared/ui/settings/AppsSettingsSection.vue`: search, launch, diagnostics,
+  local scaffold/duplicate/title/Trash operations, and definition navigation
+- `src/shared/ui/settings/AppSettingsSectionRows.vue`: keyboard catalog rows
 - `src/mim/apps/`: embedded host, launch-plan host, Changes, and Scratch
 - `src/apps/sdk/mim-sdk.js`: app bridge for data, files, HTTP, tools, and editor
 - `src/apps/sdk/theme-base.css`: optional shared app theme base
@@ -69,9 +76,9 @@ See [apps-system.md](apps-system.md).
 
 ### Routines
 
-- `src/stores/routines.js`: live catalog and run state
-- `src/services/routines.js`: native commands and change events
-- `src/mim/activities/RoutinesActivity.vue`: scheduler UI
+- `src/stores/routines.js`: live catalog, source-aware mutations, and run state
+- `src/services/routines.js`: native CRUD/reveal commands and change events
+- `src/mim/activities/RoutinesActivity.vue`: scheduler control surface
 
 See [routines.md](routines.md).
 
@@ -93,7 +100,7 @@ See [editor-system.md](editor-system.md), [inline-ai.md](inline-ai.md), and
 
 - `src/shared/styles/`: Tailwind tokens, themes, editor bridge, diff styles
 - `src/shared/ui/SettingsDialog.vue`: Appearance, Editor, Models, Launchers,
-  Shortcuts, and About
+  Apps, Shortcuts, and About
 - `src/shared/ui/settings/`: settings sections
 - `src/stores/settings.js`: persisted settings and cross-window theme sync
 - `src/shared/fonts.js`: editor font choices
@@ -128,8 +135,11 @@ See [mcp.md](mcp.md).
 
 - `src-tauri/src/file_index.rs`: recent-first index and bounded content search
 - `src-tauri/src/file_index_commands.rs`: native index command surface
+- `src-tauri/src/workspace_files.rs`: workspace-scoped browse and mutation
+  commands, traversal protection, system Trash, reveal, and default-app open
 - `src-tauri/src/file_open.rs`: supported CLI file-open handling
-- `src-tauri/src/apps.rs`: TOML catalog, launch resolution, app data, HTTP
+- `src-tauri/src/apps.rs`: TOML catalog, safe local definition operations,
+  launch resolution, app data, HTTP
 - `src-tauri/src/routines.rs`: TOML schema, cron parsing, planner rules
 - `src-tauri/src/routine_runtime.rs`: scheduler, launcher resolution, Activity runs
 - `src-tauri/src/git.rs`: Git status used by the built-in Changes app
@@ -155,6 +165,8 @@ See [mcp.md](mcp.md).
 | `~/.mim/routines/` | routine TOML |
 | `~/.mim/routines-state.json` | next-fire planner state |
 | `~/.mim/settings.json` | editor/workbench/settings data |
+| `~/.mim/session.json` | open editor tabs, drafts, recents, and zoom |
+| `~/.mim/models.json` | inline/ghost AI provider and model registry |
 | `~/.mim/bin/` | installed `mimx` |
 | `~/.mim/pi/mim-tools.ts` | installed Pi extension |
 | `~/.mim/keys.env` | debug-only plaintext key fallback |

@@ -60,6 +60,32 @@ describe('launchers store', () => {
     expect(store.availablePresets).toHaveLength(1)
   })
 
+  it('keeps an exact binary override launchable without built-in detection', async () => {
+    loadLauncherConfig.mockResolvedValueOnce({
+      path: '/config',
+      diagnostic: null,
+      presets: [{
+        id: 'local-reviewer',
+        title: 'Local reviewer',
+        kind: 'agent',
+        agentId: 'custom',
+        binary: '/opt/mim/bin/reviewer',
+        args: ['--fast'],
+      }],
+    })
+    const store = useLaunchersStore()
+
+    await store.load()
+
+    expect(store.availablePresets).toHaveLength(1)
+    expect(store.availablePresets[0]).toMatchObject({
+      id: 'local-reviewer',
+      binary: '/opt/mim/bin/reviewer',
+      available: true,
+      unavailableReason: '',
+    })
+  })
+
   it('reports load errors as a recoverable state', async () => {
     detectAgents.mockRejectedValueOnce(new Error('probe crashed'))
     const store = useLaunchersStore()

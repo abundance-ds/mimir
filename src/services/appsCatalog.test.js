@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import {
+  createLocalApp,
   createAppActivity,
+  duplicateLocalApp,
   dynamicToolDefinitions,
   embeddedAppUrl,
   invokeAppCommand,
   listenForAppTools,
   loadAppsCatalog,
+  trashLocalApp,
+  updateLocalAppTitle,
 } from './appsCatalog.js'
 
 describe('appsCatalog service', () => {
@@ -54,6 +58,26 @@ describe('appsCatalog service', () => {
       description: 'Read the note.',
       inputSchema: { type: 'object', properties: {} },
     }])
+  })
+
+  it('routes local definition mutations to the native catalog and normalizes every result', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      directory: '/home/me/.mim/apps',
+      apps: [{ id: 'notes', title: 'Notes', mode: 'embedded', builtin: false }],
+      diagnostics: [],
+    })
+
+    await createLocalApp({ id: 'notes', title: 'Notes', description: 'Local notes' })
+    await duplicateLocalApp('notes', { id: 'notes-copy', title: 'Notes Copy' })
+    await updateLocalAppTitle('notes', 'Field Notes')
+    await trashLocalApp('notes-copy')
+
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['app_create', { id: 'notes', title: 'Notes', description: 'Local notes' }],
+      ['app_duplicate', { appId: 'notes', newId: 'notes-copy', title: 'Notes Copy' }],
+      ['app_update_title', { appId: 'notes', title: 'Field Notes' }],
+      ['app_trash', { appId: 'notes-copy' }],
+    ])
   })
 
   it('builds a durable singleton Activity and a custom-protocol local URL', () => {

@@ -1,9 +1,14 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  createLocalApp,
   createAppActivity,
+  duplicateLocalApp,
   loadAppsCatalog,
+  reloadAppsCatalog,
   resolveAppLaunch,
+  trashLocalApp,
+  updateLocalAppTitle,
 } from '../services/appsCatalog.js'
 
 export const useAppsCatalogStore = defineStore('appsCatalog', () => {
@@ -28,13 +33,7 @@ export const useAppsCatalogStore = defineStore('appsCatalog', () => {
     error.value = ''
     try {
       const catalog = await loadAppsCatalog()
-      directory.value = catalog.directory
-      apps.value = catalog.apps
-      diagnostics.value = catalog.diagnostics
-      loaded.value = true
-      if (!apps.value.some((app) => app.id === selectedId.value)) {
-        selectedId.value = apps.value[0]?.id || ''
-      }
+      applyCatalog(catalog)
     } catch (cause) {
       error.value = message(cause)
       throw cause
@@ -57,6 +56,57 @@ export const useAppsCatalogStore = defineStore('appsCatalog', () => {
     if (apps.value.some((app) => app.id === id)) selectedId.value = id
   }
 
+  async function reload() {
+    return mutate(() => reloadAppsCatalog())
+  }
+
+  async function create(input) {
+    const catalog = await mutate(() => createLocalApp(input))
+    select(input.id)
+    return catalog
+  }
+
+  async function duplicate(appId, input) {
+    const catalog = await mutate(() => duplicateLocalApp(appId, input))
+    select(input.id)
+    return catalog
+  }
+
+  async function updateTitle(appId, title) {
+    const catalog = await mutate(() => updateLocalAppTitle(appId, title))
+    select(appId)
+    return catalog
+  }
+
+  async function trash(appId) {
+    return mutate(() => trashLocalApp(appId))
+  }
+
+  async function mutate(operation) {
+    loading.value = true
+    error.value = ''
+    try {
+      const catalog = await operation()
+      applyCatalog(catalog)
+      return catalog
+    } catch (cause) {
+      error.value = message(cause)
+      throw cause
+    } finally {
+      loading.value = false
+    }
+  }
+
+  function applyCatalog(catalog) {
+    directory.value = catalog.directory
+    apps.value = catalog.apps
+    diagnostics.value = catalog.diagnostics
+    loaded.value = true
+    if (!apps.value.some((app) => app.id === selectedId.value)) {
+      selectedId.value = apps.value[0]?.id || ''
+    }
+  }
+
   return {
     directory,
     apps,
@@ -69,6 +119,11 @@ export const useAppsCatalogStore = defineStore('appsCatalog', () => {
     localApps,
     selectedApp,
     load,
+    reload,
+    create,
+    duplicate,
+    updateTitle,
+    trash,
     prepareActivity,
     select,
   }

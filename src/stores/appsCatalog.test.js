@@ -1,15 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  createLocalApp,
+  duplicateLocalApp,
   loadAppsCatalog,
+  reloadAppsCatalog,
   resolveAppLaunch,
+  trashLocalApp,
+  updateLocalAppTitle,
 } from '../services/appsCatalog.js'
 import { useAppsCatalogStore } from './appsCatalog.js'
 
 vi.mock('../services/appsCatalog.js', async (importOriginal) => ({
   ...(await importOriginal()),
+  createLocalApp: vi.fn(),
+  duplicateLocalApp: vi.fn(),
   loadAppsCatalog: vi.fn(),
+  reloadAppsCatalog: vi.fn(),
   resolveAppLaunch: vi.fn(),
+  trashLocalApp: vi.fn(),
+  updateLocalAppTitle: vi.fn(),
 }))
 
 const apps = [
@@ -44,6 +54,19 @@ describe('appsCatalog store', () => {
       appId: 'ledger',
       url: 'file:///apps/ledger/index.html',
     })
+    for (const operation of [
+      reloadAppsCatalog,
+      createLocalApp,
+      duplicateLocalApp,
+      updateLocalAppTitle,
+      trashLocalApp,
+    ]) {
+      vi.mocked(operation).mockReset().mockResolvedValue({
+        directory: '/home/me/.mim/apps',
+        apps,
+        diagnostics: [],
+      })
+    }
   })
 
   it('loads once, groups built-ins, and preserves user selection on refresh', async () => {
@@ -80,5 +103,25 @@ describe('appsCatalog store', () => {
     await expect(store.load()).rejects.toThrow('catalog unreadable')
     expect(store.loaded).toBe(false)
     expect(store.error).toBe('catalog unreadable')
+  })
+
+  it('applies mutation catalogs immediately so the Sidebar sees local app changes live', async () => {
+    const store = useAppsCatalogStore()
+    await store.load()
+    const created = {
+      ...apps[1],
+      id: 'field-notes',
+      title: 'Field Notes',
+    }
+    vi.mocked(createLocalApp).mockResolvedValue({
+      directory: '/home/me/.mim/apps',
+      apps: [...apps, created],
+      diagnostics: [],
+    })
+
+    await store.create({ id: 'field-notes', title: 'Field Notes' })
+
+    expect(store.apps.map(app => app.id)).toContain('field-notes')
+    expect(store.selectedId).toBe('field-notes')
   })
 })

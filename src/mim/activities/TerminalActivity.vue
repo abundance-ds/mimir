@@ -250,21 +250,41 @@ async function initialize() {
     terminal.loadAddon(webLinksAddon)
     terminal.open(surface.value)
     dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
+    if (props.active) await attachActiveSurface()
+  } catch (cause) {
+    loading.value = false
+    error.value = errorMessage(cause, 'Could not attach to this Activity.')
+  }
+}
+
+let attachPromise = null
+let attachEpoch = 0
+function attachActiveSurface() {
+  if (disposed || unlistenEvents) return attachPromise || Promise.resolve()
+  if (attachPromise) return attachPromise
+  const epoch = ++attachEpoch
+  const pending = (async () => {
     installResizeObserver()
     installThemeObserver()
 
-    // Subscribe before snapshotting. Output received in the small hydration
-    // window is queued, then sequence-deduplicated against replay.
+    // Subscribe before snapshotting. Inactive surfaces have no listener or
+    // observers; native scrollback catches them up from `lastSequence` when
+    // selected again without rebuilding their xterm instance.
     const stopListening = await listenToActivityEvents(handleActivityEvent)
-    if (disposed) {
+    if (disposed || !props.active || epoch !== attachEpoch) {
       stopListening()
       return
     }
     unlistenEvents = stopListening
+    hydrated = false
+    pendingEvents = []
 
     scheduleFit()
-    const snapshot = await activitySnapshot(activityId.value)
-    if (disposed) return
+    const snapshot = await activitySnapshot(
+      activityId.value,
+      lastSequence > 0 ? lastSequence : null,
+    )
+    if (disposed || !props.active || epoch !== attachEpoch) return
     applySnapshot(snapshot)
     const snapshotEnded = ended.value
     hydrated = true
@@ -280,15 +300,27 @@ async function initialize() {
       })
     }
 
-    if (props.active) {
-      await nextTick()
-      scheduleFit()
-      terminal?.focus()
-    }
-  } catch (cause) {
-    loading.value = false
-    error.value = errorMessage(cause, 'Could not attach to this Activity.')
-  }
+    await nextTick()
+    scheduleFit()
+    if (activityPaneOwnsFocus()) terminal?.focus()
+  })().finally(() => {
+    if (attachPromise === pending) attachPromise = null
+  })
+  attachPromise = pending
+  return attachPromise
+}
+
+function detachInactiveSurface() {
+  attachEpoch += 1
+  attachPromise = null
+  hydrated = false
+  pendingEvents = []
+  unlistenEvents?.()
+  unlistenEvents = null
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  themeObserver?.disconnect()
+  themeObserver = null
 }
 
 function applySnapshot(snapshot) {
@@ -411,6 +443,11 @@ function focusTerminal() {
   terminal?.focus()
 }
 
+function activityPaneOwnsFocus() {
+  const pane = surface.value?.closest?.('[data-pane="activity"]')
+  return !pane || pane.contains(document.activeElement)
+}
+
 function installResizeObserver() {
   if (typeof ResizeObserver === 'undefined') return
   resizeObserver = new ResizeObserver(scheduleFit)
@@ -466,10 +503,12 @@ watch(
 watch(
   () => props.active,
   async (active) => {
-    if (!active || disposed) return
-    await nextTick()
-    scheduleFit()
-    terminal?.focus()
+    if (disposed) return
+    if (!active) {
+      detachInactiveSurface()
+      return
+    }
+    await attachActiveSurface()
   },
 )
 
@@ -489,14 +528,9 @@ onBeforeUnmount(() => {
   pendingEvents = []
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
   resizeFrame = 0
-  unlistenEvents?.()
-  unlistenEvents = null
+  detachInactiveSurface()
   dataDisposable?.dispose()
   dataDisposable = null
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  themeObserver?.disconnect()
-  themeObserver = null
   terminal?.dispose()
   terminal = null
   // ActivitySupervisor owns the process. Detaching this renderer surface must

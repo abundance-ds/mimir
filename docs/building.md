@@ -52,6 +52,7 @@ npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
 The frontend wrappers in `scripts/test.mjs` and `scripts/build.mjs` set the Node
@@ -67,7 +68,9 @@ npm run tauri -- build
 ```
 
 The GitHub workflow verifies frontend and Rust on Linux. Its manual packaging
-job builds an Apple Silicon DMG on macOS.
+job builds an Apple Silicon DMG on macOS. A local macOS build produces
+`src-tauri/target/release/bundle/macos/Mim.app` and a versioned image under
+`src-tauri/target/release/bundle/dmg/`.
 
 Keep the version synchronized in:
 
@@ -86,4 +89,5 @@ systems are used. See [agent-setup.md](agent-setup.md) and
 
 API keys saved in Settings use the OS keychain. In debug builds only, key
 resolution may also read process environment variables, the repository `.env`,
-and `~/.mim/keys.env`.
+and `~/.mim/keys.env`. The fallback file is atomically replaced and owner-only
+on Unix; it remains a debug convenience, not release credential storage.
