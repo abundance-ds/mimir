@@ -5,13 +5,6 @@ import { limitText } from './helpers'
 
 export function createShellTool(context) {
   const workspacePath = context.workspacePath || context.projectPath || null
-  const gateCtx = {
-    sessionId: context.sessionId,
-    policy: context.policy,
-    onApprovalRequest: context.onApprovalRequest,
-    projectPath: workspacePath,
-    approvalMode: context.approvalMode,
-  }
 
   if (!workspacePath) return {}
 
@@ -19,7 +12,7 @@ export function createShellTool(context) {
     shell: tool({
       description:
         'Execute a shell command in the project directory. Returns stdout, stderr, and exit code. ' +
-        'Runs in bash with the user\'s PATH. Requires user approval. ' +
+        'Runs in bash with the user\'s PATH and the active workspace as its default directory. ' +
         'Avoid interactive commands (vim, less, top) — they will hang.',
       inputSchema: z.object({
         command: z.string().min(1).max(2000).describe('Shell command to execute'),
@@ -64,7 +57,7 @@ export function createShellTool(context) {
         } catch (e) {
           return { error: `Command failed: ${e?.message || e}` }
         }
-      }, gateCtx),
+      }),
     }),
   }
 }

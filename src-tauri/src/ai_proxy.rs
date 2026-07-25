@@ -79,29 +79,6 @@ pub async fn ai_proxy_stream(
     let body = request.body;
 
     tauri::async_runtime::spawn(async move {
-        // Audit: log AI request start
-        {
-            let audit_state = app.state::<crate::audit::AuditDbState>();
-            let _ = crate::audit::audit_log_internal(
-                &audit_state,
-                "ai.request",
-                None,
-                None,
-                Some(format!("ai:{}", &model_id)),
-                Some(
-                    serde_json::json!({
-                        "correlationId": &correlation_id,
-                        "feature": &feature,
-                        "provider": &provider_name,
-                        "modelId": &model_id,
-                        "providerModel": &provider_model,
-                        "route": &route,
-                    })
-                    .to_string(),
-                ),
-            );
-        }
-
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
@@ -154,27 +131,6 @@ pub async fn ai_proxy_stream(
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
             let body = response.text().await.unwrap_or_default();
-            // Audit: log AI request error
-            {
-                let audit_state = app.state::<crate::audit::AuditDbState>();
-                let _ = crate::audit::audit_log_internal(
-                    &audit_state,
-                    "ai.error",
-                    None,
-                    None,
-                    Some(format!("ai:{}", &model_id)),
-                    Some(
-                        serde_json::json!({
-                            "correlationId": &correlation_id,
-                            "feature": &feature,
-                            "provider": &provider_name,
-                            "modelId": &model_id,
-                            "status": status,
-                        })
-                        .to_string(),
-                    ),
-                );
-            }
             let _ = app.emit(
                 &error_event,
                 serde_json::json!({
@@ -301,28 +257,6 @@ pub async fn ai_proxy_stream(
                     "providerModel": &provider_model,
                     "route": &route,
                 }),
-            );
-        }
-
-        // Audit: log AI request completion
-        {
-            let audit_state = app.state::<crate::audit::AuditDbState>();
-            let _ = crate::audit::audit_log_internal(
-                &audit_state,
-                if aborted { "ai.abort" } else { "ai.complete" },
-                None,
-                None,
-                Some(format!("ai:{}", &model_id)),
-                Some(
-                    serde_json::json!({
-                        "correlationId": &correlation_id,
-                        "feature": &feature,
-                        "provider": &provider_name,
-                        "modelId": &model_id,
-                        "aborted": aborted,
-                    })
-                    .to_string(),
-                ),
             );
         }
 

@@ -25,7 +25,6 @@ export function useKeyboardShortcuts({
   onNewTab,
   onCloseTab,
   onRewriteSelection,
-  cycleViewMode,
   editorHasFocus,
 }) {
   const ui = useEditorUIStore()
@@ -53,10 +52,6 @@ export function useKeyboardShortcuts({
       e.preventDefault()
       ui.settingsOpen = !ui.settingsOpen
       return
-    }
-    if (mod && e.key === '\\') {
-      e.preventDefault()
-      ui.toggleSidebar()
     }
     if (mod && e.key === '/') {
       e.preventDefault()
@@ -89,14 +84,6 @@ export function useKeyboardShortcuts({
     if (mod && e.shiftKey && e.key === '>') {
       e.preventDefault()
       onFormat('blockquote')
-    }
-    if (mod && e.shiftKey && key === 'c') {
-      e.preventDefault()
-      onFormat('cite')
-    }
-    if (mod && !e.shiftKey && key === 'e') {
-      e.preventDefault()
-      cycleViewMode()
     }
     if (mod && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       e.preventDefault()

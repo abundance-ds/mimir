@@ -72,6 +72,7 @@ export function parseCommentTags(text) {
       id: attrs.id,
       author: attrs.author,
       text: attrs.text || '',
+      status: attrs.status || 'active',
       created: attrs.created,
       replies,
       tagFrom,
@@ -103,8 +104,9 @@ export function stripCommentTags(text) {
 }
 
 export function buildCommentTag(comment) {
-  const { id, author, text, created, anchorText, replies } = comment
+  const { id, author, text, status, created, anchorText, replies } = comment
   let tag = `<comment id="${escapeAttr(id)}" author="${escapeAttr(author)}" text="${escapeAttr(text)}"`
+  if (status) tag += ` status="${escapeAttr(status)}"`
   if (created) tag += ` created="${escapeAttr(created)}"`
   tag += `>${anchorText || ''}`
   if (replies?.length) {

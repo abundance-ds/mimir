@@ -1,5 +1,5 @@
 <template>
-  <div class="app-footer h-[26px] shrink-0 grid grid-cols-[1fr_auto_1fr] items-center px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
+  <div class="app-footer h-[26px] shrink-0 flex items-center justify-between px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
     <!-- Left: stats -->
     <div class="footer-stats flex items-center justify-self-start relative min-w-0">
       <div class="relative flex items-center hover:bg-chrome-mid rounded" @click.stop="statsOpen = !statsOpen">
@@ -44,8 +44,7 @@
       </div>
     </div>
 
-    <!-- Center: zoom -->
-    <div class="footer-zoom zoom-ctrl group flex items-center justify-self-center relative" @click.stop>
+    <div class="footer-zoom zoom-ctrl group flex items-center relative" @click.stop>
       <button class="zoom-step" @click="$emit('zoom-out')">−</button>
       <span class="min-w-9 text-center font-mono text-[9px] leading-none text-ink-3 hover:text-ink-2 hover:bg-chrome-mid rounded" @click="zoomOpen = !zoomOpen">{{ zoomLevel }}%</span>
       <button class="zoom-step" @click="$emit('zoom-in')">+</button>
@@ -66,26 +65,19 @@
       </div>
     </div>
 
-    <!-- Right: view mode -->
-    <div class="footer-view flex items-center gap-2 justify-self-end">
-      <SegmentedControl :options="['source', 'split', 'preview']" :modelValue="viewMode" @update:modelValue="$emit('set-view', $event)" />
-      <span class="footer-shortcut text-ink-3">⌘E</span>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import SegmentedControl from '../../../shared/ui/SegmentedControl.vue'
 
 const props = defineProps({
   zoomLevel: { type: Number, default: 100 },
-  viewMode: { type: String, default: 'source' },
   selectionText: { type: String, default: '' },
   stats: { type: Object, default: () => ({ words: 0, characters: 0, lines: 0, readingMinutes: 1 }) },
   saveStatus: { type: Object, default: () => ({ label: '', tone: 'quiet' }) },
 })
-defineEmits(['zoom-in', 'zoom-out', 'set-zoom', 'set-view', 'save-status-click'])
+defineEmits(['zoom-in', 'zoom-out', 'set-zoom', 'save-status-click'])
 
 const statsOpen = ref(false)
 const zoomOpen = ref(false)
@@ -218,9 +210,6 @@ button.footer-save-status {
     display: none;
   }
 
-  .footer-shortcut {
-    display: none;
-  }
 }
 
 @media (max-width: 430px) {
@@ -235,8 +224,5 @@ button.footer-save-status {
     display: none;
   }
 
-  .footer-view {
-    justify-self: center;
-  }
 }
 </style>

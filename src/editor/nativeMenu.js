@@ -120,16 +120,6 @@ function buildMenuItems(recentFiles, actions) {
       ],
     },
     {
-      text: 'View',
-      items: [
-        item('editor:view-source', 'Source', null, () => actions.setView?.('source')),
-        item('editor:view-split', 'Split', null, () => actions.setView?.('split')),
-        item('editor:view-preview', 'Preview', null, () => actions.setView?.('preview')),
-        separator(),
-        item('editor:toggle-sidebar', 'Toggle Sidebar', 'CmdOrCtrl+\\', actions.toggleSidebar),
-      ],
-    },
-    {
       text: 'Window',
       items: [
         { item: 'Minimize' },

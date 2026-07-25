@@ -70,7 +70,7 @@ import { useSettingsStore } from '../../../stores/settings.js'
 import { getModelRegistry, getAiKeyStatus } from '../../../services/ai/client.js'
 import { modelMenuItems } from '../../../services/ai/modelControls.js'
 import { createInlineAITransport, buildInlineSystemPrompt } from '../../../services/ai/inlineTransport.js'
-import ModelPicker from '../../../panel/components/ModelPicker.vue'
+import ModelPicker from '../../../shared/ui/ModelPicker.vue'
 
 const TOOL_LABELS = {
   read: 'Reading',
@@ -141,7 +141,6 @@ function getConfig() {
     toolContext: {
       sessionId: `inline-${Date.now()}`,
       projectPath: props.projectPath || null,
-      approvalMode: 'bypass',
       getDocument: props.getDocument || null,
       _readHistory: new Set(),
     },

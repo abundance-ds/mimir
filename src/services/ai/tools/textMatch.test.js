@@ -141,6 +141,10 @@ describe('resolveSafePath', () => {
     expect(resolveSafePath('/etc/passwd', workspace)).toBeNull()
   })
 
+  it('blocks sibling paths that merely share the workspace prefix', () => {
+    expect(resolveSafePath(`${workspace}-evil/file.txt`, workspace)).toBeNull()
+  })
+
   it('returns null when workspacePath is empty/null', () => {
     expect(resolveSafePath('file.txt', '')).toBeNull()
     expect(resolveSafePath('file.txt', null)).toBeNull()

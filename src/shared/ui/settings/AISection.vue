@@ -110,24 +110,6 @@
       </button>
     </div>
 
-    <!-- ─── Trust ─── -->
-    <div class="section-title mt">Trust</div>
-
-    <div class="setting-row last">
-      <div class="setting-label">
-        Approval mode
-        <span class="setting-desc">{{ approvalDesc }}</span>
-      </div>
-      <div class="segmented-control">
-        <button
-          v-for="opt in approvalOptions"
-          :key="opt.value"
-          class="segmented-btn"
-          :class="{ 'segmented-active': settings.aiApprovalMode === opt.value, 'segmented-danger': opt.value === 'bypass' }"
-          @click="settings.set('aiApprovalMode', opt.value)"
-        >{{ opt.label }}</button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -224,22 +206,6 @@ function selectGhostModel(id) {
   settings.set('aiGhostModel', id)
   ghostModelOpen.value = false
 }
-
-// ─── Trust ───
-
-const approvalOptions = [
-  { label: 'Strict', value: 'strict' },
-  { label: 'Normal', value: 'normal' },
-  { label: 'Bypass Approval', value: 'bypass' },
-]
-
-const approvalDescriptions = {
-  strict: 'Ask before every action',
-  normal: 'Ask for sensitive actions only',
-  bypass: 'No approval prompts — you are responsible',
-}
-
-const approvalDesc = computed(() => approvalDescriptions[settings.aiApprovalMode] || '')
 
 // ─── Lifecycle ───
 

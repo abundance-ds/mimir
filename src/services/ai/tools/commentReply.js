@@ -4,13 +4,6 @@ import { withGate } from './gate'
 import { parseCommentTags, escapeAttr } from '../../comments/parser'
 
 export function createCommentReplyTool(context = {}) {
-  const gateCtx = {
-    sessionId: context.sessionId,
-    policy: context.policy,
-    onApprovalRequest: context.onApprovalRequest,
-    approvalMode: context.approvalMode,
-  }
-
   return {
     comment_reply: tool({
       description: 'Reply to an existing comment thread.',
@@ -56,7 +49,7 @@ export function createCommentReplyTool(context = {}) {
         } catch (err) {
           return { error: err?.message || err }
         }
-      }, gateCtx),
+      }),
     }),
   }
 }

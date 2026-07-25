@@ -267,11 +267,6 @@ export function insertImage(view) {
   return true
 }
 
-export function insertCitation(view) {
-  // Place cursor between [@ and ]
-  return insertAtCursor(view, '[@]', 2)
-}
-
 export function insertHorizontalRule(view) {
   return insertAtCursor(view, '\n---\n')
 }

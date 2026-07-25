@@ -10,6 +10,7 @@ describe('parseCommentTags', () => {
     expect(c.id).toBe('c1')
     expect(c.author).toBe('user')
     expect(c.text).toBe('Fix this')
+    expect(c.status).toBe('active')
     expect(c.created).toBe('2026-01-01T00:00:00Z')
     expect(c.anchorText).toBe('World')
     expect(c.replies).toEqual([])
@@ -97,6 +98,7 @@ describe('parseCommentTags', () => {
     const text = '<comment id="c1" author="user" text="hi">X</comment>'
     const result = parseCommentTags(text)
     expect(result.comments[0].created).toBeUndefined()
+    expect(result.comments[0].status).toBe('active')
   })
 })
 
@@ -151,6 +153,14 @@ describe('buildCommentTag', () => {
       id: 'c1', author: 'user', text: 'Fix', anchorText: 'X',
     })
     expect(tag).not.toContain('created=')
+  })
+
+  it('round-trips the canonical comment status when provided', () => {
+    const tag = buildCommentTag({
+      id: 'c1', author: 'user', text: 'Done', status: 'resolved', anchorText: 'X',
+    })
+    expect(tag).toContain('status="resolved"')
+    expect(parseCommentTags(tag).comments[0].status).toBe('resolved')
   })
 })
 

@@ -108,7 +108,7 @@
 - `src/services/ai/rewrite.js` — only imported by dead RewriteOverlay
 
 **Dead subsystems:**
-- `src/apps/*` — entire custom app platform (bridge, runner, runtime, SDK)
+- `src/apps/runner.js`, `src/apps/runtime.js`, `src/apps/bridge.js` — discarded chat-era app runtime. The injected SDK and theme remain live.
 - `web/*` — Nuxt portal, admin dashboard, licensing
 - `sidecar/docx-worker/` — .NET DOCX sidecar (spike)
 
@@ -221,12 +221,12 @@ src/
       actions.js                   # [DEAD] cross-store orchestration
       persistence.js               # GRAY — called by MimPanel, loads too much
       helpers.js                   # [DEAD] chat instance Map
-  apps/                            # [DEAD] — entire custom app platform
+  apps/                            # Mixed — injected SDK/theme live; old runner/runtime/bridge dead
     bridge.js                      # [DEAD] iframe postMessage bridge
     runner.js                      # [DEAD] app lifecycle orchestrator
     runtime.js                     # [DEAD] runtime context
-    sdk/mim-sdk.js           # [DEAD] auto-injected SDK
-    sdk/theme-base.css             # [DEAD] app iframe theme
+    sdk/mim-sdk.js                 # LIVE — injected data/fs/http/tool/workspace bridge
+    sdk/theme-base.css             # LIVE — injected app iframe theme
   shared/
     hfu.js                         # "Hidden From User" — wraps/strips <hfu> tags for context injection
     lineDelta.js                   # LCS-based line diff stats + path disambiguation

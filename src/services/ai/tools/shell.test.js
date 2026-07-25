@@ -6,10 +6,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args) => mockInvoke(...args),
 }))
 
-vi.mock('../../audit.js', () => ({
-  logAudit: vi.fn(),
-}))
-
 import { createShellTool } from './shell'
 
 const context = {

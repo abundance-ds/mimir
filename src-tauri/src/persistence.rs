@@ -76,6 +76,13 @@ where
             source,
         })?;
     contents.push(b'\n');
+    write_bytes_atomic(path, &contents)
+}
+
+/// Atomically replace `path` with already-serialized bytes.
+pub fn write_bytes_atomic(path: impl AsRef<Path>, contents: &[u8]) -> Result<(), PersistenceError> {
+    let path = path.as_ref();
+    validate_file_name(path)?;
 
     let parent = parent_directory(path);
     fs::create_dir_all(parent)
@@ -84,7 +91,7 @@ where
     let mut pending = create_pending_file(path)?;
     pending
         .file_mut()
-        .write_all(&contents)
+        .write_all(contents)
         .map_err(|source| io_error("write temporary persistence file", pending.path(), source))?;
     pending
         .file_mut()

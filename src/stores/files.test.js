@@ -7,18 +7,12 @@ vi.mock('../services/fileSystem.js', () => ({
   saveFile: vi.fn(),
 }))
 
-vi.mock('../services/board/loader.js', () => ({
-  parseBoardEntry: vi.fn(),
-  serializeEntry: vi.fn(),
-}))
-
 import { useFileStore } from './files.js'
 import {
   openFileDialog,
   saveFileDialog,
   saveFile,
 } from '../services/fileSystem.js'
-import { parseBoardEntry, serializeEntry } from '../services/board/loader.js'
 
 describe('files store', () => {
   beforeEach(() => {
@@ -462,128 +456,4 @@ describe('files store', () => {
     })
   })
 
-  // ── board file handling (frontmatter/meta) ──
-
-  describe('board file handling', () => {
-
-    describe('openFile with board files', () => {
-      it('parses issue frontmatter: sets meta and strips body', async () => {
-        const raw = '---\ntitle: Test\ntype: issue\nstatus: backlog\npriority: normal\n---\n\n## Content'
-        parseBoardEntry.mockReturnValue({
-          meta: { title: 'Test', type: 'issue', status: 'backlog', priority: 'normal' },
-          body: '\n## Content',
-        })
-
-        const store = useFileStore()
-        await store.openFile('/project/issues/issue-123.md', raw)
-
-        expect(parseBoardEntry).toHaveBeenCalledWith(raw)
-        const file = store.openFiles[0]
-        expect(file.meta).toEqual({ title: 'Test', type: 'issue', status: 'backlog', priority: 'normal' })
-        expect(file.content).toBe('\n## Content')
-      })
-
-      it('parses knowledge frontmatter: sets meta and strips body', async () => {
-        const raw = '---\ntitle: Notes\ntype: knowledge\ntags: []\n---\n\nSome knowledge content'
-        parseBoardEntry.mockReturnValue({
-          meta: { title: 'Notes', type: 'knowledge', tags: [] },
-          body: '\nSome knowledge content',
-        })
-
-        const store = useFileStore()
-        await store.openFile('/project/knowledge/knowledge-456.md', raw)
-
-        const file = store.openFiles[0]
-        expect(file.meta).toEqual({ title: 'Notes', type: 'knowledge', tags: [] })
-        expect(file.content).toBe('\nSome knowledge content')
-      })
-
-      it('does NOT parse frontmatter for regular (non-board) files', async () => {
-        const raw = '---\ntitle: Readme\n---\n\nContent'
-
-        const store = useFileStore()
-        await store.openFile('/project/README.md', raw)
-
-        expect(parseBoardEntry).not.toHaveBeenCalled()
-        const file = store.openFiles[0]
-        expect(file.meta).toBeNull()
-        expect(file.content).toBe(raw)
-      })
-
-      it('sets meta when board file has no frontmatter (fallback title)', async () => {
-        const raw = '# My Note\n\nSome plain markdown'
-        parseBoardEntry.mockReturnValue({
-          meta: { title: 'My Note', type: 'knowledge', tags: [] },
-          body: raw,
-        })
-
-        const store = useFileStore()
-        await store.openFile('/project/knowledge/note-789.md', raw)
-
-        const file = store.openFiles[0]
-        expect(file.meta).toEqual({ title: 'My Note', type: 'knowledge', tags: [] })
-        expect(file.content).toBe(raw)
-      })
-    })
-
-    describe('updateMeta', () => {
-      it('merges updates, sets updated timestamp, and marks dirty', async () => {
-        parseBoardEntry.mockReturnValue({
-          meta: { title: 'Task', type: 'issue', status: 'backlog', priority: 'normal' },
-          body: '\nBody',
-        })
-
-        const store = useFileStore()
-        await store.openFile('/project/issues/issue-1.md', '---\ntitle: Task\ntype: issue\nstatus: backlog\npriority: normal\n---\n\nBody')
-        const file = store.openFiles[0]
-        expect(file.dirty).toBe(false)
-
-        store.updateMeta(file.id, { status: 'in-progress' })
-
-        expect(file.meta.status).toBe('in-progress')
-        expect(file.meta.title).toBe('Task')
-        expect(file.meta.updated).toBeDefined()
-        expect(file.dirty).toBe(true)
-      })
-
-      it('does not crash on non-board file (meta is null)', async () => {
-        const store = useFileStore()
-        await store.openFile('/project/README.md', '# Readme')
-        const file = store.openFiles[0]
-        expect(file.meta).toBeNull()
-
-        // should be a no-op, not throw
-        store.updateMeta(file.id, { status: 'done' })
-        expect(file.meta).toBeNull()
-        expect(file.dirty).toBe(false)
-      })
-    })
-
-    describe('writeFile with meta (save)', () => {
-      it('re-serializes frontmatter before saving', async () => {
-        const raw = '---\ntitle: Task\ntype: issue\nstatus: backlog\npriority: normal\n---\n\nBody text'
-        parseBoardEntry.mockReturnValue({
-          meta: { title: 'Task', type: 'issue', status: 'backlog', priority: 'normal' },
-          body: '\nBody text',
-        })
-        serializeEntry.mockReturnValue('---\ntitle: "Task"\ntype: "issue"\nstatus: "backlog"\npriority: "normal"\n---\n\n\nBody text')
-        saveFile.mockResolvedValue(undefined)
-
-        const store = useFileStore()
-        await store.openFile('/project/issues/issue-1.md', raw)
-        store.updateContent('Updated body')
-
-        await store.save()
-
-        expect(serializeEntry).toHaveBeenCalledWith(
-          { title: 'Task', type: 'issue', status: 'backlog', priority: 'normal' },
-          'Updated body',
-        )
-        expect(saveFile).toHaveBeenCalledWith(
-          '/project/issues/issue-1.md',
-          serializeEntry.mock.results[0].value,
-        )
-      })
-    })
-  })
 })

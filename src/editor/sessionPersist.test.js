@@ -23,10 +23,6 @@ describe('sessionPersist', () => {
       ]),
       recentFiles: ref(['/a.md', '/old.md']),
       activeFileIndex: ref(0),
-      sidebarVisible: ref(true),
-      activePanel: ref('outline'),
-      panelOpen: ref(true),
-      viewMode: ref('source'),
       zoomLevel: ref(100),
       ...overrides,
     }
@@ -51,10 +47,6 @@ describe('sessionPersist', () => {
     await nextTick()
 
     state.activeFileIndex.value = 1
-    await nextTick()
-    vi.advanceTimersByTime(500)
-
-    state.viewMode.value = 'split'
     await nextTick()
     vi.advanceTimersByTime(500)
 
@@ -122,8 +114,6 @@ describe('sessionPersist', () => {
       ],
       recentFiles: ['/a.md', '/old.md'],
       activeFileIndex: 0,
-      sidebar: { visible: true, panel: 'outline', panelOpen: true },
-      viewMode: 'source',
       zoomLevel: 150,
     })
   })

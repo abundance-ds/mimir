@@ -4,13 +4,6 @@ import { withGate } from './gate'
 import { parseCommentTags, cleanToRawPos, buildCommentTag } from '../../comments/parser'
 
 export function createCommentAddTool(context = {}) {
-  const gateCtx = {
-    sessionId: context.sessionId,
-    policy: context.policy,
-    onApprovalRequest: context.onApprovalRequest,
-    approvalMode: context.approvalMode,
-  }
-
   return {
     comment_add: tool({
       description: 'Add a review comment anchored to a text passage. Use read("@editor", { show_comments: true }) to see existing comments.',
@@ -60,7 +53,7 @@ export function createCommentAddTool(context = {}) {
         } catch (err) {
           return { error: err?.message || err }
         }
-      }, gateCtx),
+      }),
     }),
   }
 }

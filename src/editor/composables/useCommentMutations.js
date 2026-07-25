@@ -62,6 +62,33 @@ export function useCommentMutations(editorSurfaceRef) {
     return ok()
   }
 
+  function setStatus(commentId, status) {
+    const view = getView()
+    if (!view) return fail('No active editor view.')
+    if (!['active', 'resolved'].includes(status)) return fail('Invalid comment status.')
+    const doc = view.state.doc.toString()
+    const re = new RegExp(`<comment\\s[^>]*id="${escapeRegExp(commentId)}"[^>]*>`)
+    const match = re.exec(doc)
+    if (!match) return fail('Comment not found.')
+
+    const currentTag = match[0]
+    const nextTag = /\sstatus="[^"]*"/.test(currentTag)
+      ? currentTag.replace(/\sstatus="[^"]*"/, ` status="${status}"`)
+      : currentTag.replace(/>$/, ` status="${status}">`)
+    view.dispatch({
+      changes: {
+        from: match.index,
+        to: match.index + currentTag.length,
+        insert: nextTag,
+      },
+      annotations: commentMutation.of(true),
+    })
+    if (status === 'resolved' && commentManager.activeCommentId === commentId) {
+      commentManager.setActiveComment(null)
+    }
+    return ok({ status })
+  }
+
   function updateReply(commentId, replyId, newText) {
     const view = getView()
     if (!view) return fail('No active editor view.')
@@ -98,5 +125,14 @@ export function useCommentMutations(editorSurfaceRef) {
     return ok({ changed: false })
   }
 
-  return { addReply, delete: del, updateText, updateReply, deleteReply, clearAll }
+  return {
+    addReply,
+    delete: del,
+    resolve: id => setStatus(id, 'resolved'),
+    reopen: id => setStatus(id, 'active'),
+    updateText,
+    updateReply,
+    deleteReply,
+    clearAll,
+  }
 }

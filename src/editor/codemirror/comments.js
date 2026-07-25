@@ -52,9 +52,12 @@ const commentDecorations = EditorView.decorations.compute([commentTagField], (st
     const safeFrom = Math.min(c.contentFrom, docLen)
     const safeTo = Math.min(c.contentTo, docLen)
     if (safeFrom < safeTo) {
+      const resolvedClass = c.status === 'resolved' ? ' cm-comment-range-resolved' : ''
       decos.push(
         Decoration.mark({
-          class: c.id === activeId ? 'cm-comment-range cm-comment-range-active' : 'cm-comment-range',
+          class: c.id === activeId
+            ? `cm-comment-range cm-comment-range-active${resolvedClass}`
+            : `cm-comment-range${resolvedClass}`,
         }).range(safeFrom, safeTo)
       )
     }
@@ -76,6 +79,7 @@ class CommentBlockWidget extends WidgetType {
   eq(other) {
     return other.comment.id === this.comment.id &&
       other.comment.text === this.comment.text &&
+      other.comment.status === this.comment.status &&
       other.activeId === this.activeId &&
       other.onCommentClick === this.onCommentClick &&
       other.onCommentAction === this.onCommentAction &&
@@ -90,9 +94,12 @@ class CommentBlockWidget extends WidgetType {
     const c = this.comment
     const wrap = document.createElement('div')
     const hasText = Boolean(c.text?.trim())
-    wrap.className = `cm-comment-block${c.id === this.activeId ? ' is-active' : ''}${hasText ? '' : ' is-empty'}`
+    const resolved = c.status === 'resolved'
+    const draft = ensureDraft(this.drafts, c.id, !hasText, resolved)
+    wrap.className = `cm-comment-block${c.id === this.activeId ? ' is-active' : ''}${hasText ? '' : ' is-empty'}${resolved ? ' is-resolved' : ''}${draft.collapsed ? ' is-collapsed' : ''}`
     wrap.dataset.commentId = c.id
     wrap.contentEditable = 'false'
+    wrap.tabIndex = 0
 
     wrap.addEventListener('mousedown', (event) => event.stopPropagation())
     wrap.addEventListener('keydown', (event) => event.stopPropagation())
@@ -106,15 +113,25 @@ class CommentBlockWidget extends WidgetType {
 
     const meta = document.createElement('span')
     meta.className = 'cm-comment-block-meta'
-    meta.textContent = authorLabel(c.author)
+    meta.textContent = resolved ? `${authorLabel(c.author)} · Resolved` : authorLabel(c.author)
     header.append(meta)
+
+    const summary = document.createElement('span')
+    summary.className = 'cm-comment-block-summary'
+    summary.textContent = commentSummary(c)
+    header.append(summary)
 
     const actions = document.createElement('div')
     actions.className = 'cm-comment-block-actions'
+    const collapseButton = makeButton(draft.collapsed ? '+' : '−', 'collapse', {
+      title: draft.collapsed ? 'Expand discussion' : 'Minimize discussion',
+    })
     const terminalButton = makeButton('Tag', 'terminal-prompt', { title: 'Paste a comment prompt into the terminal' })
-    const resolveButton = makeButton('Resolve', 'delete', { title: 'Remove this comment wrapper' })
+    const resolveButton = makeButton(resolved ? 'Reopen' : 'Resolve', resolved ? 'reopen' : 'resolve', {
+      title: resolved ? 'Reopen this discussion' : 'Resolve this discussion',
+    })
     const more = makeMoreMenu()
-    actions.append(terminalButton, resolveButton, more)
+    actions.append(collapseButton, terminalButton, resolveButton, more)
     header.append(actions)
     wrap.append(header)
 
@@ -142,7 +159,6 @@ class CommentBlockWidget extends WidgetType {
       wrap.append(replies)
     }
 
-    const draft = ensureDraft(this.drafts, c.id, !hasText)
     const replyTrigger = document.createElement('button')
     replyTrigger.type = 'button'
     replyTrigger.className = 'cm-comment-reply-trigger'
@@ -209,7 +225,7 @@ class CommentBlockWidget extends WidgetType {
       view,
       widget: this,
       wrap,
-      action: 'delete',
+      action: resolved ? 'reopen' : 'resolve',
       error,
     })
     wireWidgetButton(more.copyButton, {
@@ -217,6 +233,14 @@ class CommentBlockWidget extends WidgetType {
       widget: this,
       wrap,
       action: 'copy-prompt',
+      error,
+      onOk: () => { more.open = false },
+    })
+    wireWidgetButton(more.deleteButton, {
+      view,
+      widget: this,
+      wrap,
+      action: 'delete',
       error,
       onOk: () => { more.open = false },
     })
@@ -275,6 +299,25 @@ class CommentBlockWidget extends WidgetType {
     wrap.append(error)
     syncDraft()
 
+    collapseButton.addEventListener('mousedown', stopWidgetMouse)
+    collapseButton.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      toggleCollapsed()
+    })
+    const toggleCollapsed = () => {
+      draft.collapsed = !draft.collapsed
+      wrap.classList.toggle('is-collapsed', draft.collapsed)
+      collapseButton.textContent = draft.collapsed ? '+' : '−'
+      collapseButton.title = draft.collapsed ? 'Expand discussion' : 'Minimize discussion'
+      if (!draft.collapsed) this.activate(view)
+    }
+    wrap.addEventListener('keydown', (event) => {
+      if (event.target !== wrap || !['Enter', ' '].includes(event.key)) return
+      event.preventDefault()
+      toggleCollapsed()
+    })
+
     if (!hasText) {
       requestAnimationFrame(() => input.focus())
     }
@@ -293,8 +336,14 @@ function authorLabel(author) {
   return 'You'
 }
 
-function ensureDraft(drafts, id, open = false) {
-  if (!drafts.has(id)) drafts.set(id, { text: '', open })
+function commentSummary(comment) {
+  const body = comment.text?.trim() || 'New comment'
+  const replies = comment.replies?.length || 0
+  return replies ? `${body} · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : body
+}
+
+function ensureDraft(drafts, id, open = false, collapsed = false) {
+  if (!drafts.has(id)) drafts.set(id, { text: '', open, collapsed })
   return drafts.get(id)
 }
 
@@ -319,13 +368,16 @@ function makeMoreMenu() {
   const menu = document.createElement('div')
   menu.className = 'cm-comment-menu'
   const copyButton = makeButton('Copy prompt', 'copy-prompt')
+  const deleteButton = makeButton('Delete discussion', 'delete')
   const stripButton = makeButton('Remove all comments', 'strip-all')
   menu.append(
     copyButton,
+    deleteButton,
     stripButton,
   )
   details.append(summary, menu)
   details.copyButton = copyButton
+  details.deleteButton = deleteButton
   details.stripButton = stripButton
   details.addEventListener('mousedown', (event) => event.stopPropagation())
   details.addEventListener('click', (event) => event.stopPropagation())

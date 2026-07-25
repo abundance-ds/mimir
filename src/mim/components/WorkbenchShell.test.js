@@ -54,6 +54,23 @@ describe('WorkbenchShell', () => {
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
   })
 
+  it('keeps the Sidebar component visible in its rail and restores hidden content panes outside their stages', async () => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+    const sidebar = wrapper.get('[data-testid="sidebar-slot"]').element
+
+    store.setPaneState('sidebar', 'rail')
+    store.setPaneState('activity', 'rail')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-testid="sidebar-slot"]').element).toBe(sidebar)
+    expect(wrapper.get('[data-pane-stage="sidebar"]').attributes('aria-hidden')).toBeUndefined()
+    expect(wrapper.get('[data-pane-restore="activity"]').exists()).toBe(true)
+
+    await wrapper.get('[data-pane-restore="activity"]').trigger('click')
+    expect(store.paneLayout.activity.state).toBe('expanded')
+  })
+
   it('keeps an Activity host mounted while its pane is railed', async () => {
     const wrapper = render()
     const store = useWorkbenchStore()

@@ -23,6 +23,19 @@ async function main() {
     return
   }
 
+  if (command === 'tools') {
+    const tools = await request('tools/list', {})
+    console.log(JSON.stringify(tools?.tools || [], null, 2))
+    return
+  }
+  if (command === 'call') {
+    const [name, ...inputParts] = args
+    if (!name) throw new Error('Usage: mimx call <tool> [json | --stdin]')
+    const input = await readJson(inputParts)
+    printResult(await callTool(name, input))
+    return
+  }
+
   const spec = commands[command]
   if (!spec) {
     console.error(`Unknown command: ${command}`)
@@ -36,21 +49,29 @@ async function main() {
     console.log(result?.prompt || '')
     return
   }
-  if (result !== undefined && result !== null && result !== '') {
-    if (typeof result === 'string') console.log(result)
-    else console.log(JSON.stringify(result, null, 2))
-  }
+  printResult(result)
 }
 
 async function callTool(name, args) {
+  const body = await request('tools/call', { name, arguments: args })
+  const text = body?.content?.[0]?.text ?? ''
+  if (body?.isError) throw new Error(text)
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+async function request(method, params) {
   const response = await fetch(DEFAULT_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: Date.now(),
-      method: 'tools/call',
-      params: { name, arguments: args },
+      method,
+      params,
     }),
   })
 
@@ -61,13 +82,7 @@ async function callTool(name, args) {
   const body = await response.json()
   if (body.error) throw new Error(body.error.message || JSON.stringify(body.error))
 
-  const text = body.result?.content?.[0]?.text ?? ''
-  if (body.result?.isError) throw new Error(text)
-  try {
-    return JSON.parse(text)
-  } catch {
-    return text
-  }
+  return body.result
 }
 
 async function readText(parts) {
@@ -85,6 +100,26 @@ async function readText(parts) {
     return await fs.readFile(parts[1], 'utf8')
   }
   return parts.join(' ')
+}
+
+async function readJson(parts) {
+  const text = await readText(parts)
+  if (!text.trim()) return {}
+  try {
+    const value = JSON.parse(text)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('input must be a JSON object')
+    }
+    return value
+  } catch (error) {
+    throw new Error(`Invalid tool input JSON: ${error.message}`)
+  }
+}
+
+function printResult(result) {
+  if (result === undefined || result === null || result === '') return
+  if (typeof result === 'string') console.log(result)
+  else console.log(JSON.stringify(result, null, 2))
 }
 
 function parseRevealTarget(target = '') {
@@ -112,6 +147,9 @@ Usage:
   mimx set-content --stdin
   mimx reveal <path:line|line|path>
   mimx save
+  mimx tools
+  mimx call <tool> '{"key":"value"}'
+  mimx call <tool> --stdin
 
 Environment:
   MIMX_MCP_URL  defaults to ${DEFAULT_URL}`)

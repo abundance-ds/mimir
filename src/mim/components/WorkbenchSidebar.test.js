@@ -5,7 +5,13 @@ import WorkbenchSidebar from './WorkbenchSidebar.vue'
 const launchers = [
   { id: 'files', title: 'Files', icon: 'files', shortcut: '⌘P' },
   { id: 'codex', title: 'Codex', icon: 'agent' },
-  { id: 'terminal', title: 'Terminal', icon: 'terminal' },
+  {
+    id: 'terminal',
+    title: 'Terminal',
+    icon: 'terminal',
+    available: false,
+    unavailableReason: 'shell unavailable',
+  },
 ]
 
 const activities = [
@@ -74,5 +80,15 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.findAll('[data-sidebar-row="activity:agent:one"]')).toHaveLength(1)
     expect(wrapper.get('[data-activity-status="working"]').classes()).toContain('bg-accent')
     expect(wrapper.get('[data-activity-unread="agent:one"]').exists()).toBe(true)
+  })
+
+  it('keeps unavailable launchers actionable with an exact native diagnostic', () => {
+    const wrapper = render()
+    const terminal = wrapper.get('[data-sidebar-row="launcher:terminal"]')
+
+    expect(terminal.attributes('data-launcher-available')).toBe('false')
+    expect(terminal.attributes('aria-disabled')).toBe('true')
+    expect(terminal.attributes('title')).toBe('Terminal — shell unavailable')
+    expect(terminal.text()).toContain('missing')
   })
 })

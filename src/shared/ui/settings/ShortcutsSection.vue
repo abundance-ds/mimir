@@ -19,13 +19,13 @@
       </div>
     </div>
 
-    <div class="section-title mt">Panel</div>
+    <div class="section-title mt">Workbench</div>
     <div class="shortcuts-table">
       <div
-        v-for="(s, i) in panelShortcuts"
+        v-for="(s, i) in workbenchShortcuts"
         :key="'p' + i"
         class="shortcut-row"
-        :class="{ last: i === panelShortcuts.length - 1 }"
+        :class="{ last: i === workbenchShortcuts.length - 1 }"
       >
         <span class="shortcut-action">{{ s.action }}</span>
         <span class="shortcut-keys">
@@ -42,11 +42,10 @@
 
 <script setup>
 const editorShortcuts = [
-  { action: 'Toggle sidebar', keys: ['⌘', '\\'] },
+  { action: 'Inline AI', keys: ['⌘', 'K'] },
   { action: 'Cycle toolbar', keys: ['⌘', '/'] },
   { action: 'Bold', keys: ['⌘', 'B'] },
   { action: 'Italic', keys: ['⌘', 'I'] },
-  { action: 'Cycle view', keys: ['⌘', 'E'] },
   { action: 'Settings', keys: ['⌘', ','] },
   { action: 'Save', keys: ['⌘', 'S'] },
   { action: 'New document', keys: ['⌘', 'N'] },
@@ -54,13 +53,11 @@ const editorShortcuts = [
   { action: 'Zoom in / out', keys: ['⌘', '+', '/', '⌘', '−'] },
 ]
 
-const panelShortcuts = [
-  { action: 'New chat', keys: ['⌘', 'N'] },
-  { action: 'Toggle sidebar', keys: ['⌘', '\\'] },
-  { action: 'Toggle terminal', keys: ['⌘', '`'] },
-  { action: 'Send message', keys: ['Enter'] },
-  { action: 'New line', keys: ['Shift', 'Enter'] },
-  { action: 'Stop generation', keys: ['Esc'] },
+const workbenchShortcuts = [
+  { action: 'Quick open', keys: ['⌘', 'P'] },
+  { action: 'Toggle sidebar', keys: ['⌘', 'B'] },
+  { action: 'Open selected file', keys: ['Enter'] },
+  { action: 'Navigate files', keys: ['↑', '/', '↓'] },
 ]
 </script>
 

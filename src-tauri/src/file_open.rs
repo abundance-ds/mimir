@@ -23,35 +23,6 @@ pub fn filter_file_args(args: &[String]) -> Vec<String> {
         .collect()
 }
 
-pub fn create_editor_window<M: Manager<tauri::Wry>>(
-    manager: &M,
-) -> tauri::Result<tauri::WebviewWindow> {
-    let label = format!(
-        "editor-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
-    let url = format!("/?view=editor&window={}&new=1", label);
-    let mut builder =
-        tauri::WebviewWindowBuilder::new(manager, &label, tauri::WebviewUrl::App(url.into()))
-            .title("Mim Panel")
-            .inner_size(1280.0, 860.0)
-            .min_inner_size(300.0, 620.0)
-            .center()
-            .decorations(true);
-
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true);
-    }
-
-    builder.build()
-}
-
 #[tauri::command]
 pub fn open_files_in_editor(app: tauri::AppHandle, paths: Vec<String>) {
     do_open_files_in_editor(&app, paths);
@@ -62,19 +33,12 @@ pub fn do_open_files_in_editor(app: &tauri::AppHandle, paths: Vec<String>) {
         return;
     }
 
-    let editor_win = app
-        .webview_windows()
-        .into_iter()
-        .find(|(label, _)| label.starts_with("editor-"))
-        .map(|(_, w)| w);
-
-    if let Some(win) = editor_win {
+    if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit("mim://open-file", &paths);
         let _ = win.set_focus();
     } else {
         let state = app.state::<PendingFilePaths>();
         *state.0.lock().unwrap() = paths;
-        let _ = create_editor_window(app);
     }
 }
 

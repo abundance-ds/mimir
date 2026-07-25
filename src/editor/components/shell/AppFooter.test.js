@@ -6,7 +6,6 @@ function mountFooter(props = {}) {
   return mount(AppFooter, {
     props: {
       zoomLevel: 100,
-      viewMode: 'source',
       stats: { words: 12, characters: 80, spaces: 10, lines: 4, readingMinutes: 1 },
       saveStatus: { label: '', tone: 'quiet' },
       ...props,

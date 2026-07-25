@@ -4,19 +4,12 @@ import { withGate } from './gate'
 import { crossrefTypeToCsl, reconstructAbstract } from './helpers'
 
 export function createSearchWebTool(context) {
-  const gateCtx = {
-    sessionId: context.sessionId,
-    policy: context.policy,
-    onApprovalRequest: context.onApprovalRequest,
-    approvalMode: context.approvalMode,
-  }
-
   return {
     search_web: tool({
       description:
         'Search academic sources online. "openalex" = paper search, "crossref" = DOI metadata lookup, ' +
-        '"arxiv" = arXiv metadata lookup. Returns metadata only — does not import.\n' +
-        'Use edit("@library.json", ...) to import a result into the library. limit applies to openalex only (crossref/arxiv return one result).',
+        '"arxiv" = arXiv metadata lookup. Returns metadata only. ' +
+        'limit applies to OpenAlex only; Crossref and arXiv return one result.',
       inputSchema: z.object({
         source: z.enum(['openalex', 'crossref', 'arxiv']),
         query: z.string().min(1).max(500),
@@ -141,7 +134,7 @@ export function createSearchWebTool(context) {
         }
 
         return { error: `Unknown source: ${source}` }
-      }, gateCtx),
+      }),
     }),
   }
 }

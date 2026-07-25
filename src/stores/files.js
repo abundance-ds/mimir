@@ -2,7 +2,6 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { openFileDialog, saveFileDialog, saveFile } from '../services/fileSystem.js'
 import { SAVE_STATE } from '../shared/saveState.js'
-import { parseBoardEntry, serializeEntry } from '../services/board/loader.js'
 
 const RECENT_LIMIT = 12
 let nextFileId = 1
@@ -27,7 +26,6 @@ export const useFileStore = defineStore('files', () => {
       saveState: dirty ? SAVE_STATE.dirty : SAVE_STATE.idle,
       saveError: null,
       reviews: null,
-      meta: null,
     }
   }
 
@@ -46,23 +44,11 @@ export const useFileStore = defineStore('files', () => {
     file.saveState = SAVE_STATE.saving
     file.saveError = null
     try {
-      let contentToWrite = file.content
-      if (file.meta) {
-        contentToWrite = serializeEntry(file.meta, file.content)
-      }
-      await saveFile(file.path, contentToWrite)
+      await saveFile(file.path, file.content)
       file.dirty = false
       file.saveState = SAVE_STATE.saved
       file.saveError = null
       addRecentFile(file.path)
-
-      if (file.meta && window.__TAURI_INTERNALS__) {
-        const entryId = file.path?.split('/').pop()?.replace(/\.md$/, '') || ''
-        import('@tauri-apps/api/event').then(({ emit }) => {
-          emit('mim://board-changed', { entryId })
-        })
-      }
-
       return true
     } catch (error) {
       file.dirty = true
@@ -136,30 +122,11 @@ export const useFileStore = defineStore('files', () => {
       active.newTab = false
       active.dirty = false
       active.saveState = SAVE_STATE.idle
-      active.meta = null
-      if (path && (path.includes('/issues/') || path.includes('/knowledge/')) && !path.includes('/node_modules/')) {
-        try {
-          const { meta, body } = parseBoardEntry(content)
-          if (meta.type === 'issue' || meta.type === 'knowledge') {
-            active.content = body
-            active.meta = meta
-          }
-        } catch {}
-      }
       addRecentFile(path)
       return
     }
 
     const file = makeFile({ path, content })
-    if (path && (path.includes('/issues/') || path.includes('/knowledge/')) && !path.includes('/node_modules/')) {
-      try {
-        const { meta, body } = parseBoardEntry(content)
-        if (meta.type === 'issue' || meta.type === 'knowledge') {
-          file.content = body
-          file.meta = meta
-        }
-      } catch {}
-    }
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
     addRecentFile(path)
@@ -286,13 +253,6 @@ export const useFileStore = defineStore('files', () => {
     if (file) file.reviews = null
   }
 
-  function updateMeta(fileId, updates) {
-    const file = openFiles.value.find(f => f.id === fileId)
-    if (!file || !file.meta) return
-    Object.assign(file.meta, updates, { updated: new Date().toISOString() })
-    markFileDirty(file)
-  }
-
   return {
     openFiles,
     recentFiles,
@@ -318,6 +278,5 @@ export const useFileStore = defineStore('files', () => {
     addFileFromTransfer,
     setFileReviews,
     clearFileReviews,
-    updateMeta,
   }
 })

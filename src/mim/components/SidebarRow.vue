@@ -1,32 +1,46 @@
 <template>
-  <button
-    type="button"
+  <div
     class="group relative flex h-9 w-full items-center text-left text-ink-2 hover:bg-chrome-mid hover:text-ink"
-    :class="{ 'bg-accent-soft text-ink': active }"
-    :aria-current="active ? 'page' : undefined"
+    :class="{
+      'bg-accent-soft text-ink': active,
+      'text-ink-4': muted && !active,
+    }"
+    @click="$emit('click')"
   >
     <span
       v-if="active"
       class="absolute inset-y-1 left-0 w-0.5 bg-accent"
       aria-hidden="true"
     />
-    <span class="ml-3 grid size-7 shrink-0 place-items-center">
-      <slot />
-    </span>
-    <span
-      :data-sidebar-copy="copyId || undefined"
-      class="ml-2 flex min-w-0 flex-1 items-center gap-2 pr-2"
-      :class="{ 'pointer-events-none invisible': collapsed }"
-      :aria-hidden="collapsed"
+    <button
+      type="button"
+      class="flex h-full min-w-0 flex-1 items-center text-left"
+      :aria-current="active ? 'page' : undefined"
     >
-      <span class="min-w-0 flex-1 truncate text-[11px] font-medium">
-        {{ label }}
+      <span class="ml-3 grid size-7 shrink-0 place-items-center">
+        <slot />
       </span>
-      <span v-if="meta" class="shrink-0 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3">
-        {{ meta }}
+      <span
+        :data-sidebar-copy="copyId || undefined"
+        class="ml-2 flex min-w-0 flex-1 items-center gap-2"
+        :class="{ 'pointer-events-none invisible': collapsed }"
+        :aria-hidden="collapsed"
+      >
+        <span class="min-w-0 flex-1 truncate text-[11px] font-medium">
+          <slot name="label">{{ label }}</slot>
+        </span>
+        <span v-if="meta" class="shrink-0 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3">
+          {{ meta }}
+        </span>
       </span>
+    </button>
+    <span
+      v-if="$slots.trailing && !collapsed"
+      class="mr-1 shrink-0"
+    >
+      <slot name="trailing" />
     </span>
-  </button>
+  </div>
 </template>
 
 <script setup>
@@ -36,5 +50,8 @@ defineProps({
   collapsed: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
   copyId: { type: String, default: '' },
+  muted: { type: Boolean, default: false },
 })
+
+defineEmits(['click'])
 </script>

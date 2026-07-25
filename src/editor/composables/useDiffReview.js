@@ -1,4 +1,3 @@
-import { emit as telemetryEmit } from '../../services/telemetry.js'
 
 export function proposalIdsFromReviewMeta(meta) {
   if (!meta) return []
@@ -182,7 +181,6 @@ export function useDiffReview({
     const path = currentFile.value?.path || ''
     flushEditorContent({ bridge: 'flush' })
     diffStore.activate({ original, modified, path, review: opts?.review || null })
-    telemetryEmit('diff.review')
   }
 
   function activateBatchDiff(fileList, meta) {

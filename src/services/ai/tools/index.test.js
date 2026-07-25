@@ -21,9 +21,7 @@ describe('createMimTools', () => {
     const names = Object.keys(tools)
 
     expect(names).toContain('shell')
-    expect(names).toContain('show')
     expect(names).toContain('list')
-    expect(names).toContain('annotate_docx')
   })
 
   it('every tool has description and execute', () => {

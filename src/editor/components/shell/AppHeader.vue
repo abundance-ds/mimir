@@ -29,7 +29,7 @@
 
         <!-- App menus (Windows/Linux only) -->
         <nav
-            v-if="showAppMenus"
+            v-if="showAppMenus && !embedded"
             class="app-menu no-drag"
             aria-label="Application menu"
         >
@@ -242,103 +242,38 @@
         </nav>
 
         <!-- Right: fixed gap before buttons -->
-        <div data-tauri-drag-region :class="hideSidebar ? 'flex-1 self-stretch' : 'w-7 shrink-0 self-stretch'"></div>
+        <div data-tauri-drag-region class="flex-1 self-stretch"></div>
 
+        <!-- Standalone editor sidebar toggle. Workbench pane controls live outside the editor. -->
         <button
-            v-if="hideSidebar && mimToggles"
-            class="mim-collapse-btn no-drag mr-2"
-            :title="mimToggles.terminalVisible?.value ? 'Expand panel' : 'Show terminal'"
-            @click="mimToggles.collapse()"
+            v-if="embedded"
+            type="button"
+            class="sidebar-toggle no-drag"
+            title="Collapse editor"
+            aria-label="Collapse editor"
+            @click="workbench.setPaneState('editor', 'rail')"
         >
-            <component
-                :is="mimToggles.terminalVisible?.value ? IconLayoutSidebarLeftCollapse : IconLayoutSidebarLeftExpand"
-                :size="14"
-            />
+            <IconLayoutSidebarRightCollapse :size="17" />
         </button>
 
-        <!-- MimPanel mode: panel toggles -->
-        <div v-if="hideSidebar && mimToggles" class="mim-panel-toggles no-drag">
-            <button
-                v-for="p in mimToggles.panels"
-                :key="p.id"
-                class="mim-ptoggle"
-                :class="{ active: mimToggles.rightPanel.value === p.id }"
-                @click="mimToggles.setRightPanel(p.id)"
-            >{{ p.label }}</button>
-        </div>
-
-        <!-- Standalone mode: export + sidebar toggle -->
-        <div v-else-if="!hideSidebar" class="flex items-center gap-[6px] shrink-0">
-            <button
-                ref="exportBtnRef"
-                class="header-action no-drag"
-                title="Export"
-                @click="exportPopover.toggle()"
-            >
-                <IconFileExport :size="14" />
-                <span>Export</span>
-            </button>
-
-            <button
-                class="sidebar-toggle group no-drag"
-                :class="sidebarOpen ? 'is-open' : 'is-closed'"
-                :title="
-                    sidebarOpen
-                        ? `Collapse sidebar ${shortcut('\\')}`
-                        : `Expand sidebar ${shortcut('\\')}`
-                "
-                :aria-label="
-                    sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'
-                "
-                @click="toggleSidebar"
-            >
-                <component
-                    :is="defaultSidebarIcon"
-                    :size="18"
-                    class="sidebar-toggle-icon sidebar-toggle-default"
-                />
-                <component
-                    :is="hoverSidebarIcon"
-                    :size="18"
-                    class="sidebar-toggle-icon sidebar-toggle-hover"
-                />
-            </button>
-        </div>
-    </div>
-
-    <!-- Export popover (rendered outside header to avoid overflow clipping) -->
-    <div
-        v-if="exportPopover.isOpen.value"
-        ref="exportFloatingRef"
-        :style="exportPopover.floatingStyles.value"
-        class="export-popover"
-    >
-        <SidebarExport :references="references" />
     </div>
 </template>
 
 <script setup>
-import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { platformKind } from "../../../shared/platform.js";
 import { basename, dirname } from "../../../shared/utils/path.js";
-import { usePopover } from "../../../shared/composables/usePopover.js";
-import SidebarExport from "../sidebar/SidebarExport.vue";
+import { useWorkbenchStore } from "../../../stores/workbench.js";
 import TabStrip from "../workspace/TabStrip.vue";
 import {
     IconArrowBackUp,
     IconArrowForwardUp,
     IconLayoutSidebarRightCollapse,
-    IconLayoutSidebarRightExpand,
-    IconLayoutSidebarRight,
-    IconLayoutSidebarRightFilled,
-    IconLayoutSidebarLeftCollapse,
-    IconLayoutSidebarLeftExpand,
     IconChevronDown,
     IconClipboard,
     IconCopy,
     IconDeviceFloppy,
     IconFileDownload,
-    IconFileExport,
     IconFilePlus,
     IconFileText,
     IconFolderOpen,
@@ -351,19 +286,17 @@ import {
 } from "@tabler/icons-vue";
 
 const props = defineProps({
-    sidebarOpen: { type: Boolean, default: false },
+    embedded: { type: Boolean, default: false },
     showAppMenus: { type: Boolean, default: false },
     recentFiles: { type: Array, default: () => [] },
     canSave: { type: Boolean, default: true },
     hasSelection: { type: Boolean, default: false },
-    references: { type: Array, default: () => [] },
     tabs: { type: Array, default: () => [] },
     activeTab: { type: Number, default: 0 },
     arrivedTabIndex: { type: Number, default: -1 },
     hideSidebar: { type: Boolean, default: false },
 });
 const emit = defineEmits([
-    "toggle-sidebar",
     "new-file",
     "open-file",
     "open-recent",
@@ -380,37 +313,11 @@ const emit = defineEmits([
 ]);
 
 const headerRef = ref(null);
+const workbench = useWorkbenchStore();
 const openMenu = ref(null);
 const isMac = computed(() => platformKind() === "macos");
 const clippedRecentFiles = computed(() => props.recentFiles.slice(0, 7));
 
-const mimToggles = inject("mimPanelToggles", null);
-
-// Export popover
-const exportBtnRef = ref(null);
-const exportFloatingRef = ref(null);
-const exportPopover = usePopover({ placement: "bottom-end", offsetPx: 4 });
-
-watch(exportBtnRef, (el) => {
-    exportPopover.referenceRef.value = el;
-});
-watch(exportFloatingRef, (el) => {
-    exportPopover.floatingRef.value = el;
-});
-
-// Sidebar toggle icons (right-side sidebar)
-const defaultSidebarIcon = computed(() =>
-    props.sidebarOpen ? IconLayoutSidebarRightFilled : IconLayoutSidebarRight,
-);
-const hoverSidebarIcon = computed(() =>
-    props.sidebarOpen
-        ? IconLayoutSidebarRightCollapse
-        : IconLayoutSidebarRightExpand,
-);
-
-function toggleSidebar() {
-    emit("toggle-sidebar");
-}
 function closeMenu() {
     openMenu.value = null;
 }
@@ -717,72 +624,4 @@ onUnmounted(() => {
     transform: translateX(0) scale(1);
 }
 
-/* ── MimPanel toggles ── */
-
-.mim-collapse-btn {
-    width: 28px;
-    height: 26px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    margin-right: 6px;
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--color-ink-3);
-    transition: color 140ms, background 140ms, border-color 140ms;
-}
-
-.mim-collapse-btn:hover {
-    color: var(--color-ink);
-    background: var(--color-chrome-mid);
-    border-color: var(--color-rule-light);
-}
-
-.mim-panel-toggles {
-    display: flex;
-    gap: 1px;
-    background: var(--color-chrome-mid);
-    border-radius: 5px;
-    padding: 2px;
-    flex-shrink: 0;
-}
-
-.mim-ptoggle {
-    height: 22px;
-    padding: 0 8px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--color-ink-3);
-    font-family: var(--font-sans);
-    font-size: 10.5px;
-    font-weight: 560;
-    white-space: nowrap;
-    transition: color 100ms, background 100ms;
-}
-
-.mim-ptoggle:hover {
-    color: var(--color-ink-2);
-}
-
-.mim-ptoggle.active {
-    background: var(--color-surface);
-    color: var(--color-ink);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.export-popover {
-    width: 280px;
-    max-height: 80vh;
-    overflow-y: auto;
-    background: var(--color-surface);
-    border: 1px solid var(--color-rule);
-    border-radius: 7px;
-    box-shadow:
-        0 18px 46px rgba(0, 0, 0, 0.18),
-        0 2px 8px rgba(0, 0, 0, 0.08);
-    z-index: 70;
-}
 </style>

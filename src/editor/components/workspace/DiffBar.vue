@@ -88,7 +88,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useDiffStore } from '../../../stores/diff.js'
-import { relativeTime } from '../../../services/audit.js'
+import { relativeTime } from '../../../shared/time.js'
 
 const diff = useDiffStore()
 const emit = defineEmits(['accept-all', 'reject-all', 'navigate-chunk', 'navigate-file'])

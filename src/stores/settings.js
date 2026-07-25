@@ -20,36 +20,22 @@ const DEFAULTS = {
   aiGhostModel: 'auto',
   aiInlineRewrite: true,
   aiInlineModel: 'auto',
-  exportFormat: 'pdf',
-  exportPdfTemplate: 'clean',
-  exportCitationStyle: 'apa',
-  exportBibliography: true,
-  exportPdfPageSize: 'a4',
-  exportDocxFont: 'Calibri',
-  exportDocxPageSize: 'a4',
-  disabledTools: [],
-  disabledSkills: [],
-  aiApprovalMode: 'normal',
-  panelSidebarWidth: 256,
-  terminalHeight: 220,
-  mimTerminalWidth: 460,
   mimTerminalFontSize: 12,
-  auditIdentity: '',
   recentAppIds: [],
-  telemetryEnabled: true,
-  telemetryDeviceId: '',
   commentGateSkip: false,
-  lastChatModel: '',
   mimWorkspaceFolder: '',
-  mimRightPanel: 'editor',
+  workbenchLayout: {
+    sidebar: { state: 'expanded', width: 240 },
+    activity: { state: 'expanded', width: 560 },
+    editor: { state: 'expanded', width: 520 },
+    activeActivityId: 'files',
+  },
 }
 
 export const useSettingsStore = defineStore('settings', () => {
   const settings = {}
   for (const [key, defaultVal] of Object.entries(DEFAULTS)) {
-    settings[key] = ref(
-      Array.isArray(defaultVal) ? [...defaultVal] : defaultVal,
-    )
+    settings[key] = ref(cloneSetting(defaultVal))
   }
   const settingsReady = ref(false)
 
@@ -67,9 +53,9 @@ export const useSettingsStore = defineStore('settings', () => {
       }
     } catch { /* use defaults */ }
 
-    for (const [key, defaultVal] of Object.entries(DEFAULTS)) {
+    for (const key of Object.keys(DEFAULTS)) {
       if (saved[key] !== undefined) {
-        settings[key].value = saved[key]
+        settings[key].value = cloneSetting(saved[key])
       }
     }
     settingsReady.value = true
@@ -103,7 +89,7 @@ export const useSettingsStore = defineStore('settings', () => {
   let saveTimer = null
   function set(key, value) {
     if (!(key in settings)) return
-    settings[key].value = value
+    settings[key].value = cloneSetting(value)
     if (!settingsReady.value) return
     clearTimeout(saveTimer)
     saveTimer = setTimeout(save, 300)
@@ -140,3 +126,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return { ...settings, settingsReady, isDarkTheme, load, save, set, applyTheme }
 })
+
+function cloneSetting(value) {
+  if (value && typeof value === 'object') return structuredClone(value)
+  return value
+}

@@ -1,72 +1,47 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { withGate } from './gate'
-import { isAtPath, resolveAtPath } from './pathHandlers'
 import { resolveSafePath } from './textMatch'
-import { checkPathAccess } from './pathPermission'
 
-export function createListTool(context) {
+function globPattern(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i')
+}
+
+export function createListTool(context = {}) {
   const workspacePath = context.workspacePath || context.projectPath || null
-  const gateCtx = {
-    sessionId: context.sessionId,
-    policy: context.policy,
-    onApprovalRequest: context.onApprovalRequest,
-    projectPath: workspacePath,
-    approvalMode: context.approvalMode,
-  }
 
   return {
     list: tool({
-      description: `List files in a directory or entries at a virtual path.\n@issues/ → issues. @knowledge/ → knowledge. @apps/ → apps. @skills/ → skills. Project path → files.`,
+      description: 'List files in a directory inside the active workspace.',
       inputSchema: z.object({
-        target: z.string().min(1).max(500),
-        pattern: z.string().max(100).optional().describe('Glob filter, e.g. "*.md"'),
+        target: z.string().max(500).default('.'),
+        pattern: z.string().max(100).optional().describe('Optional glob filter such as "*.md".'),
       }),
-      execute: withGate('list', async ({ target, pattern }) => {
-        // --- @-paths ---
-        if (isAtPath(target)) {
-          const resolved = await resolveAtPath(target, { projectId: context.projectId })
-          if (!resolved) return { error: `Cannot resolve path: ${target}` }
-          if (resolved.error) return { error: resolved.error }
-
-          if (!resolved.absolutePath) return { error: `Unsupported @-path for listing: ${target}` }
-
-          try {
-            const { invoke } = await import('@tauri-apps/api/core')
-            const files = await invoke('list_dir', { path: resolved.absolutePath })
-            let entries = (files || []).map(f => ({ name: f.name, is_dir: f.is_dir, size: f.size || 0 }))
-            if (pattern) {
-              const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i')
-              entries = entries.filter(e => e.is_dir || regex.test(e.name))
-            }
-            return { directory: target, count: entries.length, entries: entries.slice(0, 100) }
-          } catch (err) {
-            return { error: `Failed to list ${target}: ${err?.message || err}` }
-          }
-        }
-
-        // --- Project directory ---
-        if (!workspacePath) return { error: 'No project folder linked.' }
+      execute: withGate('list', async ({ target = '.', pattern } = {}) => {
+        if (!workspacePath) return { error: 'No workspace folder is open.' }
+        if (target.startsWith('@')) return { error: `Unknown workbench target: ${target}` }
 
         const safePath = resolveSafePath(target, workspacePath)
-        if (!safePath) return { error: 'Invalid directory path.' }
-
-        const denied = await checkPathAccess(safePath, 'read', gateCtx)
-        if (denied) return denied
+        if (!safePath) return { error: 'Directory must stay inside the active workspace.' }
 
         try {
           const { invoke } = await import('@tauri-apps/api/core')
           const files = await invoke('list_dir', { path: safePath })
-          let entries = (files || []).map(f => ({ name: f.name, is_dir: f.is_dir, size: f.size || 0 }))
-          if (pattern) {
-            const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i')
-            entries = entries.filter(e => e.is_dir || regex.test(e.name))
-          }
-          return { directory: target, count: entries.length, entries: entries.slice(0, 100) }
-        } catch (e) {
-          return { error: `Failed to list directory: ${e?.message || e}` }
+          const filter = pattern ? globPattern(pattern) : null
+          const entries = (files || [])
+            .map(file => ({
+              name: file.name,
+              is_dir: file.is_dir,
+              size: file.size || 0,
+            }))
+            .filter(entry => !filter || entry.is_dir || filter.test(entry.name))
+            .slice(0, 200)
+          return { directory: target, count: entries.length, entries }
+        } catch (error) {
+          return { error: `Failed to list directory: ${error?.message || error}` }
         }
-      }, gateCtx),
+      }),
     }),
   }
 }

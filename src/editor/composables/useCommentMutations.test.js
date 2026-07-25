@@ -188,6 +188,32 @@ describe('useCommentMutations', () => {
     })
   })
 
+  describe('resolve and reopen', () => {
+    it('adds resolved status without removing the canonical wrapper', () => {
+      const doc = '<comment id="c1" author="user" text="Fix">World</comment>'
+      const { view, mutations } = setup(doc)
+      const result = mutations.resolve('c1')
+      const change = view.dispatched[0].changes
+      const next = doc.slice(0, change.from) + change.insert + doc.slice(change.to)
+
+      expect(result).toEqual({ ok: true, status: 'resolved' })
+      expect(next).toContain('status="resolved"')
+      expect(next).toContain('>World</comment>')
+    })
+
+    it('reopens by replacing only the status attribute', () => {
+      const doc = '<comment id="c1" author="user" text="Fix" status="resolved">World</comment>'
+      const { view, mutations } = setup(doc)
+      const result = mutations.reopen('c1')
+      const change = view.dispatched[0].changes
+      const next = doc.slice(0, change.from) + change.insert + doc.slice(change.to)
+
+      expect(result).toEqual({ ok: true, status: 'active' })
+      expect(next).toContain('status="active"')
+      expect(next).not.toContain('status="resolved"')
+    })
+  })
+
   describe('clearAll', () => {
     it('strips comment wrappers and replies from the document', () => {
       const doc = 'A<comment id="c1" author="user" text="Fix">B<reply id="r1" author="ai" text="Done"/></comment>C'

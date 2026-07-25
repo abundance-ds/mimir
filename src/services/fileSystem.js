@@ -33,25 +33,6 @@ export async function openFileDialog() {
   return { path: result.path, content: result.content }
 }
 
-export async function openMultipleFilesDialog() {
-  if (!isTauri()) return []
-  const selected = await open({
-    multiple: true,
-    filters: [
-      { name: 'Code and Text', extensions: CODE_TEXT_EXTENSIONS },
-      { name: 'All Files', extensions: ['*'] },
-    ],
-  })
-  if (!selected) return []
-  const paths = Array.isArray(selected)
-    ? selected.map((s) => (typeof s === 'string' ? s : s.path))
-    : [typeof selected === 'string' ? selected : selected.path]
-  const results = await Promise.all(
-    paths.map((path) => invoke('read_text_file', { path }))
-  )
-  return results.map((r) => ({ path: r.path, content: r.content }))
-}
-
 export async function saveFileDialog(defaultPath) {
   if (!isTauri()) return null
   const path = await save({
@@ -62,17 +43,6 @@ export async function saveFileDialog(defaultPath) {
     ],
   })
   return path || null
-}
-
-export async function saveExportDialog(defaultPath, filters) {
-  if (!isTauri()) return null
-  const path = await save({ defaultPath, filters })
-  return path || null
-}
-
-export async function writeBinaryFile(path, base64Data) {
-  if (!isTauri()) return
-  await invoke('write_binary_file', { path, dataBase64: base64Data })
 }
 
 // --- File I/O ---
@@ -89,9 +59,4 @@ export async function readFile(path) {
   if (!isTauri()) return ''
   const result = await invoke('read_text_file', { path })
   return result.content
-}
-
-export async function pathExists(path) {
-  if (!isTauri()) return false
-  return invoke('path_exists', { path })
 }

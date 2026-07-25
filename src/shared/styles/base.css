@@ -48,10 +48,6 @@ html, body {
 
 .cm-content,
 .cm-line,
-.preview-content,
-.asst-text,
-.user-bubble,
-[class*="prose"],
 textarea,
 input,
 [contenteditable],

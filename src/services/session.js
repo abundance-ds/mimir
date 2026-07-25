@@ -18,9 +18,6 @@ async function getSessionPath() {
  * {
  *   openFiles: string[],
  *   activeFileIndex: number,
- *   sidebar: { visible: boolean, panel: string, panelOpen: boolean },
- *   viewMode: string,
- *   toolbarMode: string,
  *   zoomLevel: number,
  * }
  */

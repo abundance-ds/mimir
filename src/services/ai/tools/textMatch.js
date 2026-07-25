@@ -46,7 +46,8 @@ export function resolveSafePath(relativePath, workspacePath) {
     else if (part !== '.' && part !== '') normalized.push(part)
   }
   const canonicalized = '/' + normalized.join('/')
-  if (!canonicalized.startsWith(workspacePath)) return null
+  const workspace = workspacePath.replace(/\/+$/, '')
+  if (canonicalized !== workspace && !canonicalized.startsWith(`${workspace}/`)) return null
   return canonicalized
 }
 

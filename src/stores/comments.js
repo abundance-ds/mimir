@@ -1,6 +1,5 @@
 import { ref, computed, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import { emit as telemetryEmit } from '../services/telemetry.js'
 
 export const useCommentsStore = defineStore('comments', () => {
   const comments = shallowRef([])
@@ -33,7 +32,6 @@ export const useCommentsStore = defineStore('comments', () => {
   }
 
   function commentAdded() {
-    telemetryEmit('comment.add')
   }
 
   return {

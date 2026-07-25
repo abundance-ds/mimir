@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::{
     extract::State,
     http::{header, HeaderMap, StatusCode},
@@ -8,15 +5,21 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::{Deserialize, Serialize};
-use tauri::Emitter;
-use tokio::sync::{oneshot, watch, Mutex};
+use serde::Deserialize;
+use tokio::sync::{watch, Mutex};
+
+use crate::{
+    tool_registry::{
+        RegistrySnapshot, ToolCallContext, ToolCaller, ToolError, ToolErrorCode, ToolRegistry,
+        ToolResult,
+    },
+    tool_runtime::{self, ToolRuntime},
+};
 
 pub struct ToolServerState {
     shutdown_tx: Mutex<Option<watch::Sender<bool>>>,
     port: Mutex<u16>,
     token: Mutex<String>,
-    hub: Mutex<Option<Arc<ToolHub>>>,
 }
 
 impl Default for ToolServerState {
@@ -25,79 +28,23 @@ impl Default for ToolServerState {
             shutdown_tx: Mutex::new(None),
             port: Mutex::new(0),
             token: Mutex::new(String::new()),
-            hub: Mutex::new(None),
         }
     }
 }
 
-struct ToolHub {
-    app_handle: tauri::AppHandle,
-    pending: Mutex<HashMap<String, oneshot::Sender<ToolResponse>>>,
-}
-
-#[derive(Serialize)]
-struct ToolRequest {
-    id: String,
-    tool: String,
-    input: serde_json::Value,
-    cwd: Option<String>,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct ToolResponse {
-    pub result: Option<serde_json::Value>,
-    pub error: Option<String>,
-}
-
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CallBody {
     tool: String,
     input: Option<serde_json::Value>,
     cwd: Option<String>,
+    request_id: Option<String>,
 }
 
 #[derive(Clone)]
 struct AppState {
-    hub: Arc<ToolHub>,
+    registry: ToolRegistry,
     token: String,
-}
-
-// ── Shared dispatch (event bridge) ───────────────────────────────
-
-async fn dispatch(
-    hub: &ToolHub,
-    tool: &str,
-    input: serde_json::Value,
-    cwd: Option<String>,
-    timeout_secs: u64,
-) -> Result<ToolResponse, String> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let (tx, rx) = oneshot::channel();
-    hub.pending.lock().await.insert(id.clone(), tx);
-
-    let request = ToolRequest {
-        id: id.clone(),
-        tool: tool.to_string(),
-        input,
-        cwd,
-    };
-
-    if let Err(e) = hub.app_handle.emit("tool-call-request", &request) {
-        hub.pending.lock().await.remove(&id);
-        return Err(format!("Event emit failed: {}", e));
-    }
-
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx).await {
-        Ok(Ok(resp)) => Ok(resp),
-        Ok(Err(_)) => {
-            hub.pending.lock().await.remove(&id);
-            Err("Channel closed".into())
-        }
-        Err(_) => {
-            hub.pending.lock().await.remove(&id);
-            Err(format!("Timeout after {}s", timeout_secs))
-        }
-    }
 }
 
 // ── Bearer auth (legacy HTTP API only) ───────────────────────────
@@ -108,12 +55,13 @@ fn check_auth(
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let auth = headers
         .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
+        .and_then(|value| value.to_str().ok())
         .unwrap_or("");
-    if let Some(token) = auth.strip_prefix("Bearer ") {
-        if token == expected {
-            return Ok(());
-        }
+    if auth
+        .strip_prefix("Bearer ")
+        .is_some_and(|token| token == expected)
+    {
+        return Ok(());
     }
     Err((
         StatusCode::UNAUTHORIZED,
@@ -124,50 +72,99 @@ fn check_auth(
     ))
 }
 
-// ── Legacy HTTP API (kept for curl/debugging) ────────────────────
+// ── Legacy HTTP API (curl/debugging/mimx) ────────────────────────
 
 async fn handle_call(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<CallBody>,
 ) -> impl IntoResponse {
-    if let Err(e) = check_auth(&headers, &state.token) {
-        return e.into_response();
+    if let Err(error) = check_auth(&headers, &state.token) {
+        return error.into_response();
     }
-    match dispatch(
-        &state.hub,
-        &body.tool,
-        body.input.unwrap_or(serde_json::json!({})),
-        body.cwd,
-        120,
-    )
-    .await
-    {
-        Ok(resp) if resp.error.is_some() => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "tool_error", "message": resp.error })),
+
+    let context = ToolCallContext {
+        request_id: body.request_id,
+        caller: ToolCaller::Mimx,
+        cwd: body.cwd,
+        metadata: serde_json::Map::new(),
+    };
+    match state
+        .registry
+        .call(
+            &body.tool,
+            context,
+            body.input.unwrap_or_else(|| serde_json::json!({})),
         )
-            .into_response(),
-        Ok(resp) => Json(serde_json::json!({ "result": resp.result })).into_response(),
-        Err(e) => (
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(serde_json::json!({ "error": "timeout", "message": e })),
+        .await
+    {
+        Ok(result) => Json(serde_json::json!({
+            "result": result.value,
+            "displayText": result.display_text,
+            "metadata": result.metadata,
+        }))
+        .into_response(),
+        Err(error) => (
+            http_status_for_tool_error(error.code),
+            Json(serde_json::json!({
+                "error": tool_error_name(error.code),
+                "message": error.message,
+                "data": error.data,
+            })),
         )
             .into_response(),
     }
 }
 
 async fn handle_schema(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
-    if let Err(e) = check_auth(&headers, &state.token) {
-        return e.into_response();
+    if let Err(error) = check_auth(&headers, &state.token) {
+        return error.into_response();
     }
-    match dispatch(&state.hub, "__schema__", serde_json::json!({}), None, 10).await {
-        Ok(resp) => Json(serde_json::json!({ "tools": resp.result })).into_response(),
-        Err(e) => (
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(serde_json::json!({ "error": "timeout", "message": e })),
-        )
-            .into_response(),
+    let snapshot = state.registry.snapshot();
+    Json(serde_json::json!({
+        "revision": snapshot.revision,
+        "tools": legacy_tool_schema(&snapshot),
+    }))
+    .into_response()
+}
+
+fn legacy_tool_schema(snapshot: &RegistrySnapshot) -> Vec<serde_json::Value> {
+    snapshot
+        .tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.mcp_alias,
+                "canonical_name": tool.canonical_name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+                "owner": tool.owner,
+                "source": tool.source,
+            })
+        })
+        .collect()
+}
+
+fn http_status_for_tool_error(code: ToolErrorCode) -> StatusCode {
+    match code {
+        ToolErrorCode::NotFound => StatusCode::NOT_FOUND,
+        ToolErrorCode::InvalidInput => StatusCode::BAD_REQUEST,
+        ToolErrorCode::Cancelled => StatusCode::CONFLICT,
+        ToolErrorCode::Timeout => StatusCode::GATEWAY_TIMEOUT,
+        ToolErrorCode::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ToolErrorCode::Handler | ToolErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn tool_error_name(code: ToolErrorCode) -> &'static str {
+    match code {
+        ToolErrorCode::NotFound => "not_found",
+        ToolErrorCode::InvalidInput => "invalid_input",
+        ToolErrorCode::Cancelled => "cancelled",
+        ToolErrorCode::Timeout => "timeout",
+        ToolErrorCode::Unavailable => "unavailable",
+        ToolErrorCode::Handler => "tool_error",
+        ToolErrorCode::Internal => "internal",
     }
 }
 
@@ -177,104 +174,143 @@ fn jsonrpc_ok(id: &serde_json::Value, result: serde_json::Value) -> serde_json::
     serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-fn jsonrpc_err(id: &serde_json::Value, code: i32, message: &str) -> serde_json::Value {
-    serde_json::json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+fn jsonrpc_err(
+    id: &serde_json::Value,
+    code: i32,
+    message: &str,
+    data: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut error = serde_json::json!({ "code": code, "message": message });
+    if let Some(data) = data {
+        error["data"] = data;
+    }
+    serde_json::json!({ "jsonrpc": "2.0", "id": id, "error": error })
+}
+
+fn mcp_tool_list(snapshot: &RegistrySnapshot) -> serde_json::Value {
+    let tools: Vec<serde_json::Value> = snapshot
+        .tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.mcp_alias,
+                "description": tool.description,
+                "inputSchema": tool.input_schema,
+                "_meta": {
+                    "mim/canonicalName": tool.canonical_name,
+                    "mim/owner": tool.owner,
+                    "mim/source": tool.source,
+                    "mim/registryRevision": snapshot.revision,
+                }
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "tools": tools,
+        "_meta": { "mim/registryRevision": snapshot.revision }
+    })
+}
+
+fn render_tool_result(result: ToolResult) -> serde_json::Value {
+    let text = result.display_text.unwrap_or_else(|| match &result.value {
+        serde_json::Value::String(value) => value.clone(),
+        value => serde_json::to_string_pretty(value).unwrap_or_default(),
+    });
+    serde_json::json!({
+        "content": [{ "type": "text", "text": text }],
+        "structuredContent": result.value,
+        "_meta": result.metadata,
+    })
+}
+
+fn render_tool_error(error: ToolError) -> serde_json::Value {
+    serde_json::json!({
+        "content": [{ "type": "text", "text": error.message }],
+        "structuredContent": {
+            "error": tool_error_name(error.code),
+            "message": error.message,
+            "data": error.data,
+        },
+        "isError": true,
+    })
 }
 
 async fn handle_mcp(
     State(state): State<AppState>,
-    Json(req): Json<serde_json::Value>,
+    Json(request): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
-    let id = req.get("id").unwrap_or(&serde_json::Value::Null);
-
-    if req.get("id").is_none() {
+    let method = request
+        .get("method")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let Some(id) = request.get("id") else {
+        // Notifications are accepted and intentionally have no response body.
         return StatusCode::ACCEPTED.into_response();
-    }
+    };
 
     match method {
         "initialize" => {
             let session_id = uuid::Uuid::new_v4().to_string();
+            let requested_protocol = request
+                .pointer("/params/protocolVersion")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("2025-03-26");
             let body = jsonrpc_ok(
                 id,
                 serde_json::json!({
-                    "protocolVersion": "2025-03-26",
+                    "protocolVersion": requested_protocol,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "mim-terminal", "version": "0.3.0" }
+                    "serverInfo": { "name": "mim", "version": env!("CARGO_PKG_VERSION") }
                 }),
             );
             (
                 [(
                     axum::http::header::HeaderName::from_static("mcp-session-id"),
-                    axum::http::HeaderValue::from_str(&session_id).unwrap(),
+                    axum::http::HeaderValue::from_str(&session_id)
+                        .expect("UUID is a valid header value"),
                 )],
                 Json(body),
             )
                 .into_response()
         }
-
+        "ping" => Json(jsonrpc_ok(id, serde_json::json!({}))).into_response(),
         "tools/list" => {
-            match dispatch(&state.hub, "__schema__", serde_json::json!({}), None, 10).await {
-                Ok(resp) => {
-                    let tools: Vec<serde_json::Value> = resp
-                        .result
-                        .as_ref()
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|t| {
-                                    serde_json::json!({
-                                        "name": t.get("name"),
-                                        "description": t.get("description"),
-                                        "inputSchema": t.get("input_schema")
-                                            .unwrap_or(&serde_json::json!({"type": "object"})),
-                                    })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    Json(jsonrpc_ok(id, serde_json::json!({ "tools": tools }))).into_response()
-                }
-                Err(e) => Json(jsonrpc_err(id, -32603, &e)).into_response(),
-            }
+            let snapshot = state.registry.snapshot();
+            Json(jsonrpc_ok(id, mcp_tool_list(&snapshot))).into_response()
         }
-
         "tools/call" => {
-            let params = req.get("params").cloned().unwrap_or(serde_json::json!({}));
-            let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            let arguments = params
-                .get("arguments")
+            let Some(name) = request
+                .pointer("/params/name")
+                .and_then(serde_json::Value::as_str)
+            else {
+                return Json(jsonrpc_err(id, -32602, "Missing tool name", None)).into_response();
+            };
+            let arguments = request
+                .pointer("/params/arguments")
                 .cloned()
-                .unwrap_or(serde_json::json!({}));
-
-            match dispatch(&state.hub, name, arguments, None, 120).await {
-                Ok(resp) if resp.error.is_some() => Json(jsonrpc_ok(
-                    id,
-                    serde_json::json!({
-                        "content": [{ "type": "text", "text": resp.error.unwrap() }],
-                        "isError": true
-                    }),
-                ))
-                .into_response(),
-                Ok(resp) => {
-                    let text = match resp.result {
-                        Some(serde_json::Value::String(s)) => s,
-                        Some(v) => serde_json::to_string_pretty(&v).unwrap_or_default(),
-                        None => String::new(),
-                    };
-                    Json(jsonrpc_ok(
-                        id,
-                        serde_json::json!({
-                            "content": [{ "type": "text", "text": text }]
-                        }),
-                    ))
-                    .into_response()
-                }
-                Err(e) => Json(jsonrpc_err(id, -32603, &e)).into_response(),
-            }
+                .unwrap_or_else(|| serde_json::json!({}));
+            let request_id = match id {
+                serde_json::Value::String(value) => Some(value.clone()),
+                serde_json::Value::Number(value) => Some(value.to_string()),
+                _ => None,
+            };
+            let context = ToolCallContext {
+                request_id,
+                caller: ToolCaller::Mcp,
+                cwd: None,
+                metadata: request
+                    .pointer("/params/_meta")
+                    .and_then(serde_json::Value::as_object)
+                    .cloned()
+                    .unwrap_or_default(),
+            };
+            let result = match state.registry.call(name, context, arguments).await {
+                Ok(result) => render_tool_result(result),
+                Err(error) => render_tool_error(error),
+            };
+            Json(jsonrpc_ok(id, result)).into_response()
         }
-
-        _ => Json(jsonrpc_err(id, -32601, "Method not found")).into_response(),
+        _ => Json(jsonrpc_err(id, -32601, "Method not found", None)).into_response(),
     }
 }
 
@@ -283,87 +319,72 @@ async fn handle_mcp(
 const DEFAULT_PORT: u16 = 17532;
 
 async fn start_server(
-    app: tauri::AppHandle,
+    registry: ToolRegistry,
     port: u16,
     token: String,
-) -> Result<(Arc<ToolHub>, watch::Sender<bool>, u16), String> {
-    let hub = Arc::new(ToolHub {
-        app_handle: app,
-        pending: Mutex::new(HashMap::new()),
-    });
-
-    let state = AppState {
-        hub: hub.clone(),
-        token,
-    };
-
+) -> Result<(watch::Sender<bool>, u16), String> {
+    let state = AppState { registry, token };
     let router = Router::new()
         .route("/api/tools/call", post(handle_call))
         .route("/api/tools", get(handle_schema))
         .route("/mcp", post(handle_mcp))
         .with_state(state);
 
-    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
-    let listener = tokio::net::TcpListener::bind(addr)
+    let address: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+    let listener = tokio::net::TcpListener::bind(address)
         .await
-        .map_err(|e| format!("Failed to bind tool server on port {}: {}", port, e))?;
-
+        .map_err(|error| format!("Failed to bind tool server on port {port}: {error}"))?;
     let bound_port = listener
         .local_addr()
-        .map_err(|e| format!("Failed to get local addr: {}", e))?
+        .map_err(|error| format!("Failed to get tool server address: {error}"))?
         .port();
-
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
     tokio::spawn(async move {
         let server = axum::serve(listener, router);
         tokio::select! {
             result = server => {
-                if let Err(e) = result {
-                    eprintln!("[tool_server] Server error: {}", e);
+                if let Err(error) = result {
+                    eprintln!("[tool_server] Server error: {error}");
                 }
             }
             _ = shutdown_rx.changed() => {}
         }
     });
-
-    eprintln!("[tool_server] MCP at http://127.0.0.1:{}/mcp", bound_port);
-    Ok((hub, shutdown_tx, bound_port))
+    eprintln!("[tool_server] MCP at http://127.0.0.1:{bound_port}/mcp");
+    Ok((shutdown_tx, bound_port))
 }
 
 // ── Tauri commands ───────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn tool_server_start(
-    app: tauri::AppHandle,
     state: tauri::State<'_, ToolServerState>,
+    registry: tauri::State<'_, ToolRegistry>,
     port: Option<u16>,
 ) -> Result<serde_json::Value, String> {
     if state.shutdown_tx.lock().await.is_some() {
-        let p = *state.port.lock().await;
-        let t = state.token.lock().await.clone();
-        return Ok(serde_json::json!({ "port": p, "token": t }));
+        let port = *state.port.lock().await;
+        let token = state.token.lock().await.clone();
+        return Ok(serde_json::json!({ "port": port, "token": token }));
     }
 
-    let port = port.unwrap_or(DEFAULT_PORT);
+    let requested_port = port.unwrap_or(DEFAULT_PORT);
     let token = uuid::Uuid::new_v4().to_string();
-    let (hub, shutdown_tx, bound_port) = start_server(app, port, token.clone()).await?;
+    let (shutdown_tx, bound_port) =
+        start_server(registry.inner().clone(), requested_port, token.clone()).await?;
 
-    *state.hub.lock().await = Some(hub);
     *state.shutdown_tx.lock().await = Some(shutdown_tx);
     *state.port.lock().await = bound_port;
     *state.token.lock().await = token.clone();
-
     Ok(serde_json::json!({ "port": bound_port, "token": token }))
 }
 
 #[tauri::command]
 pub async fn tool_server_stop(state: tauri::State<'_, ToolServerState>) -> Result<(), String> {
-    let shutdown_tx = state.shutdown_tx.lock().await.take();
-    if let Some(tx) = shutdown_tx {
-        let _ = tx.send(true);
+    if let Some(shutdown_tx) = state.shutdown_tx.lock().await.take() {
+        let _ = shutdown_tx.send(true);
     }
-    *state.hub.lock().await = None;
     *state.port.lock().await = 0;
     *state.token.lock().await = String::new();
     Ok(())
@@ -372,24 +393,153 @@ pub async fn tool_server_stop(state: tauri::State<'_, ToolServerState>) -> Resul
 #[tauri::command]
 pub async fn tool_server_status(
     state: tauri::State<'_, ToolServerState>,
+    registry: tauri::State<'_, ToolRegistry>,
 ) -> Result<serde_json::Value, String> {
     let running = state.shutdown_tx.lock().await.is_some();
     let port = *state.port.lock().await;
-    Ok(serde_json::json!({ "running": running, "port": port }))
+    Ok(serde_json::json!({
+        "running": running,
+        "port": port,
+        "registryRevision": registry.revision(),
+    }))
 }
 
+/// Compatibility response command used by the existing editor tool service.
 #[tauri::command]
 pub async fn tool_call_response(
-    state: tauri::State<'_, ToolServerState>,
+    runtime: tauri::State<'_, ToolRuntime>,
     id: String,
     result: Option<serde_json::Value>,
     error: Option<String>,
 ) -> Result<(), String> {
-    let hub = state.hub.lock().await;
-    if let Some(hub) = hub.as_ref() {
-        if let Some(tx) = hub.pending.lock().await.remove(&id) {
-            let _ = tx.send(ToolResponse { result, error });
-        }
+    tool_runtime::resolve_legacy_response(runtime.inner(), id, result, error).await
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::{
+        tool_bridge::register_core_tool,
+        tool_registry::{ToolCallContext, ToolOwner, ToolSource},
+    };
+
+    use super::*;
+
+    #[test]
+    fn mcp_list_uses_aliases_and_preserves_canonical_metadata() {
+        let registry = ToolRegistry::new();
+        register_core_tool(
+            &registry,
+            "editor.selection",
+            "editor_selection",
+            "Read selection",
+            json!({ "type": "object" }),
+            ToolSource::Native,
+            |_context: ToolCallContext, _input| async {
+                Ok(ToolResult::new(json!({ "text": "hello" })))
+            },
+        )
+        .unwrap();
+        let list = mcp_tool_list(&registry.snapshot());
+        assert_eq!(list["tools"][0]["name"], "editor_selection");
+        assert_eq!(
+            list["tools"][0]["_meta"]["mim/canonicalName"],
+            "editor.selection"
+        );
+        assert_eq!(list["_meta"]["mim/registryRevision"], 1);
     }
-    Ok(())
+
+    #[test]
+    fn structured_tool_errors_remain_mcp_tool_results() {
+        let rendered = render_tool_error(
+            ToolError::new(ToolErrorCode::InvalidInput, "path is required")
+                .with_data(json!({ "path": "$.path" })),
+        );
+        assert_eq!(rendered["isError"], true);
+        assert_eq!(rendered["structuredContent"]["error"], "invalid_input");
+        assert_eq!(rendered["structuredContent"]["data"]["path"], "$.path");
+    }
+
+    #[test]
+    fn legacy_schema_is_deterministic_and_contains_owner() {
+        let registry = ToolRegistry::new();
+        register_core_tool(
+            &registry,
+            "files.read",
+            "read",
+            "Read file",
+            json!({ "type": "object" }),
+            ToolSource::Native,
+            |_context: ToolCallContext, _input| async { Ok(ToolResult::new(json!(null))) },
+        )
+        .unwrap();
+        let schema = legacy_tool_schema(&registry.snapshot());
+        assert_eq!(schema[0]["name"], "read");
+        assert_eq!(schema[0]["canonical_name"], "files.read");
+        assert_eq!(schema[0]["owner"]["kind"], "core");
+        assert_eq!(registry.list()[0].owner, ToolOwner::Core);
+    }
+
+    #[tokio::test]
+    async fn mcp_endpoint_lists_and_calls_the_canonical_registry() {
+        let registry = ToolRegistry::new();
+        register_core_tool(
+            &registry,
+            "editor.selection",
+            "editor_selection",
+            "Read selection",
+            json!({
+                "type": "object",
+                "properties": { "includeText": { "type": "boolean" } },
+                "additionalProperties": false
+            }),
+            ToolSource::Native,
+            |context: ToolCallContext, input: serde_json::Value| async move {
+                assert_eq!(context.caller, ToolCaller::Mcp);
+                assert_eq!(context.request_id.as_deref(), Some("call-1"));
+                Ok(ToolResult::new(json!({
+                    "text": if input["includeText"] == true { "selected" } else { "" }
+                })))
+            },
+        )
+        .unwrap();
+        let state = AppState {
+            registry,
+            token: "unused-for-mcp".into(),
+        };
+
+        let list_response = handle_mcp(
+            State(state.clone()),
+            Json(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })),
+        )
+        .await
+        .into_response();
+        let list_body = axum::body::to_bytes(list_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let list_json: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
+        assert_eq!(list_json["result"]["tools"][0]["name"], "editor_selection");
+
+        let call_response = handle_mcp(
+            State(state),
+            Json(json!({
+                "jsonrpc": "2.0",
+                "id": "call-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "editor_selection",
+                    "arguments": { "includeText": true }
+                }
+            })),
+        )
+        .await
+        .into_response();
+        let call_body = axum::body::to_bytes(call_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let call_json: serde_json::Value = serde_json::from_slice(&call_body).unwrap();
+        assert_eq!(call_json["result"]["structuredContent"]["text"], "selected");
+        assert_eq!(call_json["result"]["isError"], serde_json::Value::Null);
+    }
 }

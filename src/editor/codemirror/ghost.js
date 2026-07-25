@@ -1,6 +1,5 @@
 import { Annotation, StateEffect, StateField, Prec } from '@codemirror/state'
 import { EditorView, Decoration, WidgetType } from '@codemirror/view'
-import { emit as telemetryEmit } from '../../services/telemetry.js'
 
 const setGhost = StateEffect.define()
 const clearGhost = StateEffect.define()
@@ -245,7 +244,6 @@ export function ghostExtension(options = {}) {
                 suggestions: getSuggestions ? [] : fallback,
               }),
             })
-            telemetryEmit('ghost.trigger')
             if (getSuggestions) {
               const before = view.state.sliceDoc(Math.max(0, suggestionPos - 5000), suggestionPos)
               const after = view.state.sliceDoc(suggestionPos, Math.min(view.state.doc.length, suggestionPos + 1000))
@@ -287,7 +285,6 @@ export function ghostExtension(options = {}) {
 function acceptGhost(view) {
   const ghost = view.state.field(ghostField)
   if (!ghost.active || ghost.pending || ghost.suggestions.length === 0) return
-  telemetryEmit('ghost.accept')
   const text = ghost.suggestions[ghost.index]
   view.dispatch({
     changes: { from: ghost.pos, insert: text },
@@ -330,13 +327,6 @@ function acceptNextWord(view) {
 
 function buildLocalSuggestions(view, pos) {
   const before = view.state.sliceDoc(Math.max(0, pos - 800), pos).toLowerCase()
-  if (before.includes('citation') || before.includes('reference')) {
-    return [
-      ' The important constraint is that reference problems should become visible diagnostics rather than interruptions.',
-      ' A malformed bibliography should never make the writing surface unstable.',
-      ' The reference system should act like a quiet compiler for citations.',
-    ]
-  }
   if (before.includes('ai') || before.includes('rewrite')) {
     return [
       ' The editor should show the proposed change first, then let the writer decide whether it belongs.',

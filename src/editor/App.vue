@@ -1,23 +1,17 @@
 <template>
   <div
     class="editor-shell h-full w-full flex flex-col bg-surface overflow-hidden"
-    :class="{
-      'is-sidebar-open': panelShown,
-      'is-split-mode': state.viewMode === 'split',
-    }"
   >
     <AppHeader
-      :sidebarOpen="panelShown"
+      :embedded="embedded"
       :showAppMenus="showAppMenus"
       :recentFiles="fileManager.recentFiles"
       :canSave="Boolean(currentFile?.path)"
       :hasSelection="Boolean(selectionText)"
-      :references="referenceLibrary"
       :tabs="displayTabs"
       :activeTab="displayActiveTab"
       :arrivedTabIndex="arrivedTabIndex"
       :hideSidebar="hideSidebar"
-      @toggle-sidebar="toggleSidebar"
       @new-file="onNewFile"
       @open-file="onOpenDialog"
       @save="onSave"
@@ -34,17 +28,10 @@
     />
 
     <div class="editor-body flex-1 flex min-h-0 bg-chrome">
-      <div
-        class="editor-sidebar-scrim"
-        aria-hidden="true"
-        @click="closePanel"
-      />
-
       <div class="editor-workspace flex-1 flex flex-col min-w-0">
         <InlineAI
           v-if="inlineAIState"
           :key="inlineAIKey"
-          :class="panelShown ? 'rounded-tr-lg overflow-hidden' : ''"
           :selection="inlineAIState"
           :documentId="documentIdFromPath(currentFile?.path)"
           :getDocument="getDocumentForInlineAI"
@@ -56,25 +43,12 @@
         />
         <DiffBar
           v-else-if="diffStore.active && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
-          :class="panelShown ? 'rounded-tr-lg overflow-hidden' : ''"
           @accept-all="onDiffAcceptAll"
           @reject-all="onDiffRejectAll"
           @navigate-chunk="onDiffNavigateChunk"
           @navigate-file="onDiffNavigateFile"
         />
-        <IssueContextBar
-          v-if="currentFile?.meta && !diffStore.active"
-          :meta="currentFile.meta"
-          :file-id="currentFile.id"
-          @send-to-agent="onSendToAgent"
-          @meta-changed="autoSave.schedule()"
-        />
-
-        <div class="editor-panes flex-1 flex min-h-0 overflow-hidden" :class="[
-          diffStore.active ? '' : `view-${state.viewMode}`,
-          panelShown ? 'rounded-br-lg' : '',
-          panelShown && !diffStore.active && !inlineAIState && editorSettings.editorToolbarMode === 'none' ? 'rounded-tr-lg' : '',
-        ]">
+        <div class="editor-panes flex-1 flex min-h-0 overflow-hidden">
           <BatchDiffView
             v-if="diffStore.active && diffStore.isBatch && reviewTabActive"
             ref="batchDiffViewRef"
@@ -88,12 +62,12 @@
           <NewTabPage v-if="isNewTabPage && !diffStore.active" />
           <EditorSurface
             ref="editorSurfaceRef"
-            v-show="!isNewTabPage && (!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused)) && state.viewMode !== 'preview'"
+            v-show="!isNewTabPage && (!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :zoomLevel="state.zoomLevel"
             :maxWidth="editorContentMaxWidth"
-            :showBorder="state.viewMode === 'split'"
+            :showBorder="false"
             :extensions="editorExtensions"
             @change="onContentChange"
             @cursor="info => cursorLine = info.line"
@@ -104,40 +78,20 @@
             @ask-agent="onAskAgent"
             @active-formats="activeFormats = $event"
           />
-          <PreviewPane
-            ref="previewPaneRef"
-            v-show="(!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused)) && state.viewMode !== 'source'"
-            :content="(!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused)) && state.viewMode !== 'source' ? previewHtml : ''"
-          />
         </div>
 
         <AppFooter
           :zoomLevel="state.zoomLevel"
-          :viewMode="state.viewMode"
           :selectionText="selectionText"
           :stats="documentStats"
           :saveStatus="footerSave"
           @zoom-in="zoomIn"
           @zoom-out="zoomOut"
           @set-zoom="setZoomLevel"
-          @set-view="onSetView"
           @save-status-click="onSaveStatusClick"
         />
       </div>
 
-      <Sidebar
-        v-if="!hideSidebar"
-        class="editor-sidebar"
-        :collapsed="!panelShown"
-        :width="sidebarWidth"
-        :dragging="sidebarDragging"
-        :outline="outlineItems"
-        :references="referenceLibrary"
-        :cursorLine="cursorLine"
-        @resize-start="onSidebarResizeStart"
-        @reload-refs="reloadReferenceLibrary"
-        @scroll-to-pos="onScrollToPos"
-      />
     </div>
 
     <SettingsDialog
@@ -230,37 +184,31 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useEditorUIStore } from '../stores/editorUI.js'
-import { useSidebarResize } from '../shared/composables/useSidebarResize.js'
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts.js'
 import { useFileStore } from '../stores/files.js'
 import { useSettingsStore } from '../stores/settings.js'
-import { useDeferredMarkdownPreview } from './composables/useDeferredMarkdownPreview.js'
 import { useDocumentBridge } from './composables/useDocumentBridge.js'
 import { installNativeEditorMenu, shouldInstallNativeEditorMenu } from './nativeMenu.js'
 import { platformKind } from '../shared/platform.js'
-import { relativeTime } from '../services/audit.js'
+import { relativeTime } from '../shared/time.js'
 import { readFile } from '../services/fileSystem.js'
 import { loadSession, saveSession } from '../services/session.js'
 import { createSessionPersist } from './sessionPersist.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
-import { citationExtensions } from './codemirror/citations.js'
 import { commentsExtension, setActiveComment as setActiveCommentEffect, getCommentsFromState, commentMutation } from './codemirror/comments.js'
 import { escapeAttr } from '../services/comments/parser.js'
 import { buildCommentsPrompt } from '../services/comments/prompt.js'
 import { EditorView } from '@codemirror/view'
-import { outlineExtension } from './codemirror/outline.js'
 import { useCommentsStore } from '../stores/comments.js'
 import { useProposalBridge, computeDiffFromReview, computeCompoundDiff } from './composables/useProposalBridge.js'
 import { useFileOpen } from './composables/useFileOpen.js'
-import { useScrollSync } from './composables/useScrollSync.js'
 import { useContentSync } from './composables/useContentSync.js'
 import { useCommentMutations } from './composables/useCommentMutations.js'
 import { useDiffReview } from './composables/useDiffReview.js'
 import { useTabManagement } from './composables/useTabManagement.js'
 import { requestGhostSuggestions } from '../services/ai/ghost.js'
 import { documentIdFromPath } from '../services/ai/context.js'
-import { loadLibrary } from '../services/references.js'
 import { createAutoSaveController } from './autoSaveController.js'
 import { fileDisplayName, footerSaveStatus, tabFromFile } from './saveStatus.js'
 import { useSaveFeedbackStore } from '../stores/saveFeedback.js'
@@ -268,32 +216,23 @@ import { useSaveFeedbackStore } from '../stores/saveFeedback.js'
 import AppFooter from './components/shell/AppFooter.vue'
 import AppHeader from './components/shell/AppHeader.vue'
 import SettingsDialog from '../shared/ui/SettingsDialog.vue'
-import Sidebar from './components/sidebar/Sidebar.vue'
 import EditorSurface from './components/workspace/EditorSurface.vue'
-import PreviewPane from './components/workspace/PreviewPane.vue'
 import InlineAI from './components/workspace/InlineAI.vue'
 import DiffBar from './components/workspace/DiffBar.vue'
 import DiffView from './components/workspace/DiffView.vue'
 import BatchDiffView from './components/workspace/BatchDiffView.vue'
-import IssueContextBar from './components/IssueContextBar.vue'
 import NewTabPage from './components/workspace/NewTabPage.vue'
 import { useDiffStore } from '../stores/diff.js'
-import { init as initTelemetry, emit as telemetryEmit } from '../services/telemetry.js'
 
 const props = defineProps({
   hideSidebar: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false },
 })
 
 const editorUI = useEditorUIStore()
 const state = editorUI
-const panelShown = computed(() => props.hideSidebar ? false : editorUI.panelShown)
-const { selectPanel, toggleSidebar, closePanel, closePanelOnNarrow, setViewMode, zoomIn, zoomOut, setZoomLevel } = editorUI
+const { zoomIn, zoomOut, setZoomLevel } = editorUI
 const showAppMenus = platformKind() !== 'macos'
-
-const NARROW_EDITOR_QUERY = '(max-width: 760px)'
-let narrowEditorQuery = null
-
-const { width: sidebarWidth, dragging: sidebarDragging, onPointerDown: onSidebarResizeStart } = useSidebarResize(240, { side: 'right' })
 
 const editorSettings = useSettingsStore()
 
@@ -310,9 +249,6 @@ const cursorLine = ref(0)
 const inlineAIState = ref(null)
 const inlineAIKey = ref(0)
 const editorSurfaceRef = ref(null)
-const previewPaneRef = ref(null)
-const referenceLibrary = ref([])
-const outlineItems = ref([])
 const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
@@ -333,13 +269,8 @@ watch(commentGateVisible, (v) => {
 })
 let sessionPersistCleanup = null
 
-const preview = useDeferredMarkdownPreview()
-const previewHtml = preview.html
 const documentBridge = useDocumentBridge()
 useFileOpen()
-
-const scrollSyncEnabled = computed(() => state.viewMode === 'split' && !diffStore.active)
-useScrollSync(editorSurfaceRef, computed(() => previewPaneRef.value?.rootEl ?? null), scrollSyncEnabled)
 
 const editorLineWidthMap = {
   normal: '80ch',
@@ -406,30 +337,6 @@ const footerSave = computed(() => footerSaveStatus({
 }))
 const settingsInitialSection = ref('appearance')
 
-const citationReferenceItems = computed(() => referenceLibrary.value.map(r => ({
-  key: r._key || r.key,
-  title: r.title || '',
-  author: (r.author || []).map(a => `${a.given || ''} ${a.family || ''}`).join(', '),
-  year: r.issued?.['date-parts']?.[0]?.[0]?.toString() || '',
-  journal: r['container-title'] || '',
-  doi: r.DOI || '',
-})))
-
-const citationDiagnostics = computed(() => {
-  const seen = new Set()
-  const duplicateKeys = []
-  for (const ref of citationReferenceItems.value) {
-    if (seen.has(ref.key)) duplicateKeys.push({ key: ref.key })
-    seen.add(ref.key)
-  }
-  return { duplicateKeys }
-})
-
-async function reloadReferenceLibrary() {
-  referenceLibrary.value = await loadLibrary()
-}
-
-provide('reloadReferenceLibrary', reloadReferenceLibrary)
 provide('editorSurfaceRef', editorSurfaceRef)
 provide('editorScrollInfo', editorScrollInfo)
 provide('editorGeometryVersion', editorGeometryVersion)
@@ -586,11 +493,6 @@ watch(
 )
 
 const editorExtensions = computed(() => [
-  outlineExtension({
-    onOutlineChange: (outline) => {
-      outlineItems.value = outline
-    },
-  }),
   commentsExtension({
     onCommentClick: (id) => {
       commentManager.setActiveComment(id)
@@ -618,10 +520,6 @@ const editorExtensions = computed(() => [
       return result.suggestions
     },
   })] : []),
-  ...citationExtensions(
-    () => citationReferenceItems.value,
-    () => citationDiagnostics.value
-  ),
   ...livePreviewExtension(
     () => editorSettings.editorLivePreview,
     () => currentFile.value?.path,
@@ -638,10 +536,8 @@ const contentSync = useContentSync({
   currentFile,
   fileManager,
   documentBridge,
-  preview,
-  getViewMode: () => state.viewMode,
 })
-const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot, previewEnabled } = contentSync
+const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot } = contentSync
 
 async function saveCurrentFile({ source = 'manual', mode = 'save' } = {}) {
   const feedbackMode = mode === 'saveAs' || !currentFile.value?.path ? 'saveAs' : 'save'
@@ -714,7 +610,6 @@ async function onOpenRecent(path) {
   try {
     const content = await readFile(path)
     await fileManager.openFile(path, content)
-    telemetryEmit('file.open', { ext: path?.split('.').pop() || 'unknown' })
   } catch {
     fileManager.removeRecentFile(path)
   }
@@ -767,12 +662,6 @@ async function onSaveStatusClick(status) {
   }
 }
 
-watch(() => state.viewMode, () => {
-  const content = flushEditorContent({ bridge: 'schedule', previewMode: 'none' })
-  if (!previewEnabled()) preview.render('', false)
-  else preview.render(content, true)
-})
-
 watch(() => editorSettings.editorAutoSave, (enabled) => {
   if (enabled) autoSave.schedule()
   else autoSave.clear()
@@ -797,8 +686,6 @@ function nativeMenuActions() {
     closeTab: () => onCloseTab(activeFileIndex.value),
     editCommand: onEditCommand,
     rewriteSelection: onRewriteSelection,
-    setView: onSetView,
-    toggleSidebar,
     openSettings,
   }
 }
@@ -842,18 +729,6 @@ watch(() => commentManager.activeCommentId, (id) => {
   if (!v) return
   v.dispatch({ effects: setActiveCommentEffect.of(id) })
 })
-
-// --- View ---
-
-function onSetView(mode) {
-  setViewMode(mode)
-}
-
-function cycleViewMode() {
-  const modes = ['source', 'split', 'preview']
-  const next = modes[(modes.indexOf(state.viewMode) + 1) % modes.length]
-  setViewMode(next)
-}
 
 // --- Toolbar actions ---
 
@@ -947,6 +822,14 @@ async function onInlineCommentAction({ type, id, text }) {
     return commentMutations.delete?.(id) || { ok: false, error: 'Comment mutation unavailable.' }
   }
 
+  if (type === 'resolve') {
+    return commentMutations.resolve?.(id) || { ok: false, error: 'Comment mutation unavailable.' }
+  }
+
+  if (type === 'reopen') {
+    return commentMutations.reopen?.(id) || { ok: false, error: 'Comment mutation unavailable.' }
+  }
+
   if (type === 'strip-all') {
     if (window.confirm('Remove all inline comments from this file?')) {
       return commentMutations.clearAll?.() || { ok: false, error: 'Comment mutation unavailable.' }
@@ -982,12 +865,6 @@ function onScrollToLine(lineNumber) {
     pos += lines[i].length + 1
   }
   editorSurfaceRef.value.scrollToPos(pos)
-  closePanelOnNarrow()
-}
-
-function onScrollToPos(pos) {
-  editorSurfaceRef.value?.scrollToPos(pos)
-  closePanelOnNarrow()
 }
 
 function buildSelectionContext(sel) {
@@ -1013,39 +890,12 @@ function openInlineAI(sel) {
   }
   inlineAIState.value = buildSelectionContext(sel)
   inlineAIKey.value++
-  telemetryEmit('inline_ai.use')
 }
 
 function onAskAgent() {
   const sel = editorSurfaceRef.value?.getSelection()
   if (!sel) return
   openInlineAI(sel)
-}
-
-async function onSendToAgent() {
-  const file = currentFile.value
-  if (!file?.path) return
-
-  if (file.meta && window.__TAURI_INTERNALS__) {
-    const entryId = file.path.split('/').pop().replace(/\.md$/, '')
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('board_send_to_agent', { filePath: file.path, entryId })
-    return
-  }
-
-  const comments = commentManager.comments.value
-    ? commentManager.comments.value.filter(c => c.status === 'active')
-    : []
-
-  const view = editorSurfaceRef.value?.getView?.()
-
-  const { submitReview } = await import('./composables/useSubmitReview.js')
-  await submitReview({
-    filePath: file.path,
-    editorView: view,
-    comments,
-    target: { type: 'new', projectId: 'general' },
-  })
 }
 
 function onSelectionCommand(sel) {
@@ -1228,18 +1078,13 @@ useKeyboardShortcuts({
   onNewTab: () => fileManager.newTab(),
   onCloseTab: () => onCloseTab(activeFileIndex.value),
   onRewriteSelection,
-  cycleViewMode,
   editorHasFocus: () => Boolean(editorSurfaceRef.value?.hasFocus?.()),
 })
 
 // --- Session persistence ---
 
 function onBeforeUnload() {
-  flushEditorContent({ bridge: 'flush', previewMode: 'none' })
-}
-
-function syncNarrowEditor(event) {
-  if (event.matches) closePanel()
+  flushEditorContent({ bridge: 'flush' })
 }
 
 function onEditorKeydown(event) {
@@ -1254,9 +1099,6 @@ function onEditorKeydown(event) {
       diffStore.deactivate()
     }
     return
-  }
-  if (event.key === 'Escape' && panelShown.value && narrowEditorQuery?.matches) {
-    closePanel()
   }
   if (diffStore.active && diffStore.viewMode === 'diff') {
     if (event.key === '[' || (event.key === 'ArrowUp' && event.altKey)) {
@@ -1276,12 +1118,7 @@ function onEditorKeydown(event) {
 
 onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload)
-  narrowEditorQuery = window.matchMedia?.(NARROW_EDITOR_QUERY) || null
-  narrowEditorQuery?.addEventListener?.('change', syncNarrowEditor)
   document.addEventListener('keydown', onEditorKeydown)
-
-  // Load reference library
-  loadLibrary().then(lib => { referenceLibrary.value = lib })
 
   // Restore session
   const session = await loadSession()
@@ -1306,19 +1143,8 @@ onMounted(async () => {
     if (session.activeFileIndex != null) {
       fileManager.setActiveTab(session.activeFileIndex)
     }
-    if (session.viewMode) state.viewMode = session.viewMode
     if (session.zoomLevel) state.zoomLevel = session.zoomLevel
-    if (session.sidebar) {
-      state.sidebarVisible = true
-      const panel = session.sidebar.panel ?? 'outline'
-      state.activePanel = ['outline', 'notes', 'refs', 'history'].includes(panel) ? panel : 'outline'
-      state.panelOpen = session.sidebar.panelOpen ?? true
-      if (session.sidebar.visible === false && session.sidebar.panelOpen !== false) {
-        state.panelOpen = false
-      }
-    }
   }
-  if (narrowEditorQuery?.matches) closePanel()
 
   // If no files restored, start with a blank file
   if (!fileManager.hasOpenFiles) {
@@ -1330,18 +1156,12 @@ onMounted(async () => {
     openFiles,
     recentFiles: computed(() => fileManager.recentFiles),
     activeFileIndex,
-    sidebarVisible: computed(() => state.sidebarVisible),
-    activePanel: computed(() => state.activePanel),
-    panelOpen: computed(() => state.panelOpen),
-    viewMode: computed(() => state.viewMode),
     zoomLevel: computed(() => state.zoomLevel),
   }, saveSession)
 
   syncOpenFileSnapshot()
   await syncNativeMenu()
   await bindNativeMenuFocusSync()
-
-  initTelemetry(editorSettings)
 
   // Dev: expose diff activation for console testing
   if (import.meta.env.DEV) {
@@ -1359,7 +1179,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
-  narrowEditorQuery?.removeEventListener?.('change', syncNarrowEditor)
   document.removeEventListener('keydown', onEditorKeydown)
   autoSave.clear()
   contentSync.dispose()
@@ -1370,7 +1189,6 @@ onUnmounted(() => {
   if (unlistenNativeMenuFocus) unlistenNativeMenuFocus()
   if (sessionPersistCleanup) sessionPersistCleanup()
   documentBridge.dispose()
-  preview.dispose()
 })
 </script>
 
@@ -1380,76 +1198,8 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.editor-sidebar-scrim {
-  display: none;
-}
-
 .editor-panes {
   min-width: 0;
-}
-
-@media (max-width: 760px) {
-  .editor-sidebar {
-    position: absolute;
-    inset: 0 0 0 auto;
-    z-index: 30;
-    max-width: 80%;
-    transform: translateX(104%);
-    visibility: hidden;
-    pointer-events: none;
-    box-shadow: -18px 0 44px rgba(0, 0, 0, 0.16);
-    transition:
-      transform 180ms ease,
-      visibility 0ms linear 180ms;
-  }
-
-  .editor-shell.is-sidebar-open .editor-sidebar {
-    transform: translateX(0);
-    visibility: visible;
-    pointer-events: auto;
-    transition:
-      transform 180ms ease,
-      visibility 0ms;
-  }
-
-  .editor-sidebar :deep(.sidebar-panel) {
-    width: 100% !important;
-  }
-
-  .editor-sidebar :deep(.resize-handle) {
-    display: none;
-  }
-
-  .editor-sidebar-scrim {
-    position: absolute;
-    inset: 0;
-    z-index: 20;
-    display: block;
-    background: rgba(20, 18, 14, 0.16);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 180ms ease;
-  }
-
-  .editor-shell.is-sidebar-open .editor-sidebar-scrim {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  .editor-panes.view-split {
-    flex-direction: column;
-  }
-
-  .editor-panes.view-split :deep(.editor-wrap) {
-    min-height: 48%;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-rule-light);
-  }
-
-  .editor-panes.view-split :deep(.preview-content) {
-    min-height: 34%;
-    border-left: 0;
-  }
 }
 
 .close-confirm-card {

@@ -20,10 +20,6 @@ vi.mock('./helpers.js', () => ({
   }),
 }))
 
-vi.mock('../../audit.js', () => ({
-  logAudit: vi.fn(),
-}))
-
 import { createCommentAddTool } from './commentAdd'
 import { createCommentReplyTool } from './commentReply'
 

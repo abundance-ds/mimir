@@ -39,11 +39,7 @@
             <div class="settings-body scrollbar-thin">
               <AppearanceSection v-if="activeSection === 'appearance'" />
               <EditorSection v-else-if="activeSection === 'editor'" />
-              <PanelSection v-else-if="activeSection === 'panel'" />
               <AISection v-else-if="activeSection === 'ai'" />
-              <ToolsSection v-else-if="activeSection === 'tools'" />
-              <UsageSection v-else-if="activeSection === 'usage'" />
-              <AuditSection v-else-if="activeSection === 'audit'" />
               <ShortcutsSection v-else-if="activeSection === 'shortcuts'" />
               <AboutSection v-else-if="activeSection === 'about'" />
             </div>
@@ -60,23 +56,15 @@ import './settings/settings-form.css'
 import AppearanceSection from './settings/AppearanceSection.vue'
 import EditorSection from './settings/EditorSection.vue'
 import AISection from './settings/AISection.vue'
-import PanelSection from './settings/PanelSection.vue'
-import ToolsSection from './settings/ToolsSection.vue'
-import UsageSection from './settings/UsageSection.vue'
 import ShortcutsSection from './settings/ShortcutsSection.vue'
-import AuditSection from './settings/AuditSection.vue'
 import AboutSection from './settings/AboutSection.vue'
 import {
   IconX,
   IconPalette,
   IconPencil,
   IconSparkles,
-  IconShield,
-  IconChartBar,
   IconKeyboard,
   IconInfoCircle,
-  IconClipboardList,
-  IconLayout,
 } from '@tabler/icons-vue'
 
 const props = defineProps({
@@ -89,13 +77,9 @@ const navGroups = [
   [
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
     { id: 'editor',     label: 'Editor',     icon: IconPencil },
-    { id: 'panel',      label: 'Panel',      icon: IconLayout },
     { id: 'ai',         label: 'Models',     icon: IconSparkles },
-    { id: 'tools',      label: 'Tools',      icon: IconShield },
   ],
   [
-    { id: 'usage',      label: 'Usage',      icon: IconChartBar },
-    { id: 'audit',      label: 'Audit',      icon: IconClipboardList },
     { id: 'shortcuts',  label: 'Shortcuts',  icon: IconKeyboard },
     { id: 'about',      label: 'About',      icon: IconInfoCircle },
   ],
@@ -116,11 +100,7 @@ watch(() => props.initialSection, (section) => {
 
 function mapSection(section) {
   if (['appearance', 'general'].includes(section)) return 'appearance'
-  if (['panel'].includes(section)) return 'panel'
   if (['models', 'ai'].includes(section)) return 'ai'
-  if (['tools'].includes(section)) return 'tools'
-  if (['usage'].includes(section)) return 'usage'
-  if (['audit', 'activity'].includes(section)) return 'audit'
   if (['shortcuts'].includes(section)) return 'shortcuts'
   if (['about', 'info'].includes(section)) return 'about'
   if (['editor', 'writing'].includes(section)) return 'editor'

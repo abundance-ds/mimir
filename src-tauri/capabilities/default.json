@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the editor window.",
-  "windows": ["main", "editor-*", "app-*", "tab-ghost"],
+  "windows": ["main", "app-*"],
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",
@@ -15,16 +15,6 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
-    "dialog:allow-ask",
-    "shell:allow-open",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        { "name": "binaries/docx-worker", "sidecar": true, "args": true },
-        { "name": "binaries/typst", "sidecar": true, "args": true }
-      ]
-    },
-    "updater:default",
-    "process:allow-restart"
+    "dialog:allow-ask"
   ]
 }

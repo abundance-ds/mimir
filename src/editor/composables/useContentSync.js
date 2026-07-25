@@ -5,26 +5,17 @@ export function useContentSync({
   currentFile,
   fileManager,
   documentBridge,
-  preview,
-  getViewMode,
 }) {
   let contentSyncTimer = null
-
-  function previewEnabled() {
-    return getViewMode() !== 'source'
-  }
 
   function currentEditorContent() {
     return editorSurfaceRef.value?.getContent?.() ?? currentFile.value?.content ?? ''
   }
 
-  function syncDerivedContent(content, { bridge = 'schedule', previewMode = 'schedule' } = {}) {
+  function syncDerivedContent(content, { bridge = 'schedule' } = {}) {
     const path = currentFile.value?.path || ''
     if (bridge === 'flush') documentBridge.flush(content, path)
     else if (bridge === 'schedule') documentBridge.schedule(content, path)
-
-    if (previewMode === 'flush') preview.render(content, previewEnabled())
-    else if (previewMode === 'schedule') preview.schedule(content, previewEnabled())
   }
 
   function flushEditorContent(options = {}) {
@@ -46,10 +37,10 @@ export function useContentSync({
     }, CONTENT_SYNC_DELAY)
   }
 
-  function syncOpenFileSnapshot({ bridge = 'flush', previewMode = 'flush' } = {}) {
+  function syncOpenFileSnapshot({ bridge = 'flush' } = {}) {
     const file = currentFile.value
     if (!file) return
-    syncDerivedContent(file.content || '', { bridge, previewMode })
+    syncDerivedContent(file.content || '', { bridge })
   }
 
   function dispose() {
@@ -61,7 +52,6 @@ export function useContentSync({
     flushEditorContent,
     scheduleContentSync,
     syncOpenFileSnapshot,
-    previewEnabled,
     dispose,
   }
 }

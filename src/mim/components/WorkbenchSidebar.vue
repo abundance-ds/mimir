@@ -38,18 +38,25 @@
     </button>
 
     <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Launchers and activities">
-      <div v-if="!collapsed" class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3">
+      <div
+        class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3"
+        :class="{ invisible: collapsed }"
+        :aria-hidden="collapsed"
+      >
         Launch
       </div>
       <SidebarRow
         v-for="launcher in launchers"
         :key="`launcher:${launcher.id}`"
         :data-sidebar-row="`launcher:${launcher.id}`"
-        :title="launcher.title"
+        :data-launcher-available="launcher.available === false ? 'false' : 'true'"
+        :aria-disabled="launcher.available === false ? 'true' : undefined"
+        :title="launcherTitle(launcher)"
         :label="launcher.title"
-        :meta="launcher.shortcut"
+        :meta="launcher.available === false ? 'missing' : launcher.shortcut"
         :collapsed="collapsed"
         :active="false"
+        :muted="launcher.available === false"
         @click="$emit('launch', launcher.id)"
       >
         <component
@@ -61,7 +68,11 @@
 
       <div class="mx-3 my-2 h-px bg-rule" />
 
-      <div v-if="!collapsed" class="flex items-center justify-between px-3 pb-1 pt-1">
+      <div
+        class="flex items-center justify-between px-3 pb-1 pt-1"
+        :class="{ invisible: collapsed }"
+        :aria-hidden="collapsed"
+      >
         <span class="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3">Activities</span>
         <span class="font-mono text-[9px] tabular-nums text-ink-4">{{ activities.length }}</span>
       </div>
@@ -95,11 +106,110 @@
             aria-label="Unread activity"
           />
         </span>
+        <template #label>
+          <input
+            v-if="renamingId === activity.id"
+            :data-activity-rename="activity.id"
+            v-model="renameDraft"
+            class="h-6 w-full min-w-0 border border-accent bg-surface px-1.5 text-[11px] text-ink outline-none"
+            aria-label="Activity name"
+            @click.stop
+            @keydown.enter.prevent="commitRename(activity)"
+            @keydown.escape.prevent="cancelRename"
+            @blur="commitRename(activity)"
+          />
+          <span v-else>{{ activity.title }}</span>
+        </template>
+        <template #trailing>
+          <button
+            type="button"
+            :data-activity-menu-button="activity.id"
+            :aria-expanded="activityMenuId === activity.id"
+            aria-label="Activity actions"
+            title="Activity actions"
+            class="grid size-7 place-items-center text-ink-4 opacity-0 hover:bg-chrome-high hover:text-ink group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            @click.stop="toggleActivityMenu(activity.id)"
+          >
+            <IconDots :size="14" :stroke-width="1.8" />
+          </button>
+          <div
+            v-if="activityMenuId === activity.id"
+            :data-activity-menu="activity.id"
+            class="absolute right-1 top-8 z-50 w-36 border border-rule bg-surface py-1 shadow-lg"
+            role="menu"
+            @click.stop
+          >
+            <button class="activity-menu-item" role="menuitem" @click="beginRename(activity)">
+              <IconPencil :size="12" /> Rename
+            </button>
+            <button
+              v-if="isLive(activity.status)"
+              class="activity-menu-item text-rem"
+              role="menuitem"
+              @click="runAction('stopActivity', activity.id)"
+            >
+              <IconPlayerStop :size="12" /> Stop
+            </button>
+            <button
+              v-if="activity.retention === 'durable' && !isLive(activity.status)"
+              class="activity-menu-item"
+              role="menuitem"
+              @click="runAction('archiveActivity', activity.id)"
+            >
+              <IconArchive :size="12" /> Archive
+            </button>
+            <button
+              v-if="!isLive(activity.status)"
+              class="activity-menu-item text-rem"
+              role="menuitem"
+              @click="runAction('clearActivity', activity.id)"
+            >
+              <IconTrash :size="12" /> Clear
+            </button>
+          </div>
+        </template>
       </SidebarRow>
 
       <div v-if="activities.length === 0 && !collapsed" class="px-3 py-3 text-[10px] leading-relaxed text-ink-3">
         Runs stay here while you work.
       </div>
+
+      <template v-if="archivedActivities.length">
+        <div class="mx-3 my-2 h-px bg-rule" />
+        <div
+          class="flex items-center justify-between px-3 pb-1 pt-1"
+          :class="{ invisible: collapsed }"
+          :aria-hidden="collapsed"
+        >
+          <span class="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3">Archived</span>
+          <span class="font-mono text-[9px] tabular-nums text-ink-4">{{ archivedActivities.length }}</span>
+        </div>
+        <SidebarRow
+          v-for="activity in archivedActivities"
+          :key="`archived:${activity.id}`"
+          :title="`${activity.title} — archived`"
+          :label="activity.title"
+          meta="archived"
+          :collapsed="collapsed"
+          muted
+          @click="runAction('restoreActivity', activity.id)"
+        >
+          <span class="grid size-7 place-items-center font-mono text-[10px] font-semibold">
+            {{ monogram(activity.title) }}
+          </span>
+          <template #trailing>
+            <button
+              type="button"
+              title="Restore Activity"
+              aria-label="Restore Activity"
+              class="grid size-7 place-items-center text-ink-4 opacity-0 hover:bg-chrome-high hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+              @click.stop="runAction('restoreActivity', activity.id)"
+            >
+              <IconArchiveOff :size="13" />
+            </button>
+          </template>
+        </SidebarRow>
+      </template>
     </nav>
 
     <button
@@ -119,8 +229,12 @@
 </template>
 
 <script setup>
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
+  IconArchive,
+  IconArchiveOff,
   IconApps,
+  IconDots,
   IconFileStack,
   IconFolder,
   IconLayoutSidebarLeftCollapse,
@@ -129,6 +243,9 @@ import {
   IconTerminal2,
   IconClockPlay,
   IconSparkles,
+  IconPencil,
+  IconPlayerStop,
+  IconTrash,
 } from '@tabler/icons-vue'
 import SidebarRow from './SidebarRow.vue'
 
@@ -138,10 +255,28 @@ defineProps({
   workspacePath: { type: String, default: '' },
   launchers: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
+  archivedActivities: { type: Array, default: () => [] },
   activeActivityId: { type: String, default: '' },
 })
 
-defineEmits(['launch', 'selectActivity', 'chooseWorkspace', 'toggleCollapse'])
+const emit = defineEmits([
+  'launch',
+  'selectActivity',
+  'chooseWorkspace',
+  'toggleCollapse',
+  'renameActivity',
+  'stopActivity',
+  'archiveActivity',
+  'restoreActivity',
+  'clearActivity',
+])
+const activityMenuId = ref('')
+const renamingId = ref('')
+const renameDraft = ref('')
+const LIVE_STATUSES = new Set(['ready', 'starting', 'working', 'needs-input', 'idle'])
+
+onMounted(() => document.addEventListener('pointerdown', closeActivityMenu))
+onUnmounted(() => document.removeEventListener('pointerdown', closeActivityMenu))
 
 const icons = {
   files: IconFileStack,
@@ -154,6 +289,11 @@ const icons = {
 
 function iconFor(name) {
   return icons[name] || icons.default
+}
+
+function launcherTitle(launcher) {
+  if (launcher.available !== false) return launcher.title
+  return `${launcher.title} — ${launcher.unavailableReason || 'Unavailable'}`
 }
 
 function monogram(title) {
@@ -183,4 +323,63 @@ function statusClass(status) {
     interrupted: 'bg-ink-4',
   }[status] || 'bg-ink-4'
 }
+
+function isLive(status) {
+  return LIVE_STATUSES.has(status)
+}
+
+function toggleActivityMenu(id) {
+  activityMenuId.value = activityMenuId.value === id ? '' : id
+}
+
+function closeActivityMenu() {
+  activityMenuId.value = ''
+}
+
+async function beginRename(activity) {
+  closeActivityMenu()
+  renamingId.value = activity.id
+  renameDraft.value = activity.title
+  await nextTick()
+  const field = document.querySelector('[data-activity-rename]')
+  field?.focus()
+  field?.select()
+}
+
+function commitRename(activity) {
+  if (renamingId.value !== activity.id) return
+  const title = renameDraft.value.trim()
+  renamingId.value = ''
+  if (title && title !== activity.title) {
+    emit('renameActivity', { id: activity.id, title })
+  }
+}
+
+function cancelRename() {
+  renamingId.value = ''
+}
+
+function runAction(event, id) {
+  closeActivityMenu()
+  emit(event, id)
+}
 </script>
+
+<style scoped>
+.activity-menu-item {
+  display: flex;
+  width: 100%;
+  height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  text-align: left;
+  font-size: 10px;
+}
+
+.activity-menu-item:hover,
+.activity-menu-item:focus-visible {
+  background: var(--color-chrome);
+  outline: none;
+}
+</style>

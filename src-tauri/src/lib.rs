@@ -7,6 +7,8 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
+pub mod activities;
+mod activity_commands;
 mod ai;
 mod ai_keys;
 mod ai_models;
@@ -14,22 +16,22 @@ mod ai_providers;
 mod ai_proxy;
 mod ai_transport;
 mod ai_usage;
-mod activities;
 mod apps;
-mod audit;
-mod docx_worker;
+pub mod file_index;
+mod file_index_commands;
 mod file_open;
 mod file_search;
 mod git;
-mod pty;
+mod launchers;
+pub mod mimx;
 mod persistence;
-mod references;
-mod search;
+pub mod routine_runtime;
+pub mod routines;
 mod shell_exec;
+pub mod tool_bridge;
+pub mod tool_registry;
+mod tool_runtime;
 mod tool_server;
-mod tool_registry;
-mod typst_export;
-mod usage;
 
 #[cfg(target_os = "macos")]
 fn enable_macos_spellcheck() {
@@ -201,52 +203,6 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
 }
 
 #[tauri::command]
-fn copy_dir(src: String, dest: String) -> Result<(), String> {
-    fn copy_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-        fs::create_dir_all(to)?;
-        for entry in fs::read_dir(from)? {
-            let entry = entry?;
-            let target = to.join(entry.file_name());
-            if entry.file_type()?.is_dir() {
-                copy_recursive(&entry.path(), &target)?;
-            } else {
-                fs::copy(entry.path(), target)?;
-            }
-        }
-        Ok(())
-    }
-    copy_recursive(std::path::Path::new(&src), std::path::Path::new(&dest))
-        .map_err(|e| format!("Could not copy {} → {}: {}", src, dest, e))
-}
-
-#[tauri::command]
-fn symlink_dir(src: String, dest: String) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(&src, &dest)
-            .map_err(|e| format!("Could not symlink {} → {}: {}", src, dest, e))
-    }
-    #[cfg(windows)]
-    {
-        std::os::windows::fs::symlink_dir(&src, &dest)
-            .map_err(|e| format!("Could not symlink {} → {}: {}", src, dest, e))
-    }
-}
-
-#[tauri::command]
-fn delete_path(path: String) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !p.exists() {
-        return Ok(());
-    }
-    if p.is_dir() {
-        fs::remove_dir_all(&p).map_err(|e| format!("Could not remove {}: {}", path, e))
-    } else {
-        fs::remove_file(&p).map_err(|e| format!("Could not remove {}: {}", path, e))
-    }
-}
-
-#[tauri::command]
 fn reveal_in_finder(path: String) -> Result<(), String> {
     let _p = std::path::Path::new(&path);
 
@@ -403,18 +359,14 @@ fn pending_proposals(store: &ProposalStore) -> Vec<serde_json::Value> {
 }
 
 fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[serde_json::Value]) {
-    if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("mim://proposals-state", proposals);
-    }
     let pending: Vec<serde_json::Value> = proposals
         .iter()
         .filter(|p| proposal_status(p) == "pending")
         .cloned()
         .collect();
-    for window in app.webview_windows().values() {
-        if window.label().starts_with("editor-") {
-            let _ = window.emit("mim://proposals-changed", &pending);
-        }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.emit("mim://proposals-state", proposals);
+        let _ = main.emit("mim://proposals-changed", &pending);
     }
 }
 
@@ -424,14 +376,14 @@ fn broadcast_proposal_result(
     status: &str,
     detail: &str,
 ) {
-    if let Some(panel) = app.get_webview_window("main") {
+    if let Some(main) = app.get_webview_window("main") {
         let result = serde_json::json!({
             "id": proposal_id(proposal).unwrap_or(""),
             "sessionId": proposal_session_id(proposal),
             "status": status,
             "detail": detail,
         });
-        let _ = panel.emit("mim://proposal-result", &result);
+        let _ = main.emit("mim://proposal-result", &result);
     }
 }
 
@@ -784,44 +736,6 @@ fn proposal_reject(
 }
 
 #[tauri::command]
-fn proposal_send(
-    app: tauri::AppHandle,
-    payload: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let mut targets = Vec::new();
-    for window in app.webview_windows().values() {
-        let label = window.label().to_string();
-        if label.starts_with("editor-") {
-            let _ = window.emit("mim://proposal-apply", &payload);
-            targets.push(label);
-        }
-    }
-    Ok(serde_json::json!({
-        "delivered": !targets.is_empty(),
-        "targets": targets,
-    }))
-}
-
-#[tauri::command]
-fn diff_open(
-    app: tauri::AppHandle,
-    payload: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let mut targets = Vec::new();
-    for window in app.webview_windows().values() {
-        let label = window.label().to_string();
-        if label.starts_with("editor-") {
-            let _ = window.emit("mim://diff-open", &payload);
-            targets.push(label);
-        }
-    }
-    Ok(serde_json::json!({
-        "delivered": !targets.is_empty(),
-        "targets": targets,
-    }))
-}
-
-#[tauri::command]
 fn proposal_respond(
     app: tauri::AppHandle,
     state: tauri::State<ProposalState>,
@@ -861,8 +775,8 @@ fn proposal_respond(
         store.proposals.clone()
     };
     broadcast_proposal_state(&app, &proposals_snapshot);
-    if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("mim://proposal-result", &result);
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.emit("mim://proposal-result", &result);
     }
     Ok(())
 }
@@ -870,45 +784,13 @@ fn proposal_respond(
 #[tauri::command]
 fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
     let payload = serde_json::json!({ "path": path, "content": content });
-    for window in app.webview_windows().values() {
-        if window.label().starts_with("editor-") {
-            let _ = window.emit("mim://file-updated", &payload);
-        }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.emit("mim://file-updated", &payload);
     }
     Ok(())
 }
 
-#[tauri::command]
-fn document_context_send(app: tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
-    if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("mim://document-changed", &payload);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn comments_submit(app: tauri::AppHandle, payload: serde_json::Value) -> Result<(), String> {
-    if let Some(panel) = app.get_webview_window("main") {
-        let _ = panel.emit("mim://comments-submit", &payload);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn board_send_to_agent(
-    app: tauri::AppHandle,
-    file_path: String,
-    entry_id: String,
-) -> Result<(), String> {
-    if let Some(panel) = app.get_webview_window("main") {
-        let payload = serde_json::json!({ "filePath": file_path, "entryId": entry_id });
-        let _ = panel.emit("mim://board-send-to-agent", &payload);
-        let _ = panel.set_focus();
-    }
-    Ok(())
-}
-
-fn create_panel_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<tauri::WebviewWindow> {
+fn create_main_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<tauri::WebviewWindow> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(manager, "main", tauri::WebviewUrl::App("/".into()))
             .title("Mim Panel")
@@ -930,18 +812,6 @@ fn create_panel_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<tau
 }
 
 #[tauri::command]
-fn focus_main_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.unminimize();
-        win.set_focus().map_err(|e| e.to_string())
-    } else {
-        create_panel_window(&app).map_err(|e| e.to_string())?;
-        Ok(())
-    }
-}
-
-#[tauri::command]
 fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
     let caller = window.label().to_string();
     for (label, w) in window.app_handle().webview_windows() {
@@ -952,284 +822,68 @@ fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn get_cursor_screen_position() -> Option<(f64, f64)> {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSEvent, NSScreen};
-    let point = NSEvent::mouseLocation();
-    let mtm = unsafe { MainThreadMarker::new_unchecked() };
-    let screens = NSScreen::screens(mtm);
-    if screens.count() == 0 {
-        return None;
-    }
-    let main_screen = screens.objectAtIndex(0);
-    let screen_height = main_screen.frame().size.height;
-    Some((point.x, screen_height - point.y))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn get_cursor_screen_position() -> Option<(f64, f64)> {
-    None
-}
-
-#[tauri::command]
-fn get_cursor_position(screen_x: f64, screen_y: f64) -> (f64, f64) {
-    get_cursor_screen_position().unwrap_or((screen_x, screen_y))
-}
-
-#[tauri::command]
-fn tab_drag_resolve(
-    app: tauri::AppHandle,
-    source_label: String,
-    screen_x: f64,
-    screen_y: f64,
-    file_data: serde_json::Value,
-) -> Result<String, String> {
-    let os_cursor = get_cursor_screen_position();
-    let (sx, sy) = os_cursor.unwrap_or((screen_x, screen_y));
-
-    for window in app.webview_windows().values() {
-        let label = window.label().to_string();
-        if !label.starts_with("editor-") || label == source_label {
-            continue;
-        }
-        if window.is_minimized().unwrap_or(false) {
-            continue;
-        }
-
-        let pos = match window.outer_position() {
-            Ok(p) => p,
-            Err(_) => {
-                continue;
-            }
-        };
-        let size = match window.outer_size() {
-            Ok(s) => s,
-            Err(_) => {
-                continue;
-            }
-        };
-        let scale = window.scale_factor().unwrap_or(1.0);
-
-        let x = pos.x as f64 / scale;
-        let y = pos.y as f64 / scale;
-        let w = size.width as f64 / scale;
-        let h = size.height as f64 / scale;
-
-        let hit = sx >= x && sx <= x + w && sy >= y && sy <= y + h;
-
-        if hit {
-            let _ = app.emit_to(&label, "mim://tab-receive", &file_data);
-            let _ = window.set_focus();
-            return Ok("transferred".to_string());
-        }
-    }
-    Ok("create_new".to_string())
-}
-
-#[tauri::command]
-fn read_bundled_profile(app: tauri::AppHandle) -> Result<String, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("No resource dir: {e}"))?;
-    let path = resource_dir.join("profile.json");
-    std::fs::read_to_string(&path).map_err(|e| format!("Could not read profile.json: {e}"))
-}
-
-#[derive(serde::Serialize)]
-struct BundledSkillEntry {
-    id: String,
-    content: String,
-}
-
-#[tauri::command]
-fn list_bundled_skills(app: tauri::AppHandle) -> Result<Vec<BundledSkillEntry>, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("No resource dir: {e}"))?;
-    let skills_dir = resource_dir.join("bundled-skills");
-
-    let mut entries = Vec::new();
-    let read_dir = match std::fs::read_dir(&skills_dir) {
-        Ok(rd) => rd,
-        Err(_) => return Ok(entries),
-    };
-
-    for entry in read_dir.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let skill_path = entry.path().join("SKILL.md");
-        if let Ok(content) = std::fs::read_to_string(&skill_path) {
-            entries.push(BundledSkillEntry {
-                id: entry.file_name().to_string_lossy().into_owned(),
-                content,
-            });
-        }
-    }
-
-    Ok(entries)
-}
-
-#[derive(serde::Serialize)]
-struct BundledFileEntry {
-    path: String,
-    content: String,
-}
-
-#[derive(serde::Serialize)]
-struct BundledAppEntry {
-    id: String,
-    manifest: String,
-    files: Vec<BundledFileEntry>,
-}
-
-#[tauri::command]
-fn list_bundled_apps(app: tauri::AppHandle) -> Result<Vec<BundledAppEntry>, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("No resource dir: {e}"))?;
-    let apps_dir = resource_dir.join("bundled-apps");
-
-    let mut entries = Vec::new();
-    let read_dir = match std::fs::read_dir(&apps_dir) {
-        Ok(rd) => rd,
-        Err(_) => return Ok(entries),
-    };
-
-    for entry in read_dir.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let app_dir = entry.path();
-        let manifest_path = app_dir.join("manifest.json");
-        let manifest = match std::fs::read_to_string(&manifest_path) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-
-        let mut files = Vec::new();
-        let mut dirs_to_scan = vec![app_dir.clone()];
-        while let Some(dir) = dirs_to_scan.pop() {
-            if let Ok(dir_entries) = std::fs::read_dir(&dir) {
-                for file_entry in dir_entries.flatten() {
-                    let rel = file_entry
-                        .path()
-                        .strip_prefix(&app_dir)
-                        .unwrap_or(file_entry.path().as_path())
-                        .to_string_lossy()
-                        .into_owned();
-                    if rel == "manifest.json" || rel.starts_with("data/") {
-                        continue;
-                    }
-                    if file_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        dirs_to_scan.push(file_entry.path());
-                    } else if file_entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                        if let Ok(content) = std::fs::read_to_string(file_entry.path()) {
-                            files.push(BundledFileEntry { path: rel, content });
-                        }
-                    }
-                }
-            }
-        }
-
-        entries.push(BundledAppEntry {
-            id: entry.file_name().to_string_lossy().into_owned(),
-            manifest,
-            files,
-        });
-    }
-
-    Ok(entries)
-}
-
-fn serve_workflow_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    let path = request.uri().path().trim_start_matches('/');
-
-    if path.contains("..") || path.is_empty() {
-        return tauri::http::Response::builder()
-            .status(403)
-            .body(b"Forbidden".to_vec())
-            .unwrap();
-    }
-
-    let home = match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        Some(h) => h,
-        None => {
-            return tauri::http::Response::builder()
-                .status(500)
-                .body(b"No home dir".to_vec())
-                .unwrap()
-        }
-    };
-
-    let file_path = PathBuf::from(home)
-        .join(".mim")
-        .join("workflows")
-        .join(path);
-
-    match fs::read(&file_path) {
-        Ok(content) => {
-            let mime = match path.rsplit('.').next().unwrap_or("") {
-                "js" | "mjs" => "application/javascript",
-                "json" => "application/json",
-                "css" => "text/css",
-                "txt" | "md" => "text/plain",
-                _ => "application/octet-stream",
-            };
-            tauri::http::Response::builder()
-                .status(200)
-                .header("Content-Type", mime)
-                .header("Access-Control-Allow-Origin", "*")
-                .body(content)
-                .unwrap()
-        }
-        Err(_) => tauri::http::Response::builder()
-            .status(404)
-            .body(format!("Not found: {}", path).into_bytes())
-            .unwrap(),
-    }
-}
-
 pub fn run() {
+    let tool_registry = tool_registry::ToolRegistry::default();
+    let tool_runtime = tool_runtime::ToolRuntime::new(tool_registry.clone());
+    let activity_supervisor =
+        activities::ActivitySupervisor::new(activities::ActivitySupervisorConfig::default())
+            .expect("activity supervisor must initialize");
+    let routine_runtime = routine_runtime::RoutineRuntime::new(
+        routine_runtime::RoutineRuntimeConfig::default(),
+        activity_supervisor.clone(),
+    )
+    .expect("routine runtime must initialize");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .register_uri_scheme_protocol("wf", |_app, request| serve_workflow_file(request))
         .register_uri_scheme_protocol("app", |_app, request| apps::serve_app_file(request))
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             let paths = file_open::filter_file_args(&args);
             file_open::do_open_files_in_editor(app, paths);
         }))
         .manage(ProposalState::default())
+        .manage(activity_supervisor)
+        .manage(routine_runtime)
         .manage(ai_proxy::AiStreamState::default())
-        .manage(usage::UsageDbState::default())
-        .manage(audit::AuditDbState::default())
-        .manage(pty::PtyState::default())
         .manage(file_open::PendingFilePaths::default())
+        .manage(file_index_commands::FileIndexState::default())
         .manage(tool_server::ToolServerState::default())
-        .manage(tool_registry::ToolRegistry::default())
+        .manage(tool_registry)
+        .manage(tool_runtime)
         .setup(|app| {
             #[cfg(target_os = "macos")]
             enable_macos_spellcheck();
 
-            let panel = create_panel_window(app)?;
+            mimx::install().map_err(std::io::Error::other)?;
+            create_main_window(app)?;
+            let supervisor = app.state::<activities::ActivitySupervisor>();
+            activity_commands::TauriActivitySink::install(app.handle(), &supervisor);
+            let routines = app.state::<routine_runtime::RoutineRuntime>();
+            routine_runtime::TauriRoutineSink::install(app.handle(), &routines);
+            routines.start().map_err(std::io::Error::other)?;
+            app.state::<tool_runtime::ToolRuntime>()
+                .initialize(app.handle())
+                .map_err(std::io::Error::other)?;
 
             let cli_files = file_open::filter_file_args(&std::env::args().collect::<Vec<_>>());
             if !cli_files.is_empty() {
                 let state = app.state::<file_open::PendingFilePaths>();
                 *state.0.lock().unwrap() = cli_files;
-                file_open::create_editor_window(app)?;
             }
 
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                let app = window.app_handle().clone();
+                let window_id = window.label().to_string();
+                tauri::async_runtime::spawn(async move {
+                    app.state::<tool_runtime::ToolRuntime>()
+                        .disconnect_window(&window_id)
+                        .await;
+                });
+            }
+
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::Focused(false) = event {
                 log::debug!(
@@ -1272,33 +926,7 @@ pub fn run() {
             path_exists,
             create_dir,
             list_dir,
-            copy_dir,
-            symlink_dir,
-            delete_path,
-            references::ref_dir,
-            references::ref_list,
-            references::ref_add,
-            references::ref_remove,
-            references::ref_update,
-            typst_export::export_pdf,
-            usage::usage_record,
-            usage::usage_query_month,
-            usage::usage_query_daily,
-            usage::usage_get_setting,
-            usage::usage_set_setting,
-            usage::tool_execution_record,
-            usage::tool_execution_query,
-            usage::usage_query_month_csv,
-            audit::audit_log,
-            audit::audit_query,
-            audit::audit_query_summary,
-            audit::audit_export_csv,
-            git::git_clone,
-            git::git_clone_authenticated,
-            git::git_init,
             git::git_status,
-            git::git_file_log,
-            git::git_file_at_revision,
             push_proposals,
             get_proposals_for_path,
             proposal_create,
@@ -1306,53 +934,70 @@ pub fn run() {
             proposal_register_editor,
             proposal_apply,
             proposal_reject,
-            proposal_send,
             proposal_respond,
             notify_file_updated,
-            diff_open,
-            document_context_send,
-            comments_submit,
-            board_send_to_agent,
             settings_changed,
-            focus_main_window,
             spell_suggest,
-            docx_worker::docx_annotate,
-            docx_worker::docx_read_comments,
-            docx_worker::docx_validate,
             shell_exec::shell_exec,
-            get_cursor_position,
-            tab_drag_resolve,
-            pty::pty_spawn,
-            pty::pty_write,
-            pty::pty_resize,
-            pty::pty_kill,
+            activity_commands::activity_list,
+            activity_commands::activity_spawn,
+            activity_commands::activity_snapshot,
+            activity_commands::activity_write,
+            activity_commands::activity_resize,
+            activity_commands::activity_stop,
+            activity_commands::activity_interrupt_all,
+            activity_commands::activity_flush,
+            launchers::launcher_detect_agents,
+            launchers::launcher_load_config,
+            launchers::launcher_save_config,
+            launchers::launcher_resolve,
+            routine_runtime::routine_catalog,
+            routine_runtime::routine_reload,
+            routine_runtime::routine_run_now,
             file_open::take_pending_files,
             file_open::open_files_in_editor,
-            apps::app_discover,
-            apps::app_create,
-            apps::app_write_file,
-            apps::app_delete,
+            file_index_commands::file_index_open,
+            file_index_commands::file_index_files,
+            file_index_commands::file_index_filter,
+            file_index_commands::file_index_refresh,
+            file_index_commands::file_index_begin_search,
+            file_index_commands::file_index_cancel_search,
+            file_index_commands::file_index_search,
+            apps::app_catalog,
+            apps::app_resolve,
             apps::app_open_window,
             apps::app_data_load,
             apps::app_data_save,
             apps::app_data_delete,
-            apps::app_data_keys,
             apps::app_http_request,
-            search::search_sessions,
             file_search::search_file_content,
             reveal_in_finder,
-            read_bundled_profile,
-            list_bundled_skills,
-            list_bundled_apps,
             tool_server::tool_server_start,
             tool_server::tool_server_stop,
             tool_server::tool_server_status,
             tool_server::tool_call_response,
+            tool_runtime::tool_registry_snapshot,
+            tool_runtime::tool_registry_list,
+            tool_runtime::tool_registry_call,
+            tool_runtime::tool_ui_provider_reconcile,
+            tool_runtime::tool_ui_provider_unregister,
+            tool_runtime::tool_provider_window_disconnected,
+            tool_runtime::tool_app_provider_reconcile,
+            tool_runtime::tool_app_provider_unregister,
+            tool_runtime::tool_relay_response,
+            tool_runtime::tool_relay_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mim Panel")
         .run(|app_handle, event| {
-            let _ = &app_handle;
+            if matches!(
+                &event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                app_handle
+                    .state::<routine_runtime::RoutineRuntime>()
+                    .stop_background();
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = event {
                 let paths: Vec<String> = urls

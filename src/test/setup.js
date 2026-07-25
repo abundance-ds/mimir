@@ -8,8 +8,7 @@ beforeEach(() => {
 
 // --- Tauri mocks (prevent import errors in component tests) ---
 
-// Every command registered in src-tauri/src/lib.rs → generate_handler![...]
-// Tauri strips module prefixes, so `usage::usage_record` becomes `usage_record`.
+// Every command registered in src-tauri/src/lib.rs → generate_handler![...].
 // Keep this list in sync when adding/removing Rust commands.
 const VALID_TAURI_COMMANDS = new Set([
   // ai
@@ -18,46 +17,42 @@ const VALID_TAURI_COMMANDS = new Set([
   'ai_proxy_stream', 'ai_abort', 'ai_cleanup',
   // filesystem (top-level)
   'read_text_file', 'read_binary_file', 'write_text_file', 'write_binary_file',
-  'path_exists', 'create_dir', 'list_dir', 'copy_dir', 'symlink_dir', 'delete_path',
-  // references
-  'ref_dir', 'ref_list', 'ref_add', 'ref_remove', 'ref_update',
-  // typst_export
-  'export_pdf',
-  // usage
-  'usage_record', 'usage_query_month', 'usage_query_daily',
-  'usage_get_setting', 'usage_set_setting',
-  'tool_execution_record', 'tool_execution_query', 'usage_query_month_csv',
-  // audit
-  'audit_log', 'audit_query', 'audit_query_summary', 'audit_export_csv',
+  'path_exists', 'create_dir', 'list_dir',
   // git
-  'git_clone', 'git_clone_authenticated', 'git_init', 'git_status', 'git_file_log', 'git_file_at_revision',
+  'git_status',
   // IPC / window coordination (top-level)
   'proposal_create', 'proposal_list', 'proposal_register_editor', 'proposal_apply', 'proposal_reject',
-  'proposal_send', 'proposal_respond', 'diff_open', 'notify_file_updated',
+  'proposal_respond', 'notify_file_updated', 'get_proposals_for_path',
   'document_context_send', 'comments_submit', 'settings_changed', 'focus_main_window',
   // spell
   'spell_suggest',
-  // docx_worker
-  'docx_annotate', 'docx_read_comments', 'docx_validate',
   // shell_exec
   'shell_exec',
-  // cursor / tabs (top-level)
-  'get_cursor_position', 'tab_drag_resolve',
-  // pty
-  'pty_spawn', 'pty_write', 'pty_resize', 'pty_kill',
+  // Activities and launcher presets
+  'activity_list', 'activity_spawn', 'activity_snapshot', 'activity_write',
+  'activity_resize', 'activity_stop', 'activity_interrupt_all', 'activity_flush',
+  'activity_rename', 'activity_set_archived', 'activity_clear',
+  'launcher_detect_agents', 'launcher_load_config', 'launcher_save_config', 'launcher_resolve',
   // file_open
   'take_pending_files', 'open_files_in_editor',
   // apps
-  'app_discover', 'app_create', 'app_write_file', 'app_delete', 'app_open_window',
-  'app_data_load', 'app_data_save', 'app_data_delete', 'app_data_keys',
-  // search
-  'search_sessions',
-  // file_search
+  'app_open_window', 'app_data_load', 'app_data_save', 'app_data_delete',
+  'app_catalog', 'app_resolve', 'app_http_request',
+  // routines
+  'routine_catalog', 'routine_reload', 'routine_run_now',
+  // canonical dynamic tool providers
+  'tool_server_start', 'tool_server_stop', 'tool_server_status', 'tool_call_response',
+  'tool_registry_snapshot', 'tool_registry_list', 'tool_registry_call',
+  'tool_ui_provider_reconcile', 'tool_ui_provider_unregister',
+  'tool_provider_window_disconnected',
+  'tool_app_provider_reconcile', 'tool_app_provider_unregister', 'tool_relay_response',
+  'tool_relay_cancel',
+  // file indexing and content search
+  'file_index_open', 'file_index_files', 'file_index_filter', 'file_index_refresh',
+  'file_index_begin_search', 'file_index_cancel_search', 'file_index_search',
   'search_file_content',
   // reveal
   'reveal_in_finder',
-  // profile / bundled resources
-  'read_bundled_profile', 'list_bundled_skills', 'list_bundled_apps',
 ])
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -89,8 +84,4 @@ vi.mock('@tauri-apps/api/window', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
   save: vi.fn(),
-}))
-
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  Command: vi.fn(),
 }))

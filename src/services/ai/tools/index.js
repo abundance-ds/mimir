@@ -6,8 +6,6 @@ import { createCreateTool } from './create'
 import { createCommentAddTool } from './commentAdd'
 import { createCommentReplyTool } from './commentReply'
 import { createSearchWebTool } from './searchWeb'
-import { createAnnotateDocxTool } from './annotateDocx'
-import { createShowTool } from './show'
 import { createShellTool } from './shell'
 import { limitText, MAX_TOOL_OUTPUT_CHARS } from './helpers'
 
@@ -23,8 +21,6 @@ export function createMimTools(context = {}) {
     ...createCommentAddTool(context),
     ...createCommentReplyTool(context),
     ...createSearchWebTool(context),
-    ...createAnnotateDocxTool(context),
-    ...createShowTool(context),
     ...createShellTool(context),
   }
 

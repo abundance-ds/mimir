@@ -124,8 +124,6 @@ defineExpose({
       'checkbox': () => fmt.toggleCheckbox(view.value),
       'link': () => fmt.insertLink(view.value),
       'image': () => fmt.insertImage(view.value),
-      'cite': () => fmt.insertCitation(view.value),
-      'citation': () => fmt.insertCitation(view.value),
       'strikethrough': () => fmt.toggleStrikethrough(view.value),
       'blockquote': () => fmt.toggleBlockquote(view.value),
       'horizontal-rule': () => fmt.insertHorizontalRule(view.value),

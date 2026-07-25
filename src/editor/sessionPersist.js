@@ -9,12 +9,6 @@ export function createSessionPersist(state, save) {
       .map(f => f.path ? { path: f.path } : { path: null, content: f.content }),
     recentFiles: [...state.recentFiles.value],
     activeFileIndex: state.activeFileIndex.value,
-    sidebar: {
-      visible: state.sidebarVisible.value,
-      panel: state.activePanel.value,
-      panelOpen: state.panelOpen.value,
-    },
-    viewMode: state.viewMode.value,
     zoomLevel: state.zoomLevel.value,
   }))
 

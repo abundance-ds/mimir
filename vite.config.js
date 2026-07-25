@@ -34,8 +34,6 @@ export default defineConfig({
             '@ai-sdk/vue',
             'ai',
           ],
-          'docx': ['docx'],
-          'marked': ['marked'],
         },
       },
     },

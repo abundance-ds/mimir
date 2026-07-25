@@ -39,15 +39,16 @@ describe('settings store', () => {
     expect(store.aiGhostSuggestions).toBe(true)
     expect(store.aiGhostModel).toBe('auto')
     expect(store.aiInlineRewrite).toBe(true)
-    expect(store.exportFormat).toBe('pdf')
-    expect(store.exportPdfTemplate).toBe('clean')
-    expect(store.exportCitationStyle).toBe('apa')
-    expect(store.exportBibliography).toBe(true)
-    expect(store.exportPdfPageSize).toBe('a4')
-    expect(store.exportDocxFont).toBe('Calibri')
-    expect(store.exportDocxPageSize).toBe('a4')
-    expect(store.disabledTools).toEqual([])
-    expect(store.aiApprovalMode).toBe('normal')
+    expect(store.mimWorkspaceFolder).toBe('')
+    expect(store.workbenchLayout).toEqual({
+      sidebar: { state: 'expanded', width: 240 },
+      activity: { state: 'expanded', width: 560 },
+      editor: { state: 'expanded', width: 520 },
+      activeActivityId: 'files',
+    })
+    expect(store.exportFormat).toBeUndefined()
+    expect(store.telemetryEnabled).toBeUndefined()
+    expect(store.aiApprovalMode).toBeUndefined()
   })
 
   it('isDarkTheme returns true for dark themes', () => {
@@ -89,8 +90,23 @@ describe('settings store', () => {
 
   it('set() works for array settings', () => {
     const store = useSettingsStore()
-    store.set('disabledTools', ['tool_a', 'tool_b'])
-    expect(store.disabledTools).toEqual(['tool_a', 'tool_b'])
+    store.set('recentAppIds', ['one', 'two'])
+    expect(store.recentAppIds).toEqual(['one', 'two'])
+  })
+
+  it('keeps all shell persistence in one detached workbench object', () => {
+    const store = useSettingsStore()
+    const layout = {
+      sidebar: { state: 'rail', width: 300 },
+      activity: { state: 'expanded', width: 620 },
+      editor: { state: 'expanded', width: 480 },
+      activeActivityId: 'agent:review',
+    }
+    store.set('workbenchLayout', layout)
+    layout.sidebar.width = 1
+
+    expect(store.workbenchLayout.sidebar.width).toBe(300)
+    expect(store.workbenchLayout.activeActivityId).toBe('agent:review')
   })
 
   // ── Debounced save ──

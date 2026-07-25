@@ -15,10 +15,10 @@ function commentBtn(wrapper) {
 }
 
 describe('EditorToolbar', () => {
-  it('renders all 16 toolbar buttons (15 format + 1 comment)', () => {
+  it('renders all 15 toolbar buttons (14 format + 1 comment)', () => {
     const w = mountToolbar()
     const btns = w.findAll('button.toolbar-btn')
-    expect(btns).toHaveLength(16)
+    expect(btns).toHaveLength(15)
   })
 
   it('emits format event with correct name on click', async () => {
@@ -45,7 +45,7 @@ describe('EditorToolbar', () => {
     const cases = [
       ['Heading 1', 'heading-1'],
       ['Bullet List (⇧⌘8)', 'bullet-list'],
-      ['Citation (⇧⌘C)', 'cite'],
+      ['Blockquote (⇧⌘.)', 'blockquote'],
     ]
     for (const [title, expected] of cases) {
       const btn = btnByTitle(w, title)
@@ -56,7 +56,7 @@ describe('EditorToolbar', () => {
     expect(emitted).toHaveLength(3)
     expect(emitted[0]).toEqual(['heading-1'])
     expect(emitted[1]).toEqual(['bullet-list'])
-    expect(emitted[2]).toEqual(['cite'])
+    expect(emitted[2]).toEqual(['blockquote'])
   })
 
   it('no buttons highlighted when activeFormats is empty', () => {

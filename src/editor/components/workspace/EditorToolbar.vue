@@ -20,7 +20,6 @@
       <button class="toolbar-btn" title="Link" :class="isActive('link')" @mousedown.prevent @click="emit('format', 'link')"><IconLink :size="14" /></button>
       <button class="toolbar-btn" title="Image" :class="isActive('image')" @mousedown.prevent @click="emit('format', 'image')"><IconPhoto :size="14" /></button>
       <button class="toolbar-btn" title="Inline Code" :class="isActive('code')" @mousedown.prevent @click="emit('format', 'code')"><IconCode :size="14" /></button>
-      <button class="toolbar-btn" title="Citation (⇧⌘C)" :class="isActive('cite')" @mousedown.prevent @click="emit('format', 'cite')">Cite</button>
     </div>
     <span class="toolbar-sep"></span>
     <button class="toolbar-btn" :class="props.hasSelection ? '' : 'toolbar-disabled'" title="Add Comment (⇧⌘M)" @mousedown.prevent @click="onComment"><IconMessagePlus :size="14" /></button>

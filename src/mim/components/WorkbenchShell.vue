@@ -7,33 +7,21 @@
     <section
       data-pane="sidebar"
       :data-pane-state="layout.sidebar.state"
-      class="relative h-full min-h-0 shrink-0 overflow-hidden border-r border-rule bg-chrome"
+      class="relative h-full min-h-0 shrink-0 overflow-hidden border-r border-rule bg-chrome motion-safe:transition-[width] motion-safe:duration-150 motion-reduce:transition-none"
       :style="{ width: `${paneWidth('sidebar')}px` }"
     >
       <div
         data-pane-stage="sidebar"
         class="h-full min-h-0"
-        :class="{ 'pointer-events-none invisible': isRail('sidebar') }"
-        :aria-hidden="isRail('sidebar')"
       >
         <slot name="sidebar" :collapsed="isRail('sidebar')" />
       </div>
-      <button
-        v-if="isRail('sidebar')"
-        type="button"
-        data-pane-restore="sidebar"
-        title="Show sidebar"
-        class="absolute inset-0 flex w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-3 hover:bg-chrome-mid hover:text-ink"
-        @click="workbench.setPaneState('sidebar', 'expanded')"
-      >
-        <span class="[writing-mode:vertical-rl] rotate-180">MIM</span>
-      </button>
       <button
         v-if="!isRail('sidebar')"
         type="button"
         data-resize-handle="sidebar"
         aria-label="Resize sidebar"
-        class="absolute inset-y-0 right-0 z-20 w-1 translate-x-1/2 hover:bg-accent/40"
+        class="absolute inset-y-0 right-0 z-20 w-2 translate-x-1/2 hover:bg-accent/35 focus-visible:bg-accent/35 focus-visible:outline-none"
         @pointerdown="startResize('sidebar', $event)"
       />
     </section>
@@ -41,7 +29,7 @@
     <section
       data-pane="activity"
       :data-pane-state="layout.activity.state"
-      class="relative h-full min-h-0 min-w-0 overflow-hidden border-r border-rule bg-chrome-mid"
+      class="relative h-full min-h-0 min-w-0 overflow-hidden border-r border-rule bg-chrome-mid motion-safe:transition-[width] motion-safe:duration-150 motion-reduce:transition-none"
       :class="isRail('activity') ? 'shrink-0' : 'flex-1'"
       :style="activityStyle"
     >
@@ -53,12 +41,19 @@
       >
         <slot name="activity" :collapsed="isRail('activity')" />
       </div>
+      <RailRestore
+        v-if="isRail('activity')"
+        pane="activity"
+        :title="activityTitle"
+        :meta="activityMeta"
+        @restore="workbench.setPaneState('activity', 'expanded')"
+      />
     </section>
 
     <section
       data-pane="editor"
       :data-pane-state="layout.editor.state"
-      class="relative h-full min-h-0 min-w-0 shrink-0 overflow-hidden bg-surface"
+      class="relative h-full min-h-0 min-w-0 shrink-0 overflow-hidden bg-surface motion-safe:transition-[width] motion-safe:duration-150 motion-reduce:transition-none"
       :style="{ width: `${paneWidth('editor')}px` }"
     >
       <button
@@ -66,7 +61,7 @@
         type="button"
         data-resize-handle="editor"
         aria-label="Resize editor"
-        class="absolute inset-y-0 left-0 z-20 w-1 -translate-x-1/2 hover:bg-accent/40"
+        class="absolute inset-y-0 left-0 z-20 w-2 -translate-x-1/2 hover:bg-accent/35 focus-visible:bg-accent/35 focus-visible:outline-none"
         @pointerdown="startResize('editor', $event)"
       />
       <div
@@ -77,12 +72,20 @@
       >
         <slot name="editor" :collapsed="isRail('editor')" />
       </div>
+      <RailRestore
+        v-if="isRail('editor')"
+        pane="editor"
+        :title="editorTitle"
+        :meta="editorMeta"
+        @restore="workbench.setPaneState('editor', 'expanded')"
+      />
     </section>
   </main>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import RailRestore from './RailRestore.vue'
 import {
   ACTIVITY_RAIL_WIDTH,
   EDITOR_RAIL_WIDTH,
@@ -92,6 +95,10 @@ import {
 
 defineProps({
   dragging: { type: Boolean, default: false },
+  activityTitle: { type: String, default: 'Activity' },
+  activityMeta: { type: String, default: '' },
+  editorTitle: { type: String, default: 'Editor' },
+  editorMeta: { type: String, default: '' },
 })
 
 const emit = defineEmits(['resizeStart'])
@@ -126,3 +133,9 @@ function startResize(pane, event) {
   emit('resizeStart', pane, event)
 }
 </script>
+
+<style scoped>
+.is-dragging > section {
+  transition: none;
+}
+</style>
