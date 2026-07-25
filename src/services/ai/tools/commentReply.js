@@ -2,8 +2,11 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { withGate } from './gate'
 import { parseCommentTags, escapeAttr } from '../../comments/parser'
+import { resolveSafePath } from './textMatch'
 
 export function createCommentReplyTool(context = {}) {
+  const workspacePath = context.workspacePath || context.projectPath || null
+
   return {
     comment_reply: tool({
       description: 'Reply to an existing comment thread.',
@@ -26,10 +29,11 @@ export function createCommentReplyTool(context = {}) {
             resolvedPath = doc.path
             rawContent = doc.content
           } else {
-            rawContent = (await invoke('read_text_file', { path: target })).content
+            resolvedPath = resolveSafePath(target, workspacePath)
+            if (!resolvedPath) return { error: 'Path must stay inside the active workspace.' }
+            rawContent = (await invoke('read_text_file', { path: resolvedPath })).content
           }
 
-          if (!resolvedPath) return { error: 'No file path available. Open a document or provide a path.' }
           if (!rawContent) return { error: 'Document is empty.' }
 
           const { comments } = parseCommentTags(rawContent)
@@ -42,8 +46,13 @@ export function createCommentReplyTool(context = {}) {
           const insertPos = comment.tagTo - '</comment>'.length
           const modified = rawContent.slice(0, insertPos) + replyTag + rawContent.slice(insertPos)
 
-          await invoke('write_text_file', { path: resolvedPath, content: modified })
-          await emit('mim://file-updated', { path: resolvedPath, content: modified })
+          if (target === '@editor' && context.setDocument) {
+            await context.setDocument(modified)
+          } else {
+            if (!resolvedPath) return { error: 'No file path available. Open a document or provide a path.' }
+            await invoke('write_text_file', { path: resolvedPath, content: modified })
+            await emit('mim://file-updated', { path: resolvedPath, content: modified })
+          }
 
           return { reply_id: replyId, comment_id, status: 'replied' }
         } catch (err) {

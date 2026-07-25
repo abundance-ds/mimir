@@ -44,7 +44,7 @@
 const editorShortcuts = [
   { action: 'Inline AI', keys: ['⌘', 'K'] },
   { action: 'Cycle toolbar', keys: ['⌘', '/'] },
-  { action: 'Bold', keys: ['⌘', 'B'] },
+  { action: 'Bold', keys: ['⇧', '⌘', 'B'] },
   { action: 'Italic', keys: ['⌘', 'I'] },
   { action: 'Settings', keys: ['⌘', ','] },
   { action: 'Save', keys: ['⌘', 'S'] },

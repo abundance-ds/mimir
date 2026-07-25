@@ -131,7 +131,7 @@ function parseRevealTarget(target = '') {
 }
 
 function printHelp() {
-  console.log(`mimx - control the attached Mim Panel editor
+  console.log(`mimx - control the attached Mim editor
 
 Usage:
   mimx open <path>

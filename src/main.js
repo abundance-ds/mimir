@@ -13,7 +13,7 @@ if (params.get('view') === 'editor') {
     createApp(m.default).use(createPinia()).mount('#app')
   })
 } else {
-  import('./mim/MimPanel.vue').then(m => {
+  import('./mim/App.vue').then(m => {
     createApp(m.default).use(createPinia()).mount('#app')
   })
 }

@@ -19,7 +19,7 @@
           <button class="ctx-item" @click="paste">Paste <span class="ctx-shortcut">⌘V</span></button>
           <div class="ctx-divider" />
           <button class="ctx-item" @click="addComment">Add Comment <span class="ctx-shortcut">⇧⌘M</span></button>
-          <button class="ctx-item ctx-ai" @click="askAI">Ask AI <span class="ctx-shortcut">⌘K</span></button>
+          <button v-if="aiEnabled" class="ctx-item ctx-ai" @click="askAI">Ask AI <span class="ctx-shortcut">⌘K</span></button>
         </template>
         <template v-else>
           <button class="ctx-item" @click="paste">Paste <span class="ctx-shortcut">⌘V</span></button>
@@ -42,6 +42,7 @@ const props = defineProps({
   hasSelection: { type: Boolean, default: false },
   view: { type: Object, default: null },
   spellcheckEnabled: { type: Boolean, default: false },
+  aiEnabled: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['close', 'comment', 'ask-agent'])

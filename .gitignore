@@ -14,7 +14,6 @@
 node_modules/
 dist/
 target/
-Cargo.lock
 
 # Logs/temp
 *.log
@@ -37,8 +36,5 @@ ANCHORING/
 plan-*.md
 !docs/plan-ai-*.md
 TODO.md
-
-# Sidecar binaries tracked via Git LFS (not gitignored)
-# src-tauri/binaries/ — tracked by LFS
 
 workflows-tbd/

@@ -69,6 +69,7 @@
             :maxWidth="editorContentMaxWidth"
             :showBorder="false"
             :extensions="editorExtensions"
+            :inlineAIEnabled="editorSettings.aiInlineRewrite"
             @change="onContentChange"
             @cursor="info => cursorLine = info.line"
             @selection-change="selectionText = $event"
@@ -730,6 +731,10 @@ watch(() => commentManager.activeCommentId, (id) => {
   v.dispatch({ effects: setActiveCommentEffect.of(id) })
 })
 
+watch(() => editorSettings.aiInlineRewrite, (enabled) => {
+  if (!enabled && inlineAIState.value) closeInlineAI()
+})
+
 // --- Toolbar actions ---
 
 function onFormat(action) {
@@ -847,8 +852,8 @@ async function onInlineCommentAction({ type, id, text }) {
   }
 
   if (type === 'terminal-prompt') {
-    if (!window.__mim_terminalPaste) return { ok: false, error: 'Terminal not available.' }
-    const ok = await window.__mim_terminalPaste(commentPrompt(id))
+    if (!window.__mim_activityPaste) return { ok: false, error: 'Terminal Activity not available.' }
+    const ok = await window.__mim_activityPaste(commentPrompt(id))
     if (!ok) return { ok: false, error: 'No active terminal. Open a terminal tab first.' }
     return { ok: true }
   }
@@ -986,17 +991,32 @@ function mimComments() {
         id: comment.id,
         author: comment.author || 'user',
         text: comment.text || '',
+        status: comment.status || 'active',
+        created: comment.created || null,
         anchorText: comment.anchorText || '',
         line: line?.number || null,
         column: line ? comment.contentFrom - line.from + 1 : null,
         replies: (comment.replies || []).map(reply => ({
+          id: reply.id || null,
           author: reply.author || 'agent',
           text: reply.text || '',
+          timestamp: reply.ts || null,
         })),
       }
     }),
     prompt: commentPrompt(comments[0]?.id),
   }
+}
+
+function mimCommentAction(action, commentId) {
+  const handlers = {
+    resolve: commentMutations.resolve,
+    reopen: commentMutations.reopen,
+    delete: commentMutations.delete,
+  }
+  const handler = handlers[action]
+  if (!handler) return { ok: false, error: `Unknown comment action: ${action}` }
+  return handler(commentId)
 }
 
 function mimReplaceSelection(text = '') {
@@ -1010,6 +1030,36 @@ function mimSetContent(content = '') {
   const current = editorSurfaceRef.value?.getContent?.() || ''
   editorSurfaceRef.value?.replaceRange(0, current.length, content)
   return mimActive()
+}
+
+function mimReviewProposal(proposal) {
+  if (!proposal?.id || !proposal?.targetText) {
+    throw new Error('A review proposal needs an id and targetText.')
+  }
+  const file = currentFile.value
+  if (!file) throw new Error('No document is open.')
+  flushEditorContent({ bridge: 'flush' })
+  const review = {
+    proposalId: proposal.id,
+    sessionId: proposal.sessionId || proposal.threadId || 'mcp',
+    targetText: proposal.targetText,
+    replacement: proposal.replacement || '',
+    path: proposal.absolutePath || proposal.path || file.path || '',
+    type: proposal.type || 'edit',
+    original: proposal.original,
+    modified: proposal.modified,
+  }
+  fileManager.setFileReviews(file, [review])
+  const diff = computeDiffFromReview(review, file.content || '')
+  if (!diff) throw new Error('The proposal target is no longer present in the active document.')
+  activateDiffForCurrentFile(diff.original, diff.modified, {
+    review: {
+      ids: [review.proposalId],
+      sessionId: review.sessionId,
+      path: review.path,
+    },
+  })
+  return { proposalId: review.proposalId, status: 'pending_review' }
 }
 
 function mimReveal({ path, line, offset } = {}) {
@@ -1044,8 +1094,10 @@ defineExpose({
   mimTabs,
   mimSelection,
   mimComments,
+  mimCommentAction,
   mimReplaceSelection,
   mimSetContent,
+  mimReviewProposal,
   mimReveal,
   mimSave,
   mimCloseActiveTab,

@@ -5,13 +5,16 @@ export async function readDocument(contextGetDocument) {
   let path = null
   if (contextGetDocument) {
     const ctx = contextGetDocument()
-    if (ctx && ctx.content) { content = ctx.content; path = ctx.path || null }
+    if (ctx && typeof ctx.content === 'string') {
+      content = ctx.content
+      path = ctx.path || null
+    }
   }
-  if (!content) {
+  if (content == null) {
     content = localStorage.getItem('mim:doc')
     path = localStorage.getItem('mim:doc:path') || null
   }
-  if (content) {
+  if (content != null) {
     return {
       documentId: path ? path.replace(/[^a-zA-Z0-9._/-]+/g, '-') : 'local-document',
       title: firstHeading(content) || (path ? path.split('/').pop() : 'Current document'),

@@ -23,7 +23,7 @@ describe('EditorToolbar', () => {
 
   it('emits format event with correct name on click', async () => {
     const w = mountToolbar()
-    const boldBtn = btnByTitle(w, 'Bold (⌘B)')
+    const boldBtn = btnByTitle(w, 'Bold (⇧⌘B)')
     expect(boldBtn).toBeTruthy()
     await boldBtn.trigger('click')
     expect(w.emitted('format')).toBeTruthy()
@@ -32,7 +32,7 @@ describe('EditorToolbar', () => {
 
   it('highlights active format buttons', () => {
     const w = mountToolbar({ activeFormats: ['bold', 'italic'] })
-    const boldBtn = btnByTitle(w, 'Bold (⌘B)')
+    const boldBtn = btnByTitle(w, 'Bold (⇧⌘B)')
     const italicBtn = btnByTitle(w, 'Italic (⌘I)')
     const h1Btn = btnByTitle(w, 'Heading 1')
     expect(boldBtn.classes()).toContain('toolbar-active')

@@ -3,8 +3,11 @@ import { createPinia, setActivePinia } from 'pinia'
 
 let eventCallback = null
 vi.mock('../services/activities.js', () => ({
+  clearActivity: vi.fn(),
   listActivities: vi.fn(),
+  renameActivity: vi.fn(),
   resolveLauncher: vi.fn(),
+  setActivityArchived: vi.fn(),
   spawnActivity: vi.fn(),
   stopActivity: vi.fn(),
   listenToActivityEvents: vi.fn(async (callback) => {
@@ -15,7 +18,7 @@ vi.mock('../services/activities.js', () => ({
 
 import * as api from '../services/activities.js'
 import { useActivitiesStore } from './activities.js'
-import { useActivityRuntimeStore } from './activityRuntime.js'
+import { resumeArguments, useActivityRuntimeStore } from './activityRuntime.js'
 import { useWorkbenchStore } from './workbench.js'
 
 const backendRecord = {
@@ -87,6 +90,42 @@ describe('activity runtime store', () => {
     }))
     expect(record.status).toBe('idle')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:new-id')
+  })
+
+  it.each([
+    ['codex', ['-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"'], ['resume', '--last', '-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"']],
+    ['claude', ['--mcp-config', '{}'], ['--continue', '--mcp-config', '{}']],
+    ['pi', ['--extension', '/tmp/mim-tools.ts'], ['--continue', '--extension', '/tmp/mim-tools.ts']],
+    ['none', ['--flag'], ['--flag']],
+  ])('builds exact %s resume argv', (strategy, args, expected) => {
+    expect(resumeArguments(args, strategy)).toEqual(expected)
+  })
+
+  it('launches a resumable agent session without losing configured flags', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce('resume-id')
+    api.resolveLauncher.mockResolvedValueOnce({
+      presetId: 'codex',
+      title: 'Codex',
+      kind: 'agent',
+      agentId: 'codex',
+      resumeStrategy: 'codex',
+      command: '/bin/codex',
+      args: ['--model', 'gpt-5', '-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"'],
+      cwd: '/w',
+      env: {},
+    })
+    const runtime = useActivityRuntimeStore()
+    await runtime.launchPreset({ id: 'codex' }, '/w', {
+      resume: true,
+      resumeStrategy: 'codex',
+    })
+
+    expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'agent:resume-id',
+      launch: expect.objectContaining({
+        args: ['resume', '--last', '--model', 'gpt-5', '-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"'],
+      }),
+    }))
   })
 
   it('reconciles status and exit events from process truth', async () => {

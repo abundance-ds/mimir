@@ -551,7 +551,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
                     "scope": { "const": "project" },
                     "query": { "type": "string", "maxLength": 500 },
                     "file_pattern": { "type": "string", "maxLength": 100 },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
                 }),
                 &["scope", "query"],
             ),
@@ -606,6 +606,33 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
                     "text": { "type": "string", "minLength": 1, "maxLength": 4000 }
                 }),
                 &["target", "comment_id", "text"],
+            ),
+        ),
+        definition(
+            "comments.resolve",
+            "comment_resolve",
+            "Resolve a pseudo-XML comment thread in the active editor without deleting it.",
+            object_schema(
+                json!({ "comment_id": { "type": "string", "minLength": 1 } }),
+                &["comment_id"],
+            ),
+        ),
+        definition(
+            "comments.reopen",
+            "comment_reopen",
+            "Reopen a resolved pseudo-XML comment thread in the active editor.",
+            object_schema(
+                json!({ "comment_id": { "type": "string", "minLength": 1 } }),
+                &["comment_id"],
+            ),
+        ),
+        definition(
+            "comments.delete",
+            "comment_delete",
+            "Delete a pseudo-XML comment thread while preserving its anchored document text.",
+            object_schema(
+                json!({ "comment_id": { "type": "string", "minLength": 1 } }),
+                &["comment_id"],
             ),
         ),
         definition(
@@ -728,6 +755,48 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             ),
         ),
         definition(
+            "activities.stop",
+            "activities_stop",
+            "Stop a live terminal, agent, or routine Activity.",
+            object_schema(
+                json!({ "activity_id": { "type": "string", "minLength": 1 } }),
+                &["activity_id"],
+            ),
+        ),
+        definition(
+            "activities.rename",
+            "activities_rename",
+            "Rename an Activity without changing its stable identity.",
+            object_schema(
+                json!({
+                    "activity_id": { "type": "string", "minLength": 1 },
+                    "title": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }),
+                &["activity_id", "title"],
+            ),
+        ),
+        definition(
+            "activities.archive",
+            "activities_archive",
+            "Archive or restore an ended durable Activity.",
+            object_schema(
+                json!({
+                    "activity_id": { "type": "string", "minLength": 1 },
+                    "archived": { "type": "boolean" }
+                }),
+                &["activity_id", "archived"],
+            ),
+        ),
+        definition(
+            "activities.clear",
+            "activities_clear",
+            "Permanently clear an ended Activity and its persisted scrollback.",
+            object_schema(
+                json!({ "activity_id": { "type": "string", "minLength": 1 } }),
+                &["activity_id"],
+            ),
+        ),
+        definition(
             "apps.list",
             "apps_list",
             "List discovered hackable Mim apps.",
@@ -802,6 +871,9 @@ fn legacy_tool_aliases() -> Vec<&'static str> {
         "create",
         "comment_add",
         "comment_reply",
+        "comment_resolve",
+        "comment_reopen",
+        "comment_delete",
         "search_web",
         "shell",
         "editor_open",
@@ -869,6 +941,10 @@ mod tests {
         let rendered_schema = search.input_schema.to_string();
         assert!(!rendered_schema.contains("references"));
         assert!(!rendered_schema.contains("citations"));
+        assert_eq!(
+            search.input_schema["properties"]["limit"]["maximum"],
+            json!(50)
+        );
     }
 
     #[test]

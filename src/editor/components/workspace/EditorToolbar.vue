@@ -6,7 +6,7 @@
       <button class="toolbar-btn" title="Heading 1" :class="isActive('heading-1')" @mousedown.prevent @click="emit('format', 'heading-1')">H1</button>
       <button class="toolbar-btn" title="Heading 2" :class="isActive('heading-2')" @mousedown.prevent @click="emit('format', 'heading-2')">H2</button>
       <button class="toolbar-btn" title="Heading 3" :class="isActive('heading-3')" @mousedown.prevent @click="emit('format', 'heading-3')">H3</button>
-      <button class="toolbar-btn font-bold" title="Bold (⌘B)" :class="isActive('bold')" @mousedown.prevent @click="emit('format', 'bold')">B</button>
+      <button class="toolbar-btn font-bold" title="Bold (⇧⌘B)" :class="isActive('bold')" @mousedown.prevent @click="emit('format', 'bold')">B</button>
       <button class="toolbar-btn italic" title="Italic (⌘I)" :class="isActive('italic')" @mousedown.prevent @click="emit('format', 'italic')">I</button>
       <button class="toolbar-btn" title="Strikethrough (⇧⌘X)" style="text-decoration: line-through" :class="isActive('strikethrough')" @mousedown.prevent @click="emit('format', 'strikethrough')">S</button>
     </div>

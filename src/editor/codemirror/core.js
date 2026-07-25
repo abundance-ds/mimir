@@ -193,7 +193,7 @@ export function languageExtensionForPath(path = '') {
   return []
 }
 
-export function createEditor({ parent, doc, path = '', extensions = [], onChange, onCursor, onStats, onSelectionCommand, onActiveFormats, initialSettings }) {
+export function createEditor({ parent, doc, path = '', extensions = [], onChange, onCursor, onStats, onSelectionCommand, onActiveFormats, isSelectionRewriteEnabled = () => true, initialSettings }) {
   const updateListener = EditorView.updateListener.of((update) => {
     if (update.docChanged) {
       onChange?.(update)
@@ -224,6 +224,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
     {
       key: 'Mod-k',
       run(view) {
+        if (!isSelectionRewriteEnabled()) return false
         const selection = view.state.selection.main
         onSelectionCommand?.({
           from: selection.from,

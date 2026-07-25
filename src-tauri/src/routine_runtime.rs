@@ -819,6 +819,7 @@ fn resolve_routine(
         definition.workspace.as_deref(),
         &config.home_path,
         &config.default_shell,
+        &config.mcp_url,
     )
     .map_err(|message| {
         let field = if message.contains("Working directory") || message.contains("open workspace") {
@@ -1208,6 +1209,8 @@ mod tests {
                 "exec",
                 "--model",
                 "gpt 5",
+                "-c",
+                r#"mcp_servers.mim.url="http://127.0.0.1:29999/mcp""#,
                 "Review the work tree and report sharp findings."
             ]
         );

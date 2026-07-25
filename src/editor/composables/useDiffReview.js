@@ -27,17 +27,6 @@ export function useDiffReview({
     }
   }
 
-  async function respondToFocusedFile(file, status) {
-    if (!file?.proposalId) return
-    const sessionId = diffStore.reviewMeta?.sessionId || ''
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('proposal_respond', {
-        result: { id: file.proposalId, sessionId, status, detail: `User ${status} the change` },
-      })
-    } catch {}
-  }
-
   async function respondToDiffReview(status) {
     const meta = diffStore.reviewMeta
     const ids = proposalIdsFromReviewMeta(meta)
@@ -57,43 +46,88 @@ export function useDiffReview({
   async function onBatchAllResolved() {
     const allFiles = [...diffStore.files]
     const sessionId = diffStore.reviewMeta?.sessionId || ''
-    const accepted = allFiles.filter(f => f.status === 'accepted')
+    const { invoke } = await import('@tauri-apps/api/core')
+    let activeEditorChanged = false
+
+    for (const file of allFiles) {
+      if (file.status !== 'accepted' || file.applied) continue
+      try {
+        const active = currentFile.value?.path === file.path
+        if (active) {
+          if (currentFile.value.content !== file.original) {
+            throw new Error('The active document changed after this review was created. Reopen the proposal against the latest text.')
+          }
+          currentFile.value.content = file.modified
+          fileManager.markDirty()
+          activeEditorChanged = true
+        } else {
+          const openFile = fileManager.openFiles?.find(candidate => candidate.path === file.path)
+          const currentContent = openFile
+            ? openFile.content
+            : (await invoke('read_text_file', { path: file.path })).content
+          if (currentContent !== file.original && currentContent !== file.modified) {
+            throw new Error('This file changed after the review was created. Refresh the proposal before applying it.')
+          }
+          if (currentContent !== file.modified) {
+            await invoke('write_text_file', { path: file.path, content: file.modified })
+          }
+          if (openFile) {
+            openFile.content = file.modified
+            openFile.dirty = false
+            openFile.saveState = 'saved'
+            openFile.saveError = null
+          }
+        }
+        diffStore.markFileApplied(file.path)
+      } catch (error) {
+        diffStore.markFileFailed(file.path, error?.message || error)
+      }
+    }
+    if (activeEditorChanged) scheduleContentSync()
+
+    for (const file of allFiles) {
+      const liveFile = diffStore.files.find(candidate => candidate.path === file.path)
+      if (!liveFile || liveFile.status === 'pending' || liveFile.lifecycleResolved) continue
+      if (liveFile.status === 'accepted' && !liveFile.applied) continue
+      if (!liveFile.proposalId) {
+        diffStore.markFileLifecycleResolved(file.path)
+        continue
+      }
+      const status = liveFile.status === 'accepted' ? 'applied' : 'rejected'
+      try {
+        await invoke('proposal_respond', {
+          result: {
+            id: liveFile.proposalId,
+            sessionId,
+            status,
+            detail: `User ${status} the change`,
+          },
+        })
+        diffStore.markFileLifecycleResolved(file.path)
+      } catch (error) {
+        diffStore.markFileFailed(
+          file.path,
+          `The file decision was saved, but its proposal status could not be updated: ${error?.message || error}`,
+        )
+      }
+    }
+
+    if (diffStore.pendingFiles.length > 0) {
+      return {
+        ok: false,
+        failures: diffStore.pendingFiles.map(file => ({ path: file.path, error: file.error })),
+      }
+    }
 
     diffStore.deactivate()
     reviewTabActive.value = false
-
-    for (const file of accepted) {
-      if (currentFile.value?.path === file.path) {
-        currentFile.value.content = file.modified
-        fileManager.markDirty()
-      }
-    }
-    if (accepted.length > 0) scheduleContentSync()
-
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await Promise.allSettled(
-        allFiles.filter(f => f.proposalId).map(file => {
-          const status = file.status === 'accepted' ? 'applied' : 'rejected'
-          return invoke('proposal_respond', {
-            result: { id: file.proposalId, sessionId, status, detail: `User ${status} the change` },
-          })
-        })
-      )
-    } catch {}
+    return { ok: true }
   }
 
   async function onDiffAcceptAll() {
     if (diffStore.isBatchFileFocused) {
       const path = diffStore.focusedFile
       diffStore.acceptFile(path)
-      const file = diffStore.files.find(f => f.path === path)
-      if (file && currentFile.value?.path === path) {
-        currentFile.value.content = file.modified
-        fileManager.markDirty()
-        scheduleContentSync()
-      }
-      await respondToFocusedFile(file, 'applied')
       diffStore.clearBatchFocus()
       reviewTabActive.value = true
       if (diffStore.allResolved) await onBatchAllResolved()
@@ -125,29 +159,14 @@ export function useDiffReview({
     if (diffStore.isBatchFileFocused) {
       const path = diffStore.focusedFile
       diffStore.rejectFile(path)
-      const file = diffStore.files.find(f => f.path === path)
-      await respondToFocusedFile(file, 'rejected')
       diffStore.clearBatchFocus()
       reviewTabActive.value = true
       if (diffStore.allResolved) await onBatchAllResolved()
       return
     }
     if (diffStore.isBatch) {
-      const allFiles = [...diffStore.files]
-      const sessionId = diffStore.reviewMeta?.sessionId || ''
       diffStore.rejectAllFiles()
-      diffStore.deactivate()
-      reviewTabActive.value = false
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        await Promise.allSettled(
-          allFiles.filter(f => f.proposalId).map(file =>
-            invoke('proposal_respond', {
-              result: { id: file.proposalId, sessionId, status: 'rejected', detail: 'User rejected the change' },
-            })
-          )
-        )
-      } catch {}
+      await onBatchAllResolved()
     } else if (diffStore.reviewMeta?.type === 'history') {
       diffStore.deactivate()
     } else if (diffStore.reviewMeta?.type === 'inline-ai') {
@@ -160,6 +179,16 @@ export function useDiffReview({
   }
 
   async function onDiffChunksResolved(content) {
+    if (diffStore.isBatchFileFocused) {
+      const path = diffStore.focusedFile
+      const file = diffStore.files.find(candidate => candidate.path === path)
+      if (file) file.modified = content
+      diffStore.acceptFile(path)
+      diffStore.clearBatchFocus()
+      reviewTabActive.value = true
+      if (diffStore.allResolved) await onBatchAllResolved()
+      return
+    }
     if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
     else if (proposalIdsFromReviewMeta(diffStore.reviewMeta).length > 0) {
       const status = content === diffStore.originalContent ? 'rejected' : 'applied'

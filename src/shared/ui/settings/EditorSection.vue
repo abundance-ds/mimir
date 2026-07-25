@@ -25,6 +25,32 @@
       </div>
     </div>
 
+    <div class="setting-row">
+      <div class="setting-label">
+        Terminal size
+        <span class="setting-desc">Font size for terminals and agent Activities</span>
+      </div>
+      <div class="stepper">
+        <button
+          class="stepper-btn"
+          aria-label="Decrease terminal font size"
+          :disabled="settings.mimTerminalFontSize <= 9"
+          @click="settings.set('mimTerminalFontSize', settings.mimTerminalFontSize - 1)"
+        >
+          <IconMinus :size="10" />
+        </button>
+        <span class="stepper-value">{{ settings.mimTerminalFontSize }}px</span>
+        <button
+          class="stepper-btn"
+          aria-label="Increase terminal font size"
+          :disabled="settings.mimTerminalFontSize >= 24"
+          @click="settings.set('mimTerminalFontSize', settings.mimTerminalFontSize + 1)"
+        >
+          <IconPlus :size="10" />
+        </button>
+      </div>
+    </div>
+
     <!-- Font -->
     <div class="setting-row">
       <div class="setting-label">

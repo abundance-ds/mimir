@@ -1,8 +1,8 @@
 <template>
   <div class="about-page">
     <div class="about-hero">
-      <span class="about-title">mim terminal</span>
-      <span class="about-version">v0.3.0-alpha</span>
+      <span class="about-title">Mim</span>
+      <span class="about-version">v0.1.0</span>
     </div>
 
     <div class="about-links">

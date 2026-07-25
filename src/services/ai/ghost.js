@@ -4,7 +4,7 @@ import { mapAiError } from './errors.js'
 import { useSettingsStore } from '../../stores/settings.js'
 
 export async function requestGhostSuggestions({ before, after, documentId, fallback = [] }) {
-  const system = `You are the inline completion engine for mim terminal editor.
+  const system = `You are the inline completion engine for Mim.
 
 Return JSON only:
 {

@@ -570,9 +570,17 @@ fn validate_relative_path(value: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn app_catalog() -> Result<AppCatalog, String> {
     let directory = default_apps_dir()?;
-    tauri::async_runtime::spawn_blocking(move || load_catalog(&directory))
-        .await
-        .map_err(|error| format!("App catalog task failed: {error}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "Could not create apps directory {}: {error}",
+                directory.display()
+            )
+        })?;
+        Ok::<_, String>(load_catalog(&directory))
+    })
+    .await
+    .map_err(|error| format!("App catalog task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -582,6 +590,12 @@ pub async fn app_resolve(
 ) -> Result<ResolvedAppLaunch, String> {
     let directory = default_apps_dir()?;
     tauri::async_runtime::spawn_blocking(move || {
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "Could not create apps directory {}: {error}",
+                directory.display()
+            )
+        })?;
         let catalog = load_catalog(&directory);
         let app = catalog
             .apps

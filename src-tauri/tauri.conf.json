@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mim Panel",
-  "version": "0.0.1",
-  "identifier": "dev.mim.panel",
+  "productName": "Mim",
+  "version": "0.1.0",
+  "identifier": "rs.shoulde.mim",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,6 +34,9 @@
         "mimeType": "text/plain",
         "description": "Text Document"
       }
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

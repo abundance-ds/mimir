@@ -1,5 +1,5 @@
 import { Annotation, StateEffect, StateField, Prec } from '@codemirror/state'
-import { EditorView, Decoration, WidgetType } from '@codemirror/view'
+import { EditorView, Decoration, ViewPlugin, WidgetType } from '@codemirror/view'
 
 const setGhost = StateEffect.define()
 const clearGhost = StateEffect.define()
@@ -173,10 +173,18 @@ const ghostDecorations = EditorView.decorations.compute([ghostField], (state) =>
 
 export function ghostExtension(options = {}) {
   let lastPlusAt = 0
+  let requestSerial = 0
+  let disposed = false
   const getSuggestions = options.getSuggestions
   const onStateChange = options.onStateChange
 
   return [
+    ViewPlugin.fromClass(class {
+      destroy() {
+        disposed = true
+        requestSerial++
+      }
+    }),
     ghostField,
     ghostDecorations,
     EditorView.updateListener.of((update) => {
@@ -202,6 +210,7 @@ export function ghostExtension(options = {}) {
           }
           if (event.key === 'Tab' || event.key === 'ArrowRight' || event.key === 'Enter') {
             event.preventDefault()
+            requestSerial++
             acceptGhost(view)
             return true
           }
@@ -222,9 +231,11 @@ export function ghostExtension(options = {}) {
           }
           if (event.key === 'Escape') {
             event.preventDefault()
+            requestSerial++
             view.dispatch({ effects: clearGhost.of(null) })
             return true
           }
+          requestSerial++
           view.dispatch({ effects: clearGhost.of(null) })
           return false
         }
@@ -245,10 +256,12 @@ export function ghostExtension(options = {}) {
               }),
             })
             if (getSuggestions) {
+              const requestId = ++requestSerial
               const before = view.state.sliceDoc(Math.max(0, suggestionPos - 5000), suggestionPos)
               const after = view.state.sliceDoc(suggestionPos, Math.min(view.state.doc.length, suggestionPos + 1000))
               getSuggestions({ before, after, fallback, pos: suggestionPos })
                 .then((result) => {
+                  if (disposed || requestId !== requestSerial) return
                   const current = view.state.field(ghostField)
                   if (!current.active || current.pos !== suggestionPos) return
                   if (result && typeof result === 'object' && !Array.isArray(result) && result.error) {
@@ -260,6 +273,7 @@ export function ghostExtension(options = {}) {
                   view.dispatch({ effects: setGhost.of({ pos: suggestionPos, suggestions: clean.length > 0 ? clean : fallback }) })
                 })
                 .catch(() => {
+                  if (disposed || requestId !== requestSerial) return
                   const current = view.state.field(ghostField)
                   if (!current.active || current.pos !== suggestionPos) return
                   view.dispatch({ effects: setGhost.of({ pos: suggestionPos, suggestions: fallback }) })
@@ -275,7 +289,10 @@ export function ghostExtension(options = {}) {
       },
       mousedown(_event, view) {
         const ghost = view.state.field(ghostField)
-        if (ghost.active) view.dispatch({ effects: clearGhost.of(null) })
+        if (ghost.active) {
+          requestSerial++
+          view.dispatch({ effects: clearGhost.of(null) })
+        }
         return false
       },
     })),

@@ -111,6 +111,11 @@ describe('WorkbenchApp', () => {
     toolRuntimeStop.mockResolvedValue()
     storage.clear()
     vi.stubGlobal('localStorage', localStorageMock)
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1280,
+    })
 
     launcherApi.detectAgents.mockResolvedValue([
       { id: 'codex', title: 'Codex', installed: true, binaryPath: '/bin/codex' },
@@ -279,6 +284,33 @@ describe('WorkbenchApp', () => {
     await nextTick()
     expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
     expect(wrapper.get('[data-sidebar-row="launcher:core:files"]').element).toBe(filesRow)
+  })
+
+  it('adapts narrow windows to one focused surface and restores the desktop layout', async () => {
+    const wrapper = await render({ workspace: '/w' })
+
+    window.innerWidth = 700
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
+    expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('rail')
+
+    await wrapper.get('[data-file-row="/w/README.md"]').trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('rail')
+    expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
+
+    window.innerWidth = 900
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
+    expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
+
+    window.innerWidth = 1280
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 240px')
   })
 
   it('restores persisted rail states and widths before ordinary use', async () => {

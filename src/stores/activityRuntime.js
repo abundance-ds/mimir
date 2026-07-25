@@ -36,6 +36,12 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   async function launchPreset(preset, workspacePath, options = {}) {
     const resolved = await resolveLauncher(preset, workspacePath)
     const kind = options.kind || resolved.kind
+    const resumeStrategy = normalizedResumeStrategy(
+      options.resumeStrategy || resolved.resumeStrategy,
+    )
+    const resolvedArgs = options.resume
+      ? resumeArguments(resolved.args, resumeStrategy)
+      : resolved.args
     const id = `${kind}:${crypto.randomUUID()}`
     const timestamp = new Date().toISOString()
     const record = {
@@ -54,13 +60,13 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       },
       host: {
         type: 'pty',
-        ...(resolved.resumeStrategy && resolved.resumeStrategy !== 'none'
-          ? { resumeStrategy: resolved.resumeStrategy }
+        ...(resumeStrategy !== 'none'
+          ? { resumeStrategy }
           : {}),
       },
       launch: {
         command: resolved.command,
-        args: [...(resolved.args || []), ...(options.args || [])],
+        args: [...resolvedArgs, ...(options.args || [])],
         cwd: resolved.cwd,
         env: {
           ...(resolved.env || {}),
@@ -171,4 +177,21 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
 
 function message(error) {
   return error instanceof Error ? error.message : String(error || 'Activity runtime failed.')
+}
+
+export function resumeArguments(args = [], strategy = 'none') {
+  const current = [...args]
+  if (strategy === 'codex') {
+    if (current[0] === 'resume') return current
+    return ['resume', '--last', ...current]
+  }
+  if (strategy === 'claude' || strategy === 'pi') {
+    if (current.includes('--continue') || current.includes('-c')) return current
+    return ['--continue', ...current]
+  }
+  return current
+}
+
+function normalizedResumeStrategy(value) {
+  return ['codex', 'claude', 'pi'].includes(value) ? value : 'none'
 }

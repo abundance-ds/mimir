@@ -12,6 +12,7 @@
       :has-selection="ctxMenu.hasSelection"
       :view="view"
       :spellcheck-enabled="settings.editorSpellCheck"
+      :ai-enabled="inlineAIEnabled"
       @close="ctxMenu.show = false"
       @comment="emit('comment')"
       @ask-agent="emit('ask-agent')"
@@ -21,6 +22,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
+import { Compartment } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
@@ -37,6 +39,7 @@ const props = defineProps({
   maxWidth: { type: String, default: '' },
   showBorder: { type: Boolean, default: false },
   extensions: { type: Array, default: () => [] },
+  inlineAIEnabled: { type: Boolean, default: true },
 })
 
 const emit = defineEmits([
@@ -56,6 +59,7 @@ const settings = useSettingsStore()
 const cmHost = ref(null)
 const view = shallowRef(null)
 let applyingExternalContent = false
+const featureCompartment = new Compartment()
 
 const ctxMenu = reactive({ show: false, x: 0, y: 0, hasSelection: false })
 function onContextMenu(e) {
@@ -211,10 +215,11 @@ onMounted(() => {
     parent: cmHost.value,
     doc: props.content,
     path: props.path,
-    extensions: props.extensions,
+    extensions: [featureCompartment.of(props.extensions)],
     onChange: onCMChange,
     onCursor: onCMCursor,
     onSelectionCommand: onCMSelectionCommand,
+    isSelectionRewriteEnabled: () => props.inlineAIEnabled,
     onActiveFormats: (formats) => emit('active-formats', formats),
     initialSettings: {
       wordWrap: settings.editorWordWrap,
@@ -258,6 +263,13 @@ watch(() => settings.isDarkTheme, (dark) => {
   if (!view.value) return
   view.value.dispatch({
     effects: darkModeCompartment.reconfigure(dark ? EditorView.darkTheme.of(true) : []),
+  })
+})
+
+watch(() => props.extensions, (extensions) => {
+  if (!view.value) return
+  view.value.dispatch({
+    effects: featureCompartment.reconfigure(extensions),
   })
 })
 

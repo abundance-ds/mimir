@@ -54,6 +54,9 @@ export const useDiffStore = defineStore('diff', () => {
       modified: f.modified,
       proposalId: f.proposalId || null,
       status: 'pending',
+      applied: false,
+      lifecycleResolved: false,
+      error: null,
     }))
     batchId.value = batch
     reviewMeta.value = sessionId ? { sessionId } : null
@@ -86,25 +89,64 @@ export const useDiffStore = defineStore('diff', () => {
 
   function acceptFile(path) {
     const f = files.value.find(x => x.path === path)
-    if (f) f.status = 'accepted'
+    if (f) {
+      f.status = 'accepted'
+      f.error = null
+    }
   }
 
   function rejectFile(path) {
     const f = files.value.find(x => x.path === path)
-    if (f) f.status = 'rejected'
+    if (f) {
+      f.status = 'rejected'
+      f.error = null
+    }
   }
 
   function acceptAllFiles() {
-    files.value.forEach(f => { f.status = 'accepted' })
+    files.value.forEach(f => {
+      f.status = 'accepted'
+      f.error = null
+    })
   }
 
   function rejectAllFiles() {
-    files.value.forEach(f => { f.status = 'rejected' })
+    files.value.forEach(f => {
+      f.status = 'rejected'
+      f.error = null
+    })
   }
 
   function resetFile(path) {
     const f = files.value.find(x => x.path === path)
-    if (f) f.status = 'pending'
+    if (f && !f.applied && !f.lifecycleResolved) {
+      f.status = 'pending'
+      f.error = null
+    }
+  }
+
+  function markFileApplied(path) {
+    const f = files.value.find(x => x.path === path)
+    if (f) {
+      f.applied = true
+      f.error = null
+    }
+  }
+
+  function markFileLifecycleResolved(path) {
+    const f = files.value.find(x => x.path === path)
+    if (f) {
+      f.lifecycleResolved = true
+      f.error = null
+    }
+  }
+
+  function markFileFailed(path, error) {
+    const f = files.value.find(x => x.path === path)
+    if (f) {
+      f.status = 'pending'
+      f.error = String(error || 'Could not apply this file.')
+    }
   }
 
   function focusBatchFile(path) {
@@ -170,6 +212,7 @@ export const useDiffStore = defineStore('diff', () => {
     viewMode, layout, chunkCount, currentChunk, hasChunks,
     activate, activateBatch, deactivate,
     acceptFile, rejectFile, acceptAllFiles, rejectAllFiles, resetFile,
+    markFileApplied, markFileLifecycleResolved, markFileFailed,
     focusBatchFile, clearBatchFocus,
     setViewMode, setLayout,
     setChunkCount, nextChunk, prevChunk,

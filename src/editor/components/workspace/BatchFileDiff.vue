@@ -10,7 +10,7 @@
       </span>
       <div class="flex gap-1 shrink-0">
         <button
-          v-if="file.status === 'pending'"
+          v-if="file.status === 'pending' && !file.applied"
           class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent"
           @mousedown.prevent
           @click="emit('reject', file.path)"
@@ -20,19 +20,20 @@
           class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-add hover:bg-add/10 border-0 bg-transparent"
           @mousedown.prevent
           @click="emit('accept', file.path)"
-        >Accept</button>
+        >{{ file.applied ? 'Retry status' : 'Accept' }}</button>
         <template v-if="file.status === 'accepted'">
-          <span class="font-sans text-[10px] font-medium text-add">Accepted</span>
-          <button class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent" @mousedown.prevent @click="emit('reset', file.path)">Undo</button>
+          <span class="font-sans text-[10px] font-medium text-add">{{ file.applied ? 'Applied' : 'Accepted' }}</span>
+          <button v-if="!file.applied" class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent" @mousedown.prevent @click="emit('reset', file.path)">Undo</button>
         </template>
         <template v-if="file.status === 'rejected'">
           <span class="font-sans text-[10px] font-medium text-ink-3">Rejected</span>
-          <button class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent" @mousedown.prevent @click="emit('reset', file.path)">Undo</button>
+          <button v-if="!file.lifecycleResolved" class="font-sans text-[10px] font-medium h-[22px] px-2 rounded-[3px] text-ink-3 hover:text-ink hover:bg-chrome-high border-0 bg-transparent" @mousedown.prevent @click="emit('reset', file.path)">Undo</button>
         </template>
       </div>
     </div>
+    <div v-if="file.error" class="batch-file-error" role="alert">{{ file.error }}</div>
     <div
-      v-if="file.status === 'pending'"
+      v-if="file.status === 'pending' && !file.applied"
       ref="diffHost"
       class="batch-file-diff"
     ></div>
@@ -101,6 +102,15 @@ onUnmounted(() => {
 <style scoped>
 .batch-file-section.rejected {
   opacity: 0.5;
+}
+
+.batch-file-error {
+  padding: 6px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-rem) 28%, var(--color-rule-light));
+  background: color-mix(in srgb, var(--color-rem) 7%, var(--color-surface));
+  color: var(--color-rem);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
 }
 
 .batch-file-diff {

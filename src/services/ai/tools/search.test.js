@@ -41,6 +41,20 @@ describe('search tool', () => {
     }))
   })
 
+  it('shares the 50-result ceiling advertised by the canonical MCP catalog', () => {
+    const { search } = createSearchTool({ workspacePath: '/projects/myapp' })
+    expect(search.inputSchema.safeParse({
+      scope: 'project',
+      query: 'result',
+      limit: 50,
+    }).success).toBe(true)
+    expect(search.inputSchema.safeParse({
+      scope: 'project',
+      query: 'result',
+      limit: 51,
+    }).success).toBe(false)
+  })
+
   it('requires a query and active workspace', async () => {
     const withWorkspace = createSearchTool({ workspacePath: '/projects/myapp' }).search
     expect((await withWorkspace.execute({})).error).toContain('Query is required')

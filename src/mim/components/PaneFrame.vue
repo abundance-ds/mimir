@@ -13,6 +13,16 @@
       >
         <nav v-if="pane === 'activity'" class="no-drag flex shrink-0 items-center">
           <button
+            v-if="workbench.paneLayout.sidebar.state === 'rail'"
+            type="button"
+            data-pane-action="restore-sidebar"
+            title="Restore sidebar"
+            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink"
+            @click="workbench.setPaneState('sidebar', 'expanded')"
+          >
+            <IconLayoutSidebarLeftExpand :size="15" :stroke-width="1.8" />
+          </button>
+          <button
             type="button"
             data-pane-action="previous"
             title="Previous activity"
@@ -100,6 +110,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconLayoutSidebarRightCollapse,
 } from '@tabler/icons-vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'

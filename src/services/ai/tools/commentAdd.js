@@ -2,8 +2,11 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { withGate } from './gate'
 import { parseCommentTags, cleanToRawPos, buildCommentTag } from '../../comments/parser'
+import { resolveSafePath } from './textMatch'
 
 export function createCommentAddTool(context = {}) {
+  const workspacePath = context.workspacePath || context.projectPath || null
+
   return {
     comment_add: tool({
       description: 'Add a review comment anchored to a text passage. Use read("@editor", { show_comments: true }) to see existing comments.',
@@ -26,15 +29,19 @@ export function createCommentAddTool(context = {}) {
             resolvedPath = doc.path
             rawContent = doc.content
           } else {
-            rawContent = (await invoke('read_text_file', { path: target })).content
+            resolvedPath = resolveSafePath(target, workspacePath)
+            if (!resolvedPath) return { error: 'Path must stay inside the active workspace.' }
+            rawContent = (await invoke('read_text_file', { path: resolvedPath })).content
           }
 
-          if (!resolvedPath) return { error: 'No file path available. Open a document or provide a path.' }
           if (!rawContent) return { error: 'Document is empty.' }
 
           const { comments, cleanText, offsetMap } = parseCommentTags(rawContent)
           const idx = cleanText.indexOf(anchor_text)
           if (idx === -1) return { error: 'Could not find anchor_text in the document. Ensure it matches exactly.' }
+          if (cleanText.indexOf(anchor_text, idx + anchor_text.length) !== -1) {
+            return { error: 'anchor_text matches more than one passage. Provide a longer, unique anchor.' }
+          }
 
           const rawFrom = cleanToRawPos(offsetMap, idx)
           const rawTo = cleanToRawPos(offsetMap, idx + anchor_text.length)
@@ -46,8 +53,13 @@ export function createCommentAddTool(context = {}) {
           const tag = buildCommentTag({ id, author: 'ai', text, created: new Date().toISOString(), anchorText: anchor_text })
           const modified = rawContent.slice(0, rawFrom) + tag + rawContent.slice(rawTo)
 
-          await invoke('write_text_file', { path: resolvedPath, content: modified })
-          await emit('mim://file-updated', { path: resolvedPath, content: modified })
+          if (target === '@editor' && context.setDocument) {
+            await context.setDocument(modified)
+          } else {
+            if (!resolvedPath) return { error: 'No file path available. Open a document or provide a path.' }
+            await invoke('write_text_file', { path: resolvedPath, content: modified })
+            await emit('mim://file-updated', { path: resolvedPath, content: modified })
+          }
 
           return { comment_id: id, status: 'created', anchor: anchor_text.slice(0, 80) }
         } catch (err) {

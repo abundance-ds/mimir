@@ -353,7 +353,10 @@ function makeButton(label, action, { primary = false, title = '' } = {}) {
   button.className = primary ? 'cm-comment-btn cm-comment-btn-primary' : 'cm-comment-btn'
   button.dataset.commentAction = action
   button.textContent = label
-  if (title) button.title = title
+  if (title) {
+    button.title = title
+    button.setAttribute('aria-label', title)
+  }
   return button
 }
 
@@ -364,6 +367,7 @@ function makeMoreMenu() {
   summary.className = 'cm-comment-more-trigger'
   summary.textContent = '...'
   summary.title = 'More comment actions'
+  summary.setAttribute('aria-label', 'More comment actions')
 
   const menu = document.createElement('div')
   menu.className = 'cm-comment-menu'

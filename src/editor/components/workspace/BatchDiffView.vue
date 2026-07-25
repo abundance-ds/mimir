@@ -16,7 +16,7 @@
 </template>
 
 <script setup>
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { useDiffStore } from '../../../stores/diff.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
@@ -46,12 +46,12 @@ const wrapperStyle = computed(() => {
 
 function onAcceptFile(path) {
   diffStore.acceptFile(path)
-  checkAllResolved()
+  emitIfResolved()
 }
 
 function onRejectFile(path) {
   diffStore.rejectFile(path)
-  checkAllResolved()
+  emitIfResolved()
 }
 
 function onResetFile(path) {
@@ -65,15 +65,11 @@ function scrollToFile(path) {
 
 defineExpose({ scrollToFile })
 
-function checkAllResolved() {
+function emitIfResolved() {
   if (diffStore.allResolved) {
     emit('all-resolved')
   }
 }
-
-watch(() => diffStore.allResolved, (resolved) => {
-  if (resolved) emit('all-resolved')
-})
 </script>
 
 <style scoped>

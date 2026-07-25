@@ -86,13 +86,13 @@
         v-else-if="ended"
         type="button"
         data-terminal-restart
-        title="Start this Activity again"
+        :title="restartTitle"
         class="flex h-7 shrink-0 items-center gap-1.5 px-2 font-mono text-[9px] font-medium text-ink-2 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
         @pointerdown.stop
         @click.stop="requestRestart"
       >
         <IconRefresh :size="12" :stroke-width="1.7" />
-        Run again
+        {{ restartLabel }}
       </button>
     </header>
 
@@ -193,6 +193,17 @@ const error = ref('')
 const activityId = computed(() => props.activity.id)
 const mode = computed(() => props.activity.kind === 'agent' ? 'agent' : 'terminal')
 const ended = computed(() => hasExited.value || (!live.value && isEndedStatus(status.value)))
+const canResume = computed(() => (
+  mode.value === 'agent'
+  && Boolean(props.activity.host?.resumeStrategy)
+  && props.activity.host?.resumeStrategy !== 'none'
+))
+const restartLabel = computed(() => canResume.value ? 'Resume' : 'Run again')
+const restartTitle = computed(() => (
+  canResume.value
+    ? `Resume the latest ${props.activity.title} session in this workspace`
+    : 'Start this Activity again'
+))
 const statusLabel = computed(() => terminalStatusLabel(status.value))
 const statusSignalClass = computed(() => {
   if (status.value === 'working' || status.value === 'needs-input') return 'bg-accent'

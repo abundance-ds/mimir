@@ -8,9 +8,7 @@ use std::{
 };
 
 const CONFIG_VERSION: u32 = 1;
-const MIM_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
-const CLAUDE_MCP_CONFIG: &str =
-    r#"{"mcpServers":{"mim":{"type":"http","url":"http://127.0.0.1:17532/mcp"}}}"#;
+const DEFAULT_MIM_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -170,15 +168,26 @@ pub fn load_config(path: &Path) -> Result<LauncherConfigResponse, String> {
         .map_err(|error| error.to_string())?
     {
         QuarantinedLoad::Loaded(config) => (config, None),
-        QuarantinedLoad::Missing => (default_config(), None),
-        QuarantinedLoad::Quarantined { path, reason } => (
-            default_config(),
-            Some(format!(
-                "Invalid launcher configuration was moved to {}: {}",
-                path.display(),
-                reason
-            )),
-        ),
+        QuarantinedLoad::Missing => {
+            let config = default_config();
+            write_json_atomic(path, &config).map_err(|error| error.to_string())?;
+            (config, None)
+        }
+        QuarantinedLoad::Quarantined {
+            path: quarantined_path,
+            reason,
+        } => {
+            let config = default_config();
+            write_json_atomic(path, &config).map_err(|error| error.to_string())?;
+            (
+                config,
+                Some(format!(
+                    "Invalid launcher configuration was moved to {}: {}",
+                    quarantined_path.display(),
+                    reason
+                )),
+            )
+        }
     };
     validate_config(&config)?;
     Ok(LauncherConfigResponse {
@@ -269,6 +278,7 @@ pub fn resolve_launch(
     workspace_path: Option<&str>,
     home_path: &Path,
     default_shell: &Path,
+    mcp_url: &str,
 ) -> Result<ResolvedLaunch, String> {
     let cwd = match &preset.cwd {
         WorkingDirectory::Workspace => workspace_path
@@ -329,9 +339,10 @@ pub fn resolve_launch(
         .or(inherited_path.as_deref());
     let path = crate::mimx::path_with_mimx_at(home_path, current_path)?;
     environment.insert("PATH".into(), path.to_string_lossy().into_owned());
+    environment.insert("MIMX_MCP_URL".into(), mcp_url.to_string());
     let mut args = preset.args.clone();
     if let Some(agent_id) = agent_id.as_deref() {
-        append_mim_connection_args(agent_id, home_path, &mut args);
+        append_mim_connection_args(agent_id, home_path, mcp_url, &mut args);
     }
 
     Ok(ResolvedLaunch {
@@ -347,16 +358,28 @@ pub fn resolve_launch(
     })
 }
 
-fn append_mim_connection_args(agent_id: &str, home: &Path, args: &mut Vec<String>) {
+fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: &mut Vec<String>) {
     match agent_id {
         "codex" if !args.iter().any(|arg| arg.contains("mcp_servers.mim.")) => {
             args.extend([
                 "-c".into(),
-                format!(r#"mcp_servers.mim.url="{MIM_MCP_URL}""#),
+                format!(
+                    "mcp_servers.mim.url={}",
+                    serde_json::to_string(mcp_url)
+                        .expect("serializing an MCP URL string cannot fail")
+                ),
             ]);
         }
         "claude" if !args.iter().any(|arg| arg == "--mcp-config") => {
-            args.extend(["--mcp-config".into(), CLAUDE_MCP_CONFIG.into()]);
+            let config = serde_json::json!({
+                "mcpServers": {
+                    "mim": {
+                        "type": "http",
+                        "url": mcp_url,
+                    }
+                }
+            });
+            args.extend(["--mcp-config".into(), config.to_string()]);
         }
         "pi" => {
             let extension = crate::mimx::pi_extension_path_at(home)
@@ -499,7 +522,14 @@ pub async fn launcher_resolve(
         let home = dirs::home_dir()
             .ok_or_else(|| "Could not resolve the home directory for this launcher.".to_string())?;
         let shell = default_shell_path();
-        resolve_launch(&preset, &detected, workspace_path.as_deref(), &home, &shell)
+        resolve_launch(
+            &preset,
+            &detected,
+            workspace_path.as_deref(),
+            &home,
+            &shell,
+            DEFAULT_MIM_MCP_URL,
+        )
     })
     .await
     .map_err(|error| format!("Launcher resolution task failed: {error}"))?
@@ -556,6 +586,19 @@ mod tests {
     }
 
     #[test]
+    fn missing_configuration_materializes_hackable_defaults() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("nested").join("launchers.json");
+
+        let loaded = load_config(&path).unwrap();
+
+        assert_eq!(loaded.presets, default_config().presets);
+        let written: LauncherConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(written, default_config());
+    }
+
+    #[test]
     fn corrupt_configuration_is_quarantined_and_defaults_recover() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("launchers.json");
@@ -565,7 +608,10 @@ mod tests {
 
         assert_eq!(loaded.presets, default_config().presets);
         assert!(loaded.diagnostic.unwrap().contains("moved"));
-        assert!(!path.exists());
+        assert_eq!(
+            serde_json::from_slice::<LauncherConfig>(&std::fs::read(&path).unwrap()).unwrap(),
+            default_config()
+        );
         assert!(std::fs::read_dir(directory.path())
             .unwrap()
             .any(|entry| entry
@@ -626,6 +672,7 @@ mod tests {
             Some(directory.path().to_str().unwrap()),
             directory.path(),
             Path::new("/bin/zsh"),
+            "http://127.0.0.1:29999/mcp",
         )
         .unwrap();
 
@@ -636,18 +683,29 @@ mod tests {
                 "--model",
                 "gpt 5",
                 "-c",
-                r#"mcp_servers.mim.url="http://127.0.0.1:17532/mcp""#,
+                r#"mcp_servers.mim.url="http://127.0.0.1:29999/mcp""#,
             ]
         );
         assert_eq!(launch.cwd, directory.path().to_string_lossy());
         assert_eq!(launch.resume_strategy, ResumeStrategy::Codex);
+        assert_eq!(
+            launch.env.get("MIMX_MCP_URL").map(String::as_str),
+            Some("http://127.0.0.1:29999/mcp")
+        );
     }
 
     #[test]
     fn reports_missing_workspace_and_missing_agent_precisely() {
         let preset = default_config().presets[0].clone();
-        let error =
-            resolve_launch(&preset, &[], None, Path::new("/"), Path::new("/bin/sh")).unwrap_err();
+        let error = resolve_launch(
+            &preset,
+            &[],
+            None,
+            Path::new("/"),
+            Path::new("/bin/sh"),
+            DEFAULT_MIM_MCP_URL,
+        )
+        .unwrap_err();
         assert!(error.contains("open workspace"));
 
         let directory = tempdir().unwrap();
@@ -657,6 +715,7 @@ mod tests {
             Some(directory.path().to_str().unwrap()),
             directory.path(),
             Path::new("/bin/sh"),
+            DEFAULT_MIM_MCP_URL,
         )
         .unwrap_err();
         assert!(error.contains("no result"));
@@ -665,25 +724,32 @@ mod tests {
     #[test]
     fn every_builtin_agent_connects_to_the_mim_capability_spine() {
         let home = Path::new("/Users/mim");
+        let mcp_url = "http://127.0.0.1:29999/mcp";
 
         let mut codex = Vec::new();
-        append_mim_connection_args("codex", home, &mut codex);
+        append_mim_connection_args("codex", home, mcp_url, &mut codex);
         assert_eq!(
             codex,
-            ["-c", r#"mcp_servers.mim.url="http://127.0.0.1:17532/mcp""#]
+            ["-c", r#"mcp_servers.mim.url="http://127.0.0.1:29999/mcp""#]
         );
 
         let mut claude = Vec::new();
-        append_mim_connection_args("claude", home, &mut claude);
-        assert_eq!(claude, ["--mcp-config", CLAUDE_MCP_CONFIG]);
+        append_mim_connection_args("claude", home, mcp_url, &mut claude);
+        assert_eq!(
+            claude,
+            [
+                "--mcp-config",
+                r#"{"mcpServers":{"mim":{"type":"http","url":"http://127.0.0.1:29999/mcp"}}}"#
+            ]
+        );
 
         let mut pi = Vec::new();
-        append_mim_connection_args("pi", home, &mut pi);
+        append_mim_connection_args("pi", home, mcp_url, &mut pi);
         assert_eq!(pi, ["--extension", "/Users/mim/.mim/pi/mim-tools.ts"]);
 
-        append_mim_connection_args("codex", home, &mut codex);
-        append_mim_connection_args("claude", home, &mut claude);
-        append_mim_connection_args("pi", home, &mut pi);
+        append_mim_connection_args("codex", home, mcp_url, &mut codex);
+        append_mim_connection_args("claude", home, mcp_url, &mut claude);
+        append_mim_connection_args("pi", home, mcp_url, &mut pi);
         assert_eq!(codex.len(), 2);
         assert_eq!(claude.len(), 2);
         assert_eq!(pi.len(), 2);

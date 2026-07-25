@@ -27,6 +27,7 @@ const context = {
   sessionId: 'sess-1',
   approvalMode: 'bypass',
   policy: {},
+  projectPath: '/project',
   getDocument: () => ({
     content: 'Hello world, this is a test document with some content.',
     path: '/project/test.md',
@@ -74,6 +75,47 @@ describe('comment_add tool', () => {
     })
 
     expect(result.error).toMatch(/Could not find anchor_text/)
+  })
+
+  it('updates the live editor without silently saving its dirty document', async () => {
+    const setDocument = vi.fn()
+    const { comment_add } = createCommentAddTool({
+      ...context,
+      setDocument,
+      getDocument: () => ({ content: 'Unsaved draft text.', path: null }),
+    })
+    const { readDocument } = await import('./helpers.js')
+    readDocument.mockResolvedValueOnce({
+      documentId: 'draft', title: 'Untitled', path: null, content: 'Unsaved draft text.',
+    })
+
+    const result = await comment_add.execute({
+      target: '@editor',
+      anchor_text: 'draft',
+      text: 'Keep working here',
+    })
+
+    expect(result.status).toBe('created')
+    expect(setDocument).toHaveBeenCalledWith(expect.stringContaining('>draft</comment>'))
+    expect(mockInvoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+  })
+
+  it('rejects an ambiguous anchor instead of commenting the first accidental match', async () => {
+    const { readDocument } = await import('./helpers.js')
+    readDocument.mockResolvedValueOnce({
+      documentId: 'doc-1', title: 'Test', path: '/project/test.md',
+      content: 'repeated passage, then repeated passage.',
+    })
+
+    const { comment_add } = createCommentAddTool(context)
+    const result = await comment_add.execute({
+      target: '@editor',
+      anchor_text: 'repeated passage',
+      text: 'Which one?',
+    })
+
+    expect(result.error).toMatch(/more than one/)
+    expect(mockInvoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
   })
 
   it('searches in clean text, ignoring existing comment tags', async () => {
@@ -126,15 +168,15 @@ describe('comment_add tool', () => {
 
     const { comment_add } = createCommentAddTool(context)
     const result = await comment_add.execute({
-      target: '/other/file.md',
+      target: '/project/other/file.md',
       anchor_text: 'on disk',
       text: 'Note',
     })
 
     expect(result.status).toBe('created')
-    expect(mockInvoke).toHaveBeenCalledWith('read_text_file', { path: '/other/file.md' })
+    expect(mockInvoke).toHaveBeenCalledWith('read_text_file', { path: '/project/other/file.md' })
     expect(mockInvoke).toHaveBeenCalledWith('write_text_file', expect.objectContaining({
-      path: '/other/file.md',
+      path: '/project/other/file.md',
     }))
   })
 })
@@ -188,6 +230,26 @@ describe('comment_reply tool', () => {
     expect(result.error).toMatch(/not found/)
   })
 
+  it('replies in the live editor without writing through dirty state to disk', async () => {
+    const doc = 'A <comment id="c-live" author="user" text="Review">B</comment> C'
+    const setDocument = vi.fn()
+    const { readDocument } = await import('./helpers.js')
+    readDocument.mockResolvedValueOnce({
+      documentId: 'draft', title: 'Untitled', path: null, content: doc,
+    })
+
+    const { comment_reply } = createCommentReplyTool({ ...context, setDocument })
+    const result = await comment_reply.execute({
+      target: '@editor',
+      comment_id: 'c-live',
+      text: 'Handled',
+    })
+
+    expect(result.status).toBe('replied')
+    expect(setDocument).toHaveBeenCalledWith(expect.stringContaining('text="Handled"'))
+    expect(mockInvoke).not.toHaveBeenCalledWith('write_text_file', expect.anything())
+  })
+
   it('reads from disk when target is a file path', async () => {
     mockInvoke.mockImplementation((cmd) => {
       if (cmd === 'read_text_file')
@@ -196,15 +258,15 @@ describe('comment_reply tool', () => {
 
     const { comment_reply } = createCommentReplyTool(context)
     const result = await comment_reply.execute({
-      target: '/other/file.md',
+      target: '/project/other/file.md',
       comment_id: 'c-xyz',
       text: 'Reply on direct path',
     })
 
     expect(result.status).toBe('replied')
-    expect(mockInvoke).toHaveBeenCalledWith('read_text_file', { path: '/other/file.md' })
+    expect(mockInvoke).toHaveBeenCalledWith('read_text_file', { path: '/project/other/file.md' })
     expect(mockInvoke).toHaveBeenCalledWith('write_text_file', expect.objectContaining({
-      path: '/other/file.md',
+      path: '/project/other/file.md',
     }))
   })
 

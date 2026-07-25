@@ -40,6 +40,7 @@
               <AppearanceSection v-if="activeSection === 'appearance'" />
               <EditorSection v-else-if="activeSection === 'editor'" />
               <AISection v-else-if="activeSection === 'ai'" />
+              <LaunchersSection v-else-if="activeSection === 'launchers'" />
               <ShortcutsSection v-else-if="activeSection === 'shortcuts'" />
               <AboutSection v-else-if="activeSection === 'about'" />
             </div>
@@ -56,6 +57,7 @@ import './settings/settings-form.css'
 import AppearanceSection from './settings/AppearanceSection.vue'
 import EditorSection from './settings/EditorSection.vue'
 import AISection from './settings/AISection.vue'
+import LaunchersSection from './settings/LaunchersSection.vue'
 import ShortcutsSection from './settings/ShortcutsSection.vue'
 import AboutSection from './settings/AboutSection.vue'
 import {
@@ -65,6 +67,7 @@ import {
   IconSparkles,
   IconKeyboard,
   IconInfoCircle,
+  IconRocket,
 } from '@tabler/icons-vue'
 
 const props = defineProps({
@@ -78,6 +81,7 @@ const navGroups = [
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
     { id: 'editor',     label: 'Editor',     icon: IconPencil },
     { id: 'ai',         label: 'Models',     icon: IconSparkles },
+    { id: 'launchers',  label: 'Launchers',  icon: IconRocket },
   ],
   [
     { id: 'shortcuts',  label: 'Shortcuts',  icon: IconKeyboard },
@@ -101,6 +105,7 @@ watch(() => props.initialSection, (section) => {
 function mapSection(section) {
   if (['appearance', 'general'].includes(section)) return 'appearance'
   if (['models', 'ai'].includes(section)) return 'ai'
+  if (['launchers', 'agents'].includes(section)) return 'launchers'
   if (['shortcuts'].includes(section)) return 'shortcuts'
   if (['about', 'info'].includes(section)) return 'about'
   if (['editor', 'writing'].includes(section)) return 'editor'
@@ -120,9 +125,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 
 <style scoped>
 .settings-dialog {
-  width: 760px;
-  height: 640px;
-  max-height: 80vh;
+  width: min(760px, calc(100vw - 24px));
+  height: min(640px, calc(100vh - 24px));
   background: var(--color-surface);
   border: 1px solid var(--color-rule);
   border-radius: 10px;

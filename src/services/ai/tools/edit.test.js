@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { matchInCleanContent } from './edit'
+import { describe, it, expect, vi } from 'vitest'
+import { createEditTool, matchInCleanContent } from './edit'
 import { stripCommentTags } from '../../comments/parser'
 
 function tag(id, text, opts = {}) {
@@ -350,5 +350,53 @@ describe('matchInCleanContent', () => {
       expect(result).toHaveProperty('from')
       expect(result).toHaveProperty('to')
     })
+  })
+})
+
+describe('edit @editor review contract', () => {
+  it('builds a reviewable diff from visible text while preserving comment-aware matching', async () => {
+    const raw = `Hello ${tag('c1', 'careful')} world.`
+    const onProposal = vi.fn()
+    const { edit } = createEditTool({
+      getDocument: () => ({ content: raw, path: '/work/doc.md' }),
+      onProposal,
+    })
+
+    const result = await edit.execute({
+      target: '@editor',
+      old_text: 'Hello careful world.',
+      new_text: 'Hello precise world.',
+    })
+
+    expect(result.status).toBe('pending_review')
+    expect(onProposal).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/work/doc.md',
+      original: raw,
+      modified: 'Hello precise world.',
+      status: 'pending',
+    }))
+  })
+
+  it('does not create a phantom review when the target is missing or ambiguous', async () => {
+    const onProposal = vi.fn()
+    const { edit } = createEditTool({
+      getDocument: () => ({ content: 'same same', path: '/work/doc.md' }),
+      onProposal,
+    })
+
+    const missing = await edit.execute({
+      target: '@editor',
+      old_text: 'absent',
+      new_text: 'replacement',
+    })
+    const ambiguous = await edit.execute({
+      target: '@editor',
+      old_text: 'same',
+      new_text: 'replacement',
+    })
+
+    expect(missing.error).toMatch(/not found/i)
+    expect(ambiguous.error).toMatch(/2 locations/)
+    expect(onProposal).not.toHaveBeenCalled()
   })
 })

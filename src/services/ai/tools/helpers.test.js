@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { limitText } from './index'
+import { readDocument } from './helpers.js'
 
 describe('limitText', () => {
   it('returns text unchanged when under limit', () => {
@@ -53,5 +54,16 @@ describe('limitText', () => {
   it('does not truncate text shorter than default limit', () => {
     const text = 'Short text'
     expect(limitText(text)).toBe('Short text')
+  })
+})
+
+describe('readDocument', () => {
+  it('treats an intentionally empty live editor as authoritative', async () => {
+    const document = await readDocument(() => ({ content: '', path: '/work/empty.md' }))
+    expect(document).toEqual(expect.objectContaining({
+      content: '',
+      path: '/work/empty.md',
+      title: 'empty.md',
+    }))
   })
 })

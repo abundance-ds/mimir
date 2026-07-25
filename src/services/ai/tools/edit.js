@@ -22,7 +22,7 @@ export function matchInCleanContent(rawContent, oldText) {
   }
 }
 
-function findUniqueRange(fileContent, oldText) {
+export function findUniqueRange(fileContent, oldText) {
   const matchCount = countMatches(fileContent, oldText)
   if (matchCount === 1) return findTargetText(fileContent, oldText)
   if (matchCount > 1) return { error: 'ambiguous', count: matchCount }
@@ -48,12 +48,22 @@ export function createEditTool(context = {}) {
       execute: withGate('edit', async ({ target, old_text, new_text, rationale }) => {
         if (target === '@editor') {
           const document = await readDocument(context.getDocument || null)
-          if (!document.content) return { error: 'No document is open.' }
+          const range = findUniqueRange(document.content, old_text)
+          if (!range || range.error === 'not_found') {
+            return { error: 'Text not found in the active editor. Read @editor again and verify the exact content.' }
+          }
+          if (range.error === 'ambiguous') {
+            return { error: `Text matches ${range.count} locations in the active editor. Provide a longer, unique passage.` }
+          }
+          const modified = document.content.slice(0, range.from) + new_text + document.content.slice(range.to)
           const proposal = {
             id: generateProposalId('proposal'),
             type: 'edit',
+            path: document.path || null,
             targetText: old_text,
             replacement: new_text,
+            original: document.content,
+            modified,
             rationale: rationale || '',
             createdAt: new Date().toISOString(),
             status: 'pending',

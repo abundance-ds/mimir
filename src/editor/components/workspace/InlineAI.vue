@@ -12,6 +12,8 @@
           autocorrect="off"
           autocapitalize="off"
           rows="1"
+          aria-label="Inline AI instruction"
+          aria-keyshortcuts="Enter Shift+Enter Meta+Enter Control+Enter"
           :disabled="isLoading"
           :placeholder="placeholder"
           @keydown="onInputKeydown"
@@ -19,6 +21,7 @@
         />
         <button
           type="submit"
+          aria-label="Send inline AI instruction"
           class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-semibold text-accent-ink bg-accent hover:opacity-90 disabled:opacity-30"
           :disabled="!input.trim() || isLoading"
         >Send</button>
@@ -30,11 +33,21 @@
         :models="modelList"
         @update:modelId="onModelChange"
       />
-      <button class="w-[24px] h-[24px] flex items-center justify-center rounded text-ink-3 text-sm hover:text-ink-2 hover:bg-chrome-high shrink-0" @mousedown.prevent @click="onClose">&times;</button>
+      <button
+        aria-label="Close inline AI"
+        title="Close inline AI"
+        class="w-[24px] h-[24px] flex items-center justify-center rounded text-ink-3 text-sm hover:text-ink-2 hover:bg-chrome-high shrink-0"
+        @mousedown.prevent
+        @click="onClose"
+      >&times;</button>
     </div>
 
     <!-- Row 2: Status / Response / Error -->
-    <div v-if="isLoading || responseText || chatError" class="flex items-start gap-1.5 min-h-[34px] px-[14px] py-1.5 border-t border-rule-light">
+    <div
+      v-if="isLoading || responseText || chatError"
+      aria-live="polite"
+      class="flex items-start gap-1.5 min-h-[34px] px-[14px] py-1.5 border-t border-rule-light"
+    >
       <!-- Loading -->
       <template v-if="isLoading">
         <span class="inline-flex items-center min-w-[80px] font-sans text-[11px] text-accent leading-snug">
@@ -55,7 +68,13 @@
         <p class="flex-1 min-w-0 font-sans text-[11px] leading-snug text-ink-2">{{ responseText }}</p>
         <template v-if="pendingEdit">
           <button class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-medium text-ink-3 iai-reject-btn" @mousedown.prevent @click="onReject">Reject</button>
-          <button class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-semibold text-accent-ink bg-accent hover:opacity-90" @mousedown.prevent @click="onAccept">Accept</button>
+          <button
+            aria-label="Accept AI edit"
+            aria-keyshortcuts="Meta+Enter Control+Enter"
+            class="shrink-0 h-[24px] px-2.5 rounded font-sans text-[10.5px] font-semibold text-accent-ink bg-accent hover:opacity-90"
+            @mousedown.prevent
+            @click="onAccept"
+          >Accept</button>
         </template>
       </template>
     </div>
@@ -71,6 +90,7 @@ import { getModelRegistry, getAiKeyStatus } from '../../../services/ai/client.js
 import { modelMenuItems } from '../../../services/ai/modelControls.js'
 import { createInlineAITransport, buildInlineSystemPrompt } from '../../../services/ai/inlineTransport.js'
 import ModelPicker from '../../../shared/ui/ModelPicker.vue'
+import { inlineAIKeyAction } from './inlineAIKeys.js'
 
 const TOOL_LABELS = {
   read: 'Reading',
@@ -227,15 +247,16 @@ function resetInput() {
 }
 
 function onInputKeydown(e) {
-  if (e.key === 'Escape') {
+  const action = inlineAIKeyAction(e, { hasPendingEdit: Boolean(pendingEdit.value) })
+  if (action === 'escape') {
     e.preventDefault()
     onClose()
-  } else if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    onSubmit()
-  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+  } else if (action === 'accept') {
     e.preventDefault()
     onAccept()
+  } else if (action === 'submit') {
+    e.preventDefault()
+    onSubmit()
   }
 }
 

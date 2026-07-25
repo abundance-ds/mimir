@@ -71,4 +71,15 @@ describe('PaneFrame', () => {
     await wrapper.get('[data-pane-action="next"]').trigger('click')
     expect(store.activeActivityId).toBe('terminal:two')
   })
+
+  it('lets the first expanded content header restore a railed sidebar', async () => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+    store.setPaneState('sidebar', 'rail')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.get('[data-pane-action="restore-sidebar"]').trigger('click')
+
+    expect(store.paneLayout.sidebar.state).toBe('expanded')
+  })
 })

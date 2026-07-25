@@ -90,6 +90,9 @@ export async function executeToolRequest(request, options = {}) {
   if (tool.startsWith('editor.')) {
     return executeEditorTool(resolveEditor(options), tool, input)
   }
+  if (['comments.resolve', 'comments.reopen', 'comments.delete'].includes(tool)) {
+    return executeEditorCommentTool(resolveEditor(options), tool, input)
+  }
 
   switch (tool) {
     case 'activities.list':
@@ -104,6 +107,28 @@ export async function executeToolRequest(request, options = {}) {
             cols: input.cols ?? 100,
             rows: input.rows ?? 30,
           })
+    case 'activities.stop':
+      if (options.stopActivity) return options.stopActivity(input.activity_id)
+      await invoke('activity_stop', { activityId: input.activity_id })
+      return { activity_id: input.activity_id, status: 'stopping' }
+    case 'activities.rename':
+      return options.renameActivity
+        ? options.renameActivity(input.activity_id, input.title)
+        : invoke('activity_rename', {
+            activityId: input.activity_id,
+            title: input.title,
+          })
+    case 'activities.archive':
+      return options.archiveActivity
+        ? options.archiveActivity(input.activity_id, input.archived)
+        : invoke('activity_set_archived', {
+            activityId: input.activity_id,
+            archived: input.archived,
+          })
+    case 'activities.clear':
+      if (options.clearActivity) return options.clearActivity(input.activity_id)
+      await invoke('activity_clear', { activityId: input.activity_id })
+      return { activity_id: input.activity_id, status: 'cleared' }
     case 'apps.list':
       return options.listApps ? options.listApps() : invoke('app_catalog')
     case 'apps.launch':
@@ -126,6 +151,18 @@ export async function executeToolRequest(request, options = {}) {
   }
 }
 
+function executeEditorCommentTool(editor, tool, input) {
+  const action = tool.slice('comments.'.length)
+  if (!input?.comment_id) throw invalidInputError('comment_id is required.')
+  const result = editor.mimCommentAction?.(action, input.comment_id)
+  if (!result) throw unavailableError('The attached editor does not support comment actions.')
+  if (result.ok === false) throw toolError('handler', result.error || `Could not ${action} comment.`)
+  return {
+    comment_id: input.comment_id,
+    status: action === 'delete' ? 'deleted' : action === 'resolve' ? 'resolved' : 'active',
+  }
+}
+
 async function executeWorkspaceTool(request, options) {
   const alias = CORE_TOOL_ALIASES[request.tool]
   if (!alias) throw notFoundError(`Tool '${request.tool}' has no renderer handler.`)
@@ -140,12 +177,36 @@ async function executeWorkspaceTool(request, options) {
     projectPath: workspacePath,
     disabledTools: [],
     getDocument: () => editor?.mimActive?.({ includeContent: true }) || null,
-    onProposal: options.onProposal || (() => {}),
+    setDocument: content => editor?.mimSetContent?.(content),
+    onProposal: options.onProposal || createEditorProposalBridge(editor, request),
     signal: options.signal,
   })
   const implementation = tools[alias]
   if (!implementation) throw notFoundError(`Tool '${request.tool}' is not installed.`)
   return implementation.execute(request.input || {})
+}
+
+function createEditorProposalBridge(editor, request) {
+  return async (proposal) => {
+    if (proposal?.status !== 'pending') return proposal
+
+    const active = editor?.mimActive?.() || null
+    const path = proposal.path || active?.path || null
+    const enriched = {
+      ...proposal,
+      path,
+      absolutePath: path,
+      sessionId: request.context?.activityId || 'mcp',
+      threadId: request.context?.activityId || 'mcp',
+    }
+
+    // Open the review immediately in the stable editor surface. Registering it
+    // natively afterwards keeps the same proposal visible to every caller and
+    // lets accept/reject complete the shared lifecycle.
+    await editor?.mimReviewProposal?.(enriched)
+    await invoke('proposal_create', { proposal: enriched })
+    return enriched
+  }
 }
 
 function resolveEditor(options, required = true) {
@@ -205,11 +266,23 @@ async function updateSettings(settings, values) {
     if (!isPublicSetting(key) || !(key in settings)) {
       throw invalidInputError(`Setting '${key}' is not editable through MCP.`)
     }
+    if (!hasCompatibleSettingShape(settings[key], value)) {
+      throw invalidInputError(`Setting '${key}' has an incompatible value type.`)
+    }
     settings.set(key, value)
     updated[key] = value
   }
   await settings.save?.()
   return { updated }
+}
+
+function hasCompatibleSettingShape(current, next) {
+  if (typeof current === 'number') return typeof next === 'number' && Number.isFinite(next)
+  if (Array.isArray(current)) return Array.isArray(next)
+  if (current && typeof current === 'object') {
+    return Boolean(next) && typeof next === 'object' && !Array.isArray(next)
+  }
+  return typeof next === typeof current
 }
 
 function isPublicSetting(key) {

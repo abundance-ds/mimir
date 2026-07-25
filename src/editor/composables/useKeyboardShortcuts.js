@@ -57,7 +57,7 @@ export function useKeyboardShortcuts({
       e.preventDefault()
       settings.editorToolbarMode = settings.editorToolbarMode === 'none' ? 'top' : 'none'
     }
-    if (mod && !e.shiftKey && key === 'b') {
+    if (mod && e.shiftKey && key === 'b') {
       e.preventDefault()
       onFormat('bold')
     }

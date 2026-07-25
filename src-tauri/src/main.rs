@@ -1,3 +1,3 @@
 fn main() {
-    mim_terminal::run()
+    mim_workbench::run()
 }

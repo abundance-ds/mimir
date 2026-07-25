@@ -61,9 +61,9 @@ impl ActivitySupervisorConfig {
 
 impl Default for ActivitySupervisorConfig {
     fn default() -> Self {
-        let persistence_dir = dirs::data_local_dir()
+        let persistence_dir = dirs::home_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("mim-panel")
+            .join(".mim")
             .join("activities");
         Self {
             persistence_dir,
@@ -169,6 +169,15 @@ pub enum SupervisorError {
     MissingLaunch(String),
     #[error("activity {0} is not running")]
     NotRunning(String),
+    #[error("activity title cannot be empty")]
+    EmptyTitle,
+    #[error("activity {0} is ephemeral and cannot be archived")]
+    NotDurable(String),
+    #[error("activity {activity_id} must be ended before it can be {operation}")]
+    NotEnded {
+        activity_id: String,
+        operation: &'static str,
+    },
     #[error("could not open PTY for {activity_id}: {message}")]
     OpenPty {
         activity_id: String,
@@ -283,6 +292,10 @@ enum PersistenceCommand {
     Save {
         path: PathBuf,
         value: PersistedActivity,
+    },
+    Delete {
+        path: PathBuf,
+        ack: mpsc::Sender<Result<(), String>>,
     },
     Flush(mpsc::Sender<()>),
 }
@@ -601,6 +614,114 @@ impl ActivitySupervisor {
         self.kill_with_intent(activity_id, &activity, USER_STOP_INTENT)
     }
 
+    /// Rename an activity without disturbing its process, PTY, or scrollback.
+    pub fn rename(
+        &self,
+        activity_id: &str,
+        title: impl Into<String>,
+    ) -> Result<ActivityRecord, SupervisorError> {
+        let title = title.into().trim().to_string();
+        if title.is_empty() {
+            return Err(SupervisorError::EmptyTitle);
+        }
+        let activity = self.activity(activity_id)?;
+        let (record, sinks) = {
+            let dispatch = lock(&self.inner.dispatch);
+            let mut record = lock(&activity.record);
+            let scrollback = lock(&activity.scrollback);
+            if record.title == title {
+                return Ok(record.clone());
+            }
+            record.title = title;
+            record.updated_at = timestamp();
+            let snapshot = record.clone();
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
+                self.inner.persistence.save(path, value);
+            }
+            let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
+            (snapshot, sinks)
+        };
+        publish_to_sinks(
+            &sinks,
+            &ActivityEvent::Upsert {
+                record: record.clone(),
+            },
+        );
+        Ok(record)
+    }
+
+    /// Archive and restore only durable, ended activities. Running processes
+    /// remain visible and ephemeral terminals never acquire false durability.
+    pub fn set_archived(
+        &self,
+        activity_id: &str,
+        archived: bool,
+    ) -> Result<ActivityRecord, SupervisorError> {
+        let activity = self.activity(activity_id)?;
+        let (record, sinks) = {
+            let dispatch = lock(&self.inner.dispatch);
+            let mut record = lock(&activity.record);
+            let scrollback = lock(&activity.scrollback);
+            if record.retention != ActivityRetention::Durable {
+                return Err(SupervisorError::NotDurable(activity_id.to_string()));
+            }
+            if !record.is_clearable() {
+                return Err(SupervisorError::NotEnded {
+                    activity_id: activity_id.to_string(),
+                    operation: "archived",
+                });
+            }
+            if record.is_archived() == archived {
+                return Ok(record.clone());
+            }
+            let now = timestamp();
+            record.archived_at = archived.then(|| now.clone());
+            record.updated_at = now;
+            let snapshot = record.clone();
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
+                self.inner.persistence.save(path, value);
+            }
+            let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
+            (snapshot, sinks)
+        };
+        publish_to_sinks(
+            &sinks,
+            &ActivityEvent::Upsert {
+                record: record.clone(),
+            },
+        );
+        Ok(record)
+    }
+
+    /// Permanently clear an ended activity and its persisted scrollback.
+    ///
+    /// Completion persists its final snapshot while holding the activity
+    /// record lock, so once this method observes an ended record its ordered
+    /// delete is guaranteed to follow every session write.
+    pub fn clear(&self, activity_id: &str) -> Result<ActivityRecord, SupervisorError> {
+        let mut activities = lock(&self.inner.activities);
+        let activity = activities
+            .get(activity_id)
+            .cloned()
+            .ok_or_else(|| SupervisorError::NotFound(activity_id.to_string()))?;
+        let record = lock(&activity.record);
+        if lock(&activity.command_tx).is_some() || !record.is_clearable() {
+            return Err(SupervisorError::NotEnded {
+                activity_id: activity_id.to_string(),
+                operation: "cleared",
+            });
+        }
+        let removed = record.clone();
+        drop(record);
+
+        let path = activity_persistence_path(&self.inner.config.persistence_dir, activity_id);
+        self.inner.persistence.delete(path)?;
+        activities.remove(activity_id);
+        Ok(removed)
+    }
+
     /// Mark and terminate every live process as interrupted. This is the app
     /// quit/restart path; it never masquerades as an intentional user stop.
     pub fn interrupt_all(&self) -> usize {
@@ -788,7 +909,6 @@ impl SupervisorInner {
         };
 
         let mut events = Vec::with_capacity(2);
-        let persisted;
         let sinks;
         {
             // This gate makes attach+snapshot race-free. No callback or I/O is
@@ -817,12 +937,11 @@ impl SupervisorInner {
                     needs_input_is_blocking: change.needs_input_is_blocking,
                 });
             }
-            persisted = persisted_snapshot(&record, &scrollback);
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.persistence_path_and_value(persisted) {
+                self.persistence.save(path, value);
+            }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
-        }
-
-        if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-            self.persistence.save(path, value);
         }
         for event in events {
             publish_to_sinks(&sinks, &event);
@@ -830,7 +949,6 @@ impl SupervisorInner {
     }
 
     fn record_agent_status(&self, activity: &Arc<ManagedActivity>, change: AgentStatusChange) {
-        let persisted;
         let event;
         let sinks;
         {
@@ -848,11 +966,11 @@ impl SupervisorInner {
                 title_hint: change.title_hint,
                 needs_input_is_blocking: change.needs_input_is_blocking,
             };
-            persisted = persisted_snapshot(&record, &scrollback);
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.persistence_path_and_value(persisted) {
+                self.persistence.save(path, value);
+            }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
-        }
-        if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-            self.persistence.save(path, value);
         }
         publish_to_sinks(&sinks, &event);
     }
@@ -880,7 +998,6 @@ impl SupervisorInner {
         lock(&activity.killer).take();
         activity.process_id.store(0, Ordering::Release);
 
-        let persisted;
         let record_snapshot;
         let sinks;
         {
@@ -905,12 +1022,11 @@ impl SupervisorInner {
                 debug_assert_eq!(change.status, record.status);
             }
             record_snapshot = record.clone();
-            persisted = persisted_snapshot(&record, &scrollback);
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.persistence_path_and_value(persisted) {
+                self.persistence.save(path, value);
+            }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
-        }
-
-        if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-            self.persistence.save(path, value);
         }
         publish_to_sinks(
             &sinks,
@@ -929,8 +1045,6 @@ impl SupervisorInner {
         }
         let scrollback = lock(&activity.scrollback);
         let persisted = persisted_snapshot(&record, &scrollback);
-        drop(scrollback);
-        drop(record);
         if let Some((path, value)) = self.persistence_path_and_value(persisted) {
             self.persistence.save(path, value);
         }
@@ -960,6 +1074,19 @@ impl PersistenceQueue {
         let _ = self.tx.send(PersistenceCommand::Save { path, value });
     }
 
+    fn delete(&self, path: PathBuf) -> Result<(), SupervisorError> {
+        let (ack_tx, ack_rx) = mpsc::channel();
+        self.tx
+            .send(PersistenceCommand::Delete { path, ack: ack_tx })
+            .map_err(|_| SupervisorError::PersistenceWorker("worker channel closed".into()))?;
+        ack_rx
+            .recv()
+            .map_err(|_| {
+                SupervisorError::PersistenceWorker("worker stopped before deleting activity".into())
+            })?
+            .map_err(SupervisorError::PersistenceWorker)
+    }
+
     fn flush(&self) -> Result<(), SupervisorError> {
         let (ack_tx, ack_rx) = mpsc::channel();
         self.tx
@@ -977,12 +1104,32 @@ impl PersistenceQueue {
 }
 
 fn persistence_loop(receiver: mpsc::Receiver<PersistenceCommand>, errors: Arc<Mutex<Vec<String>>>) {
+    struct PendingPersistence {
+        value: Option<PersistedActivity>,
+        delete_acks: Vec<mpsc::Sender<Result<(), String>>>,
+    }
+
     while let Ok(first) = receiver.recv() {
-        let mut pending = HashMap::new();
+        let mut pending: HashMap<PathBuf, PendingPersistence> = HashMap::new();
         let mut flush_acks = Vec::new();
         match first {
             PersistenceCommand::Save { path, value } => {
-                pending.insert(path, value);
+                pending.insert(
+                    path,
+                    PendingPersistence {
+                        value: Some(value),
+                        delete_acks: Vec::new(),
+                    },
+                );
+            }
+            PersistenceCommand::Delete { path, ack } => {
+                pending.insert(
+                    path,
+                    PendingPersistence {
+                        value: None,
+                        delete_acks: vec![ack],
+                    },
+                );
             }
             PersistenceCommand::Flush(ack) => flush_acks.push(ack),
         }
@@ -994,7 +1141,25 @@ fn persistence_loop(receiver: mpsc::Receiver<PersistenceCommand>, errors: Arc<Mu
             };
             match receiver.recv_timeout(remaining) {
                 Ok(PersistenceCommand::Save { path, value }) => {
-                    pending.insert(path, value);
+                    pending
+                        .entry(path)
+                        .and_modify(|action| action.value = Some(value.clone()))
+                        .or_insert(PendingPersistence {
+                            value: Some(value),
+                            delete_acks: Vec::new(),
+                        });
+                }
+                Ok(PersistenceCommand::Delete { path, ack }) => {
+                    pending
+                        .entry(path)
+                        .and_modify(|action| {
+                            action.value = None;
+                            action.delete_acks.push(ack.clone());
+                        })
+                        .or_insert(PendingPersistence {
+                            value: None,
+                            delete_acks: vec![ack],
+                        });
                 }
                 Ok(PersistenceCommand::Flush(ack)) => flush_acks.push(ack),
                 Err(mpsc::RecvTimeoutError::Timeout) => break,
@@ -1002,9 +1167,18 @@ fn persistence_loop(receiver: mpsc::Receiver<PersistenceCommand>, errors: Arc<Mu
             }
         }
 
-        for (path, value) in pending {
-            if let Err(error) = write_json_atomic(&path, &value) {
-                lock(&errors).push(error.to_string());
+        for (path, action) in pending {
+            let result = match action.value {
+                Some(value) => write_json_atomic(&path, &value).map_err(|error| error.to_string()),
+                None if !path.exists() => Ok(()),
+                None => fs::remove_file(&path)
+                    .map_err(|error| format!("Could not delete {}: {}", path.display(), error)),
+            };
+            if let Err(error) = &result {
+                lock(&errors).push(error.clone());
+            }
+            for ack in action.delete_acks {
+                let _ = ack.send(result.clone());
             }
         }
         for ack in flush_acks {
@@ -1516,6 +1690,106 @@ mod tests {
             snapshot.record.session.unwrap().exit.unwrap().reason,
             SessionExitReason::Interrupted
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_archive_and_clear_are_ordered_durable_lifecycle_operations() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let record = durable_record(
+            "lifecycle",
+            "/bin/sh",
+            vec!["-c".into(), "printf durable-history".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(record, 80, 24))
+            .unwrap();
+        wait_for_end(&supervisor, "lifecycle");
+        supervisor.flush_persistence().unwrap();
+
+        let (event_tx, event_rx) = mpsc::channel();
+        supervisor.subscribe(Arc::new(event_tx));
+
+        let renamed = supervisor.rename("lifecycle", "  Review run  ").unwrap();
+        assert_eq!(renamed.title, "Review run");
+        assert!(matches!(
+            event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ActivityEvent::Upsert { record } if record.title == "Review run"
+        ));
+
+        let archived = supervisor.set_archived("lifecycle", true).unwrap();
+        assert!(archived.archived_at.is_some());
+        assert!(matches!(
+            event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ActivityEvent::Upsert { record } if record.archived_at.is_some()
+        ));
+
+        supervisor.flush_persistence().unwrap();
+        drop(supervisor);
+
+        let hydrated = create_supervisor(&temp);
+        let restored = hydrated.snapshot("lifecycle", None).unwrap();
+        assert_eq!(restored.record.title, "Review run");
+        assert!(restored.record.archived_at.is_some());
+        assert_eq!(replay_bytes(&restored), b"durable-history");
+
+        let removed = hydrated.clear("lifecycle").unwrap();
+        assert_eq!(removed.id, "lifecycle");
+        assert!(hydrated.list().is_empty());
+        assert!(!activity_persistence_path(temp.path(), "lifecycle").exists());
+        drop(hydrated);
+
+        assert!(create_supervisor(&temp).list().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lifecycle_rejects_empty_titles_running_sessions_and_ephemeral_archives() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let running = durable_record(
+            "running-lifecycle",
+            "/bin/sh",
+            vec!["-c".into(), "while :; do sleep 1; done".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(running, 80, 24))
+            .unwrap();
+
+        assert!(matches!(
+            supervisor.rename("running-lifecycle", "  "),
+            Err(SupervisorError::EmptyTitle)
+        ));
+        assert!(matches!(
+            supervisor.set_archived("running-lifecycle", true),
+            Err(SupervisorError::NotEnded {
+                operation: "archived",
+                ..
+            })
+        ));
+        assert!(matches!(
+            supervisor.clear("running-lifecycle"),
+            Err(SupervisorError::NotEnded {
+                operation: "cleared",
+                ..
+            })
+        ));
+        supervisor.stop("running-lifecycle").unwrap();
+        wait_for_end(&supervisor, "running-lifecycle");
+
+        let mut ephemeral =
+            durable_record("ephemeral", "/bin/sh", vec!["-c".into(), "true".into()]);
+        ephemeral.retention = ActivityRetention::Ephemeral;
+        supervisor
+            .spawn(SpawnActivityRequest::new(ephemeral, 80, 24))
+            .unwrap();
+        wait_for_end(&supervisor, "ephemeral");
+        assert!(matches!(
+            supervisor.set_archived("ephemeral", true),
+            Err(SupervisorError::NotDurable(id)) if id == "ephemeral"
+        ));
+        assert_eq!(supervisor.clear("ephemeral").unwrap().id, "ephemeral");
     }
 
     #[test]

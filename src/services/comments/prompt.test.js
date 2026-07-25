@@ -18,8 +18,10 @@ describe('buildCommentsPrompt', () => {
     })
 
     expect(prompt).toContain('2 inline <comment> annotations')
-    expect(prompt).toContain('@/tmp/plan.md')
-    expect(prompt).toContain('pseudo-XML comments')
+    expect(prompt).toContain('"/tmp/plan.md"')
+    expect(prompt).toContain('canonical pseudo-XML threads')
+    expect(prompt).toContain('Preserve every <comment> wrapper, <reply>, and status attribute')
+    expect(prompt).toContain('use comment_reply')
     expect(prompt).toContain('Focus first on c2 near line 42: Check the JSON example')
   })
 })

@@ -1,17 +1,17 @@
 {
-  "name": "mim-panel",
+  "name": "mim-workbench",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "bin": {
     "mimx": "bin/mimx.mjs"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
-    "test": "vitest run",
+    "test": "node scripts/test.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
@@ -61,5 +61,8 @@
     "tailwindcss": "^4.3.0",
     "vite": "^7.2.4",
     "vitest": "^4.1.5"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.8"
   }
 }

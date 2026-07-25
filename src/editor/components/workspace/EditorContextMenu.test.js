@@ -42,6 +42,13 @@ describe('EditorContextMenu', () => {
     expect(labels).not.toContain('Ask AI ⌘K')
   })
 
+  it('hides Ask AI when inline AI is disabled without removing comments', () => {
+    const w = mountMenu({ hasSelection: true, aiEnabled: false })
+    const labels = itemLabels(w)
+    expect(labels).toContain('Add Comment ⇧⌘M')
+    expect(labels).not.toContain('Ask AI ⌘K')
+  })
+
   // --- Emit behavior ---
 
   it('emits comment then close when Add Comment clicked', async () => {

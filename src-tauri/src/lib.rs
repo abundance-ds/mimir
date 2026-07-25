@@ -793,7 +793,7 @@ fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> 
 fn create_main_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<tauri::WebviewWindow> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(manager, "main", tauri::WebviewUrl::App("/".into()))
-            .title("Mim Panel")
+            .title("Mim")
             .inner_size(1280.0, 800.0)
             .min_inner_size(520.0, 420.0)
             .decorations(true);
@@ -945,6 +945,9 @@ pub fn run() {
             activity_commands::activity_write,
             activity_commands::activity_resize,
             activity_commands::activity_stop,
+            activity_commands::activity_rename,
+            activity_commands::activity_set_archived,
+            activity_commands::activity_clear,
             activity_commands::activity_interrupt_all,
             activity_commands::activity_flush,
             launchers::launcher_detect_agents,
@@ -988,7 +991,7 @@ pub fn run() {
             tool_runtime::tool_relay_cancel,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Mim Panel")
+        .expect("error while building Mim")
         .run(|app_handle, event| {
             if matches!(
                 &event,

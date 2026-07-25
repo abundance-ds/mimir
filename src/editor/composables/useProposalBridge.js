@@ -1,13 +1,15 @@
 import { ref, onUnmounted } from 'vue'
 import { findTargetText } from '../../services/ai/tools/textMatch.js'
+import { matchInCleanContent } from '../../services/ai/tools/edit.js'
 import { PROPOSAL_APPLY_EVENT, DIFF_OPEN_EVENT } from '../../shared/proposalEvents.js'
 
 const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
 export function computeDiffFromReview(review, fileContent) {
   if (!review?.targetText) return null
-  const match = findTargetText(fileContent, review.targetText)
-  if (!match) return null
+  const direct = findTargetText(fileContent, review.targetText)
+  const match = direct || matchInCleanContent(fileContent, review.targetText)
+  if (!match || match.error) return null
   return {
     original: fileContent,
     modified: fileContent.slice(0, match.from) + review.replacement + fileContent.slice(match.to),
@@ -19,8 +21,9 @@ export function computeCompoundDiff(reviews, fileContent) {
   const positioned = []
   for (const r of reviews) {
     if (!r.targetText) continue
-    const match = findTargetText(fileContent, r.targetText)
-    if (!match) continue
+    const direct = findTargetText(fileContent, r.targetText)
+    const match = direct || matchInCleanContent(fileContent, r.targetText)
+    if (!match || match.error) continue
     positioned.push({ replacement: r.replacement || '', from: match.from, to: match.to })
   }
   if (positioned.length === 0) return null

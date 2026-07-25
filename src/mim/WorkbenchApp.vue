@@ -118,6 +118,7 @@ import QuickOpen from './components/QuickOpen.vue'
 import WorkbenchShell from './components/WorkbenchShell.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import { useWorkbenchResize } from './composables/useWorkbenchResize.js'
+import { applyResponsiveZone, responsiveZoneFor } from './responsiveLayout.js'
 
 const activityModules = import.meta.glob('./activities/*Activity.vue', { eager: true })
 const optionalSurfaces = {
@@ -147,13 +148,31 @@ const editorRef = ref(null)
 const quickOpen = ref(false)
 const diagnostic = ref('')
 const initialized = ref(false)
+const responsiveZone = ref('wide')
 const activitySurfaces = new Map()
+let desktopLayout = null
 
 const toolRuntime = createToolRuntime({
   getEditor: () => editorRef.value,
   getWorkspacePath: () => workspaceFiles.workspacePath || null,
   settings,
   listActivities: () => activities.activities,
+  stopActivity: async (id) => {
+    await activityRuntime.stop(id)
+    return { activity_id: id, status: 'stopping' }
+  },
+  renameActivity: async (id, title) => {
+    await activityRuntime.rename(id, title)
+    return activities.byId(id)
+  },
+  archiveActivity: async (id, archived) => {
+    await activityRuntime.setArchived(id, archived)
+    return activities.byId(id)
+  },
+  clearActivity: async (id) => {
+    await activityRuntime.clear(id)
+    return { activity_id: id, status: 'cleared' }
+  },
   listApps: listAppsForTool,
   launchApp: launchAppFromTool,
 })
@@ -231,10 +250,12 @@ watch(
 onMounted(async () => {
   ensureCoreActivities()
   document.addEventListener('keydown', onKeydown, true)
-  window.__mim_terminalPaste = pasteToActiveTerminal
+  window.addEventListener('resize', syncResponsiveLayout)
+  window.__mim_activityPaste = pasteToActiveTerminal
 
   await settings.load()
   restoreWorkbench()
+  syncResponsiveLayout({ force: true })
 
   const [, runtimeResult, toolRuntimeResult] = await Promise.allSettled([
     launchers.load(),
@@ -260,12 +281,13 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown, true)
+  window.removeEventListener('resize', syncResponsiveLayout)
   resize.dispose()
   workspaceFiles.dispose()
   activityRuntime.dispose()
   toolRuntime.stop()
-  if (window.__mim_terminalPaste === pasteToActiveTerminal) {
-    delete window.__mim_terminalPaste
+  if (window.__mim_activityPaste === pasteToActiveTerminal) {
+    delete window.__mim_activityPaste
   }
   activitySurfaces.clear()
 })
@@ -298,9 +320,34 @@ function restoreWorkbench() {
 
 function persistWorkbench(layout = workbench.layoutSnapshot()) {
   if (!initialized.value) return
+  const persistedLayout = responsiveZone.value === 'wide'
+    ? layout
+    : (desktopLayout || layout)
   settings.set('workbenchLayout', {
-    ...layout,
+    ...persistedLayout,
     activeActivityId: workbench.activeActivityId || 'files',
+  })
+}
+
+function syncResponsiveLayout({ force = false } = {}) {
+  const nextZone = responsiveZoneFor(window.innerWidth)
+  if (!force && nextZone === responsiveZone.value) return
+  if (responsiveZone.value === 'wide' && nextZone !== 'wide') {
+    desktopLayout = workbench.layoutSnapshot()
+  }
+  applyResponsiveZone(workbench, nextZone, {
+    preferEditor: Boolean(editorFiles.currentFile),
+    desktopLayout,
+  })
+  responsiveZone.value = nextZone
+  if (nextZone === 'wide') desktopLayout = null
+}
+
+function focusNarrowPane(pane) {
+  if (responsiveZone.value !== 'focus') return
+  applyResponsiveZone(workbench, 'focus', {
+    preferEditor: pane === 'editor',
+    desktopLayout,
   })
 }
 
@@ -386,6 +433,7 @@ function selectActivity(id) {
     })
   }
   workbench.openActivity(id)
+  focusNarrowPane('activity')
   workbench.setPaneState('activity', 'expanded')
 }
 
@@ -398,6 +446,7 @@ async function openFileInEditor(path) {
   if (!path) return
   try {
     await editorRef.value?.mimOpen(path)
+    focusNarrowPane('editor')
     workbench.setPaneState('editor', 'expanded')
     diagnostic.value = ''
   } catch (cause) {
@@ -457,7 +506,19 @@ async function restartActivity(payload) {
     diagnostic.value = `${activity?.title || 'Activity'} cannot restart because its launcher preset is missing.`
     return
   }
-  await onLaunch(`preset:${preset.id}`)
+  try {
+    await activityRuntime.launchPreset(
+      preset,
+      activity.workspacePath || workspaceFiles.workspacePath,
+      {
+        resume: activity.kind === 'agent' && Boolean(activity.host?.resumeStrategy),
+        resumeStrategy: activity.host?.resumeStrategy,
+        title: activity.title,
+      },
+    )
+  } catch (cause) {
+    diagnostic.value = `${activity?.title || 'Activity'} could not restart: ${errorMessage(cause)}`
+  }
 }
 
 function surfaceFor(activity) {

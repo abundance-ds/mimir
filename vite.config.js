@@ -11,6 +11,9 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
+    // CodeMirror and the provider SDK are intentionally isolated heavyweight
+    // engines. Their sizes are stable and below this explicit release budget.
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
@@ -35,6 +38,20 @@ export default defineConfig({
             'ai',
           ],
         },
+      },
+      onwarn(warning, warn) {
+        // Tauri core/event are deliberately static shell dependencies. A few
+        // lazy editor paths import them defensively; Rollup correctly keeps
+        // those imports in the static chunk, so this warning carries no
+        // chunking action.
+        if (
+          warning.message?.includes('dynamically imported by')
+          && (
+            warning.message.includes('@tauri-apps/api/core.js')
+            || warning.message.includes('@tauri-apps/api/event.js')
+          )
+        ) return
+        warn(warning)
       },
     },
   },

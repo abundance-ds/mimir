@@ -2,7 +2,8 @@
     <div
         ref="headerRef"
         data-tauri-drag-region="deep"
-        class="relative z-40 h-10 shrink-0 flex items-center gap-0 px-[14px] bg-chrome whitespace-nowrap overflow-visible drag-region border-b border-rule-light"
+        class="relative z-40 shrink-0 flex items-center gap-0 px-[14px] bg-chrome whitespace-nowrap overflow-visible drag-region border-b border-rule-light"
+        :class="embedded ? 'h-11' : 'h-10'"
         @keydown.esc="closeMenu"
     >
         <!-- Left: traffic-light spacer -->
@@ -15,6 +16,34 @@
 
         <!-- Gap between traffic lights and tabs -->
         <div v-if="!hideSidebar" data-tauri-drag-region class="w-7 shrink-0 self-stretch"></div>
+
+        <div
+            v-if="embedded && (activityRailed || (sidebarRailed && activityRailed))"
+            class="no-drag mr-1 flex shrink-0 items-center border-r border-rule pr-1"
+        >
+            <button
+                v-if="sidebarRailed && activityRailed"
+                type="button"
+                data-editor-action="restore-sidebar"
+                class="sidebar-toggle no-drag"
+                title="Restore sidebar"
+                aria-label="Restore sidebar"
+                @click="workbench.setPaneState('sidebar', 'expanded')"
+            >
+                <IconLayoutSidebarLeftExpand :size="17" />
+            </button>
+            <button
+                v-if="activityRailed"
+                type="button"
+                data-editor-action="restore-activity"
+                class="sidebar-toggle no-drag"
+                title="Restore activity"
+                aria-label="Restore activity"
+                @click="workbench.setPaneState('activity', 'expanded')"
+            >
+                <IconLayoutSidebarLeftExpand :size="17" />
+            </button>
+        </div>
 
         <!-- File tabs -->
         <TabStrip
@@ -269,6 +298,7 @@ import {
     IconArrowBackUp,
     IconArrowForwardUp,
     IconLayoutSidebarRightCollapse,
+    IconLayoutSidebarLeftExpand,
     IconChevronDown,
     IconClipboard,
     IconCopy,
@@ -316,6 +346,8 @@ const headerRef = ref(null);
 const workbench = useWorkbenchStore();
 const openMenu = ref(null);
 const isMac = computed(() => platformKind() === "macos");
+const sidebarRailed = computed(() => workbench.paneLayout.sidebar.state === "rail");
+const activityRailed = computed(() => workbench.paneLayout.activity.state === "rail");
 const clippedRecentFiles = computed(() => props.recentFiles.slice(0, 7));
 
 function closeMenu() {
