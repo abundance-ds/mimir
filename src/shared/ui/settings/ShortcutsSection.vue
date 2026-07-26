@@ -50,12 +50,13 @@ const editorShortcuts = [
   { action: 'Save', keys: ['⌘', 'S'] },
   { action: 'New document', keys: ['⌘', 'N'] },
   { action: 'Close tab', keys: ['⌘', 'W'] },
-  { action: 'Zoom in / out', keys: ['⌘', '+', '/', '⌘', '−'] },
 ]
 
 const workbenchShortcuts = [
   { action: 'Quick open', keys: ['⌘', 'P'] },
   { action: 'Toggle sidebar', keys: ['⌘', 'B'] },
+  { action: 'Zoom in / out', keys: ['⌘', '+', '/', '⌘', '−'] },
+  { action: 'Reset zoom', keys: ['⌘', '0'] },
   { action: 'Open selected file', keys: ['Enter'] },
   { action: 'Navigate files', keys: ['↑', '/', '↓'] },
 ]

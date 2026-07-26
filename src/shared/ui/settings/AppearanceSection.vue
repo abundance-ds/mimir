@@ -33,11 +33,41 @@
         </div>
       </button>
     </div>
+
+    <!-- ─── Interface ─── -->
+    <div class="section-title">Interface</div>
+    <div class="setting-row">
+      <div class="setting-label">
+        Zoom
+        <span class="setting-desc">Scales the whole window · ⌘+ / ⌘− · ⌘0 resets</span>
+      </div>
+      <div class="stepper">
+        <button
+          class="stepper-btn"
+          aria-label="Zoom interface out"
+          :disabled="settings.workbenchZoom <= WORKBENCH_ZOOM_LEVELS[0]"
+          @click="settings.set('workbenchZoom', nextWorkbenchZoom(settings.workbenchZoom, 'out'))"
+        >
+          <IconMinus :size="10" />
+        </button>
+        <span class="stepper-value">{{ settings.workbenchZoom }}%</span>
+        <button
+          class="stepper-btn"
+          aria-label="Zoom interface in"
+          :disabled="settings.workbenchZoom >= WORKBENCH_ZOOM_LEVELS[WORKBENCH_ZOOM_LEVELS.length - 1]"
+          @click="settings.set('workbenchZoom', nextWorkbenchZoom(settings.workbenchZoom, 'in'))"
+        >
+          <IconPlus :size="10" />
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
+import { IconMinus, IconPlus } from '@tabler/icons-vue'
 import { useSettingsStore } from '../../../stores/settings.js'
+import { WORKBENCH_ZOOM_LEVELS, nextWorkbenchZoom } from '../../../shared/workbenchZoom.js'
 
 const settings = useSettingsStore()
 

@@ -28,6 +28,7 @@ describe('settings store', () => {
   it('initializes all settings with correct defaults', () => {
     const store = useSettingsStore()
 
+    expect(store.workbenchZoom).toBe(100)
     expect(store.editorFontFamily).toBe('mono')
     expect(store.editorFontSize).toBe(16)
     expect(store.editorTheme).toBe('parchment')
@@ -41,7 +42,28 @@ describe('settings store', () => {
     expect(store.aiGhostModel).toBe('auto')
     expect(store.aiInlineRewrite).toBe(true)
     expect(store.mimWorkspaceFolder).toBe('')
+    expect(store.mimTeamGraphFolder).toBe('')
+    expect(store.sidebarToolOrder).toEqual([])
+    expect(store.sidebarNewActivityOrder).toEqual([])
+    expect(store.businessGraphViewState).toEqual({
+      section: 'work',
+      sectionViews: {
+        work: 'board',
+        projects: 'portfolio',
+        people: 'directory',
+        companies: 'crm',
+        knowledge: 'list',
+        all: 'list',
+      },
+      work: {
+        groupBy: 'status',
+        sortBy: 'priority',
+        priority: '',
+        visibleStatuses: ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done'],
+      },
+    })
     expect(store.recentWorkspaceFolders).toEqual([])
+    expect(store.workbenchFileFavorites).toEqual({})
     expect(store.workbenchLayout).toEqual({
       sidebar: { state: 'expanded', width: 240 },
       activity: { state: 'expanded', width: 560 },
@@ -51,6 +73,23 @@ describe('settings store', () => {
     expect(store.exportFormat).toBeUndefined()
     expect(store.telemetryEnabled).toBeUndefined()
     expect(store.aiApprovalMode).toBeUndefined()
+  })
+
+  it('clamps workbenchZoom writes to the supported range', () => {
+    const store = useSettingsStore()
+    store.set('workbenchZoom', 9000)
+    expect(store.workbenchZoom).toBe(200)
+    store.set('workbenchZoom', 5)
+    expect(store.workbenchZoom).toBe(50)
+    store.set('workbenchZoom', 'nonsense')
+    expect(store.workbenchZoom).toBe(100)
+  })
+
+  it('normalizes persisted workbenchZoom during load', async () => {
+    storage.set('mim:editor:settings:v1', JSON.stringify({ workbenchZoom: 5 }))
+    const store = useSettingsStore()
+    await store.load()
+    expect(store.workbenchZoom).toBe(50)
   })
 
   it('isDarkTheme returns true for dark themes', () => {
@@ -103,6 +142,22 @@ describe('settings store', () => {
     const store = useSettingsStore()
     store.set('recentAppIds', ['one', 'two'])
     expect(store.recentAppIds).toEqual(['one', 'two'])
+  })
+
+  it('clones persisted business graph view state instead of retaining caller references', () => {
+    const store = useSettingsStore()
+    const state = {
+      section: 'projects',
+      sectionViews: { projects: 'graph' },
+      work: { visibleStatuses: ['plan'] },
+    }
+
+    store.set('businessGraphViewState', state)
+    state.sectionViews.projects = 'list'
+    state.work.visibleStatuses.push('done')
+
+    expect(store.businessGraphViewState.sectionViews.projects).toBe('graph')
+    expect(store.businessGraphViewState.work.visibleStatuses).toEqual(['plan'])
   })
 
   it('keeps all shell persistence in one detached workbench object', () => {

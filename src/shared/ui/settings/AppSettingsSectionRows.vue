@@ -36,9 +36,9 @@
 <script setup>
 import {
   IconBolt,
-  IconBrandGit,
   IconCode,
   IconExternalLink,
+  IconFocus2,
   IconTerminal2,
   IconTool,
   IconWindow,
@@ -54,7 +54,7 @@ defineProps({
 defineEmits(['select', 'launch'])
 
 function iconFor(app) {
-  if (app.id === 'changes') return IconBrandGit
+  if (app.id === 'scratch') return IconFocus2
   return {
     embedded: IconCode,
     terminal: IconTerminal2,

@@ -1,6 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { emit, listen } from '@tauri-apps/api/event'
+import { DEFAULT_WORKBENCH_ZOOM, applyWorkbenchZoom, clampWorkbenchZoom } from '../shared/workbenchZoom.js'
 
 const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 const STORAGE_KEY = 'mim:editor:settings:v1'
@@ -8,6 +9,7 @@ const STORAGE_KEY = 'mim:editor:settings:v1'
 const DARK_THEMES = ['slate', 'monokai', 'dracula', 'zenith', 'synthwave']
 
 const DEFAULTS = {
+  workbenchZoom: DEFAULT_WORKBENCH_ZOOM,
   editorFontFamily: 'mono',
   editorFontSize: 16,
   editorTheme: 'parchment',
@@ -28,8 +30,29 @@ const DEFAULTS = {
     mode: 'manual',
     order: [],
   },
+  sidebarToolOrder: [],
+  sidebarNewActivityOrder: [],
+  workbenchFileFavorites: {},
   commentGateSkip: false,
   mimWorkspaceFolder: '',
+  mimTeamGraphFolder: '',
+  businessGraphViewState: {
+    section: 'work',
+    sectionViews: {
+      work: 'board',
+      projects: 'portfolio',
+      people: 'directory',
+      companies: 'crm',
+      knowledge: 'list',
+      all: 'list',
+    },
+    work: {
+      groupBy: 'status',
+      sortBy: 'priority',
+      priority: '',
+      visibleStatuses: ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done'],
+    },
+  },
   recentWorkspaceFolders: [],
   workbenchLayout: {
     sidebar: { state: 'expanded', width: 240 },
@@ -70,7 +93,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
       for (const key of Object.keys(DEFAULTS)) {
         if (saved[key] !== undefined) {
-          settings[key].value = cloneSetting(saved[key])
+          settings[key].value = normalizeSetting(key, cloneSetting(saved[key]))
         }
       }
       settingsReady.value = true
@@ -132,7 +155,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ── Set: the only way to change a setting and persist it ──
   function set(key, value) {
     if (!(key in settings)) return
-    settings[key].value = cloneSetting(value)
+    settings[key].value = normalizeSetting(key, cloneSetting(value))
     if (!settingsReady.value) return
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
@@ -152,6 +175,9 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   watch(settings.editorTheme, (val) => applyTheme(val))
+  watch(settings.workbenchZoom, (val) => {
+    void applyWorkbenchZoom(val)
+  })
 
   // ── Cross-window sync (Tauri only) ──
   function ensureSyncListener() {
@@ -164,6 +190,7 @@ export const useSettingsStore = defineStore('settings', () => {
         await flush()
         await load({ force: true })
         applyTheme(settings.editorTheme.value)
+        void applyWorkbenchZoom(settings.workbenchZoom.value)
       }),
     )
       .then((unlisten) => {
@@ -193,7 +220,10 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   // Kick off initial load
-  load().then(() => applyTheme(settings.editorTheme.value))
+  load().then(() => {
+    applyTheme(settings.editorTheme.value)
+    void applyWorkbenchZoom(settings.workbenchZoom.value)
+  })
 
   const isDarkTheme = computed(() => DARK_THEMES.includes(settings.editorTheme.value))
 
@@ -213,4 +243,11 @@ export const useSettingsStore = defineStore('settings', () => {
 function cloneSetting(value) {
   if (value && typeof value === 'object') return JSON.parse(JSON.stringify(value))
   return value
+}
+
+const NORMALIZERS = { workbenchZoom: clampWorkbenchZoom }
+
+function normalizeSetting(key, value) {
+  const normalize = NORMALIZERS[key]
+  return normalize ? normalize(value) : value
 }

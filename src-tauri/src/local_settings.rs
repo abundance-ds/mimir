@@ -77,6 +77,26 @@ fn save_editor_settings_at(path: &Path, editor: &Value) -> Result<(), String> {
     save_settings_at(path, &Value::Object(settings))
 }
 
+/// Saved interface zoom (`editor.workbenchZoom`, percent) as a webview zoom factor.
+/// Read once at main-window creation so startup paints at the saved zoom;
+/// afterwards the renderer settings store owns every zoom change.
+pub fn initial_workbench_zoom_factor() -> f64 {
+    let _guard = lock_settings_io();
+    settings_path()
+        .and_then(|path| load_settings_at(&path))
+        .map(|loaded| workbench_zoom_factor_from(&loaded.settings))
+        .unwrap_or(1.0)
+}
+
+fn workbench_zoom_factor_from(settings: &Value) -> f64 {
+    let percent = settings
+        .get("editor")
+        .and_then(|editor| editor.get("workbenchZoom"))
+        .and_then(Value::as_f64)
+        .unwrap_or(100.0);
+    percent.clamp(50.0, 200.0) / 100.0
+}
+
 #[tauri::command]
 pub fn settings_load() -> Result<SettingsLoadResponse, String> {
     let _guard = lock_settings_io();
@@ -133,6 +153,17 @@ mod tests {
 
         save_settings_at(&path, &serde_json::json!({ "editor": {} })).unwrap();
         assert_eq!(std::fs::read(&quarantined).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn workbench_zoom_factor_clamps_defaults_and_rejects_non_numbers() {
+        let zoom = |value: serde_json::Value| workbench_zoom_factor_from(&value);
+        assert_eq!(zoom(serde_json::json!({})), 1.0);
+        assert_eq!(zoom(serde_json::json!({ "editor": {} })), 1.0);
+        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": 125 } })), 1.25);
+        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": 10 } })), 0.5);
+        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": 9000 } })), 2.0);
+        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": "huge" } })), 1.0);
     }
 
     #[test]
