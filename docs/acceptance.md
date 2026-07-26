@@ -43,6 +43,9 @@ requirements; they do not replace runtime verification.
 - Live output streams once, replay is ordered, resize reaches the PTY, and stop
   is idempotent.
 - Durable ended Activities can be renamed, archived/restored, and cleared.
+- Cmd/Ctrl+W on a focused Sidebar Activity archives that exact durable row,
+  including failed rows that are not currently selected; live rows stop before
+  archival.
 - Codex, Claude, and Pi detection reports precise unavailable states.
 - Settings > CLI tools uses compact detected-agent rows, launcher-visibility
   switches, shell-like flag editing, progressive cwd/command/environment

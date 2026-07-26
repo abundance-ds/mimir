@@ -61,14 +61,16 @@ pretend that an old PTY is still attached.
 
 Option/Alt+Cmd/Ctrl+Left/Right switches the adjacent vertical Activity row when
 the Activity pane or Sidebar owns focus. Sidebar focus moves with the selected
-row. The same chord stays horizontal inside Editor tabs. Cmd/Ctrl+W closes the
-focused dynamic Activity (stop then archive/delete as appropriate) and rails
-the Activity pane when the last closable row is gone. Editor focus closes its
-tab instead; closing the last embedded tab rails Editor and never closes Mim.
-The macOS native menu accelerator delegates through the same focus-aware path.
-Open Settings, confirmation dialogs, and Quick Open consume close first.
-Collapsing and restoring panes also hands focus to visible rail/header controls,
-so later shortcuts never target aria-hidden content.
+row. The same chord stays horizontal inside Editor tabs. Cmd/Ctrl+W on a
+Sidebar Activity row targets that exact row, even when another Activity is
+selected or the focused run ended in error. Durable rows archive (after a live
+process stops); ephemeral terminal rows are cleared. The Activity pane rails
+when its last closable row is gone. Editor focus closes its tab instead;
+closing the last embedded tab rails Editor and never closes Mim. The macOS
+native menu accelerator delegates through the same focus-aware path. Open
+Settings, confirmation dialogs, and Quick Open consume close first. Collapsing
+and restoring panes also hands focus to visible rail/header controls, so later
+shortcuts never target aria-hidden content.
 
 ## Resume
 

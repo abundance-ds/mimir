@@ -583,6 +583,41 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
   })
 
+  it('archives the exact focused Activity row with Cmd+W even when it failed', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:selected', 'Selected run', '2026-07-25T13:00:00Z'),
+      status: 'done',
+    })
+    store.upsert({
+      ...activityRecord('agent:failed', 'Failed run', '2026-07-25T12:00:00Z'),
+      status: 'error',
+      error: 'CLI exited before it could start',
+    })
+    useWorkbenchStore().openActivity('agent:selected')
+    await nextTick()
+    activityApi.setActivityArchived.mockClear()
+
+    const failedRow = wrapper.get('[data-sidebar-row="activity:agent:failed"]')
+    const failedRowButton = failedRow.get('button')
+    failedRowButton.element.focus()
+    failedRowButton.element.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }))
+    await flushPromises()
+
+    expect(activityApi.setActivityArchived).toHaveBeenCalledTimes(1)
+    expect(activityApi.setActivityArchived).toHaveBeenCalledWith('agent:failed', true)
+    expect(store.byId('agent:failed').archivedAt).toEqual(expect.any(String))
+    expect(store.byId('agent:selected').archivedAt).toBeNull()
+    expect(useWorkbenchStore().activeActivityId).toBe('agent:selected')
+    expect(wrapper.find('[data-sidebar-row="activity:agent:failed"]').exists()).toBe(false)
+  })
+
   it('opens a Files result in the mounted Editor without changing Activity', async () => {
     const wrapper = await render({ workspace: '/w' })
     expect(useWorkbenchStore().activeActivityId).toBe('files')
