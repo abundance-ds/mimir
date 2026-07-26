@@ -21,8 +21,10 @@ Mim has one three-pane window:
 ```
 
 - **Sidebar** opens Files and Routines, launches configured CLI agents and
-  installed apps from its Apps section, and tracks live, finished, and
-  archived Activities. Apps are managed in a searchable Settings catalog—with
+  installed apps from its Apps section or the Activities `+` menu, and tracks
+  live, finished, and archived Activities. The creation menu includes every
+  enabled launcher that can make a dynamic row—including Terminal—and has no
+  built-in Chat option. Apps are managed in a searchable Settings catalog—with
   a runnable local scaffold, definition actions, diagnostics, and live Sidebar
   refresh—rather than through a generic destination row.
 - **Activity** is the universal execution surface. Each terminal, agent run,

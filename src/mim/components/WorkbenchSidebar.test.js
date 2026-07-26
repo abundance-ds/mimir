@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import WorkbenchSidebar from './WorkbenchSidebar.vue'
 
 const launchers = [
@@ -227,6 +228,71 @@ describe('WorkbenchSidebar', () => {
     expect(document.activeElement.textContent).toContain('Name')
     await sortMenu.trigger('keydown', { key: 'Escape' })
     expect(document.activeElement).toBe(sortButton.element)
+    wrapper.unmount()
+  })
+
+  it('creates every dynamic Activity type from the compact plus menu without Chat', async () => {
+    const wrapper = mount(WorkbenchSidebar, {
+      attachTo: document.body,
+      props: {
+        apps: [
+          { id: 'preset:codex', title: 'Codex', icon: 'codex', available: true },
+          { id: 'preset:terminal', title: 'Terminal', icon: 'terminal', available: true },
+          { id: 'app:ledger', title: 'Ledger', icon: 'apps', available: true },
+        ],
+        activities,
+      },
+    })
+    const create = wrapper.get('[data-activity-create-button]')
+
+    create.element.focus()
+    await create.trigger('keydown', { key: 'ArrowDown' })
+    const menu = document.body.querySelector('[data-activity-create-menu]')
+    const options = [...menu.querySelectorAll('[data-activity-create-option]')]
+
+    expect(create.attributes('title')).toBe('New Activity')
+    expect(create.attributes('aria-expanded')).toBe('true')
+    expect(menu.textContent).toContain('Codex')
+    expect(menu.textContent).toContain('Terminal')
+    expect(menu.textContent).toContain('Ledger')
+    expect(menu.textContent).not.toContain('Chat')
+    expect(menu.querySelector('[data-activity-create-divider]')).not.toBeNull()
+    expect(document.activeElement).toBe(options[0])
+
+    options.find(option => option.textContent.includes('Terminal')).click()
+    await nextTick()
+    expect(wrapper.emitted('launch').at(-1)).toEqual(['preset:terminal'])
+    expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
+    expect(document.activeElement).toBe(create.element)
+
+    await wrapper.setProps({ collapsed: true })
+    expect(wrapper.get('[data-activity-create-button]').attributes('title')).toBe('New Activity')
+    wrapper.unmount()
+  })
+
+  it('restores focus to the Activity plus button when its menu closes with Escape', async () => {
+    const wrapper = mount(WorkbenchSidebar, {
+      attachTo: document.body,
+      props: {
+        apps: [
+          { id: 'preset:terminal', title: 'Terminal', icon: 'terminal', available: true },
+        ],
+      },
+    })
+    const create = wrapper.get('[data-activity-create-button]')
+    create.element.focus()
+    await create.trigger('click')
+    const menu = document.body.querySelector('[data-activity-create-menu]')
+
+    menu.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }))
+    await nextTick()
+
+    expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
+    expect(document.activeElement).toBe(create.element)
     wrapper.unmount()
   })
 

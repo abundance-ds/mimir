@@ -45,6 +45,13 @@ pretend that an old PTY is still attached.
 
 ## Sidebar operations
 
+- The Activities header `+` opens every enabled, available launcher that can
+  create a dynamic row: CLI agent presets, Terminal, and installed Apps. Fixed
+  Files/Routines surfaces and Chat are intentionally absent. The same compact
+  control replaces the section marker in the collapsed rail.
+- The creation menu uses source icons, separates CLI and App targets with one
+  quiet rule, flips inside the viewport, and supports Arrow Up/Down, Home, End,
+  Escape, Tab, and focus restoration.
 - Every dynamic and archived row can be renamed from double-click, F2,
   right-click, or its always-discoverable actions button.
 - Source metadata selects recognizable Codex/OpenAI, Claude/Anthropic, Pi,

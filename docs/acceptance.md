@@ -37,6 +37,9 @@ requirements; they do not replace runtime verification.
 ## Activities and agents
 
 - Every terminal, agent, app instance, and routine run has a stable Activity.
+- The Activities `+` menu launches every enabled dynamic Activity type,
+  including Terminal, without offering a built-in Chat; it remains available
+  in the collapsed Sidebar and is fully keyboard-operable.
 - Native PTY launches preserve exact argv boundaries, cwd, and environment.
 - Plain terminals are ephemeral. Agent and routine Activities persist bounded
   scrollback and final state across relaunch.

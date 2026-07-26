@@ -126,8 +126,7 @@
       <div
         class="relative flex h-7 items-center px-3"
       >
-        <span v-if="collapsed" class="h-px w-7 bg-rule-light" aria-hidden="true" />
-        <template v-else>
+        <template v-if="!collapsed">
           <button
             type="button"
             data-sidebar-activities-toggle
@@ -185,7 +184,68 @@
           </div>
           </span>
         </template>
+        <button
+          ref="activityCreateButtonRef"
+          type="button"
+          data-activity-create-button
+          data-no-reorder
+          :aria-expanded="activityCreateMenuOpen"
+          aria-haspopup="menu"
+          aria-label="New Activity"
+          title="New Activity"
+          class="grid place-items-center text-ink-3 hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+          :class="collapsed ? 'size-7' : 'size-6'"
+          :disabled="!activityCreateOptions.length"
+          @pointerdown.stop
+          @click.stop="toggleActivityCreateMenu"
+          @keydown.down.stop.prevent="openActivityCreateMenu"
+        >
+          <IconPlus :size="13" :stroke-width="1.8" />
+        </button>
       </div>
+
+      <Teleport to="body">
+        <div
+          v-if="activityCreateMenuOpen"
+          ref="activityCreateMenuRef"
+          data-activity-create-menu
+          role="menu"
+          aria-label="New Activity"
+          class="fixed z-[220] max-h-[min(360px,calc(100vh-16px))] w-52 overflow-y-auto border border-rule bg-surface p-1 shadow-lg"
+          :style="activityCreateMenuStyle"
+          @pointerdown.stop
+          @click.stop
+          @keydown="onActivityCreateMenuKeydown"
+        >
+          <template v-for="(option, index) in activityCreateOptions" :key="option.id">
+            <div
+              v-if="index === activityCreateAppStart"
+              data-activity-create-divider
+              class="my-1 border-t border-rule-light"
+              role="separator"
+            />
+            <button
+              type="button"
+              data-activity-create-option
+              :data-activity-create-id="option.id"
+              role="menuitem"
+              class="activity-create-item"
+              @click="launchActivityOption(option.id)"
+            >
+              <span class="grid size-5 shrink-0 place-items-center text-ink-3">
+                <component
+                  :is="iconFor(option.icon)"
+                  :size="14"
+                  :stroke-width="1.8"
+                  :monochrome="true"
+                />
+              </span>
+              <span class="min-w-0 flex-1 truncate">{{ option.title }}</span>
+            </button>
+          </template>
+        </div>
+      </Teleport>
+
       <template v-if="collapsed || !activitiesCollapsed">
       <SidebarRow
         v-for="activity in activities"
@@ -463,7 +523,7 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   IconArrowDown,
   IconArrowUp,
@@ -479,6 +539,7 @@ import {
   IconFileStack,
   IconLayoutSidebarLeftCollapse,
   IconMathPi,
+  IconPlus,
   IconSettings,
   IconRobot,
   IconTerminal2,
@@ -532,6 +593,10 @@ const archivedOpen = ref(false)
 const renamingId = ref('')
 const renameDraft = ref('')
 const sidebarRoot = ref(null)
+const activityCreateButtonRef = ref(null)
+const activityCreateMenuRef = ref(null)
+const activityCreateMenuOpen = ref(false)
+const activityCreateMenuStyle = ref({})
 const LIVE_STATUSES = new Set(['ready', 'starting', 'working', 'needs-input', 'idle'])
 const SORT_OPTIONS = Object.freeze([
   { id: 'manual', label: 'Manual' },
@@ -539,9 +604,21 @@ const SORT_OPTIONS = Object.freeze([
   { id: 'attention', label: 'Needs attention' },
   { id: 'name', label: 'Name' },
 ])
+const activityCreateOptions = computed(() => props.apps.filter(
+  option => option?.id && option.available !== false,
+))
+const activityCreateAppStart = computed(() => {
+  const index = activityCreateOptions.value.findIndex(
+    option => String(option.id).startsWith('app:'),
+  )
+  return index > 0 ? index : -1
+})
 
 onMounted(() => document.addEventListener('pointerdown', closeMenus))
-onUnmounted(() => document.removeEventListener('pointerdown', closeMenus))
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', closeMenus)
+  closeActivityCreateMenu()
+})
 
 const {
   dropIndicator,
@@ -600,6 +677,7 @@ function canStop(activity) {
 }
 
 async function toggleActivityMenu(id) {
+  closeActivityCreateMenu()
   sortMenuOpen.value = false
   activityMenuId.value = activityMenuId.value === id ? '' : id
   if (activityMenuId.value) {
@@ -609,6 +687,7 @@ async function toggleActivityMenu(id) {
 }
 
 async function openActivityMenu(id) {
+  closeActivityCreateMenu()
   sortMenuOpen.value = false
   activityMenuId.value = id
   await nextTick()
@@ -616,6 +695,7 @@ async function openActivityMenu(id) {
 }
 
 async function toggleSortMenu() {
+  closeActivityCreateMenu()
   activityMenuId.value = ''
   sortMenuOpen.value = !sortMenuOpen.value
   if (sortMenuOpen.value) {
@@ -625,6 +705,7 @@ async function toggleSortMenu() {
 }
 
 async function openSortMenu() {
+  closeActivityCreateMenu()
   activityMenuId.value = ''
   sortMenuOpen.value = true
   await nextTick()
@@ -633,10 +714,100 @@ async function openSortMenu() {
 
 function closeMenus(event) {
   if (event?.target?.closest?.(
-    '[data-activity-menu], [data-activity-menu-button], [data-activity-sort-menu], [data-activity-sort-button]',
+    '[data-activity-menu], [data-activity-menu-button], [data-activity-sort-menu], [data-activity-sort-button], [data-activity-create-menu], [data-activity-create-button]',
   )) return
   activityMenuId.value = ''
   sortMenuOpen.value = false
+  closeActivityCreateMenu()
+}
+
+async function toggleActivityCreateMenu() {
+  if (activityCreateMenuOpen.value) {
+    closeActivityCreateMenu()
+    return
+  }
+  await openActivityCreateMenu()
+}
+
+async function openActivityCreateMenu() {
+  activityMenuId.value = ''
+  sortMenuOpen.value = false
+  if (!activityCreateOptions.value.length) return
+  if (!activityCreateMenuOpen.value) {
+    activityCreateMenuOpen.value = true
+    window.addEventListener('resize', positionActivityCreateMenu)
+    window.addEventListener('scroll', positionActivityCreateMenu, true)
+  }
+  await nextTick()
+  positionActivityCreateMenu()
+  activityCreateItems()[0]?.focus()
+}
+
+function closeActivityCreateMenu() {
+  activityCreateMenuOpen.value = false
+  window.removeEventListener('resize', positionActivityCreateMenu)
+  window.removeEventListener('scroll', positionActivityCreateMenu, true)
+}
+
+function positionActivityCreateMenu() {
+  const trigger = activityCreateButtonRef.value
+  const menu = activityCreateMenuRef.value
+  if (!trigger || !menu) return
+  const rect = trigger.getBoundingClientRect()
+  const width = 208
+  const margin = 8
+  const left = Math.max(
+    margin,
+    Math.min(rect.right - width, window.innerWidth - width - margin),
+  )
+  const below = rect.bottom + 4
+  const menuHeight = menu.offsetHeight
+  const top = below + menuHeight <= window.innerHeight - margin
+    ? below
+    : Math.max(margin, rect.top - menuHeight - 4)
+  activityCreateMenuStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+  }
+}
+
+function activityCreateItems() {
+  return Array.from(
+    activityCreateMenuRef.value?.querySelectorAll('[data-activity-create-option]') || [],
+  )
+}
+
+function launchActivityOption(id) {
+  closeActivityCreateMenu()
+  emit('launch', id)
+  nextTick(() => activityCreateButtonRef.value?.focus())
+}
+
+function onActivityCreateMenuKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeActivityCreateMenu()
+    nextTick(() => activityCreateButtonRef.value?.focus())
+    return
+  }
+  if (event.key === 'Tab') {
+    closeActivityCreateMenu()
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const items = activityCreateItems()
+  if (!items.length) return
+  let index = items.indexOf(document.activeElement)
+  if (event.key === 'Home') index = 0
+  else if (event.key === 'End') index = items.length - 1
+  else {
+    const direction = event.key === 'ArrowDown' ? 1 : -1
+    index = (Math.max(index, 0) + direction + items.length) % items.length
+  }
+  items[index]?.focus()
 }
 
 async function beginRename(activity) {
@@ -824,6 +995,25 @@ function sortLabel(mode) {
 .activity-menu-item:disabled {
   pointer-events: none;
   opacity: 0.45;
+}
+
+.activity-create-item {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 11px;
+  color: var(--color-ink-2);
+}
+
+.activity-create-item:hover,
+.activity-create-item:focus-visible {
+  background: var(--color-chrome-high);
+  color: var(--color-ink);
+  outline: none;
 }
 
 [data-drop-position='before']::before,

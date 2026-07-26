@@ -130,6 +130,7 @@ import * as appsApi from '../services/appsCatalog.js'
 import * as routinesApi from '../services/routines.js'
 import { useActivitiesStore } from '../stores/activities.js'
 import { useFileStore } from '../stores/files.js'
+import { useLaunchersStore } from '../stores/launchers.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
 import WorkbenchApp from './WorkbenchApp.vue'
@@ -402,6 +403,54 @@ describe('WorkbenchApp', () => {
       }),
     }))
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
+  })
+
+  it('launches a fresh Terminal Activity from the Activity plus menu', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    useLaunchersStore().presets.push({
+      id: 'terminal',
+      title: 'Terminal',
+      kind: 'terminal',
+      enabled: true,
+      args: [],
+      env: {},
+      cwd: { mode: 'workspace' },
+    })
+    activityApi.resolveLauncher.mockResolvedValueOnce({
+      presetId: 'terminal',
+      title: 'Terminal',
+      kind: 'terminal',
+      agentId: null,
+      resumeStrategy: 'none',
+      command: '/bin/zsh',
+      args: [],
+      cwd: '/w',
+      env: {},
+    })
+    await nextTick()
+
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    const menu = document.body.querySelector('[data-activity-create-menu]')
+    const terminal = [...menu.querySelectorAll('[data-activity-create-option]')]
+      .find(option => option.textContent.includes('Terminal'))
+    expect(menu.textContent).not.toContain('Chat')
+    terminal.click()
+    await flushPromises()
+
+    expect(activityApi.resolveLauncher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'terminal', kind: 'terminal' }),
+      '/w',
+    )
+    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'terminal',
+      title: 'Terminal',
+      launch: expect.objectContaining({
+        command: '/bin/zsh',
+        cwd: '/w',
+      }),
+    }))
+    expect(useWorkbenchStore().activeActivityId).toMatch(/^terminal:/)
+    expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
   })
 
   it('opens returned routine runs as PTY surfaces and reruns the current routine definition', async () => {
