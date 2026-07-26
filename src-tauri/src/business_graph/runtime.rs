@@ -1,0 +1,801 @@
+use super::model::{
+    GraphChanged, GraphDeleteResult, GraphDiagnostic, GraphNeighbor, GraphNode, GraphNodeCreate,
+    GraphNodeDelete, GraphNodePatch, GraphOpenResult, GraphQuery, GraphQueryResult,
+    GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSourceRoot,
+};
+use super::store::{GraphMutationError, GraphStore};
+use super::{build_migration_report, GraphContextPack, GraphContextRequest, GraphMigrationReport};
+use crate::persistence;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{BTreeSet, HashSet, VecDeque},
+    fs,
+    path::{Path, PathBuf},
+    sync::{mpsc, Mutex, RwLock},
+    time::Duration,
+};
+use tauri::{AppHandle, Emitter, Manager};
+use uuid::Uuid;
+
+const GRAPH_CHANGED_EVENT: &str = "mim://graph-changed";
+
+#[derive(Default)]
+pub struct GraphRuntime {
+    store: RwLock<GraphStore>,
+    roots: RwLock<Vec<GraphSourceRoot>>,
+    watchers: Mutex<Vec<RecommendedWatcher>>,
+    deleted: Mutex<VecDeque<DeletedGraphSource>>,
+}
+
+#[derive(Debug, Clone)]
+struct DeletedGraphSource {
+    undo_token: String,
+    id: String,
+    path: PathBuf,
+    raw: String,
+}
+
+impl GraphRuntime {
+    #[cfg(test)]
+    pub(crate) fn from_roots(roots: Vec<GraphSourceRoot>) -> Self {
+        Self {
+            store: RwLock::new(GraphStore::load(&roots)),
+            roots: RwLock::new(roots),
+            watchers: Mutex::new(Vec::new()),
+            deleted: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    pub fn open(
+        &self,
+        app: &AppHandle,
+        project_root: impl Into<PathBuf>,
+        team_root: Option<PathBuf>,
+    ) -> Result<GraphOpenResult, String> {
+        let project_root = canonical_directory(project_root.into(), "project graph root")?;
+        let private_root = private_root()?;
+        fs::create_dir_all(&private_root)
+            .map_err(|error| format!("Could not create private graph root: {error}"))?;
+        let private_root = canonical_directory(private_root, "private graph root")?;
+
+        let mut roots = vec![
+            GraphSourceRoot::new("private:local", GraphScopeKind::Private, private_root),
+            GraphSourceRoot::new(
+                project_scope_id(&project_root),
+                GraphScopeKind::Project,
+                project_root,
+            ),
+        ];
+        if let Some(team_root) = team_root {
+            let team_root = canonical_directory(team_root, "team graph root")?;
+            roots.push(GraphSourceRoot::new(
+                "team:main",
+                GraphScopeKind::Team,
+                team_root,
+            ));
+        }
+        deduplicate_roots(&mut roots);
+
+        let store = GraphStore::load(&roots);
+        let result = open_result(&roots, &store);
+        let watchers = watch_roots(app.clone(), &roots)?;
+        *self.store.write().map_err(|error| error.to_string())? = store;
+        *self.roots.write().map_err(|error| error.to_string())? = roots;
+        *self.watchers.lock().map_err(|error| error.to_string())? = watchers;
+        Ok(result)
+    }
+
+    pub fn refresh(&self, paths: Vec<String>) -> Result<GraphChanged, String> {
+        let roots = self
+            .roots
+            .read()
+            .map_err(|error| error.to_string())?
+            .clone();
+        let next_revision = self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .revision()
+            .saturating_add(1);
+        let mut store = GraphStore::load(&roots);
+        store.set_revision(next_revision);
+        let changed = changed_result(&store, paths);
+        *self.store.write().map_err(|error| error.to_string())? = store;
+        Ok(changed)
+    }
+
+    pub fn open_result(&self) -> Result<GraphOpenResult, String> {
+        let roots = self.roots.read().map_err(|error| error.to_string())?;
+        let store = self.store.read().map_err(|error| error.to_string())?;
+        Ok(open_result(&roots, &store))
+    }
+
+    pub fn get(&self, id: &str) -> Result<Option<GraphNode>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .get(id)
+            .cloned())
+    }
+
+    pub fn query(&self, query: &GraphQuery) -> Result<GraphQueryResult, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .query(query))
+    }
+
+    pub fn search(
+        &self,
+        query: &str,
+        scope_ids: &BTreeSet<String>,
+        limit: usize,
+    ) -> Result<Vec<GraphSearchResult>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .search(query, scope_ids, limit))
+    }
+
+    pub fn neighbors(
+        &self,
+        id: &str,
+        scope_ids: &BTreeSet<String>,
+    ) -> Result<Vec<GraphNeighbor>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .neighbors(id, scope_ids))
+    }
+
+    pub fn diagnostics(&self) -> Result<Vec<GraphDiagnostic>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .diagnostics()
+            .to_vec())
+    }
+
+    pub fn migration_report(&self) -> Result<GraphMigrationReport, String> {
+        let roots = self
+            .roots
+            .read()
+            .map_err(|error| error.to_string())?
+            .clone();
+        Ok(build_migration_report(&roots))
+    }
+
+    pub fn update(&self, patch: GraphNodePatch) -> Result<GraphNode, GraphMutationError> {
+        self.store
+            .write()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .update_node(patch)
+    }
+
+    pub fn create(&self, create: GraphNodeCreate) -> Result<GraphNode, GraphMutationError> {
+        let root = {
+            let roots = self
+                .roots
+                .read()
+                .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
+            match create.scope_id.as_deref() {
+                Some(scope_id) => roots
+                    .iter()
+                    .find(|root| root.scope_id == scope_id)
+                    .cloned()
+                    .ok_or_else(|| GraphMutationError::ScopeNotFound(scope_id.into()))?,
+                None => roots
+                    .iter()
+                    .find(|root| root.scope_kind == GraphScopeKind::Project)
+                    .or_else(|| {
+                        roots
+                            .iter()
+                            .find(|root| root.scope_kind == GraphScopeKind::Private)
+                    })
+                    .cloned()
+                    .ok_or_else(|| {
+                        GraphMutationError::ScopeNotFound(
+                            "no project or private graph scope is open".into(),
+                        )
+                    })?,
+            }
+        };
+        self.store
+            .write()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .create_node(&root, create)
+    }
+
+    pub fn delete(
+        &self,
+        request: GraphNodeDelete,
+    ) -> Result<GraphDeleteResult, GraphMutationError> {
+        let node = self
+            .store
+            .read()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .get(&request.id)
+            .cloned()
+            .ok_or_else(|| GraphMutationError::NotFound(request.id.clone()))?;
+        let path = PathBuf::from(&node.provenance.source_path);
+        let raw = fs::read_to_string(&path).map_err(|error| GraphMutationError::Read {
+            path: path.to_string_lossy().into_owned(),
+            message: error.to_string(),
+        })?;
+        let mut deleted = self
+            .store
+            .write()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .delete_node(request)?;
+        let undo_token = Uuid::new_v4().to_string();
+        let mut queue = self
+            .deleted
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        queue.push_back(DeletedGraphSource {
+            undo_token: undo_token.clone(),
+            id: node.id,
+            path,
+            raw,
+        });
+        while queue.len() > 20 {
+            queue.pop_front();
+        }
+        deleted.undo_token = Some(undo_token);
+        Ok(deleted)
+    }
+
+    pub fn restore(&self, request: GraphRestoreRequest) -> Result<GraphNode, GraphMutationError> {
+        let backup = {
+            let queue = self
+                .deleted
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            queue
+                .iter()
+                .find(|backup| backup.undo_token == request.undo_token)
+                .cloned()
+                .ok_or_else(|| {
+                    GraphMutationError::NotFound(format!("undo token {}", request.undo_token))
+                })?
+        };
+        if backup.path.exists() {
+            return Err(GraphMutationError::Exists(backup.id));
+        }
+        persistence::write_bytes_atomic(&backup.path, backup.raw.as_bytes()).map_err(|error| {
+            GraphMutationError::Write {
+                path: backup.path.to_string_lossy().into_owned(),
+                message: error.to_string(),
+            }
+        })?;
+        self.refresh(vec![backup.path.to_string_lossy().into_owned()])
+            .map_err(GraphMutationError::Invalid)?;
+        let restored = self
+            .get(&backup.id)
+            .map_err(GraphMutationError::Invalid)?
+            .ok_or_else(|| GraphMutationError::NotFound(backup.id.clone()))?;
+        let mut queue = self
+            .deleted
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        queue.retain(|item| item.undo_token != request.undo_token);
+        Ok(restored)
+    }
+}
+
+#[tauri::command]
+pub async fn graph_open(
+    app: AppHandle,
+    project_root: String,
+    team_root: Option<String>,
+) -> Result<GraphOpenResult, String> {
+    let worker_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = worker_app.state::<GraphRuntime>();
+        runtime.open(&worker_app, project_root, team_root.map(PathBuf::from))
+    })
+    .await
+    .map_err(|error| format!("Business graph open task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn graph_status(runtime: tauri::State<'_, GraphRuntime>) -> Result<GraphOpenResult, String> {
+    runtime.open_result()
+}
+
+#[tauri::command]
+pub fn graph_get(
+    runtime: tauri::State<'_, GraphRuntime>,
+    id: String,
+) -> Result<Option<GraphNode>, String> {
+    runtime.get(&id)
+}
+
+#[tauri::command]
+pub fn graph_query(
+    runtime: tauri::State<'_, GraphRuntime>,
+    query: GraphQuery,
+) -> Result<GraphQueryResult, String> {
+    runtime.query(&query)
+}
+
+#[tauri::command]
+pub fn graph_search(
+    runtime: tauri::State<'_, GraphRuntime>,
+    query: String,
+    scope_ids: BTreeSet<String>,
+    limit: Option<usize>,
+) -> Result<Vec<GraphSearchResult>, String> {
+    runtime.search(&query, &scope_ids, limit.unwrap_or(25))
+}
+
+#[tauri::command]
+pub fn graph_neighbors(
+    runtime: tauri::State<'_, GraphRuntime>,
+    id: String,
+    scope_ids: BTreeSet<String>,
+) -> Result<Vec<GraphNeighbor>, String> {
+    runtime.neighbors(&id, &scope_ids)
+}
+
+#[tauri::command]
+pub fn graph_diagnostics(
+    runtime: tauri::State<'_, GraphRuntime>,
+) -> Result<Vec<GraphDiagnostic>, String> {
+    runtime.diagnostics()
+}
+
+#[tauri::command]
+pub fn graph_migration_report(
+    runtime: tauri::State<'_, GraphRuntime>,
+) -> Result<GraphMigrationReport, String> {
+    runtime.migration_report()
+}
+
+#[tauri::command]
+pub fn graph_context(
+    runtime: tauri::State<'_, GraphRuntime>,
+    request: GraphContextRequest,
+) -> Result<GraphContextPack, String> {
+    runtime.context(request)
+}
+
+#[tauri::command]
+pub async fn graph_refresh(app: AppHandle) -> Result<GraphChanged, String> {
+    let worker_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = worker_app.state::<GraphRuntime>();
+        let changed = runtime.refresh(Vec::new())?;
+        worker_app
+            .emit(GRAPH_CHANGED_EVENT, &changed)
+            .map_err(|error| error.to_string())?;
+        Ok(changed)
+    })
+    .await
+    .map_err(|error| format!("Business graph refresh task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn graph_update(
+    app: AppHandle,
+    runtime: tauri::State<'_, GraphRuntime>,
+    patch: GraphNodePatch,
+) -> Result<GraphNode, String> {
+    let updated = runtime.update(patch).map_err(|error| error.to_string())?;
+    let status = runtime.open_result()?;
+    let changed = GraphChanged {
+        graph_revision: status.graph_revision,
+        node_count: status.node_count,
+        diagnostic_count: status.diagnostic_count,
+        paths: vec![updated.provenance.source_path.clone()],
+    };
+    app.emit(GRAPH_CHANGED_EVENT, changed)
+        .map_err(|error| error.to_string())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn graph_create(
+    app: AppHandle,
+    runtime: tauri::State<'_, GraphRuntime>,
+    create: GraphNodeCreate,
+) -> Result<GraphNode, String> {
+    let created = runtime.create(create).map_err(|error| error.to_string())?;
+    emit_mutation_changed(&app, &runtime, created.provenance.source_path.clone())?;
+    Ok(created)
+}
+
+#[tauri::command]
+pub fn graph_delete(
+    app: AppHandle,
+    runtime: tauri::State<'_, GraphRuntime>,
+    request: GraphNodeDelete,
+) -> Result<GraphDeleteResult, String> {
+    let deleted = runtime.delete(request).map_err(|error| error.to_string())?;
+    emit_mutation_changed(&app, &runtime, deleted.source_path.clone())?;
+    Ok(deleted)
+}
+
+#[tauri::command]
+pub fn graph_restore(
+    app: AppHandle,
+    runtime: tauri::State<'_, GraphRuntime>,
+    request: GraphRestoreRequest,
+) -> Result<GraphNode, String> {
+    let restored = runtime
+        .restore(request)
+        .map_err(|error| error.to_string())?;
+    emit_mutation_changed(&app, &runtime, restored.provenance.source_path.clone())?;
+    Ok(restored)
+}
+
+fn emit_mutation_changed(
+    app: &AppHandle,
+    runtime: &GraphRuntime,
+    source_path: String,
+) -> Result<(), String> {
+    let status = runtime.open_result()?;
+    app.emit(
+        GRAPH_CHANGED_EVENT,
+        GraphChanged {
+            graph_revision: status.graph_revision,
+            node_count: status.node_count,
+            diagnostic_count: status.diagnostic_count,
+            paths: vec![source_path],
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn watch_roots(
+    app: AppHandle,
+    roots: &[GraphSourceRoot],
+) -> Result<Vec<RecommendedWatcher>, String> {
+    let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
+    let mut watchers = Vec::new();
+    for root in roots {
+        let sender = sender.clone();
+        let watched_root = root.root.clone();
+        let mut watcher =
+            notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+                let Ok(event) = result else {
+                    return;
+                };
+                let paths = event
+                    .paths
+                    .into_iter()
+                    .filter(|path| graph_markdown_path(&watched_root, path))
+                    .collect::<Vec<_>>();
+                if !paths.is_empty() {
+                    let _ = sender.send(paths);
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        watcher
+            .watch(&root.root, RecursiveMode::Recursive)
+            .map_err(|error| {
+                format!(
+                    "Could not watch graph root '{}': {error}",
+                    root.root.display()
+                )
+            })?;
+        watchers.push(watcher);
+    }
+    drop(sender);
+
+    std::thread::Builder::new()
+        .name("mim-business-graph-watch".into())
+        .spawn(move || {
+            while let Ok(first) = receiver.recv() {
+                let mut changed_paths = first;
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(120)) {
+                        Ok(paths) => changed_paths.extend(paths),
+                        Err(mpsc::RecvTimeoutError::Timeout) => break,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                let mut seen = HashSet::new();
+                changed_paths.retain(|path| seen.insert(path.clone()));
+                let paths = changed_paths
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
+                let runtime = app.state::<GraphRuntime>();
+                match runtime.refresh(paths) {
+                    Ok(changed) => {
+                        let _ = app.emit(GRAPH_CHANGED_EVENT, changed);
+                    }
+                    Err(error) => log::warn!("Business graph refresh failed: {error}"),
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(watchers)
+}
+
+fn graph_markdown_path(root: &Path, path: &Path) -> bool {
+    if path.extension().and_then(|value| value.to_str()) != Some("md") {
+        return false;
+    }
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    matches!(
+        relative
+            .components()
+            .next()
+            .and_then(|component| component.as_os_str().to_str()),
+        Some("knowledge" | "issues")
+    )
+}
+
+fn private_root() -> Result<PathBuf, String> {
+    dirs::home_dir()
+        .map(|home| home.join(".mim").join("graph").join("private"))
+        .ok_or_else(|| "Could not resolve the private graph root.".into())
+}
+
+fn canonical_directory(path: PathBuf, label: &str) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(&path)
+        .map_err(|error| format!("Could not resolve {label} '{}': {error}", path.display()))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "{label} is not a directory: {}",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn project_scope_id(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("project")
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    let digest = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
+    format!("project:{}-{}", name, &digest[..12])
+}
+
+fn deduplicate_roots(roots: &mut Vec<GraphSourceRoot>) {
+    let mut seen = HashSet::new();
+    roots.retain(|root| seen.insert(root.root.clone()));
+}
+
+fn open_result(roots: &[GraphSourceRoot], store: &GraphStore) -> GraphOpenResult {
+    GraphOpenResult {
+        scopes: roots
+            .iter()
+            .map(|root| GraphScopeDescriptor {
+                id: root.scope_id.clone(),
+                kind: root.scope_kind,
+                root: root.root.to_string_lossy().into_owned(),
+            })
+            .collect(),
+        node_count: store.len(),
+        diagnostic_count: store.diagnostics().len(),
+        graph_revision: store.revision(),
+    }
+}
+
+fn changed_result(store: &GraphStore, paths: Vec<String>) -> GraphChanged {
+    GraphChanged {
+        graph_revision: store.revision(),
+        node_count: store.len(),
+        diagnostic_count: store.diagnostics().len(),
+        paths,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::business_graph::GraphRelation;
+    use tempfile::TempDir;
+
+    #[test]
+    fn recognizes_only_graph_markdown_below_supported_directories() {
+        let root = Path::new("/workspace");
+        assert!(graph_markdown_path(
+            root,
+            Path::new("/workspace/knowledge/note.md")
+        ));
+        assert!(graph_markdown_path(
+            root,
+            Path::new("/workspace/issues/issue.md")
+        ));
+        assert!(!graph_markdown_path(
+            root,
+            Path::new("/workspace/docs/note.md")
+        ));
+        assert!(!graph_markdown_path(
+            root,
+            Path::new("/workspace/knowledge/image.png")
+        ));
+    }
+
+    #[test]
+    fn project_scope_ids_are_stable_and_human_readable() {
+        let id = project_scope_id(Path::new("/work/HEOR Research"));
+        assert!(id.starts_with("project:heor-research-"));
+        assert_eq!(id, project_scope_id(Path::new("/work/HEOR Research")));
+        assert_ne!(id, project_scope_id(Path::new("/other/HEOR Research")));
+    }
+
+    #[test]
+    fn runtime_composes_project_and_team_queries_without_private_leakage() {
+        let project = TempDir::new().unwrap();
+        let team = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join("issues")).unwrap();
+        fs::create_dir_all(team.path().join("knowledge")).unwrap();
+        fs::write(
+            project.path().join("issues/issue-1.md"),
+            "---\ntitle: Project issue\nstatus: plan\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            team.path().join("knowledge/company.md"),
+            "---\ntitle: Team company\ntype: company\n---\n",
+        )
+        .unwrap();
+
+        let roots = vec![
+            GraphSourceRoot::new("project:test", GraphScopeKind::Project, project.path()),
+            GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path()),
+        ];
+        let runtime = GraphRuntime {
+            store: RwLock::new(GraphStore::load(&roots)),
+            roots: RwLock::new(roots),
+            watchers: Mutex::new(Vec::new()),
+            deleted: Mutex::new(VecDeque::new()),
+        };
+        let project_result = runtime
+            .query(&GraphQuery {
+                scope_ids: BTreeSet::from(["project:test".into()]),
+                ..GraphQuery::default()
+            })
+            .unwrap();
+        assert_eq!(project_result.total, 1);
+        assert_eq!(project_result.items[0].kind, "issue");
+        let team_result = runtime
+            .search("Project", &BTreeSet::from(["team:main".into()]), 10)
+            .unwrap();
+        assert!(team_result.is_empty());
+    }
+
+    #[test]
+    fn private_project_and_team_filters_apply_before_query_search_and_counts() {
+        let private = TempDir::new().unwrap();
+        let project = TempDir::new().unwrap();
+        let team = TempDir::new().unwrap();
+        for root in [&private, &project, &team] {
+            fs::create_dir_all(root.path().join("knowledge")).unwrap();
+        }
+        fs::write(
+            private.path().join("knowledge/private-plan.md"),
+            "---\ntitle: Private acquisition plan\ntype: note\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            project.path().join("knowledge/project-plan.md"),
+            "---\ntitle: Project evidence plan\ntype: note\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            team.path().join("knowledge/team-method.md"),
+            "---\ntitle: Team evidence method\ntype: note\n---\n",
+        )
+        .unwrap();
+        let runtime = GraphRuntime::from_roots(vec![
+            GraphSourceRoot::new("private:local", GraphScopeKind::Private, private.path()),
+            GraphSourceRoot::new("project:test", GraphScopeKind::Project, project.path()),
+            GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path()),
+        ]);
+
+        let team_only = BTreeSet::from(["team:main".into()]);
+        let result = runtime
+            .query(&GraphQuery {
+                scope_ids: team_only.clone(),
+                ..GraphQuery::default()
+            })
+            .unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].id, "team-method");
+        assert!(runtime
+            .search("Private", &team_only, 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn cross_scope_edges_are_written_only_with_their_source_node() {
+        let private = TempDir::new().unwrap();
+        let team = TempDir::new().unwrap();
+        fs::create_dir_all(team.path().join("knowledge")).unwrap();
+        fs::write(
+            team.path().join("knowledge/shared-method.md"),
+            "---\ntitle: Shared method\ntype: note\n---\n",
+        )
+        .unwrap();
+        let runtime = GraphRuntime::from_roots(vec![
+            GraphSourceRoot::new("private:local", GraphScopeKind::Private, private.path()),
+            GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path()),
+        ]);
+        let created = runtime
+            .create(GraphNodeCreate {
+                scope_id: Some("private:local".into()),
+                kind: "note".into(),
+                title: "My method annotation".into(),
+                relations: vec![GraphRelation {
+                    relation: "references".into(),
+                    target: "shared-method".into(),
+                    legacy: false,
+                }],
+                ..GraphNodeCreate::default()
+            })
+            .unwrap();
+
+        assert_eq!(created.provenance.scope_id, "private:local");
+        assert!(private
+            .path()
+            .join("knowledge/my-method-annotation.md")
+            .is_file());
+        let shared = fs::read_to_string(team.path().join("knowledge/shared-method.md")).unwrap();
+        assert!(!shared.contains("my-method-annotation"));
+    }
+
+    #[test]
+    fn recently_deleted_sources_can_be_restored_from_an_opaque_undo_token() {
+        let project = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join("knowledge")).unwrap();
+        let path = project.path().join("knowledge/decision.md");
+        let raw = "---\ntitle: Reversible decision\ntype: decision\n---\nKeep the rationale.";
+        fs::write(&path, raw).unwrap();
+        let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            project.path(),
+        )]);
+        fs::remove_file(&path).unwrap();
+        runtime
+            .refresh(vec![path.to_string_lossy().into_owned()])
+            .unwrap();
+        runtime
+            .deleted
+            .lock()
+            .unwrap()
+            .push_back(DeletedGraphSource {
+                undo_token: "undo-test".into(),
+                id: "decision".into(),
+                path: path.clone(),
+                raw: raw.into(),
+            });
+
+        let restored = runtime
+            .restore(GraphRestoreRequest {
+                undo_token: "undo-test".into(),
+            })
+            .unwrap();
+        assert_eq!(restored.id, "decision");
+        assert_eq!(fs::read_to_string(path).unwrap(), raw);
+        assert!(runtime.deleted.lock().unwrap().is_empty());
+    }
+}
