@@ -67,6 +67,50 @@ describe('files store', () => {
     expect(store.activeFileIndex).toBe(0) // switched back
   })
 
+  it('reuses one transient preview tab and promotes it on a permanent open or edit', async () => {
+    const store = useFileStore()
+
+    await store.openFile('/tmp/a.md', 'A', { preview: true })
+    await store.openFile('/tmp/b.md', 'B', { preview: true })
+    expect(store.openFiles).toHaveLength(1)
+    expect(store.currentFile).toMatchObject({ path: '/tmp/b.md', preview: true })
+
+    await store.openFile('/tmp/b.md', 'B', { preview: false })
+    expect(store.currentFile.preview).toBe(false)
+
+    await store.openFile('/tmp/c.md', 'C', { preview: true })
+    expect(store.openFiles).toHaveLength(2)
+    store.updateContent('C edited')
+    expect(store.currentFile).toMatchObject({
+      path: '/tmp/c.md',
+      content: 'C edited',
+      preview: false,
+      dirty: true,
+    })
+  })
+
+  it('keeps PDF and external resource tabs read-only and out of the save pipeline', async () => {
+    const store = useFileStore()
+    await store.openFile('/tmp/report.pdf', '', {
+      kind: 'pdf',
+      preview: true,
+      meta: { size: 2048 },
+    })
+
+    store.updateContent('must be ignored')
+    store.markDirty()
+
+    expect(store.currentFile).toMatchObject({
+      kind: 'pdf',
+      content: '',
+      dirty: false,
+      preview: true,
+      meta: { size: 2048 },
+    })
+    await expect(store.save()).resolves.toBe(false)
+    expect(saveFile).not.toHaveBeenCalled()
+  })
+
   // 5. currentFile computed
   it('currentFile returns the file at activeFileIndex', () => {
     const store = useFileStore()

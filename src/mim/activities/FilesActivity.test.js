@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import { useFileStore } from '../../stores/files.js'
+import { useSettingsStore } from '../../stores/settings.js'
 import * as operations from '../../services/workspaceFileOperations.js'
+import { loadGitChanges } from '../../services/gitChanges.js'
 import FilesActivity from './FilesActivity.vue'
 
 vi.mock('../../services/fileIndex.js', () => ({
@@ -14,6 +16,10 @@ vi.mock('../../services/fileIndex.js', () => ({
   beginContentSearch: vi.fn(),
   cancelContentSearch: vi.fn(),
   searchIndexedContent: vi.fn(),
+}))
+
+vi.mock('../../services/gitChanges.js', () => ({
+  loadGitChanges: vi.fn(async () => []),
 }))
 
 vi.mock('../../services/workspaceFileOperations.js', () => ({
@@ -49,6 +55,7 @@ describe('FilesActivity', () => {
     store.workspacePath = '/w'
     store.files = indexed
     store.directoryEntries = browseEntries
+    store.treeChildren = { '': browseEntries }
     operations.listWorkspaceDirectory.mockResolvedValue(browseEntries)
     operations.createWorkspaceFile.mockResolvedValue({
       path: '/w/brief.md',
@@ -88,45 +95,71 @@ describe('FilesActivity', () => {
     })
   }
 
-  it('starts recent-first while keeping the complete browser actions visible', () => {
+  it('starts with a dense Project tree and exposes Project, Recent, and Favorites', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-file-row]')
 
-    expect(wrapper.get('[data-files-mode="recent"]').attributes('aria-pressed')).toBe('true')
-    expect(rows.map((row) => row.attributes('data-file-row'))).toEqual(['/w/new.md', '/w/src/lib.rs'])
-    expect(rows[0].text()).toContain('1.5 KB')
-    expect(wrapper.get('[data-files-new-file]').attributes('title')).toContain('New file')
-    expect(wrapper.get('[data-files-new-folder]').attributes('title')).toContain('New folder')
-    expect(wrapper.get('[data-files-refresh]').exists()).toBe(true)
-  })
-
-  it('browses folders with breadcrumbs and opens text files in the existing editor', async () => {
-    const wrapper = render()
-    await wrapper.get('[data-files-mode="browse"]').trigger('click')
-
-    expect(wrapper.findAll('[data-file-row]').map((row) => row.attributes('data-file-row'))).toEqual([
+    expect(wrapper.get('[data-files-mode="project"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-files-mode="recent"]').exists()).toBe(true)
+    expect(wrapper.get('[data-files-mode="favorites"]').exists()).toBe(true)
+    expect(rows.map((row) => row.attributes('data-file-row'))).toEqual([
       '/w/docs',
       '/w/new.md',
       '/w/chart.png',
     ])
-    await wrapper.get('[data-file-row="/w/docs"]').trigger('dblclick')
+    expect(wrapper.get('[data-files-new-file]').attributes('title')).toContain('New file')
+    expect(wrapper.get('[data-files-new-folder]').attributes('title')).toContain('New folder')
+    expect(wrapper.get('[data-files-refresh]').exists()).toBe(true)
+    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Filter project files')
+  })
+
+  it('lazily expands folders and uses preview-on-click, permanent-on-double-click', async () => {
+    operations.listWorkspaceDirectory.mockResolvedValueOnce([{
+      path: '/w/docs/guide.md',
+      name: 'guide.md',
+      relativePath: 'docs/guide.md',
+      mtime: Date.now(),
+      size: 512,
+      isDirectory: false,
+      textReadable: true,
+    }])
+    const wrapper = render()
+
+    await wrapper.get('[data-file-row="/w/docs"] button').trigger('click')
     expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
+    expect(wrapper.find('[data-file-row="/w/docs/guide.md"]').exists()).toBe(true)
 
-    await wrapper.get('[data-file-row="/w/new.md"]').trigger('dblclick')
-    expect(wrapper.emitted('openFile').at(-1)).toEqual(['/w/new.md'])
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+    expect(wrapper.emitted('openFile').at(-1)).toEqual([expect.objectContaining({
+      path: '/w/new.md',
+      preview: true,
+      entry: expect.objectContaining({ openBehavior: 'text' }),
+    })])
 
-    await wrapper.get('[data-file-row="/w/chart.png"]').trigger('dblclick')
-    expect(operations.openWorkspaceEntryNative).toHaveBeenCalledWith('/w/chart.png')
+    await wrapper.get('[data-file-row="/w/chart.png"] button').trigger('dblclick')
+    expect(wrapper.emitted('openFile').at(-1)).toEqual([expect.objectContaining({
+      path: '/w/chart.png',
+      preview: false,
+      entry: expect.objectContaining({ openBehavior: 'external' }),
+    })])
+    expect(operations.openWorkspaceEntryNative).not.toHaveBeenCalled()
   })
 
   it('creates a named workspace file and immediately opens it', async () => {
+    const store = useWorkspaceFilesStore()
+    store.refresh = vi.fn(async () => undefined)
     const wrapper = render()
     await wrapper.get('[data-files-new-file]').trigger('click')
-    await wrapper.get('[data-files-name-input]').setValue('brief.md')
-    await wrapper.get('[data-files-name-form]').trigger('submit')
+    await wrapper.get('[data-files-inline-name]').setValue('brief.md')
+    await wrapper.get('form').trigger('submit')
 
     expect(operations.createWorkspaceFile).toHaveBeenCalledWith('brief.md')
-    expect(wrapper.emitted('openFile').at(-1)).toEqual(['/w/brief.md'])
+    expect(store.refresh).not.toHaveBeenCalled()
+    expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('')
+    expect(wrapper.emitted('openFile').at(-1)).toEqual([expect.objectContaining({
+      path: '/w/brief.md',
+      preview: false,
+    })])
   })
 
   it('offers the proven row actions from a native right-click gesture', async () => {
@@ -137,8 +170,9 @@ describe('FilesActivity', () => {
     })
 
     const menu = wrapper.get('[data-files-context-menu]')
-    expect(menu.text()).toContain('Open')
+    expect(menu.text()).toContain('Open in Mim')
     expect(menu.text()).toContain('Open in default app')
+    expect(menu.text()).toContain('Add to Favorites')
     expect(menu.text()).toContain('Rename')
     expect(menu.text()).toContain('Duplicate')
     expect(menu.text()).toContain('Reveal in Finder')
@@ -150,9 +184,10 @@ describe('FilesActivity', () => {
     const editorFiles = useFileStore()
     await editorFiles.openFile('/w/new.md', '# Draft')
     const wrapper = render()
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
     await wrapper.get('[data-files-list]').trigger('keydown', { key: 'F2' })
-    await wrapper.get('[data-files-name-input]').setValue('renamed.md')
-    await wrapper.get('[data-files-name-form]').trigger('submit')
+    await wrapper.get('[data-files-inline-name]').setValue('renamed.md')
+    await wrapper.get('form').trigger('submit')
 
     expect(operations.renameWorkspaceEntry).toHaveBeenCalledWith('/w/new.md', 'renamed.md')
     await vi.waitFor(() => {
@@ -162,6 +197,7 @@ describe('FilesActivity', () => {
 
   it('invokes the selected row menu from Shift+F10 and copies an absolute path', async () => {
     const wrapper = render()
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
     await wrapper.get('[data-files-list]').trigger('keydown', { key: 'F10', shiftKey: true })
     expect(wrapper.get('[data-files-context-menu]').exists()).toBe(true)
     await wrapper.get('[data-file-action="copy-path"]').trigger('click')
@@ -171,15 +207,17 @@ describe('FilesActivity', () => {
   it('navigates an invoked context menu with native arrow and Enter behavior', async () => {
     const wrapper = render()
     document.body.appendChild(wrapper.element)
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
     await wrapper.get('[data-files-list]').trigger('keydown', { key: 'F10', shiftKey: true })
     const menu = wrapper.get('[data-files-context-menu]')
     wrapper.get('[data-file-action="open"]').element.focus()
 
     await menu.trigger('keydown', { key: 'ArrowDown' })
     await menu.trigger('keydown', { key: 'ArrowDown' })
+    await menu.trigger('keydown', { key: 'ArrowDown' })
     await menu.trigger('keydown', { key: 'Enter' })
 
-    expect(wrapper.get('[data-files-name-input]').element).toBe(document.activeElement)
+    expect(wrapper.get('[data-files-inline-name]').element).toBe(document.activeElement)
     wrapper.unmount()
   })
 
@@ -187,24 +225,59 @@ describe('FilesActivity', () => {
     const wrapper = render()
     const list = wrapper.get('[data-files-list]')
     await list.trigger('keydown', { key: 'n', metaKey: true, shiftKey: true })
-    await wrapper.get('[data-files-name-input]').setValue('research')
-    await wrapper.get('[data-files-name-form]').trigger('submit')
+    await wrapper.get('[data-files-inline-name]').setValue('research')
+    await wrapper.get('form').trigger('submit')
     expect(operations.createWorkspaceFolder).toHaveBeenCalledWith('research')
 
-    await wrapper.get('[data-file-row="/w/new.md"]').trigger('click', { metaKey: true })
-    await wrapper.get('[data-file-row="/w/src/lib.rs"]').trigger('click', { metaKey: true })
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click', { metaKey: true })
+    await wrapper.get('[data-file-row="/w/chart.png"] button').trigger('click', { metaKey: true })
     await list.trigger('keydown', { key: 'Backspace', metaKey: true })
     expect(wrapper.get('[data-files-delete-dialog]').text()).toContain('2 items')
     await wrapper.get('[data-files-confirm-delete]').trigger('click')
     expect(operations.trashWorkspaceEntries).toHaveBeenCalledWith([
       '/w/new.md',
-      '/w/src/lib.rs',
+      '/w/chart.png',
     ])
+  })
+
+  it('persists favorite files and folders as a dedicated working set', async () => {
+    const wrapper = render()
+    const settings = useSettingsStore()
+
+    await wrapper.get('[data-file-row="/w/docs"] [data-file-favorite]').trigger('click')
+    await wrapper.get('[data-file-row="/w/new.md"] [data-file-favorite]').trigger('click')
+
+    expect(settings.workbenchFileFavorites['/w']).toEqual([
+      { relativePath: 'docs', isDirectory: true },
+      { relativePath: 'new.md', isDirectory: false },
+    ])
+    expect(wrapper.get('[data-files-mode="favorites"]').text()).toContain('2')
+
+    await wrapper.get('[data-files-mode="favorites"]').trigger('click')
+    expect(wrapper.findAll('[data-file-row]').map((row) => row.attributes('data-file-row'))).toEqual([
+      '/w/docs',
+      '/w/new.md',
+    ])
+  })
+
+  it('builds Recent from actual editor history and keeps missing entries visible', async () => {
+    const editorFiles = useFileStore()
+    editorFiles.setRecentFiles(['/w/src/lib.rs', '/w/moved.md'])
+    const wrapper = render()
+
+    await wrapper.get('[data-files-mode="recent"]').trigger('click')
+
+    expect(wrapper.findAll('[data-file-row]').map((row) => row.attributes('data-file-row'))).toEqual([
+      '/w/src/lib.rs',
+      '/w/moved.md',
+    ])
+    expect(wrapper.get('[data-file-row="/w/moved.md"]').text()).toContain('Missing')
   })
 
   it('turns empty and error states into direct recovery actions', async () => {
     const store = useWorkspaceFilesStore()
     store.files = []
+    store.treeChildren = { '': [] }
     const wrapper = render()
     expect(wrapper.get('[data-files-empty]').text()).toContain('Create a file')
 
@@ -215,13 +288,89 @@ describe('FilesActivity', () => {
     expect(operations.listWorkspaceDirectory).toHaveBeenCalled()
   })
 
-  it('refreshes only when opened instead of polling full workspace scans in the background', async () => {
+  it('never couples Activity navigation to a full workspace refresh', async () => {
     const store = useWorkspaceFilesStore()
     store.refresh = vi.fn(async () => undefined)
     const wrapper = render({ active: false })
 
     await wrapper.setProps({ active: true })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
 
-    expect(store.refresh).toHaveBeenCalledTimes(1)
+    expect(store.refresh).not.toHaveBeenCalled()
+  })
+
+  it('debounces project filtering until roughly 130ms of quiet typing', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = useWorkspaceFilesStore()
+      const setQuery = vi.spyOn(store, 'setQuery').mockResolvedValue(undefined)
+      const wrapper = render()
+      await wrapper.get('[data-files-search]').setValue('lib')
+
+      await vi.advanceTimersByTimeAsync(100)
+      expect(setQuery).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(40)
+      expect(setQuery).toHaveBeenCalledWith('lib')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('marks changed directories from the precomputed git status map', async () => {
+    loadGitChanges.mockResolvedValueOnce([
+      { path: 'docs/deep/guide.md', status: 'modified' },
+      { path: 'new.md', status: 'new' },
+    ])
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.get('[data-file-row="/w/docs"]').text()).toContain('M')
+    expect(wrapper.get('[data-file-row="/w/new.md"]').text()).toContain('A')
+    expect(wrapper.get('[data-file-row="/w/chart.png"]').text()).not.toContain('M')
+  })
+
+  function seedLargeTree(count = 400) {
+    const store = useWorkspaceFilesStore()
+    store.treeChildren = {
+      '': Array.from({ length: count }, (_, index) => ({
+        path: `/w/f${index}.md`,
+        name: `f${index}.md`,
+        relativePath: `f${index}.md`,
+        mtime: Date.now(),
+        size: 10,
+        isDirectory: false,
+        textReadable: true,
+      })),
+    }
+    return count
+  }
+
+  it('windows large trees behind spacers that preserve scroll geometry', () => {
+    const count = seedLargeTree(400)
+    const wrapper = render()
+    const rows = wrapper.findAll('[data-file-row]')
+    const spacers = wrapper.findAll('[data-files-spacer]')
+
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.length).toBeLessThan(count)
+    expect(rows[0].attributes('data-file-row')).toBe('/w/f0.md')
+    expect(spacers.length).toBeGreaterThan(0)
+    const spacerHeight = spacers.reduce(
+      (sum, spacer) => sum + Number.parseInt(spacer.element.style.height, 10),
+      0,
+    )
+    expect(spacerHeight + rows.length * 28).toBe(count * 28)
+  })
+
+  it('keeps the keyboard-focused row mounted outside the virtual window', async () => {
+    seedLargeTree(400)
+    const wrapper = render()
+    expect(wrapper.find('[data-file-row="/w/f399.md"]').exists()).toBe(false)
+
+    await wrapper.get('[data-files-list]').trigger('keydown', { key: 'ArrowUp' })
+
+    expect(wrapper.find('[data-file-row="/w/f399.md"]').exists()).toBe(true)
+    expect(wrapper.get('[data-file-row="/w/f399.md"]').attributes('aria-selected')).toBe('true')
   })
 })

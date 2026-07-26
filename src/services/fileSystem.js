@@ -60,3 +60,22 @@ export async function readFile(path) {
   const result = await invoke('read_text_file', { path })
   return result.content
 }
+
+export async function readBinaryFile(path) {
+  if (!isTauri()) return new Uint8Array()
+  const result = await invoke('read_binary_file', { path })
+  if (result instanceof ArrayBuffer) return new Uint8Array(result)
+  if (ArrayBuffer.isView(result)) {
+    return new Uint8Array(result.buffer, result.byteOffset, result.byteLength)
+  }
+  if (Array.isArray(result)) return Uint8Array.from(result)
+  if (typeof result === 'string') return decodeBase64(result)
+  throw new Error(`Could not read binary data from ${path}.`)
+}
+
+function decodeBase64(value) {
+  const decoded = atob(value)
+  const bytes = new Uint8Array(decoded.length)
+  for (let index = 0; index < decoded.length; index++) bytes[index] = decoded.charCodeAt(index)
+  return bytes
+}

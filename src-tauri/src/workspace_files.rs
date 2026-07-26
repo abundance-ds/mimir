@@ -24,6 +24,70 @@ const HIDDEN_NOISE: &[&str] = &[
     "target",
 ];
 
+const KNOWN_TEXT_EXTENSIONS: &[&str] = &[
+    "bash",
+    "bib",
+    "c",
+    "cc",
+    "cfg",
+    "conf",
+    "cpp",
+    "css",
+    "csv",
+    "dockerfile",
+    "fish",
+    "go",
+    "h",
+    "hpp",
+    "htm",
+    "html",
+    "ini",
+    "java",
+    "js",
+    "json",
+    "jsonc",
+    "jsx",
+    "kt",
+    "kts",
+    "less",
+    "lua",
+    "m",
+    "markdown",
+    "md",
+    "mdown",
+    "mkd",
+    "mm",
+    "mjs",
+    "mts",
+    "php",
+    "pl",
+    "properties",
+    "py",
+    "r",
+    "rb",
+    "rs",
+    "scss",
+    "sh",
+    "sql",
+    "svg",
+    "swift",
+    "toml",
+    "ts",
+    "tsx",
+    "txt",
+    "vue",
+    "xml",
+    "yaml",
+    "yml",
+    "zsh",
+];
+
+const KNOWN_EXTERNAL_EXTENSIONS: &[&str] = &[
+    "7z", "a", "avi", "bmp", "class", "db", "dll", "dylib", "eot", "exe", "gif", "gz", "ico",
+    "jar", "jpeg", "jpg", "mkv", "mov", "mp3", "mp4", "o", "otf", "png", "rar", "so", "sqlite",
+    "sqlite3", "tar", "tiff", "ttf", "wav", "wasm", "webp", "woff", "woff2", "zip",
+];
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceEntry {
@@ -34,6 +98,7 @@ pub struct WorkspaceEntry {
     pub mtime: i64,
     pub size: u64,
     pub text_readable: bool,
+    pub open_behavior: String,
 }
 
 #[tauri::command]
@@ -45,6 +110,20 @@ pub async fn workspace_file_list_directory(
     tauri::async_runtime::spawn_blocking(move || list_directory(&root, &directory))
         .await
         .map_err(|error| format!("File browser task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn workspace_file_inspect(
+    state: tauri::State<'_, FileIndexState>,
+    path: String,
+) -> Result<WorkspaceEntry, String> {
+    let root = state.index()?.workspace();
+    tauri::async_runtime::spawn_blocking(move || {
+        let target = resolve_existing(&root, &path)?;
+        entry_for_path(&canonical_root(&root)?, &target)
+    })
+    .await
+    .map_err(|error| format!("File inspection task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -278,12 +357,23 @@ fn list_directory(root: &Path, directory: &str) -> Result<Vec<WorkspaceEntry>, S
             continue;
         }
         let candidate = item.path();
-        let canonical = match candidate.canonicalize() {
+        // Only symlinked entries can point outside the workspace: the listed
+        // directory is itself canonical, so a plain entry's real path is just
+        // the joined path. Canonicalizing every entry is expensive, so resolve
+        // only actual symlinks to enforce the root boundary (escaping or
+        // dangling links are excluded, exactly as before).
+        let file_type = match item.file_type() {
             Ok(value) => value,
             Err(_) => continue,
         };
-        if !canonical.starts_with(&canonical_root) {
-            continue;
+        if file_type.is_symlink() {
+            let canonical = match candidate.canonicalize() {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if !canonical.starts_with(&canonical_root) {
+                continue;
+            }
         }
         entries.push(entry_for_path(&canonical_root, &candidate)?);
     }
@@ -470,6 +560,7 @@ fn entry_for_path(root: &Path, path: &Path) -> Result<WorkspaceEntry, String> {
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
         .unwrap_or(0);
+    let open_behavior = classify_open_behavior(path, is_directory);
     Ok(WorkspaceEntry {
         path: path.to_string_lossy().into_owned(),
         relative_path: display_relative(root, path),
@@ -480,7 +571,8 @@ fn entry_for_path(root: &Path, path: &Path) -> Result<WorkspaceEntry, String> {
         is_directory,
         mtime,
         size: if is_directory { 0 } else { metadata.len() },
-        text_readable: !is_directory && text_readable(path),
+        text_readable: open_behavior == "text",
+        open_behavior: open_behavior.into(),
     })
 }
 
@@ -500,6 +592,31 @@ fn text_readable(path: &Path) -> bool {
         return false;
     };
     !buffer[..read].contains(&0) && std::str::from_utf8(&buffer[..read]).is_ok()
+}
+
+fn classify_open_behavior(path: &Path, is_directory: bool) -> &'static str {
+    if is_directory {
+        return "directory";
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if extension == "pdf" {
+        return "pdf";
+    }
+    if KNOWN_TEXT_EXTENSIONS.contains(&extension.as_str()) {
+        return "text";
+    }
+    if KNOWN_EXTERNAL_EXTENSIONS.contains(&extension.as_str()) {
+        return "external";
+    }
+    if text_readable(path) {
+        "text"
+    } else {
+        "external"
+    }
 }
 
 #[cfg(test)]
@@ -523,6 +640,38 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["z-folder", "A.md", "b.md"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn listing_excludes_escaping_and_dangling_symlinks_but_keeps_internal_ones() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("secret.txt"), "outside").unwrap();
+        fs::write(temp.path().join("inside.md"), "inside").unwrap();
+        symlink(
+            outside.path().join("secret.txt"),
+            temp.path().join("escape.txt"),
+        )
+        .unwrap();
+        symlink(temp.path().join("inside.md"), temp.path().join("alias.md")).unwrap();
+        symlink(
+            temp.path().join("never-existed.md"),
+            temp.path().join("dangling.md"),
+        )
+        .unwrap();
+
+        let names = list_directory(temp.path(), "")
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"inside.md".to_string()));
+        assert!(names.contains(&"alias.md".to_string()));
+        assert!(!names.contains(&"escape.txt".to_string()));
+        assert!(!names.contains(&"dangling.md".to_string()));
     }
 
     #[test]

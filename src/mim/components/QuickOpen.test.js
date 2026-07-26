@@ -104,9 +104,29 @@ describe('QuickOpen', () => {
       const wrapper = render()
       await wrapper.get('[data-quick-open-input]').setValue('src')
       await wrapper.setProps({ open: false })
-      await vi.advanceTimersByTimeAsync(100)
+      await vi.advanceTimersByTimeAsync(400)
 
       expect(filter).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('debounces typing at roughly 130ms before querying the index', async () => {
+    vi.useFakeTimers()
+    try {
+      const filter = vi.mocked(
+        (await import('../../services/fileIndex.js')).filterIndexedFiles,
+      )
+      filter.mockClear()
+      filter.mockResolvedValue([])
+      const wrapper = render()
+      await wrapper.get('[data-quick-open-input]').setValue('src')
+
+      await vi.advanceTimersByTimeAsync(100)
+      expect(filter).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(40)
+      expect(filter).toHaveBeenCalledWith('src', 250)
     } finally {
       vi.useRealTimers()
     }

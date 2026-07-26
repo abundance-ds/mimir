@@ -26,8 +26,15 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
   const directoryEntries = ref([])
   const directoryLoading = ref(false)
   const directoryError = ref('')
+  const treeChildren = ref({})
+  const treeLoadingPaths = ref(new Set())
+  const treeErrors = ref({})
+  const expandedDirectories = ref(new Set())
   let activeSearchToken = null
   let queryGeneration = 0
+  let watchUnlisten = null
+  let watchStartPromise = null
+  let watchApplyQueue = Promise.resolve()
 
   const visibleFiles = computed(() => filteredFiles.value ?? files.value)
   const selectedFile = computed(() => visibleFiles.value[selectionIndex.value] || null)
@@ -55,7 +62,12 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
       query.value = ''
       selectionIndex.value = 0
       currentDirectory.value = ''
+      treeChildren.value = {}
+      treeLoadingPaths.value = new Set()
+      treeErrors.value = {}
+      expandedDirectories.value = new Set()
       await loadDirectory('')
+      await startWatching()
     } catch (cause) {
       error.value = errorMessage(cause)
       throw cause
@@ -71,6 +83,10 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     try {
       const entries = await listWorkspaceDirectory(next)
       directoryEntries.value = Array.isArray(entries) ? entries : []
+      treeChildren.value = {
+        ...treeChildren.value,
+        [next]: directoryEntries.value,
+      }
       currentDirectory.value = next
       selectionIndex.value = 0
       return directoryEntries.value
@@ -90,6 +106,63 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     if (!currentDirectory.value) return Promise.resolve(directoryEntries.value)
     const parent = currentDirectory.value.split('/').slice(0, -1).join('/')
     return loadDirectory(parent)
+  }
+
+  async function loadTreeDirectory(path = '', { force = false } = {}) {
+    const next = normalizeRelativeDirectory(path)
+    if (!force && Object.prototype.hasOwnProperty.call(treeChildren.value, next)) {
+      return treeChildren.value[next]
+    }
+    if (treeLoadingPaths.value.has(next)) return treeChildren.value[next] || []
+    treeLoadingPaths.value = new Set([...treeLoadingPaths.value, next])
+    const errors = { ...treeErrors.value }
+    delete errors[next]
+    treeErrors.value = errors
+    try {
+      const entries = await listWorkspaceDirectory(next)
+      const normalized = Array.isArray(entries) ? entries : []
+      treeChildren.value = { ...treeChildren.value, [next]: normalized }
+      if (next === currentDirectory.value) directoryEntries.value = normalized
+      return normalized
+    } catch (cause) {
+      treeErrors.value = { ...treeErrors.value, [next]: errorMessage(cause) }
+      throw cause
+    } finally {
+      const loading = new Set(treeLoadingPaths.value)
+      loading.delete(next)
+      treeLoadingPaths.value = loading
+    }
+  }
+
+  async function toggleDirectory(path) {
+    const next = normalizeRelativeDirectory(path)
+    const expanded = new Set(expandedDirectories.value)
+    if (expanded.has(next)) {
+      expanded.delete(next)
+      expandedDirectories.value = expanded
+      return false
+    }
+    await loadTreeDirectory(next)
+    expanded.add(next)
+    expandedDirectories.value = expanded
+    return true
+  }
+
+  function collapseAllDirectories() {
+    expandedDirectories.value = new Set()
+  }
+
+  async function revealTreePath(path) {
+    const parts = normalizeRelativeDirectory(path).split('/').filter(Boolean)
+    parts.pop()
+    let current = ''
+    const expanded = new Set(expandedDirectories.value)
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part
+      await loadTreeDirectory(current)
+      expanded.add(current)
+    }
+    expandedDirectories.value = expanded
   }
 
   async function setQuery(value) {
@@ -129,7 +202,14 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
         if (query.value) await setQuery(query.value)
         selectionIndex.value = Math.min(selectionIndex.value, Math.max(visibleFiles.value.length - 1, 0))
       }
-      await loadDirectory(currentDirectory.value)
+      const loadedDirectories = Object.keys(treeChildren.value)
+      if (!loadedDirectories.includes(currentDirectory.value)) {
+        loadedDirectories.push(currentDirectory.value)
+      }
+      if (!loadedDirectories.includes('')) loadedDirectories.push('')
+      await Promise.allSettled(
+        loadedDirectories.map((directory) => loadTreeDirectory(directory, { force: true })),
+      )
       error.value = ''
       return report
     } catch (cause) {
@@ -164,10 +244,65 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     }
   }
 
+  async function startWatching() {
+    if (watchUnlisten || watchStartPromise) return watchStartPromise
+    if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) return false
+    watchStartPromise = import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('mim://workspace-files-changed', (event) => {
+        watchApplyQueue = watchApplyQueue
+          .catch(() => {})
+          .then(() => applyWorkspaceChange(event.payload))
+      }))
+      .then((unlisten) => {
+        watchUnlisten = unlisten
+        return true
+      })
+      .catch(() => false)
+      .finally(() => {
+        watchStartPromise = null
+      })
+    return watchStartPromise
+  }
+
+  async function applyWorkspaceChange(payload = {}) {
+    if (!workspacePath.value) return
+    try {
+      const hasDelta = Array.isArray(payload?.files)
+      files.value = hasDelta
+        ? mergeIndexChange(files.value, payload)
+        : await listIndexedFiles()
+      if (query.value) await setQuery(query.value)
+      const loadedDirectories = Object.keys(treeChildren.value)
+      const directories = hasDelta && !payload.replaceAll
+        ? affectedTreeDirectories(
+            workspacePath.value,
+            payload.paths,
+            loadedDirectories,
+          )
+        : loadedDirectories
+      if (!hasDelta && !directories.includes('')) directories.push('')
+      await Promise.allSettled(
+        directories.map((directory) => loadTreeDirectory(directory, { force: true })),
+      )
+      selectionIndex.value = Math.min(
+        selectionIndex.value,
+        Math.max(visibleFiles.value.length - 1, 0),
+      )
+      error.value = ''
+      return payload?.report || null
+    } catch (cause) {
+      error.value = errorMessage(cause)
+      return null
+    }
+  }
+
   async function dispose() {
     queryGeneration += 1
     if (activeSearchToken) await cancelContentSearch(activeSearchToken)
     activeSearchToken = null
+    watchUnlisten?.()
+    watchUnlisten = null
+    await watchApplyQueue.catch(() => {})
   }
 
   return {
@@ -184,6 +319,10 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     directoryEntries,
     directoryLoading,
     directoryError,
+    treeChildren,
+    treeLoadingPaths,
+    treeErrors,
+    expandedDirectories,
     visibleFiles,
     selectedFile,
     breadcrumbs,
@@ -191,11 +330,17 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     loadDirectory,
     openDirectory,
     openParentDirectory,
+    loadTreeDirectory,
+    toggleDirectory,
+    collapseAllDirectories,
+    revealTreePath,
     setQuery,
     moveSelection,
     selectPath,
     refresh,
     searchContent,
+    startWatching,
+    applyWorkspaceChange,
     dispose,
   }
 })
@@ -211,4 +356,51 @@ function normalizeRelativeDirectory(path) {
     throw new Error('Directory must stay inside the workspace.')
   }
   return normalized
+}
+
+export function mergeIndexChange(currentFiles, payload = {}) {
+  const incoming = Array.isArray(payload.files) ? payload.files : []
+  if (payload.replaceAll) return sortIndexedFiles(incoming)
+
+  const changedPaths = (Array.isArray(payload.paths) ? payload.paths : [])
+    .map(normalizeAbsolutePath)
+    .filter(Boolean)
+  const retained = (Array.isArray(currentFiles) ? currentFiles : []).filter((file) => {
+    const path = normalizeAbsolutePath(file?.path)
+    return !changedPaths.some((changed) => path === changed || path.startsWith(`${changed}/`))
+  })
+  const byPath = new Map()
+  for (const file of [...retained, ...incoming]) {
+    if (file?.path) byPath.set(normalizeAbsolutePath(file.path), file)
+  }
+  return sortIndexedFiles([...byPath.values()])
+}
+
+export function affectedTreeDirectories(workspace, changedPaths, loadedDirectories) {
+  const root = normalizeAbsolutePath(workspace).replace(/\/+$/, '')
+  const loaded = new Set(Array.isArray(loadedDirectories) ? loadedDirectories : [])
+  const affected = new Set()
+  for (const rawPath of Array.isArray(changedPaths) ? changedPaths : []) {
+    const path = normalizeAbsolutePath(rawPath)
+    if (!root || (path !== root && !path.startsWith(`${root}/`))) continue
+    const relative = path === root ? '' : path.slice(root.length + 1)
+    const parts = relative.split('/').filter(Boolean)
+    const parent = parts.slice(0, -1).join('/')
+    if (loaded.has(parent)) affected.add(parent)
+    if (loaded.has(relative)) affected.add(relative)
+  }
+  return [...affected]
+}
+
+function sortIndexedFiles(files) {
+  return [...files].sort((left, right) => (
+    Number(right?.mtime || 0) - Number(left?.mtime || 0)
+    || String(left?.relativePath || left?.path || '').localeCompare(
+      String(right?.relativePath || right?.path || ''),
+    )
+  ))
+}
+
+function normalizeAbsolutePath(path) {
+  return String(path || '').replaceAll('\\', '/').replace(/\/+$/, '')
 }

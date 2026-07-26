@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 function desktopOnly() {
   if (!window.__TAURI_INTERNALS__) {
@@ -39,4 +40,8 @@ export async function cancelContentSearch(token) {
 export async function searchIndexedContent(token, request) {
   desktopOnly()
   return invoke('file_index_search', { token, request })
+}
+
+export function listenForWorkspaceFileChanges(callback) {
+  return listen('mim://workspace-files-changed', (event) => callback(event.payload))
 }

@@ -4,6 +4,7 @@ import {
   createWorkspaceFile,
   createWorkspaceFolder,
   duplicateWorkspaceEntry,
+  inspectWorkspaceEntry,
   listWorkspaceDirectory,
   openWorkspaceEntryNative,
   revealWorkspaceEntry,
@@ -21,6 +22,14 @@ describe('workspace file operations', () => {
       { path: '/w/docs', relativePath: 'docs', isDirectory: true },
     ])
     expect(invoke).toHaveBeenCalledWith('workspace_file_list_directory', { directory: 'docs' })
+  })
+
+  it('inspects an entry before choosing an internal or native open path', async () => {
+    const entry = { path: '/w/report.pdf', openBehavior: 'pdf', textReadable: false }
+    invoke.mockResolvedValueOnce(entry)
+
+    await expect(inspectWorkspaceEntry('/w/report.pdf')).resolves.toEqual(entry)
+    expect(invoke).toHaveBeenCalledWith('workspace_file_inspect', { path: '/w/report.pdf' })
   })
 
   it('creates files and folders without collapsing the operation contract', async () => {

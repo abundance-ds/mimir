@@ -113,6 +113,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { IconFileSearch } from '@tabler/icons-vue'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 
+const SEARCH_DEBOUNCE_MS = 130
+
 const props = defineProps({
   open: { type: Boolean, default: false },
 })
@@ -170,7 +172,7 @@ function onInput() {
     } finally {
       if (generation === searchGeneration) searching.value = false
     }
-  }, 40)
+  }, SEARCH_DEBOUNCE_MS)
 }
 
 function confirm() {

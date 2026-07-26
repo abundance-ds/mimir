@@ -1,15 +1,26 @@
 use crate::file_index::{
     ContentSearchReport, ContentSearchRequest, ContentSearchToken, FileFilterHit, FileIndexEntry,
-    IndexRefresh, WorkspaceFileIndex,
+    FileIndexSnapshot, IndexRefresh, WorkspaceFileIndex,
 };
-use std::sync::{Arc, Mutex};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use serde::Serialize;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc, Mutex},
+    time::Duration,
+};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Default)]
-pub struct FileIndexState(Mutex<Option<Arc<WorkspaceFileIndex>>>);
+pub struct FileIndexState {
+    index: Mutex<Option<Arc<WorkspaceFileIndex>>>,
+    watcher: Mutex<Option<RecommendedWatcher>>,
+}
 
 impl FileIndexState {
     pub(crate) fn index(&self) -> Result<Arc<WorkspaceFileIndex>, String> {
-        self.0
+        self.index
             .lock()
             .map_err(|error| error.to_string())?
             .clone()
@@ -19,32 +30,156 @@ impl FileIndexState {
 
 #[tauri::command]
 pub async fn file_index_open(
+    app: AppHandle,
     state: tauri::State<'_, FileIndexState>,
     workspace: String,
-) -> Result<Vec<FileIndexEntry>, String> {
+) -> Result<FileIndexSnapshot, String> {
     let index = tauri::async_runtime::spawn_blocking(move || WorkspaceFileIndex::open(workspace))
         .await
         .map_err(|error| format!("File index task failed: {error}"))?
         .map_err(|error| error.to_string())?;
     let files = index.files();
-    *state.0.lock().map_err(|error| error.to_string())? = Some(Arc::new(index));
+    let index = Arc::new(index);
+    let watcher = match watch_workspace(index.clone(), app) {
+        Ok(watcher) => Some(watcher),
+        Err(error) => {
+            log::warn!("Workspace file watching is unavailable: {error}");
+            None
+        }
+    };
+    *state.index.lock().map_err(|error| error.to_string())? = Some(index);
+    *state.watcher.lock().map_err(|error| error.to_string())? = watcher;
     Ok(files)
 }
 
 #[tauri::command]
-pub fn file_index_files(
+pub async fn file_index_files(
     state: tauri::State<'_, FileIndexState>,
-) -> Result<Vec<FileIndexEntry>, String> {
-    Ok(state.index()?.files())
+) -> Result<FileIndexSnapshot, String> {
+    let index = state.index()?;
+    tauri::async_runtime::spawn_blocking(move || index.files())
+        .await
+        .map_err(|error| format!("File index task failed: {error}"))
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceChanged {
+    report: IndexRefresh,
+    paths: Vec<String>,
+    replace_all: bool,
+    files: Vec<FileIndexEntry>,
+}
+
+fn watch_workspace(
+    index: Arc<WorkspaceFileIndex>,
+    app: AppHandle,
+) -> Result<RecommendedWatcher, String> {
+    let root = index.workspace();
+    let event_root = root.clone();
+    let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else {
+            return;
+        };
+        let paths: Vec<_> = event
+            .paths
+            .into_iter()
+            .filter(|path| !ignored_watch_path(&event_root, path))
+            .collect();
+        if !paths.is_empty() {
+            let _ = sender.send(paths);
+        }
+    })
+    .map_err(|error| error.to_string())?;
+    watcher
+        .watch(&root, RecursiveMode::Recursive)
+        .map_err(|error| error.to_string())?;
+
+    std::thread::Builder::new()
+        .name("mim-workspace-watch".into())
+        .spawn(move || {
+            while let Ok(first) = receiver.recv() {
+                let mut changed = first;
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(110)) {
+                        Ok(paths) => changed.extend(paths),
+                        Err(mpsc::RecvTimeoutError::Timeout) => break,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                let mut seen = HashSet::new();
+                changed.retain(|path| seen.insert(path.clone()));
+                match index.refresh_paths(&changed) {
+                    Ok(report) => {
+                        // Ordinary content edits only replace metadata for the
+                        // touched files. Structural changes are rarer and send
+                        // one authoritative snapshot to preserve ignore and
+                        // rename semantics.
+                        let replace_all = report.added > 0 || report.removed > 0;
+                        let files = if replace_all {
+                            // Structural changes are rare enough that an owned
+                            // copy of the snapshot is fine here.
+                            index.files().to_entries()
+                        } else {
+                            index.files_for_paths(&changed)
+                        };
+                        let payload = WorkspaceChanged {
+                            report,
+                            paths: changed
+                                .iter()
+                                .map(|path| path.to_string_lossy().into_owned())
+                                .collect(),
+                            replace_all,
+                            files,
+                        };
+                        let _ = app.emit("mim://workspace-files-changed", payload);
+                    }
+                    Err(error) => log::warn!("Workspace refresh after file change failed: {error}"),
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
+
+    Ok(watcher)
+}
+
+fn ignored_watch_path(root: &Path, path: &Path) -> bool {
+    const NOISE: &[&str] = &[
+        ".git",
+        ".hg",
+        ".svn",
+        ".cache",
+        ".next",
+        ".nuxt",
+        ".parcel-cache",
+        ".turbo",
+        ".venv",
+        "__pycache__",
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "out",
+        "target",
+    ];
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .any(|component| NOISE.contains(&component))
 }
 
 #[tauri::command]
-pub fn file_index_filter(
+pub async fn file_index_filter(
     state: tauri::State<'_, FileIndexState>,
     query: String,
     max_results: Option<usize>,
 ) -> Result<Vec<FileFilterHit>, String> {
-    Ok(state.index()?.filter_files(&query, max_results))
+    let index = state.index()?;
+    tauri::async_runtime::spawn_blocking(move || index.filter_files(&query, max_results))
+        .await
+        .map_err(|error| format!("File filter task failed: {error}"))
 }
 
 #[tauri::command]

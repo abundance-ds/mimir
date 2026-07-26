@@ -2,18 +2,18 @@
 //!
 //! The index is an in-memory projection of the filesystem, not a database. A
 //! watcher should debounce its events and pass the coalesced paths to
-//! [`WorkspaceFileIndex::refresh_paths`]. Rebuilding from disk keeps `.gitignore`
-//! changes, renames, directory removals, and editor atomic-save patterns correct
-//! without maintaining a second, subtly different filesystem tree.
+//! [`WorkspaceFileIndex::refresh_paths`]. Ordinary file edits and deletes update
+//! in place; structural or ignore-rule changes fall back to a full scan.
 
-use ignore::{DirEntry, WalkBuilder};
+use ignore::{DirEntry, WalkBuilder, WalkState};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::cmp::Ordering as CmpOrdering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -59,6 +59,63 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "sqlite", "sqlite3", "tar", "tiff", "ttf", "wav", "wasm", "webp", "woff", "woff2", "zip",
 ];
 
+const TEXT_EXTENSIONS: &[&str] = &[
+    "bash",
+    "bib",
+    "c",
+    "cc",
+    "cfg",
+    "conf",
+    "cpp",
+    "css",
+    "csv",
+    "fish",
+    "go",
+    "h",
+    "hpp",
+    "htm",
+    "html",
+    "ini",
+    "java",
+    "js",
+    "json",
+    "jsonc",
+    "jsx",
+    "kt",
+    "kts",
+    "less",
+    "lua",
+    "m",
+    "markdown",
+    "md",
+    "mdown",
+    "mkd",
+    "mm",
+    "mjs",
+    "mts",
+    "php",
+    "pl",
+    "properties",
+    "py",
+    "r",
+    "rb",
+    "rs",
+    "scss",
+    "sh",
+    "sql",
+    "svg",
+    "swift",
+    "toml",
+    "ts",
+    "tsx",
+    "txt",
+    "vue",
+    "xml",
+    "yaml",
+    "yml",
+    "zsh",
+];
+
 #[derive(Debug, Error)]
 pub enum FileIndexError {
     #[error("workspace is not a directory: {0}")]
@@ -83,6 +140,47 @@ pub struct FileIndexEntry {
     pub mtime: i64,
     pub size: u64,
     pub text_readable: bool,
+}
+
+/// Cheap, shared snapshot of every indexed file in recent-first order.
+///
+/// Cloning is one atomic increment; the entry list itself is rebuilt only when
+/// the index mutates. Serializes exactly like `Vec<FileIndexEntry>`, so
+/// renderer payload shapes are unchanged.
+#[derive(Clone, Debug)]
+pub struct FileIndexSnapshot(Arc<Vec<Arc<FileIndexEntry>>>);
+
+impl FileIndexSnapshot {
+    fn empty() -> Self {
+        Self(Arc::new(Vec::new()))
+    }
+
+    fn of(files: &[IndexedFile]) -> Self {
+        Self(Arc::new(
+            files.iter().map(|file| Arc::clone(&file.public)).collect(),
+        ))
+    }
+
+    pub fn to_entries(&self) -> Vec<FileIndexEntry> {
+        self.0.iter().map(|entry| entry.as_ref().clone()).collect()
+    }
+}
+
+impl std::ops::Deref for FileIndexSnapshot {
+    type Target = [Arc<FileIndexEntry>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Serialize for FileIndexSnapshot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.0.iter().map(Arc::as_ref))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -146,7 +244,9 @@ pub struct IndexRefresh {
 
 #[derive(Clone, Debug)]
 struct IndexedFile {
-    public: FileIndexEntry,
+    /// Shared so clones of the working set and public snapshots copy a
+    /// pointer, not three heap strings.
+    public: Arc<FileIndexEntry>,
     disk_path: PathBuf,
 }
 
@@ -154,6 +254,9 @@ struct IndexedFile {
 struct IndexState {
     root: PathBuf,
     files: Vec<IndexedFile>,
+    /// Prebuilt public projection of `files`, refreshed on every mutation so
+    /// [`WorkspaceFileIndex::files`] is O(1).
+    snapshot: FileIndexSnapshot,
 }
 
 /// Thread-safe workspace index. Searches clone the small metadata snapshot and
@@ -170,8 +273,13 @@ impl WorkspaceFileIndex {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, FileIndexError> {
         let root = resolve_workspace(root.as_ref())?;
         let files = scan_workspace(&root);
+        let snapshot = FileIndexSnapshot::of(&files);
         Ok(Self {
-            state: RwLock::new(IndexState { root, files }),
+            state: RwLock::new(IndexState {
+                root,
+                files,
+                snapshot,
+            }),
             refresh_lock: Mutex::new(()),
             workspace_generation: AtomicU64::new(1),
             search_generation: AtomicU64::new(0),
@@ -191,13 +299,49 @@ impl WorkspaceFileIndex {
     }
 
     /// Returns all indexed files in deterministic recent-first order.
-    pub fn files(&self) -> Vec<FileIndexEntry> {
+    ///
+    /// The snapshot is shared, so this costs one lock acquisition and one
+    /// atomic increment regardless of workspace size.
+    pub fn files(&self) -> FileIndexSnapshot {
         self.state
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot
+            .clone()
+    }
+
+    /// Returns only indexed files covered by the changed paths.
+    ///
+    /// Watcher events use this to send an O(changed paths) renderer delta for
+    /// ordinary edits instead of serializing the complete workspace index.
+    pub fn files_for_paths(&self, changed_paths: &[PathBuf]) -> Vec<FileIndexEntry> {
+        if changed_paths.is_empty() {
+            return Vec::new();
+        }
+        let state = self
+            .state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let paths = changed_paths
+            .iter()
+            .map(|path| {
+                let candidate = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    state.root.join(path)
+                };
+                normalize_changed_path(&candidate)
+            })
+            .collect::<Vec<_>>();
+        state
             .files
             .iter()
-            .map(|file| file.public.clone())
+            .filter(|file| {
+                paths
+                    .iter()
+                    .any(|path| file.disk_path == *path || file.disk_path.starts_with(path))
+            })
+            .map(|file| file.public.as_ref().clone())
             .collect()
     }
 
@@ -221,6 +365,7 @@ impl WorkspaceFileIndex {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous = std::mem::take(&mut state.files);
+            state.snapshot = FileIndexSnapshot::empty();
             state.root = root.clone();
             previous
         };
@@ -257,18 +402,115 @@ impl WorkspaceFileIndex {
     /// Watcher integration point.
     ///
     /// Call this after debouncing a batch (roughly 50–150 ms is usually right).
-    /// `changed_paths` is presently a correctness hint: the index rebuilds from
-    /// disk so nested `.gitignore` edits, directory renames, removals, and
-    /// atomic-save replacement are all reflected together. The signature can
-    /// adopt a selective scanner later without changing watcher call sites.
-    pub fn refresh_paths(
-        &self,
-        _changed_paths: &[PathBuf],
-    ) -> Result<IndexRefresh, FileIndexError> {
-        self.refresh()
+    /// Existing-file edits and deletes are updated without walking the
+    /// workspace. Creates, renames, directory changes, and ignore-rule changes
+    /// rebuild from disk so `.gitignore` semantics and atomic saves remain
+    /// correct.
+    pub fn refresh_paths(&self, changed_paths: &[PathBuf]) -> Result<IndexRefresh, FileIndexError> {
+        if changed_paths.is_empty() {
+            return self.refresh();
+        }
+
+        let _refresh = self
+            .refresh_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (root, previous) = {
+            let state = self
+                .state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            (state.root.clone(), state.files.clone())
+        };
+        if !root.is_dir() {
+            return Err(FileIndexError::NotDirectory(root));
+        }
+
+        let previous_paths: HashSet<_> =
+            previous.iter().map(|file| file.disk_path.clone()).collect();
+        let mut affected = HashSet::new();
+        let mut full_scan = false;
+
+        for changed_path in changed_paths {
+            let candidate = if changed_path.is_absolute() {
+                changed_path.clone()
+            } else {
+                root.join(changed_path)
+            };
+            // macOS commonly reports `/var/...` while the canonical workspace
+            // root is `/private/var/...`. Resolve the nearest existing ancestor
+            // too, so deleted paths retain the same identity as indexed paths.
+            let path = normalize_changed_path(&candidate);
+            if path.strip_prefix(&root).is_err() {
+                continue;
+            }
+            if path == root || changes_ignore_rules(&root, &path) {
+                full_scan = true;
+                break;
+            }
+
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.is_dir() => {
+                    full_scan = true;
+                    break;
+                }
+                Ok(metadata) if metadata.file_type().is_file() => {
+                    if previous_paths.contains(&path) {
+                        affected.insert(path);
+                    } else {
+                        // A newly created or renamed file must pass through the
+                        // ignore-aware walker before it enters the public index.
+                        full_scan = true;
+                        break;
+                    }
+                }
+                Ok(_) => {
+                    if previous_paths.contains(&path) {
+                        affected.insert(path);
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    if previous_paths.contains(&path) {
+                        affected.insert(path);
+                    } else if previous
+                        .iter()
+                        .any(|file| file.disk_path.starts_with(&path))
+                    {
+                        // A missing path with indexed descendants was a
+                        // directory deletion or rename.
+                        full_scan = true;
+                        break;
+                    }
+                }
+                Err(_) => {
+                    full_scan = true;
+                    break;
+                }
+            }
+        }
+
+        if full_scan {
+            return Ok(self.install_files(previous, scan_workspace(&root)));
+        }
+
+        let mut files: Vec<_> = previous
+            .iter()
+            .filter(|file| !affected.contains(&file.disk_path))
+            .cloned()
+            .collect();
+        for path in affected {
+            if let Some(file) = index_file(&root, &path) {
+                files.push(file);
+            }
+        }
+        sort_indexed_files(&mut files);
+        Ok(self.install_files(previous, files))
     }
 
     /// Fuzzy filename/relative-path filtering over the metadata snapshot.
+    ///
+    /// Candidates flow through a heap bounded at the result limit, so entries
+    /// beyond the limit are ranked by reference and never cloned.
     pub fn filter_files(&self, query: &str, max_results: Option<usize>) -> Vec<FileFilterHit> {
         let limit = max_results
             .unwrap_or(DEFAULT_FILTER_RESULTS)
@@ -282,28 +524,33 @@ impl WorkspaceFileIndex {
             .state
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut hits: Vec<_> = state
-            .files
-            .iter()
-            .filter_map(|file| {
-                fuzzy_path_score(&query, &file.public.name, &file.public.relative_path).map(
-                    |score| FileFilterHit {
-                        file: file.public.clone(),
-                        score,
-                    },
-                )
-            })
-            .collect();
+        let mut best = BinaryHeap::with_capacity(limit + 1);
+        for file in &state.files {
+            let Some(score) =
+                fuzzy_path_score(&query, &file.public.name, &file.public.relative_path)
+            else {
+                continue;
+            };
+            let candidate = FilterCandidate {
+                score,
+                file: file.public.as_ref(),
+            };
+            if best.len() < limit {
+                best.push(candidate);
+            } else if let Some(mut worst) = best.peek_mut() {
+                if candidate.cmp(&worst) == CmpOrdering::Less {
+                    *worst = candidate;
+                }
+            }
+        }
 
-        hits.sort_by(|left, right| {
-            right
-                .score
-                .cmp(&left.score)
-                .then_with(|| right.file.mtime.cmp(&left.file.mtime))
-                .then_with(|| left.file.relative_path.cmp(&right.file.relative_path))
-        });
-        hits.truncate(limit);
-        hits
+        best.into_sorted_vec()
+            .into_iter()
+            .map(|candidate| FileFilterHit {
+                file: candidate.file.clone(),
+                score: candidate.score,
+            })
+            .collect()
     }
 
     /// Starts a latest-request-wins content search. Starting another search
@@ -426,12 +673,16 @@ impl WorkspaceFileIndex {
                 }
             };
 
-            for (line_index, line) in content.lines().enumerate() {
+            // One case-fold per file instead of one per line. Lowercasing
+            // never adds or removes newlines, so both iterators stay aligned.
+            let content_lower = content.to_lowercase();
+            for (line_index, (line, lower)) in
+                content.lines().zip(content_lower.lines()).enumerate()
+            {
                 if line_index % 64 == 0 && self.is_cancelled(token) {
                     report.cancelled = true;
                     return report;
                 }
-                let lower = line.to_lowercase();
                 let Some(match_byte) = lower.find(&query_lower) else {
                     continue;
                 };
@@ -457,10 +708,15 @@ impl WorkspaceFileIndex {
     fn install_files(&self, previous: Vec<IndexedFile>, files: Vec<IndexedFile>) -> IndexRefresh {
         let (added, removed, changed) = diff_files(&previous, &files);
         let total = files.len();
-        self.state
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .files = files;
+        let snapshot = FileIndexSnapshot::of(&files);
+        {
+            let mut state = self
+                .state
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.files = files;
+            state.snapshot = snapshot;
+        }
         let generation = self.invalidate_searches();
         IndexRefresh {
             generation,
@@ -481,6 +737,40 @@ impl WorkspaceFileIndex {
             || token.workspace_generation != self.workspace_generation.load(Ordering::Acquire)
     }
 }
+
+/// Bounded-heap entry for [`WorkspaceFileIndex::filter_files`].
+///
+/// The ordering ranks better hits as `Less`, so the heap root is always the
+/// weakest retained candidate and `into_sorted_vec` yields best-first order —
+/// identical to the previous full sort.
+struct FilterCandidate<'a> {
+    score: i64,
+    file: &'a FileIndexEntry,
+}
+
+impl Ord for FilterCandidate<'_> {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
+        other
+            .score
+            .cmp(&self.score)
+            .then_with(|| other.file.mtime.cmp(&self.file.mtime))
+            .then_with(|| self.file.relative_path.cmp(&other.file.relative_path))
+    }
+}
+
+impl PartialOrd for FilterCandidate<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for FilterCandidate<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == CmpOrdering::Equal
+    }
+}
+
+impl Eq for FilterCandidate<'_> {}
 
 fn resolve_workspace(path: &Path) -> Result<PathBuf, FileIndexError> {
     if !path.is_dir() {
@@ -506,51 +796,71 @@ fn scan_workspace(root: &Path) -> Vec<IndexedFile> {
         .require_git(false)
         .filter_entry(include_entry);
 
-    let mut files = Vec::new();
-    for result in builder.build() {
-        let entry = match result {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        if entry.depth() == 0 {
-            continue;
-        }
-        let file_type = match entry.file_type() {
-            Some(file_type) => file_type,
-            None => continue,
-        };
-        // Never index or traverse symlinks. `follow_links(false)` prevents
-        // recursion; this also keeps symlinked files out of the result set.
-        if !file_type.is_file() {
-            continue;
-        }
+    // The parallel walk spreads directory traversal and the per-file metadata
+    // and text probes across threads. Arrival order is nondeterministic, so
+    // the sort below alone establishes the deterministic recent-first order.
+    let collected = Mutex::new(Vec::new());
+    builder.build_parallel().run(|| {
+        Box::new(|result| {
+            let entry = match result {
+                Ok(entry) => entry,
+                Err(_) => return WalkState::Continue,
+            };
+            if entry.depth() == 0 {
+                return WalkState::Continue;
+            }
+            let file_type = match entry.file_type() {
+                Some(file_type) => file_type,
+                None => return WalkState::Continue,
+            };
+            // Never index or traverse symlinks. `follow_links(false)` prevents
+            // recursion; this also keeps symlinked files out of the result set.
+            if !file_type.is_file() {
+                return WalkState::Continue;
+            }
 
-        let disk_path = entry.into_path();
-        let metadata = match fs::metadata(&disk_path) {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
-        };
-        let relative = match disk_path.strip_prefix(root) {
-            Ok(relative) => relative,
-            Err(_) => continue,
-        };
-        let name = disk_path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        files.push(IndexedFile {
-            public: FileIndexEntry {
-                path: disk_path.to_string_lossy().into_owned(),
-                name,
-                relative_path: path_for_display(relative),
-                mtime: modified_millis(metadata.modified().ok()),
-                size: metadata.len(),
-                text_readable: is_text_readable(&disk_path),
-            },
-            disk_path,
-        });
+            let disk_path = entry.into_path();
+            if let Some(file) = index_file(root, &disk_path) {
+                collected
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(file);
+            }
+            WalkState::Continue
+        })
+    });
+
+    let mut files = collected
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    sort_indexed_files(&mut files);
+    files
+}
+
+fn index_file(root: &Path, disk_path: &Path) -> Option<IndexedFile> {
+    let metadata = fs::symlink_metadata(disk_path).ok()?;
+    if !metadata.file_type().is_file() {
+        return None;
     }
+    let relative = disk_path.strip_prefix(root).ok()?;
+    let name = disk_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Some(IndexedFile {
+        public: Arc::new(FileIndexEntry {
+            path: disk_path.to_string_lossy().into_owned(),
+            name,
+            relative_path: path_for_display(relative),
+            mtime: modified_millis(metadata.modified().ok()),
+            size: metadata.len(),
+            text_readable: is_text_readable(disk_path),
+        }),
+        disk_path: disk_path.to_path_buf(),
+    })
+}
 
+fn sort_indexed_files(files: &mut [IndexedFile]) {
     files.sort_by(|left, right| {
         right
             .public
@@ -558,7 +868,35 @@ fn scan_workspace(root: &Path) -> Vec<IndexedFile> {
             .cmp(&left.public.mtime)
             .then_with(|| left.public.relative_path.cmp(&right.public.relative_path))
     });
-    files
+}
+
+fn changes_ignore_rules(root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let file_name = relative.file_name().and_then(|name| name.to_str());
+    matches!(file_name, Some(".gitignore" | ".ignore" | "exclude"))
+        || relative == Path::new(".git/info/exclude")
+}
+
+fn normalize_changed_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = fs::canonicalize(path) {
+        return canonical;
+    }
+    let mut ancestor = path;
+    let mut suffix = Vec::new();
+    while let Some(name) = ancestor.file_name() {
+        suffix.push(name.to_os_string());
+        let Some(parent) = ancestor.parent() else {
+            break;
+        };
+        if let Ok(mut canonical) = fs::canonicalize(parent) {
+            for component in suffix.iter().rev() {
+                canonical.push(component);
+            }
+            return canonical;
+        }
+        ancestor = parent;
+    }
+    path.to_path_buf()
 }
 
 fn include_entry(entry: &DirEntry) -> bool {
@@ -588,13 +926,24 @@ fn modified_millis(modified: Option<SystemTime>) -> i64 {
 }
 
 fn is_text_readable(path: &Path) -> bool {
-    if path
+    let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
-        .map(|extension| BINARY_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+        .map(str::to_ascii_lowercase);
+
+    if extension
+        .as_deref()
+        .map(|extension| BINARY_EXTENSIONS.contains(&extension))
         .unwrap_or(false)
     {
         return false;
+    }
+    if extension
+        .as_deref()
+        .map(|extension| TEXT_EXTENSIONS.contains(&extension))
+        .unwrap_or(false)
+    {
+        return true;
     }
 
     let mut bytes = Vec::new();
@@ -776,8 +1125,8 @@ mod tests {
     fn relative_paths(index: &WorkspaceFileIndex) -> Vec<String> {
         index
             .files()
-            .into_iter()
-            .map(|file| file.relative_path)
+            .iter()
+            .map(|file| file.relative_path.clone())
             .collect()
     }
 
@@ -830,6 +1179,45 @@ mod tests {
     }
 
     #[test]
+    fn filter_limit_returns_the_best_hits_in_full_ranking_order() {
+        let temp = TempDir::new().unwrap();
+        write(temp.path(), "notes.md", "x");
+        write(temp.path(), "another-notes.md", "x");
+        for directory in 0..8 {
+            write(temp.path(), &format!("dir-{directory}/notes.md"), "x");
+        }
+        let index = WorkspaceFileIndex::open(temp.path()).unwrap();
+
+        let all = index.filter_files("notes", None);
+        assert_eq!(all.len(), 10);
+        for pair in all.windows(2) {
+            assert!(pair[0].score >= pair[1].score);
+        }
+
+        let limited = index.filter_files("notes", Some(3));
+        assert_eq!(limited, all[..3].to_vec());
+        assert_eq!(index.filter_files("notes", Some(500)), all);
+        assert!(index.filter_files("notes", Some(0)).is_empty());
+    }
+
+    #[test]
+    fn snapshot_serializes_like_a_plain_entry_list() {
+        let temp = TempDir::new().unwrap();
+        write(temp.path(), "src/one.rs", "one");
+        write(temp.path(), "two.md", "two");
+        let index = WorkspaceFileIndex::open(temp.path()).unwrap();
+
+        let snapshot = index.files();
+        let serialized = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(
+            serialized,
+            serde_json::to_value(snapshot.to_entries()).unwrap()
+        );
+        assert!(serialized[0].get("relativePath").is_some());
+        assert!(serialized[0].get("textReadable").is_some());
+    }
+
+    #[test]
     fn metadata_marks_text_binary_and_non_utf8_safely() {
         let temp = TempDir::new().unwrap();
         write(temp.path(), "readme.md", "hello");
@@ -848,6 +1236,15 @@ mod tests {
         assert!(!invalid.text_readable);
         assert_eq!(text.size, 5);
         assert!(Path::new(&text.path).is_absolute());
+    }
+
+    #[test]
+    fn known_source_types_do_not_require_content_probes() {
+        let temp = TempDir::new().unwrap();
+
+        assert!(is_text_readable(&temp.path().join("not-on-disk.rs")));
+        assert!(!is_text_readable(&temp.path().join("not-on-disk.png")));
+        assert!(!is_text_readable(&temp.path().join("not-on-disk.unknown")));
     }
 
     #[test]
@@ -1008,6 +1405,29 @@ mod tests {
     }
 
     #[test]
+    fn existing_file_events_update_without_discovering_unreported_paths() {
+        let temp = TempDir::new().unwrap();
+        write(temp.path(), "tracked.txt", "one");
+        let index = WorkspaceFileIndex::open(temp.path()).unwrap();
+
+        write(
+            temp.path(),
+            "unreported.txt",
+            "created in another event batch",
+        );
+        write(temp.path(), "tracked.txt", "a much longer edit");
+        let refresh = index
+            .refresh_paths(&[temp.path().join("tracked.txt")])
+            .unwrap();
+
+        let entries = index.files();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].relative_path, "tracked.txt");
+        assert_eq!(entries[0].size, "a much longer edit".len() as u64);
+        assert_eq!(refresh.changed, 1);
+    }
+
+    #[test]
     fn missing_files_during_search_are_skipped_and_new_external_files_refresh() {
         let temp = TempDir::new().unwrap();
         write(temp.path(), "vanishes.txt", "needle");
@@ -1082,6 +1502,26 @@ mod tests {
         assert_eq!(first.len(), 300);
         index.refresh().unwrap();
         assert_eq!(relative_paths(&index), first);
+    }
+
+    #[test]
+    fn changed_path_projection_returns_only_covered_index_entries() {
+        let temp = TempDir::new().unwrap();
+        write(temp.path(), "src/one.rs", "one");
+        write(temp.path(), "src/nested/two.rs", "two");
+        write(temp.path(), "docs/three.md", "three");
+        let index = WorkspaceFileIndex::open(temp.path()).unwrap();
+
+        let src = index.files_for_paths(&[temp.path().join("src")]);
+        assert_eq!(
+            src.iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<HashSet<_>>(),
+            HashSet::from(["src/one.rs", "src/nested/two.rs"])
+        );
+        let one = index.files_for_paths(&[PathBuf::from("src/one.rs")]);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].relative_path, "src/one.rs");
     }
 
     #[cfg(unix)]

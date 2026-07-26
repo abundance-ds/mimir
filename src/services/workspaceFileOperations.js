@@ -4,6 +4,10 @@ export function listWorkspaceDirectory(directory = '') {
   return invoke('workspace_file_list_directory', { directory })
 }
 
+export function inspectWorkspaceEntry(path) {
+  return invoke('workspace_file_inspect', { path })
+}
+
 export function createWorkspaceFile(relativePath) {
   return invoke('workspace_file_create', { relativePath, directory: false })
 }

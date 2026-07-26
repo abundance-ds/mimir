@@ -4,12 +4,18 @@ pub struct GitStatusEntry {
     pub status: String,
 }
 
-/// Return the workspace changes used by the built-in Changes app.
+/// Return workspace changes used for Files decorations and summaries.
 #[tauri::command]
-pub fn git_status(path: String) -> Result<Vec<GitStatusEntry>, String> {
-    let workspace = std::fs::canonicalize(&path)
+pub async fn git_status(path: String) -> Result<Vec<GitStatusEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || git_status_blocking(&path))
+        .await
+        .map_err(|error| format!("Git status task failed: {error}"))?
+}
+
+fn git_status_blocking(path: &str) -> Result<Vec<GitStatusEntry>, String> {
+    let workspace = std::fs::canonicalize(path)
         .map_err(|error| format!("Could not resolve workspace {}: {}", path, error))?;
-    let repo = git2::Repository::discover(&path)
+    let repo = git2::Repository::discover(path)
         .map_err(|error| format!("Could not find a Git repository from {}: {}", path, error))?;
 
     let workdir = repo
@@ -66,7 +72,7 @@ mod tests {
         let changed = nested.join("draft.md");
         std::fs::write(&changed, "hello").unwrap();
 
-        let entries = git_status(nested.to_string_lossy().into_owned()).unwrap();
+        let entries = git_status_blocking(&nested.to_string_lossy()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path, "draft.md");
         assert_eq!(entries[0].status, "new");
@@ -75,7 +81,7 @@ mod tests {
     #[test]
     fn status_reports_non_repository_clearly() {
         let root = tempfile::tempdir().unwrap();
-        let error = git_status(root.path().to_string_lossy().into_owned()).unwrap_err();
+        let error = git_status_blocking(&root.path().to_string_lossy()).unwrap_err();
         assert!(error.contains("Could not find a Git repository"));
     }
 }

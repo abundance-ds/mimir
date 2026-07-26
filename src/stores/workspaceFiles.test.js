@@ -167,6 +167,59 @@ describe('workspace files store', () => {
     }
   })
 
+  it('applies watcher metadata deltas without refetching the complete index', async () => {
+    const store = useWorkspaceFilesStore()
+    await store.openWorkspace('/w')
+    store.treeChildren = {
+      '': [],
+      src: [],
+      docs: [],
+    }
+    api.listIndexedFiles.mockClear()
+    listWorkspaceDirectory.mockClear()
+
+    await store.applyWorkspaceChange({
+      report: { added: 0, changed: 1, removed: 0, total: 2 },
+      paths: ['/w/src/old.rs'],
+      replaceAll: false,
+      files: [{
+        ...files[1],
+        mtime: 50,
+        size: 14,
+      }],
+    })
+
+    expect(api.listIndexedFiles).not.toHaveBeenCalled()
+    expect(store.files.map(file => file.relativePath)).toEqual(['src/old.rs', 'new.md'])
+    expect(store.files[0].size).toBe(14)
+    expect(listWorkspaceDirectory).toHaveBeenCalledTimes(1)
+    expect(listWorkspaceDirectory).toHaveBeenCalledWith('src')
+  })
+
+  it('accepts an authoritative watcher snapshot after structural changes', async () => {
+    const store = useWorkspaceFilesStore()
+    await store.openWorkspace('/w')
+    const added = {
+      path: '/w/docs/new.md',
+      relativePath: 'docs/new.md',
+      name: 'new.md',
+      mtime: 60,
+      size: 4,
+      textReadable: true,
+    }
+    api.listIndexedFiles.mockClear()
+
+    await store.applyWorkspaceChange({
+      report: { added: 1, changed: 0, removed: 0, total: 3 },
+      paths: ['/w/docs/new.md'],
+      replaceAll: true,
+      files: [...files, added],
+    })
+
+    expect(api.listIndexedFiles).not.toHaveBeenCalled()
+    expect(store.files[0]).toEqual(added)
+  })
+
   it('cancels the prior bounded content search before starting another', async () => {
     const store = useWorkspaceFilesStore()
     await store.openWorkspace('/w')

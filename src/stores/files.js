@@ -26,6 +26,9 @@ export const useFileStore = defineStore('files', () => {
     dirty = false,
     newTab = false,
     draftId = null,
+    kind = 'text',
+    preview = false,
+    meta = null,
   }) {
     return {
       id: nextFileId++,
@@ -34,6 +37,9 @@ export const useFileStore = defineStore('files', () => {
       content,
       dirty,
       newTab,
+      kind,
+      preview,
+      meta,
       saveState: dirty ? SAVE_STATE.dirty : SAVE_STATE.idle,
       saveError: null,
       reviews: null,
@@ -134,7 +140,11 @@ export const useFileStore = defineStore('files', () => {
 
   // Open a file from disk path. If already open, just switch to it.
   // If the active tab is a newTab landing page, replace it in-place.
-  async function openFile(path, content) {
+  async function openFile(path, content, {
+    kind = 'text',
+    preview = false,
+    meta = null,
+  } = {}) {
     const active = currentFile.value
     const existingIdx = openFiles.value.findIndex(f => f.path === path)
     if (existingIdx !== -1) {
@@ -146,25 +156,43 @@ export const useFileStore = defineStore('files', () => {
       } else {
         activeFileIndex.value = existingIdx
       }
+      const existing = openFiles.value[activeFileIndex.value]
+      existing.kind = kind
+      existing.meta = meta
+      if (!preview) existing.preview = false
       addRecentFile(path)
-      return
+      return existing
     }
 
-    if (active?.newTab) {
-      active.path = path
-      active.draftId = null
-      active.content = content
-      active.newTab = false
-      active.dirty = false
-      active.saveState = SAVE_STATE.idle
+    const reusablePreviewIndex = preview
+      ? openFiles.value.findIndex(file => file.preview && !file.dirty)
+      : -1
+    const replacementIndex = active?.newTab
+      ? activeFileIndex.value
+      : reusablePreviewIndex
+    if (replacementIndex >= 0) {
+      const replacement = openFiles.value[replacementIndex]
+      replacement.path = path
+      replacement.draftId = null
+      replacement.content = content
+      replacement.newTab = false
+      replacement.kind = kind
+      replacement.preview = preview
+      replacement.meta = meta
+      replacement.dirty = false
+      replacement.saveState = SAVE_STATE.idle
+      replacement.saveError = null
+      replacement.reviews = null
+      activeFileIndex.value = replacementIndex
       addRecentFile(path)
-      return
+      return replacement
     }
 
-    const file = makeFile({ path, content })
+    const file = makeFile({ path, content, kind, preview, meta })
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
     addRecentFile(path)
+    return file
   }
 
   // Create a new untitled file (Cmd+N — straight to blank editor)
@@ -289,15 +317,17 @@ export const useFileStore = defineStore('files', () => {
   // Update content (called on editor change)
   function updateContent(content) {
     const file = currentFile.value
-    if (!file) return
+    if (!file || file.kind !== 'text') return
     file.content = content
     file.newTab = false
+    file.preview = false
     markFileDirty(file)
   }
 
   function markDirty() {
     const file = currentFile.value
-    if (!file) return
+    if (!file || file.kind !== 'text') return
+    file.preview = false
     markFileDirty(file)
   }
 
@@ -328,7 +358,7 @@ export const useFileStore = defineStore('files', () => {
 
   // Save current file
   async function save(file = currentFile.value) {
-    if (!file) return false
+    if (!file || file.kind !== 'text') return false
     if (file.path) {
       return await writeFile(file)
     } else {
@@ -376,6 +406,9 @@ export const useFileStore = defineStore('files', () => {
       content: file.content,
       dirty: file.dirty,
       draftId: file.draftId,
+      kind: file.kind,
+      preview: file.preview,
+      meta: file.meta,
     }
     openFiles.value.splice(idx, 1)
     if (activeFileIndex.value >= openFiles.value.length) {
@@ -388,12 +421,15 @@ export const useFileStore = defineStore('files', () => {
     return removed
   }
 
-  function addFileFromTransfer({ path, content, dirty, draftId }) {
+  function addFileFromTransfer({ path, content, dirty, draftId, kind = 'text', preview = false, meta = null }) {
     openFiles.value.push(makeFile({
       path: path || null,
       content: content || '',
       dirty: !!dirty,
       draftId,
+      kind,
+      preview,
+      meta,
     }))
     activeFileIndex.value = openFiles.value.length - 1
   }

@@ -5,174 +5,117 @@
     aria-label="Files"
     @keydown.capture="onCommandKeydown"
   >
-    <header class="flex h-10 shrink-0 items-center gap-1 border-b border-rule bg-chrome-high px-2">
-      <div class="flex h-6 shrink-0 items-center border border-rule bg-chrome p-0.5" aria-label="Files view">
+    <header class="flex h-10 shrink-0 items-end border-b border-rule bg-chrome-high px-2">
+      <nav class="flex h-full min-w-0 flex-1 items-end" aria-label="Files view">
         <button
+          v-for="option in views"
+          :key="option.id"
           type="button"
-          data-files-mode="recent"
-          title="Recent files"
-          :aria-pressed="viewMode === 'recent'"
-          class="grid h-[18px] w-6 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-          :class="{ 'bg-surface text-ink': viewMode === 'recent' }"
-          @click="setViewMode('recent')"
+          :data-files-mode="option.id"
+          :aria-current="viewMode === option.id ? 'page' : undefined"
+          class="relative flex h-full items-center gap-1.5 px-2 text-[10px] font-medium text-ink-3 outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+          :class="{ 'text-ink': viewMode === option.id }"
+          @click="setViewMode(option.id)"
         >
-          <IconClock :size="13" :stroke-width="1.8" />
+          <component :is="option.icon" :size="13" :stroke-width="1.75" />
+          <span>{{ option.label }}</span>
+          <span
+            v-if="option.id === 'favorites' && favorites.length"
+            class="font-mono text-[8px] tabular-nums text-ink-4"
+          >
+            {{ favorites.length }}
+          </span>
+          <span
+            v-if="viewMode === option.id"
+            aria-hidden="true"
+            class="absolute inset-x-2 bottom-0 h-0.5 bg-accent"
+          />
         </button>
-        <button
-          type="button"
-          data-files-mode="browse"
-          title="Browse workspace"
-          :aria-pressed="viewMode === 'browse'"
-          class="grid h-[18px] w-6 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-          :class="{ 'bg-surface text-ink': viewMode === 'browse' }"
-          @click="setViewMode('browse')"
-        >
-          <IconList :size="13" :stroke-width="1.8" />
-        </button>
-      </div>
-
-      <label class="ml-1 flex h-7 min-w-0 flex-1 items-center gap-1.5 border border-rule-light bg-surface px-2 focus-within:border-accent/50">
-        <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-3" />
-        <input
-          ref="queryInput"
-          v-model="query"
-          data-files-search
-          type="search"
-          autocapitalize="off"
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck="false"
-          :placeholder="contentMode ? 'Search contents' : 'Search files'"
-          class="h-full min-w-0 flex-1 bg-transparent font-mono text-[10px] text-ink outline-none placeholder:text-ink-4"
-          @input="onQueryInput"
-          @keydown="onSearchKeydown"
-        />
-        <span
-          v-if="contentMode && files.contentSearching"
-          class="font-mono text-[8px] uppercase tracking-[0.08em] text-ink-4"
-        >
-          Searching
-        </span>
-      </label>
-
-      <div class="flex h-6 shrink-0 items-center border border-rule bg-chrome p-0.5">
-        <button
-          type="button"
-          data-search-mode="paths"
-          title="Search file names and paths"
-          :aria-pressed="!contentMode"
-          class="h-[18px] px-1.5 font-mono text-[8px] uppercase tracking-[0.06em] text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-          :class="{ 'bg-surface text-ink': !contentMode }"
-          @click="setContentMode(false)"
-        >
-          Path
-        </button>
-        <button
-          type="button"
-          data-search-mode="content"
-          title="Search inside text files"
-          :aria-pressed="contentMode"
-          class="h-[18px] px-1.5 font-mono text-[8px] uppercase tracking-[0.06em] text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-          :class="{ 'bg-surface text-ink': contentMode }"
-          @click="setContentMode(true)"
-        >
-          Text
-        </button>
-      </div>
+      </nav>
 
       <button
         type="button"
         data-files-new-file
         title="New file (⌘N)"
         aria-label="New file"
-        class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class="mb-1.5 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
         @click="promptNew('file')"
       >
-        <IconFilePlus :size="14" :stroke-width="1.8" />
+        <IconFilePlus :size="14" :stroke-width="1.75" />
       </button>
       <button
         type="button"
         data-files-new-folder
         title="New folder (⇧⌘N)"
         aria-label="New folder"
-        class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class="mb-1.5 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
         @click="promptNew('folder')"
       >
-        <IconFolderPlus :size="14" :stroke-width="1.8" />
+        <IconFolderPlus :size="14" :stroke-width="1.75" />
       </button>
       <button
         type="button"
         data-files-refresh
-        title="Refresh files (⌘R)"
-        aria-label="Refresh files"
+        title="Refresh workspace (⌘R)"
+        aria-label="Refresh workspace"
         :disabled="refreshing"
-        class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+        class="mb-1.5 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
         @click="refresh"
       >
         <IconRefresh
           :size="14"
-          :stroke-width="1.8"
+          :stroke-width="1.75"
           :class="{ 'motion-safe:animate-spin': refreshing }"
         />
       </button>
     </header>
 
-    <div
-      v-if="viewMode === 'browse' && !contentMode && !query.trim() && files.workspacePath"
-      class="flex h-7 shrink-0 items-center gap-0.5 border-b border-rule-light bg-chrome-high px-2 text-[10px]"
+    <label
+      v-if="files.workspacePath"
+      class="mx-2 my-2 flex h-8 shrink-0 items-center gap-2 border border-rule-light bg-chrome-high px-2 focus-within:border-accent/60"
     >
+      <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-4" />
+      <input
+        ref="queryInput"
+        v-model="query"
+        data-files-search
+        type="search"
+        autocapitalize="off"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        :placeholder="searchPlaceholder"
+        class="h-full min-w-0 flex-1 bg-transparent font-mono text-[10px] text-ink outline-none placeholder:text-ink-4"
+        @input="onQueryInput"
+        @keydown.down.prevent="focusList(1)"
+        @keydown.up.prevent="focusList(-1)"
+        @keydown.esc.prevent="clearQuery"
+      />
+      <kbd v-if="!query" class="font-mono text-[8px] text-ink-4">⌘F</kbd>
       <button
+        v-else
         type="button"
-        title="Up one folder"
-        aria-label="Up one folder"
-        :disabled="!files.currentDirectory"
-        class="mr-1 grid size-6 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-30"
-        @click="openParent"
+        title="Clear filter"
+        aria-label="Clear filter"
+        class="grid size-5 place-items-center text-ink-4 hover:text-ink"
+        @click="clearQuery"
       >
-        <IconArrowUp :size="13" :stroke-width="1.8" />
+        <IconX :size="12" :stroke-width="1.8" />
       </button>
-      <nav class="flex min-w-0 items-center gap-0.5 overflow-hidden" aria-label="Current folder">
-        <template v-for="(crumb, index) in files.breadcrumbs" :key="crumb.path">
-          <IconChevronRight
-            v-if="index"
-            :size="11"
-            :stroke-width="1.8"
-            class="shrink-0 text-ink-4"
-          />
-          <button
-            type="button"
-            :data-files-breadcrumb="crumb.path || 'workspace'"
-            class="min-w-0 truncate px-1.5 py-0.5 text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            :class="{ 'font-semibold text-ink': index === files.breadcrumbs.length - 1 }"
-            @click="openDirectory(crumb.path)"
-          >
-            {{ crumb.label }}
-          </button>
-        </template>
-      </nav>
-    </div>
-
-    <div
-      v-if="files.workspacePath && !contentMode"
-      class="grid h-7 shrink-0 grid-cols-[minmax(0,1fr)_72px_54px] items-center gap-3 border-b border-rule-light bg-surface px-3 font-mono text-[8px] uppercase tracking-[0.08em] text-ink-4"
-      aria-hidden="true"
-    >
-      <span>{{ viewMode === 'browse' && !query.trim() ? 'Name' : 'Recently changed' }}</span>
-      <span class="text-right">Size</span>
-      <span class="text-right">Edited</span>
-    </div>
+    </label>
 
     <div
       v-if="files.workspacePath"
       ref="listRef"
       data-files-list
-      role="listbox"
+      role="tree"
       aria-label="Workspace files"
       aria-multiselectable="true"
       tabindex="0"
-      class="min-h-0 flex-1 overflow-y-auto bg-surface outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+      class="scrollbar-thin min-h-0 flex-1 overflow-auto bg-surface outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       @keydown="onListKeydown"
       @contextmenu="openEmptyContextMenu"
+      @scroll.passive="onListScroll"
     >
       <div
         v-if="isLoading"
@@ -184,7 +127,7 @@
             <span class="block h-full w-1/2 bg-accent motion-safe:animate-pulse" />
           </span>
           <p class="mt-3 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3">
-            {{ files.loading ? 'Indexing workspace' : 'Reading folder' }}
+            Indexing workspace
           </p>
         </div>
       </div>
@@ -210,134 +153,71 @@
         </div>
       </div>
 
-      <template v-else-if="contentMode">
-        <button
-          v-for="(match, index) in files.contentMatches"
-          :key="`${match.path}:${match.line}:${match.column}`"
-          type="button"
-          data-content-match
-          role="option"
-          :aria-selected="index === focusedIndex"
-          class="block w-full border-b border-rule-light px-3 py-2 text-left hover:bg-chrome-high focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-          :class="{ 'bg-accent-soft': index === focusedIndex }"
-          @click="focusedIndex = index"
-          @dblclick="$emit('openFile', match.path)"
-        >
-          <span class="block font-mono text-[9px] text-accent">
-            {{ match.relativePath }}:{{ match.line }}:{{ match.column }}
-          </span>
-          <span class="mt-1 block truncate font-mono text-[10px] text-ink-2">{{ match.excerpt }}</span>
-        </button>
-        <div
-          v-if="query.trim() && !files.contentSearching && !files.contentMatches.length"
-          data-files-empty
-          class="grid h-40 place-items-center px-8 text-center text-[11px] text-ink-3"
-        >
-          No text matches. Try another phrase.
-        </div>
-        <div
-          v-else-if="!query.trim()"
-          data-files-empty
-          class="grid h-40 place-items-center px-8 text-center"
-        >
-          <div>
-            <IconFileSearch :size="21" :stroke-width="1.5" class="mx-auto text-ink-3" />
-            <p class="mt-3 text-[11px] font-semibold">Search inside workspace files</p>
-            <p class="mt-1 text-[10px] text-ink-3">Results include the exact line and excerpt.</p>
-          </div>
-        </div>
-        <div
-          v-if="files.contentTruncated"
-          class="border-t border-rule bg-chrome-high px-3 py-2 text-[10px] text-ink-3"
-        >
-          The safe search limit was reached. Narrow the phrase to continue.
-        </div>
-      </template>
-
       <template v-else>
-        <button
-          v-for="(entry, index) in displayEntries"
-          :key="entry.path"
-          type="button"
-          :data-file-row="entry.path"
-          role="option"
-          :aria-selected="selectedPaths.has(entry.path)"
-          class="group grid h-9 w-full grid-cols-[minmax(0,1fr)_72px_54px] items-center gap-3 border-b border-rule-light px-3 text-left hover:bg-chrome-high focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-          :class="{
-            'bg-accent-soft text-ink': selectedPaths.has(entry.path),
-            'ring-1 ring-inset ring-accent/40': index === focusedIndex && !selectedPaths.has(entry.path),
-          }"
-          @click="selectEntry(entry, index, $event)"
-          @dblclick="activateEntry(entry)"
-          @contextmenu="openContextMenu(entry, index, $event)"
-        >
-          <span class="flex min-w-0 items-center gap-2">
-            <IconFolder
-              v-if="entry.isDirectory"
-              :size="15"
-              :stroke-width="1.7"
-              class="shrink-0 text-ink-3"
-            />
-            <IconFileText
-              v-else-if="entry.textReadable !== false"
-              :size="15"
-              :stroke-width="1.7"
-              class="shrink-0 text-ink-3"
-            />
-            <IconFile
-              v-else
-              :size="15"
-              :stroke-width="1.7"
-              class="shrink-0 text-ink-3"
-            />
-            <span class="min-w-0">
-              <span class="block truncate text-[11px] font-medium">{{ entry.name }}</span>
-              <span
-                v-if="viewMode === 'recent' || query.trim()"
-                class="block truncate font-mono text-[8px] text-ink-4"
-              >
-                {{ directory(entry.relativePath) }}
-              </span>
-            </span>
-          </span>
-          <span class="text-right font-mono text-[9px] tabular-nums text-ink-3">
-            {{ entry.isDirectory ? '—' : byteSize(entry.size) }}
-          </span>
-          <span class="text-right font-mono text-[9px] tabular-nums text-ink-3">
-            {{ relativeTime(entry.mtime) }}
-          </span>
-        </button>
+        <template v-for="item in renderPlan" :key="item.key">
+          <div
+            v-if="item.spacer"
+            data-files-spacer
+            role="presentation"
+            aria-hidden="true"
+            :style="{ height: `${item.height}px` }"
+          />
+          <FileTreeRow
+            v-else
+            :row="item.row"
+            :selected="selectedPaths.has(item.row.entry.path)"
+            :active="isActive(item.row.entry)"
+            :ancestry="isActiveAncestry(item.row.entry)"
+            :favorite="isFavorite(item.row.entry)"
+            :editing="isEditing(item.row)"
+            :edit-kind="nameAction?.kind"
+            :edit-draft="nameDraft"
+            @select="selectRow(item.row, item.index, $event)"
+            @activate="activateRow(item.row, false)"
+            @toggle="toggleRow(item.row, item.index)"
+            @favorite="toggleFavorite(item.row.entry)"
+            @context="openContextMenu"
+            @update:edit-draft="nameDraft = $event"
+            @commit-edit="commitNameAction"
+            @cancel-edit="cancelNameAction"
+          />
+        </template>
 
         <div
-          v-if="!displayEntries.length"
+          v-if="!renderedRows.length"
           data-files-empty
           class="grid min-h-48 place-items-center px-8 py-8 text-center"
           @contextmenu="openEmptyContextMenu"
         >
           <div class="max-w-xs">
-            <IconFolderOpen :size="22" :stroke-width="1.5" class="mx-auto text-ink-3" />
-            <p class="mt-3 text-[12px] font-semibold">
-              {{ query.trim() ? 'No matching paths' : viewMode === 'browse' ? 'This folder is empty' : 'No files yet' }}
-            </p>
-            <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-              {{ query.trim() ? 'Try a shorter name or switch to text search.' : 'Create a file or folder to start working here.' }}
-            </p>
-            <div v-if="!query.trim()" class="mt-4 flex justify-center gap-2">
-              <button
-                type="button"
-                class="h-8 border border-rule px-3 text-[10px] font-semibold hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                @click="promptNew('file')"
-              >
-                Create a file
-              </button>
-              <button
-                type="button"
-                class="h-8 border border-rule px-3 text-[10px] font-semibold hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                @click="promptNew('folder')"
-              >
-                New folder
-              </button>
-            </div>
+            <IconStar
+              v-if="viewMode === 'favorites'"
+              :size="22"
+              :stroke-width="1.5"
+              class="mx-auto text-ink-3"
+            />
+            <IconHistory
+              v-else-if="viewMode === 'recent'"
+              :size="22"
+              :stroke-width="1.5"
+              class="mx-auto text-ink-3"
+            />
+            <IconFolderOpen
+              v-else
+              :size="22"
+              :stroke-width="1.5"
+              class="mx-auto text-ink-3"
+            />
+            <p class="mt-3 text-[12px] font-semibold">{{ emptyTitle }}</p>
+            <p class="mt-1 text-[10px] leading-relaxed text-ink-3">{{ emptyBody }}</p>
+            <button
+              v-if="viewMode === 'project' && !query"
+              type="button"
+              class="mt-4 h-8 border border-rule px-3 text-[10px] font-semibold hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              @click="promptNew('file')"
+            >
+              Create a file
+            </button>
           </div>
         </div>
       </template>
@@ -348,7 +228,7 @@
         <IconFolderOpen :size="22" :stroke-width="1.5" class="mx-auto text-ink-3" />
         <p class="mt-3 text-[12px] font-semibold">Open a workspace</p>
         <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-          Browse, search, and manage its files without leaving Mim.
+          Browse, favorite, and preview its files without leaving Mim.
         </p>
         <button
           type="button"
@@ -363,23 +243,34 @@
 
     <footer
       v-if="files.workspacePath"
-      class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[8px] uppercase tracking-[0.08em] text-ink-4"
+      class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[8px] text-ink-4"
     >
-      <span>{{ selectedPaths.size ? `${selectedPaths.size} selected` : `${displayEntries.length} items` }}</span>
-      <span class="ml-auto truncate normal-case tracking-normal">{{ files.currentDirectory || 'workspace' }}</span>
+      <span>{{ selectedPaths.size ? `${selectedPaths.size} selected` : `${visibleRows.length} visible` }}</span>
+      <span v-if="gitChanges.length" class="text-accent">
+        {{ gitChanges.length }} changed
+      </span>
+      <button
+        v-if="viewMode === 'project' && files.expandedDirectories.size"
+        type="button"
+        class="ml-auto text-ink-4 hover:text-ink"
+        @click="collapseAll"
+      >
+        Collapse all
+      </button>
+      <span v-else class="ml-auto truncate">{{ workspaceName }}</span>
     </footer>
 
     <div
       v-if="operationError"
       data-files-operation-error
       role="alert"
-      class="absolute inset-x-2 bottom-9 z-30 flex items-start gap-2 border border-rem/30 bg-surface px-3 py-2 text-[10px] text-rem"
+      class="absolute inset-x-2 bottom-9 z-30 flex items-start gap-2 border border-rem/30 bg-surface px-3 py-2 text-[10px] text-rem shadow-lg"
     >
       <span class="min-w-0 flex-1">{{ operationError }}</span>
       <button
         type="button"
         title="Dismiss"
-        class="grid size-5 shrink-0 place-items-center hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class="grid size-5 shrink-0 place-items-center hover:bg-chrome"
         @click="operationError = ''"
       >
         <IconX :size="12" :stroke-width="1.8" />
@@ -397,7 +288,7 @@
         data-files-context-menu
         role="menu"
         tabindex="-1"
-        class="fixed min-w-48 border border-rule bg-surface py-1 text-[11px] text-ink-2"
+        class="fixed min-w-52 border border-rule bg-surface py-1 text-[11px] text-ink-2 shadow-lg"
         :style="contextStyle"
         @pointerdown.stop
         @keydown="onContextMenuKeydown"
@@ -405,38 +296,32 @@
         <template v-if="emptyContext">
           <ContextAction label="New file" action="new-file" @select="promptNew('file')" />
           <ContextAction label="New folder" action="new-folder" @select="promptNew('folder')" />
-          <ContextAction label="Refresh" action="refresh" @select="refreshFromMenu" />
-        </template>
-        <template v-else-if="contextEntry && contextSelection.length > 1">
-          <ContextAction :label="`Copy ${contextSelection.length} paths`" action="copy-paths" @select="copySelectedPaths" />
-          <ContextAction :label="`Move ${contextSelection.length} items to Trash…`" action="trash" danger @select="promptDelete(contextSelection)" />
-          <ContextAction label="Clear selection" action="clear-selection" @select="clearSelection" />
+          <div class="my-1 border-t border-rule-light" />
+          <ContextAction label="Refresh workspace" action="refresh" @select="refreshFromMenu" />
+          <ContextAction label="Collapse all folders" action="collapse-all" @select="collapseAllFromMenu" />
         </template>
         <template v-else-if="contextEntry">
           <ContextAction
-            :label="contextEntry.isDirectory ? 'Open folder' : contextEntry.textReadable === false ? 'Open in default app' : 'Open'"
+            :label="contextEntry.isDirectory ? 'Expand or collapse' : 'Open in Mim'"
             action="open"
             @select="activateContextEntry"
           />
           <ContextAction
-            v-if="!contextEntry.isDirectory && contextEntry.textReadable !== false"
+            v-if="!contextEntry.isDirectory"
             label="Open in default app"
             action="open-native"
             @select="openContextNative"
           />
-          <div v-if="contextEntry.isDirectory" class="my-1 border-t border-rule-light" />
           <ContextAction
-            v-if="contextEntry.isDirectory"
-            label="New file inside"
-            action="new-file-inside"
-            @select="promptNewInside('file')"
+            :label="isFavorite(contextEntry) ? 'Remove from Favorites' : 'Add to Favorites'"
+            action="favorite"
+            @select="favoriteContextEntry"
           />
-          <ContextAction
-            v-if="contextEntry.isDirectory"
-            label="New folder inside"
-            action="new-folder-inside"
-            @select="promptNewInside('folder')"
-          />
+          <template v-if="contextEntry.isDirectory">
+            <div class="my-1 border-t border-rule-light" />
+            <ContextAction label="New file inside" action="new-file-inside" @select="promptNewInside('file')" />
+            <ContextAction label="New folder inside" action="new-folder-inside" @select="promptNewInside('folder')" />
+          </template>
           <div class="my-1 border-t border-rule-light" />
           <ContextAction label="Rename" action="rename" shortcut="F2" @select="promptRenameContext" />
           <ContextAction label="Duplicate" action="duplicate" @select="duplicateContext" />
@@ -445,66 +330,9 @@
           <ContextAction label="Copy path" action="copy-path" @select="copyContextPath(false)" />
           <ContextAction label="Copy relative path" action="copy-relative-path" @select="copyContextPath(true)" />
           <div class="my-1 border-t border-rule-light" />
-          <ContextAction label="Move to Trash…" action="trash" shortcut="⌘⌫" danger @select="promptDelete([contextEntry])" />
+          <ContextAction label="Move to Trash…" action="trash" shortcut="⌘⌫" danger @select="promptDelete(selectedEntries())" />
         </template>
       </div>
-    </div>
-
-    <div
-      v-if="nameAction"
-      class="fixed inset-0 z-[270] grid place-items-center bg-black/25 px-4"
-      @pointerdown.self="closeNameDialog"
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        :aria-label="nameDialogTitle"
-        class="w-full max-w-sm border border-rule bg-surface"
-      >
-        <header class="flex h-10 items-center border-b border-rule bg-chrome-high px-4">
-          <h2 class="text-[12px] font-semibold">{{ nameDialogTitle }}</h2>
-        </header>
-        <form
-          data-files-name-form
-          class="space-y-3 p-4"
-          @submit.prevent="confirmNameAction"
-        >
-          <label class="block">
-            <span class="mb-1.5 block text-[10px] text-ink-3">Name</span>
-            <input
-              ref="nameInputRef"
-              v-model="nameDraft"
-              data-files-name-input
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              class="h-8 w-full border border-rule bg-surface px-2 font-mono text-[11px] outline-none focus:border-accent"
-              :placeholder="nameAction.kind === 'folder' ? 'folder-name' : 'file-name.md'"
-              @keydown.esc.prevent="closeNameDialog"
-            />
-          </label>
-          <p v-if="nameError" class="text-[10px] leading-relaxed text-rem">{{ nameError }}</p>
-          <p v-else class="truncate font-mono text-[8px] text-ink-4">
-            {{ nameAction.parent ? `${nameAction.parent}/` : 'workspace/' }}
-          </p>
-          <div class="flex justify-end gap-2">
-            <button
-              type="button"
-              class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              @click="closeNameDialog"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              :disabled="operationBusy"
-              class="h-7 bg-accent px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
-            >
-              {{ operationBusy ? 'Working…' : nameAction.renamePath ? 'Rename' : 'Create' }}
-            </button>
-          </div>
-        </form>
-      </section>
     </div>
 
     <div
@@ -517,7 +345,7 @@
         role="alertdialog"
         aria-modal="true"
         aria-label="Move items to Trash"
-        class="w-full max-w-sm border border-rule bg-surface"
+        class="w-full max-w-sm border border-rule bg-surface shadow-xl"
       >
         <header class="flex h-10 items-center border-b border-rule bg-chrome-high px-4">
           <h2 class="text-[12px] font-semibold">
@@ -526,13 +354,13 @@
         </header>
         <div class="space-y-3 p-4">
           <p class="text-[11px] leading-relaxed text-ink-2">
-            {{ deleteEntries.length === 1 ? 'It moves to the system Trash and can be restored there.' : 'The selected items move to the system Trash and can be restored there.' }}
+            The selection moves to the system Trash and can be restored there.
           </p>
           <p v-if="deleteError" class="text-[10px] leading-relaxed text-rem">{{ deleteError }}</p>
           <div class="flex justify-end gap-2">
             <button
               type="button"
-              class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome"
               @click="closeDeleteDialog"
             >
               Cancel
@@ -541,7 +369,7 @@
               type="button"
               data-files-confirm-delete
               :disabled="operationBusy"
-              class="h-7 bg-rem px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+              class="h-7 bg-rem px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 disabled:opacity-40"
               @click="confirmDelete"
             >
               {{ operationBusy ? 'Moving…' : 'Move to Trash' }}
@@ -557,32 +385,34 @@
 import { computed, defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
-  IconArrowUp,
-  IconChevronRight,
   IconClock,
-  IconFile,
   IconFilePlus,
-  IconFileSearch,
-  IconFileText,
-  IconFolder,
   IconFolderOpen,
   IconFolderPlus,
-  IconList,
+  IconHistory,
   IconRefresh,
   IconSearch,
+  IconStar,
   IconX,
 } from '@tabler/icons-vue'
+import FileTreeRow from '../components/FileTreeRow.vue'
 import { useFileStore } from '../../stores/files.js'
+import { useSettingsStore } from '../../stores/settings.js'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
+import { loadGitChanges } from '../../services/gitChanges.js'
 import {
-  createWorkspaceFile,
-  createWorkspaceFolder,
-  duplicateWorkspaceEntry,
-  openWorkspaceEntryNative,
-  renameWorkspaceEntry,
-  revealWorkspaceEntry,
-  trashWorkspaceEntries,
-} from '../../services/workspaceFileOperations.js'
+  describeFileError as describeError,
+  inferOpenBehavior,
+  joinRelative,
+  normalizePath,
+  normalizeRelative,
+  parentDirectory,
+} from '../files/filePaths.js'
+import { useFileContextMenu } from '../files/useFileContextMenu.js'
+import { useFileFavorites } from '../files/useFileFavorites.js'
+import { useFileMutations } from '../files/useFileMutations.js'
+import { useFileSelection } from '../files/useFileSelection.js'
+import { basename } from '../../shared/utils/path.js'
 
 const ContextAction = defineComponent({
   props: {
@@ -617,124 +447,434 @@ const props = defineProps({
 const emit = defineEmits(['openFile', 'chooseWorkspace'])
 const files = useWorkspaceFilesStore()
 const editorFiles = useFileStore()
-const viewMode = ref('recent')
-const contentMode = ref(false)
+const settings = useSettingsStore()
+const viewMode = ref('project')
 const query = ref('')
 const queryInput = ref(null)
 const listRef = ref(null)
 const contextMenuRef = ref(null)
-const nameInputRef = ref(null)
-const focusedIndex = ref(0)
-const selectedPaths = ref(new Set())
-const anchorIndex = ref(0)
-const contextEntry = ref(null)
-const emptyContext = ref(false)
-const contextPosition = ref({ x: 12, y: 12 })
-const nameAction = ref(null)
-const nameDraft = ref('')
-const nameError = ref('')
-const deleteEntries = ref([])
-const deleteError = ref('')
-const operationError = ref('')
-const operationBusy = ref(false)
-const refreshing = ref(false)
+const gitChanges = ref([])
 let queryTimer = null
 
-const displayEntries = computed(() => {
-  if (contentMode.value) return []
-  if (query.value.trim()) return files.visibleFiles.map(asFileEntry)
-  if (viewMode.value === 'browse') return files.directoryEntries
-  return files.visibleFiles.map(asFileEntry)
-})
+const SEARCH_DEBOUNCE_MS = 130
+// Windowed rendering: only trees larger than this render behind spacers.
+const VIRTUALIZE_AT = 300
+const OVERSCAN_ROWS = 20
+const ROW_HEIGHT = 28 // FileTreeRow h-7
+const SECONDARY_ROW_HEIGHT = 36 // FileTreeRow h-9
+const scrollTop = ref(0)
+const viewportHeight = ref(0)
 
-const selectedEntry = computed(() => displayEntries.value[focusedIndex.value] || null)
-const contextSelection = computed(() => {
-  if (!contextEntry.value) return []
-  if (selectedPaths.value.size > 1 && selectedPaths.value.has(contextEntry.value.path)) {
-    return displayEntries.value.filter((entry) => selectedPaths.value.has(entry.path))
-  }
-  return [contextEntry.value]
+const views = Object.freeze([
+  { id: 'project', label: 'Project', icon: IconFolderOpen },
+  { id: 'recent', label: 'Recent', icon: IconClock },
+  { id: 'favorites', label: 'Favorites', icon: IconStar },
+])
+
+const workspaceName = computed(() => basename(files.workspacePath) || 'workspace')
+const {
+  favorites,
+  isFavorite,
+  toggleFavorite,
+  updateFavoritePaths,
+} = useFileFavorites({
+  settings,
+  workspacePath: computed(() => files.workspacePath),
 })
-const isLoading = computed(() => files.loading || (viewMode.value === 'browse' && !query.value.trim() && files.directoryLoading))
-const surfaceError = computed(() => files.error || (
-  viewMode.value === 'browse' && !query.value.trim() ? files.directoryError : ''
+const indexedByPath = computed(() => new Map(
+  files.files.map((entry) => [normalizePath(entry.path), normalizeEntry(entry)]),
 ))
-const contextStyle = computed(() => ({
-  left: `${contextPosition.value.x}px`,
-  top: `${contextPosition.value.y}px`,
-}))
-const nameDialogTitle = computed(() => {
-  if (nameAction.value?.renamePath) return `Rename ${nameAction.value.kind}`
-  return nameAction.value?.kind === 'folder' ? 'New folder' : 'New file'
+// Only the Favorites view resolves entries by relative path; skip the full
+// tree flatten (every loaded directory) for the Project and Recent views.
+const loadedByRelativePath = computed(() => {
+  if (viewMode.value !== 'favorites') return new Map()
+  const map = new Map()
+  for (const entries of Object.values(files.treeChildren)) {
+    for (const entry of entries) {
+      map.set(normalizeRelative(entry.relativePath), normalizeEntry(entry))
+    }
+  }
+  return map
+})
+const gitByPath = computed(() => new Map(
+  gitChanges.value.map((change) => [normalizeRelative(change.path), change.status]),
+))
+// Directory badge lookup precomputed once per git refresh: each changed file
+// walks up its ancestors, first change (in gitChanges order) wins — the same
+// status the previous per-row prefix scan displayed.
+const gitDirectoryStatus = computed(() => {
+  const statuses = new Map()
+  for (const [path, status] of gitByPath.value) {
+    let parent = path
+    let cut = parent.lastIndexOf('/')
+    while (cut > 0) {
+      parent = parent.slice(0, cut)
+      if (statuses.has(parent)) break
+      statuses.set(parent, status)
+      cut = parent.lastIndexOf('/')
+    }
+  }
+  return statuses
+})
+const activePath = computed(() => normalizePath(editorFiles.currentFile?.path))
+
+const visibleRows = computed(() => {
+  if (viewMode.value === 'recent') return recentRows()
+  if (viewMode.value === 'favorites') return favoriteRows()
+  if (query.value.trim()) return searchRows()
+  const rows = []
+  flattenDirectory('', 0, rows)
+  return rows
 })
 
-watch(displayEntries, (entries) => {
-  focusedIndex.value = Math.min(focusedIndex.value, Math.max(entries.length - 1, 0))
-  const visible = new Set(entries.map((entry) => entry.path))
-  selectedPaths.value = new Set([...selectedPaths.value].filter((path) => visible.has(path)))
+const {
+  clearSelection,
+  focusList,
+  focusParent,
+  focusedIndex,
+  moveFocus,
+  resetSelection,
+  selectedDirectory,
+  selectedEntries,
+  selectedPaths,
+  selectRow,
+} = useFileSelection({
+  visibleRows,
+  listRef,
+  activateRow,
+  closeContextMenu: () => closeContextMenu(),
 })
 
-watch(() => props.active, (active, wasActive) => {
-  if (active && wasActive === false && files.workspacePath) void refresh()
+const {
+  closeContextMenu,
+  contextEntry,
+  contextStyle,
+  emptyContext,
+  onContextMenuKeydown,
+  onDocumentPointerDown,
+  openContextMenu,
+  openEmptyContextMenu,
+  openKeyboardContextMenu,
+} = useFileContextMenu({
+  visibleRows,
+  focusedIndex,
+  selectedPaths,
+  listRef,
+  contextMenuRef,
 })
 
-onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown, true))
+const {
+  cancelNameAction,
+  closeDeleteDialog,
+  commitNameAction,
+  confirmDelete,
+  copyContextPath,
+  deleteEntries,
+  deleteError,
+  duplicateContext,
+  isEditing,
+  nameAction,
+  nameDraft,
+  openContextNative,
+  operationBusy,
+  operationError,
+  promptDelete,
+  promptNew,
+  promptNewInside,
+  promptRename,
+  promptRenameContext,
+  refresh,
+  refreshing,
+  revealContext,
+} = useFileMutations({
+  files,
+  editorFiles,
+  listRef,
+  contextEntry,
+  selectedDirectory,
+  closeContextMenu,
+  clearSelection,
+  updateFavoritePaths,
+  refreshGit,
+  emitOpenFile: payload => emit('openFile', payload),
+})
+
+const renderedRows = computed(() => {
+  const rows = [...visibleRows.value]
+  if (!nameAction.value || nameAction.value.renamePath) return rows
+  const parent = normalizeRelative(nameAction.value.parent)
+  const parentIndex = parent
+    ? rows.findIndex((row) => normalizeRelative(row.entry.relativePath) === parent)
+    : -1
+  const depth = parentIndex >= 0 ? rows[parentIndex].depth + 1 : 0
+  const row = makeRow({
+    path: `__create__:${nameAction.value.kind}:${parent}`,
+    relativePath: joinRelative(parent, nameDraft.value || ''),
+    name: nameDraft.value || '',
+    isDirectory: nameAction.value.kind === 'folder',
+    textReadable: nameAction.value.kind !== 'folder',
+    openBehavior: nameAction.value.kind === 'folder' ? 'directory' : 'text',
+  }, depth, { editing: true })
+  rows.splice(parentIndex + 1, 0, row)
+  return rows
+})
+
+const rowOffsets = computed(() => {
+  const rows = renderedRows.value
+  const offsets = new Array(rows.length + 1)
+  offsets[0] = 0
+  for (let index = 0; index < rows.length; index += 1) {
+    offsets[index + 1] = offsets[index]
+      + (rows[index].secondary ? SECONDARY_ROW_HEIGHT : ROW_HEIGHT)
+  }
+  return offsets
+})
+
+const windowRange = computed(() => {
+  const rows = renderedRows.value
+  const offsets = rowOffsets.value
+  const top = scrollTop.value
+  const bottom = top + Math.max(viewportHeight.value, 1)
+  const start = Math.max(rowIndexAt(offsets, top) - OVERSCAN_ROWS, 0)
+  const end = Math.min(rowIndexAt(offsets, bottom) + 1 + OVERSCAN_ROWS, rows.length)
+  return { start, end }
+})
+
+// Small trees render every row exactly as before; large trees render only the
+// scroll window (plus overscan) between spacers that keep scroll geometry.
+// The keyboard-focused row always stays mounted so focus and roving keyboard
+// navigation survive, wherever the window sits.
+const renderPlan = computed(() => {
+  const rows = renderedRows.value
+  if (rows.length <= VIRTUALIZE_AT) {
+    return rows.map((row, index) => ({ key: row.key, row, index }))
+  }
+  const offsets = rowOffsets.value
+  const { start, end } = windowRange.value
+  const focus = Math.min(Math.max(focusedIndex.value, 0), rows.length - 1)
+  const plan = []
+  const pushRow = (index) => plan.push({ key: rows[index].key, row: rows[index], index })
+  const pushSpacer = (from, to, key) => {
+    if (to > from) plan.push({ key, spacer: true, height: offsets[to] - offsets[from] })
+  }
+  if (focus < start) {
+    pushSpacer(0, focus, 'spacer-lead')
+    pushRow(focus)
+    pushSpacer(focus + 1, start, 'spacer-top')
+  } else {
+    pushSpacer(0, start, 'spacer-top')
+  }
+  for (let index = start; index < end; index += 1) pushRow(index)
+  if (focus >= end) {
+    pushSpacer(end, focus, 'spacer-bottom')
+    pushRow(focus)
+    pushSpacer(focus + 1, rows.length, 'spacer-tail')
+  } else {
+    pushSpacer(end, rows.length, 'spacer-bottom')
+  }
+  return plan
+})
+
+function rowIndexAt(offsets, y) {
+  let low = 0
+  let high = Math.max(offsets.length - 2, 0)
+  while (low < high) {
+    const mid = (low + high + 1) >> 1
+    if (offsets[mid] <= y) low = mid
+    else high = mid - 1
+  }
+  return low
+}
+
+function onListScroll() {
+  const list = listRef.value
+  if (!list) return
+  scrollTop.value = list.scrollTop
+  viewportHeight.value = list.clientHeight
+}
+
+const listResizeObserver = typeof ResizeObserver === 'function'
+  ? new ResizeObserver(() => onListScroll())
+  : null
+
+watch(listRef, (element, previous) => {
+  if (previous) listResizeObserver?.unobserve(previous)
+  if (element) {
+    listResizeObserver?.observe(element)
+    onListScroll()
+  }
+}, { flush: 'post' })
+
+const isLoading = computed(() => files.loading || (
+  viewMode.value === 'project'
+  && !query.value.trim()
+  && !Object.prototype.hasOwnProperty.call(files.treeChildren, '')
+))
+const surfaceError = computed(() => files.error || files.treeErrors[''] || '')
+const searchPlaceholder = computed(() => ({
+  project: 'Filter project files',
+  recent: 'Filter recent files',
+  favorites: 'Filter favorites',
+}[viewMode.value]))
+const emptyTitle = computed(() => {
+  if (query.value.trim()) return 'No matching files'
+  if (viewMode.value === 'favorites') return 'No favorites yet'
+  if (viewMode.value === 'recent') return 'No recent files'
+  return 'This workspace is empty'
+})
+const emptyBody = computed(() => {
+  if (query.value.trim()) return 'Try a shorter filename or path.'
+  if (viewMode.value === 'favorites') return 'Star files or folders you return to often.'
+  if (viewMode.value === 'recent') return 'Files you open in Mim appear here.'
+  return 'Create a file to start working here.'
+})
+
+watch(() => files.workspacePath, () => {
+  resetSelection()
+  if (files.workspacePath) void refreshGit()
+})
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown, true)
+  if (files.workspacePath) void refreshGit()
+})
 onUnmounted(() => {
   clearTimeout(queryTimer)
+  listResizeObserver?.disconnect()
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
 })
 
-function setViewMode(mode) {
-  clearTimeout(queryTimer)
-  viewMode.value = mode
-  contentMode.value = false
-  query.value = ''
-  files.setQuery('')
-  clearSelection()
-  if (mode === 'browse' && !files.directoryEntries.length && files.workspacePath) {
-    void files.loadDirectory(files.currentDirectory)
-  }
-  nextTick(() => listRef.value?.focus())
+function normalizeEntry(entry) {
+  const openBehavior = entry.openBehavior || (
+    entry.isDirectory ? 'directory'
+      : String(entry.name || '').toLowerCase().endsWith('.pdf') ? 'pdf'
+        : entry.textReadable === false ? 'external' : 'text'
+  )
+  return { ...entry, openBehavior }
 }
 
-function setContentMode(value) {
-  contentMode.value = value
+function makeRow(entry, depth, options = {}) {
+  const normalized = normalizeEntry(entry)
+  return {
+    key: options.key || normalized.path,
+    entry: normalized,
+    depth,
+    expanded: normalized.isDirectory && files.expandedDirectories.has(normalizeRelative(normalized.relativePath)),
+    loading: normalized.isDirectory && files.treeLoadingPaths.has(normalizeRelative(normalized.relativePath)),
+    gitStatus: gitStatusFor(normalized),
+    secondary: Boolean(options.secondary),
+    favoriteRoot: Boolean(options.favoriteRoot),
+    missing: Boolean(options.missing),
+    editing: Boolean(options.editing),
+  }
+}
+
+function flattenDirectory(parent, depth, rows, seen = new Set()) {
+  const key = normalizeRelative(parent)
+  if (seen.has(key)) return
+  seen.add(key)
+  for (const entry of files.treeChildren[key] || []) {
+    const row = makeRow(entry, depth)
+    rows.push(row)
+    if (entry.isDirectory && row.expanded) {
+      flattenDirectory(entry.relativePath, depth + 1, rows, seen)
+    }
+  }
+}
+
+function searchRows() {
+  return files.visibleFiles.map((entry) => makeRow(entry, 0, { secondary: true }))
+}
+
+function recentRows() {
+  const needle = query.value.trim().toLowerCase()
+  return editorFiles.recentFiles
+    .map((path) => indexedByPath.value.get(normalizePath(path)) || fallbackFileEntry(path))
+    .filter((entry) => matchesEntry(entry, needle))
+    .map((entry) => makeRow(entry, 0, { secondary: true, missing: !indexedByPath.value.has(normalizePath(entry.path)) }))
+}
+
+function favoriteRows() {
+  const needle = query.value.trim().toLowerCase()
+  const rows = []
+  for (const record of favorites.value) {
+    const entry = resolveFavorite(record)
+    if (needle && !matchesEntry(entry, needle)) continue
+    const row = makeRow(entry, 0, {
+      favoriteRoot: true,
+      secondary: true,
+      missing: Boolean(entry.missing),
+      key: `favorite:${record.relativePath}`,
+    })
+    rows.push(row)
+    if (!needle && entry.isDirectory && row.expanded && !entry.missing) {
+      flattenDirectory(entry.relativePath, 1, rows)
+    }
+  }
+  return rows
+}
+
+function resolveFavorite(record) {
+  const relativePath = normalizeRelative(record.relativePath)
+  const loaded = loadedByRelativePath.value.get(relativePath)
+  if (loaded) return loaded
+  const absolute = absolutePath(relativePath)
+  const indexed = indexedByPath.value.get(normalizePath(absolute))
+  if (indexed) return indexed
+  const parent = parentDirectory(relativePath)
+  const parentLoaded = Object.prototype.hasOwnProperty.call(files.treeChildren, parent)
+  return normalizeEntry({
+    path: absolute,
+    relativePath,
+    name: basename(relativePath),
+    isDirectory: record.isDirectory,
+    textReadable: record.isDirectory ? false : undefined,
+    openBehavior: record.isDirectory ? 'directory' : inferOpenBehavior(relativePath),
+    missing: parentLoaded,
+  })
+}
+
+function fallbackFileEntry(path) {
+  const relativePath = relativeFromAbsolute(path)
+  return normalizeEntry({
+    path,
+    relativePath,
+    name: basename(path),
+    isDirectory: false,
+    textReadable: inferOpenBehavior(path) === 'text',
+    openBehavior: inferOpenBehavior(path),
+  })
+}
+
+function setViewMode(mode) {
+  viewMode.value = mode
+  query.value = ''
+  void files.setQuery('')
   clearSelection()
-  onQueryInput()
-  nextTick(() => queryInput.value?.focus())
+  nextTick(() => listRef.value?.focus())
 }
 
 function onQueryInput() {
   clearTimeout(queryTimer)
+  if (viewMode.value !== 'project') return
   queryTimer = setTimeout(async () => {
     try {
-      if (contentMode.value) await files.searchContent(query.value)
-      else await files.setQuery(query.value)
+      await files.setQuery(query.value)
       focusedIndex.value = 0
       selectedPaths.value = new Set()
     } catch (error) {
-      operationError.value = describeError(error, 'Search failed')
+      operationError.value = describeError(error, 'File filter failed')
     }
-  }, contentMode.value ? 160 : 35)
+  }, SEARCH_DEBOUNCE_MS)
 }
 
-function onSearchKeydown(event) {
-  if (event.key === 'ArrowDown') {
-    event.preventDefault()
-    listRef.value?.focus()
-    moveFocus(1)
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault()
-    listRef.value?.focus()
-    moveFocus(-1)
-  } else if (event.key === 'Enter') {
-    event.preventDefault()
-    activateFocused()
-  } else if (event.key === 'Escape' && query.value) {
-    event.preventDefault()
-    query.value = ''
-    onQueryInput()
-  }
+function clearQuery() {
+  clearTimeout(queryTimer)
+  query.value = ''
+  void files.setQuery('')
+  focusedIndex.value = 0
+  selectedPaths.value = new Set()
+  queryInput.value?.focus()
 }
 
 function onCommandKeydown(event) {
@@ -754,384 +894,118 @@ function onCommandKeydown(event) {
     event.preventDefault()
     event.stopPropagation()
     void refresh()
+  } else if (key === 'arrowleft' && viewMode.value === 'project') {
+    event.preventDefault()
+    collapseAll()
   }
 }
 
 function onListKeydown(event) {
   if (event.defaultPrevented) return
   const command = event.metaKey || event.ctrlKey
+  const row = visibleRows.value[focusedIndex.value]
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
     moveFocus(event.key === 'ArrowDown' ? 1 : -1, event.shiftKey)
+  } else if (event.key === 'ArrowRight' && row?.entry.isDirectory) {
+    event.preventDefault()
+    if (!row.expanded) void toggleRow(row, focusedIndex.value)
+    else moveFocus(1)
+  } else if (event.key === 'ArrowLeft' && row?.entry.isDirectory) {
+    event.preventDefault()
+    if (row.expanded) void toggleRow(row, focusedIndex.value)
+    else focusParent(row)
   } else if (event.key === 'Enter') {
     event.preventDefault()
-    activateFocused()
+    activateFocused(false)
   } else if (event.key === ' ') {
     event.preventDefault()
-    toggleFocusedSelection()
+    activateFocused(true)
   } else if (event.key === 'F2') {
     event.preventDefault()
-    promptRename(selectedEntry.value)
+    promptRename(row?.entry)
   } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
     event.preventDefault()
     openKeyboardContextMenu()
   } else if ((event.key === 'Delete' || (event.key === 'Backspace' && command)) && selectedPaths.value.size) {
     event.preventDefault()
     promptDelete(selectedEntries())
-  } else if (event.key === 'Backspace' && !command && viewMode.value === 'browse' && !query.value && files.currentDirectory) {
+  } else if (command && event.key.toLowerCase() === 'a') {
     event.preventDefault()
-    void openParent()
-  } else if (command && event.key.toLowerCase() === 'a' && !query.value) {
-    event.preventDefault()
-    selectedPaths.value = new Set(displayEntries.value.map((entry) => entry.path))
+    selectedPaths.value = new Set(visibleRows.value.map((item) => item.entry.path))
   } else if (event.key === 'Escape') {
-    clearSelection()
-    closeContextMenu()
+    if (nameAction.value) cancelNameAction()
+    else clearSelection()
   }
 }
 
-function moveFocus(delta, extend = false) {
-  const length = contentMode.value ? files.contentMatches.length : displayEntries.value.length
-  if (!length) return
-  focusedIndex.value = (focusedIndex.value + delta + length) % length
-  if (contentMode.value) return
-  if (extend) {
-    const start = Math.min(anchorIndex.value, focusedIndex.value)
-    const end = Math.max(anchorIndex.value, focusedIndex.value)
-    selectedPaths.value = new Set(displayEntries.value.slice(start, end + 1).map((entry) => entry.path))
-  } else {
-    anchorIndex.value = focusedIndex.value
-    selectedPaths.value = new Set([displayEntries.value[focusedIndex.value].path])
-  }
-  nextTick(() => {
-    const row = listRef.value?.querySelector(`[data-file-row="${cssEscape(displayEntries.value[focusedIndex.value]?.path)}"]`)
-    row?.scrollIntoView?.({ block: 'nearest' })
-  })
-}
-
-function selectEntry(entry, index, event) {
-  focusedIndex.value = index
-  if (event.shiftKey) {
-    const start = Math.min(anchorIndex.value, index)
-    const end = Math.max(anchorIndex.value, index)
-    selectedPaths.value = new Set(displayEntries.value.slice(start, end + 1).map((item) => item.path))
-  } else if (event.metaKey || event.ctrlKey) {
-    const next = new Set(selectedPaths.value)
-    if (next.has(entry.path)) next.delete(entry.path)
-    else next.add(entry.path)
-    selectedPaths.value = next
-    anchorIndex.value = index
-  } else {
-    selectedPaths.value = new Set([entry.path])
-    anchorIndex.value = index
-  }
-}
-
-function toggleFocusedSelection() {
-  const entry = selectedEntry.value
-  if (!entry) return
-  const next = new Set(selectedPaths.value)
-  if (next.has(entry.path)) next.delete(entry.path)
-  else next.add(entry.path)
-  selectedPaths.value = next
-}
-
-function selectedEntries() {
-  if (!selectedPaths.value.size && selectedEntry.value) return [selectedEntry.value]
-  return displayEntries.value.filter((entry) => selectedPaths.value.has(entry.path))
-}
-
-async function activateEntry(entry) {
-  closeContextMenu()
-  if (entry.isDirectory) {
-    await openDirectory(entry.relativePath)
-  } else if (entry.textReadable === false) {
-    await runOperation(() => openWorkspaceEntryNative(entry.path), `Could not open ${entry.name}`)
-  } else {
-    emit('openFile', entry.path)
-  }
-}
-
-function activateFocused() {
-  if (contentMode.value) {
-    const match = files.contentMatches[focusedIndex.value]
-    if (match) emit('openFile', match.path)
-  } else if (selectedEntry.value) {
-    void activateEntry(selectedEntry.value)
-  }
-}
-
-async function openDirectory(relativePath) {
+async function toggleRow(row, index = focusedIndex.value) {
+  if (!row.entry.isDirectory || row.missing) return
+  focusedIndex.value = Math.max(index, 0)
+  selectedPaths.value = new Set([row.entry.path])
   try {
-    await files.openDirectory(relativePath)
-    focusedIndex.value = 0
-    selectedPaths.value = new Set()
+    await files.toggleDirectory(row.entry.relativePath)
   } catch (error) {
     operationError.value = describeError(error, 'Folder could not be opened')
   }
 }
 
-function openParent() {
-  return openDirectory(files.currentDirectory.split('/').slice(0, -1).join('/'))
+function activateRow(row, preview) {
+  if (!row || row.missing) return
+  if (row.entry.isDirectory) {
+    void toggleRow(row)
+    return
+  }
+  emit('openFile', { path: row.entry.path, preview, entry: row.entry })
 }
 
-async function refresh() {
-  if (refreshing.value || !files.workspacePath) return
-  refreshing.value = true
-  operationError.value = ''
+function activateFocused(preview) {
+  const row = visibleRows.value[focusedIndex.value]
+  if (row) activateRow(row, preview)
+}
+
+async function refreshGit() {
+  if (!files.workspacePath) {
+    gitChanges.value = []
+    return
+  }
   try {
-    const report = await files.refresh()
-    if (report === null && files.error) operationError.value = files.error
-  } catch (error) {
-    operationError.value = describeError(error, 'Files could not be refreshed')
-  } finally {
-    refreshing.value = false
+    gitChanges.value = await loadGitChanges(files.workspacePath)
+  } catch {
+    gitChanges.value = []
   }
 }
 
-function openContextMenu(entry, index, event) {
-  event.preventDefault()
-  event.stopPropagation()
-  focusedIndex.value = index
-  if (!(selectedPaths.value.size > 1 && selectedPaths.value.has(entry.path))) {
-    selectedPaths.value = new Set([entry.path])
-    anchorIndex.value = index
-  }
-  contextEntry.value = entry
-  emptyContext.value = false
-  placeContextMenu(event.clientX, event.clientY)
+function gitStatusFor(entry) {
+  const relativePath = normalizeRelative(entry.relativePath)
+  const exact = gitByPath.value.get(relativePath)
+  if (exact) return exact
+  if (!entry.isDirectory) return ''
+  return gitDirectoryStatus.value.get(relativePath) || ''
 }
 
-function openKeyboardContextMenu() {
-  const entry = selectedEntry.value
-  if (!entry) {
-    emptyContext.value = true
-    placeContextMenu(16, 72)
-    return
-  }
-  if (!selectedPaths.value.has(entry.path)) selectedPaths.value = new Set([entry.path])
-  contextEntry.value = entry
-  const row = listRef.value?.querySelector(`[data-file-row="${cssEscape(entry.path)}"]`)
-  const rect = row?.getBoundingClientRect?.()
-  placeContextMenu(rect?.left || 16, rect?.bottom || 72)
+function collapseAll() {
+  files.collapseAllDirectories()
+  focusedIndex.value = 0
 }
 
-function openEmptyContextMenu(event) {
-  if (event.target?.closest?.('[data-file-row]')) return
-  event.preventDefault()
-  contextEntry.value = null
-  emptyContext.value = true
-  placeContextMenu(event.clientX, event.clientY)
-}
-
-function placeContextMenu(x, y) {
-  contextPosition.value = {
-    x: Math.max(8, Math.min(Number(x) || 8, window.innerWidth - 220)),
-    y: Math.max(8, Math.min(Number(y) || 8, window.innerHeight - 300)),
-  }
-  nextTick(() => {
-    const first = contextMenuRef.value?.querySelector('[role="menuitem"]')
-    ;(first || contextMenuRef.value)?.focus()
-  })
-}
-
-function closeContextMenu() {
-  contextEntry.value = null
-  emptyContext.value = false
-}
-
-function onContextMenuKeydown(event) {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeContextMenu()
-    nextTick(() => listRef.value?.focus())
-    return
-  }
-  const items = [...(contextMenuRef.value?.querySelectorAll('[role="menuitem"]') || [])]
-  if (!items.length) return
-  const current = Math.max(0, items.indexOf(document.activeElement))
-  let next = null
-  if (event.key === 'ArrowDown') next = (current + 1) % items.length
-  else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length
-  else if (event.key === 'Home') next = 0
-  else if (event.key === 'End') next = items.length - 1
-  else if ((event.key === 'Enter' || event.key === ' ') && document.activeElement?.matches?.('[role="menuitem"]')) {
-    event.preventDefault()
-    document.activeElement.click()
-    return
-  }
-  if (next !== null) {
-    event.preventDefault()
-    items[next].focus()
-  }
-}
-
-function onDocumentPointerDown(event) {
-  if (!contextEntry.value && !emptyContext.value) return
-  if (contextMenuRef.value?.contains(event.target)) return
+function collapseAllFromMenu() {
   closeContextMenu()
+  collapseAll()
 }
 
 function activateContextEntry() {
   const entry = contextEntry.value
-  if (entry) void activateEntry(entry)
-}
-
-function openContextNative() {
-  const entry = contextEntry.value
-  closeContextMenu()
-  if (entry) void runOperation(() => openWorkspaceEntryNative(entry.path), `Could not open ${entry.name}`)
-}
-
-function promptNew(kind, parent = operationDirectory()) {
-  closeContextMenu()
-  nameAction.value = { kind, parent }
-  nameDraft.value = ''
-  nameError.value = ''
-  nextTick(() => nameInputRef.value?.focus())
-}
-
-function promptNewInside(kind) {
-  const entry = contextEntry.value
-  if (entry?.isDirectory) promptNew(kind, entry.relativePath)
-}
-
-function promptRename(entry) {
-  if (!entry) return
-  closeContextMenu()
-  nameAction.value = {
-    kind: entry.isDirectory ? 'folder' : 'file',
-    parent: parentDirectory(entry.relativePath),
-    renamePath: entry.path,
-  }
-  nameDraft.value = entry.name
-  nameError.value = ''
-  nextTick(() => {
-    nameInputRef.value?.focus()
-    nameInputRef.value?.select()
-  })
-}
-
-function promptRenameContext() {
-  promptRename(contextEntry.value)
-}
-
-function closeNameDialog() {
-  if (operationBusy.value) return
-  nameAction.value = null
-  nameError.value = ''
-}
-
-async function confirmNameAction() {
-  const action = nameAction.value
-  if (!action || operationBusy.value) return
-  const name = nameDraft.value.trim()
-  if (!name) {
-    nameError.value = 'Enter a name.'
-    return
-  }
-  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
-    nameError.value = 'Use a name without folder separators.'
-    return
-  }
-  operationBusy.value = true
-  nameError.value = ''
-  try {
-    if (action.renamePath) {
-      await editorFiles.waitForWorkspacePaths([action.renamePath])
-      const result = await renameWorkspaceEntry(action.renamePath, name)
-      editorFiles.moveWorkspacePath(action.renamePath, result.path)
-    } else {
-      const relativePath = joinRelative(action.parent, name)
-      if (action.kind === 'folder') {
-        await createWorkspaceFolder(relativePath)
-      } else {
-        const result = await createWorkspaceFile(relativePath)
-        emit('openFile', result.path)
-      }
-    }
-    nameAction.value = null
-    await files.refresh()
-  } catch (error) {
-    nameError.value = describeError(error, action.renamePath ? 'Rename failed' : 'Creation failed')
-  } finally {
-    operationBusy.value = false
-  }
-}
-
-async function duplicateContext() {
-  const entry = contextEntry.value
   closeContextMenu()
   if (!entry) return
-  await runOperation(async () => {
-    await duplicateWorkspaceEntry(entry.path)
-    await files.refresh()
-  }, `Could not duplicate ${entry.name}`)
+  const row = visibleRows.value.find((item) => item.entry.path === entry.path) || makeRow(entry, 0)
+  activateRow(row, false)
 }
 
-function promptDelete(entries) {
-  closeContextMenu()
-  const unique = new Map(entries.filter(Boolean).map((entry) => [entry.path, entry]))
-  deleteEntries.value = [...unique.values()]
-  deleteError.value = ''
-}
-
-function closeDeleteDialog() {
-  if (operationBusy.value) return
-  deleteEntries.value = []
-  deleteError.value = ''
-}
-
-async function confirmDelete() {
-  if (!deleteEntries.value.length || operationBusy.value) return
-  operationBusy.value = true
-  deleteError.value = ''
-  const paths = deleteEntries.value.map((entry) => entry.path)
-  try {
-    await editorFiles.waitForWorkspacePaths(paths)
-    await trashWorkspaceEntries(paths)
-    editorFiles.handleWorkspaceTrash(paths)
-    deleteEntries.value = []
-    clearSelection()
-    await files.refresh()
-  } catch (error) {
-    deleteError.value = describeError(error, 'Could not move the selection to the Trash')
-  } finally {
-    operationBusy.value = false
-  }
-}
-
-async function revealContext() {
+function favoriteContextEntry() {
   const entry = contextEntry.value
   closeContextMenu()
-  if (entry) await runOperation(() => revealWorkspaceEntry(entry.path), `Could not reveal ${entry.name}`)
-}
-
-function copyContextPath(relative) {
-  const entry = contextEntry.value
-  closeContextMenu()
-  if (entry) void copyText(relative ? entry.relativePath : entry.path)
-}
-
-function copySelectedPaths() {
-  const paths = contextSelection.value.map((entry) => entry.path)
-  closeContextMenu()
-  void copyText(paths.join('\n'))
-}
-
-async function copyText(text) {
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.')
-    await navigator.clipboard.writeText(text)
-  } catch (error) {
-    operationError.value = describeError(error, 'Path could not be copied')
-  }
-}
-
-function clearSelection() {
-  selectedPaths.value = new Set()
-  closeContextMenu()
+  toggleFavorite(entry)
 }
 
 function refreshFromMenu() {
@@ -1139,63 +1013,31 @@ function refreshFromMenu() {
   void refresh()
 }
 
-async function runOperation(operation, fallback) {
-  operationError.value = ''
-  try {
-    return await operation()
-  } catch (error) {
-    operationError.value = describeError(error, fallback)
-    return null
-  }
+function isActive(entry) {
+  return Boolean(activePath.value) && normalizePath(entry.path) === activePath.value
 }
 
-function operationDirectory() {
-  return viewMode.value === 'browse' && !query.value.trim() ? files.currentDirectory : ''
+function isActiveAncestry(entry) {
+  if (!activePath.value || !entry.isDirectory) return false
+  const path = normalizePath(entry.path).replace(/\/+$/, '')
+  return activePath.value.startsWith(`${path}/`)
 }
 
-function asFileEntry(file) {
-  return { ...file, isDirectory: false }
+function matchesEntry(entry, needle) {
+  if (!needle) return true
+  return `${entry.name} ${entry.relativePath}`.toLowerCase().includes(needle)
 }
 
-function joinRelative(parent, name) {
-  return parent ? `${parent.replace(/\/+$/, '')}/${name}` : name
+function absolutePath(relativePath) {
+  const root = String(files.workspacePath || '').replace(/[\\/]+$/, '')
+  const separator = root.includes('\\') && !root.includes('/') ? '\\' : '/'
+  return relativePath ? `${root}${separator}${relativePath.replaceAll('/', separator)}` : root
 }
 
-function parentDirectory(path) {
-  const parts = String(path || '').split('/')
-  parts.pop()
-  return parts.join('/')
+function relativeFromAbsolute(path) {
+  const root = normalizePath(files.workspacePath).replace(/\/+$/, '')
+  const candidate = normalizePath(path)
+  return candidate.startsWith(`${root}/`) ? candidate.slice(root.length + 1) : basename(path)
 }
 
-function directory(path) {
-  const value = String(path || '')
-  const index = value.lastIndexOf('/')
-  return index < 0 ? 'workspace' : value.slice(0, index)
-}
-
-function byteSize(bytes) {
-  const count = Number(bytes || 0)
-  if (count < 1024) return `${count} B`
-  if (count < 1024 * 1024) return `${(count / 1024).toFixed(1)} KB`
-  if (count < 1024 * 1024 * 1024) return `${(count / 1024 / 1024).toFixed(1)} MB`
-  return `${(count / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
-
-function relativeTime(timestamp) {
-  const delta = Math.max(0, Date.now() - Number(timestamp || 0))
-  if (delta < 60_000) return 'now'
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m`
-  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h`
-  if (delta < 604_800_000) return `${Math.floor(delta / 86_400_000)}d`
-  return new Date(Number(timestamp || 0)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function describeError(error, fallback) {
-  const message = error instanceof Error ? error.message : String(error || '')
-  return message ? `${fallback}: ${message}` : fallback
-}
-
-function cssEscape(value) {
-  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(String(value || '')) : String(value || '').replaceAll('"', '\\"')
-}
 </script>
