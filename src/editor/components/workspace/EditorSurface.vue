@@ -23,10 +23,10 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
 import { Compartment } from '@codemirror/state'
-import { EditorView, lineNumbers } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import { undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
-import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineNumbersCompartment, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
+import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { fontFamilyForKey } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
@@ -182,7 +182,7 @@ const wrapperStyle = computed(() => {
   const zoom = props.zoomLevel / 100
   const s = {
     '--editor-size': (baseFontSize * zoom) + 'px',
-    '--editor-line-height': ((23 * baseFontSize / 12) * zoom) + 'px',
+    '--editor-line-height': ((22 * baseFontSize / 12) * zoom) + 'px',
     '--font-mono': fontFamilyForKey(settings.editorFontFamily),
   }
   if (props.maxWidth) {
@@ -259,7 +259,7 @@ watch(() => settings.editorSpellCheck, (on) => {
 watch(() => settings.editorLineNumbers, (on) => {
   if (!view.value) return
   view.value.dispatch({
-    effects: lineNumbersCompartment.reconfigure(on ? lineNumbers() : []),
+    effects: lineIndicatorCompartment.reconfigure(lineIndicatorExtensions(on)),
   })
 })
 

@@ -350,8 +350,14 @@ const editorLineWidthMap = {
   off: '',
 }
 
-const documentStats = computed(() => {
-  const text = currentFile.value?.content ?? ''
+// Footer word/line counts. Computed lazily on a debounce instead of a
+// computed over the reactive content string: the O(n) scans below would
+// otherwise re-run on every content sync (~150ms) while typing.
+const DOCUMENT_STATS_DELAY = 500
+const documentStats = ref(computeDocumentStats(''))
+let documentStatsTimer = null
+
+function computeDocumentStats(text) {
   const trimmed = text.trim()
   const words = trimmed ? trimmed.split(/\s+/).length : 0
   const characters = text.length
@@ -359,7 +365,23 @@ const documentStats = computed(() => {
   const lines = text ? text.split('\n').length : 0
   const readingMinutes = Math.max(1, Math.round(words / 230))
   return { words, characters, spaces, lines, readingMinutes }
-})
+}
+
+watch(
+  () => [currentFile.value?.id ?? null, currentFile.value?.content ?? ''],
+  ([fileId, text], previous) => {
+    clearTimeout(documentStatsTimer)
+    if (!previous || previous[0] !== fileId) {
+      // File switch (or first run): update the footer immediately.
+      documentStats.value = computeDocumentStats(text)
+      return
+    }
+    documentStatsTimer = setTimeout(() => {
+      documentStats.value = computeDocumentStats(text)
+    }, DOCUMENT_STATS_DELAY)
+  },
+  { immediate: true },
+)
 
 const editorContentMaxWidth = computed(() => (
   editorLineWidthMap[editorSettings.editorLineWidth] ?? editorLineWidthMap.normal
@@ -1239,6 +1261,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onEditorKeydown)
   windowCloseGuard.dispose()
   autoSave.clear()
+  clearTimeout(documentStatsTimer)
   contentSync.dispose()
   nativeLifecycle.dispose()
   proposalLifecycle.dispose()

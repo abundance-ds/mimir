@@ -25,7 +25,7 @@ describe('EditorSurface feature extensions', () => {
     wrapper.unmount()
   })
 
-  it('renders the paper-style line gutter only while the setting is enabled', async () => {
+  it('moves the active-line highlight between the row and line-number cell', async () => {
     const pinia = createPinia()
     const wrapper = mount(EditorSurface, {
       props: {
@@ -37,13 +37,20 @@ describe('EditorSurface feature extensions', () => {
     const settings = useSettingsStore(pinia)
 
     expect(wrapper.find('.cm-lineNumbers').exists()).toBe(false)
+    expect(wrapper.find('.cm-activeLine').exists()).toBe(true)
+    expect(wrapper.find('.cm-activeLineGutter').exists()).toBe(false)
+
     settings.set('editorLineNumbers', true)
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.cm-lineNumbers').exists()).toBe(true)
+    expect(wrapper.find('.cm-activeLine').exists()).toBe(false)
+    expect(wrapper.find('.cm-activeLineGutter').exists()).toBe(true)
 
     settings.set('editorLineNumbers', false)
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.cm-lineNumbers').exists()).toBe(false)
+    expect(wrapper.find('.cm-activeLine').exists()).toBe(true)
+    expect(wrapper.find('.cm-activeLineGutter').exists()).toBe(false)
     wrapper.unmount()
   })
 })

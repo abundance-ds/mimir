@@ -1,5 +1,5 @@
 import { EditorState, Compartment, Prec } from '@codemirror/state'
-import { EditorView, keymap, highlightActiveLine, drawSelection, dropCursor, rectangularSelection, crosshairCursor, lineNumbers } from '@codemirror/view'
+import { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { HighlightStyle, StreamLanguage, bracketMatching, indentOnInput, foldKeymap, syntaxHighlighting, syntaxTree } from '@codemirror/language'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
@@ -49,7 +49,7 @@ export const editorTheme = EditorView.theme({
     padding: '0 2px',
   },
   '.cm-activeLine': {
-    backgroundColor: 'transparent',
+    backgroundColor: 'var(--active-line)',
   },
   '.cm-gutters': {
     backgroundColor: 'var(--editor-paper)',
@@ -62,11 +62,11 @@ export const editorTheme = EditorView.theme({
     userSelect: 'none',
   },
   '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 10px 0 16px',
-    minWidth: '42px',
+    padding: '0 10px 0 14px',
+    minWidth: '40px',
   },
   '.cm-activeLineGutter': {
-    backgroundColor: 'transparent',
+    backgroundColor: 'var(--active-line)',
     color: 'var(--color-ink-2)',
   },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
@@ -164,9 +164,15 @@ export const editorHighlightStyle = HighlightStyle.define([
 
 export const wrapCompartment = new Compartment()
 export const spellcheckCompartment = new Compartment()
-export const lineNumbersCompartment = new Compartment()
+export const lineIndicatorCompartment = new Compartment()
 export const languageCompartment = new Compartment()
 export const darkModeCompartment = new Compartment()
+
+export function lineIndicatorExtensions(showLineNumbers = false) {
+  return showLineNumbers
+    ? [lineNumbers(), highlightActiveLineGutter()]
+    : highlightActiveLine()
+}
 
 const editorInputAttributes = {
   autocorrect: 'off',
@@ -267,8 +273,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
     extensions: [
       wrapCompartment.of(showWordWrap ? EditorView.lineWrapping : []),
       spellcheckCompartment.of(editorInputAttributesExtension(showSpellcheck)),
-      lineNumbersCompartment.of(showLineNumbers ? lineNumbers() : []),
-      highlightActiveLine(),
+      lineIndicatorCompartment.of(lineIndicatorExtensions(showLineNumbers)),
       history(),
       drawSelection(),
       dropCursor(),

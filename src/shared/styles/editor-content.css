@@ -19,7 +19,7 @@
   --syntax-string: #2e7d32;
   --syntax-number: #e65100;
   --editor-size: 14px;
-  --editor-line-height: 23px;
+  --editor-line-height: 22px;
 }
 
 /* Ghost suggestion decorations */
@@ -108,7 +108,7 @@
   position: relative;
   padding: 0 2px;
   margin: 0 -2px;
-  line-height: 23px;
+  line-height: 22px;
 }
 
 .editor-content div.line-active {
