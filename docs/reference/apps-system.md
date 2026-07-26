@@ -53,9 +53,10 @@ fast access surfaces.
 Mutations return the fresh catalog, so Sidebar launch rows update immediately.
 Built-ins are visible and launchable but never mutated.
 
-Today is a full-pane durable top-priority editor. It retains the former
-Scratch app's stable `scratch` id, `scratch` app-data key, and `scratch_read`
-MCP alias, so saved text and integrations survive the presentation change.
+Today is a full-pane durable top-priority editor with minimal Markdown source
+highlighting and no preview layer. It retains the former Scratch app's stable
+`scratch` id, `scratch` app-data key, and `scratch_read` MCP alias, so saved
+text and integrations survive the presentation change.
 
 Business graph is the native first-party graph, Issue Board, portfolio, and CRM
 instrument. Its `rust-helper = "business-graph"` route mounts a Vue Activity

@@ -132,7 +132,8 @@ requirements; they do not replace runtime verification.
 - Reloading an already-mounted embedded App replaces its exact tool provider
   and reloads its frame without accumulating listeners.
 - Today is a durable single-priority editor that restores former Scratch text,
-  autosaves, and exposes the live value through `scratch_read`.
+  highlights Markdown source without a preview layer, autosaves, and exposes
+  the live value through `scratch_read`.
 - Today and Business graph are functional built-in Tools.
 - Git state remains available through Files decorations and summaries; there
   is no separate Changes built-in.
@@ -196,7 +197,9 @@ requirements; they do not replace runtime verification.
   CodeMirror selection/focus, responds to narrow widths, and can be hidden in
   Settings > Editor.
 - Optional line numbers use a transparent paper gutter with aligned tabular
-  digits and reconfigure live without recreating the document.
+  digits and reconfigure live without recreating the document. The current-line
+  tint sits on the number cell when visible and moves to the editor row when
+  line numbers are hidden.
 - Tabs expose the tablist contract, keyboard navigation, independent close
   controls, immediate overflow reveal, drag cancellation, and a stable New Tab
   landing page. Closing the final embedded tab yields the Editor pane instead

@@ -7,7 +7,7 @@ Files spans four state owners. Keep them separate when changing behavior:
 | regular-file metadata, fuzzy path results, bounded content hits | `src-tauri/src/file_index.rs`, `file_index_commands.rs` | `src/services/fileIndex.js`, `src/stores/workspaceFiles.js` |
 | immediate directory children and mutation safety | `src-tauri/src/workspace_files.rs` | `src/services/workspaceFileOperations.js`, `workspaceFiles.treeChildren` |
 | open tabs and user-opened recents | — | `src/stores/files.js` |
-| Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mim/activities/FilesActivity.vue`, `src/mim/components/FileTreeRow.vue` |
+| Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mim/activities/FilesActivity.vue`, `src/mim/files/`, `src/mim/components/FileTreeRow.vue` |
 
 The metadata index and directory tree are intentionally different projections.
 The index contains reviewable regular files, respects ignore/noise rules, and
@@ -34,9 +34,11 @@ directory structure would disappear and expansion would require a full scan.
 - Git status is loaded independently by `FilesActivity.vue`; directory status
   is a derived descendant marker and is not stored in either file projection.
 
-`FilesActivity.vue` owns ephemeral surface state: current view/query,
-focus/selection anchor, context menu, inline create/rename, delete
-confirmation, favorites orchestration, and Git decoration.
+`FilesActivity.vue` composes ephemeral surface state while focused controllers
+under `src/mim/files/` own selection/navigation, context-menu lifetime,
+favorites identity, path normalization, and filesystem mutations. Mutation
+state and cleanup must stay in `useFileMutations.js`; tree rows remain
+presentation-only.
 `workspaceFiles.js` owns reusable index/search tokens and directory caches.
 `FileTreeRow.vue` is presentation plus ARIA only; moving operational state into
 the row creates per-row authorities and breaks keyboard/multi-select behavior.
@@ -132,8 +134,8 @@ See [security.md](security.md).
 |---|---|---|
 | scan, ordering, ignore, path/content query | `file_index.rs`, `file_index_commands.rs`, `fileIndex.js`, `workspaceFiles.js`, Quick Open | native index tests; store and Quick Open tests |
 | tree load/expand/refresh | `workspace_files.rs`, `workspaceFileOperations.js`, `workspaceFiles.js`, `FilesActivity.vue` | native workspace-file, service, store, Files Activity tests |
-| row visuals, focus, selection, context actions | `FilesActivity.vue`, `FileTreeRow.vue` | Files Activity tests |
-| favorites | `FilesActivity.vue`, `stores/settings.js`, settings persistence | Files Activity and settings tests |
+| row visuals, focus, selection, context actions | `FilesActivity.vue`, `mim/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity and file-controller tests |
+| favorites | `mim/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
-| rename/Trash with open buffers | `FilesActivity.vue`, `stores/files.js`, `workspace_files.rs` | Files Activity, file-store, native mutation tests |
+| rename/Trash with open buffers | `mim/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
 | MCP mutation surface | `tool_runtime.rs`, renderer file tool handlers, `workspace_files.rs` | tool runtime and native mutation tests |

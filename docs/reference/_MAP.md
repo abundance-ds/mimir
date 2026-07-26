@@ -165,6 +165,7 @@ cross-window behavior are in [settings.md](settings.md).
 - `src-tauri/src/tool_bridge.rs`: UI and app provider bridges
 - `src-tauri/src/tool_runtime.rs`: core definitions and live provider ownership
 - `src-tauri/src/tool_server.rs`: loopback MCP transport and legacy debug routes
+- `src-tauri/src/shell_exec.rs`: bounded shell execution with sensitive-env filtering behind `shell.run`
 - `bin/mimx.mjs`: tool discovery, generic calls, and editor shortcuts
 - `bin/pi-mim-extension.ts`: dynamic Pi registration of current Mim tools
 
@@ -199,6 +200,7 @@ server lease ordering are mapped in [ipc.md](ipc.md).
 - `src-tauri/src/ai_models.rs`: model registry
 - `src-tauri/src/ai_providers.rs`, `ai_transport.rs`, `ai_usage.rs`: provider
   formats, network policy, and normalized usage
+- `src-tauri/src/session.rs`: crash-safe editor session load/save commands
 - `src-tauri/src/persistence.rs`: atomic JSON/byte writes and corrupt quarantine
 
 See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and

@@ -48,6 +48,13 @@ The supervisor rejects archive/restore for ephemeral records and archive/clear
 for live records. Keep those rules in the native owner; hiding a menu item is
 not enforcement.
 
+### Routine `timezone = "local"` resolves TZ, then UTC
+
+`parse_timezone` in `src-tauri/src/routines.rs` maps `local` (or empty) to the
+`TZ` environment variable and falls back to UTC when `TZ` is unset — the
+normal case for a macOS GUI launch. `local` is therefore usually UTC, not the
+system timezone; write an explicit IANA name for local-time schedules.
+
 ## MCP and apps
 
 ### Install renderer listeners before starting MCP
@@ -175,6 +182,13 @@ Production key writes use the OS keychain. Repository `.env` and
 `~/.mim/keys.env` are read only by debug builds; do not make them the release
 storage path. Its atomic writer enforces owner-only permissions on Unix before
 secret bytes are written.
+
+### Localhost AI hosts work only in debug builds
+
+`validate_url_host` in `src-tauri/src/ai_transport.rs` accepts
+`localhost`/`127.0.0.1` only under `cfg(debug_assertions)`. A release build
+rejects the identical provider URL, so a local model endpoint that works in
+development fails after packaging.
 
 ## Files and platform
 

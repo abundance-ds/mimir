@@ -35,7 +35,10 @@ is `com.mim.terminal`, keyed by the provider environment-variable name.
 5. preserve existing permissions for ordinary replacement;
 6. close before rename for Windows compatibility;
 7. atomically rename on the same filesystem;
-8. sync the parent directory where supported.
+8. sync the parent directory where supported, debounced to at most one fsync
+   per directory per ~2s window — a crash inside the window can lose the
+   rename (the directory may still reference the previous file), never a
+   synced file's contents.
 
 Document writes use the same byte writer, so an existing file's permissions
 survive replacement and a read-only destination is rejected. Secret fallback

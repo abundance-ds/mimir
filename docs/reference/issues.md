@@ -10,11 +10,18 @@ Known issues and gaps. Every agent should check this file and add to it when the
   manual runtime release check. The current coding session had no compatible
   in-app browser-control surface, so this evidence must not be inferred from
   happy-dom geometry.
-- `src/test/setup.js` describes its Tauri command allowlist as an exact mirror
-  of `src-tauri/src/lib.rs::generate_handler!`, but it still contains removed
-  compatibility commands and omits current commands including
-  `push_proposals` and `workspace_file_inspect`. Reconcile or generate the
-  allowlist so frontend tests cannot conceal command-registration drift.
+- Tauri command drift between `src/test/setup.js` (VALID_TAURI_COMMANDS) and
+  `src-tauri/src/lib.rs::generate_handler!` is down to one remaining ghost:
+  `document_context_send` is invoked by
+  `src/editor/composables/useDocumentBridge.js` but not registered in Rust, so
+  the invoke fails silently at runtime (swallowed by a catch). The mock
+  allowlist entry stays so editor tests do not trip the unknown-command guard;
+  it is carried as the sole tracked exception in
+  `scripts/check-tauri-commands.mjs` (`npm run check:commands`). The real fix
+  — registering the command or removing the invoke — belongs to the editor
+  bridge owner. (Resolved 2026-07-26: ghost entries `comments_submit`,
+  `focus_main_window`, `search_file_content` removed from the allowlist;
+  `push_proposals` added.)
 - Files/Workbench test fixtures still seed the old flat `workspaceFiles.files`
   projection and assert Recent/Browse-era controls. The Project tree now waits
   on `treeChildren['']`, so those fixtures remain in the loading state and

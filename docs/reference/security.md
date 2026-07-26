@@ -88,10 +88,14 @@ definitions and cancel pending calls so a stale frame cannot retain authority.
 
 ## Shell and process execution
 
-`shell.run` executes `/bin/bash -lc` (or `cmd.exe /C`) with the requested
-working directory. Environment filtering removes keys containing common secret
-markers and `TAURI_`, but it is heuristic and does not sanitize filesystem,
-network, subprocess, or shell-language behavior.
+`shell.run` (`src-tauri/src/shell_exec.rs`) executes `/bin/bash -lc` (or
+`cmd.exe /C`) with the requested working directory. The timeout defaults to
+30s and caller values are clamped to 120s; stdout and stderr are each
+truncated to 100,000 bytes with a `[truncated]` marker. Environment filtering
+drops keys starting with `TAURI_` or containing `API_KEY`, `SECRET`, `TOKEN`,
+`PASSWORD`, or `CREDENTIAL` (case-insensitive substring match), but it is
+heuristic and does not sanitize filesystem, network, subprocess, or
+shell-language behavior.
 
 Timeout kills the direct shell child; do not assume an independently detached
 descendant is terminated. PTY Activity stop/shutdown uses the Activity

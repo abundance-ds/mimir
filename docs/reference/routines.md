@@ -28,7 +28,7 @@ Fields:
 | `title` | Activity-facing label |
 | `enabled` | defaults to `true` |
 | `schedule` | five-, six-, or seven-field cron expression |
-| `timezone` | IANA timezone or `local` |
+| `timezone` | IANA timezone or `local`; `local` resolves the `TZ` environment variable and falls back to UTC when `TZ` is unset |
 | `preset` | ID from `~/.mim/launchers.json` |
 | `prompt` | final CLI prompt argument |
 | `overlap` | `skip` or `parallel` |

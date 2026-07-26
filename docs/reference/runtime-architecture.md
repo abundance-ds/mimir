@@ -50,7 +50,15 @@ Window destruction calls `ToolRuntime::disconnect_window`; destruction of
 ## Renderer bootstrap
 
 `src/main.js` selects either the workbench or standalone Editor by query
-parameter. The workbench path in `src/mim/WorkbenchApp.vue`:
+parameter. `WorkbenchApp.vue` composes three controllers:
+
+- `useWorkspaceBootstrap.js` owns settings/layout/workspace startup and
+  responsive projection;
+- `useActivityLifecycle.js` owns close/archive/clear/restart transitions;
+- `useWorkbenchKeyboardRouting.js` owns focus classification and shortcut
+  dispatch.
+
+The bootstrap path:
 
 1. installs core renderer-only Activity records (`files`, `routines`);
 2. installs global key/focus/resize handlers;
@@ -66,14 +74,14 @@ Preserve that isolation rather than replacing it with one all-or-nothing
 bootstrap promise.
 
 Opening or switching a workspace mounts the Business graph separately through
-`WorkbenchApp.vue`: local private, current-project, and optional team roots are
-normalized into one `GraphRuntime`. Native filesystem watchers rebuild the
-disposable index after an external Markdown change and emit
+`useWorkspaceBootstrap.js`: local private, current-project, and optional team
+roots are normalized into one `GraphRuntime`. Native filesystem watchers
+rebuild the disposable index after an external Markdown change and emit
 `mim://graph-changed`; the renderer reloads its projection. A failed team root
 does not change the physical meaning of the private or project source.
 
-`src/editor/App.vue` has a second hydration transaction inside the mounted
-workbench:
+`useEditorSessionLifecycle.js` owns a second hydration transaction inside the
+mounted Editor:
 
 1. load and normalize session entries;
 2. read path-backed entries with bounded concurrency;
@@ -82,9 +90,9 @@ workbench:
 5. install debounced session persistence;
 6. then install file-open, native-menu, quit, and editor-bridge listeners.
 
-Vue does not cancel async `onMounted`. `editorDisposed` checks after awaited
-steps prevent a stale HMR/unmounted instance from installing listeners or
-persistence after its replacement has taken ownership.
+Vue does not cancel async `onMounted`. `App.vue` keeps ordering guards after
+awaited steps, while every extracted lifecycle controller independently
+rejects or tears down late listener registration after disposal.
 
 ## Renderer/native boundary
 
@@ -133,8 +141,8 @@ CodeMirror before canceling persistence and unregisters its proposal snapshot.
 |---|---|---|
 | Tauri setup or managed state | `src-tauri/src/lib.rs`, relevant runtime constructor | Rust module tests; frontend smoke/build |
 | Graph roots, watcher, or source refresh | `business_graph/runtime.rs`, `store.rs`, `WorkbenchApp.vue`, graph store/service | native scope/watcher/mutation tests; graph store/app tests |
-| Workbench initialization | `WorkbenchApp.vue`, `activityRuntime.js`, `toolRuntime.js` | `WorkbenchApp.test.js`, store/service tests |
-| Editor hydration/recovery | `editor/App.vue`, `sessionRestore.js`, `sessionPersist.js` | `sessionRestore.test.js`, `sessionPersist.test.js`, `App.settings.test.js` |
+| Workbench initialization | `useWorkspaceBootstrap.js`, `WorkbenchApp.vue`, `activityRuntime.js`, `toolRuntime.js` | Workbench controller/integration and store/service tests |
+| Editor hydration/recovery | `useEditorSessionLifecycle.js`, `sessionRestore.js`, `sessionPersist.js` | Editor lifecycle, session restore/persist, and Settings tests |
 | Window/application close | `windowCloseGuard.js`, `appQuit.js`, `lib.rs` exit handler | `windowCloseGuard.test.js`, `appQuit.test.js` |
 | Runtime teardown/HMR | component unmount hooks, tool-server lease code | `toolRuntime.test.js`, `WorkbenchApp.test.js` |
 

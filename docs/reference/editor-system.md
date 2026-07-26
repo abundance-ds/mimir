@@ -5,15 +5,28 @@ the selected Activity changes.
 
 ## Files and tabs
 
-`src/editor/App.vue` orchestrates:
+`src/editor/App.vue` composes the visible surface and delegates stable
+subsystems:
 
 - Markdown and text tabs
 - open, recent, new, save, save as, close confirmation, and autosave
-- session restoration from `~/.mim/session.json`
 - dirty/save/error feedback
 - tab selection, ordering, and cross-window transfer
 - configurable font, size, line width, wrapping, paper-style line numbers,
   spellcheck, Markdown toolbar, and theme
+
+| Subsystem | Owner |
+|---|---|
+| startup restore, fallback draft, reactive persistence | `useEditorSessionLifecycle.js` |
+| native menu/focus synchronization and application Quit | `useEditorNativeLifecycle.js` |
+| proposal registration, native events, and review projection | `useEditorProposalLifecycle.js` |
+| public Mim/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
+| tab close/reorder/new behavior | `useTabManagement.js` |
+| CodeMirror/store/document synchronization | `useContentSync.js` |
+
+These controllers own their timers, watchers, and native listener cleanup.
+`App.vue` owns their ordering because hydration must finish before native
+surfaces are installed.
 
 `src/stores/files.js` owns open files and save state.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
@@ -51,9 +64,12 @@ syntax markers and replacing images, tables, and rules with widgets. There is
 no separate rendered preview pane.
 
 Line numbers are an optional compartment. Their gutter shares the editor paper
-instead of adding a separate slab or divider. `EditorToolbar.vue` is mounted
-only for Markdown/draft documents when enabled; `mousedown.prevent` keeps the
-selection owned by CodeMirror while a formatting command runs.
+instead of adding a separate slab or divider. The current line uses a quiet,
+theme-aware fill on its number cell; with line numbers hidden, the same fill
+moves to the editor row. It never uses a colored edge or stripe.
+`EditorToolbar.vue` is mounted only for Markdown/draft documents when enabled;
+`mousedown.prevent` keeps the selection owned by CodeMirror while a formatting
+command runs.
 
 The active document remains plain Markdown on disk.
 
@@ -82,7 +98,8 @@ complete until `proposal_respond` succeeds; failure leaves the diff open.
 
 ## Agent bridge
 
-`src/editor/App.vue` exposes methods used by the MCP relay:
+`useEditorCommandApi.js` defines the methods exposed by `src/editor/App.vue`
+and used by the MCP relay:
 
 - open, list tabs, inspect active tab/content/selection/comments
 - replace selection or full content

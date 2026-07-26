@@ -59,9 +59,13 @@ ordered record subscription for upserts, status, and exit.
   without a listener.
 
 Plain terminals are ephemeral. Agent and routine runs are durable and persist
-bounded scrollback under `~/.mim/activities/`. Durable records restore after
-relaunch; any process that was live becomes interrupted because Mim does not
-pretend that an old PTY is still attached.
+bounded scrollback under `~/.mim/activities/`. Retained scrollback defaults to
+1 MB for terminals and 2 MB for durable agent/routine runs
+(`DEFAULT_TERMINAL_SCROLLBACK_BYTES` / `DEFAULT_DURABLE_SCROLLBACK_BYTES` in
+`supervisor.rs`); `ActivitySpawnRequest.scrollback_byte_cap` overrides the cap
+per spawn. Durable records restore after relaunch; any process that was live
+becomes interrupted because Mim does not pretend that an old PTY is still
+attached.
 
 The renderer installs `mim://activity-event` before calling `activity_list`.
 Events project upsert/status/exit, while the initial list closes the startup
@@ -143,6 +147,8 @@ the complete retained scrollback.
 - `src-tauri/src/launchers.rs`
 - `src/stores/activities.js`
 - `src/stores/activityRuntime.js`
+- `src/mim/composables/useActivityLifecycle.js`
+- `src/mim/composables/useWorkbenchKeyboardRouting.js`
 - `src/mim/activities/TerminalActivity.vue`
 - `src/mim/components/WorkbenchSidebar.vue`
 

@@ -88,8 +88,9 @@ Rust preserves split UTF-8 sequences between upstream chunks and emits one
 lossy final fragment only if the stream ends mid-character.
 
 The proxy verifies requested provider matches the resolved model and only
-connects to an allowlisted provider host. Caller-provided provider model is a
-legacy lookup fallback; stable model id is preferred.
+connects to an allowlisted provider host. Debug builds additionally accept
+`localhost`/`127.0.0.1`; release builds reject the same URL. Caller-provided
+provider model is a legacy lookup fallback; stable model id is preferred.
 
 ## Provider normalization
 
