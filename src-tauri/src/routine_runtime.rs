@@ -1183,9 +1183,15 @@ pub(crate) fn headless_argv(
     Ok(args)
 }
 
+/// Fingerprint the routine inputs from file metadata (path, mtime, size)
+/// instead of file contents. This runs on every planner tick, so a quiet tick
+/// must not read and hash every routine file. Tradeoff: an edit that preserves
+/// both the size and the mtime (below the filesystem's timestamp granularity)
+/// is not detected until an explicit reload; every ordinary save changes the
+/// mtime and therefore still changes the fingerprint.
 fn input_fingerprint(config: &RoutineRuntimeConfig) -> Result<String, String> {
     let mut hasher = Sha256::new();
-    hasher.update(b"mim-routine-inputs-v1\0");
+    hasher.update(b"mim-routine-inputs-v2\0");
 
     let mut routine_paths = fs::read_dir(&config.routines_dir)
         .map_err(|error| {
@@ -1202,15 +1208,16 @@ fn input_fingerprint(config: &RoutineRuntimeConfig) -> Result<String, String> {
     for path in routine_paths {
         hasher.update(path.to_string_lossy().as_bytes());
         hasher.update(b"\0");
-        hasher.update(fs::read(&path).map_err(|error| {
+        let metadata = fs::metadata(&path).map_err(|error| {
             format!("Could not fingerprint routine {}: {error}", path.display())
-        })?);
+        })?;
+        hash_file_signature(&mut hasher, &metadata);
         hasher.update(b"\0");
     }
 
     hasher.update(config.launcher_config_path.to_string_lossy().as_bytes());
-    match fs::read(&config.launcher_config_path) {
-        Ok(contents) => hasher.update(contents),
+    match fs::metadata(&config.launcher_config_path) {
+        Ok(metadata) => hash_file_signature(&mut hasher, &metadata),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             hasher.update(b"<default-launchers>")
         }
@@ -1222,6 +1229,17 @@ fn input_fingerprint(config: &RoutineRuntimeConfig) -> Result<String, String> {
         }
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn hash_file_signature(hasher: &mut Sha256, metadata: &fs::Metadata) {
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .unwrap_or_default();
+    hasher.update(modified.as_secs().to_le_bytes());
+    hasher.update(modified.subsec_nanos().to_le_bytes());
+    hasher.update(metadata.len().to_le_bytes());
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1423,6 +1441,50 @@ mod tests {
         fn runtime(&self) -> RoutineRuntime {
             RoutineRuntime::new(self.config.clone(), self.supervisor.clone()).unwrap()
         }
+    }
+
+    #[test]
+    fn input_fingerprint_tracks_file_set_size_and_mtime_changes() {
+        use std::time::SystemTime;
+
+        let root = tempfile::tempdir().unwrap();
+        let config = RoutineRuntimeConfig {
+            routines_dir: root.path().join("routines"),
+            planner_state_path: root.path().join("routines-state.json"),
+            launcher_config_path: root.path().join("launchers.json"),
+            home_path: root.path().to_path_buf(),
+            default_shell: PathBuf::from("/bin/sh"),
+            tick_interval: Duration::from_secs(60),
+            mcp_url: "http://127.0.0.1:29999/mcp".into(),
+        };
+        fs::create_dir_all(&config.routines_dir).unwrap();
+        let empty = input_fingerprint(&config).unwrap();
+
+        // A new routine file changes the fingerprint; non-toml files do not count.
+        fs::write(config.routines_dir.join("notes.txt"), "ignored").unwrap();
+        assert_eq!(input_fingerprint(&config).unwrap(), empty);
+        let routine = config.routines_dir.join("daily.toml");
+        fs::write(&routine, "one").unwrap();
+        let with_routine = input_fingerprint(&config).unwrap();
+        assert_ne!(with_routine, empty);
+
+        // A size change is detected.
+        fs::write(&routine, "one plus more").unwrap();
+        let grown = input_fingerprint(&config).unwrap();
+        assert_ne!(grown, with_routine);
+
+        // A pure mtime change (identical size) is detected.
+        let file = fs::File::options().write(true).open(&routine).unwrap();
+        file.set_modified(SystemTime::now() + Duration::from_secs(7))
+            .unwrap();
+        drop(file);
+        let touched = input_fingerprint(&config).unwrap();
+        assert_ne!(touched, grown);
+
+        // Quiet ticks are stable, and the launcher config participates too.
+        assert_eq!(input_fingerprint(&config).unwrap(), touched);
+        fs::write(&config.launcher_config_path, "{\"presets\":[]}").unwrap();
+        assert_ne!(input_fingerprint(&config).unwrap(), touched);
     }
 
     #[test]
