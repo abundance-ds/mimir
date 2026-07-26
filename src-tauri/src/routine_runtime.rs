@@ -1399,6 +1399,7 @@ mod tests {
                 id: "review-agent".into(),
                 title: "Review agent".into(),
                 kind: LauncherKind::Agent,
+                enabled: true,
                 agent_id: Some("codex".into()),
                 binary: Some(self.binary.to_string_lossy().into_owned()),
                 args: vec!["--model".into(), "gpt 5".into()],
@@ -1526,7 +1527,7 @@ mod tests {
                 "--model",
                 "gpt 5",
                 "-c",
-                r#"mcp_servers.mim.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#,
                 "Review the work tree and report sharp findings."
             ]
         );

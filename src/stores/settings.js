@@ -12,6 +12,7 @@ const DEFAULTS = {
   editorFontSize: 16,
   editorTheme: 'parchment',
   editorWordWrap: true,
+  editorLineNumbers: false,
   editorLineWidth: 'normal',
   editorAutoSave: true,
   editorSpellCheck: false,
@@ -29,6 +30,7 @@ const DEFAULTS = {
   },
   commentGateSkip: false,
   mimWorkspaceFolder: '',
+  recentWorkspaceFolders: [],
   workbenchLayout: {
     sidebar: { state: 'expanded', width: 240 },
     activity: { state: 'expanded', width: 560 },

@@ -108,6 +108,23 @@
       </button>
     </div>
 
+    <div class="setting-row">
+      <div class="setting-label">
+        Line numbers
+        <span class="setting-desc">Show quiet line numbers on the editor paper</span>
+      </div>
+      <button
+        type="button"
+        class="toggle-switch"
+        :class="{ 'toggle-on': settings.editorLineNumbers }"
+        :aria-pressed="settings.editorLineNumbers"
+        aria-label="Line numbers"
+        @click="settings.set('editorLineNumbers', !settings.editorLineNumbers)"
+      >
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+
     <!-- Line width -->
     <div class="setting-row">
       <div class="setting-label">

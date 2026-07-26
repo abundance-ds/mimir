@@ -37,6 +37,11 @@ The Sidebar owns launch and navigation. The Activity pane owns execution and
 local instruments. The Editor owns authored files, inline model interaction,
 reviewable diffs, and comments.
 
+The project switcher keeps the current folder and a small most-recent-first
+list at the top of the Sidebar. Active Activities remain the default working
+set; archived rows stay behind an explicit counted disclosure instead of
+accumulating in daily navigation.
+
 ## Kernel
 
 - **Activity supervisor:** native PTYs, exact argv, durable agent/routine
@@ -53,9 +58,10 @@ reviewable diffs, and comments.
   management, trust, permission, and team ceremony are intentionally absent.
 - **Routines:** TOML cron schedules that resolve launcher presets and create
   ordinary durable agent Activities.
-- **Editor:** CodeMirror Markdown, tabs, formatting, autosave, live in-editor
-  Markdown rendering, Cmd+K inline AI, `++` ghost completions, diff review, and
-  inline pseudo-XML comment discussions.
+- **Editor:** CodeMirror Markdown, tabs, formatting toolbar, optional paper
+  line numbers, autosave, live in-editor Markdown rendering, Cmd+K inline AI,
+  `++` ghost completions, diff review, and inline pseudo-XML comment
+  discussions.
 
 ## Surface boundary
 

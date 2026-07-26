@@ -1,35 +1,122 @@
 <template>
-  <div class="launchers-settings">
-    <div class="flex items-start justify-between gap-4">
+  <section class="flex flex-col font-sans text-ink" aria-label="CLI tools">
+    <div class="mb-4 flex items-start justify-between gap-4">
       <div>
-        <div class="section-title">Launcher presets</div>
+        <h2 class="section-title mb-0">Coding agents</h2>
         <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-          One click starts an exact argv array. No shell parsing, escaping, or hidden wrapper.
+          Choose what appears in Launch. Custom flags are passed as exact arguments.
         </p>
       </div>
-      <button
-        type="button"
-        class="launcher-button shrink-0"
-        :disabled="busy"
-        @click="addPreset"
-      >
-        <IconPlus :size="13" />
-        Add
-      </button>
+      <div class="relative shrink-0" data-launcher-add-root>
+        <button
+          ref="addButtonRef"
+          type="button"
+          data-launcher-add
+          class="launcher-button"
+          :aria-expanded="addMenuOpen"
+          aria-haspopup="menu"
+          :disabled="busy"
+          @click="addMenuOpen = !addMenuOpen"
+          @keydown.down.prevent="openAddMenu"
+        >
+          <IconPlus :size="13" />
+          Add preset
+          <IconChevronDown :size="11" />
+        </button>
+        <div
+          v-if="addMenuOpen"
+          data-launcher-add-menu
+          role="menu"
+          class="absolute right-0 top-8 z-20 w-52 border border-rule bg-surface p-1 shadow-lg"
+          @keydown="onAddMenuKeydown"
+        >
+          <div class="px-2 pb-1 pt-1 font-sans text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+            Agent preset
+          </div>
+          <button
+            v-for="agent in launchers.agents"
+            :key="agent.id"
+            type="button"
+            data-launcher-add-option
+            role="menuitem"
+            class="launcher-menu-item"
+            @click="addAgentPreset(agent)"
+          >
+            <component :is="iconForAgent(agent.id)" :size="14" :stroke-width="1.8" :monochrome="true" />
+            <span class="min-w-0 flex-1 truncate">{{ agent.title }}</span>
+            <span class="font-mono text-[8px] text-ink-4">{{ agent.installed ? 'detected' : 'not found' }}</span>
+          </button>
+          <div class="my-1 border-t border-rule-light" />
+          <button
+            type="button"
+            data-launcher-add-option
+            role="menuitem"
+            class="launcher-menu-item"
+            @click="addTerminalPreset"
+          >
+            <IconTerminal2 :size="14" :stroke-width="1.8" />
+            <span>Terminal preset</span>
+          </button>
+        </div>
+      </div>
     </div>
 
-    <div class="mt-4 border-y border-rule-light py-2">
+    <div v-if="loading" class="grid min-h-32 place-items-center text-[10px] text-ink-3">
+      Detecting local CLI tools…
+    </div>
+
+    <template v-else>
+      <LauncherGroup
+        title="Agents"
+        :rows="agentDrafts"
+        :open-id="openId"
+        :advanced-id="advancedId"
+        :agents="launchers.agents"
+        @toggle-open="toggleOpen"
+        @toggle-advanced="toggleAdvanced"
+        @toggle-enabled="toggleEnabled"
+        @remove="removePreset"
+      />
+
+      <LauncherGroup
+        v-if="terminalDrafts.length"
+        class="mt-4"
+        title="Terminals"
+        :rows="terminalDrafts"
+        :open-id="openId"
+        :advanced-id="advancedId"
+        :agents="launchers.agents"
+        @toggle-open="toggleOpen"
+        @toggle-advanced="toggleAdvanced"
+        @toggle-enabled="toggleEnabled"
+        @remove="removePreset"
+      />
+
+      <div
+        v-if="!draft.length"
+        class="grid min-h-28 place-items-center border border-dashed border-rule px-6 text-center"
+      >
+        <div>
+          <p class="text-[11px] font-semibold text-ink-2">No CLI presets</p>
+          <p class="mt-1 text-[9px] text-ink-3">Add Codex, Claude, Pi, or a terminal.</p>
+        </div>
+      </div>
+    </template>
+
+    <div class="mt-5 border-y border-rule-light py-2">
       <div class="flex min-w-0 items-center gap-2">
         <IconFileCode :size="13" class="shrink-0 text-ink-3" />
-        <code class="min-w-0 flex-1 truncate font-mono text-[9px] text-ink-3">
+        <span class="text-[9px] text-ink-3">Configuration</span>
+        <code class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-ink-4">
           {{ launchers.configPath || '~/.mim/launchers.json' }}
         </code>
         <button
           type="button"
           class="launcher-icon-button"
-          title="Reload launcher file"
+          title="Reload launcher configuration"
+          aria-label="Reload launcher configuration"
           :disabled="busy"
-          @click="reload"
+          @click="reload({ confirmDirty: true })"
         >
           <IconRefresh :size="13" />
         </button>
@@ -42,151 +129,18 @@
       </p>
     </div>
 
-    <div v-if="loading" class="grid min-h-32 place-items-center text-[10px] text-ink-3">
-      Detecting local agents…
-    </div>
-
-    <div v-else class="mt-4 space-y-3">
-      <article
-        v-for="(preset, index) in draft"
-        :key="preset.key"
-        data-launcher-preset
-        class="border border-rule bg-chrome-low"
-      >
-        <header class="flex h-9 items-center gap-2 border-b border-rule-light px-3">
-          <span
-            aria-hidden="true"
-            class="size-1.5 rounded-full"
-            :class="availabilityClass(preset)"
-          />
-          <strong class="min-w-0 flex-1 truncate text-[10px] font-semibold text-ink-2">
-            {{ preset.title.trim() || 'Untitled launcher' }}
-          </strong>
-          <span class="font-mono text-[8px] uppercase tracking-[0.12em] text-ink-4">
-            {{ availabilityLabel(preset) }}
-          </span>
-          <button
-            type="button"
-            class="launcher-icon-button text-rem"
-            title="Remove launcher"
-            @click="removePreset(index)"
-          >
-            <IconTrash :size="12" />
-          </button>
-        </header>
-
-        <div class="grid gap-3 p-3 md:grid-cols-2">
-          <label class="launcher-field">
-            <span>Title</span>
-            <input v-model="preset.title" type="text" autocomplete="off" />
-          </label>
-          <label class="launcher-field">
-            <span>Stable id</span>
-            <input
-              v-model="preset.id"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              class="font-mono"
-            />
-          </label>
-
-          <label class="launcher-field">
-            <span>Kind</span>
-            <select v-model="preset.kind" @change="changeKind(preset)">
-              <option value="agent">Agent</option>
-              <option value="terminal">Terminal</option>
-            </select>
-          </label>
-          <label v-if="preset.kind === 'agent'" class="launcher-field">
-            <span>Agent</span>
-            <select v-model="preset.agentId">
-              <option v-for="agent in launchers.agents" :key="agent.id" :value="agent.id">
-                {{ agent.title }}{{ agent.installed ? '' : ' · not found' }}
-              </option>
-            </select>
-          </label>
-
-          <label class="launcher-field md:col-span-2">
-            <span>Binary override</span>
-            <input
-              v-model="preset.binary"
-              data-launcher-binary
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              :placeholder="preset.kind === 'agent' ? 'Use detected agent binary' : 'Default login shell'"
-              class="font-mono"
-            />
-          </label>
-
-          <label class="launcher-field">
-            <span>Working directory</span>
-            <select v-model="preset.cwdMode">
-              <option value="workspace">Current workspace</option>
-              <option value="home">Home</option>
-              <option value="custom">Custom path</option>
-            </select>
-          </label>
-          <label v-if="preset.cwdMode === 'custom'" class="launcher-field">
-            <span>Custom path</span>
-            <input
-              v-model="preset.cwdPath"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="/absolute/path"
-              class="font-mono"
-            />
-          </label>
-
-          <label class="launcher-field md:col-span-2">
-            <span>Arguments <em>one argv entry per line; JSON-quote empty or padded values</em></span>
-            <textarea
-              v-model="preset.argsText"
-              data-launcher-args
-              rows="3"
-              spellcheck="false"
-              placeholder="--model&#10;claude-sonnet-4-5"
-              class="font-mono"
-            />
-          </label>
-          <label class="launcher-field md:col-span-2">
-            <span>Environment <em>KEY=value, one per line</em></span>
-            <textarea
-              v-model="preset.envText"
-              data-launcher-env
-              rows="2"
-              spellcheck="false"
-              placeholder="PI_OFFLINE=1"
-              class="font-mono"
-            />
-          </label>
-        </div>
-      </article>
-
-      <div
-        v-if="!draft.length"
-        class="grid min-h-32 place-items-center border border-dashed border-rule px-6 text-center"
-      >
-        <div>
-          <p class="text-[11px] font-semibold text-ink-2">No launchers configured</p>
-          <p class="mt-1 text-[9px] text-ink-3">Add an agent or terminal preset.</p>
-        </div>
-      </div>
-    </div>
-
     <p v-if="error" role="alert" class="mt-3 text-[10px] leading-relaxed text-rem">
       {{ error }}
     </p>
     <p v-else-if="saved" role="status" class="mt-3 text-[10px] text-add">
-      Launcher file saved. New launches use it immediately.
+      CLI presets saved. New launches use them immediately.
     </p>
 
-    <footer class="sticky -bottom-6 mt-5 flex items-center justify-between border-t border-rule bg-surface py-3">
-      <span class="text-[9px] text-ink-3">
-        {{ dirty ? 'Unsaved launcher changes' : 'Launcher file is current' }}
-      </span>
+    <footer
+      v-if="dirty || saving"
+      class="sticky -bottom-6 mt-4 flex items-center justify-between border-t border-rule bg-surface py-3"
+    >
+      <span class="text-[9px] text-ink-3">Unsaved CLI changes</span>
       <button
         type="button"
         data-launcher-save
@@ -195,22 +149,29 @@
         @click="save"
       >
         <IconDeviceFloppy :size="13" />
-        {{ saving ? 'Saving…' : 'Save launchers' }}
+        {{ saving ? 'Saving…' : 'Save changes' }}
       </button>
     </footer>
-  </div>
+  </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
+  IconChevronDown,
   IconDeviceFloppy,
   IconFileCode,
+  IconMathPi,
   IconPlus,
   IconRefresh,
-  IconTrash,
+  IconRobot,
+  IconTerminal2,
 } from '@tabler/icons-vue'
+import IconProviderAnthropic from '../../../shared/icons/IconProviderAnthropic.vue'
+import IconProviderOpenAI from '../../../shared/icons/IconProviderOpenAI.vue'
 import { useLaunchersStore } from '../../../stores/launchers.js'
+import { formatLauncherFlags, parseLauncherFlags } from './launcherFlags.js'
+import LauncherGroup from './LauncherGroup.vue'
 
 const launchers = useLaunchersStore()
 const draft = ref([])
@@ -219,13 +180,23 @@ const loading = ref(false)
 const saving = ref(false)
 const saved = ref(false)
 const error = ref('')
+const openId = ref('')
+const advancedId = ref('')
+const addMenuOpen = ref(false)
+const addButtonRef = ref(null)
 const busy = computed(() => loading.value || saving.value)
-const serializedDraft = computed(() => JSON.stringify(toPresets(draft.value)))
-const dirty = computed(() => serializedDraft.value !== baseline.value)
+const dirty = computed(() => draftSignature(draft.value) !== baseline.value)
+const agentDrafts = computed(() => draft.value.filter(preset => preset.kind === 'agent'))
+const terminalDrafts = computed(() => draft.value.filter(preset => preset.kind === 'terminal'))
 
-onMounted(reload)
+onMounted(() => {
+  document.addEventListener('pointerdown', closeAddMenu)
+  void reload()
+})
+onUnmounted(() => document.removeEventListener('pointerdown', closeAddMenu))
 
-async function reload() {
+async function reload({ confirmDirty = false } = {}) {
+  if (confirmDirty && dirty.value && !window.confirm('Discard unsaved CLI preset changes?')) return
   loading.value = true
   error.value = ''
   saved.value = false
@@ -256,48 +227,79 @@ async function save() {
   }
 }
 
-function addPreset() {
-  const id = uniqueId('launcher')
-  draft.value.push({
-    key: crypto.randomUUID(),
+function addAgentPreset(agent) {
+  const id = uniqueId(agent.id)
+  const sequence = draft.value.filter(preset => preset.agentId === agent.id).length + 1
+  const row = toDraft({
     id,
-    title: 'New launcher',
-    kind: 'terminal',
-    agentId: '',
-    binary: '',
-    argsText: '',
-    envText: '',
-    cwdMode: 'workspace',
-    cwdPath: '',
+    title: sequence === 1 ? agent.title : `${agent.title} ${sequence}`,
+    kind: 'agent',
+    agentId: agent.id,
+    enabled: true,
+    args: [],
+    env: {},
+    cwd: { mode: 'workspace' },
   })
-  saved.value = false
+  draft.value.push(row)
+  addMenuOpen.value = false
+  openId.value = row.key
 }
 
-function removePreset(index) {
-  draft.value.splice(index, 1)
-  saved.value = false
+function addTerminalPreset() {
+  const id = uniqueId('terminal')
+  const sequence = draft.value.filter(preset => preset.kind === 'terminal').length + 1
+  const row = toDraft({
+    id,
+    title: sequence === 1 ? 'Terminal' : `Terminal ${sequence}`,
+    kind: 'terminal',
+    enabled: true,
+    args: [],
+    env: {},
+    cwd: { mode: 'workspace' },
+  })
+  draft.value.push(row)
+  addMenuOpen.value = false
+  openId.value = row.key
 }
 
-function changeKind(preset) {
-  if (preset.kind === 'agent' && !preset.agentId) {
-    preset.agentId = launchers.agents[0]?.id || 'codex'
-  }
+function removePreset(key) {
+  const index = draft.value.findIndex(preset => preset.key === key)
+  if (index >= 0) draft.value.splice(index, 1)
+  if (openId.value === key) openId.value = ''
+  if (advancedId.value === key) advancedId.value = ''
+}
+
+function toggleOpen(key) {
+  openId.value = openId.value === key ? '' : key
+  if (openId.value !== key && advancedId.value === key) advancedId.value = ''
+}
+
+function toggleAdvanced(key) {
+  advancedId.value = advancedId.value === key ? '' : key
+}
+
+function toggleEnabled(key, enabled) {
+  const preset = draft.value.find(candidate => candidate.key === key)
+  if (preset) preset.enabled = enabled
 }
 
 function resetDraft(presets) {
   draft.value = (presets || []).map(toDraft)
-  baseline.value = JSON.stringify(toPresets(draft.value))
+  baseline.value = draftSignature(draft.value)
+  openId.value = ''
+  advancedId.value = ''
 }
 
 function toDraft(preset) {
   return {
-    key: crypto.randomUUID(),
+    key: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
     id: String(preset.id || ''),
     title: String(preset.title || ''),
     kind: preset.kind === 'agent' ? 'agent' : 'terminal',
     agentId: String(preset.agentId || ''),
+    enabled: preset.enabled !== false,
     binary: String(preset.binary || ''),
-    argsText: (preset.args || []).map(formatArgument).join('\n'),
+    flagsText: formatLauncherFlags(preset.args || []),
     envText: Object.entries(preset.env || {}).map(([key, value]) => `${key}=${value}`).join('\n'),
     cwdMode: preset.cwd?.mode || 'workspace',
     cwdPath: preset.cwd?.path || '',
@@ -310,7 +312,8 @@ function toPresets(rows) {
       id: row.id.trim(),
       title: row.title.trim(),
       kind: row.kind,
-      args: argumentLines(row.argsText),
+      enabled: row.enabled !== false,
+      args: parseLauncherFlags(row.flagsText),
       env: environment(row.envText),
       cwd: row.cwdMode === 'custom'
         ? { mode: 'custom', path: row.cwdPath.trim() }
@@ -322,44 +325,26 @@ function toPresets(rows) {
   })
 }
 
+function draftSignature(rows) {
+  return JSON.stringify(rows.map(({ key, ...row }) => row))
+}
+
 function validatePresets(presets) {
   const ids = new Set()
   for (const preset of presets) {
     if (!/^[a-z0-9_-]+$/.test(preset.id)) {
-      throw new Error(`Launcher id '${preset.id || '(empty)'}' must use lowercase letters, digits, - or _.`)
+      throw new Error(`Preset id '${preset.id || '(empty)'}' must use lowercase letters, digits, - or _.`)
     }
-    if (ids.has(preset.id)) throw new Error(`Launcher id '${preset.id}' is duplicated.`)
+    if (ids.has(preset.id)) throw new Error(`Preset id '${preset.id}' is duplicated.`)
     ids.add(preset.id)
-    if (!preset.title) throw new Error(`Launcher '${preset.id}' needs a title.`)
+    if (!preset.title) throw new Error(`Preset '${preset.id}' needs a title.`)
     if (preset.kind === 'agent' && !preset.agentId) {
-      throw new Error(`Agent launcher '${preset.id}' needs an agent.`)
+      throw new Error(`Agent preset '${preset.id}' needs an agent.`)
     }
     if (preset.cwd.mode === 'custom' && !preset.cwd.path) {
-      throw new Error(`Launcher '${preset.id}' needs a custom working directory.`)
+      throw new Error(`Preset '${preset.id}' needs a custom working directory.`)
     }
   }
-}
-
-function lines(value) {
-  return String(value || '').split('\n').map(line => line.trim()).filter(Boolean)
-}
-
-function argumentLines(value) {
-  return String(value || '')
-    .split('\n')
-    .filter(line => line.length > 0)
-    .map((line) => {
-      const candidate = line.trim()
-      if (!candidate.startsWith('"')) return line
-      let parsed
-      try {
-        parsed = JSON.parse(candidate)
-      } catch {
-        throw new Error(`Argument ${line} is not a valid JSON string.`)
-      }
-      if (typeof parsed !== 'string') throw new Error(`Argument ${line} must decode to a string.`)
-      return parsed
-    })
 }
 
 function environment(value) {
@@ -370,16 +355,6 @@ function environment(value) {
   }))
 }
 
-function formatArgument(value) {
-  const argument = String(value)
-  return argument === ''
-    || argument.trim() !== argument
-    || argument.includes('\n')
-    || argument.startsWith('"')
-    ? JSON.stringify(argument)
-    : argument
-}
-
 function uniqueId(prefix) {
   const ids = new Set(draft.value.map(preset => preset.id))
   if (!ids.has(prefix)) return prefix
@@ -388,18 +363,44 @@ function uniqueId(prefix) {
   return `${prefix}-${suffix}`
 }
 
-function availabilityLabel(preset) {
-  if (preset.kind !== 'agent') return 'Ready'
-  const agent = launchers.agents.find(candidate => candidate.id === preset.agentId)
-  return agent?.installed || preset.binary.trim() ? 'Ready' : 'Not found'
+function iconForAgent(agentId) {
+  if (agentId === 'codex') return IconProviderOpenAI
+  if (agentId === 'claude') return IconProviderAnthropic
+  if (agentId === 'pi') return IconMathPi
+  return IconRobot
 }
 
-function availabilityClass(preset) {
-  return availabilityLabel(preset) === 'Ready' ? 'bg-add' : 'bg-rem'
+function closeAddMenu(event) {
+  if (event?.target?.closest?.('[data-launcher-add-root]')) return
+  addMenuOpen.value = false
+}
+
+async function openAddMenu() {
+  addMenuOpen.value = true
+  await nextTick()
+  document.querySelector('[data-launcher-add-menu] [data-launcher-add-option]')?.focus()
+}
+
+async function onAddMenuKeydown(event) {
+  if (event.key === 'Escape') {
+    addMenuOpen.value = false
+    await nextTick()
+    addButtonRef.value?.focus()
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const items = Array.from(event.currentTarget.querySelectorAll('[data-launcher-add-option]'))
+  let index = items.indexOf(document.activeElement)
+  if (event.key === 'Home') index = 0
+  else if (event.key === 'End') index = items.length - 1
+  else index = (Math.max(index, 0) + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+  await nextTick()
+  items[index]?.focus()
 }
 
 function errorMessage(cause) {
-  return cause instanceof Error ? cause.message : String(cause || 'Launcher settings failed.')
+  return cause instanceof Error ? cause.message : String(cause || 'CLI tool settings failed.')
 }
 </script>
 
@@ -412,7 +413,6 @@ function errorMessage(cause) {
   border: 1px solid var(--color-rule);
   background: var(--color-chrome-mid);
   padding: 0 10px;
-  font-family: var(--font-sans);
   font-size: 10px;
   font-weight: 600;
   color: var(--color-ink-2);
@@ -443,53 +443,21 @@ function errorMessage(cause) {
   place-items: center;
   color: var(--color-ink-3);
 }
-.launcher-field {
+.launcher-menu-item {
   display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-  font-family: var(--font-sans);
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-ink-3);
-}
-.launcher-field em {
-  font-size: 8px;
-  font-style: normal;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-}
-.launcher-field input,
-.launcher-field select,
-.launcher-field textarea {
   width: 100%;
-  border: 1px solid var(--color-rule-light);
-  border-radius: 0;
-  background: var(--color-surface);
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
   padding: 6px 8px;
-  font-family: var(--font-sans);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.45;
-  text-transform: none;
+  text-align: left;
+  font-size: 11px;
+  color: var(--color-ink-2);
+}
+.launcher-menu-item:hover,
+.launcher-menu-item:focus {
+  background: var(--color-chrome-high);
   color: var(--color-ink);
   outline: none;
-}
-.launcher-field input,
-.launcher-field select {
-  height: 30px;
-}
-.launcher-field textarea {
-  resize: vertical;
-}
-.launcher-field input:focus,
-.launcher-field select:focus,
-.launcher-field textarea:focus {
-  border-color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px var(--color-accent-soft);
 }
 </style>

@@ -24,6 +24,18 @@ editor actions.
 boundary. Do not join preset arguments for a shell or add quoting. App process
 launches and Routine prompts follow the same rule.
 
+Settings presents those boundaries as one familiar CLI-flags field.
+`launcherFlags.js` is the deliberate parsing/formatting boundary: quoted and
+escaped input becomes an argv array before save. Do not move parsing into the
+native spawn path or execute the field through a shell.
+
+### Keep Codex's injected MCP name app-specific
+
+Codex config overrides merge with existing tables. Injecting
+`mcp_servers.mim.url` into a user config where `mim` is a stdio server creates
+an invalid hybrid transport. Keep the one-run HTTP entry under
+`mcp_servers.mim_workbench` unless a full migration strategy replaces it.
+
 ### Durable does not mean a process survives relaunch
 
 Durable Activity metadata and bounded scrollback survive. PTY and child handles

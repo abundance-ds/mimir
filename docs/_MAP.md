@@ -33,7 +33,8 @@ navigation history.
 ### Workbench and Activities
 
 - `src/mim/WorkbenchApp.vue`: top-level orchestration and core Activity records
-- `src/mim/components/`: three-pane shell, rails, sidebar, quick-open, pane host
+- `src/mim/components/`: three-pane shell, rails, sidebar, recent-project
+  switcher, quick-open, pane host
 - `src/mim/activities/TerminalActivity.vue`: xterm-backed terminal and agent UI
 - `src/mim/activities/FilesActivity.vue`: recent-first inbox, actionable folder
   browser, multi-selection, context menus, and keyboard file operations
@@ -99,9 +100,10 @@ See [editor-system.md](editor-system.md), [inline-ai.md](inline-ai.md), and
 ### Shared UI
 
 - `src/shared/styles/`: Tailwind tokens, themes, editor bridge, diff styles
-- `src/shared/ui/SettingsDialog.vue`: Appearance, Editor, Models, Launchers,
+- `src/shared/ui/SettingsDialog.vue`: Appearance, Editor, Models, CLI tools,
   Apps, Shortcuts, and About
-- `src/shared/ui/settings/`: settings sections
+- `src/shared/ui/settings/`: settings sections, progressive launcher rows, and
+  exact CLI-flag parsing
 - `src/stores/settings.js`: persisted settings and cross-window theme sync
 - `src/shared/fonts.js`: editor font choices
 

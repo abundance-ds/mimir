@@ -11,7 +11,7 @@ function btnByTitle(wrapper, title) {
 }
 
 function commentBtn(wrapper) {
-  return btnByTitle(wrapper, 'Add Comment (⇧⌘M)')
+  return wrapper.findAll('button').at(-1)
 }
 
 describe('EditorToolbar', () => {
@@ -77,12 +77,14 @@ describe('EditorToolbar', () => {
     const w = mountToolbar({ hasSelection: false })
     const btn = commentBtn(w)
     expect(btn.classes()).toContain('toolbar-disabled')
+    expect(btn.attributes('disabled')).toBeDefined()
   })
 
   it('Add Comment button is enabled when hasSelection is true', () => {
     const w = mountToolbar({ hasSelection: true })
     const btn = commentBtn(w)
     expect(btn.classes()).not.toContain('toolbar-disabled')
+    expect(btn.attributes('disabled')).toBeUndefined()
   })
 
   it('Add Comment button does NOT emit comment when hasSelection is false', async () => {
@@ -98,5 +100,12 @@ describe('EditorToolbar', () => {
     await btn.trigger('click')
     expect(w.emitted('comment')).toBeTruthy()
     expect(w.emitted('comment')).toHaveLength(1)
+  })
+
+  it('shows the current comment count without turning it into a separate toolbar control', () => {
+    const w = mountToolbar({ hasSelection: true, commentCount: 3 })
+    expect(commentBtn(w).text()).toContain('Comment')
+    expect(commentBtn(w).text()).toContain('3')
+    expect(w.findAll('button.toolbar-btn')).toHaveLength(15)
   })
 })

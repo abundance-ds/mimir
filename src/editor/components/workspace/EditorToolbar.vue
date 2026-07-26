@@ -1,8 +1,10 @@
 <template>
   <div
+    ref="toolbarRef"
+    data-editor-toolbar
     class="editor-toolbar h-[30px] shrink-0 border-b border-rule-light flex items-center gap-1.5 px-[14px] whitespace-nowrap overflow-hidden"
   >
-    <div class="flex gap-0.5 items-center">
+    <div class="flex shrink-0 gap-0.5 items-center">
       <button class="toolbar-btn" title="Heading 1" :class="isActive('heading-1')" @mousedown.prevent @click="emit('format', 'heading-1')">H1</button>
       <button class="toolbar-btn" title="Heading 2" :class="isActive('heading-2')" @mousedown.prevent @click="emit('format', 'heading-2')">H2</button>
       <button class="toolbar-btn" title="Heading 3" :class="isActive('heading-3')" @mousedown.prevent @click="emit('format', 'heading-3')">H3</button>
@@ -11,7 +13,7 @@
       <button class="toolbar-btn" title="Strikethrough (⇧⌘X)" style="text-decoration: line-through" :class="isActive('strikethrough')" @mousedown.prevent @click="emit('format', 'strikethrough')">S</button>
     </div>
     <span class="toolbar-sep"></span>
-    <div class="flex gap-0.5 items-center">
+    <div class="flex shrink-0 gap-0.5 items-center">
       <button class="toolbar-btn" title="Bullet List (⇧⌘8)" :class="isActive('bullet-list')" @mousedown.prevent @click="emit('format', 'bullet-list')"><IconList :size="14" /></button>
       <button class="toolbar-btn" title="Numbered List (⇧⌘7)" :class="isActive('numbered-list')" @mousedown.prevent @click="emit('format', 'numbered-list')"><IconListNumbers :size="14" /></button>
       <button class="toolbar-btn" title="Checkbox" :class="isActive('checkbox')" @mousedown.prevent @click="emit('format', 'checkbox')"><IconListCheck :size="14" /></button>
@@ -22,20 +24,38 @@
       <button class="toolbar-btn" title="Inline Code" :class="isActive('code')" @mousedown.prevent @click="emit('format', 'code')"><IconCode :size="14" /></button>
     </div>
     <span class="toolbar-sep"></span>
-    <button class="toolbar-btn" :class="props.hasSelection ? '' : 'toolbar-disabled'" title="Add Comment (⇧⌘M)" @mousedown.prevent @click="onComment"><IconMessagePlus :size="14" /></button>
-    <div class="flex-1"></div>
+    <button
+      class="toolbar-btn shrink-0 gap-1 px-2 text-[11px]"
+      :class="props.hasSelection ? '' : 'toolbar-disabled'"
+      :disabled="!props.hasSelection"
+      :aria-disabled="!props.hasSelection"
+      :title="props.hasSelection ? 'Add Comment (⇧⌘M)' : 'Select text to add a comment'"
+      @mousedown.prevent
+      @click="onComment"
+    >
+      <IconMessagePlus :size="13" />
+      <span v-show="!compact">Comment</span>
+      <span v-if="commentCount" class="font-mono text-[9px] text-accent">{{ commentCount }}</span>
+    </button>
+    <div class="min-w-2 flex-1"></div>
   </div>
 </template>
 
 <script setup>
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IconList, IconListNumbers, IconListCheck, IconQuote, IconLineDashed, IconLink, IconPhoto, IconCode, IconMessagePlus } from '@tabler/icons-vue'
 
 const props = defineProps({
   activeFormats: { type: Array, default: () => [] },
   hasSelection: { type: Boolean, default: false },
+  commentCount: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['format', 'comment'])
+const toolbarRef = ref(null)
+const compact = ref(false)
+let fullContentWidth = 0
+let observer = null
 
 function isActive(action) {
   return props.activeFormats.includes(action) ? 'toolbar-active' : ''
@@ -45,6 +65,33 @@ function onComment() {
   if (!props.hasSelection) return
   emit('comment')
 }
+
+function checkOverflow() {
+  const toolbar = toolbarRef.value
+  if (!toolbar) return
+  if (!compact.value && toolbar.scrollWidth > toolbar.clientWidth) {
+    fullContentWidth = toolbar.scrollWidth
+    compact.value = true
+    return
+  }
+  if (compact.value && toolbar.clientWidth >= fullContentWidth) {
+    compact.value = false
+    requestAnimationFrame(() => {
+      if (toolbar.scrollWidth > toolbar.clientWidth) {
+        fullContentWidth = toolbar.scrollWidth
+        compact.value = true
+      }
+    })
+  }
+}
+
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined') return
+  observer = new ResizeObserver(checkOverflow)
+  if (toolbarRef.value) observer.observe(toolbarRef.value)
+})
+onUnmounted(() => observer?.disconnect())
+watch(() => props.commentCount, () => nextTick(checkOverflow))
 </script>
 
 <style scoped>
@@ -88,7 +135,6 @@ function onComment() {
 .toolbar-disabled {
   opacity: 0.35;
   cursor: default;
-  pointer-events: none;
 }
 .toolbar-sep {
   width: 1px;

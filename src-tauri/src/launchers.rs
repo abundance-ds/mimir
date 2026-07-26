@@ -10,6 +10,7 @@ use std::{
 
 const CONFIG_VERSION: u32 = 1;
 const DEFAULT_MIM_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
+const CODEX_MIM_SERVER_ID: &str = "mim_workbench";
 static DETECTED_AGENTS: OnceLock<AgentDetectionCache> = OnceLock::new();
 
 #[derive(Default)]
@@ -94,6 +95,8 @@ pub struct LauncherPreset {
     pub id: String,
     pub title: String,
     pub kind: LauncherKind,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -103,6 +106,10 @@ pub struct LauncherPreset {
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     pub cwd: WorkingDirectory,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +175,7 @@ pub fn default_config() -> LauncherConfig {
                 id: "terminal".into(),
                 title: "Terminal".into(),
                 kind: LauncherKind::Terminal,
+                enabled: true,
                 agent_id: None,
                 binary: None,
                 args: Vec::new(),
@@ -183,6 +191,7 @@ fn agent_preset(id: &str, title: &str, agent_id: &str) -> LauncherPreset {
         id: id.into(),
         title: title.into(),
         kind: LauncherKind::Agent,
+        enabled: true,
         agent_id: Some(agent_id.into()),
         binary: None,
         args: Vec::new(),
@@ -434,11 +443,19 @@ fn validate_explicit_binary(binary: &str) -> Result<(), String> {
 
 fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: &mut Vec<String>) {
     match agent_id {
-        "codex" if !args.iter().any(|arg| arg.contains("mcp_servers.mim.")) => {
+        "codex"
+            if !args.iter().any(|arg| {
+                arg.contains("mcp_servers.mim.url") || arg.contains("mcp_servers.mim_workbench.url")
+            }) =>
+        {
+            // Use an app-specific table instead of `mcp_servers.mim`. A user
+            // may already have a valid stdio server with that generic name;
+            // overlaying only `url` would merge transports and make Codex
+            // reject its config before the session starts.
             args.extend([
                 "-c".into(),
                 format!(
-                    "mcp_servers.mim.url={}",
+                    "mcp_servers.{CODEX_MIM_SERVER_ID}.url={}",
                     serde_json::to_string(mcp_url)
                         .expect("serializing an MCP URL string cannot fail")
                 ),
@@ -704,6 +721,25 @@ mod tests {
     }
 
     #[test]
+    fn version_one_presets_without_visibility_remain_enabled() {
+        let config: LauncherConfig = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "presets": [{
+                "id": "codex",
+                "title": "Codex",
+                "kind": "agent",
+                "agentId": "codex",
+                "args": [],
+                "env": {},
+                "cwd": { "mode": "workspace" }
+            }]
+        }))
+        .unwrap();
+
+        assert!(config.presets[0].enabled);
+    }
+
+    #[test]
     fn corrupt_configuration_is_quarantined_and_defaults_recover() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("launchers.json");
@@ -792,7 +828,7 @@ mod tests {
                 "--model",
                 "gpt 5",
                 "-c",
-                r#"mcp_servers.mim.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#,
             ]
         );
         assert_eq!(launch.cwd, directory.path().to_string_lossy());
@@ -976,7 +1012,10 @@ mod tests {
         append_mim_connection_args("codex", home, mcp_url, &mut codex);
         assert_eq!(
             codex,
-            ["-c", r#"mcp_servers.mim.url="http://127.0.0.1:29999/mcp""#]
+            [
+                "-c",
+                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#
+            ]
         );
 
         let mut claude = Vec::new();
@@ -1032,5 +1071,30 @@ mod tests {
         assert_eq!(codex, expected_codex);
         assert_eq!(claude, expected_claude);
         assert_eq!(pi, expected_pi);
+    }
+
+    #[test]
+    fn codex_connection_does_not_merge_with_a_legacy_stdio_mim_server() {
+        let mut args = vec![
+            "-c".into(),
+            r#"mcp_servers.mim.command="legacy-mim-server""#.into(),
+        ];
+
+        append_mim_connection_args(
+            "codex",
+            Path::new("/Users/mim"),
+            "http://127.0.0.1:29999/mcp",
+            &mut args,
+        );
+
+        assert_eq!(
+            args,
+            [
+                "-c",
+                r#"mcp_servers.mim.command="legacy-mim-server""#,
+                "-c",
+                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#,
+            ]
+        );
     }
 }

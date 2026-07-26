@@ -1,13 +1,14 @@
 # Agent setup
 
 Mim detects Codex, Claude, and Pi from the user's login-shell PATH. Installed
-agents appear as one-click launchers in the Sidebar. A missing binary remains
-visible with its diagnostic.
+and enabled presets appear as one-click launchers in the Sidebar. Missing
+binaries remain visible with their diagnostics in Settings > CLI tools instead
+of occupying the launch surface.
 
 ## Launcher presets
 
 Presets live in `~/.mim/launchers.json`. Mim writes the default file on first
-load and can edit the same data in Settings > Launchers.
+load and can edit the same data in Settings > CLI tools.
 
 ```json
 {
@@ -18,6 +19,7 @@ load and can edit the same data in Settings > Launchers.
       "title": "Codex",
       "kind": "agent",
       "agentId": "codex",
+      "enabled": true,
       "args": [],
       "env": {},
       "cwd": { "mode": "workspace" }
@@ -27,6 +29,7 @@ load and can edit the same data in Settings > Launchers.
       "title": "Claude review",
       "kind": "agent",
       "agentId": "claude",
+      "enabled": true,
       "args": ["--model", "sonnet"],
       "env": {},
       "cwd": { "mode": "workspace" }
@@ -35,6 +38,7 @@ load and can edit the same data in Settings > Launchers.
       "id": "terminal",
       "title": "Terminal",
       "kind": "terminal",
+      "enabled": true,
       "args": [],
       "env": {},
       "cwd": { "mode": "workspace" }
@@ -46,6 +50,13 @@ load and can edit the same data in Settings > Launchers.
 `kind` is `agent` or `terminal`. Agent presets use `agentId` `codex`, `claude`,
 or `pi`; `binary` may override detection. A terminal may also set `binary`;
 otherwise it uses the platform's default shell.
+
+`enabled` controls whether the usable preset appears in the Sidebar. Existing
+version-1 files without the field load as enabled. The ordinary Settings path
+shows detected command/version, a visibility switch, and one shell-like CLI
+flags field. Working directory and command/environment details are progressive
+disclosures. The flags editor parses quotes and escapes into `args`; the saved
+file and native launcher still retain exact argv entries.
 
 `cwd` accepts:
 
@@ -65,7 +76,9 @@ Every Mim-launched preset receives:
 
 Agent-specific connection is added unless the preset already supplies it:
 
-- Codex receives a one-off `mcp_servers.mim.url` configuration override.
+- Codex receives a one-off `mcp_servers.mim_workbench.url` configuration
+  override. The app-specific name cannot merge with a user's unrelated stdio
+  server named `mim`.
 - Claude receives an inline `--mcp-config` HTTP server definition.
 - Pi receives `--extension ~/.mim/pi/mim-tools.ts`.
 

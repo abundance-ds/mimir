@@ -92,6 +92,7 @@ describe('WorkbenchSidebar', () => {
     await wrapper.get('[data-sidebar-row="launcher:codex"]').trigger('click')
     await wrapper.get('[data-sidebar-row="activity:terminal:two"]').trigger('click')
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    document.body.querySelector('[data-project-open-folder]')?.click()
     await wrapper.get('[data-sidebar-collapse]').trigger('click')
     await wrapper.get('[data-sidebar-settings]').trigger('click')
     await wrapper.get('[data-sidebar-manage-apps]').trigger('click')
@@ -113,7 +114,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-settings]').text()).toContain('Settings')
   })
 
-  it('discloses Apps and Activities independently while the live rail keeps both available', async () => {
+  it('discloses Apps and Activities independently while archived rows stay hidden by default', async () => {
     const wrapper = render()
     await wrapper.setProps({
       archivedActivities: [{
@@ -129,6 +130,13 @@ describe('WorkbenchSidebar', () => {
     const activitiesToggle = wrapper.get('[data-sidebar-activities-toggle]')
     expect(appsToggle.attributes('aria-expanded')).toBe('true')
     expect(activitiesToggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-sidebar-archived-toggle]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
+
+    await wrapper.get('[data-sidebar-archived-toggle]').trigger('click')
+    expect(wrapper.get('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(true)
+    await wrapper.get('[data-sidebar-archived-toggle]').trigger('click')
+    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
 
     await appsToggle.trigger('click')
     expect(wrapper.find('[data-sidebar-row="launcher:codex"]').exists()).toBe(false)
@@ -151,7 +159,8 @@ describe('WorkbenchSidebar', () => {
     await wrapper.setProps({ collapsed: true })
     expect(wrapper.get('[data-sidebar-row="launcher:codex"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(true)
+    expect(wrapper.get('[data-sidebar-archived-toggle]').exists()).toBe(true)
+    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
   })
 
   it('uses status and unread overlays without duplicating rows', () => {

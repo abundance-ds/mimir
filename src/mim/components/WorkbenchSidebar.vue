@@ -23,25 +23,14 @@
       </button>
     </div>
 
-    <button
-      type="button"
-      data-sidebar-workspace
-      :title="workspacePath || 'Choose workspace'"
-      class="group flex h-11 shrink-0 items-center border-b border-rule text-left hover:bg-chrome-mid"
-      @click="$emit('chooseWorkspace')"
-    >
-      <span class="ml-3 grid size-7 shrink-0 place-items-center text-ink-3 group-hover:text-ink">
-        <IconFolder :size="16" :stroke-width="1.7" />
-      </span>
-      <span v-if="!collapsed" class="ml-2 min-w-0 flex-1 pr-2">
-        <span class="block truncate text-[11px] font-semibold text-ink">
-          {{ workspaceName || 'Open workspace' }}
-        </span>
-        <span class="block truncate font-mono text-[9px] text-ink-3">
-          {{ workspacePath || 'Choose a folder' }}
-        </span>
-      </span>
-    </button>
+    <WorkspaceSwitcher
+      :collapsed="collapsed"
+      :workspace-name="workspaceName"
+      :workspace-path="workspacePath"
+      :recent-workspaces="recentWorkspaces"
+      @choose-workspace="$emit('chooseWorkspace')"
+      @open-workspace="$emit('openWorkspace', $event)"
+    />
 
     <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Launchers and activities">
       <div
@@ -341,16 +330,42 @@
 
       <template v-if="archivedActivities.length">
         <div class="mx-3 my-2 h-px bg-rule" />
-        <div
-          class="flex items-center justify-between px-3 pb-1 pt-1"
-          :class="{ invisible: collapsed }"
-          :aria-hidden="collapsed"
+        <button
+          type="button"
+          data-sidebar-archived-toggle
+          :aria-expanded="archivedOpen"
+          :title="archivedOpen ? 'Hide archived Activities' : `Show ${archivedActivities.length} archived Activities`"
+          class="group relative flex h-8 w-full items-center text-left text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+          @click="archivedOpen = !archivedOpen"
+          @keydown.right.prevent="archivedOpen = true"
+          @keydown.left.prevent="archivedOpen = false"
         >
-          <span class="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3">Archived</span>
-          <span class="font-mono text-[9px] tabular-nums text-ink-4">{{ archivedActivities.length }}</span>
-        </div>
+          <span class="ml-3 grid size-7 shrink-0 place-items-center">
+            <IconArchive :size="14" :stroke-width="1.7" />
+          </span>
+          <template v-if="!collapsed">
+            <span class="ml-2 min-w-0 flex-1 font-sans text-[10px]">Archived</span>
+            <span class="mr-2 font-mono text-[9px] tabular-nums text-ink-4">{{ archivedActivities.length }}</span>
+            <IconChevronDown
+              v-if="archivedOpen"
+              :size="12"
+              :stroke-width="2"
+              class="mr-3 shrink-0"
+            />
+            <IconChevronRight
+              v-else
+              :size="12"
+              :stroke-width="2"
+              class="mr-3 shrink-0"
+            />
+          </template>
+          <span
+            v-else
+            class="absolute ml-7 mt-[-18px] min-w-3 rounded-full bg-chrome-high px-0.5 text-center font-mono text-[7px] leading-3 text-ink-2"
+          >{{ archivedActivities.length }}</span>
+        </button>
         <SidebarRow
-          v-for="activity in archivedActivities"
+          v-for="activity in (archivedOpen ? archivedActivities : [])"
           :key="`archived:${activity.id}`"
           :data-sidebar-row="`archived:${activity.id}`"
           :title="`${activity.title} — archived`"
@@ -462,7 +477,6 @@ import {
   IconChevronRight,
   IconDots,
   IconFileStack,
-  IconFolder,
   IconLayoutSidebarLeftCollapse,
   IconMathPi,
   IconSettings,
@@ -475,6 +489,7 @@ import {
   IconTrash,
 } from '@tabler/icons-vue'
 import SidebarRow from './SidebarRow.vue'
+import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 import { moveActivityId } from '../activityOrdering.js'
 import { usePointerReorder } from '../composables/usePointerReorder.js'
 import IconProviderAnthropic from '../../shared/icons/IconProviderAnthropic.vue'
@@ -484,6 +499,7 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   workspaceName: { type: String, default: '' },
   workspacePath: { type: String, default: '' },
+  recentWorkspaces: { type: Array, default: () => [] },
   launchers: { type: Array, default: () => [] },
   apps: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
@@ -496,6 +512,7 @@ const emit = defineEmits([
   'launch',
   'selectActivity',
   'chooseWorkspace',
+  'openWorkspace',
   'toggleCollapse',
   'renameActivity',
   'stopActivity',
@@ -511,6 +528,7 @@ const activityMenuId = ref('')
 const sortMenuOpen = ref(false)
 const appsCollapsed = ref(false)
 const activitiesCollapsed = ref(false)
+const archivedOpen = ref(false)
 const renamingId = ref('')
 const renameDraft = ref('')
 const sidebarRoot = ref(null)

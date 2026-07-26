@@ -51,6 +51,14 @@
           @navigate-chunk="onDiffNavigateChunk"
           @navigate-file="onDiffNavigateFile"
         />
+        <EditorToolbar
+          v-if="editorToolbarVisible"
+          :active-formats="activeFormats"
+          :has-selection="Boolean(selectionText)"
+          :comment-count="commentManager.comments.length"
+          @format="onFormat"
+          @comment="onComment"
+        />
         <div class="editor-panes flex-1 flex min-h-0 overflow-hidden">
           <BatchDiffView
             v-if="diffStore.active && diffStore.isBatch && reviewTabActive"
@@ -245,6 +253,7 @@ import AppFooter from './components/shell/AppFooter.vue'
 import AppHeader from './components/shell/AppHeader.vue'
 import SettingsDialog from '../shared/ui/SettingsDialog.vue'
 import EditorSurface from './components/workspace/EditorSurface.vue'
+import EditorToolbar from './components/workspace/EditorToolbar.vue'
 import InlineAI from './components/workspace/InlineAI.vue'
 import DiffBar from './components/workspace/DiffBar.vue'
 import DiffView from './components/workspace/DiffView.vue'
@@ -286,6 +295,12 @@ const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
 const isNewTabPage = computed(() => currentFile.value?.newTab === true)
+const editorToolbarVisible = computed(() => (
+  editorSettings.editorToolbarMode !== 'none'
+  && !isNewTabPage.value
+  && !diffStore.active
+  && isMarkdownPath(currentFile.value?.path)
+))
 const inlineAIProjectPath = computed(() => parentPath(currentFile.value?.path))
 const closeOverlayRef = ref(null)
 const restoreConfirmMeta = ref(null)
@@ -305,6 +320,11 @@ let modalReturnFocus = null
 let sessionPersistCleanup = null
 let editorDisposed = false
 let editorHydrationPromise = Promise.resolve()
+
+function isMarkdownPath(path) {
+  if (!path) return true
+  return /\.(?:md|markdown|mdown|mkd)$/i.test(String(path))
+}
 
 function reportSessionError(error) {
   console.error('[session] persistence failed', error)

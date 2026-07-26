@@ -25,6 +25,7 @@ vi.mock('./sessionPersist.js', () => ({
 }))
 
 import { useFileStore } from '../stores/files.js'
+import { useSettingsStore } from '../stores/settings.js'
 import App from './App.vue'
 
 const SettingsDialogStub = defineComponent({
@@ -230,5 +231,47 @@ describe('Editor Apps Settings bridge', () => {
     )
     wrapper.unmount()
     diagnostic.mockRestore()
+  })
+
+  it('mounts the Markdown toolbar in the real editor flow and obeys the Editor setting', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(App, {
+      props: { embedded: true },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppHeader: true,
+          AppFooter: true,
+          SettingsDialog: SettingsDialogStub,
+          EditorSurface: EditorSurfaceStub,
+          InlineAI: true,
+          DiffBar: true,
+          DiffView: true,
+          BatchDiffView: true,
+          NewTabPage: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    const settings = useSettingsStore(pinia)
+    const files = useFileStore(pinia)
+
+    expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(true)
+    settings.set('editorToolbarMode', 'none')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(false)
+
+    settings.set('editorToolbarMode', 'top')
+    files.currentFile.path = '/work/main.rs'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(false)
+
+    files.currentFile.path = '/work/notes.md'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(true)
+    wrapper.unmount()
   })
 })

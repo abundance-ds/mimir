@@ -90,7 +90,7 @@ import {
   IconSparkles,
   IconKeyboard,
   IconInfoCircle,
-  IconRocket,
+  IconTerminal2,
   IconApps,
 } from '@tabler/icons-vue'
 
@@ -105,7 +105,7 @@ const navGroups = [
     { id: 'appearance', label: 'Appearance', icon: IconPalette },
     { id: 'editor',     label: 'Editor',     icon: IconPencil },
     { id: 'ai',         label: 'Models',     icon: IconSparkles },
-    { id: 'launchers',  label: 'Launchers',  icon: IconRocket },
+    { id: 'launchers',  label: 'CLI tools',  icon: IconTerminal2 },
     { id: 'apps',       label: 'Apps',       icon: IconApps },
   ],
   [

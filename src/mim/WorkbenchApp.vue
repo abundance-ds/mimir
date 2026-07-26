@@ -13,6 +13,7 @@
         :collapsed="collapsed"
         :workspace-name="workspaceName"
         :workspace-path="workspaceFiles.workspacePath"
+        :recent-workspaces="recentWorkspaces"
         :launchers="surfaceLauncherRows"
         :apps="appLauncherRows"
         :activities="sidebarActivities"
@@ -22,6 +23,7 @@
         @launch="onLaunch"
         @select-activity="selectActivity"
         @choose-workspace="chooseWorkspace"
+        @open-workspace="openWorkspace"
         @toggle-collapse="toggleSidebar"
         @rename-activity="renameActivity"
         @stop-activity="stopActivity"
@@ -238,6 +240,10 @@ const activityMeta = computed(() => {
   return humanStatus(activity.status)
 })
 const workspaceName = computed(() => basename(workspaceFiles.workspacePath))
+const recentWorkspaces = computed(() => (
+  (Array.isArray(settings.recentWorkspaceFolders) ? settings.recentWorkspaceFolders : [])
+    .map(path => ({ path, name: basename(path) }))
+))
 const editorTitle = computed(() => {
   const path = editorFiles.currentFile?.path
   return path ? basename(path) : 'Editor'
@@ -266,7 +272,9 @@ const surfaceLauncherRows = computed(() => [
 ])
 
 const appLauncherRows = computed(() => [
-  ...launchers.decoratedPresets.map((preset) => ({
+  ...launchers.decoratedPresets.filter(
+    preset => preset.enabled && preset.available,
+  ).map((preset) => ({
     id: `preset:${preset.id}`,
     title: preset.title,
     icon: launcherIcon(preset),
@@ -464,6 +472,7 @@ async function openWorkspace(path, { persist = true, revealFiles = true } = {}) 
     await workspaceFiles.openWorkspace(path)
     ensureCoreActivities(path)
     if (persist) settings.set('mimWorkspaceFolder', path)
+    rememberWorkspace(path)
     diagnostic.value = ''
     if (revealFiles) openCoreActivity('files')
     return true
@@ -471,6 +480,18 @@ async function openWorkspace(path, { persist = true, revealFiles = true } = {}) 
     diagnostic.value = `Workspace index failed: ${errorMessage(cause)}`
     return false
   }
+}
+
+function rememberWorkspace(path) {
+  const normalized = String(path || '').trim()
+  if (!normalized) return
+  const previous = Array.isArray(settings.recentWorkspaceFolders)
+    ? settings.recentWorkspaceFolders
+    : []
+  settings.set(
+    'recentWorkspaceFolders',
+    [normalized, ...previous.filter(candidate => candidate !== normalized)].slice(0, 8),
+  )
 }
 
 async function onLaunch(id) {

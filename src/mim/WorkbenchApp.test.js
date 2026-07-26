@@ -298,7 +298,6 @@ describe('WorkbenchApp', () => {
       'launcher:core:files',
       'launcher:core:routines',
       'launcher:preset:review',
-      'launcher:preset:claude',
       'launcher:app:ledger',
     ])
     expect(wrapper.get('[data-activity-surface="files"]').exists()).toBe(true)
@@ -357,18 +356,31 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
   })
 
-  it('keeps unavailable launchers visible and explains the exact problem', async () => {
+  it('keeps unavailable CLI tools out of the launch surface', async () => {
     const wrapper = await render()
-    const claude = wrapper.get('[data-sidebar-row="launcher:preset:claude"]')
 
-    expect(claude.attributes('data-launcher-available')).toBe('false')
-    expect(claude.attributes('title')).toContain('binary not found')
-    await claude.trigger('click')
-
-    expect(wrapper.get('[data-workbench-diagnostic]').text()).toContain(
-      'Claude is unavailable: binary not found',
-    )
+    expect(wrapper.find('[data-sidebar-row="launcher:preset:claude"]').exists()).toBe(false)
     expect(activityApi.resolveLauncher).not.toHaveBeenCalled()
+  })
+
+  it('switches recent projects from the sidebar and promotes the selection to most recent', async () => {
+    localStorage.setItem('mim:editor:settings:v1', JSON.stringify({
+      mimWorkspaceFolder: '/w',
+      recentWorkspaceFolders: ['/w', '/other/project'],
+    }))
+    const wrapper = await render()
+    fileApi.openWorkspaceIndex.mockClear()
+
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    const recent = wrapper.get('[data-project-switcher-menu]')
+      .findAll('[data-project-menu-item]')
+      .find(item => item.text().includes('/other/project'))
+    await recent.trigger('click')
+    await flushPromises()
+
+    expect(fileApi.openWorkspaceIndex).toHaveBeenCalledWith('/other/project')
+    expect(useSettingsStore().mimWorkspaceFolder).toBe('/other/project')
+    expect(useSettingsStore().recentWorkspaceFolders[0]).toBe('/other/project')
   })
 
   it('launches an available preset in the selected workspace', async () => {

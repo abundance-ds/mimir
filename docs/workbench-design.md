@@ -63,10 +63,14 @@ The permanent rail system is the signature:
 - Dynamic Activities retain order and use source-specific Codex, Claude, Pi,
   Terminal, App, and Routine icons with status overlays and native tooltips.
 - Row geometry stays aligned between expanded and collapsed Sidebar states.
+- The project mark opens the same teleported current/recent-folder switcher in
+  expanded and rail states; switching never requires first expanding Sidebar.
 - Apps and Activities have independent disclosure controls in the expanded
   Sidebar. Their local state survives pane collapse because the Sidebar remains
   mounted; rail mode always exposes both icon lists so collapsing a section
   cannot strand navigation. The Apps gear is a separate Settings action.
+- Archived Activities are a secondary set: a quiet counted disclosure is
+  present, but archived rows are not rendered until the user asks for them.
 - Activity and Editor never both remain railed.
 - Restore controls live in adjacent pane headers so the shell is recoverable.
 

@@ -1,10 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
 
 const FALLBACK_PRESETS = Object.freeze([
-  { id: 'codex', title: 'Codex', kind: 'agent', agentId: 'codex', args: [], env: {}, cwd: { mode: 'workspace' } },
-  { id: 'claude', title: 'Claude', kind: 'agent', agentId: 'claude', args: [], env: {}, cwd: { mode: 'workspace' } },
-  { id: 'pi', title: 'Pi', kind: 'agent', agentId: 'pi', args: [], env: {}, cwd: { mode: 'workspace' } },
-  { id: 'terminal', title: 'Terminal', kind: 'terminal', args: [], env: {}, cwd: { mode: 'workspace' } },
+  { id: 'codex', title: 'Codex', kind: 'agent', agentId: 'codex', enabled: true, args: [], env: {}, cwd: { mode: 'workspace' } },
+  { id: 'claude', title: 'Claude', kind: 'agent', agentId: 'claude', enabled: true, args: [], env: {}, cwd: { mode: 'workspace' } },
+  { id: 'pi', title: 'Pi', kind: 'agent', agentId: 'pi', enabled: true, args: [], env: {}, cwd: { mode: 'workspace' } },
+  { id: 'terminal', title: 'Terminal', kind: 'terminal', enabled: true, args: [], env: {}, cwd: { mode: 'workspace' } },
 ])
 
 export async function detectAgents() {

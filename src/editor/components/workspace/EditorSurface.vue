@@ -23,10 +23,10 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
 import { Compartment } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { EditorView, lineNumbers } from '@codemirror/view'
 import { undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
-import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
+import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineNumbersCompartment, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { fontFamilyForKey } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
@@ -227,6 +227,7 @@ onMounted(() => {
     initialSettings: {
       wordWrap: settings.editorWordWrap,
       spellCheck: settings.editorSpellCheck,
+      lineNumbers: settings.editorLineNumbers,
       isDark: settings.isDarkTheme,
     },
   })
@@ -252,6 +253,13 @@ watch(() => settings.editorSpellCheck, (on) => {
   if (!view.value) return
   view.value.dispatch({
     effects: spellcheckCompartment.reconfigure(editorInputAttributesExtension(on)),
+  })
+})
+
+watch(() => settings.editorLineNumbers, (on) => {
+  if (!view.value) return
+  view.value.dispatch({
+    effects: lineNumbersCompartment.reconfigure(on ? lineNumbers() : []),
   })
 })
 

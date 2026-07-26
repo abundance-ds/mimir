@@ -12,7 +12,8 @@ the selected Activity changes.
 - session restoration from `~/.mim/session.json`
 - dirty/save/error feedback
 - tab selection, ordering, and cross-window transfer
-- configurable font, size, line width, wrapping, spellcheck, toolbar, and theme
+- configurable font, size, line width, wrapping, paper-style line numbers,
+  spellcheck, Markdown toolbar, and theme
 
 `src/stores/files.js` owns open files and save state.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
@@ -25,6 +26,11 @@ compartments. `formatting.js` implements Markdown formatting commands.
 `livePreview.js` provides Typora-style in-editor rendering by hiding inactive
 syntax markers and replacing images, tables, and rules with widgets. There is
 no separate rendered preview pane.
+
+Line numbers are an optional compartment. Their gutter shares the editor paper
+instead of adding a separate slab or divider. `EditorToolbar.vue` is mounted
+only for Markdown/draft documents when enabled; `mousedown.prevent` keeps the
+selection owned by CodeMirror while a formatting command runs.
 
 The active document remains plain Markdown on disk.
 

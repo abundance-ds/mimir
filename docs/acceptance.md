@@ -11,6 +11,10 @@ requirements; they do not replace runtime verification.
   reordering rows or losing status.
 - Apps and Activities disclose independently in the expanded Sidebar; the live
   rail continues to expose both lists regardless of disclosure state.
+- The project switcher shows the current folder, recent folders, and an
+  explicit native folder-picker action in both Sidebar states.
+- Archived Activity rows are hidden by default. A counted disclosure reveals
+  them without mixing them into the active working set.
 - Activity and Editor can each collapse to a mounted 44px rail.
 - Activity and Editor cannot both remain railed; recovery always leaves a
   usable content surface.
@@ -40,6 +44,11 @@ requirements; they do not replace runtime verification.
   is idempotent.
 - Durable ended Activities can be renamed, archived/restored, and cleared.
 - Codex, Claude, and Pi detection reports precise unavailable states.
+- Settings > CLI tools uses compact detected-agent rows, launcher-visibility
+  switches, shell-like flag editing, progressive cwd/command/environment
+  details, and no kind/agent/cwd select maze.
+- Disabled or unavailable CLI presets do not clutter the Sidebar; they remain
+  diagnosable and configurable in Settings.
 - Supported agents resume through their CLI-specific continuation command.
 - Routine reruns resolve the current routine definition. Plain terminal and
   app-process reruns preserve their exact stored command, argv, cwd, and env.
@@ -56,6 +65,8 @@ requirements; they do not replace runtime verification.
 - Live app providers can add, update, remove, execute, and cancel tools without
   restarting the server.
 - Mim-launched Codex, Claude, and Pi receive the endpoint automatically.
+- Codex uses the app-specific `mcp_servers.mim_workbench` HTTP entry so an
+  existing stdio server named `mim` cannot make one-run configuration invalid.
 
 ## Files
 
@@ -121,6 +132,11 @@ requirements; they do not replace runtime verification.
 
 - Markdown tabs, open/save/save-as, autosave, formatting, spellcheck, live
   in-editor rendering, and session restoration remain functional.
+- The Markdown formatting toolbar is mounted in the Editor, preserves
+  CodeMirror selection/focus, responds to narrow widths, and can be hidden in
+  Settings > Editor.
+- Optional line numbers use a transparent paper gutter with aligned tabular
+  digits and reconfigure live without recreating the document.
 - Tabs expose the tablist contract, keyboard navigation, independent close
   controls, immediate overflow reveal, drag cancellation, and a stable New Tab
   landing page. Closing the final embedded tab yields the Editor pane instead

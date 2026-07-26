@@ -16,10 +16,18 @@ export const useLaunchersStore = defineStore('launchers', () => {
   const ready = ref(false)
 
   const decoratedPresets = computed(() => presets.value.map((preset) => {
-    if (preset.kind !== 'agent') return { ...preset, available: true, unavailableReason: '' }
+    if (preset.kind !== 'agent') {
+      return {
+        ...preset,
+        enabled: preset.enabled !== false,
+        available: true,
+        unavailableReason: '',
+      }
+    }
     if (String(preset.binary || '').trim()) {
       return {
         ...preset,
+        enabled: preset.enabled !== false,
         available: true,
         unavailableReason: '',
         detectedAgent: null,
@@ -29,6 +37,7 @@ export const useLaunchersStore = defineStore('launchers', () => {
     const available = Boolean(agent?.installed && agent?.binaryPath)
     return {
       ...preset,
+      enabled: preset.enabled !== false,
       available,
       unavailableReason: available
         ? ''
@@ -36,7 +45,9 @@ export const useLaunchersStore = defineStore('launchers', () => {
       detectedAgent: agent || null,
     }
   }))
-  const availablePresets = computed(() => decoratedPresets.value.filter((preset) => preset.available))
+  const availablePresets = computed(() => decoratedPresets.value.filter(
+    preset => preset.available && preset.enabled,
+  ))
   const unavailablePresets = computed(() => decoratedPresets.value.filter((preset) => !preset.available))
 
   async function load() {

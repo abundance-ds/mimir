@@ -32,6 +32,7 @@ describe('settings store', () => {
     expect(store.editorFontSize).toBe(16)
     expect(store.editorTheme).toBe('parchment')
     expect(store.editorWordWrap).toBe(true)
+    expect(store.editorLineNumbers).toBe(false)
     expect(store.editorAutoSave).toBe(true)
     expect(store.editorSpellCheck).toBe(false)
     expect(store.editorToolbarMode).toBe('top')
@@ -40,6 +41,7 @@ describe('settings store', () => {
     expect(store.aiGhostModel).toBe('auto')
     expect(store.aiInlineRewrite).toBe(true)
     expect(store.mimWorkspaceFolder).toBe('')
+    expect(store.recentWorkspaceFolders).toEqual([])
     expect(store.workbenchLayout).toEqual({
       sidebar: { state: 'expanded', width: 240 },
       activity: { state: 'expanded', width: 560 },

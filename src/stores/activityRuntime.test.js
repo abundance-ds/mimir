@@ -119,7 +119,7 @@ describe('activity runtime store', () => {
   })
 
   it.each([
-    ['codex', ['-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"'], ['resume', '--last', '-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"']],
+    ['codex', ['-c', 'mcp_servers.mim_workbench.url="http://127.0.0.1:17532/mcp"'], ['resume', '--last', '-c', 'mcp_servers.mim_workbench.url="http://127.0.0.1:17532/mcp"']],
     ['claude', ['--mcp-config', '{}'], ['--continue', '--mcp-config', '{}']],
     ['pi', ['--extension', '/tmp/mim-tools.ts'], ['--continue', '--extension', '/tmp/mim-tools.ts']],
     ['none', ['--flag'], ['--flag']],
@@ -136,7 +136,7 @@ describe('activity runtime store', () => {
       agentId: 'codex',
       resumeStrategy: 'codex',
       command: '/bin/codex',
-      args: ['--model', 'gpt-5', '-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"'],
+      args: ['--model', 'gpt-5', '-c', 'mcp_servers.mim_workbench.url="http://127.0.0.1:17532/mcp"'],
       cwd: '/w',
       env: {},
     })
@@ -149,7 +149,7 @@ describe('activity runtime store', () => {
     expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
       id: 'agent:resume-id',
       launch: expect.objectContaining({
-        args: ['resume', '--last', '--model', 'gpt-5', '-c', 'mcp_servers.mim.url="http://127.0.0.1:17532/mcp"'],
+        args: ['resume', '--last', '--model', 'gpt-5', '-c', 'mcp_servers.mim_workbench.url="http://127.0.0.1:17532/mcp"'],
       }),
     }))
   })
