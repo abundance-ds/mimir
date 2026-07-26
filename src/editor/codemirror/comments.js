@@ -7,6 +7,72 @@ import { parseCommentTags, stripCommentTags } from '../../services/comments/pars
 export const setActiveComment = StateEffect.define()
 export const commentMutation = Annotation.define()
 
+// --- Incremental reparse guard ---
+//
+// parseCommentTags needs the whole document as a string, which costs a full
+// rope-to-string copy plus a global regex scan — too expensive per keystroke.
+// changesMayAffectComments detects the common case where an edit cannot
+// possibly change the set of comment tags, so the previously parsed comments
+// can simply be mapped through the change set instead of reparsed.
+//
+// The check is deliberately conservative: a false "affected" only costs an
+// unnecessary full reparse (the old behavior), while a false "unaffected"
+// would leave stale tags. When in doubt it reports "affected".
+
+const TAG_CONTEXT_WINDOW = 16
+
+function containsAngleBracket(text) {
+  return text.indexOf('<') !== -1 || text.indexOf('>') !== -1
+}
+
+export function changesMayAffectComments(changes, startDoc, comments) {
+  let affected = false
+  changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+    if (affected) return
+    // Inserted text could introduce (part of) a tag.
+    if (containsAngleBracket(inserted.toString())) {
+      affected = true
+      return
+    }
+    // Deleted text could remove (part of) a tag, or join fragments that
+    // surround the deletion into a new tag.
+    if (toA > fromA && containsAngleBracket(startDoc.sliceString(fromA, toA))) {
+      affected = true
+      return
+    }
+    // A bracket-free edit can still complete or break a partial tag whose
+    // delimiters sit just outside the edited range (e.g. fixing a typo in
+    // `<commEnt ...>` or removing junk in `</commentx>`), so treat any edit
+    // near an existing `<` or `>` as potentially affecting tags.
+    const before = startDoc.sliceString(Math.max(0, fromA - TAG_CONTEXT_WINDOW), fromA)
+    const after = startDoc.sliceString(toA, Math.min(startDoc.length, toA + TAG_CONTEXT_WINDOW))
+    if (containsAngleBracket(before) || containsAngleBracket(after)) {
+      affected = true
+      return
+    }
+    // Edits overlapping or adjacent to a known comment span. This also covers
+    // bracket-free edits deep inside long attribute runs, whose delimiters
+    // may sit outside the context window above.
+    for (const c of comments) {
+      if (fromA <= c.tagTo && toA >= c.tagFrom) {
+        affected = true
+        return
+      }
+    }
+  })
+  return affected
+}
+
+function mapCommentsThrough(changes, comments) {
+  return comments.map(c => ({
+    ...c,
+    tagFrom: changes.mapPos(c.tagFrom, 1),
+    tagTo: changes.mapPos(c.tagTo, -1),
+    contentFrom: changes.mapPos(c.contentFrom, 1),
+    contentTo: changes.mapPos(c.contentTo, -1),
+  }))
+}
+
 // --- StateField ---
 
 export const commentTagField = StateField.define({
@@ -18,8 +84,14 @@ export const commentTagField = StateField.define({
     let { comments, activeId } = value
 
     if (tr.docChanged) {
-      const parsed = parseCommentTags(tr.state.doc.toString())
-      comments = parsed.comments
+      if (changesMayAffectComments(tr.changes, tr.startState.doc, comments)) {
+        // Safety net: full reparse whenever the edit could touch a tag.
+        const parsed = parseCommentTags(tr.state.doc.toString())
+        comments = parsed.comments
+      } else if (comments.length > 0) {
+        // Edit is provably outside every tag: map positions, keep the rest.
+        comments = mapCommentsThrough(tr.changes, comments)
+      }
     }
 
     for (const effect of tr.effects) {
@@ -671,6 +743,20 @@ function handleDelete(view) {
 const commentEmptyCleanup = EditorState.transactionFilter.of((tr) => {
   if (!tr.docChanged) return tr
   if (tr.annotation(commentMutation)) return tr
+
+  // Cheap bail-out: if the previous state has no empty comment to sweep and
+  // the edit provably cannot affect comment tags, no cleanup can be needed —
+  // skip the full-document copy + reparse below. Empty comments linger from
+  // annotated mutations (which skip this filter), so their presence forces
+  // the full path on the next unannotated edit, as before.
+  const prev = tr.startState.field(commentTagField, false)
+  if (
+    prev &&
+    !prev.comments.some(c => c.contentFrom === c.contentTo) &&
+    !changesMayAffectComments(tr.changes, tr.startState.doc, prev.comments)
+  ) {
+    return tr
+  }
 
   const newDoc = tr.newDoc.toString()
   const newComments = parseCommentTags(newDoc).comments

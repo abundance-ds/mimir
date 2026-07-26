@@ -1,7 +1,7 @@
 import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemirror/view'
 import { syntaxTree } from '@codemirror/language'
 import { RangeSetBuilder, StateField, Prec } from '@codemirror/state'
-import { invoke } from '@tauri-apps/api/core'
+import { readBinaryFile } from '../../services/fileSystem.js'
 
 const imageCache = new Map()
 
@@ -174,9 +174,10 @@ class ImageWidget extends WidgetType {
       wrapper.appendChild(placeholder)
 
       const absPath = this.absPath
-      invoke('read_binary_file', { path: absPath })
-        .then(b64 => {
-          const dataUrl = `data:${getMimeType(absPath)};base64,${b64}`
+      readBinaryFile(absPath)
+        .then(bytes => {
+          const blob = new Blob([bytes], { type: getMimeType(absPath) })
+          const dataUrl = URL.createObjectURL(blob)
           imageCache.set(absPath, dataUrl)
           img.src = dataUrl
           wrapper.appendChild(img)

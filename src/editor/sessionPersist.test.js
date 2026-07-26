@@ -96,6 +96,26 @@ describe('sessionPersist', () => {
     ])
   })
 
+  it('keeps transient PDF and external previews out of the restored editor session', () => {
+    const state = makeState({
+      openFiles: ref([
+        { path: '/notes.md', content: 'notes', kind: 'text' },
+        { path: '/report.pdf', content: '', kind: 'pdf', preview: true },
+        { path: '/photo.png', content: '', kind: 'external' },
+        { path: '/later.md', content: 'later', kind: 'text' },
+      ]),
+      activeFileIndex: ref(1),
+    })
+
+    expect(createSessionSnapshot(state)).toMatchObject({
+      openFiles: [
+        { path: '/notes.md' },
+        { path: '/later.md' },
+      ],
+      activeFileIndex: 1,
+    })
+  })
+
   it('does not resurrect path-backed or untitled edits explicitly discarded on quit', () => {
     const pathDraft = { path: '/dirty.md', content: 'discard me', dirty: true }
     const untitled = { path: null, content: 'discard draft', dirty: true, draftId: 'draft-x' }

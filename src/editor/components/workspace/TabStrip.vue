@@ -29,6 +29,7 @@
                 :class="[
                     activeTab === i ? 'tab-active' : 'tab-inactive',
                     tab.type === 'review' ? 'tab-review' : '',
+                    tab.preview ? 'italic' : '',
                 ]"
                 role="tab"
                 :aria-selected="activeTab === i"

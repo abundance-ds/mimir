@@ -18,6 +18,7 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
   const discarded = new Set(discardedFiles.map(fileIdentity))
 
   for (const [sourceIndex, file] of files.entries()) {
+    if (file.kind && file.kind !== 'text') continue
     if (discarded.has(fileIdentity(file))) {
       // "Don't Save" means disk is authoritative for path-backed files and
       // an untitled draft must not resurrect on the next launch.

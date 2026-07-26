@@ -7,7 +7,7 @@
       :embedded="embedded"
       :showAppMenus="showAppMenus"
       :recentFiles="fileManager.recentFiles"
-      :canSave="Boolean(currentFile)"
+      :canSave="Boolean(currentFile) && currentFile?.kind !== 'pdf' && currentFile?.kind !== 'external'"
       :hasSelection="Boolean(selectionText)"
       :tabs="displayTabs"
       :activeTab="displayActiveTab"
@@ -31,7 +31,7 @@
     <div class="editor-body flex-1 flex min-h-0 bg-chrome">
       <div class="editor-workspace flex-1 flex flex-col min-w-0">
         <InlineAI
-          v-if="inlineAIState"
+          v-if="inlineAIState && !isResourcePreview"
           :key="inlineAIKey"
           :selection="inlineAIState"
           :documentId="documentIdFromPath(currentFile?.path)"
@@ -70,13 +70,17 @@
             ref="diffViewRef"
             @accept="onDiffChunksResolved"
           />
+          <FilePreviewPage
+            v-if="isResourcePreview && !diffStore.active"
+            :file="currentFile"
+          />
           <NewTabPage
-            v-if="isNewTabPage && !diffStore.active"
+            v-else-if="isNewTabPage && !diffStore.active"
             @activated="restoreEditorFocus"
           />
           <EditorSurface
             ref="editorSurfaceRef"
-            v-show="!isNewTabPage && (!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
+            v-show="!isResourcePreview && !isNewTabPage && (!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :zoomLevel="state.zoomLevel"
@@ -96,6 +100,7 @@
         </div>
 
         <AppFooter
+          v-if="!isResourcePreview"
           :zoomLevel="state.zoomLevel"
           :selectionText="selectionText"
           :stats="documentStats"
@@ -220,16 +225,12 @@ import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts.js'
 import { useFileStore } from '../stores/files.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useDocumentBridge } from './composables/useDocumentBridge.js'
-import { installNativeEditorMenu, shouldInstallNativeEditorMenu } from './nativeMenu.js'
 import { isTauriRuntime, platformKind } from '../shared/platform.js'
 import { relativeTime } from '../shared/time.js'
 import { basename, parentPath } from '../shared/utils/path.js'
 import { readFile } from '../services/fileSystem.js'
-import { loadSession, saveSession } from '../services/session.js'
-import { createSessionPersist, createSessionSnapshot } from './sessionPersist.js'
-import { loadSessionEntries, normalizeSessionEntries } from './sessionRestore.js'
+import { inspectWorkspaceEntry } from '../services/workspaceFileOperations.js'
 import { createWindowCloseGuard } from './windowCloseGuard.js'
-import { completeNativeQuit } from './appQuit.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
 import { commentsExtension, setActiveComment as setActiveCommentEffect, getCommentsFromState, commentMutation } from './codemirror/comments.js'
@@ -237,7 +238,9 @@ import { escapeAttr } from '../services/comments/parser.js'
 import { buildCommentsPrompt } from '../services/comments/prompt.js'
 import { EditorView } from '@codemirror/view'
 import { useCommentsStore } from '../stores/comments.js'
-import { useProposalBridge, computeDiffFromReview, computeCompoundDiff } from './composables/useProposalBridge.js'
+import { useEditorProposalLifecycle } from './composables/useEditorProposalLifecycle.js'
+import { useEditorNativeLifecycle } from './composables/useEditorNativeLifecycle.js'
+import { useEditorSessionLifecycle } from './composables/useEditorSessionLifecycle.js'
 import { useFileOpen } from './composables/useFileOpen.js'
 import { useContentSync } from './composables/useContentSync.js'
 import { useCommentMutations } from './composables/useCommentMutations.js'
@@ -259,6 +262,7 @@ import DiffBar from './components/workspace/DiffBar.vue'
 import DiffView from './components/workspace/DiffView.vue'
 import BatchDiffView from './components/workspace/BatchDiffView.vue'
 import NewTabPage from './components/workspace/NewTabPage.vue'
+import FilePreviewPage from './components/workspace/FilePreviewPage.vue'
 import { useDiffStore } from '../stores/diff.js'
 
 const props = defineProps({
@@ -295,9 +299,11 @@ const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
 const isNewTabPage = computed(() => currentFile.value?.newTab === true)
+const isResourcePreview = computed(() => ['pdf', 'external'].includes(currentFile.value?.kind))
 const editorToolbarVisible = computed(() => (
   editorSettings.editorToolbarMode !== 'none'
   && !isNewTabPage.value
+  && !isResourcePreview.value
   && !diffStore.active
   && isMarkdownPath(currentFile.value?.path)
 ))
@@ -317,9 +323,7 @@ const editorModalOpen = computed(() => Boolean(
 let commentGateResolve = null
 let modalReturnFocus = null
 
-let sessionPersistCleanup = null
 let editorDisposed = false
-let editorHydrationPromise = Promise.resolve()
 
 function isMarkdownPath(path) {
   if (!path) return true
@@ -421,148 +425,17 @@ provide('commentMutations', commentMutations)
 
 // --- Proposal bridge (cross-window) ---
 
-const proposalWindowLabel = typeof window !== 'undefined'
-  ? new URLSearchParams(window.location.search).get('window') || ''
-  : ''
-let proposalRegisterTimer = null
-
-function scheduleProposalEditorRegistration() {
-  if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) return
-  clearTimeout(proposalRegisterTimer)
-  proposalRegisterTimer = setTimeout(async () => {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('proposal_register_editor', {
-        windowLabel: proposalWindowLabel,
-        documents: openFiles.value.map((file, index) => ({
-          path: file.path || '',
-          dirty: Boolean(file.dirty),
-          active: index === activeFileIndex.value,
-        })),
-      })
-    } catch {}
-  }, 50)
-}
-
-function unregisterProposalEditor() {
-  if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) return
-  import('@tauri-apps/api/core')
-    .then(({ invoke }) => invoke('proposal_register_editor', {
-      windowLabel: proposalWindowLabel,
-      documents: [],
-    }))
-    .catch(() => {})
-}
-
-const proposalBridge = useProposalBridge({
-  getDocContent: () => currentEditorContent(),
-  applyChange: (from, to, text) => editorSurfaceRef.value?.replaceRange(from, to, text),
-  getDocPath: () => currentFile.value?.path ?? '',
-  activateDiff: (original, modified, opts) => activateDiffForCurrentFile(original, modified, opts),
-  activateBatchDiff: (fileList, meta) => activateBatchDiff(fileList, meta),
-  openFileForDiff: (path, content) => fileManager.openFile(path, content),
-  stashFileReviews: (review) => fileManager.setFileReviews(currentFile.value, [review]),
+const proposalLifecycle = useEditorProposalLifecycle({
+  fileManager,
+  diffStore,
+  openFiles,
+  activeFileIndex,
+  currentEditorContent: () => currentEditorContent(),
+  flushEditorContent: (...args) => flushEditorContent(...args),
+  editorSurfaceRef,
+  activateDiff: (...args) => activateDiffForCurrentFile(...args),
+  activateBatchDiff: (...args) => activateBatchDiff(...args),
 })
-
-// Listen for proposal changes from the panel (via Rust broadcast)
-if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
-  import('@tauri-apps/api/event').then(({ listen }) => {
-    listen('mim://file-updated', (event) => {
-      const { path, content } = event.payload || {}
-      if (!path) return
-      const file = fileManager.openFiles.find(f => f.path === path)
-      if (!file) return
-      file.content = content
-      file.dirty = false
-      fileManager.clearFileReviews(file)
-      if (fileManager.currentFile === file && diffStore.active) {
-        diffStore.deactivate()
-      }
-    })
-
-    listen('mim://proposals-changed', (event) => {
-      const proposals = event.payload || []
-      const file = fileManager.currentFile
-      if (!file?.path) return
-      flushEditorContent()
-
-      const matches = proposals.filter(p =>
-        p.path === file.path || p.absolutePath === file.path
-      )
-
-      if (matches.length > 0 && !file.reviews) {
-        const reviews = matches.map(m => ({
-          proposalId: m.id,
-          sessionId: m.threadId || m.sessionId || '',
-          targetText: m.targetText || '',
-          replacement: m.replacement || '',
-          path: m.absolutePath || m.path,
-          type: m.type || 'edit',
-        }))
-        fileManager.setFileReviews(file, reviews)
-        activateDiffFromReviews(file)
-      } else if (matches.length === 0 && file.reviews) {
-        fileManager.clearFileReviews(file)
-        diffStore.deactivate()
-      }
-    })
-  })
-}
-
-function activateDiffFromReviews(file) {
-  if (!file?.reviews?.length) return false
-  if (fileManager.currentFile === file) flushEditorContent()
-  const content = file.content || ''
-  const diff = file.reviews.length === 1
-    ? computeDiffFromReview(file.reviews[0], content)
-    : computeCompoundDiff(file.reviews, content)
-  if (diff) {
-    const ids = file.reviews.map(r => r.proposalId)
-    const r = file.reviews[0]
-    diffStore.activate({ original: diff.original, modified: diff.modified, path: file.path || '', review: { ids, sessionId: r.sessionId, path: r.path } })
-    return true
-  }
-  fileManager.clearFileReviews(file)
-  return false
-}
-
-async function checkProposalsForFile(file) {
-  if (!file?.path || file.reviews) return
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const proposals = await invoke('get_proposals_for_path', { path: file.path })
-    if (proposals.length === 0) return
-    const reviews = proposals.map(p => ({
-      proposalId: p.id,
-      sessionId: p.threadId || p.sessionId || '',
-      targetText: p.targetText || '',
-      replacement: p.replacement || '',
-      path: p.absolutePath || p.path,
-      type: p.type || 'edit',
-    }))
-    fileManager.setFileReviews(file, reviews)
-    activateDiffFromReviews(file)
-  } catch {}
-}
-
-watch(() => fileManager.activeFileIndex, () => {
-  const file = fileManager.currentFile
-  if (file?.reviews) {
-    if (!activateDiffFromReviews(file)) diffStore.deactivate()
-  } else if (diffStore.active && diffStore.reviewMeta?.ids) {
-    diffStore.deactivate()
-  }
-  checkProposalsForFile(file)
-})
-
-watch(
-  () => [
-    activeFileIndex.value,
-    ...openFiles.value.map(file => `${file.path || ''}:${file.dirty ? '1' : '0'}`),
-  ].join('|'),
-  scheduleProposalEditorRegistration,
-  { immediate: true },
-)
 
 const editorExtensions = computed(() => [
   commentsExtension({
@@ -600,10 +473,6 @@ const editorExtensions = computed(() => [
 
 // --- Content sync + save ---
 
-let nativeMenuTimer = null
-let unlistenNativeMenuFocus = null
-let unlistenQuitRequested = null
-
 const contentSync = useContentSync({
   editorSurfaceRef,
   currentFile,
@@ -611,6 +480,19 @@ const contentSync = useContentSync({
   documentBridge,
 })
 const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot } = contentSync
+
+const editorSession = useEditorSessionLifecycle({
+  fileManager,
+  openFiles,
+  activeFileIndex,
+  readFile,
+  getZoomLevel: () => state.zoomLevel,
+  setZoomLevel: value => {
+    state.zoomLevel = value
+  },
+  flushEditorContent,
+  onError: reportSessionError,
+})
 
 async function saveCurrentFile({ source = 'manual', mode = 'save', file = null } = {}) {
   const targetFile = file || currentFile.value
@@ -689,22 +571,10 @@ const windowCloseGuard = createWindowCloseGuard({
   flushContent: () => flushEditorContent({ bridge: 'flush' }),
   getDirtyFiles: () => openFiles.value.filter(file => file.dirty),
   confirmFile: file => confirmFileClose(file),
-  awaitReady: () => editorHydrationPromise,
+  awaitReady: editorSession.awaitReady,
   onError: reportSessionError,
   beforeNativeClose: () => editorSettings.flush(),
-  flushSession: async (discardedFiles = []) => {
-    const snapshot = createSessionSnapshot({
-      openFiles,
-      recentFiles: computed(() => fileManager.recentFiles),
-      activeFileIndex,
-      zoomLevel: computed(() => state.zoomLevel),
-    }, { discardedFiles })
-    if (sessionPersistCleanup) {
-      await sessionPersistCleanup.flush(snapshot)
-      return
-    }
-    await saveSession(snapshot)
-  },
+  flushSession: editorSession.flush,
 })
 
 async function requestEditorWindowClose(options) {
@@ -718,7 +588,7 @@ async function closeEditorTab(index) {
   if (await dismissEditorSurface()) return false
   const closed = await onCloseTab(index)
   if (closed) {
-    await Promise.resolve(sessionPersistCleanup?.flush?.()).catch(reportSessionError)
+    await editorSession.flush().catch(reportSessionError)
   }
   if (openFiles.value.length) restoreEditorFocus()
   return closed
@@ -933,6 +803,15 @@ watch(() => state.settingsOpen, (open) => {
   if (!open) settingsInitialSection.value = 'appearance'
 })
 
+const nativeLifecycle = useEditorNativeLifecycle({
+  fileManager,
+  editorSettings,
+  windowCloseGuard,
+  getActions: nativeMenuActions,
+  onError: reportSessionError,
+})
+const { requestAppQuit } = nativeLifecycle
+
 function nativeMenuActions() {
   return {
     newFile: createBlankFile,
@@ -950,69 +829,6 @@ function nativeMenuActions() {
     openSettings,
   }
 }
-
-async function syncNativeMenu() {
-  await installNativeEditorMenu({
-    recentFiles: fileManager.recentFiles,
-    actions: nativeMenuActions(),
-  })
-}
-
-function scheduleNativeMenuSync() {
-  if (!shouldInstallNativeEditorMenu()) return
-  clearTimeout(nativeMenuTimer)
-  nativeMenuTimer = setTimeout(() => {
-    syncNativeMenu().catch((error) => {
-      console.error('[nativeMenu] sync failed', error)
-    })
-  }, 80)
-}
-
-async function bindNativeMenuFocusSync() {
-  if (!shouldInstallNativeEditorMenu()) return
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    const unlisten = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-      if (focused) syncNativeMenu()
-    })
-    if (editorDisposed) {
-      unlisten()
-      return
-    }
-    unlistenNativeMenuFocus = unlisten
-  } catch (error) {
-    console.error('[nativeMenu] focus binding failed', error)
-  }
-}
-
-async function requestAppQuit() {
-  if (!isTauriRuntime()) return requestEditorWindowClose()
-  return completeNativeQuit({
-    requestClose: options => windowCloseGuard.requestClose(options),
-    flushSettings: () => editorSettings.flush(),
-    confirmQuit: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('app_quit_confirmed')
-    },
-  })
-}
-
-async function bindNativeQuitGuard() {
-  if (!isTauriRuntime()) return
-  const { listen } = await import('@tauri-apps/api/event')
-  const stop = await listen('mim://quit-requested', () => {
-    void requestAppQuit().catch(reportSessionError)
-  })
-  if (editorDisposed) {
-    stop()
-    return
-  }
-  unlistenQuitRequested = stop
-}
-
-watch(() => fileManager.recentFiles.slice(), () => {
-  scheduleNativeMenuSync()
-})
 
 // --- Comments: Active comment sync (Vue→CM6) ---
 watch(() => commentManager.activeCommentId, (id) => {
@@ -1255,17 +1071,58 @@ async function rejectDiffAndFocus() {
   restoreEditorFocus()
 }
 
-async function mimOpen(path) {
+async function mimOpen(path, { preview = false, entry = null } = {}) {
   if (!path) throw new Error('path is required')
   flushEditorContent({ bridge: 'flush' })
-  const content = await readFile(path)
-  await fileManager.openFile(path, content)
+  let inspected = entry?.openBehavior ? entry : null
+  if (!inspected) {
+    try {
+      inspected = await inspectWorkspaceEntry(path)
+    } catch {
+      // Settings definitions and other trusted editor routes can live outside
+      // the active workspace, where the workspace-scoped inspector correctly
+      // refuses access. Preserve those text routes without weakening the
+      // workspace boundary used by Files.
+    }
+  }
+  inspected ||= fallbackOpenEntry(path)
+  const kind = inspected.openBehavior || (
+    inspected.textReadable === false ? 'external' : 'text'
+  )
+  const content = kind === 'text' ? await readFile(path) : ''
+  await fileManager.openFile(path, content, {
+    kind,
+    preview,
+    meta: inspected,
+  })
   await nextTick()
-  editorSurfaceRef.value?.scrollToPos(0)
+  if (kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
   emit('navigateEditor', { path })
-  restoreEditorFocus()
+  if (kind === 'text') restoreEditorFocus()
   return mimActive()
 }
+
+function fallbackOpenEntry(path) {
+  const name = basename(path)
+  const extension = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+  const openBehavior = extension === 'pdf'
+    ? 'pdf'
+    : FALLBACK_EXTERNAL_EXTENSIONS.has(extension) ? 'external' : 'text'
+  return {
+    path,
+    name,
+    isDirectory: false,
+    textReadable: openBehavior === 'text',
+    openBehavior,
+  }
+}
+
+const FALLBACK_EXTERNAL_EXTENSIONS = new Set([
+  '7z', 'avi', 'bmp', 'db', 'dll', 'dylib', 'eot', 'exe', 'gif', 'gz', 'ico',
+  'jar', 'jpeg', 'jpg', 'mkv', 'mov', 'mp3', 'mp4', 'otf', 'png', 'rar', 'so',
+  'sqlite', 'sqlite3', 'tar', 'tiff', 'ttf', 'wav', 'wasm', 'webp', 'woff',
+  'woff2', 'zip',
+])
 
 function mimActive({ includeContent = false } = {}) {
   flushEditorContent({ bridge: 'flush' })
@@ -1276,6 +1133,8 @@ function mimActive({ includeContent = false } = {}) {
     path: file.path || null,
     name: editorTabs.value[activeFileIndex.value]?.name || basename(file.path),
     dirty: Boolean(file.dirty),
+    kind: file.kind || 'text',
+    preview: Boolean(file.preview),
     index: activeFileIndex.value,
     cursor: editorSurfaceRef.value?.getCursor?.() || null,
     content: includeContent ? content : undefined,
@@ -1291,6 +1150,34 @@ function mimTabs() {
     dirty: Boolean(file.dirty),
     active: index === activeFileIndex.value,
   }))
+}
+
+function mimState({ includeContent = false } = {}) {
+  const active = mimActive({ includeContent })
+  const tabs = mimTabs()
+  const selection = mimSelection()
+  const view = editorSurfaceRef.value?.getView?.()
+  const comments = view ? getCommentsFromState(view.state) : []
+  const visible = view?.visibleRanges?.[0]
+  const visibleRange = visible
+    ? {
+        from: visible.from,
+        to: visible.to,
+        fromLine: view.state.doc.lineAt(visible.from).number,
+        toLine: view.state.doc.lineAt(visible.to).number,
+      }
+    : null
+  return {
+    active,
+    tabs,
+    selection,
+    visibleRange,
+    comments: {
+      total: comments.length,
+      unresolved: comments.filter(comment => comment.status !== 'resolved').length,
+      resolved: comments.filter(comment => comment.status === 'resolved').length,
+    },
+  }
 }
 
 function mimSelection() {
@@ -1440,6 +1327,7 @@ function mimOpenSettings(section = 'appearance') {
 
 defineExpose({
   mimOpen,
+  mimState,
   mimActive,
   mimTabs,
   mimSelection,
@@ -1486,13 +1374,6 @@ useKeyboardShortcuts({
   editorHasFocus: () => Boolean(editorSurfaceRef.value?.hasFocus?.()),
 })
 
-// --- Session persistence ---
-
-function onBeforeUnload() {
-  flushEditorContent({ bridge: 'flush' })
-  void Promise.resolve(sessionPersistCleanup?.flush?.()).catch(reportSessionError)
-}
-
 function onEditorKeydown(event) {
   if (event.key === 'Escape' && diffStore.active) {
     event.preventDefault()
@@ -1530,69 +1411,12 @@ function onEditorKeydown(event) {
 
 onMounted(async () => {
   editorDisposed = false
-  window.addEventListener('beforeunload', onBeforeUnload)
+  editorSession.beginMount()
+  window.addEventListener('beforeunload', editorSession.beforeUnload)
   document.addEventListener('keydown', onEditorKeydown)
   void windowCloseGuard.setup().catch(reportSessionError)
 
-  editorHydrationPromise = fileManager.hydrateSession(async () => {
-    const session = await loadSession()
-    if (session?.recentFiles?.length) {
-      fileManager.setRecentFiles(session.recentFiles)
-    }
-    if (session?.openFiles?.length) {
-      const restored = normalizeSessionEntries(
-        session.openFiles,
-        session.activeFileIndex,
-      )
-      const loadedEntries = await loadSessionEntries(restored.entries, readFile)
-      for (const { entry, content, error } of loadedEntries) {
-        const path = entry.path
-        if (path) {
-          if (!error) {
-            fileManager.restorePath({
-              path,
-              content: entry.dirty ? entry.content : content,
-              dirty: entry.dirty,
-            })
-          } else if (entry.dirty) {
-            // The path disappeared after the last session, but the user's
-            // unsaved text is still recoverable as a stable draft.
-            fileManager.restoreDraft({ content: entry.content })
-          }
-        } else {
-          fileManager.restoreDraft(entry)
-        }
-      }
-      fileManager.activateSessionEntry(restored.activeEntry)
-      if (session.zoomLevel) state.zoomLevel = session.zoomLevel
-      if (restored.changed) {
-        // Commit legacy migration immediately. Persistence starts after restore
-        // and is intentionally not immediate, so without this write a corrupt
-        // multi-clone session could remain on disk until an unrelated edit.
-        try {
-          await saveSession(createSessionSnapshot({
-            openFiles,
-            recentFiles: computed(() => fileManager.recentFiles),
-            activeFileIndex,
-            zoomLevel: computed(() => state.zoomLevel),
-          }))
-        } catch (error) {
-          console.error('[session] could not persist migrated session', error)
-        }
-      }
-    }
-
-    // Creating the fallback is part of the shared transaction too. A new
-    // mount must never race a pending disk restore by fabricating a blank.
-    if (!fileManager.hasOpenFiles) fileManager.newFile()
-  })
-  try {
-    await editorHydrationPromise
-  } catch (error) {
-    reportSessionError(error)
-    if (!fileManager.hasOpenFiles) fileManager.newFile()
-    editorHydrationPromise = Promise.resolve(false)
-  }
+  await editorSession.hydrate()
 
   // An async onMounted callback is not canceled by Vue. If this component was
   // replaced during hydration, the replacement owns persistence and native
@@ -1600,21 +1424,12 @@ onMounted(async () => {
   if (editorDisposed) return
 
   // Persist session state reactively (debounced on any change)
-  sessionPersistCleanup = createSessionPersist({
-    openFiles,
-    recentFiles: computed(() => fileManager.recentFiles),
-    activeFileIndex,
-    zoomLevel: computed(() => state.zoomLevel),
-  }, saveSession)
+  editorSession.startPersistence()
 
   await nativeFileOpen.setup()
   if (editorDisposed) return
   syncOpenFileSnapshot()
-  await syncNativeMenu()
-  if (editorDisposed) return
-  await bindNativeMenuFocusSync()
-  if (editorDisposed) return
-  await bindNativeQuitGuard()
+  await nativeLifecycle.start()
   if (editorDisposed) return
 
   // Dev: expose diff activation for console testing
@@ -1636,21 +1451,16 @@ onUnmounted(() => {
   // Synchronize the latest CodeMirror transaction before canceling its
   // debounce and before any replacement HMR instance reads the shared store.
   flushEditorContent({ bridge: 'unmount' })
-  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('beforeunload', editorSession.beforeUnload)
   document.removeEventListener('keydown', onEditorKeydown)
   windowCloseGuard.dispose()
   autoSave.clear()
   contentSync.dispose()
-  clearTimeout(nativeMenuTimer)
-  clearTimeout(proposalRegisterTimer)
-  unregisterProposalEditor()
+  nativeLifecycle.dispose()
+  proposalLifecycle.dispose()
   saveFeedback.dispose()
-  if (unlistenNativeMenuFocus) unlistenNativeMenuFocus()
-  if (unlistenQuitRequested) unlistenQuitRequested()
   releaseEditorSettingsSync?.()
-  if (sessionPersistCleanup) {
-    void Promise.resolve(sessionPersistCleanup()).catch(reportSessionError)
-  }
+  editorSession.dispose()
   documentBridge.dispose()
 })
 </script>
