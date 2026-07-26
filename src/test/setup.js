@@ -31,8 +31,12 @@ const VALID_TAURI_COMMANDS = new Set([
   'git_status',
   // IPC / window coordination (top-level)
   'proposal_create', 'proposal_list', 'proposal_register_editor', 'proposal_apply', 'proposal_reject',
-  'proposal_respond', 'notify_file_updated', 'get_proposals_for_path',
-  'document_context_send', 'comments_submit', 'settings_changed', 'focus_main_window',
+  'proposal_respond', 'push_proposals', 'notify_file_updated', 'get_proposals_for_path',
+  // document_context_send has no Rust command but is still invoked by
+  // useDocumentBridge.js behind a silent catch; keeping it mocked stops
+  // editor tests from tripping the unknown-command guard. Tracked debt —
+  // see scripts/check-tauri-commands.mjs and docs/reference/issues.md.
+  'document_context_send', 'settings_changed',
   'app_quit_confirmed',
   // spell
   'spell_suggest',
@@ -65,7 +69,6 @@ const VALID_TAURI_COMMANDS = new Set([
   'workspace_file_list_directory', 'workspace_file_inspect', 'workspace_file_create', 'workspace_file_rename',
   'workspace_file_duplicate', 'workspace_file_trash', 'workspace_file_open_native',
   'workspace_file_reveal',
-  'search_file_content',
   // reveal
   'reveal_in_finder',
 ])

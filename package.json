@@ -10,6 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/build.mjs",
     "docs:check": "node scripts/check-docs.mjs",
+    "check:commands": "node scripts/check-tauri-commands.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "test": "node scripts/test.mjs",

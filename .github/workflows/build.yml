@@ -49,6 +49,9 @@ jobs:
       - name: Check documentation
         run: npm run docs:check
 
+      - name: Check Tauri command sync
+        run: npm run check:commands
+
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
