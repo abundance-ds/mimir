@@ -167,8 +167,8 @@
     fs: Object.freeze({
       async readText(path, encoding) {
         if (encoding && encoding.toLowerCase() !== 'utf-8') {
-          const b64 = await invoke('read_binary_file', { path })
-          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+          const result = await invoke('read_binary_file', { path })
+          const bytes = binaryResultToBytes(result)
           if (encoding.toLowerCase() === 'latin1' || encoding.toLowerCase() === 'iso-8859-1') {
             return Array.from(bytes, b => String.fromCharCode(b)).join('')
           }
@@ -244,5 +244,17 @@
   window.mim = sdk
   if (isIframe) {
     window.parent.postMessage({ type: 'mim:ready', appId }, '*')
+  }
+
+  function binaryResultToBytes(result) {
+    if (result instanceof ArrayBuffer) return new Uint8Array(result)
+    if (ArrayBuffer.isView(result)) {
+      return new Uint8Array(result.buffer, result.byteOffset, result.byteLength)
+    }
+    if (Array.isArray(result)) return Uint8Array.from(result)
+    if (typeof result === 'string') {
+      return Uint8Array.from(atob(result), character => character.charCodeAt(0))
+    }
+    throw new Error('The native file reader returned an unsupported binary payload.')
   }
 })()
