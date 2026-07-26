@@ -457,3 +457,537 @@ fn extract_openai_output_text(value: &Value) -> String {
         .collect::<Vec<_>>()
         .join("")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(value: Value) -> AiModelConfig {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn provider(url: &str) -> AiProviderConfig {
+        AiProviderConfig {
+            url: url.to_string(),
+            api_key_env: "TEST_KEY".to_string(),
+        }
+    }
+
+    fn message(role: &str, content: &str) -> AiMessage {
+        AiMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+        }
+    }
+
+    fn request(messages: Vec<AiMessage>) -> AiGenerateRequest {
+        AiGenerateRequest {
+            correlation_id: None,
+            feature: "chat".to_string(),
+            model_id: None,
+            workspace_id: None,
+            document_id: None,
+            system: None,
+            messages,
+            response_format: None,
+            stream: None,
+            max_output_tokens: None,
+            temperature: None,
+            metadata: None,
+            provider_options: None,
+        }
+    }
+
+    fn anthropic_model() -> AiModelConfig {
+        model(serde_json::json!({
+            "id": "claude-test",
+            "name": "Claude Test",
+            "provider": "anthropic",
+            "model": "claude-test-1"
+        }))
+    }
+
+    #[test]
+    fn anthropic_request_shapes_auth_headers_and_body() {
+        let mut req = request(vec![
+            message("system", "Rule one"),
+            message("user", "hi"),
+            message("tool", "tool output"),
+        ]);
+        req.system = Some("  Base  ".to_string());
+        req.temperature = Some(0.25);
+
+        let built = build_provider_request(
+            &req,
+            &anthropic_model(),
+            &provider("https://api.anthropic.com/v1/messages"),
+            "KEY",
+        )
+        .unwrap();
+
+        assert_eq!(built.url, "https://api.anthropic.com/v1/messages");
+        assert_eq!(built.headers.get("x-api-key").unwrap(), "KEY");
+        assert_eq!(built.headers.get("anthropic-version").unwrap(), "2023-06-01");
+        assert_eq!(built.headers.get("content-type").unwrap(), "application/json");
+
+        assert_eq!(built.body["model"], "claude-test-1");
+        assert_eq!(built.body["max_tokens"], 1200);
+        assert_eq!(built.body["temperature"], 0.25);
+        // request.system and system-role messages merge into one system string.
+        assert_eq!(built.body["system"], "Base\n\nRule one");
+        // System messages are filtered out; unknown roles collapse to "user".
+        let messages = built.body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "hi");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "tool output");
+    }
+
+    #[test]
+    fn anthropic_thinking_budget_raises_max_tokens_and_drops_temperature() {
+        let mut req = request(vec![message("user", "hi")]);
+        req.max_output_tokens = Some(1000);
+        req.temperature = Some(0.5);
+        let model = model(serde_json::json!({
+            "id": "claude-test",
+            "name": "Claude Test",
+            "provider": "anthropic",
+            "model": "claude-test-1",
+            "control": {
+                "kind": "thinking",
+                "label": "Thinking",
+                "default": "deep",
+                "options": [
+                    { "id": "none", "label": "Off" },
+                    { "id": "deep", "label": "Deep", "budgetTokens": 2048 }
+                ]
+            }
+        }));
+
+        let built =
+            build_provider_request(&req, &model, &provider("https://api.anthropic.com/v1"), "K")
+                .unwrap();
+        assert_eq!(built.body["thinking"]["type"], "enabled");
+        assert_eq!(built.body["thinking"]["budget_tokens"], 2048);
+        // max_tokens must exceed the thinking budget.
+        assert_eq!(built.body["max_tokens"], 2049);
+        // Temperature is not sent alongside thinking.
+        assert!(built.body.get("temperature").is_none());
+
+        // A larger max_tokens is preserved as-is.
+        req.max_output_tokens = Some(4000);
+        let built =
+            build_provider_request(&req, &model, &provider("https://api.anthropic.com/v1"), "K")
+                .unwrap();
+        assert_eq!(built.body["max_tokens"], 4000);
+
+        // Selecting the "none" option disables thinking and restores temperature.
+        req.provider_options = Some(serde_json::json!({ "controlId": "none" }));
+        let built =
+            build_provider_request(&req, &model, &provider("https://api.anthropic.com/v1"), "K")
+                .unwrap();
+        assert_eq!(built.body["thinking"]["type"], "disabled");
+        assert_eq!(built.body["temperature"], 0.5);
+    }
+
+    #[test]
+    fn anthropic_effort_control_maps_to_adaptive_thinking() {
+        let mut req = request(vec![message("user", "hi")]);
+        req.temperature = Some(0.5);
+        let model = model(serde_json::json!({
+            "id": "claude-test",
+            "name": "Claude Test",
+            "provider": "anthropic",
+            "model": "claude-test-1",
+            "control": {
+                "kind": "effort",
+                "label": "Effort",
+                "default": "high",
+                "options": [
+                    { "id": "none", "label": "Off" },
+                    { "id": "high", "label": "High", "providerValue": "maximum" }
+                ]
+            }
+        }));
+
+        let built =
+            build_provider_request(&req, &model, &provider("https://api.anthropic.com/v1"), "K")
+                .unwrap();
+        assert_eq!(built.body["thinking"]["type"], "adaptive");
+        // providerValue overrides the option id when present.
+        assert_eq!(built.body["output_config"]["effort"], "maximum");
+        assert!(built.body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn openai_request_uses_bearer_auth_and_prepends_system() {
+        let mut req = request(vec![
+            message("system", "Be terse"),
+            message("user", "hi"),
+            message("assistant", "hello"),
+        ]);
+        req.temperature = Some(0.25);
+        req.response_format = Some("json".to_string());
+        let model = model(serde_json::json!({
+            "id": "gpt-test",
+            "name": "GPT Test",
+            "provider": "openai",
+            "model": "gpt-test-1"
+        }));
+
+        let built = build_provider_request(
+            &req,
+            &model,
+            &provider("https://api.openai.com/v1/responses"),
+            "KEY",
+        )
+        .unwrap();
+
+        assert_eq!(built.headers.get("authorization").unwrap(), "Bearer KEY");
+        assert_eq!(built.body["model"], "gpt-test-1");
+        assert_eq!(built.body["max_output_tokens"], 1200);
+        assert_eq!(built.body["store"], false);
+        assert_eq!(built.body["temperature"], 0.25);
+        assert_eq!(built.body["text"]["format"]["type"], "json_object");
+
+        let input = built.body["input"].as_array().unwrap();
+        // Merged system message goes first; system-role messages also remain in
+        // the input list with role "system" (they are not filtered for OpenAI).
+        assert_eq!(input.len(), 4);
+        assert_eq!(input[0]["role"], "system");
+        assert_eq!(input[0]["content"], "Be terse");
+        assert_eq!(input[1]["role"], "system");
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[3]["role"], "assistant");
+    }
+
+    #[test]
+    fn openai_effort_control_sets_reasoning_and_summary() {
+        let mut req = request(vec![message("user", "hi")]);
+        let model = model(serde_json::json!({
+            "id": "gpt-test",
+            "name": "GPT Test",
+            "provider": "openai",
+            "model": "gpt-test-1",
+            "control": {
+                "kind": "effort",
+                "label": "Effort",
+                "default": "medium",
+                "options": [
+                    { "id": "none", "label": "Off" },
+                    { "id": "medium", "label": "Medium" }
+                ]
+            }
+        }));
+
+        let built =
+            build_provider_request(&req, &model, &provider("https://api.openai.com/v1"), "K")
+                .unwrap();
+        assert_eq!(built.body["reasoning"]["effort"], "medium");
+        assert_eq!(built.body["reasoning"]["summary"], "auto");
+
+        req.provider_options = Some(serde_json::json!({ "controlId": "none" }));
+        let built =
+            build_provider_request(&req, &model, &provider("https://api.openai.com/v1"), "K")
+                .unwrap();
+        assert_eq!(built.body["reasoning"]["effort"], "none");
+        assert!(built.body["reasoning"].get("summary").is_none());
+    }
+
+    #[test]
+    fn google_request_builds_keyed_url_and_maps_roles() {
+        let mut req = request(vec![
+            message("system", "Be brief"),
+            message("user", "hi"),
+            message("assistant", "hello"),
+        ]);
+        req.response_format = Some("json".to_string());
+        let model = model(serde_json::json!({
+            "id": "gemini-test",
+            "name": "Gemini Test",
+            "provider": "google",
+            "model": "gemini-test-1",
+            "control": {
+                "kind": "thinking",
+                "label": "Thinking",
+                "default": "low",
+                "options": [{ "id": "low", "label": "Low", "providerValue": "LOW" }]
+            }
+        }));
+
+        let built = build_provider_request(
+            &req,
+            &model,
+            // Trailing slash is trimmed before the model path is appended.
+            &provider("https://generativelanguage.googleapis.com/v1beta/models/"),
+            "KEY",
+        )
+        .unwrap();
+
+        assert_eq!(
+            built.url,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-test-1:generateContent?key=KEY"
+        );
+        // Auth travels in the URL; the only header is content-type.
+        assert_eq!(built.headers.len(), 1);
+        assert_eq!(built.headers.get("content-type").unwrap(), "application/json");
+
+        let contents = built.body["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 2);
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(contents[1]["parts"][0]["text"], "hello");
+        assert_eq!(built.body["systemInstruction"]["parts"][0]["text"], "Be brief");
+        assert_eq!(
+            built.body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "LOW"
+        );
+        assert_eq!(
+            built.body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(built.body["generationConfig"]["maxOutputTokens"], 1200);
+    }
+
+    #[test]
+    fn unknown_providers_are_rejected() {
+        let req = request(vec![message("user", "hi")]);
+        let model = model(serde_json::json!({
+            "id": "x",
+            "name": "X",
+            "provider": "mystery",
+            "model": "m"
+        }));
+        // .err().expect(..) instead of .expect_err(..): ProviderRequest and
+        // ProviderResponse do not derive Debug, and tests must not change them.
+        let error = build_provider_request(&req, &model, &provider("https://x.example"), "K")
+            .err()
+            .expect("unknown provider must fail");
+        assert!(error.contains("Unsupported AI provider"), "{}", error);
+
+        let error = parse_provider_response("mystery", "{}", false)
+            .err()
+            .expect("unknown provider must fail");
+        assert!(error.contains("Unsupported AI provider"), "{}", error);
+    }
+
+    #[test]
+    fn parse_anthropic_response_joins_text_and_normalizes_usage() {
+        let body = serde_json::json!({
+            "content": [
+                { "type": "thinking", "thinking": "hmm" },
+                { "type": "text", "text": "Hello " },
+                { "type": "text", "text": "world" }
+            ],
+            "usage": {
+                "input_tokens": 10,
+                "cache_read_input_tokens": 40,
+                "cache_creation_input_tokens": 5,
+                "output_tokens": 7
+            }
+        })
+        .to_string();
+
+        let parsed = parse_provider_response("anthropic", &body, false).unwrap();
+        assert_eq!(parsed.text, "Hello world");
+        assert!(parsed.json.is_none());
+        // Anthropic's input_tokens excludes cache reads/writes, so the
+        // normalized total input adds them back.
+        assert_eq!(parsed.usage.input_tokens, 55);
+        assert_eq!(parsed.usage.input_no_cache_tokens, 10);
+        assert_eq!(parsed.usage.cache_read_input_tokens, 40);
+        assert_eq!(parsed.usage.cached_input_tokens, 40);
+        assert_eq!(parsed.usage.cache_write_input_tokens, 5);
+        assert_eq!(parsed.usage.output_tokens, 7);
+        assert_eq!(parsed.usage.total_tokens, 62);
+        assert_eq!(parsed.usage.reasoning_tokens, 0);
+    }
+
+    #[test]
+    fn parse_openai_response_prefers_output_text_and_reads_details() {
+        let body = serde_json::json!({
+            "output_text": "{\"answer\":42}",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "input_tokens_details": { "cached_tokens": 60 },
+                "output_tokens_details": { "reasoning_tokens": 5 }
+            }
+        })
+        .to_string();
+
+        let parsed = parse_provider_response("openai", &body, true).unwrap();
+        assert_eq!(parsed.text, "{\"answer\":42}");
+        assert_eq!(parsed.json.unwrap()["answer"], 42);
+        assert_eq!(parsed.usage.input_tokens, 100);
+        assert_eq!(parsed.usage.input_no_cache_tokens, 40);
+        assert_eq!(parsed.usage.cached_input_tokens, 60);
+        assert_eq!(parsed.usage.cache_write_input_tokens, 0);
+        assert_eq!(parsed.usage.output_tokens, 20);
+        assert_eq!(parsed.usage.reasoning_tokens, 5);
+        assert_eq!(parsed.usage.total_tokens, 120);
+    }
+
+    #[test]
+    fn parse_openai_response_falls_back_to_output_array() {
+        let body = serde_json::json!({
+            "output": [
+                { "type": "reasoning", "summary": [] },
+                {
+                    "type": "message",
+                    "content": [
+                        { "type": "output_text", "text": "Hi" },
+                        { "content": " there" }
+                    ]
+                }
+            ]
+        })
+        .to_string();
+
+        let parsed = parse_provider_response("openai", &body, false).unwrap();
+        assert_eq!(parsed.text, "Hi there");
+    }
+
+    #[test]
+    fn parse_google_response_reads_candidates_and_usage() {
+        let body = serde_json::json!({
+            "candidates": [
+                { "content": { "parts": [ { "text": "Hallo " }, { "text": "Welt" } ] } }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 50,
+                "cachedContentTokenCount": 20,
+                "candidatesTokenCount": 10,
+                "thoughtsTokenCount": 4,
+                "totalTokenCount": 64
+            }
+        })
+        .to_string();
+
+        let parsed = parse_provider_response("google", &body, false).unwrap();
+        assert_eq!(parsed.text, "Hallo Welt");
+        assert_eq!(parsed.usage.input_tokens, 50);
+        assert_eq!(parsed.usage.input_no_cache_tokens, 30);
+        assert_eq!(parsed.usage.cached_input_tokens, 20);
+        // Output combines candidate and thought tokens.
+        assert_eq!(parsed.usage.output_tokens, 14);
+        assert_eq!(parsed.usage.reasoning_tokens, 4);
+        assert_eq!(parsed.usage.total_tokens, 64);
+    }
+
+    #[test]
+    fn parse_google_response_computes_total_when_absent() {
+        let body = serde_json::json!({
+            "candidates": [ { "content": { "parts": [ { "text": "x" } ] } } ],
+            "usageMetadata": {
+                "promptTokenCount": 5,
+                "candidatesTokenCount": 3,
+                "thoughtsTokenCount": 2
+            }
+        })
+        .to_string();
+        let parsed = parse_provider_response("google", &body, false).unwrap();
+        assert_eq!(parsed.usage.total_tokens, 10);
+    }
+
+    #[test]
+    fn invalid_response_bodies_error_per_provider() {
+        for provider in ["anthropic", "openai", "google"] {
+            let error = parse_provider_response(provider, "not json", false)
+                .err()
+                .expect("invalid JSON must fail");
+            assert!(error.contains("Invalid"), "{}: {}", provider, error);
+        }
+    }
+
+    #[test]
+    fn merged_system_combines_field_and_system_messages() {
+        let mut req = request(vec![
+            message("system", "  Rule one  "),
+            message("user", "hi"),
+            message("system", "   "),
+        ]);
+        req.system = Some("  Base  ".to_string());
+        assert_eq!(merged_system(&req).unwrap(), "Base\n\nRule one");
+
+        let empty = request(vec![message("user", "hi")]);
+        assert!(merged_system(&empty).is_none());
+
+        let mut blank = request(vec![]);
+        blank.system = Some("   ".to_string());
+        assert!(merged_system(&blank).is_none());
+    }
+
+    #[test]
+    fn selected_control_option_prefers_requested_then_default_then_first() {
+        let model = model(serde_json::json!({
+            "id": "m",
+            "name": "M",
+            "provider": "anthropic",
+            "model": "m1",
+            "control": {
+                "kind": "effort",
+                "label": "Effort",
+                "default": "mid",
+                "options": [
+                    { "id": "low", "label": "Low" },
+                    { "id": "mid", "label": "Mid" }
+                ]
+            }
+        }));
+
+        // No request selection: control default wins.
+        let req = request(vec![]);
+        let (kind, option) = selected_control_option(&req, &model).unwrap();
+        assert_eq!(kind, "effort");
+        assert_eq!(option.id, "mid");
+
+        // Explicit controlId wins.
+        let mut req = request(vec![]);
+        req.provider_options = Some(serde_json::json!({ "controlId": "low" }));
+        assert_eq!(selected_control_option(&req, &model).unwrap().1.id, "low");
+
+        // Legacy "control" key is honored too.
+        let mut req = request(vec![]);
+        req.provider_options = Some(serde_json::json!({ "control": "low" }));
+        assert_eq!(selected_control_option(&req, &model).unwrap().1.id, "low");
+
+        // Unknown requested id falls back to the default option.
+        let mut req = request(vec![]);
+        req.provider_options = Some(serde_json::json!({ "controlId": "bogus" }));
+        assert_eq!(selected_control_option(&req, &model).unwrap().1.id, "mid");
+
+        // Whitespace-only ids are ignored (treated as no selection).
+        let mut req = request(vec![]);
+        req.provider_options = Some(serde_json::json!({ "controlId": "  " }));
+        assert_eq!(selected_control_option(&req, &model).unwrap().1.id, "mid");
+
+        // When even the default id is unknown, the first option is used.
+        let broken = self::model(serde_json::json!({
+            "id": "m", "name": "M", "provider": "anthropic", "model": "m1",
+            "control": {
+                "kind": "effort", "label": "Effort", "default": "missing",
+                "options": [ { "id": "low", "label": "Low" } ]
+            }
+        }));
+        assert_eq!(selected_control_option(&req, &broken).unwrap().1.id, "low");
+
+        // Models without a control block yield None.
+        let plain = self::model(serde_json::json!({
+            "id": "m", "name": "M", "provider": "anthropic", "model": "m1"
+        }));
+        assert!(selected_control_option(&req, &plain).is_none());
+    }
+
+    #[test]
+    fn parse_json_text_extracts_embedded_objects() {
+        assert!(parse_json_text("{\"a\":1}", false).is_none());
+        assert_eq!(parse_json_text("{\"a\":1}", true).unwrap()["a"], 1);
+        assert_eq!(
+            parse_json_text("Sure thing: {\"a\": 1} — done!", true).unwrap()["a"],
+            1
+        );
+        assert!(parse_json_text("no json here", true).is_none());
+    }
+}

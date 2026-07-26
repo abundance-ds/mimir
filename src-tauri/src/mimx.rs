@@ -17,14 +17,9 @@ pub fn install() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
         let script = directory.join("mimx.mjs");
-        crate::persistence::write_bytes_atomic(&script, MIMX_SOURCE.as_bytes())
-            .map_err(|error| error.to_string())?;
+        write_if_changed(&script, MIMX_SOURCE.as_bytes())?;
         let wrapper = directory.join("mimx.cmd");
-        crate::persistence::write_bytes_atomic(
-            &wrapper,
-            b"@echo off\r\nnode \"%~dp0mimx.mjs\" %*\r\n",
-        )
-        .map_err(|error| error.to_string())?;
+        write_if_changed(&wrapper, b"@echo off\r\nnode \"%~dp0mimx.mjs\" %*\r\n")?;
         Ok(directory)
     }
 
@@ -32,8 +27,7 @@ pub fn install() -> Result<PathBuf, String> {
     {
         use std::os::unix::fs::PermissionsExt;
         let executable = directory.join("mimx");
-        crate::persistence::write_bytes_atomic(&executable, MIMX_SOURCE.as_bytes())
-            .map_err(|error| error.to_string())?;
+        write_if_changed(&executable, MIMX_SOURCE.as_bytes())?;
         let mut permissions = fs::metadata(&executable)
             .map_err(|error| format!("Could not inspect installed mimx: {error}"))?
             .permissions();
@@ -46,9 +40,19 @@ pub fn install() -> Result<PathBuf, String> {
 
 pub fn install_pi_extension() -> Result<PathBuf, String> {
     let path = pi_extension_path()?;
-    crate::persistence::write_bytes_atomic(&path, PI_EXTENSION_SOURCE.as_bytes())
-        .map_err(|error| error.to_string())?;
+    write_if_changed(&path, PI_EXTENSION_SOURCE.as_bytes())?;
     Ok(path)
+}
+
+/// Atomically write `contents` to `path`, skipping the write (and its fsyncs)
+/// when the file already holds exactly those bytes. Install runs on every app
+/// start before the window shows, so the common case must not pay for four
+/// fsyncs. Any read failure falls through to the normal atomic write.
+fn write_if_changed(path: &Path, contents: &[u8]) -> Result<(), String> {
+    if matches!(fs::read(path), Ok(existing) if existing == contents) {
+        return Ok(());
+    }
+    crate::persistence::write_bytes_atomic(path, contents).map_err(|error| error.to_string())
 }
 
 pub fn pi_extension_path() -> Result<PathBuf, String> {
@@ -110,17 +114,43 @@ mod tests {
         assert!(paths.contains(&PathBuf::from("/usr/bin")));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn write_if_changed_skips_identical_contents_and_replaces_differing_ones() {
+        use std::os::unix::fs::MetadataExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mimx");
+
+        write_if_changed(&path, b"one").unwrap();
+        let original_inode = fs::metadata(&path).unwrap().ino();
+
+        // Identical contents: the atomic rename (which would allocate a new
+        // inode) must be skipped entirely.
+        write_if_changed(&path, b"one").unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().ino(), original_inode);
+        assert_eq!(fs::read(&path).unwrap(), b"one");
+
+        // Differing contents still replace the file.
+        write_if_changed(&path, b"two").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"two");
+        assert_ne!(fs::metadata(&path).unwrap().ino(), original_inode);
+    }
+
     #[test]
     fn embedded_cli_exposes_discovery_and_generic_calls() {
         assert!(MIMX_SOURCE.contains("command === 'tools'"));
         assert!(MIMX_SOURCE.contains("command === 'call'"));
+        assert!(MIMX_SOURCE.contains("mimx help <topic>"));
+        assert!(MIMX_SOURCE.contains("includeAll"));
         assert!(MIMX_SOURCE.starts_with("#!/usr/bin/env node"));
     }
 
     #[test]
-    fn embedded_pi_extension_discovers_and_registers_every_tool() {
+    fn embedded_pi_extension_registers_the_default_discovered_tools() {
         assert!(PI_EXTENSION_SOURCE.contains("\"tools/list\""));
         assert!(PI_EXTENSION_SOURCE.contains("pi.registerTool"));
+        assert!(PI_EXTENSION_SOURCE.contains("startsWith(\"mim_\")"));
         assert!(PI_EXTENSION_SOURCE.contains("\"tools/call\""));
         assert_eq!(
             pi_extension_path_at(Path::new("/Users/mim")),

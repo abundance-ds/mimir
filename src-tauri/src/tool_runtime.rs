@@ -29,6 +29,19 @@ use crate::{
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 120_000;
 const MIN_RELAY_TIMEOUT_MS: u64 = 100;
 const MAX_RELAY_TIMEOUT_MS: u64 = 600_000;
+pub(crate) const LEAN_AGENT_TOOLS: [(&str, &str, &str); 3] = [
+    ("editor.state", "mim_state", "Get active editor state."),
+    (
+        "editor.reveal",
+        "mim_reveal",
+        "Open a file in Mim, optionally at a line.",
+    ),
+    (
+        "editor.propose",
+        "mim_propose",
+        "Propose one exact text replacement for review.",
+    ),
+];
 const TOOL_RELAY_REQUEST_EVENT: &str = "mim://tool-relay-request";
 const TOOL_RELAY_CANCEL_EVENT: &str = "mim://tool-relay-cancel";
 const TOOL_LIST_CHANGED_EVENT: &str = "mim://tools-list-changed";
@@ -146,6 +159,11 @@ impl ToolRuntime {
 
     /// Install stable UI-backed core tools and begin emitting revision changes.
     pub fn initialize(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        for (canonical_name, alias, _) in LEAN_AGENT_TOOLS {
+            self.registry
+                .reserve_core_tool(canonical_name, alias)
+                .map_err(|error| error.to_string())?;
+        }
         let provider = UiToolProvider::new(
             self.registry.clone(),
             "mim-core",
@@ -156,6 +174,7 @@ impl ToolRuntime {
         provider
             .register_core(core_tool_definitions())
             .map_err(|error| error.to_string())?;
+        crate::business_graph::tools::register_native_tools(&self.registry, app)?;
         *self
             .core_ui
             .lock()
@@ -731,6 +750,13 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             &["path"],
         ),
         editor_definition(
+            "editor.state",
+            "editor_state",
+            "Get active editor state.",
+            json!({ "include_content": { "type": "boolean" } }),
+            &[],
+        ),
+        editor_definition(
             "editor.active",
             "editor_active",
             "Return active editor tab metadata and optional content.",
@@ -789,6 +815,18 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
                 "offset": { "type": "number" }
             }),
             &[],
+        ),
+        editor_definition(
+            "editor.propose",
+            "editor_propose",
+            "Propose one exact text replacement for review.",
+            json!({
+                "path": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "old_text": { "type": "string", "minLength": 1, "maxLength": 50000 },
+                "new_text": { "type": "string", "maxLength": 50000 },
+                "rationale": { "type": "string", "maxLength": 2000 }
+            }),
+            &["old_text", "new_text"],
         ),
         editor_definition(
             "editor.save",

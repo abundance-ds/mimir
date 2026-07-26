@@ -393,3 +393,224 @@ fn remove_header_case(headers: &mut HashMap<String, String>, name: &str) {
         headers.remove(&key);
     }
 }
+
+// NOTE: ai_proxy_stream itself is not unit-tested here: it loads the real
+// model registry from disk and spawns an HTTP request task, neither of which
+// belongs in a unit test. Its pure helpers and the session-state commands it
+// relies on for abort/cleanup are covered below.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_models::{AiProviderConfig, ModelDefaults};
+
+    fn model(id: &str, provider: &str, provider_model: &str) -> AiModelConfig {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": id,
+            "provider": provider,
+            "model": provider_model
+        }))
+        .unwrap()
+    }
+
+    fn registry() -> ModelRegistry {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "anthropic".to_string(),
+            AiProviderConfig {
+                url: "https://api.anthropic.com/v1/messages".to_string(),
+                api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            },
+        );
+        providers.insert(
+            "openai".to_string(),
+            AiProviderConfig {
+                url: "https://api.openai.com/v1/responses".to_string(),
+                api_key_env: "OPENAI_API_KEY".to_string(),
+            },
+        );
+        ModelRegistry {
+            version: 1,
+            models: vec![
+                model("claude-a", "anthropic", "claude-3"),
+                model("gpt-b", "openai", "gpt-4o"),
+            ],
+            providers,
+            defaults: ModelDefaults {
+                chat: vec!["gpt-b".to_string()],
+                rewrite: vec!["claude-a".to_string()],
+                ..ModelDefaults::default()
+            },
+            legacy_ids: HashMap::new(),
+        }
+    }
+
+    fn proxy_request(
+        provider: &str,
+        model_id: Option<&str>,
+        provider_model: Option<&str>,
+        feature: Option<&str>,
+    ) -> AiProxyRequest {
+        AiProxyRequest {
+            correlation_id: "corr-1".to_string(),
+            feature: feature.map(ToOwned::to_owned),
+            provider: provider.to_string(),
+            model_id: model_id.map(ToOwned::to_owned),
+            provider_model: provider_model.map(ToOwned::to_owned),
+            url: "https://api.anthropic.com/v1/messages".to_string(),
+            headers: HashMap::new(),
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_proxy_model_prefers_explicit_model_id() {
+        let registry = registry();
+        let request = proxy_request("anthropic", Some("claude-a"), Some("gpt-4o"), None);
+        let resolved = resolve_proxy_model(&registry, &request).unwrap();
+        assert_eq!(resolved.id, "claude-a");
+
+        let unknown = proxy_request("anthropic", Some("nope"), None, None);
+        let error = resolve_proxy_model(&registry, &unknown).expect_err("unknown id must fail");
+        assert!(error.contains("Unknown AI model id"), "{}", error);
+    }
+
+    #[test]
+    fn resolve_proxy_model_falls_back_to_provider_model_match() {
+        let registry = registry();
+        // Empty model_id is treated as absent.
+        let request = proxy_request("anthropic", Some(""), Some("claude-3"), None);
+        let resolved = resolve_proxy_model(&registry, &request).unwrap();
+        assert_eq!(resolved.id, "claude-a");
+
+        // The provider must match too, otherwise defaults kick in.
+        let mismatched = proxy_request("openai", None, Some("claude-3"), None);
+        let resolved = resolve_proxy_model(&registry, &mismatched).unwrap();
+        assert_eq!(resolved.id, "gpt-b"); // chat default
+    }
+
+    #[test]
+    fn resolve_proxy_model_uses_feature_defaults_last() {
+        let registry = registry();
+        let chat = proxy_request("anthropic", None, None, None);
+        assert_eq!(resolve_proxy_model(&registry, &chat).unwrap().id, "gpt-b");
+
+        let rewrite = proxy_request("anthropic", None, None, Some("rewrite"));
+        assert_eq!(resolve_proxy_model(&registry, &rewrite).unwrap().id, "claude-a");
+
+        // "auto" is a sentinel handled by resolve_model: defaults apply.
+        let auto = proxy_request("anthropic", Some("auto"), None, Some("rewrite"));
+        assert_eq!(resolve_proxy_model(&registry, &auto).unwrap().id, "claude-a");
+    }
+
+    #[test]
+    fn authenticated_headers_replace_caller_auth_per_provider() {
+        let mut incoming = HashMap::new();
+        incoming.insert("Authorization".to_string(), "Bearer attacker".to_string());
+        incoming.insert("X-Api-Key".to_string(), "attacker".to_string());
+        incoming.insert("X-GOOG-API-KEY".to_string(), "attacker".to_string());
+        incoming.insert("content-type".to_string(), "application/json".to_string());
+
+        let headers = authenticated_headers("anthropic", incoming.clone(), "real-key");
+        assert_eq!(headers.get("x-api-key").unwrap(), "real-key");
+        assert!(!headers.keys().any(|k| k.eq_ignore_ascii_case("authorization")));
+        assert!(!headers.keys().any(|k| k.eq_ignore_ascii_case("x-goog-api-key")));
+        assert_eq!(headers.get("content-type").unwrap(), "application/json");
+
+        let headers = authenticated_headers("openai", incoming.clone(), "real-key");
+        assert_eq!(headers.get("authorization").unwrap(), "Bearer real-key");
+        assert!(!headers.keys().any(|k| k.eq_ignore_ascii_case("x-api-key")));
+
+        let headers = authenticated_headers("google", incoming.clone(), "real-key");
+        assert_eq!(headers.get("x-goog-api-key").unwrap(), "real-key");
+
+        // Unknown providers get caller auth stripped and nothing added.
+        let headers = authenticated_headers("mystery", incoming, "real-key");
+        for name in ["authorization", "x-api-key", "x-goog-api-key"] {
+            assert!(!headers.keys().any(|k| k.eq_ignore_ascii_case(name)));
+        }
+        assert_eq!(headers.get("content-type").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn authenticated_url_replaces_google_key_param_only() {
+        // Non-google URLs pass through untouched, even with a key param.
+        assert_eq!(
+            authenticated_url("openai", "https://api.openai.com/v1?key=old", "real").unwrap(),
+            "https://api.openai.com/v1?key=old"
+        );
+
+        // A caller-supplied key param is replaced with the resolved key.
+        let url = authenticated_url(
+            "google",
+            "https://generativelanguage.googleapis.com/v1beta/models/g:generateContent?key=attacker&alt=sse",
+            "real",
+        )
+        .unwrap();
+        assert!(url.contains("key=real"), "{}", url);
+        assert!(!url.contains("attacker"), "{}", url);
+        assert!(url.contains("alt=sse"), "{}", url);
+
+        // Characterization: without an existing key param nothing is added —
+        // auth then travels via the x-goog-api-key header instead.
+        let untouched = authenticated_url(
+            "google",
+            "https://generativelanguage.googleapis.com/v1beta/models/g:generateContent",
+            "real",
+        )
+        .unwrap();
+        assert!(!untouched.contains("key="), "{}", untouched);
+
+        let error = authenticated_url("google", "not a url", "real")
+            .expect_err("invalid URL must fail");
+        assert!(error.contains("Invalid AI URL"), "{}", error);
+    }
+
+    #[test]
+    fn remove_header_case_drops_all_case_variants() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "a".to_string());
+        headers.insert("AUTHORIZATION".to_string(), "b".to_string());
+        headers.insert("authorization".to_string(), "c".to_string());
+        headers.insert("x-other".to_string(), "keep".to_string());
+        remove_header_case(&mut headers, "authorization");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.get("x-other").unwrap(), "keep");
+    }
+
+    #[test]
+    fn abort_signals_session_and_cleanup_removes_it() {
+        let app = tauri::test::mock_app();
+        app.manage(AiStreamState::default());
+
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        app.state::<AiStreamState>()
+            .sessions
+            .lock()
+            .unwrap()
+            .insert("abc".to_string(), AiStreamSession { cancel_tx });
+
+        // Abort flips the watch flag but leaves the session registered —
+        // removal is the stream task's (or ai_cleanup's) job.
+        ai_abort(app.state(), "abc".to_string()).unwrap();
+        assert!(*cancel_rx.borrow());
+        assert!(app
+            .state::<AiStreamState>()
+            .sessions
+            .lock()
+            .unwrap()
+            .contains_key("abc"));
+
+        ai_cleanup(app.state(), "abc".to_string()).unwrap();
+        assert!(app.state::<AiStreamState>().sessions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn abort_and_cleanup_ignore_unknown_sessions() {
+        let app = tauri::test::mock_app();
+        app.manage(AiStreamState::default());
+        ai_abort(app.state(), "missing".to_string()).unwrap();
+        ai_cleanup(app.state(), "missing".to_string()).unwrap();
+        assert!(app.state::<AiStreamState>().sessions.lock().unwrap().is_empty());
+    }
+}

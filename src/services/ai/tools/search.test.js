@@ -8,19 +8,33 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 describe('search tool', () => {
   beforeEach(() => invoke.mockReset())
 
-  it('searches active-workspace content and shortens returned paths', async () => {
-    invoke.mockResolvedValue([
-      { path: '/projects/myapp/src/main.js', line: 10, snippet: 'const x = 42' },
-    ])
+  it('searches indexed workspace content and returns relative paths', async () => {
+    const token = { requestGeneration: 3, workspaceGeneration: 1 }
+    invoke
+      .mockResolvedValueOnce(token)
+      .mockResolvedValueOnce({
+        matches: [{
+          path: '/projects/myapp/src/main.js',
+          name: 'main.js',
+          relativePath: 'src/main.js',
+          line: 10,
+          column: 7,
+          excerpt: 'const x = 42',
+        }],
+        scannedFiles: 1,
+        skippedFiles: 0,
+        bytesScanned: 12,
+        cancelled: false,
+        truncated: false,
+      })
     const { search } = createSearchTool({ workspacePath: '/projects/myapp' })
 
     const result = await search.execute({ query: 'const x' })
 
-    expect(invoke).toHaveBeenCalledWith('search_file_content', {
-      path: '/projects/myapp',
-      query: 'const x',
-      file_pattern: null,
-      max_results: 20,
+    expect(invoke).toHaveBeenCalledWith('file_index_begin_search')
+    expect(invoke).toHaveBeenCalledWith('file_index_search', {
+      token,
+      request: { query: 'const x', pathQuery: null, maxResults: 20 },
     })
     expect(result).toMatchObject({
       query: 'const x',
@@ -29,16 +43,32 @@ describe('search tool', () => {
     })
   })
 
-  it('passes file filters and result limits through', async () => {
-    invoke.mockResolvedValue([])
+  it('passes file filters and result limits through, keeping exact glob semantics', async () => {
+    invoke
+      .mockResolvedValueOnce({ requestGeneration: 1, workspaceGeneration: 1 })
+      .mockResolvedValueOnce({
+        matches: [
+          // The fuzzy pathQuery pre-filter can let near-misses through; the
+          // tool must re-apply the exact "*.rs" suffix rule.
+          { path: '/projects/myapp/src/main.rs', name: 'main.rs', relativePath: 'src/main.rs', line: 1, column: 1, excerpt: 'TODO' },
+          { path: '/projects/myapp/notes.rst', name: 'notes.rst', relativePath: 'notes.rst', line: 2, column: 1, excerpt: 'TODO' },
+        ],
+        scannedFiles: 2,
+        skippedFiles: 0,
+        bytesScanned: 9,
+        cancelled: false,
+        truncated: false,
+      })
     const { search } = createSearchTool({ workspacePath: '/projects/myapp' })
 
-    await search.execute({ query: 'TODO', file_pattern: '*.rs', limit: 7 })
+    const result = await search.execute({ query: 'TODO', file_pattern: '*.rs', limit: 7 })
 
-    expect(invoke).toHaveBeenCalledWith('search_file_content', expect.objectContaining({
-      file_pattern: '*.rs',
-      max_results: 7,
+    expect(invoke).toHaveBeenCalledWith('file_index_search', expect.objectContaining({
+      request: expect.objectContaining({ pathQuery: '.rs', maxResults: 7 }),
     }))
+    expect(result.matches).toEqual([
+      { path: 'src/main.rs', line: 1, snippet: 'TODO' },
+    ])
   })
 
   it('shares the 50-result ceiling advertised by the canonical MCP catalog', () => {

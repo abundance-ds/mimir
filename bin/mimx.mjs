@@ -5,6 +5,10 @@ import { pathToFileURL } from 'node:url'
 const DEFAULT_URL = process.env.MIMX_MCP_URL || 'http://127.0.0.1:17532/mcp'
 
 const commands = {
+  state: {
+    tool: 'editor.state',
+    args: parts => ({ include_content: parts.includes('--content') }),
+  },
   open: { tool: 'editor_open', args: ([path]) => ({ path }) },
   active: { tool: 'editor_active', args: () => ({}) },
   tabs: { tool: 'editor_tabs', args: () => ({}) },
@@ -21,13 +25,16 @@ const commands = {
 async function main() {
   const [command, ...args] = process.argv.slice(2)
   if (!command || command === 'help' || command === '--help' || command === '-h') {
-    printHelp()
+    console.log(helpText(command === 'help' ? args[0] : ''))
     return
   }
 
   if (command === 'tools') {
-    const tools = await request('tools/list', {})
-    console.log(JSON.stringify(tools?.tools || [], null, 2))
+    const json = args.includes('--json')
+    const topic = args.find(arg => !arg.startsWith('-')) || ''
+    const includeAll = args.includes('--all') || Boolean(topic)
+    const result = await request('tools/list', { includeAll })
+    console.log(formatToolCatalog(result?.tools || [], { json, topic }))
     return
   }
   if (command === 'call') {
@@ -37,11 +44,15 @@ async function main() {
     printResult(await callTool(name, input))
     return
   }
+  if (['graph', 'board', 'context'].includes(command)) {
+    console.log(await terminalGraphCommand(command, args))
+    return
+  }
 
   const spec = commands[command]
   if (!spec) {
     console.error(`Unknown command: ${command}`)
-    printHelp()
+    console.error(helpText())
     process.exit(2)
   }
 
@@ -71,6 +82,65 @@ export async function callTool(name, args) {
   } catch {
     return text
   }
+}
+
+export async function terminalGraphCommand(command, args = [], call = callTool) {
+  if (command === 'context') {
+    const id = String(args[0] || '').trim()
+    if (!id) throw new Error('Usage: mimx context <graph-node-id>')
+    const context = await call('graph.context', { focusId: id, maxNodes: 16 })
+    return context?.markdown || 'No graph context returned.'
+  }
+  if (command === 'board') {
+    const status = String(args[0] || '').trim()
+    const result = await call('graph.query', {
+      kinds: ['issue'],
+      ...(status ? { status } : {}),
+      limit: 500,
+    })
+    return formatBoard(result?.items || [])
+  }
+  if (command === 'graph') {
+    const query = args.join(' ').trim()
+    const result = query
+      ? await call('graph.search', { query, limit: 100 })
+      : await call('graph.list', { limit: 100 })
+    const items = query
+      ? (result || []).map(item => item.node || item)
+      : result?.items || []
+    return formatGraph(items, query ? items.length : result?.total)
+  }
+  throw new Error(`Unknown graph projection: ${command}`)
+}
+
+export function formatGraph(items, total = items.length) {
+  const rows = items.map(item => [
+    String(item.kind || 'node').toUpperCase().padEnd(18),
+    truncateCell(item.title || item.id, 48).padEnd(48),
+    scopeCell(item.scopeId),
+    item.id,
+  ].join('  '))
+  return [
+    `BUSINESS GRAPH · ${items.length}${Number.isFinite(total) ? ` of ${total}` : ''}`,
+    'KIND                TITLE                                             SCOPE    ID',
+    ...rows,
+  ].join('\n')
+}
+
+export function formatBoard(items) {
+  const statuses = ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done', 'cancelled']
+  const sections = []
+  for (const status of statuses) {
+    const issues = items.filter(item => (item.status || 'backlog') === status)
+    if (!issues.length) continue
+    sections.push(`\n${status.replaceAll('-', ' ').toUpperCase()} · ${issues.length}`)
+    for (const issue of issues) {
+      const marker = { urgent: '!!', high: ' !', normal: ' ·', low: '  ' }[issue.priority] || ' ·'
+      const project = issue.projectId ? `  → ${issue.projectId}` : ''
+      sections.push(`${marker} ${truncateCell(issue.title || issue.id, 64)}  [${issue.id}]${project}`)
+    }
+  }
+  return `WORK BOARD · ${items.length}${sections.join('\n') || '\n\nNo issues in this projection.'}`
 }
 
 async function request(method, params) {
@@ -140,29 +210,117 @@ function parseRevealTarget(target = '') {
   return { path: target }
 }
 
-function printHelp() {
-  console.log(`mimx - control the attached Mim editor
+export function helpText(topic = '') {
+  const normalized = String(topic || '').trim().toLowerCase()
+  if (normalized && HELP_TOPICS[normalized]) return HELP_TOPICS[normalized]
+  if (normalized) {
+    return `Unknown help topic: ${topic}\n\n${helpText()}`
+  }
+  return `mimx — optional access to the attached Mim workbench
 
-Usage:
+Use normal file and shell tools for ordinary coding.
+
+  mimx state [--content]          active editor context
+  mimx reveal <path:line>         show a location in Mim
+  mimx tools [topic]              discover optional capabilities
+  mimx call <tool> [json|--stdin] call one capability
+  mimx help <topic>               focused help
+
+Topics: core, editor, review, comments, graph, files, activities, apps,
+        routines, settings, web, docs
+
+MIMX_MCP_URL defaults to ${DEFAULT_URL}`
+}
+
+const HELP_TOPICS = Object.freeze({
+  core: `Core agent tools
+
+  mim_state    Get active editor state.
+  mim_reveal   Open a file in Mim, optionally at a line.
+  mim_propose  Propose one exact text replacement for review.
+
+Use: mimx call <tool> '<json>'`,
+  editor: `Editor shortcuts
+
+  mimx state [--content]
   mimx open <path>
-  mimx active
-  mimx tabs
-  mimx content
-  mimx selection
+  mimx reveal <path:line|line|path>
+  mimx active | tabs | content | selection
+  mimx replace-selection <text|--stdin|--file path>
+  mimx set-content <--stdin|--file path>
+  mimx save`,
+  review: `Reviewable changes
+
+  mimx call mim_propose '{"path":"/workspace/README.md","old_text":"before","new_text":"after","rationale":"Why"}'
+
+The path is optional. Mim opens the target and shows the exact replacement as
+a diff for acceptance or rejection; it does not apply the proposal directly.`,
+  comments: `Comments
+
   mimx comments
   mimx comments-prompt
-  mimx replace-selection <text>
-  mimx replace-selection --stdin
-  mimx replace-selection --file <path>
-  mimx set-content --stdin
-  mimx reveal <path:line|line|path>
-  mimx save
-  mimx tools
-  mimx call <tool> '{"key":"value"}'
-  mimx call <tool> --stdin
+  mimx tools comments`,
+  graph: `Business graph
 
-Environment:
-  MIMX_MCP_URL  defaults to ${DEFAULT_URL}`)
+  mimx graph [search terms]
+  mimx board [status]
+  mimx context <graph-node-id>
+  mimx tools graph`,
+  files: 'Optional file capabilities: mimx tools files',
+  activities: 'Activity capabilities: mimx tools activities',
+  apps: 'App capabilities: mimx tools apps',
+  routines: 'Routine capabilities: mimx tools routines',
+  settings: 'Settings capabilities: mimx tools settings',
+  web: 'Academic metadata search: mimx tools web',
+  docs: `Mim keeps dense implementation notes and old tutorials out of agent context.
+
+In the source tree, browse docs/reference/ only when a focused help topic is
+insufficient.`,
+  tools: `Tool discovery
+
+  mimx tools              three default agent tools
+  mimx tools <topic>      names and descriptions for one domain
+  mimx tools --all        every registered capability, without schemas
+  mimx tools --json       default schemas
+  mimx tools --all --json full raw registry`,
+})
+
+export function formatToolCatalog(tools, { json = false, topic = '' } = {}) {
+  const filtered = filterToolsByTopic(tools, topic)
+  if (json) return JSON.stringify(filtered, null, 2)
+  if (!filtered.length) return topic
+    ? `No tools found for topic '${topic}'.`
+    : 'No Mim tools are currently available.'
+  return filtered
+    .map(tool => `${tool.name}\t${tool.description || ''}`.trimEnd())
+    .join('\n')
+}
+
+function filterToolsByTopic(tools, topic) {
+  const normalized = String(topic || '').trim().toLowerCase()
+  if (!normalized) return tools
+  const domains = TOOL_TOPIC_DOMAINS[normalized] || [normalized]
+  return tools.filter((tool) => {
+    const canonical = String(tool?._meta?.['mim/canonicalName'] || tool?.name || '')
+    return domains.some(domain => canonical === domain || canonical.startsWith(`${domain}.`))
+  })
+}
+
+const TOOL_TOPIC_DOMAINS = Object.freeze({
+  core: ['editor.state', 'editor.reveal', 'editor.propose'],
+  review: ['editor.propose', 'files.edit'],
+  comments: ['comments', 'editor.comments'],
+  graph: ['graph', 'knowledge', 'issues', 'projects', 'research'],
+  business: ['graph', 'knowledge', 'issues', 'projects', 'research'],
+})
+
+function scopeCell(scopeId = '') {
+  return String(scopeId).split(':')[0].slice(0, 7).padEnd(7)
+}
+
+function truncateCell(value, limit) {
+  const text = String(value || '').replaceAll(/\s+/g, ' ').trim()
+  return text.length <= limit ? text : `${text.slice(0, Math.max(1, limit - 1))}…`
 }
 
 const invokedAsScript = process.argv[1]

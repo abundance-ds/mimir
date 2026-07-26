@@ -3,6 +3,16 @@ import { z } from 'zod'
 import { withGate } from './gate'
 import { limitText } from './helpers'
 
+// Matches the legacy glob semantics this tool has always advertised: "*.ext"
+// is a filename-suffix match, anything else an exact filename. The indexed
+// search only narrows by fuzzy path query (a superset of these matches), so
+// the exact filter is re-applied to its results here.
+function matchesFilePattern(name, pattern) {
+  if (!pattern) return true
+  if (pattern.startsWith('*')) return name.endsWith(pattern.slice(1))
+  return name === pattern
+}
+
 export function createSearchTool(context = {}) {
   const workspacePath = context.workspacePath || context.projectPath || null
 
@@ -22,21 +32,25 @@ export function createSearchTool(context = {}) {
 
         try {
           const { invoke } = await import('@tauri-apps/api/core')
-          const results = await invoke('search_file_content', {
-            path: workspacePath,
-            query,
-            file_pattern: file_pattern || null,
-            max_results: limit || 20,
+          const pattern = (file_pattern || '').trim()
+          const token = await invoke('file_index_begin_search')
+          const report = await invoke('file_index_search', {
+            token,
+            request: {
+              query,
+              // Fuzzy pre-narrowing; exact glob filtering happens below.
+              pathQuery: pattern ? pattern.replace(/^\*+/, '') : null,
+              maxResults: limit || 20,
+            },
           })
-          return {
-            query,
-            count: (results || []).length,
-            matches: (results || []).map(result => ({
-              path: result.path?.replace(`${workspacePath}/`, '') || result.path,
-              line: result.line,
-              snippet: limitText(result.snippet || '', 240),
-            })),
-          }
+          const matches = (report?.matches || [])
+            .filter(match => matchesFilePattern(match.name || '', pattern))
+            .map(match => ({
+              path: match.relativePath || match.path,
+              line: match.line,
+              snippet: limitText(match.excerpt || '', 240),
+            }))
+          return { query, count: matches.length, matches }
         } catch (error) {
           return { error: `Search failed: ${error?.message || error}` }
         }

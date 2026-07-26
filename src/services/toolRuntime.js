@@ -93,6 +93,9 @@ export async function executeToolRequest(request, options = {}) {
   const { tool, input = {}, context = {} } = request
   if (options.signal?.aborted) throw cancelledError()
 
+  if (tool === 'editor.propose') {
+    return executeEditorProposal(request, options)
+  }
   if (tool.startsWith('editor.')) {
     return executeEditorTool(resolveEditor(options), tool, input)
   }
@@ -326,6 +329,21 @@ async function executeWorkspaceTool(request, options) {
   return implementation.execute(request.input || {})
 }
 
+async function executeEditorProposal(request, options) {
+  const editor = resolveEditor(options)
+  if (request.input?.path) await editor.mimOpen(request.input.path)
+  return executeWorkspaceTool({
+    ...request,
+    tool: 'files.edit',
+    input: {
+      target: '@editor',
+      old_text: request.input?.old_text,
+      new_text: request.input?.new_text,
+      rationale: request.input?.rationale,
+    },
+  }, options)
+}
+
 function createEditorProposalBridge(editor, request) {
   return async (proposal) => {
     if (proposal?.status !== 'pending') return proposal
@@ -361,6 +379,8 @@ async function executeEditorTool(editor, tool, input) {
   switch (tool) {
     case 'editor.open':
       return editor.mimOpen(input.path)
+    case 'editor.state':
+      return editor.mimState({ includeContent: Boolean(input.include_content) })
     case 'editor.active':
       return editor.mimActive({ includeContent: Boolean(input.includeContent) })
     case 'editor.tabs':

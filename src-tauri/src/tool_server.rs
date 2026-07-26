@@ -14,10 +14,10 @@ use tokio::{
 
 use crate::{
     tool_registry::{
-        RegistrySnapshot, ToolCallContext, ToolCaller, ToolError, ToolErrorCode, ToolRegistry,
-        ToolResult,
+        RegistrySnapshot, ToolCallContext, ToolCaller, ToolDescriptor, ToolError, ToolErrorCode,
+        ToolRegistry, ToolResult,
     },
-    tool_runtime::{self, ToolRuntime},
+    tool_runtime::{self, ToolRuntime, LEAN_AGENT_TOOLS},
 };
 
 pub struct ToolServerState {
@@ -214,28 +214,64 @@ fn jsonrpc_err(
     serde_json::json!({ "jsonrpc": "2.0", "id": id, "error": error })
 }
 
-fn mcp_tool_list(snapshot: &RegistrySnapshot) -> serde_json::Value {
-    let tools: Vec<serde_json::Value> = snapshot
-        .tools
-        .iter()
-        .map(|tool| {
-            serde_json::json!({
-                "name": tool.mcp_alias,
-                "description": tool.description,
-                "inputSchema": tool.input_schema,
-                "_meta": {
-                    "mim/canonicalName": tool.canonical_name,
-                    "mim/owner": tool.owner,
-                    "mim/source": tool.source,
-                    "mim/registryRevision": snapshot.revision,
-                }
+fn mcp_tool_list(snapshot: &RegistrySnapshot, include_all: bool) -> serde_json::Value {
+    let tools: Vec<serde_json::Value> = if include_all {
+        snapshot.tools.iter().map(full_mcp_tool).collect()
+    } else {
+        LEAN_AGENT_TOOLS
+            .iter()
+            .filter_map(|(canonical_name, alias, description)| {
+                snapshot
+                    .tools
+                    .iter()
+                    .find(|tool| tool.canonical_name == *canonical_name)
+                    .map(|tool| {
+                        serde_json::json!({
+                            "name": alias,
+                            "description": description,
+                            "inputSchema": tool.input_schema,
+                        })
+                    })
             })
-        })
-        .collect();
+            .collect()
+    };
     serde_json::json!({
         "tools": tools,
-        "_meta": { "mim/registryRevision": snapshot.revision }
+        "_meta": {
+            "mim/registryRevision": snapshot.revision,
+            "mim/disclosure": if include_all { "all" } else { "core" },
+        }
     })
+}
+
+fn full_mcp_tool(tool: &ToolDescriptor) -> serde_json::Value {
+    let projection = LEAN_AGENT_TOOLS
+        .iter()
+        .find(|(canonical_name, _, _)| *canonical_name == tool.canonical_name);
+    let name = projection
+        .map(|(_, alias, _)| *alias)
+        .unwrap_or(tool.mcp_alias.as_str());
+    let description = projection
+        .map(|(_, _, description)| *description)
+        .unwrap_or(tool.description.as_str());
+    serde_json::json!({
+        "name": name,
+        "description": description,
+        "inputSchema": tool.input_schema,
+        "_meta": {
+            "mim/canonicalName": tool.canonical_name,
+            "mim/owner": tool.owner,
+            "mim/source": tool.source,
+        }
+    })
+}
+
+fn resolve_mcp_tool_name(name: &str) -> &str {
+    LEAN_AGENT_TOOLS
+        .iter()
+        .find(|(_, alias, _)| *alias == name)
+        .map(|(canonical_name, _, _)| *canonical_name)
+        .unwrap_or(name)
 }
 
 fn render_tool_result(result: ToolResult) -> serde_json::Value {
@@ -295,7 +331,11 @@ async fn handle_mcp(
         "ping" => Json(jsonrpc_ok(id, serde_json::json!({}))).into_response(),
         "tools/list" => {
             let snapshot = state.registry.snapshot();
-            Json(jsonrpc_ok(id, mcp_tool_list(&snapshot))).into_response()
+            let include_all = request
+                .pointer("/params/includeAll")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            Json(jsonrpc_ok(id, mcp_tool_list(&snapshot, include_all))).into_response()
         }
         "tools/call" => {
             let Some(name) = request
@@ -323,7 +363,11 @@ async fn handle_mcp(
                     .cloned()
                     .unwrap_or_default(),
             };
-            let result = match state.registry.call(name, context, arguments).await {
+            let result = match state
+                .registry
+                .call(resolve_mcp_tool_name(name), context, arguments)
+                .await
+            {
                 Ok(result) => render_tool_result(result),
                 Err(error) => render_tool_error(error),
             };
@@ -505,8 +549,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mcp_list_uses_aliases_and_preserves_canonical_metadata() {
+    fn mcp_list_is_lean_by_default_and_full_on_request() {
         let registry = ToolRegistry::new();
+        register_core_tool(
+            &registry,
+            "editor.state",
+            "editor_state",
+            "Verbose internal state description",
+            json!({ "type": "object" }),
+            ToolSource::Native,
+            |_context: ToolCallContext, _input| async {
+                Ok(ToolResult::new(json!({ "text": "hello" })))
+            },
+        )
+        .unwrap();
         register_core_tool(
             &registry,
             "editor.selection",
@@ -519,13 +575,30 @@ mod tests {
             },
         )
         .unwrap();
-        let list = mcp_tool_list(&registry.snapshot());
-        assert_eq!(list["tools"][0]["name"], "editor_selection");
+
+        let list = mcp_tool_list(&registry.snapshot(), false);
+        assert_eq!(list["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(list["tools"][0]["name"], "mim_state");
+        assert_eq!(list["tools"][0]["description"], "Get active editor state.");
+        assert!(list["tools"][0].get("_meta").is_none());
+        assert_eq!(list["_meta"]["mim/disclosure"], "core");
+
+        let full = mcp_tool_list(&registry.snapshot(), true);
+        assert_eq!(full["tools"].as_array().unwrap().len(), 2);
         assert_eq!(
-            list["tools"][0]["_meta"]["mim/canonicalName"],
-            "editor.selection"
+            full["tools"][0]["_meta"]["mim/canonicalName"],
+            "editor.selection",
         );
-        assert_eq!(list["_meta"]["mim/registryRevision"], 1);
+        let projected_state = full["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["_meta"]["mim/canonicalName"] == "editor.state")
+            .unwrap();
+        assert_eq!(projected_state["name"], "mim_state");
+        assert_eq!(projected_state["description"], "Get active editor state.");
+        assert_eq!(full["_meta"]["mim/registryRevision"], 2);
+        assert_eq!(full["_meta"]["mim/disclosure"], "all");
     }
 
     #[test]
@@ -678,12 +751,12 @@ mod tests {
         let registry = ToolRegistry::new();
         register_core_tool(
             &registry,
-            "editor.selection",
-            "editor_selection",
-            "Read selection",
+            "editor.state",
+            "editor_state",
+            "Read state",
             json!({
                 "type": "object",
-                "properties": { "includeText": { "type": "boolean" } },
+                "properties": { "include_content": { "type": "boolean" } },
                 "additionalProperties": false
             }),
             ToolSource::Native,
@@ -691,7 +764,7 @@ mod tests {
                 assert_eq!(context.caller, ToolCaller::Mcp);
                 assert_eq!(context.request_id.as_deref(), Some("call-1"));
                 Ok(ToolResult::new(json!({
-                    "text": if input["includeText"] == true { "selected" } else { "" }
+                    "content": if input["include_content"] == true { "document" } else { "" }
                 })))
             },
         )
@@ -711,7 +784,7 @@ mod tests {
             .await
             .unwrap();
         let list_json: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
-        assert_eq!(list_json["result"]["tools"][0]["name"], "editor_selection");
+        assert_eq!(list_json["result"]["tools"][0]["name"], "mim_state");
 
         let call_response = handle_mcp(
             State(state),
@@ -720,8 +793,8 @@ mod tests {
                 "id": "call-1",
                 "method": "tools/call",
                 "params": {
-                    "name": "editor_selection",
-                    "arguments": { "includeText": true }
+                    "name": "mim_state",
+                    "arguments": { "include_content": true }
                 }
             })),
         )
@@ -731,7 +804,10 @@ mod tests {
             .await
             .unwrap();
         let call_json: serde_json::Value = serde_json::from_slice(&call_body).unwrap();
-        assert_eq!(call_json["result"]["structuredContent"]["text"], "selected");
+        assert_eq!(
+            call_json["result"]["structuredContent"]["content"],
+            "document"
+        );
         assert_eq!(call_json["result"]["isError"], serde_json::Value::Null);
     }
 }

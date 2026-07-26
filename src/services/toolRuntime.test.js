@@ -78,6 +78,25 @@ describe('canonical renderer tool runtime', () => {
     expect(editor.mimActive).toHaveBeenCalledWith({ includeContent: true })
   })
 
+  it('returns the composed lean editor state in one call', async () => {
+    const state = {
+      active: { path: '/work/a.md', dirty: true },
+      tabs: [{ path: '/work/a.md', active: true }],
+      selection: { from: 2, to: 7, text: 'draft' },
+      visibleRange: { fromLine: 1, toLine: 20 },
+      comments: { total: 2, unresolved: 1, resolved: 1 },
+    }
+    const editor = {
+      mimState: vi.fn(() => state),
+    }
+
+    await expect(executeToolRequest({
+      tool: 'editor.state',
+      input: { include_content: true },
+    }, { editor })).resolves.toEqual(state)
+    expect(editor.mimState).toHaveBeenCalledWith({ includeContent: true })
+  })
+
   it('routes resolve, reopen, and delete through the active editor comment model', async () => {
     const editor = {
       mimCommentAction: vi.fn(() => ({ ok: true })),
@@ -342,6 +361,52 @@ describe('canonical renderer tool runtime', () => {
         threadId: 'agent-1',
       }),
     })
+  })
+
+  it('opens an optional path and routes lean proposals through review', async () => {
+    const editor = {
+      mimOpen: vi.fn(async () => ({ path: '/work/a.md' })),
+      mimActive: vi.fn(() => ({ path: '/work/a.md', dirty: false })),
+      mimReviewProposal: vi.fn(async proposal => ({ proposalId: proposal.id })),
+    }
+    createMimTools.mockImplementation(context => ({
+      edit: {
+        execute: vi.fn(async (input) => {
+          expect(input.target).toBe('@editor')
+          const proposal = {
+            id: 'proposal-lean',
+            status: 'pending',
+            type: 'edit',
+            targetText: input.old_text,
+            replacement: input.new_text,
+          }
+          await context.onProposal(proposal)
+          return { proposalId: proposal.id, status: 'pending_review' }
+        }),
+      },
+    }))
+    invoke.mockResolvedValue(undefined)
+
+    await expect(executeToolRequest({
+      tool: 'editor.propose',
+      input: {
+        path: '/work/a.md',
+        old_text: 'before',
+        new_text: 'after',
+        rationale: 'Clarify.',
+      },
+      context: { activityId: 'agent-lean' },
+    }, { editor })).resolves.toEqual({
+      proposalId: 'proposal-lean',
+      status: 'pending_review',
+    })
+
+    expect(editor.mimOpen).toHaveBeenCalledWith('/work/a.md')
+    expect(editor.mimReviewProposal).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'proposal-lean',
+      path: '/work/a.md',
+      sessionId: 'agent-lean',
+    }))
   })
 
   it('returns structured errors and cancels pending calls without replying late', async () => {

@@ -28,7 +28,9 @@ export default function mimTools(pi: ExtensionAPI) {
     const result = await request("tools/list", {});
     for (const definition of result?.tools || []) {
       if (!definition?.name) continue;
-      const toolName = `mim_${definition.name}`;
+      const toolName = definition.name.startsWith("mim_")
+        ? definition.name
+        : `mim_${definition.name}`;
       if (registered.has(toolName)) continue;
       registered.add(toolName);
       pi.registerTool({

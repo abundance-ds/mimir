@@ -272,3 +272,140 @@ fn save_file_keys(keys: &HashMap<String, String>) -> Result<(), String> {
     write_secret_bytes_atomic(&path, content.as_bytes())
         .map_err(|err| format!("Could not write {}: {}", path.display(), err))
 }
+
+// NOTE: resolve_api_key, key_status, and set_api_key are intentionally not
+// covered here: each one calls into the OS keychain (read_keyring /
+// write_keyring) before any other source is consulted, and there is no seam
+// to stub that out without changing behavior. Tests must not touch the real
+// keychain, so only the pure parsing/path layers below are exercised.
+//
+// The debug-only file sources are all #[cfg(debug_assertions)], so this test
+// module is too; `cargo test` builds with debug assertions by default.
+#[cfg(all(test, debug_assertions))]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, MutexGuard};
+
+    // Serializes tests that mutate process-global environment variables.
+    // (The repo has no serial-test dependency; a shared mutex is the
+    // convention-compatible minimal alternative.)
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<OsString>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self {
+                key,
+                original,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_env_content_reads_assignments_and_skips_noise() {
+        let content = "\
+# comment line
+   # indented comment
+
+ANTHROPIC_API_KEY = sk-test-123
+OPENAI_API_KEY=\"quoted value\"
+GEMINI_API_KEY='single quoted'
+INNER_EQUALS=a=b=c
+no_equals_sign_line
+DUPLICATE=first
+DUPLICATE=second
+";
+        let keys = parse_env_content(content).unwrap();
+        assert_eq!(keys.get("ANTHROPIC_API_KEY").unwrap(), "sk-test-123");
+        assert_eq!(keys.get("OPENAI_API_KEY").unwrap(), "quoted value");
+        assert_eq!(keys.get("GEMINI_API_KEY").unwrap(), "single quoted");
+        // Only the first '=' splits; the rest stays in the value.
+        assert_eq!(keys.get("INNER_EQUALS").unwrap(), "a=b=c");
+        // Within one file, a later duplicate assignment wins (HashMap insert).
+        assert_eq!(keys.get("DUPLICATE").unwrap(), "second");
+        assert!(!keys.contains_key("no_equals_sign_line"));
+        assert_eq!(keys.len(), 5);
+    }
+
+    #[test]
+    fn unquote_env_value_strips_only_matched_quote_pairs() {
+        assert_eq!(unquote_env_value("\"value\""), "value");
+        assert_eq!(unquote_env_value("'value'"), "value");
+        assert_eq!(unquote_env_value("plain"), "plain");
+        // Mismatched quotes are left alone.
+        assert_eq!(unquote_env_value("\"value'"), "\"value'");
+        // Too short to be a pair.
+        assert_eq!(unquote_env_value("\""), "\"");
+        assert_eq!(unquote_env_value(""), "");
+    }
+
+    #[test]
+    fn dotenv_candidates_walk_up_from_the_working_directory() {
+        // Read-only with respect to the environment: uses the real cwd.
+        let cwd = std::env::current_dir().unwrap();
+        let candidates = dotenv_candidates().unwrap();
+        assert_eq!(candidates[0], cwd.join(".env"));
+        if let Some(parent) = cwd.parent() {
+            assert_eq!(candidates[1], parent.join(".env"));
+            if let Some(grandparent) = parent.parent() {
+                assert_eq!(candidates[2], grandparent.join(".env"));
+            }
+        }
+        assert!(candidates.len() <= 3);
+        // Order matters: load_dotenv_keys uses or_insert, so the nearest
+        // .env (cwd first) wins for duplicate keys across candidate files.
+    }
+
+    #[test]
+    fn file_keys_round_trip_through_home_scoped_keys_env() {
+        let home = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set("HOME", home.path());
+
+        // Missing file reads as empty.
+        assert!(load_file_keys().unwrap().is_empty());
+
+        let mut keys = HashMap::new();
+        keys.insert("B_KEY".to_string(), "beta".to_string());
+        keys.insert("A_KEY".to_string(), "alpha value".to_string());
+        save_file_keys(&keys).unwrap();
+
+        let path = home.path().join(".mim").join("keys.env");
+        let written = fs::read_to_string(&path).unwrap();
+        // Rows are sorted by key and the file ends with a newline.
+        assert_eq!(written, "A_KEY=alpha value\nB_KEY=beta\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        assert_eq!(load_file_keys().unwrap(), keys);
+
+        // An empty map writes an empty file (no trailing newline).
+        save_file_keys(&HashMap::new()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        assert!(load_file_keys().unwrap().is_empty());
+    }
+}
