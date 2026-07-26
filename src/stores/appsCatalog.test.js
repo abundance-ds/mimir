@@ -24,10 +24,10 @@ vi.mock('../services/appsCatalog.js', async (importOriginal) => ({
 
 const apps = [
   {
-    id: 'changes',
-    title: 'Changes',
-    mode: 'rust-helper',
-    helper: 'git-changes',
+    id: 'scratch',
+    title: 'Today',
+    mode: 'embedded',
+    entry: 'mim://builtin/scratch',
     builtin: true,
     tools: [],
   },
@@ -76,7 +76,7 @@ describe('appsCatalog store', () => {
     await store.load()
 
     expect(loadAppsCatalog).toHaveBeenCalledTimes(1)
-    expect(store.builtins.map((app) => app.id)).toEqual(['changes'])
+    expect(store.builtins.map((app) => app.id)).toEqual(['scratch'])
     expect(store.localApps.map((app) => app.id)).toEqual(['ledger'])
     expect(store.selectedApp.id).toBe('ledger')
   })

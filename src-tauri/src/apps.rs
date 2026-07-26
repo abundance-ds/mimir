@@ -133,26 +133,57 @@ pub fn default_apps_dir() -> Result<PathBuf, String> {
 }
 
 pub fn builtin_apps() -> Vec<InstalledApp> {
-    vec![InstalledApp {
-        definition: AppDefinition {
-            id: "changes".into(),
-            title: "Changes".into(),
-            description: "Review the workspace's current Git changes.".into(),
-            mode: AppMode::RustHelper,
-            entry: None,
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            preset: None,
-            helper: Some("git-changes".into()),
-            action_tool: None,
-            launch_only: false,
-            tools: Vec::new(),
+    vec![
+        InstalledApp {
+            definition: AppDefinition {
+                // Keep the original id and data key so the former Scratch app
+                // reopens with its durable text intact.
+                id: "scratch".into(),
+                title: "Today".into(),
+                description: "Keep one top priority in view.".into(),
+                mode: AppMode::Embedded,
+                entry: Some("mim://builtin/scratch".into()),
+                command: None,
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                preset: None,
+                helper: None,
+                action_tool: None,
+                launch_only: false,
+                tools: vec![AppToolDefinition {
+                    name: "read".into(),
+                    description: "Read the current top priority.".into(),
+                    input_schema: empty_object(),
+                    mcp_alias: Some("scratch_read".into()),
+                }],
+            },
+            directory: "builtin".into(),
+            manifest_path: "builtin:scratch".into(),
+            builtin: true,
         },
-        directory: "builtin".into(),
-        manifest_path: "builtin:changes".into(),
-        builtin: true,
-    }]
+        InstalledApp {
+            definition: AppDefinition {
+                id: "business-graph".into(),
+                title: "Business graph".into(),
+                description:
+                    "Run work, projects, relationships, and durable knowledge from one graph."
+                        .into(),
+                mode: AppMode::RustHelper,
+                entry: None,
+                command: None,
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                preset: None,
+                helper: Some("business-graph".into()),
+                action_tool: None,
+                launch_only: false,
+                tools: Vec::new(),
+            },
+            directory: "builtin".into(),
+            manifest_path: "builtin:business-graph".into(),
+            builtin: true,
+        },
+    ]
 }
 
 pub fn load_catalog(directory: &Path) -> AppCatalog {
@@ -1283,11 +1314,15 @@ entry = "index.html"
         let directory = tempdir().unwrap();
         write_embedded_app(directory.path(), "inspector", "Inspector");
         let catalog = load_catalog(directory.path());
-        assert_eq!(catalog.apps.len(), 2);
+        assert_eq!(catalog.apps.len(), 3);
         assert!(catalog
             .apps
             .iter()
-            .any(|app| app.definition.id == "changes" && app.builtin));
+            .any(|app| app.definition.id == "scratch" && app.builtin));
+        assert!(catalog
+            .apps
+            .iter()
+            .any(|app| app.definition.id == "business-graph" && app.builtin));
         assert!(catalog
             .apps
             .iter()
@@ -1298,13 +1333,13 @@ entry = "index.html"
     #[test]
     fn manifests_cannot_shadow_builtin_ids() {
         let directory = tempdir().unwrap();
-        write_embedded_app(directory.path(), "changes", "Shadow");
+        write_embedded_app(directory.path(), "scratch", "Shadow");
         let catalog = load_catalog(directory.path());
         assert_eq!(
             catalog
                 .apps
                 .iter()
-                .filter(|app| app.definition.id == "changes")
+                .filter(|app| app.definition.id == "scratch")
                 .count(),
             1
         );
@@ -1355,7 +1390,7 @@ entry = "index.html"
                 None,
                 None,
                 None,
-                Some("git-changes"),
+                Some("business-graph"),
                 None,
             ),
             (
@@ -1537,7 +1572,7 @@ entry = "index.html"
                 .contains("already installed")
         );
         assert!(
-            duplicate_local_app(directory.path(), "changes", "changes-copy", None)
+            duplicate_local_app(directory.path(), "scratch", "scratch-copy", None)
                 .unwrap_err()
                 .contains("Built-in")
         );
@@ -1583,7 +1618,7 @@ entry = "index.html"
             .iter()
             .any(|app| app.definition.id == "inspector"));
         assert!(
-            trash_local_app_with(directory.path(), "changes", |_| Ok(()))
+            trash_local_app_with(directory.path(), "scratch", |_| Ok(()))
                 .unwrap_err()
                 .contains("Built-in")
         );
