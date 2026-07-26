@@ -496,11 +496,17 @@ mod tests {
         assert_eq!(resolve_proxy_model(&registry, &chat).unwrap().id, "gpt-b");
 
         let rewrite = proxy_request("anthropic", None, None, Some("rewrite"));
-        assert_eq!(resolve_proxy_model(&registry, &rewrite).unwrap().id, "claude-a");
+        assert_eq!(
+            resolve_proxy_model(&registry, &rewrite).unwrap().id,
+            "claude-a"
+        );
 
         // "auto" is a sentinel handled by resolve_model: defaults apply.
         let auto = proxy_request("anthropic", Some("auto"), None, Some("rewrite"));
-        assert_eq!(resolve_proxy_model(&registry, &auto).unwrap().id, "claude-a");
+        assert_eq!(
+            resolve_proxy_model(&registry, &auto).unwrap().id,
+            "claude-a"
+        );
     }
 
     #[test]
@@ -513,8 +519,12 @@ mod tests {
 
         let headers = authenticated_headers("anthropic", incoming.clone(), "real-key");
         assert_eq!(headers.get("x-api-key").unwrap(), "real-key");
-        assert!(!headers.keys().any(|k| k.eq_ignore_ascii_case("authorization")));
-        assert!(!headers.keys().any(|k| k.eq_ignore_ascii_case("x-goog-api-key")));
+        assert!(!headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("authorization")));
+        assert!(!headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("x-goog-api-key")));
         assert_eq!(headers.get("content-type").unwrap(), "application/json");
 
         let headers = authenticated_headers("openai", incoming.clone(), "real-key");
@@ -561,8 +571,8 @@ mod tests {
         .unwrap();
         assert!(!untouched.contains("key="), "{}", untouched);
 
-        let error = authenticated_url("google", "not a url", "real")
-            .expect_err("invalid URL must fail");
+        let error =
+            authenticated_url("google", "not a url", "real").expect_err("invalid URL must fail");
         assert!(error.contains("Invalid AI URL"), "{}", error);
     }
 
@@ -602,7 +612,12 @@ mod tests {
             .contains_key("abc"));
 
         ai_cleanup(app.state(), "abc".to_string()).unwrap();
-        assert!(app.state::<AiStreamState>().sessions.lock().unwrap().is_empty());
+        assert!(app
+            .state::<AiStreamState>()
+            .sessions
+            .lock()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -611,6 +626,11 @@ mod tests {
         app.manage(AiStreamState::default());
         ai_abort(app.state(), "missing".to_string()).unwrap();
         ai_cleanup(app.state(), "missing".to_string()).unwrap();
-        assert!(app.state::<AiStreamState>().sessions.lock().unwrap().is_empty());
+        assert!(app
+            .state::<AiStreamState>()
+            .sessions
+            .lock()
+            .unwrap()
+            .is_empty());
     }
 }

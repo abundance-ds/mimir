@@ -156,7 +156,11 @@ mod tests {
         // 1M uncached input derived from 3M - 1M read - 1M write.
         assert_eq!(usage.input_no_cache_tokens, 1_000_000);
         let expected = 3.0 + 0.3 + 3.75 + 15.0;
-        assert!((usage.estimated_cost - expected).abs() < EPSILON, "{}", usage.estimated_cost);
+        assert!(
+            (usage.estimated_cost - expected).abs() < EPSILON,
+            "{}",
+            usage.estimated_cost
+        );
     }
 
     #[test]
@@ -175,7 +179,11 @@ mod tests {
         }
         .with_cost(&model);
         let expected = 10.0 + 1.0 + 12.5;
-        assert!((usage.estimated_cost - expected).abs() < EPSILON, "{}", usage.estimated_cost);
+        assert!(
+            (usage.estimated_cost - expected).abs() < EPSILON,
+            "{}",
+            usage.estimated_cost
+        );
     }
 
     #[test]
@@ -192,7 +200,11 @@ mod tests {
         }
         .with_cost(&model);
         let expected = 10.0 + 10.0 + 10.0;
-        assert!((usage.estimated_cost - expected).abs() < EPSILON, "{}", usage.estimated_cost);
+        assert!(
+            (usage.estimated_cost - expected).abs() < EPSILON,
+            "{}",
+            usage.estimated_cost
+        );
     }
 
     #[test]
@@ -216,7 +228,11 @@ mod tests {
         assert_eq!(usage.cache_read_input_tokens, 1_000_000);
         assert_eq!(usage.input_no_cache_tokens, 1_000_000);
         let expected = 10.0 + 1.0;
-        assert!((usage.estimated_cost - expected).abs() < EPSILON, "{}", usage.estimated_cost);
+        assert!(
+            (usage.estimated_cost - expected).abs() < EPSILON,
+            "{}",
+            usage.estimated_cost
+        );
     }
 
     #[test]

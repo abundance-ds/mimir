@@ -160,10 +160,22 @@ mod tests {
         let zoom = |value: serde_json::Value| workbench_zoom_factor_from(&value);
         assert_eq!(zoom(serde_json::json!({})), 1.0);
         assert_eq!(zoom(serde_json::json!({ "editor": {} })), 1.0);
-        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": 125 } })), 1.25);
-        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": 10 } })), 0.5);
-        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": 9000 } })), 2.0);
-        assert_eq!(zoom(serde_json::json!({ "editor": { "workbenchZoom": "huge" } })), 1.0);
+        assert_eq!(
+            zoom(serde_json::json!({ "editor": { "workbenchZoom": 125 } })),
+            1.25
+        );
+        assert_eq!(
+            zoom(serde_json::json!({ "editor": { "workbenchZoom": 10 } })),
+            0.5
+        );
+        assert_eq!(
+            zoom(serde_json::json!({ "editor": { "workbenchZoom": 9000 } })),
+            2.0
+        );
+        assert_eq!(
+            zoom(serde_json::json!({ "editor": { "workbenchZoom": "huge" } })),
+            1.0
+        );
     }
 
     #[test]
