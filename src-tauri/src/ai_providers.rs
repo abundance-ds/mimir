@@ -60,7 +60,6 @@ fn build_anthropic_request(
     let mut body = json!({
         "model": model.model,
         "max_tokens": max_tokens,
-        "cache_control": { "type": "ephemeral" },
         "messages": request.messages.iter().filter(|message| message.role != "system").map(|message| {
             json!({ "role": normalize_anthropic_role(&message.role), "content": message.content })
         }).collect::<Vec<_>>(),
@@ -68,7 +67,14 @@ fn build_anthropic_request(
     let mut thinking_enabled = false;
 
     if let Some(system) = merged_system(request) {
-        body["system"] = json!(system);
+        // Prompt caching: cache_control is not a valid top-level Messages API
+        // parameter; it belongs on a content block. The system prompt is the
+        // stable prefix here, so mark it as the cache breakpoint.
+        body["system"] = json!([{
+            "type": "text",
+            "text": system,
+            "cache_control": { "type": "ephemeral" }
+        }]);
     }
     if let Some((kind, option)) = selected_control_option(request, model) {
         let option_id = option.id.as_str();
@@ -125,9 +131,18 @@ fn build_openai_request(
     if let Some(system) = merged_system(request) {
         input.push(json!({ "role": "system", "content": system }));
     }
-    input.extend(request.messages.iter().map(|message| {
-        json!({ "role": normalize_openai_role(&message.role), "content": message.content })
-    }));
+    // System-role messages are already merged into the leading system entry;
+    // filter them here (as the Anthropic/Google builders do) so system
+    // content is not sent twice.
+    input.extend(
+        request
+            .messages
+            .iter()
+            .filter(|message| message.role != "system")
+            .map(|message| {
+                json!({ "role": normalize_openai_role(&message.role), "content": message.content })
+            }),
+    );
 
     let mut body = json!({
         "model": model.model,
@@ -527,14 +542,27 @@ mod tests {
 
         assert_eq!(built.url, "https://api.anthropic.com/v1/messages");
         assert_eq!(built.headers.get("x-api-key").unwrap(), "KEY");
-        assert_eq!(built.headers.get("anthropic-version").unwrap(), "2023-06-01");
-        assert_eq!(built.headers.get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            built.headers.get("anthropic-version").unwrap(),
+            "2023-06-01"
+        );
+        assert_eq!(
+            built.headers.get("content-type").unwrap(),
+            "application/json"
+        );
 
         assert_eq!(built.body["model"], "claude-test-1");
         assert_eq!(built.body["max_tokens"], 1200);
         assert_eq!(built.body["temperature"], 0.25);
-        // request.system and system-role messages merge into one system string.
-        assert_eq!(built.body["system"], "Base\n\nRule one");
+        // cache_control is not a valid top-level Messages API parameter.
+        assert!(built.body.get("cache_control").is_none());
+        // request.system and system-role messages merge into one system content
+        // block carrying the prompt-caching breakpoint.
+        let system = built.body["system"].as_array().unwrap();
+        assert_eq!(system.len(), 1);
+        assert_eq!(system[0]["type"], "text");
+        assert_eq!(system[0]["text"], "Base\n\nRule one");
+        assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
         // System messages are filtered out; unknown roles collapse to "user".
         let messages = built.body["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 2);
@@ -652,14 +680,15 @@ mod tests {
         assert_eq!(built.body["text"]["format"]["type"], "json_object");
 
         let input = built.body["input"].as_array().unwrap();
-        // Merged system message goes first; system-role messages also remain in
-        // the input list with role "system" (they are not filtered for OpenAI).
-        assert_eq!(input.len(), 4);
+        // Merged system message goes first; system-role messages are filtered
+        // out of the input list so system content is sent exactly once.
+        assert_eq!(input.len(), 3);
         assert_eq!(input[0]["role"], "system");
         assert_eq!(input[0]["content"], "Be terse");
-        assert_eq!(input[1]["role"], "system");
-        assert_eq!(input[2]["role"], "user");
-        assert_eq!(input[3]["role"], "assistant");
+        assert_eq!(input[1]["role"], "user");
+        assert_eq!(input[1]["content"], "hi");
+        assert_eq!(input[2]["role"], "assistant");
+        assert_eq!(input[2]["content"], "hello");
     }
 
     #[test]
@@ -731,14 +760,20 @@ mod tests {
         );
         // Auth travels in the URL; the only header is content-type.
         assert_eq!(built.headers.len(), 1);
-        assert_eq!(built.headers.get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            built.headers.get("content-type").unwrap(),
+            "application/json"
+        );
 
         let contents = built.body["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 2);
         assert_eq!(contents[0]["role"], "user");
         assert_eq!(contents[1]["role"], "model");
         assert_eq!(contents[1]["parts"][0]["text"], "hello");
-        assert_eq!(built.body["systemInstruction"]["parts"][0]["text"], "Be brief");
+        assert_eq!(
+            built.body["systemInstruction"]["parts"][0]["text"],
+            "Be brief"
+        );
         assert_eq!(
             built.body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
             "LOW"
