@@ -17,10 +17,10 @@ mod ai_proxy;
 mod ai_transport;
 mod ai_usage;
 mod apps;
+pub mod business_graph;
 pub mod file_index;
 mod file_index_commands;
 mod file_open;
-mod file_search;
 mod git;
 mod launchers;
 mod local_settings;
@@ -110,9 +110,9 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn read_binary_file(path: String) -> Result<String, String> {
+fn read_binary_file(path: String) -> Result<tauri::ipc::Response, String> {
     let bytes = std::fs::read(&path).map_err(|e| format!("Could not read {}: {}", path, e))?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
@@ -202,9 +202,36 @@ struct EditorProposalDocument {
     active: bool,
 }
 
+/// Shared handle to one proposal. Cloning copies a pointer, so store
+/// snapshots taken for command replies and event broadcasts stay cheap, and
+/// transparent serialization keeps the renderer-visible JSON identical to a
+/// plain `serde_json::Value`.
+#[derive(Clone, Debug)]
+struct SharedProposal(std::sync::Arc<serde_json::Value>);
+
+impl SharedProposal {
+    fn new(value: serde_json::Value) -> Self {
+        Self(std::sync::Arc::new(value))
+    }
+}
+
+impl std::ops::Deref for SharedProposal {
+    type Target = serde_json::Value;
+
+    fn deref(&self) -> &serde_json::Value {
+        &self.0
+    }
+}
+
+impl Serialize for SharedProposal {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
 #[derive(Default)]
 struct ProposalStore {
-    proposals: Vec<serde_json::Value>,
+    proposals: Vec<SharedProposal>,
     editor_documents: HashMap<String, Vec<EditorProposalDocument>>,
 }
 
@@ -259,6 +286,7 @@ fn upsert_proposal(
             );
         }
     }
+    let proposal = SharedProposal::new(proposal);
     if let Some(existing) = store
         .proposals
         .iter_mut()
@@ -276,12 +304,14 @@ fn set_proposal_status(
     id: &str,
     status: &str,
     detail: Option<&str>,
-) -> Option<serde_json::Value> {
+) -> Option<SharedProposal> {
     let proposal = store
         .proposals
         .iter_mut()
         .find(|p| proposal_id(p) == Some(id))?;
-    if let Some(obj) = proposal.as_object_mut() {
+    // Live snapshots may still share this Arc; make_mut clones only this one
+    // proposal in that case instead of the whole store.
+    if let Some(obj) = std::sync::Arc::make_mut(&mut proposal.0).as_object_mut() {
         obj.insert(
             "status".to_string(),
             serde_json::Value::String(status.to_string()),
@@ -298,7 +328,7 @@ fn set_proposal_status(
     Some(proposal.clone())
 }
 
-fn pending_proposals(store: &ProposalStore) -> Vec<serde_json::Value> {
+fn pending_proposals(store: &ProposalStore) -> Vec<SharedProposal> {
     store
         .proposals
         .iter()
@@ -307,8 +337,8 @@ fn pending_proposals(store: &ProposalStore) -> Vec<serde_json::Value> {
         .collect()
 }
 
-fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[serde_json::Value]) {
-    let pending: Vec<serde_json::Value> = proposals
+fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[SharedProposal]) {
+    let pending: Vec<SharedProposal> = proposals
         .iter()
         .filter(|p| proposal_status(p) == "pending")
         .cloned()
@@ -529,15 +559,14 @@ fn push_proposals(
 fn get_proposals_for_path(
     state: tauri::State<ProposalState>,
     path: String,
-) -> Vec<serde_json::Value> {
+) -> Vec<SharedProposal> {
     let store = state.0.lock().unwrap_or_else(|e| e.into_inner());
     pending_proposals(&store)
-        .iter()
+        .into_iter()
         .filter(|p| {
             p.get("path").and_then(|v| v.as_str()) == Some(path.as_str())
                 || p.get("absolutePath").and_then(|v| v.as_str()) == Some(path.as_str())
         })
-        .cloned()
         .collect()
 }
 
@@ -557,7 +586,7 @@ fn proposal_create(
 }
 
 #[tauri::command]
-fn proposal_list(state: tauri::State<ProposalState>) -> Vec<serde_json::Value> {
+fn proposal_list(state: tauri::State<ProposalState>) -> Vec<SharedProposal> {
     let store = state.0.lock().unwrap_or_else(|e| e.into_inner());
     store.proposals.clone()
 }
@@ -757,7 +786,16 @@ fn create_main_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<taur
             )));
     }
 
-    builder.build()
+    let window = builder.build()?;
+
+    // Apply the saved interface zoom before the first paint so startup does
+    // not flash at 100%; the renderer settings store owns it from then on.
+    let zoom = local_settings::initial_workbench_zoom_factor();
+    if (zoom - 1.0).abs() > f64::EPSILON {
+        let _ = window.set_zoom(zoom);
+    }
+
+    Ok(window)
 }
 
 #[tauri::command]
@@ -799,6 +837,7 @@ pub fn run() {
         .manage(activity_supervisor)
         .manage(routine_runtime)
         .manage(ai_proxy::AiStreamState::default())
+        .manage(business_graph::GraphRuntime::default())
         .manage(file_open::PendingFilePaths::default())
         .manage(file_index_commands::FileIndexState::default())
         .manage(tool_server::ToolServerState::default())
@@ -867,6 +906,20 @@ pub fn run() {
             path_exists,
             create_dir,
             list_dir,
+            business_graph::runtime::graph_open,
+            business_graph::runtime::graph_status,
+            business_graph::runtime::graph_get,
+            business_graph::runtime::graph_query,
+            business_graph::runtime::graph_search,
+            business_graph::runtime::graph_neighbors,
+            business_graph::runtime::graph_diagnostics,
+            business_graph::runtime::graph_migration_report,
+            business_graph::runtime::graph_context,
+            business_graph::runtime::graph_refresh,
+            business_graph::runtime::graph_update,
+            business_graph::runtime::graph_create,
+            business_graph::runtime::graph_delete,
+            business_graph::runtime::graph_restore,
             git::git_status,
             push_proposals,
             get_proposals_for_path,
@@ -914,6 +967,7 @@ pub fn run() {
             file_index_commands::file_index_cancel_search,
             file_index_commands::file_index_search,
             workspace_files::workspace_file_list_directory,
+            workspace_files::workspace_file_inspect,
             workspace_files::workspace_file_create,
             workspace_files::workspace_file_rename,
             workspace_files::workspace_file_duplicate,
@@ -932,7 +986,6 @@ pub fn run() {
             apps::app_data_save,
             apps::app_data_delete,
             apps::app_http_request,
-            file_search::search_file_content,
             reveal_in_finder,
             tool_server::tool_server_start,
             tool_server::tool_server_stop,

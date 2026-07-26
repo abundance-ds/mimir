@@ -22,6 +22,11 @@ const VALID_TAURI_COMMANDS = new Set([
   // filesystem (top-level)
   'read_text_file', 'read_binary_file', 'write_text_file', 'write_binary_file',
   'path_exists', 'create_dir', 'list_dir',
+  // unified business graph
+  'graph_open', 'graph_status', 'graph_get', 'graph_query', 'graph_search',
+  'graph_neighbors', 'graph_diagnostics', 'graph_refresh', 'graph_update',
+  'graph_create', 'graph_delete', 'graph_restore', 'graph_migration_report',
+  'graph_context',
   // git
   'git_status',
   // IPC / window coordination (top-level)
@@ -57,7 +62,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // file indexing and content search
   'file_index_open', 'file_index_files', 'file_index_filter', 'file_index_refresh',
   'file_index_begin_search', 'file_index_cancel_search', 'file_index_search',
-  'workspace_file_list_directory', 'workspace_file_create', 'workspace_file_rename',
+  'workspace_file_list_directory', 'workspace_file_inspect', 'workspace_file_create', 'workspace_file_rename',
   'workspace_file_duplicate', 'workspace_file_trash', 'workspace_file_open_native',
   'workspace_file_reveal',
   'search_file_content',
@@ -79,6 +84,12 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(vi.fn())),
   emit: vi.fn(),
+}))
+
+vi.mock('@tauri-apps/api/webview', () => ({
+  getCurrentWebview: vi.fn(() => ({
+    setZoom: vi.fn(() => Promise.resolve()),
+  })),
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({

@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'happy-dom',
-    include: ['src/**/*.test.js', 'review-workflow/**/*.test.js'],
+    include: ['src/**/*.test.js'],
     setupFiles: ['src/test/setup.js'],
     server: {
       deps: {
@@ -16,6 +16,12 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.js', 'src/**/*.vue'],
       exclude: ['src/test/**', '**/*.test.js'],
+      thresholds: {
+        lines: 65,
+        statements: 62,
+        functions: 57,
+        branches: 53,
+      },
     },
   },
 })
