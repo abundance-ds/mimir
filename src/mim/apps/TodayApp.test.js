@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { syntaxTree } from '@codemirror/language'
 import {
   listenForAppTools,
   loadAppData,
@@ -68,11 +69,27 @@ describe('TodayApp', () => {
     })
   }
 
+  function view(wrapper) {
+    return wrapper.vm.getEditorView()
+  }
+
+  async function setEditorText(wrapper, value) {
+    const editor = view(wrapper)
+    editor.dispatch({
+      changes: {
+        from: 0,
+        to: editor.state.doc.length,
+        insert: value,
+      },
+    })
+    await wrapper.vm.$nextTick()
+  }
+
   it('restores the previous scratch text and installs its reader after the listener', async () => {
     const wrapper = render()
     await flushPromises()
 
-    expect(wrapper.get('textarea').element.value).toBe('Ship the focused review flow')
+    expect(view(wrapper).state.doc.toString()).toBe('Ship the focused review flow')
     expect(reconcileAppTools).toHaveBeenCalledWith({
       appId: 'scratch',
       instanceId: 'app:scratch',
@@ -86,7 +103,7 @@ describe('TodayApp', () => {
     const wrapper = render()
     await flushPromises()
 
-    await wrapper.get('textarea').setValue('Finish the priority card')
+    await setEditorText(wrapper, 'Finish the priority card')
     expect(wrapper.get('[data-today-save-state]').text()).toContain('Unsaved')
     await vi.advanceTimersByTimeAsync(400)
     await flushPromises()
@@ -98,10 +115,34 @@ describe('TodayApp', () => {
     expect(wrapper.get('[data-today-save-state]').text()).toContain('Saved')
   })
 
+  it('keeps Select All inside the priority editor', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const editor = view(wrapper)
+    editor.dispatch({ selection: { anchor: 5 } })
+
+    await wrapper.get('.cm-content').trigger('keydown', { key: 'a', metaKey: true })
+
+    expect(editor.state.selection.main.from).toBe(0)
+    expect(editor.state.selection.main.to).toBe(editor.state.doc.length)
+  })
+
+  it('parses Markdown for source-level syntax highlighting without preview rendering', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await setEditorText(wrapper, '# Focus\n\n**Ship it** with [notes](./notes.md)')
+
+    const tree = syntaxTree(view(wrapper).state).toString()
+    expect(tree).toContain('ATXHeading1')
+    expect(tree).toContain('StrongEmphasis')
+    expect(tree).toContain('Link')
+    expect(wrapper.find('h1').exists()).toBe(false)
+  })
+
   it('serves the live priority through the retained scratch reader', async () => {
     const wrapper = render()
     await flushPromises()
-    await wrapper.get('textarea').setValue('Tool-visible priority')
+    await setEditorText(wrapper, 'Tool-visible priority')
 
     await relay.onCall({
       id: 'call-9',
@@ -126,12 +167,12 @@ describe('TodayApp', () => {
     const wrapper = render()
     await flushPromises()
 
-    await wrapper.get('textarea').setValue('Keep this exact draft')
+    await setEditorText(wrapper, 'Keep this exact draft')
     await vi.advanceTimersByTimeAsync(400)
     await flushPromises()
 
     expect(wrapper.get('[data-today-error]').text()).toContain('disk busy')
-    expect(wrapper.get('textarea').element.value).toBe('Keep this exact draft')
+    expect(view(wrapper).state.doc.toString()).toBe('Keep this exact draft')
 
     await wrapper.get('[data-today-error] button').trigger('click')
     await flushPromises()
