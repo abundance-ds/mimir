@@ -42,8 +42,12 @@
           v-else-if="ended"
           type="button"
           data-terminal-restart
+          :data-resume-emphasis="canResume ? 'accent' : 'neutral'"
           :title="restartTitle"
-          class="flex h-7 shrink-0 items-center gap-1.5 px-2 font-mono text-[9px] font-medium text-ink-2 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          class="flex h-7 shrink-0 items-center gap-1.5 border px-2 font-mono text-[9px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          :class="canResume
+            ? 'border-accent/40 bg-accent-soft text-accent hover:border-accent hover:bg-accent hover:text-accent-ink'
+            : 'border-transparent text-ink-2 hover:bg-chrome hover:text-ink'"
           @pointerdown.stop
           @click.stop="requestRestart"
         >

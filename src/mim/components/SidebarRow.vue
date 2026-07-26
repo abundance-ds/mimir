@@ -26,13 +26,20 @@
       <span
         :data-sidebar-copy="copyId || undefined"
         class="ml-2 flex min-w-0 flex-1 items-center gap-2"
-        :class="{ 'pointer-events-none invisible': collapsed }"
+        :class="[
+          $slots.trailing ? 'pr-1' : 'pr-3',
+          { 'pointer-events-none invisible': collapsed },
+        ]"
         :aria-hidden="collapsed"
       >
         <span class="min-w-0 flex-1 truncate text-[11px] font-medium">
           <slot name="label">{{ label }}</slot>
         </span>
-        <span v-if="meta" class="shrink-0 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3">
+        <span
+          v-if="meta"
+          data-sidebar-meta
+          class="shrink-0 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4"
+        >
           {{ meta }}
         </span>
       </span>

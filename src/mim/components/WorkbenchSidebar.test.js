@@ -78,6 +78,9 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-row="launcher:codex"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
     expect(wrapper.get('[data-sidebar-row="launcher:codex"] svg').attributes('viewBox')).toBe('0 0 256 260')
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"] svg').attributes('viewBox')).toBe('0 0 256 260')
+    const fileShortcut = wrapper.get('[data-sidebar-row="tool:files"] [data-sidebar-meta]')
+    expect(fileShortcut.text()).toBe('⌘P')
+    expect(fileShortcut.element.parentElement.classList.contains('pr-3')).toBe(true)
   })
 
   it('keeps the same rows and exposes source identity in rail mode', async () => {

@@ -63,6 +63,7 @@ const agent = {
   title: 'Codex',
   workspacePath: '/workspace',
   status: 'working',
+  host: { type: 'pty', resumeStrategy: 'codex' },
   launch: { cwd: '/workspace' },
 }
 
@@ -268,7 +269,11 @@ describe('TerminalActivity', () => {
       record: { ...agent, status: 'done' },
     })
     await nextTick()
-    expect(wrapper.get('[data-terminal-restart]').exists()).toBe(true)
+    const resume = wrapper.get('[data-terminal-restart]')
+    expect(resume.exists()).toBe(true)
+    expect(resume.attributes('data-resume-emphasis')).toBe('accent')
+    expect(resume.classes()).toContain('bg-accent-soft')
+    expect(resume.classes()).toContain('text-accent')
     expect(wrapper.emitted('exit')).toHaveLength(1)
     expect(wrapper.emitted('restart-ready')[0][0]).toMatchObject({
       activityId: 'agent:one',
