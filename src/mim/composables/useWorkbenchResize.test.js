@@ -1,12 +1,35 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkbenchStore } from '../../stores/workbench.js'
 import { useWorkbenchResize } from './useWorkbenchResize.js'
 
 describe('useWorkbenchResize', () => {
+  let frames
+
   beforeEach(() => {
     setActivePinia(createPinia())
+    frames = new Map()
+    let nextFrameId = 1
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      const id = nextFrameId
+      nextFrameId += 1
+      frames.set(id, callback)
+      return id
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id)
+    })
   })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function runFrame() {
+    const callbacks = [...frames.values()]
+    frames.clear()
+    for (const callback of callbacks) callback(performance.now())
+  }
 
   it('resizes Sidebar with pointer movement and persists once on release', () => {
     const store = useWorkbenchStore()
@@ -15,13 +38,49 @@ describe('useWorkbenchResize', () => {
 
     resize.start('sidebar', { clientX: 100 })
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150 }))
+    runFrame()
 
     expect(store.paneLayout.sidebar.width).toBe(290)
     expect(resize.dragging.value).toBe(true)
 
     window.dispatchEvent(new MouseEvent('pointerup', { clientX: 150 }))
     expect(resize.dragging.value).toBe(false)
+    expect(persist).toHaveBeenCalledTimes(1)
     expect(persist).toHaveBeenCalledWith(store.layoutSnapshot())
+  })
+
+  it('coalesces pointer moves into one store write per animation frame', () => {
+    const store = useWorkbenchStore()
+    const resize = useWorkbenchResize(store)
+    const setPaneWidth = vi.spyOn(store, 'setPaneWidth')
+
+    resize.start('sidebar', { clientX: 100 })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 110 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 120 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150 }))
+
+    expect(setPaneWidth).not.toHaveBeenCalled()
+    expect(store.paneLayout.sidebar.width).toBe(240)
+
+    runFrame()
+    expect(setPaneWidth).toHaveBeenCalledTimes(1)
+    expect(setPaneWidth).toHaveBeenCalledWith('sidebar', 290)
+  })
+
+  it('flushes the exact final width on release even with a frame pending', () => {
+    const store = useWorkbenchStore()
+    const resize = useWorkbenchResize(store)
+    const setPaneWidth = vi.spyOn(store, 'setPaneWidth')
+
+    resize.start('sidebar', { clientX: 100 })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 145 }))
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 145 }))
+
+    expect(store.paneLayout.sidebar.width).toBe(285)
+    expect(setPaneWidth).toHaveBeenCalledTimes(1)
+
+    runFrame()
+    expect(setPaneWidth).toHaveBeenCalledTimes(1)
   })
 
   it('resizes Editor from its left edge in the opposite direction', () => {
@@ -41,11 +100,27 @@ describe('useWorkbenchResize', () => {
 
     resize.start('sidebar', { clientX: 100 })
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 1000 }))
+    runFrame()
     expect(store.paneLayout.sidebar.width).toBe(320)
 
     resize.dispose()
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: -1000 }))
+    runFrame()
     expect(store.paneLayout.sidebar.width).toBe(320)
     expect(resize.dragging.value).toBe(false)
+  })
+
+  it('drops pending frame work on dispose instead of applying it late', () => {
+    const store = useWorkbenchStore()
+    const resize = useWorkbenchResize(store)
+    const setPaneWidth = vi.spyOn(store, 'setPaneWidth')
+
+    resize.start('sidebar', { clientX: 100 })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150 }))
+    resize.dispose()
+    runFrame()
+
+    expect(setPaneWidth).not.toHaveBeenCalled()
+    expect(store.paneLayout.sidebar.width).toBe(240)
   })
 })

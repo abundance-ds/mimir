@@ -52,7 +52,12 @@
           </div>
         </div>
 
-        <slot name="actions" />
+        <div
+          :data-pane-actions="pane"
+          class="no-drag flex shrink-0 items-center"
+        >
+          <slot name="actions" />
+        </div>
 
         <button
           type="button"

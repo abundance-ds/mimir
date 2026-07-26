@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 
 export const ACTIVITY_KINDS = Object.freeze([
@@ -57,7 +57,9 @@ const TRANSITIONS = Object.freeze({
 })
 
 export const useActivitiesStore = defineStore('activities', () => {
-  const records = ref([])
+  // Shallow on purpose: records are replaced wholesale on every mutation, so Vue
+  // never needs to deep-track the nested activity objects (hot path: PTY events).
+  const records = shallowRef([])
 
   const activities = computed(() => sorted(records.value))
   const visibleActivities = computed(() => activities.value.filter((item) => !item.archivedAt))
@@ -69,12 +71,19 @@ export const useActivitiesStore = defineStore('activities', () => {
 
   function upsert(value) {
     assertKnownFields(value)
-    const existingIndex = records.value.findIndex((item) => item.id === value?.id)
-    const existing = existingIndex >= 0 ? records.value[existingIndex] : null
+    const list = records.value
+    const existingIndex = list.findIndex((item) => item.id === value?.id)
+    const existing = existingIndex >= 0 ? list[existingIndex] : null
     const next = normalizeRecord(existing ? { ...existing, ...serializableClone(value) } : value)
 
-    if (existingIndex >= 0) records.value.splice(existingIndex, 1, next)
-    else records.value.push(next)
+    // The backend re-emits identical records; skip the write (and downstream
+    // computed/watcher invalidation) when nothing actually changed.
+    if (existing && deepEqual(existing, next)) return existing
+
+    const copy = list.slice()
+    if (existingIndex >= 0) copy[existingIndex] = next
+    else copy.push(next)
+    records.value = copy
     return next
   }
 
@@ -137,7 +146,9 @@ export const useActivitiesStore = defineStore('activities', () => {
   function replaceRecord(activity, patch) {
     const index = records.value.findIndex((item) => item.id === activity.id)
     const next = normalizeRecord({ ...activity, ...serializableClone(patch) })
-    records.value.splice(index, 1, next)
+    const copy = records.value.slice()
+    copy[index] = next
+    records.value = copy
     return next
   }
 
@@ -235,14 +246,44 @@ function plainRecord(value) {
   return clone
 }
 
+// structuredClone rejects functions/DOM handles (DataCloneError), which is the
+// serializability guarantee the JSON round-trip used to provide, without paying
+// stringify+parse on every upsert. JSON fallback only for environments without it.
+const cloneValue = typeof structuredClone === 'function'
+  ? structuredClone
+  : (value) => {
+      const encoded = JSON.stringify(value)
+      if (encoded === undefined) throw new Error('not serializable')
+      return JSON.parse(encoded)
+    }
+
 function serializableClone(value) {
+  if (value === undefined) throw new Error('Activity data must be serializable.')
   try {
-    const encoded = JSON.stringify(value)
-    if (encoded === undefined) throw new Error('not serializable')
-    return JSON.parse(encoded)
+    return cloneValue(value)
   } catch {
     throw new Error('Activity data must be serializable.')
   }
+}
+
+function deepEqual(a, b) {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  const aIsArray = Array.isArray(a)
+  if (aIsArray !== Array.isArray(b)) return false
+  if (aIsArray) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqual(a[i], b[i])) return false
+    }
+    return true
+  }
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !deepEqual(a[key], b[key])) return false
+  }
+  return true
 }
 
 function sorted(values) {

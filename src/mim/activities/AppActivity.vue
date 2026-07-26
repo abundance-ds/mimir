@@ -1,10 +1,19 @@
 <template>
-  <ChangesApp
-    v-if="surface === 'changes'"
+  <BusinessGraphApp
+    v-if="surface === 'business-graph'"
     :workspace-path="activity.workspacePath || ''"
     :active="active"
     @open-file="$emit('openFile', $event)"
     @choose-workspace="$emit('chooseWorkspace')"
+    @open-activity="$emit('openActivity', $event)"
+    @start-work="$emit('startWork', $event)"
+    @diagnostic="$emit('diagnostic', $event)"
+  />
+  <TodayApp
+    v-else-if="surface === 'today'"
+    :app="app"
+    :instance-id="instanceId"
+    :active="active"
     @diagnostic="$emit('diagnostic', $event)"
   />
   <EmbeddedAppHost
@@ -44,7 +53,8 @@
 <script setup>
 import { computed } from 'vue'
 import { IconAlertTriangle } from '@tabler/icons-vue'
-import ChangesApp from '../apps/ChangesApp.vue'
+import BusinessGraphApp from '../apps/BusinessGraphApp.vue'
+import TodayApp from '../apps/TodayApp.vue'
 import EmbeddedAppHost from '../apps/EmbeddedAppHost.vue'
 import LaunchPlanHost from '../apps/LaunchPlanHost.vue'
 
@@ -53,7 +63,14 @@ const props = defineProps({
   active: { type: Boolean, default: false },
 })
 
-defineEmits(['openFile', 'chooseWorkspace', 'launchPlan', 'diagnostic'])
+defineEmits([
+  'openFile',
+  'openActivity',
+  'startWork',
+  'chooseWorkspace',
+  'launchPlan',
+  'diagnostic',
+])
 
 const app = computed(() => props.activity?.source?.app || null)
 const plan = computed(() => props.activity?.launch?.plan || null)
@@ -62,10 +79,11 @@ const instanceId = computed(() => props.activity?.id || (
 ))
 const surface = computed(() => {
   if (!app.value || !plan.value?.mode) return 'invalid'
+  if (app.value.id === 'scratch') return 'today'
   if (
-    app.value.id === 'changes'
-    || (plan.value.mode === 'rust-helper' && plan.value.helper === 'git-changes')
-  ) return 'changes'
+    app.value.id === 'business-graph'
+    || (plan.value.mode === 'rust-helper' && plan.value.helper === 'business-graph')
+  ) return 'business-graph'
   if (plan.value.mode === 'embedded') return 'embedded'
   if (['terminal', 'process', 'window', 'action', 'rust-helper'].includes(plan.value.mode)) {
     return 'launch'

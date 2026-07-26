@@ -3,18 +3,7 @@ import { useEditorUIStore } from '../../stores/editorUI.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useFileStore } from '../../stores/files.js'
 import { primaryModifierPressed } from '../../shared/platform.js'
-
-function hasZoomModifier(e) {
-  return (e.metaKey || e.ctrlKey) && !e.altKey
-}
-
-function isZoomInKey(e) {
-  return e.key === '+' || e.key === '=' || e.code === 'Equal' || e.code === 'NumpadAdd'
-}
-
-function isZoomOutKey(e) {
-  return e.key === '-' || e.key === '_' || e.code === 'Minus' || e.code === 'NumpadSubtract'
-}
+import { workbenchZoomKeyAction, nextWorkbenchZoom } from '../../shared/workbenchZoom.js'
 
 export function useKeyboardShortcuts({
   onFormat,
@@ -35,17 +24,14 @@ export function useKeyboardShortcuts({
     const mod = primaryModifierPressed(e)
     const key = e.key.toLowerCase()
 
-    if (editorHasFocus() && hasZoomModifier(e)) {
-      if (isZoomInKey(e)) {
-        e.preventDefault()
-        ui.zoomIn()
-        return
-      }
-      if (isZoomOutKey(e)) {
-        e.preventDefault()
-        ui.zoomOut()
-        return
-      }
+    // Interface zoom for the standalone editor window. Inside the workbench
+    // this never fires: WorkbenchApp handles zoom chords at capture phase and
+    // stops propagation. Editor content zoom stays on the footer controls.
+    const zoomAction = workbenchZoomKeyAction(e)
+    if (zoomAction) {
+      e.preventDefault()
+      settings.set('workbenchZoom', nextWorkbenchZoom(settings.workbenchZoom, zoomAction))
+      return
     }
 
     if (mod && e.key === ',') {

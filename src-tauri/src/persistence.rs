@@ -8,17 +8,31 @@
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
+    collections::HashMap,
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
     process,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
 static UNIQUE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// How long a parent-directory fsync stays "fresh". Writers that replace files
+/// in the same directory within this window (e.g. PTY scrollback persistence
+/// every 250ms) skip the redundant directory fsync.
+const DIRECTORY_SYNC_WINDOW: Duration = Duration::from_secs(2);
+
+fn recent_directory_syncs() -> &'static Mutex<HashMap<PathBuf, Instant>> {
+    static RECENT: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
+    RECENT.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// An error raised while reading or durably replacing persisted JSON.
 #[derive(Debug, Error)]
@@ -170,8 +184,46 @@ fn write_bytes_atomic_inner(
         .map_err(|source| io_error("atomically replace persistence file at", path, source))?;
     pending.disarm();
 
-    sync_directory(parent)?;
+    sync_directory_debounced(parent)?;
     Ok(())
+}
+
+/// Sync `parent` unless it was already synced within [`DIRECTORY_SYNC_WINDOW`].
+///
+/// Returns whether an fsync was actually issued. Durability tradeoff: the file
+/// itself is always fully synced before the rename, but skipping the directory
+/// fsync means that after a crash or power loss within the window the *rename*
+/// may not yet be durable — the directory may still reference the previous
+/// version of the file (or, for a brand-new file, none at all). For
+/// high-frequency writers this bounds the loss to roughly the last window of
+/// replacements while eliminating a per-write directory fsync.
+fn sync_directory_debounced(parent: &Path) -> Result<bool, PersistenceError> {
+    let now = Instant::now();
+    {
+        let recent = lock_recent_directory_syncs();
+        if let Some(last) = recent.get(parent) {
+            if now.saturating_duration_since(*last) < DIRECTORY_SYNC_WINDOW {
+                return Ok(false);
+            }
+        }
+    }
+
+    // The sync happens outside the lock; only a successful sync is recorded so
+    // a transient failure never suppresses the next attempt.
+    sync_directory(parent)?;
+
+    let mut recent = lock_recent_directory_syncs();
+    if recent.len() >= 64 {
+        recent.retain(|_, synced| now.saturating_duration_since(*synced) < DIRECTORY_SYNC_WINDOW);
+    }
+    recent.insert(parent.to_path_buf(), now);
+    Ok(true)
+}
+
+fn lock_recent_directory_syncs() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Instant>> {
+    recent_directory_syncs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Load JSON from `path`, returning `None` when the file does not exist.
@@ -587,6 +639,27 @@ mod tests {
             .starts_with("routines.json.corrupt-"));
         assert_eq!(fs::read(quarantined_path).unwrap(), corrupt_contents);
         assert!(!reason.is_empty());
+    }
+
+    #[test]
+    fn directory_syncs_are_debounced_per_parent_directory() {
+        let directory = tempdir().unwrap();
+        let parent = directory.path();
+
+        assert!(sync_directory_debounced(parent).unwrap());
+        assert!(
+            !sync_directory_debounced(parent).unwrap(),
+            "a directory synced moments ago should be skipped"
+        );
+
+        // A different directory is tracked independently.
+        let other = tempdir().unwrap();
+        assert!(sync_directory_debounced(other.path()).unwrap());
+
+        // Once the recorded sync ages past the window, the directory syncs again.
+        lock_recent_directory_syncs()
+            .insert(parent.to_path_buf(), Instant::now() - DIRECTORY_SYNC_WINDOW);
+        assert!(sync_directory_debounced(parent).unwrap());
     }
 
     #[test]

@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import WorkbenchSidebar from './WorkbenchSidebar.vue'
 
+const tools = [
+  { id: 'files', activityId: 'files', title: 'Files', icon: 'files', shortcut: '⌘P' },
+  { id: 'app:scratch', activityId: 'app:scratch', title: 'Today', icon: 'today' },
+]
+
 const launchers = [
-  { id: 'files', title: 'Files', icon: 'files', shortcut: '⌘P' },
   { id: 'codex', title: 'Codex', icon: 'codex' },
   {
     id: 'terminal',
@@ -46,8 +50,8 @@ function render(collapsed = false, attach = false) {
       collapsed,
       workspaceName: 'mim-panel-editor',
       workspacePath: '/work/mim-panel-editor',
-      launchers: [launchers[0]],
-      apps: launchers.slice(1),
+      tools,
+      newActivity: launchers,
       activities,
       activeActivityId: 'agent:one',
     },
@@ -55,18 +59,21 @@ function render(collapsed = false, attach = false) {
 }
 
 describe('WorkbenchSidebar', () => {
-  it('renders stable launchers before live activities', () => {
+  it('renders Tools, New activity sources, and live Activities in that order', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-sidebar-row]').map((row) => row.attributes('data-sidebar-row'))
 
     expect(rows).toEqual([
-      'launcher:files',
+      'tool:files',
+      'tool:app:scratch',
       'launcher:codex',
       'launcher:terminal',
       'activity:agent:one',
       'activity:terminal:two',
     ])
     expect(wrapper.text()).toContain('mim-panel-editor')
+    expect(wrapper.text()).toContain('Tools')
+    expect(wrapper.text()).toContain('New activity')
     expect(wrapper.get('[data-activity-status="working"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="launcher:codex"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
     expect(wrapper.get('[data-sidebar-row="launcher:codex"] svg').attributes('viewBox')).toBe('0 0 256 260')
@@ -96,14 +103,12 @@ describe('WorkbenchSidebar', () => {
     document.body.querySelector('[data-project-open-folder]')?.click()
     await wrapper.get('[data-sidebar-collapse]').trigger('click')
     await wrapper.get('[data-sidebar-settings]').trigger('click')
-    await wrapper.get('[data-sidebar-manage-apps]').trigger('click')
 
     expect(wrapper.emitted('launch')[0]).toEqual(['codex'])
     expect(wrapper.emitted('selectActivity')[0]).toEqual(['terminal:two'])
     expect(wrapper.emitted('chooseWorkspace')).toHaveLength(1)
     expect(wrapper.emitted('toggleCollapse')).toHaveLength(1)
     expect(wrapper.emitted('settings')).toHaveLength(1)
-    expect(wrapper.emitted('manageApps')).toHaveLength(1)
   })
 
   it('keeps pane collapse in the top chrome and Settings anchored at the bottom', () => {
@@ -115,7 +120,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-settings]').text()).toContain('Settings')
   })
 
-  it('discloses Apps and Activities independently while archived rows stay hidden by default', async () => {
+  it('discloses New activity and Activities independently while Tools remain stable', async () => {
     const wrapper = render()
     await wrapper.setProps({
       archivedActivities: [{
@@ -127,9 +132,9 @@ describe('WorkbenchSidebar', () => {
       }],
     })
 
-    const appsToggle = wrapper.get('[data-sidebar-apps-toggle]')
+    const newActivityToggle = wrapper.get('[data-sidebar-new-activity-toggle]')
     const activitiesToggle = wrapper.get('[data-sidebar-activities-toggle]')
-    expect(appsToggle.attributes('aria-expanded')).toBe('true')
+    expect(newActivityToggle.attributes('aria-expanded')).toBe('true')
     expect(activitiesToggle.attributes('aria-expanded')).toBe('true')
     expect(wrapper.get('[data-sidebar-archived-toggle]').attributes('aria-expanded')).toBe('false')
     expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
@@ -139,19 +144,15 @@ describe('WorkbenchSidebar', () => {
     await wrapper.get('[data-sidebar-archived-toggle]').trigger('click')
     expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
 
-    await appsToggle.trigger('click')
+    await newActivityToggle.trigger('click')
     expect(wrapper.find('[data-sidebar-row="launcher:codex"]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-row="tool:app:scratch"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
-    expect(wrapper.emitted('manageApps')).toBeUndefined()
 
-    await appsToggle.trigger('keydown', { key: 'ArrowRight' })
+    await newActivityToggle.trigger('keydown', { key: 'ArrowRight' })
     expect(wrapper.get('[data-sidebar-row="launcher:codex"]').exists()).toBe(true)
-    await appsToggle.trigger('keydown', { key: 'ArrowLeft' })
+    await newActivityToggle.trigger('keydown', { key: 'ArrowLeft' })
     expect(wrapper.find('[data-sidebar-row="launcher:codex"]').exists()).toBe(false)
-
-    await wrapper.get('[data-sidebar-manage-apps]').trigger('click')
-    expect(wrapper.emitted('manageApps')).toHaveLength(1)
-    expect(appsToggle.attributes('aria-expanded')).toBe('false')
 
     await activitiesToggle.trigger('click')
     expect(wrapper.find('[data-sidebar-row="activity:agent:one"]').exists()).toBe(false)
@@ -235,10 +236,10 @@ describe('WorkbenchSidebar', () => {
     const wrapper = mount(WorkbenchSidebar, {
       attachTo: document.body,
       props: {
-        apps: [
+        newActivity: [
+          { id: 'app:ledger', title: 'Ledger', icon: 'apps', available: true },
           { id: 'preset:codex', title: 'Codex', icon: 'codex', available: true },
           { id: 'preset:terminal', title: 'Terminal', icon: 'terminal', available: true },
-          { id: 'app:ledger', title: 'Ledger', icon: 'apps', available: true },
         ],
         activities,
       },
@@ -257,6 +258,11 @@ describe('WorkbenchSidebar', () => {
     expect(menu.textContent).toContain('Ledger')
     expect(menu.textContent).not.toContain('Chat')
     expect(menu.querySelector('[data-activity-create-divider]')).not.toBeNull()
+    expect(options.map(option => option.textContent.trim())).toEqual([
+      'Codex',
+      'Terminal',
+      'Ledger',
+    ])
     expect(document.activeElement).toBe(options[0])
 
     options.find(option => option.textContent.includes('Terminal')).click()
@@ -274,7 +280,7 @@ describe('WorkbenchSidebar', () => {
     const wrapper = mount(WorkbenchSidebar, {
       attachTo: document.body,
       props: {
-        apps: [
+        newActivity: [
           { id: 'preset:terminal', title: 'Terminal', icon: 'terminal', available: true },
         ],
       },
@@ -341,6 +347,53 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.emitted('sortActivities').at(-1)).toEqual(['recent'])
   })
 
+  it('manually reorders Tools and New activity sources by keyboard and pointer drag', async () => {
+    const wrapper = render()
+    const today = wrapper.get('[data-sidebar-row="tool:app:scratch"]')
+    const codex = wrapper.get('[data-sidebar-row="launcher:codex"]')
+    const terminal = wrapper.get('[data-sidebar-row="launcher:terminal"]')
+
+    await today.find('button').trigger('keydown', {
+      key: 'ArrowUp',
+      altKey: true,
+      shiftKey: true,
+    })
+    expect(wrapper.emitted('reorderTools').at(-1)).toEqual([
+      ['app:scratch', 'files'],
+    ])
+
+    await codex.find('button').trigger('keydown', {
+      key: 'ArrowDown',
+      altKey: true,
+      shiftKey: true,
+    })
+    expect(wrapper.emitted('reorderLaunchers').at(-1)).toEqual([
+      ['terminal', 'codex'],
+    ])
+
+    vi.spyOn(codex.element, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      height: 36,
+    })
+    vi.spyOn(terminal.element, 'getBoundingClientRect').mockReturnValue({
+      top: 36,
+      height: 36,
+    })
+    await codex.trigger('pointerdown', { button: 0, clientX: 4, clientY: 10 })
+    document.dispatchEvent(new PointerEvent('pointermove', {
+      clientX: 6,
+      clientY: 80,
+    }))
+    document.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: 6,
+      clientY: 80,
+    }))
+
+    expect(wrapper.emitted('reorderLaunchers').at(-1)).toEqual([
+      ['terminal', 'codex'],
+    ])
+  })
+
   it('commits pointer drag reorder only after crossing the movement threshold', async () => {
     const wrapper = render()
     const first = wrapper.get('[data-sidebar-row="activity:agent:one"]')
@@ -372,7 +425,7 @@ describe('WorkbenchSidebar', () => {
   it('uses the Anthropic provider mark and truthful renderer-app lifecycle actions', async () => {
     const wrapper = mount(WorkbenchSidebar, {
       props: {
-        apps: [{ id: 'preset:claude', title: 'Claude', icon: 'claude' }],
+        newActivity: [{ id: 'preset:claude', title: 'Claude', icon: 'claude' }],
         activities: [{
           id: 'app:ledger',
           title: 'Ledger',

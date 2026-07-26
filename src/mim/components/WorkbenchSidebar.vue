@@ -32,31 +32,35 @@
       @open-workspace="$emit('openWorkspace', $event)"
     />
 
-    <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Launchers and activities">
+    <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Tools, new activities, and activity history">
       <div
         class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3"
         :class="{ invisible: collapsed }"
         :aria-hidden="collapsed"
       >
-        Launch
+        Tools
       </div>
       <SidebarRow
-        v-for="launcher in launchers"
-        :key="`launcher:${launcher.id}`"
-        :data-sidebar-row="`launcher:${launcher.id}`"
-        :data-launcher-available="launcher.available === false ? 'false' : 'true'"
-        :aria-disabled="launcher.available === false ? 'true' : undefined"
-        :title="launcherTitle(launcher)"
-        :label="launcher.title"
-        :meta="launcher.available === false ? 'missing' : launcher.shortcut"
+        v-for="tool in tools"
+        :key="`tool:${tool.id}`"
+        :data-sidebar-row="`tool:${tool.id}`"
+        :data-tool-key="tool.id"
+        :data-drop-position="toolDropPosition(tool.id)"
+        :data-launcher-available="tool.available === false ? 'false' : 'true'"
+        :aria-disabled="tool.available === false ? 'true' : undefined"
+        :title="launcherTitle(tool)"
+        :label="tool.title"
+        :meta="tool.available === false ? 'missing' : tool.shortcut"
         :collapsed="collapsed"
-        :active="false"
-        :muted="launcher.available === false"
-        @click="$emit('launch', launcher.id)"
+        :active="toolIsActive(tool)"
+        :muted="tool.available === false"
+        @pointerdown="onToolPointerDown($event, tool.id)"
+        @keydown="onToolKeydown($event, tool)"
+        @click="openTool(tool.id)"
       >
-        <span :data-launcher-identity="launcher.icon" class="grid size-7 place-items-center">
+        <span :data-launcher-identity="tool.icon" class="grid size-7 place-items-center">
           <component
-            :is="iconFor(launcher.icon)"
+            :is="iconFor(tool.icon)"
             :size="16"
             :stroke-width="1.7"
             :monochrome="true"
@@ -66,53 +70,47 @@
 
       <div class="mx-3 my-2 h-px bg-rule" />
 
-      <div data-sidebar-apps-header class="flex h-7 items-center px-3">
+      <div data-sidebar-new-activity-header class="flex h-7 items-center px-3">
         <template v-if="!collapsed">
           <button
             type="button"
-            data-sidebar-apps-toggle
-            :aria-expanded="!appsCollapsed"
-            title="Toggle Apps"
+            data-sidebar-new-activity-toggle
+            :aria-expanded="!newActivityCollapsed"
+            title="Toggle New activity"
             class="flex h-6 min-w-0 flex-1 items-center gap-1 text-left font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            @click="appsCollapsed = !appsCollapsed"
-            @keydown.right.prevent="appsCollapsed = false"
-            @keydown.left.prevent="appsCollapsed = true"
+            @click="newActivityCollapsed = !newActivityCollapsed"
+            @keydown.right.prevent="newActivityCollapsed = false"
+            @keydown.left.prevent="newActivityCollapsed = true"
           >
-            <IconChevronRight v-if="appsCollapsed" :size="12" :stroke-width="2" />
+            <IconChevronRight v-if="newActivityCollapsed" :size="12" :stroke-width="2" />
             <IconChevronDown v-else :size="12" :stroke-width="2" />
-            <span>Apps</span>
-          </button>
-          <button
-            type="button"
-            data-sidebar-manage-apps
-            title="Manage apps"
-            aria-label="Manage apps"
-            class="ml-1 grid size-6 place-items-center text-ink-4 hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            @click="$emit('manageApps')"
-          >
-            <IconSettings :size="13" :stroke-width="1.8" />
+            <span>New activity</span>
           </button>
         </template>
         <span v-else class="h-px w-7 bg-rule-light" aria-hidden="true" />
       </div>
-      <template v-if="collapsed || !appsCollapsed">
+      <template v-if="collapsed || !newActivityCollapsed">
         <SidebarRow
-          v-for="app in apps"
-          :key="`app:${app.id}`"
-          :data-sidebar-row="`launcher:${app.id}`"
-          :data-launcher-available="app.available === false ? 'false' : 'true'"
-          :aria-disabled="app.available === false ? 'true' : undefined"
-          :title="launcherTitle(app)"
-          :label="app.title"
-          :meta="app.available === false ? 'missing' : app.shortcut"
+          v-for="launcher in newActivity"
+          :key="`launcher:${launcher.id}`"
+          :data-sidebar-row="`launcher:${launcher.id}`"
+          :data-new-activity-key="launcher.id"
+          :data-drop-position="launcherDropPosition(launcher.id)"
+          :data-launcher-available="launcher.available === false ? 'false' : 'true'"
+          :aria-disabled="launcher.available === false ? 'true' : undefined"
+          :title="launcherTitle(launcher)"
+          :label="launcher.title"
+          :meta="launcher.available === false ? 'missing' : launcher.shortcut"
           :collapsed="collapsed"
           :active="false"
-          :muted="app.available === false"
-          @click="$emit('launch', app.id)"
+          :muted="launcher.available === false"
+          @pointerdown="onLauncherPointerDown($event, launcher.id)"
+          @keydown="onLauncherKeydown($event, launcher)"
+          @click="launchNewActivity(launcher.id)"
         >
-          <span :data-launcher-identity="app.icon" class="grid size-7 place-items-center">
+          <span :data-launcher-identity="launcher.icon" class="grid size-7 place-items-center">
             <component
-              :is="iconFor(app.icon)"
+              :is="iconFor(launcher.icon)"
               :size="16"
               :stroke-width="1.7"
               :monochrome="true"
@@ -531,18 +529,19 @@ import {
   IconArchiveOff,
   IconApps,
   IconArrowsSort,
-  IconBrandGit,
   IconCheck,
   IconChevronDown,
   IconChevronRight,
   IconDots,
   IconFileStack,
+  IconFocus2,
   IconLayoutSidebarLeftCollapse,
   IconMathPi,
   IconPlus,
   IconSettings,
   IconRobot,
   IconTerminal2,
+  IconTopologyStar3,
   IconClockPlay,
   IconSparkles,
   IconPencil,
@@ -561,8 +560,8 @@ const props = defineProps({
   workspaceName: { type: String, default: '' },
   workspacePath: { type: String, default: '' },
   recentWorkspaces: { type: Array, default: () => [] },
-  launchers: { type: Array, default: () => [] },
-  apps: { type: Array, default: () => [] },
+  tools: { type: Array, default: () => [] },
+  newActivity: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
   archivedActivities: { type: Array, default: () => [] },
   activeActivityId: { type: String, default: '' },
@@ -580,14 +579,15 @@ const emit = defineEmits([
   'archiveActivity',
   'restoreActivity',
   'clearActivity',
+  'reorderTools',
+  'reorderLaunchers',
   'reorderActivities',
   'sortActivities',
   'settings',
-  'manageApps',
 ])
 const activityMenuId = ref('')
 const sortMenuOpen = ref(false)
-const appsCollapsed = ref(false)
+const newActivityCollapsed = ref(false)
 const activitiesCollapsed = ref(false)
 const archivedOpen = ref(false)
 const renamingId = ref('')
@@ -604,9 +604,15 @@ const SORT_OPTIONS = Object.freeze([
   { id: 'attention', label: 'Needs attention' },
   { id: 'name', label: 'Name' },
 ])
-const activityCreateOptions = computed(() => props.apps.filter(
-  option => option?.id && option.available !== false,
-))
+const activityCreateOptions = computed(() => {
+  const available = props.newActivity.filter(
+    option => option?.id && option.available !== false,
+  )
+  return [
+    ...available.filter(option => !String(option.id).startsWith('app:')),
+    ...available.filter(option => String(option.id).startsWith('app:')),
+  ]
+})
 const activityCreateAppStart = computed(() => {
   const index = activityCreateOptions.value.findIndex(
     option => String(option.id).startsWith('app:'),
@@ -632,6 +638,30 @@ const {
   onReorder: (ids) => emit('reorderActivities', ids),
 })
 
+const {
+  dropIndicator: toolDropIndicator,
+  suppressClick: suppressToolClick,
+  onPointerDown: onToolPointerDown,
+} = usePointerReorder({
+  root: sidebarRoot,
+  rowSelector: '[data-tool-key]',
+  keyAttribute: 'data-tool-key',
+  keys: () => props.tools.map((tool) => tool.id),
+  onReorder: (ids) => emit('reorderTools', ids),
+})
+
+const {
+  dropIndicator: launcherDropIndicator,
+  suppressClick: suppressLauncherClick,
+  onPointerDown: onLauncherPointerDown,
+} = usePointerReorder({
+  root: sidebarRoot,
+  rowSelector: '[data-new-activity-key]',
+  keyAttribute: 'data-new-activity-key',
+  keys: () => props.newActivity.map((launcher) => launcher.id),
+  onReorder: (ids) => emit('reorderLaunchers', ids),
+})
+
 const icons = {
   files: IconFileStack,
   agent: IconRobot,
@@ -640,7 +670,8 @@ const icons = {
   pi: IconMathPi,
   terminal: IconTerminal2,
   apps: IconApps,
-  changes: IconBrandGit,
+  today: IconFocus2,
+  graph: IconTopologyStar3,
   routines: IconClockPlay,
   default: IconSparkles,
 }
@@ -652,6 +683,18 @@ function iconFor(name) {
 function launcherTitle(launcher) {
   if (launcher.available !== false) return launcher.title
   return `${launcher.title} — ${launcher.unavailableReason || 'Unavailable'}`
+}
+
+function openTool(id) {
+  if (!suppressToolClick.value) emit('launch', id)
+}
+
+function toolIsActive(tool) {
+  return props.activeActivityId === (tool.activityId || tool.id)
+}
+
+function launchNewActivity(id) {
+  if (!suppressLauncherClick.value) emit('launch', id)
 }
 
 function activityTitle(activity) {
@@ -891,6 +934,44 @@ function moveActivity(id, direction) {
   })
 }
 
+function moveTool(id, direction) {
+  emit('reorderTools', moveActivityId(
+    props.tools.map((tool) => tool.id),
+    id,
+    direction,
+  ))
+}
+
+function onToolKeydown(event, tool) {
+  if (
+    event.altKey
+    && event.shiftKey
+    && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+  ) {
+    event.preventDefault()
+    moveTool(tool.id, event.key === 'ArrowUp' ? -1 : 1)
+  }
+}
+
+function moveLauncher(id, direction) {
+  emit('reorderLaunchers', moveActivityId(
+    props.newActivity.map((launcher) => launcher.id),
+    id,
+    direction,
+  ))
+}
+
+function onLauncherKeydown(event, launcher) {
+  if (
+    event.altKey
+    && event.shiftKey
+    && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+  ) {
+    event.preventDefault()
+    moveLauncher(launcher.id, event.key === 'ArrowUp' ? -1 : 1)
+  }
+}
+
 function onActivityKeydown(event, activity) {
   if (event.target?.tagName === 'INPUT') return
   if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
@@ -960,6 +1041,18 @@ function focusFirstMenuItem(selector) {
 function dropPosition(id) {
   if (dropIndicator.value?.beforeId === id) return 'before'
   if (dropIndicator.value?.afterId === id) return 'after'
+  return undefined
+}
+
+function toolDropPosition(id) {
+  if (toolDropIndicator.value?.beforeId === id) return 'before'
+  if (toolDropIndicator.value?.afterId === id) return 'after'
+  return undefined
+}
+
+function launcherDropPosition(id) {
+  if (launcherDropIndicator.value?.beforeId === id) return 'before'
+  if (launcherDropIndicator.value?.afterId === id) return 'after'
   return undefined
 }
 

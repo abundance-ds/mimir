@@ -10,7 +10,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU32, AtomicU8, Ordering},
+        atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering},
         mpsc, Arc, Mutex, MutexGuard,
     },
     thread,
@@ -40,6 +40,7 @@ const PERSISTED_VERSION: u32 = 1;
 const NO_STOP_INTENT: u8 = 0;
 const USER_STOP_INTENT: u8 = 1;
 const QUIT_INTERRUPT_INTENT: u8 = 2;
+const OUTPUT_PERSIST_INTERVAL_MS: u64 = 250;
 
 #[derive(Debug, Clone)]
 pub struct ActivitySupervisorConfig {
@@ -252,6 +253,7 @@ struct ManagedActivity {
     killer: Mutex<Option<Box<dyn ChildKiller + Send + Sync>>>,
     stop_intent: AtomicU8,
     process_id: AtomicU32,
+    last_output_persist_ms: AtomicU64,
     tracker: Mutex<Option<AgentStatusTracker>>,
     runtime_started: Instant,
 }
@@ -452,6 +454,7 @@ impl ActivitySupervisor {
             killer: Mutex::new(Some(killer)),
             stop_intent: AtomicU8::new(NO_STOP_INTENT),
             process_id: AtomicU32::new(process_id.unwrap_or(0)),
+            last_output_persist_ms: AtomicU64::new(0),
             tracker: Mutex::new(tracker),
             runtime_started: Instant::now(),
         });
@@ -909,6 +912,7 @@ impl ActivitySupervisor {
                 killer: Mutex::new(None),
                 stop_intent: AtomicU8::new(NO_STOP_INTENT),
                 process_id: AtomicU32::new(0),
+                last_output_persist_ms: AtomicU64::new(0),
                 tracker: Mutex::new(None),
                 runtime_started: Instant::now(),
             });
@@ -929,12 +933,14 @@ impl SupervisorInner {
     }
 
     fn record_output(&self, activity: &Arc<ManagedActivity>, bytes: &[u8]) {
+        let output_elapsed_ms = elapsed_ms(activity.runtime_started);
         let status_change = {
             let mut tracker = lock(&activity.tracker);
             tracker
                 .as_mut()
-                .and_then(|tracker| tracker.feed(bytes, elapsed_ms(activity.runtime_started)))
+                .and_then(|tracker| tracker.feed(bytes, output_elapsed_ms))
         };
+        let status_changed = status_change.is_some();
 
         let mut events = Vec::with_capacity(2);
         let sinks;
@@ -950,7 +956,15 @@ impl SupervisorInner {
                 session.last_output_sequence = sequence;
                 session.scrollback_bytes = retained_bytes;
             }
-            record.updated_at = timestamp();
+            let persist_output = record.retention.should_persist()
+                && (status_changed
+                    || claim_periodic_persistence(
+                        &activity.last_output_persist_ms,
+                        output_elapsed_ms,
+                    ));
+            if persist_output {
+                record.updated_at = timestamp();
+            }
             apply_status_change(&mut record, status_change.as_ref());
             events.push(ActivityEvent::Output {
                 activity_id: record.id.clone(),
@@ -965,9 +979,11 @@ impl SupervisorInner {
                     needs_input_is_blocking: change.needs_input_is_blocking,
                 });
             }
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-                self.persistence.save(path, value);
+            if persist_output {
+                let persisted = persisted_snapshot(&record, &scrollback);
+                if let Some((path, value)) = self.persistence_path_and_value(persisted) {
+                    self.persistence.save(path, value);
+                }
             }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
         }
@@ -1425,6 +1441,22 @@ fn elapsed_ms(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+fn claim_periodic_persistence(last_persist_ms: &AtomicU64, elapsed_ms: u64) -> bool {
+    let stamp = elapsed_ms.saturating_add(1);
+    loop {
+        let previous = last_persist_ms.load(Ordering::Acquire);
+        if previous != 0 && stamp.saturating_sub(previous) < OUTPUT_PERSIST_INTERVAL_MS {
+            return false;
+        }
+        if last_persist_ms
+            .compare_exchange(previous, stamp, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            return true;
+        }
+    }
+}
+
 fn is_pty_eof(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::UnexpectedEof || (cfg!(unix) && error.raw_os_error() == Some(5))
 }
@@ -1499,6 +1531,29 @@ mod tests {
             .iter()
             .flat_map(|chunk| chunk.bytes.iter().copied())
             .collect()
+    }
+
+    #[test]
+    fn noisy_output_persistence_is_bounded_without_losing_the_first_snapshot() {
+        let last = AtomicU64::new(0);
+
+        assert!(claim_periodic_persistence(&last, 0));
+        assert!(!claim_periodic_persistence(
+            &last,
+            OUTPUT_PERSIST_INTERVAL_MS - 1
+        ));
+        assert!(claim_periodic_persistence(
+            &last,
+            OUTPUT_PERSIST_INTERVAL_MS
+        ));
+        assert!(!claim_periodic_persistence(
+            &last,
+            OUTPUT_PERSIST_INTERVAL_MS * 2 - 1
+        ));
+        assert!(claim_periodic_persistence(
+            &last,
+            OUTPUT_PERSIST_INTERVAL_MS * 2
+        ));
     }
 
     #[cfg(unix)]

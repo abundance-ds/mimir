@@ -87,6 +87,27 @@ vi.mock('../services/fileIndex.js', () => ({
   searchIndexedContent: vi.fn(),
 }))
 
+vi.mock('../services/workspaceFileOperations.js', () => ({
+  listWorkspaceDirectory: vi.fn(async () => [{
+    path: '/w/README.md',
+    name: 'README.md',
+    relativePath: 'README.md',
+    mtime: 42,
+    size: 120,
+    isDirectory: false,
+    textReadable: true,
+    openBehavior: 'text',
+  }]),
+  inspectWorkspaceEntry: vi.fn(),
+  createWorkspaceFile: vi.fn(),
+  createWorkspaceFolder: vi.fn(),
+  renameWorkspaceEntry: vi.fn(),
+  duplicateWorkspaceEntry: vi.fn(),
+  trashWorkspaceEntries: vi.fn(),
+  openWorkspaceEntryNative: vi.fn(),
+  revealWorkspaceEntry: vi.fn(),
+}))
+
 vi.mock('../services/routines.js', () => ({
   createRoutineDefinition: vi.fn(),
   duplicateRoutineDefinition: vi.fn(),
@@ -296,16 +317,89 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-editor-stub]').exists()).toBe(true)
     expect(toolRuntimeStart).toHaveBeenCalledTimes(1)
     expect(rows).toEqual([
-      'launcher:core:files',
-      'launcher:core:routines',
+      'tool:core:files',
+      'tool:core:routines',
+      'tool:app:ledger',
       'launcher:preset:review',
-      'launcher:app:ledger',
     ])
     expect(wrapper.get('[data-activity-surface="files"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="launcher:preset:review"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
   })
 
-  it('always boots with the mounted Editor visible and owns Apps from Settings', async () => {
+  it('places singleton apps in Tools and process apps in New activity without Changes', async () => {
+    appsApi.loadAppsCatalog.mockResolvedValue({
+      directory: '/home/me/.mim/apps',
+      diagnostics: [],
+      apps: [
+        {
+          id: 'scratch',
+          title: 'Today',
+          mode: 'embedded',
+          builtin: true,
+          tools: [],
+        },
+        {
+          id: 'business-graph',
+          title: 'Business graph',
+          mode: 'rust-helper',
+          helper: 'business-graph',
+          builtin: true,
+          tools: [],
+        },
+        {
+          id: 'review-runner',
+          title: 'Review runner',
+          mode: 'process',
+          command: '/bin/review',
+          builtin: false,
+          tools: [],
+        },
+      ],
+    })
+    const wrapper = await render()
+
+    expect(wrapper.get('[data-sidebar-row="tool:app:scratch"]').exists()).toBe(true)
+    expect(wrapper.get('[data-sidebar-row="tool:app:business-graph"]').exists()).toBe(true)
+    expect(wrapper.get('[data-sidebar-row="launcher:app:review-runner"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Changes')
+  })
+
+  it('persists and projects manual Tool order', async () => {
+    const wrapper = await render()
+    const settings = useSettingsStore()
+
+    settings.set('sidebarToolOrder', [
+      'app:ledger',
+      'core:routines',
+      'core:files',
+      'app:not-installed',
+    ])
+    await nextTick()
+
+    expect(wrapper.findAll('[data-tool-key]').map((row) => row.attributes('data-tool-key'))).toEqual([
+      'app:ledger',
+      'core:routines',
+      'core:files',
+    ])
+
+    await wrapper
+      .get('[data-sidebar-row="tool:app:ledger"]')
+      .find('button')
+      .trigger('keydown', {
+        key: 'ArrowDown',
+        altKey: true,
+        shiftKey: true,
+      })
+
+    expect(settings.sidebarToolOrder).toEqual([
+      'core:routines',
+      'app:ledger',
+      'core:files',
+      'app:not-installed',
+    ])
+  })
+
+  it('always boots with the mounted Editor visible and keeps one global Settings entry', async () => {
     localStorage.setItem('mim:editor:settings:v1', JSON.stringify({
       workbenchLayout: {
         sidebar: { state: 'expanded', width: 240 },
@@ -318,11 +412,9 @@ describe('WorkbenchApp', () => {
     const wrapper = await render()
 
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
-    expect(wrapper.find('[data-sidebar-row="launcher:core:apps"]').exists()).toBe(false)
+    expect(wrapper.find('[data-sidebar-manage-apps]').exists()).toBe(false)
     await wrapper.get('[data-sidebar-settings]').trigger('click')
     expect(editorOpenSettings).toHaveBeenLastCalledWith('appearance')
-    await wrapper.get('[data-sidebar-manage-apps]').trigger('click')
-    expect(editorOpenSettings).toHaveBeenLastCalledWith('apps')
   })
 
   it('restores a railed Editor when Settings navigates to an app definition', async () => {
@@ -405,6 +497,68 @@ describe('WorkbenchApp', () => {
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
   })
 
+  it('starts graph-grounded work as a durable associated agent Activity', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    useActivitiesStore().upsert({
+      id: 'app:business-graph',
+      kind: 'app',
+      title: 'Business graph',
+      workspacePath: '/w',
+      status: 'ready',
+      createdAt: '2026-07-26T00:00:00Z',
+      updatedAt: '2026-07-26T00:00:00Z',
+      retention: 'durable',
+      source: {
+        type: 'app',
+        appId: 'business-graph',
+        app: {
+          id: 'business-graph',
+          title: 'Business graph',
+          mode: 'rust-helper',
+          helper: 'business-graph',
+        },
+      },
+      host: { type: 'app' },
+      launch: {
+        plan: {
+          appId: 'business-graph',
+          mode: 'rust-helper',
+          helper: 'business-graph',
+        },
+      },
+    })
+    useWorkbenchStore().openActivity('app:business-graph')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    await nextTick()
+
+    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('startWork', {
+      nodeId: 'issue-1',
+      nodeKind: 'issue',
+      title: 'Extract evidence',
+      scopeIds: ['project:alpha'],
+      graphRevision: 9,
+      prompt: 'Graph-grounded prompt',
+    })
+    await flushPromises()
+
+    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'agent',
+      title: 'Work · Extract evidence',
+      retention: 'durable',
+      source: expect.objectContaining({
+        type: 'business-graph-work',
+        graphNodeId: 'issue-1',
+        graphScopeIds: ['project:alpha'],
+        graphRevision: 9,
+      }),
+      launch: expect.objectContaining({
+        args: ['review', 'Graph-grounded prompt'],
+      }),
+    }))
+    expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
+  })
+
   it('launches a fresh Terminal Activity from the Activity plus menu', async () => {
     const wrapper = await render({ workspace: '/w' })
     useLaunchersStore().presets.push({
@@ -455,7 +609,7 @@ describe('WorkbenchApp', () => {
 
   it('opens returned routine runs as PTY surfaces and reruns the current routine definition', async () => {
     const wrapper = await render({ workspace: '/w' })
-    await wrapper.get('[data-sidebar-row="launcher:core:routines"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="tool:core:routines"]').trigger('click')
     await flushPromises()
     const run = {
       id: 'routine:manual',
@@ -499,15 +653,17 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-terminal-stub="routine:fresh"]').exists()).toBe(true)
   })
 
-  it('launches an installed app directly from its Apps-section row', async () => {
+  it('opens an installed singleton app directly from its Tool row', async () => {
     const wrapper = await render({ workspace: '/w' })
 
-    await wrapper.get('[data-sidebar-row="launcher:app:ledger"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
     await flushPromises()
 
     expect(appsApi.resolveAppLaunch).toHaveBeenCalledWith('ledger', '/w')
     expect(useWorkbenchStore().activeActivityId).toBe('app:ledger')
     expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
+    expect(wrapper.find('[data-sidebar-row="activity:app:ledger"]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-row="tool:app:ledger"] button').attributes('aria-current')).toBe('page')
   })
 
   it('launches external Apps as one real PTY Activity from Sidebar, Settings, and MCP', async () => {
@@ -602,9 +758,9 @@ describe('WorkbenchApp', () => {
     ).rejects.toThrow("Launcher preset 'missing' is not configured")
   })
 
-  it('closes a renderer-hosted app locally with Cmd+W and never calls PTY lifecycle APIs', async () => {
+  it('collapses a stable Tool with Cmd+W without archiving its internal Activity', async () => {
     const wrapper = await render({ workspace: '/w' })
-    await wrapper.get('[data-sidebar-row="launcher:app:ledger"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
     await flushPromises()
     activityApi.stopActivity.mockClear()
     activityApi.setActivityArchived.mockClear()
@@ -622,11 +778,11 @@ describe('WorkbenchApp', () => {
 
     expect(activityApi.stopActivity).not.toHaveBeenCalled()
     expect(activityApi.setActivityArchived).not.toHaveBeenCalled()
-    expect(useActivitiesStore().byId('app:ledger').archivedAt).toEqual(expect.any(String))
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useActivitiesStore().byId('app:ledger').archivedAt).toBeNull()
+    expect(useWorkbenchStore().activeActivityId).toBe('app:ledger')
     expect(activityPane.attributes('data-pane-state')).toBe('rail')
 
-    await wrapper.get('[data-sidebar-row="launcher:app:ledger"]').trigger('click')
+    await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
     await flushPromises()
     expect(useActivitiesStore().byId('app:ledger').archivedAt).toBeNull()
     expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
@@ -671,10 +827,13 @@ describe('WorkbenchApp', () => {
     const wrapper = await render({ workspace: '/w' })
     expect(useWorkbenchStore().activeActivityId).toBe('files')
 
-    await wrapper.get('[data-file-row="/w/README.md"]').trigger('dblclick')
+    await wrapper.get('[data-file-row="/w/README.md"] button').trigger('dblclick')
     await flushPromises()
 
-    expect(editorOpen).toHaveBeenCalledWith('/w/README.md')
+    expect(editorOpen).toHaveBeenCalledWith('/w/README.md', {
+      preview: false,
+      entry: expect.objectContaining({ openBehavior: 'text' }),
+    })
     expect(useWorkbenchStore().activeActivityId).toBe('files')
   })
 
@@ -724,6 +883,42 @@ describe('WorkbenchApp', () => {
     }))
     await nextTick()
     expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
+  })
+
+  it('steps interface zoom with modifier chords and resets with 0, even behind a modal', async () => {
+    await render()
+    const settings = useSettingsStore()
+    const zoomChord = (key, code) => new KeyboardEvent('keydown', {
+      key,
+      code,
+      metaKey: true,
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+
+    document.dispatchEvent(zoomChord('=', 'Equal'))
+    await nextTick()
+    expect(settings.workbenchZoom).toBe(110)
+
+    document.dispatchEvent(zoomChord('=', 'Equal'))
+    await nextTick()
+    expect(settings.workbenchZoom).toBe(125)
+
+    const modal = document.createElement('div')
+    modal.setAttribute('aria-modal', 'true')
+    document.body.append(modal)
+    try {
+      document.dispatchEvent(zoomChord('-', 'Minus'))
+      await nextTick()
+      expect(settings.workbenchZoom).toBe(110)
+
+      document.dispatchEvent(zoomChord('0', 'Digit0'))
+      await nextTick()
+      expect(settings.workbenchZoom).toBe(100)
+    } finally {
+      modal.remove()
+    }
   })
 
   it('does not route global workbench shortcuts behind a teleported modal', async () => {
@@ -850,7 +1045,7 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('rail')
 
-    await wrapper.get('[data-file-row="/w/README.md"]').trigger('dblclick')
+    await wrapper.get('[data-file-row="/w/README.md"] button').trigger('dblclick')
     await flushPromises()
     expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('rail')
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')

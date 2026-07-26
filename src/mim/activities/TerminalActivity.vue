@@ -7,94 +7,51 @@
     class="flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
     @pointerdown="focusTerminal"
   >
-    <header
-      class="flex h-10 shrink-0 items-center gap-2 border-b border-rule bg-chrome-high px-2"
-      :aria-label="`${activity.title} terminal controls`"
-    >
+    <Teleport v-if="active" to="[data-pane-actions='activity']">
       <div
-        aria-hidden="true"
-        class="grid h-6 w-6 shrink-0 place-items-center border border-rule bg-surface font-mono text-[9px] font-semibold text-ink-2"
+        data-terminal-controls
+        :aria-label="`${activity.title} process controls`"
+        class="flex items-center"
       >
-        <IconRobot v-if="mode === 'agent'" :size="13" :stroke-width="1.7" />
-        <IconTerminal2 v-else :size="13" :stroke-width="1.7" />
+        <button
+          v-if="live"
+          type="button"
+          data-terminal-interrupt
+          title="Interrupt process (Ctrl-C)"
+          aria-label="Interrupt process"
+          class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          @pointerdown.stop
+          @click.stop="interrupt"
+        >
+          <IconPlayerPause :size="13" :stroke-width="1.7" />
+        </button>
+        <button
+          v-if="live"
+          type="button"
+          data-terminal-stop
+          title="Stop process"
+          aria-label="Stop process"
+          :disabled="stopping"
+          class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-rem/10 hover:text-rem focus-visible:outline focus-visible:outline-1 focus-visible:outline-rem disabled:opacity-40"
+          @pointerdown.stop
+          @click.stop="stop"
+        >
+          <IconPlayerStop :size="13" :stroke-width="1.7" />
+        </button>
+        <button
+          v-else-if="ended"
+          type="button"
+          data-terminal-restart
+          :title="restartTitle"
+          class="flex h-7 shrink-0 items-center gap-1.5 px-2 font-mono text-[9px] font-medium text-ink-2 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          @pointerdown.stop
+          @click.stop="requestRestart"
+        >
+          <IconRefresh :size="12" :stroke-width="1.7" />
+          {{ restartLabel }}
+        </button>
       </div>
-
-      <div class="min-w-0 flex-1">
-        <div class="flex min-w-0 items-center gap-2">
-          <span class="truncate text-[11px] font-semibold">{{ activity.title }}</span>
-          <span class="truncate font-mono text-[9px] text-ink-3">
-            {{ activity.workspacePath || activity.launch?.cwd || 'local' }}
-          </span>
-        </div>
-        <span class="block font-mono text-[8px] uppercase tracking-[0.12em] text-ink-3">
-          {{ mode === 'agent' ? 'Agent session' : 'Terminal' }}
-        </span>
-      </div>
-
-      <div
-        data-terminal-status
-        role="status"
-        aria-live="polite"
-        class="mr-1 flex shrink-0 items-center gap-1.5 font-mono text-[9px] text-ink-3"
-      >
-        <span
-          aria-hidden="true"
-          class="h-1.5 w-1.5 rounded-full"
-          :class="statusSignalClass"
-        />
-        <span>{{ statusLabel }}</span>
-      </div>
-
-      <button
-        v-if="live"
-        type="button"
-        data-terminal-paste
-        title="Paste from clipboard"
-        aria-label="Paste from clipboard"
-        class="grid h-7 w-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-        @pointerdown.stop
-        @click.stop="pasteFromClipboard"
-      >
-        <IconClipboard :size="13" :stroke-width="1.7" />
-      </button>
-      <button
-        v-if="live"
-        type="button"
-        data-terminal-interrupt
-        title="Interrupt process (Ctrl-C)"
-        aria-label="Interrupt process"
-        class="grid h-7 w-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-        @pointerdown.stop
-        @click.stop="interrupt"
-      >
-        <IconPlayerPause :size="13" :stroke-width="1.7" />
-      </button>
-      <button
-        v-if="live"
-        type="button"
-        data-terminal-stop
-        title="Stop process"
-        aria-label="Stop process"
-        :disabled="stopping"
-        class="grid h-7 w-7 shrink-0 place-items-center text-ink-3 hover:bg-rem/10 hover:text-rem focus-visible:outline focus-visible:outline-1 focus-visible:outline-rem disabled:opacity-40"
-        @pointerdown.stop
-        @click.stop="stop"
-      >
-        <IconPlayerStop :size="13" :stroke-width="1.7" />
-      </button>
-      <button
-        v-else-if="ended"
-        type="button"
-        data-terminal-restart
-        :title="restartTitle"
-        class="flex h-7 shrink-0 items-center gap-1.5 px-2 font-mono text-[9px] font-medium text-ink-2 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-        @pointerdown.stop
-        @click.stop="requestRestart"
-      >
-        <IconRefresh :size="12" :stroke-width="1.7" />
-        {{ restartLabel }}
-      </button>
-    </header>
+    </Teleport>
 
     <div
       v-if="mode === 'agent' && status === 'needs-input'"
@@ -143,12 +100,9 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import {
-  IconClipboard,
   IconPlayerPause,
   IconPlayerStop,
   IconRefresh,
-  IconRobot,
-  IconTerminal2,
 } from '@tabler/icons-vue'
 import {
   activitySnapshot,
@@ -163,7 +117,6 @@ import {
   orderedReplayChunks,
   readTerminalTheme,
   terminalBytes,
-  terminalStatusLabel,
 } from './terminalActivity.js'
 
 const props = defineProps({
@@ -204,15 +157,6 @@ const restartTitle = computed(() => (
     ? `Resume the latest ${props.activity.title} session in this workspace`
     : 'Start this Activity again'
 ))
-const statusLabel = computed(() => terminalStatusLabel(status.value))
-const statusSignalClass = computed(() => {
-  if (status.value === 'working' || status.value === 'needs-input') return 'bg-accent'
-  if (status.value === 'done') return 'bg-add'
-  if (status.value === 'error') return 'bg-rem'
-  if (['idle', 'ready', 'starting'].includes(status.value)) return 'bg-ink-3'
-  return 'bg-ink-4'
-})
-
 let terminal = null
 let fitAddon = null
 let webLinksAddon = null
@@ -419,15 +363,6 @@ function requestRestart() {
     activityId: activityId.value,
     activity: props.activity,
   })
-}
-
-async function pasteFromClipboard() {
-  try {
-    const value = await navigator.clipboard.readText()
-    await pasteText(value)
-  } catch (cause) {
-    error.value = errorMessage(cause, 'Clipboard access failed.')
-  }
 }
 
 async function pasteText(value = '') {

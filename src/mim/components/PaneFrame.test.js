@@ -32,6 +32,7 @@ describe('PaneFrame', () => {
 
     expect(wrapper.get('[data-pane-header="activity"]').text()).toContain('Codex')
     expect(wrapper.get('[data-pane-header="activity"]').text()).toContain('Working')
+    expect(wrapper.get('[data-pane-actions="activity"]').exists()).toBe(true)
     expect(wrapper.get('[data-pane-action="collapse"]').attributes('title')).toBe('Collapse Codex')
     expect(wrapper.get('[data-pane-action="expand"]').attributes('title')).toBe('Expand Activity')
     expect(wrapper.get('[data-pane-action="collapse"]').attributes('data-collapse-direction')).toBe('left')

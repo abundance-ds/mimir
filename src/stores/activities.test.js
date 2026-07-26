@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { nextTick, watch } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   ACTIVITY_KINDS,
@@ -61,6 +62,47 @@ describe('activities store', () => {
 
     expect(store.activities.map((item) => item.id)).toEqual(['terminal:two', 'agent:one'])
     expect(JSON.parse(JSON.stringify(store.byId('agent:one')))).toEqual(store.byId('agent:one'))
+  })
+
+  it('skips the write when the backend re-emits an identical record', () => {
+    const store = useActivitiesStore()
+    store.upsert(base)
+    const storedRecord = store.byId('agent:one')
+    const storedArray = store.records
+
+    const result = store.upsert({ ...base, launch: { ...base.launch } })
+
+    expect(result).toBe(storedRecord)
+    expect(store.records).toBe(storedArray)
+  })
+
+  it('notifies reactive consumers when an upsert changes a record', async () => {
+    const store = useActivitiesStore()
+    store.upsert(base)
+
+    const seen = []
+    const stop = watch(
+      () => store.records.map((item) => `${item.id}:${item.status}`).join('|'),
+      (value) => seen.push(value),
+    )
+
+    store.upsert({ ...base }) // identical: must not notify
+    await nextTick()
+    expect(seen).toEqual([])
+
+    store.upsert({ ...base, status: 'starting', updatedAt: '2026-07-25T10:01:00.000Z' })
+    await nextTick()
+    expect(seen).toEqual(['agent:one:starting'])
+    stop()
+  })
+
+  it('rejects non-cloneable metadata payloads', () => {
+    const store = useActivitiesStore()
+
+    expect(() => store.upsert({
+      ...base,
+      source: { onDone() {} },
+    })).toThrow(/serializable/i)
   })
 
   it('does not persist renderer runtime handles in activity records', () => {

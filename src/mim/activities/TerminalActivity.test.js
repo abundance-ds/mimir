@@ -113,10 +113,6 @@ beforeEach(() => {
     y: 0,
     toJSON() {},
   })
-  Object.defineProperty(navigator, 'clipboard', {
-    configurable: true,
-    value: { readText: vi.fn(async () => 'pasted') },
-  })
 })
 
 function snapshot(overrides = {}) {
@@ -137,18 +133,18 @@ function snapshot(overrides = {}) {
   }
 }
 
-function render(props = {}) {
+function render(props = {}, { stubTeleport = true } = {}) {
+  const stubs = {
+    IconPlayerPause: true,
+    IconPlayerStop: true,
+    IconRefresh: true,
+  }
+  if (stubTeleport) stubs.Teleport = true
+
   return mount(TerminalActivity, {
     props: { activity: agent, active: true, ...props },
     global: {
-      stubs: {
-        IconClipboard: true,
-        IconPlayerPause: true,
-        IconPlayerStop: true,
-        IconRefresh: true,
-        IconRobot: true,
-        IconTerminal2: true,
-      },
+      stubs,
     },
   })
 }
@@ -188,8 +184,35 @@ describe('TerminalActivity', () => {
     expect(order).toEqual(['listen', 'snapshot'])
     expect(writtenBytes(xterm.terminals[0])).toEqual([[0xf0, 0x9f], [0x99, 0x82]])
     expect(wrapper.emitted('ready')[0][0]).toMatchObject({ activityId: 'agent:one' })
-    expect(wrapper.get('[data-terminal-status]').text()).toBe('Working')
     expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps process controls and leaves identity chrome to the shared pane header', async () => {
+    const wrapper = await initialize()
+
+    expect(wrapper.find('header').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Agent session')
+    expect(wrapper.text()).not.toContain('/workspace')
+    expect(wrapper.get('[data-terminal-controls]').attributes('aria-label')).toBe('Codex process controls')
+    expect(wrapper.find('[data-terminal-paste]').exists()).toBe(false)
+    expect(wrapper.get('[data-terminal-interrupt]').exists()).toBe(true)
+    expect(wrapper.get('[data-terminal-stop]').exists()).toBe(true)
+  })
+
+  it('places active process controls in the shared Activity header target', async () => {
+    const target = document.createElement('div')
+    target.dataset.paneActions = 'activity'
+    document.body.append(target)
+    const wrapper = await initialize(render({}, { stubTeleport: false }))
+
+    expect(target.querySelector('[data-terminal-controls]')).not.toBeNull()
+    expect(target.querySelector('[data-terminal-stop]')).not.toBeNull()
+
+    await wrapper.setProps({ active: false })
+    expect(target.querySelector('[data-terminal-controls]')).toBeNull()
+
+    wrapper.unmount()
+    target.remove()
   })
 
   it('queues hydration output, filters by id, and removes replay duplicates', async () => {
@@ -232,7 +255,6 @@ describe('TerminalActivity', () => {
     })
     await nextTick()
 
-    expect(wrapper.get('[data-terminal-status]').text()).toBe('Input')
     expect(wrapper.get('[data-terminal-attention]').exists()).toBe(true)
     expect(wrapper.emitted('status').at(-1)[0]).toMatchObject({
       status: 'needs-input',
@@ -246,7 +268,6 @@ describe('TerminalActivity', () => {
       record: { ...agent, status: 'done' },
     })
     await nextTick()
-    expect(wrapper.get('[data-terminal-status]').text()).toBe('Done')
     expect(wrapper.get('[data-terminal-restart]').exists()).toBe(true)
     expect(wrapper.emitted('exit')).toHaveLength(1)
     expect(wrapper.emitted('restart-ready')[0][0]).toMatchObject({
@@ -276,9 +297,9 @@ describe('TerminalActivity', () => {
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
   })
 
-  it('keeps interrupt, stop, paste, and restart as explicit actions', async () => {
+  it('keeps interrupt, stop, and restart as explicit actions', async () => {
     const wrapper = await initialize()
-    await wrapper.get('[data-terminal-paste]').trigger('click')
+    await wrapper.vm.pasteText('pasted')
     await flushPromises()
     expect(Array.from(api.write.mock.calls[0][1])).toEqual([112, 97, 115, 116, 101, 100])
 

@@ -15,20 +15,61 @@ function activity(app, plan = {}) {
 }
 
 describe('AppActivity', () => {
-  it('routes the native Changes helper to its focused surface', () => {
+  it('routes the restored scratch identity to the focused Today surface', () => {
     const record = activity({
-      id: 'changes',
-      title: 'Changes',
-      mode: 'rust-helper',
-      helper: 'git-changes',
-    }, { helper: 'git-changes' })
+      id: 'scratch',
+      title: 'Today',
+      mode: 'embedded',
+      entry: 'mim://builtin/scratch',
+      tools: [],
+    }, { url: 'mim://builtin/scratch' })
     const wrapper = mount(AppActivity, {
       props: { activity: record, active: true },
-      global: { stubs: { EmbeddedAppHost: true } },
+      global: { stubs: { TodayApp: true, EmbeddedAppHost: true } },
     })
 
-    expect(wrapper.findComponent({ name: 'ChangesApp' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'TodayApp' }).exists()).toBe(true)
     expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
+  it('routes the built-in business graph to its native Vue surface', () => {
+    const record = activity({
+      id: 'business-graph',
+      title: 'Business graph',
+      mode: 'rust-helper',
+      helper: 'business-graph',
+    }, { helper: 'business-graph' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          BusinessGraphApp: true,
+          EmbeddedAppHost: true,
+        },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'BusinessGraphApp' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
+  it('bubbles graph Activity handoffs through the ordinary app surface contract', async () => {
+    const record = activity({
+      id: 'business-graph',
+      title: 'Business graph',
+      mode: 'rust-helper',
+      helper: 'business-graph',
+    }, { helper: 'business-graph' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { BusinessGraphApp: true } },
+    })
+    const payload = { nodeId: 'issue-1', prompt: 'Work from graph context.' }
+
+    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('startWork', payload)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('startWork')).toEqual([[payload]])
   })
 
   it('routes embedded apps and gives their host a stable instance identity', () => {

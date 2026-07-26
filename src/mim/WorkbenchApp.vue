@@ -14,8 +14,8 @@
         :workspace-name="workspaceName"
         :workspace-path="workspaceFiles.workspacePath"
         :recent-workspaces="recentWorkspaces"
-        :launchers="surfaceLauncherRows"
-        :apps="appLauncherRows"
+        :tools="toolRows"
+        :new-activity="newActivityRows"
         :activities="sidebarActivities"
         :archived-activities="archivedSidebarActivities"
         :active-activity-id="workbench.activeActivityId || ''"
@@ -30,9 +30,10 @@
         @archive-activity="archiveActivity"
         @restore-activity="restoreActivity"
         @clear-activity="clearActivity"
+        @reorder-tools="reorderTools"
+        @reorder-launchers="reorderLaunchers"
         @reorder-activities="reorderActivities"
         @sort-activities="sortActivities"
-        @manage-apps="openAppsSettings"
         @settings="openSettings"
       />
     </template>
@@ -68,6 +69,7 @@
                 @launch-app="launchApp"
                 @launch-plan="launchAppPlan"
                 @open-activity="openActivityRecord"
+                @start-work="startGraphWork"
                 @diagnostic="showDiagnostic"
               />
             </template>
@@ -115,7 +117,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+} from 'vue'
 import { IconAlertTriangle, IconX } from '@tabler/icons-vue'
 import EditorApp from '../editor/App.vue'
 import { useActivitiesStore } from '../stores/activities.js'
@@ -128,26 +138,31 @@ import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
 import { callAppAction, openAppWindow } from '../services/appsCatalog.js'
-import { runRoutineNow } from '../services/routines.js'
 import FilesActivity from './activities/FilesActivity.vue'
+import RoutinesActivity from './activities/RoutinesActivity.vue'
 import UnavailableActivity from './activities/UnavailableActivity.vue'
 import ActivityHost from './components/ActivityHost.vue'
 import PaneFrame from './components/PaneFrame.vue'
 import QuickOpen from './components/QuickOpen.vue'
 import WorkbenchShell from './components/WorkbenchShell.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
+import { useActivityLifecycle } from './composables/useActivityLifecycle.js'
+import { useWorkbenchKeyboardRouting } from './composables/useWorkbenchKeyboardRouting.js'
 import { useWorkbenchResize } from './composables/useWorkbenchResize.js'
-import { applyResponsiveZone, responsiveZoneFor } from './responsiveLayout.js'
+import { useWorkspaceBootstrap } from './composables/useWorkspaceBootstrap.js'
 import { ACTIVITY_SORT_MODES, orderActivities } from './activityOrdering.js'
-import { routeWorkbenchKey } from './workbenchKeyboard.js'
 
-const activityModules = import.meta.glob('./activities/*Activity.vue', { eager: true })
+const TerminalActivity = defineAsyncComponent(
+  () => import('./activities/TerminalActivity.vue').then(module => module.default),
+)
+const AppActivity = defineAsyncComponent(
+  () => import('./activities/AppActivity.vue').then(module => module.default),
+)
 const optionalSurfaces = {
-  terminal: activityModules['./activities/TerminalActivity.vue']?.default || null,
-  agent: activityModules['./activities/TerminalActivity.vue']?.default || null,
-  routine: activityModules['./activities/RoutinesActivity.vue']?.default || null,
+  terminal: TerminalActivity,
+  agent: TerminalActivity,
+  routine: RoutinesActivity,
 }
-const AppActivity = activityModules['./activities/AppActivity.vue']?.default || null
 
 const CORE_ACTIVITIES = Object.freeze([
   { id: 'files', kind: 'files', title: 'Files' },
@@ -167,14 +182,7 @@ const editorFiles = useFileStore()
 const editorRef = ref(null)
 const quickOpen = ref(false)
 const diagnostic = ref('')
-const initialized = ref(false)
-const responsiveZone = ref('wide')
-const viewportWidth = ref(window.innerWidth)
 const activitySurfaces = new Map()
-const closingActivityIds = ref(new Set())
-const finalizingClosures = new Set()
-let desktopLayout = null
-let lastWorkbenchFocus = { owner: 'none', activityId: '' }
 
 const toolRuntime = createToolRuntime({
   getEditor: () => editorRef.value,
@@ -206,9 +214,61 @@ const toolRuntime = createToolRuntime({
   trashApp: appId => appsCatalog.trash(appId),
 })
 
+const workspaceBootstrap = useWorkspaceBootstrap({
+  settings,
+  workbench,
+  activities,
+  activityRuntime,
+  launchers,
+  appsCatalog,
+  workspaceFiles,
+  editorFiles,
+  toolRuntime,
+  diagnostic,
+  coreActivities: CORE_ACTIVITIES,
+  openCoreActivity,
+  getFocusOwner: () => lastWorkbenchFocus.value.owner,
+})
+const {
+  chooseWorkspace,
+  ensureCoreActivities,
+  focusNarrowPane,
+  initialized,
+  openWorkspace,
+  persistWorkbench,
+  responsiveZone,
+  syncResponsiveLayout,
+  viewportWidth,
+} = workspaceBootstrap
+
 const resize = useWorkbenchResize(workbench, {
   persist: (layout) => persistWorkbench(layout),
 })
+
+const activityLifecycle = useActivityLifecycle({
+  activities,
+  activityRuntime,
+  launchers,
+  workbench,
+  workspacePath: computed(() => workspaceFiles.workspacePath),
+  diagnostic,
+  coreActivityIds: CORE_ACTIVITY_IDS,
+  isStableActivity: isToolActivity,
+  getSidebarActivities: () => sidebarActivities.value,
+  openCoreActivity,
+  selectActivity,
+  openActivityRecord,
+})
+const {
+  archiveActivity,
+  clearActivity,
+  closeActivity,
+  closingActivityIds,
+  renameActivity,
+  restartActivity,
+  restoreActivity,
+  stopActivity,
+} = activityLifecycle
 
 const hostActivities = computed(() => activities.visibleActivities)
 const activityNavigator = computed(() => {
@@ -222,6 +282,7 @@ const sidebarActivities = computed(() => (
   orderActivities(
     activities.visibleActivities.filter((activity) => (
       !CORE_ACTIVITY_IDS.has(activity.id)
+      && !isToolActivity(activity)
       && !closingActivityIds.value.has(activity.id)
     )),
     {
@@ -230,7 +291,9 @@ const sidebarActivities = computed(() => (
     },
   )
 ))
-const archivedSidebarActivities = computed(() => activities.archivedActivities)
+const archivedSidebarActivities = computed(() => (
+  activities.archivedActivities.filter(activity => !isToolActivity(activity))
+))
 const activeActivity = computed(() => (
   activities.byId(workbench.activeActivityId) || null
 ))
@@ -254,9 +317,16 @@ const editorMeta = computed(() => {
   return file.dirty ? 'Unsaved' : `${editorFiles.openFiles.length} tab${editorFiles.openFiles.length === 1 ? '' : 's'}`
 })
 
-const surfaceLauncherRows = computed(() => [
+const stableApps = computed(() => appsCatalog.apps.filter(
+  app => !createsFreshActivity(app),
+))
+const freshActivityApps = computed(() => appsCatalog.apps.filter(createsFreshActivity))
+const toolAppIds = computed(() => new Set(stableApps.value.map(app => app.id)))
+
+const toolRows = computed(() => orderSidebarRows([
   {
     id: 'core:files',
+    activityId: 'files',
     title: 'Files',
     icon: 'files',
     shortcut: shortcut('P'),
@@ -264,14 +334,16 @@ const surfaceLauncherRows = computed(() => [
   },
   {
     id: 'core:routines',
+    activityId: 'routines',
     title: 'Routines',
     icon: 'routines',
     shortcut: '',
     available: true,
   },
-])
+  ...stableApps.value.map(appRow),
+], settings.sidebarToolOrder))
 
-const appLauncherRows = computed(() => [
+const newActivityRows = computed(() => orderSidebarRows([
   ...launchers.decoratedPresets.filter(
     preset => preset.enabled && preset.available,
   ).map((preset) => ({
@@ -282,16 +354,49 @@ const appLauncherRows = computed(() => [
     available: preset.available,
     unavailableReason: preset.unavailableReason,
   })),
-  ...appsCatalog.apps.map((app) => ({
+  ...freshActivityApps.value.map(appRow),
+], settings.sidebarNewActivityOrder))
+
+function appRow(app) {
+  return {
     id: `app:${app.id}`,
     title: app.title,
-    icon: app.id === 'changes'
-      ? 'changes'
-      : (app.mode === 'terminal' ? 'terminal' : 'apps'),
+    icon: app.id === 'scratch'
+      ? 'today'
+      : app.id === 'business-graph'
+        ? 'graph'
+        : (app.mode === 'terminal' ? 'terminal' : 'apps'),
     shortcut: '',
     available: true,
-  })),
-])
+  }
+}
+
+function createsFreshActivity(app) {
+  return ['terminal', 'process'].includes(app?.mode)
+}
+
+function isToolActivity(activity) {
+  return activity?.kind === 'app'
+    && toolAppIds.value.has(activity.source?.appId)
+}
+
+const {
+  closeNativeFocusedSurface,
+  lastFocus: lastWorkbenchFocus,
+  onKeydown,
+  rememberWorkbenchFocus,
+} = useWorkbenchKeyboardRouting({
+  quickOpen,
+  settings,
+  editorRef,
+  editorFiles,
+  workbench,
+  sidebarActivities,
+  toggleSidebar,
+  selectActivity,
+  closeActivity,
+  collapseEmptyEditor,
+})
 
 function launcherIcon(preset) {
   if (preset.kind === 'terminal') return 'terminal'
@@ -300,6 +405,24 @@ function launcherIcon(preset) {
   if (source.includes('claude')) return 'claude'
   if (source === 'pi' || source.includes('pi-')) return 'pi'
   return 'agent'
+}
+
+function orderSidebarRows(rows, savedOrder) {
+  const orderIndex = new Map(
+    (Array.isArray(savedOrder) ? savedOrder : [])
+      .map((id, index) => [id, index]),
+  )
+  return rows
+    .map((row, sourceIndex) => ({ row, sourceIndex }))
+    .sort((left, right) => {
+      const leftIndex = orderIndex.get(left.row.id)
+      const rightIndex = orderIndex.get(right.row.id)
+      if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex
+      if (leftIndex !== undefined) return -1
+      if (rightIndex !== undefined) return 1
+      return left.sourceIndex - right.sourceIndex
+    })
+    .map(({ row }) => row)
 }
 
 watch(
@@ -312,54 +435,12 @@ watch(
   () => persistWorkbench(),
 )
 
-watch(
-  () => activities.records.map((activity) => `${activity.id}:${activity.status}`).join('|'),
-  () => {
-    for (const id of closingActivityIds.value) {
-      const activity = activities.byId(id)
-      if (activity && !isLiveActivity(activity)) void finalizeClosedActivity(activity)
-    }
-  },
-)
-
 onMounted(async () => {
-  ensureCoreActivities()
   document.addEventListener('keydown', onKeydown, true)
   document.addEventListener('focusin', rememberWorkbenchFocus, true)
   window.addEventListener('resize', syncResponsiveLayout)
   window.__mim_activityPaste = pasteToActiveTerminal
-
-  if (!settings.settingsReady) await settings.load()
-  restoreWorkbench()
-  // Editor is a first-class startup surface. A stale saved rail must never
-  // boot into a shell that appears to have no right pane.
-  workbench.setPaneState('editor', 'expanded')
-  syncResponsiveLayout({ force: true, preferEditor: true })
-
-  const [, runtimeResult, toolRuntimeResult, appsResult] = await Promise.allSettled([
-    launchers.load(),
-    activityRuntime.initialize(),
-    toolRuntime.start(),
-    appsCatalog.load(),
-  ])
-  if (runtimeResult.status === 'rejected') {
-    diagnostic.value = activityRuntime.error || errorMessage(runtimeResult.reason)
-  }
-  if (toolRuntimeResult.status === 'rejected') {
-    diagnostic.value = `MCP tools could not start: ${errorMessage(toolRuntimeResult.reason)}`
-  }
-  if (appsResult.status === 'rejected' && !diagnostic.value) {
-    diagnostic.value = `Apps could not load: ${errorMessage(appsResult.reason)}`
-  }
-
-  const savedWorkspace = String(settings.mimWorkspaceFolder || '').trim()
-  if (savedWorkspace) await openWorkspace(savedWorkspace, { persist: false, revealFiles: false })
-
-  const savedActivity = settings.workbenchLayout?.activeActivityId
-  if (savedActivity && activities.byId(savedActivity)) workbench.openActivity(savedActivity)
-  else if (!activities.byId(workbench.activeActivityId)) workbench.openActivity('files')
-  initialized.value = true
-  persistWorkbench()
+  await workspaceBootstrap.start()
 })
 
 onUnmounted(() => {
@@ -370,6 +451,8 @@ onUnmounted(() => {
   document.removeEventListener('focusin', rememberWorkbenchFocus, true)
   window.removeEventListener('resize', syncResponsiveLayout)
   resize.dispose()
+  activityLifecycle.dispose()
+  workspaceBootstrap.dispose()
   workspaceFiles.dispose()
   activityRuntime.dispose()
   toolRuntime.stop()
@@ -378,121 +461,6 @@ onUnmounted(() => {
   }
   activitySurfaces.clear()
 })
-
-function ensureCoreActivities(workspacePath = workspaceFiles.workspacePath) {
-  const timestamp = new Date(0).toISOString()
-  for (const core of CORE_ACTIVITIES) {
-    const existing = activities.byId(core.id)
-    activities.upsert({
-      id: core.id,
-      kind: core.kind,
-      title: core.title,
-      workspacePath: workspacePath || '',
-      status: 'ready',
-      createdAt: existing?.createdAt || timestamp,
-      updatedAt: existing?.updatedAt || timestamp,
-      retention: 'durable',
-      source: { type: 'core' },
-      host: { type: 'renderer' },
-      launch: {},
-    })
-  }
-}
-
-function restoreWorkbench() {
-  const saved = settings.workbenchLayout
-  if (!saved || typeof saved !== 'object') return
-  workbench.restoreLayout(saved)
-}
-
-function persistWorkbench(layout = workbench.layoutSnapshot()) {
-  if (!initialized.value) return
-  const persistedLayout = responsiveZone.value === 'wide'
-    ? layout
-    : (desktopLayout || layout)
-  settings.set('workbenchLayout', {
-    ...persistedLayout,
-    activeActivityId: workbench.activeActivityId || 'files',
-  })
-}
-
-function syncResponsiveLayout({ force = false, preferEditor = null } = {}) {
-  viewportWidth.value = window.innerWidth
-  const nextZone = responsiveZoneFor(window.innerWidth)
-  if (!force && nextZone === responsiveZone.value) return
-  if (responsiveZone.value === 'wide' && nextZone !== 'wide') {
-    desktopLayout = workbench.layoutSnapshot()
-  }
-  workbench.setSinglePaneMode(nextZone === 'focus')
-  applyResponsiveZone(workbench, nextZone, {
-    preferEditor: preferEditor ?? responsiveEditorPreference(),
-    desktopLayout,
-  })
-  responsiveZone.value = nextZone
-  if (nextZone === 'wide') desktopLayout = null
-}
-
-function responsiveEditorPreference() {
-  if (lastWorkbenchFocus.owner === 'editor') return true
-  if (lastWorkbenchFocus.owner === 'activity' || lastWorkbenchFocus.owner === 'sidebar') {
-    return false
-  }
-  return Boolean(editorFiles.currentFile)
-}
-
-function focusNarrowPane(pane) {
-  if (responsiveZone.value !== 'focus') return
-  applyResponsiveZone(workbench, 'focus', {
-    preferEditor: pane === 'editor',
-    desktopLayout,
-  })
-}
-
-async function chooseWorkspace() {
-  if (!window.__TAURI_INTERNALS__) {
-    diagnostic.value = 'Folder selection is available in the Mim desktop app.'
-    return
-  }
-  try {
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const selection = await open({
-      directory: true,
-      multiple: false,
-      title: 'Open workspace',
-    })
-    const path = Array.isArray(selection) ? selection[0] : selection
-    if (path) await openWorkspace(typeof path === 'string' ? path : path.path)
-  } catch (cause) {
-    diagnostic.value = `Workspace could not be opened: ${errorMessage(cause)}`
-  }
-}
-
-async function openWorkspace(path, { persist = true, revealFiles = true } = {}) {
-  try {
-    await workspaceFiles.openWorkspace(path)
-    ensureCoreActivities(path)
-    if (persist) settings.set('mimWorkspaceFolder', path)
-    rememberWorkspace(path)
-    diagnostic.value = ''
-    if (revealFiles) openCoreActivity('files')
-    return true
-  } catch (cause) {
-    diagnostic.value = `Workspace index failed: ${errorMessage(cause)}`
-    return false
-  }
-}
-
-function rememberWorkspace(path) {
-  const normalized = String(path || '').trim()
-  if (!normalized) return
-  const previous = Array.isArray(settings.recentWorkspaceFolders)
-    ? settings.recentWorkspaceFolders
-    : []
-  settings.set(
-    'recentWorkspaceFolders',
-    [normalized, ...previous.filter(candidate => candidate !== normalized)].slice(0, 8),
-  )
-}
 
 async function onLaunch(id) {
   if (id === 'core:files') return openCoreActivity('files')
@@ -534,6 +502,36 @@ async function onLaunch(id) {
     workbench.setPaneState('activity', 'expanded')
   } catch (cause) {
     diagnostic.value = `${preset.title} did not launch: ${errorMessage(cause)}`
+  }
+}
+
+async function startGraphWork(request) {
+  const preset = launchers.availablePresets.find(candidate => candidate.kind === 'agent')
+  if (!preset) {
+    diagnostic.value = 'Start work needs one available agent launcher. Configure Codex, Claude, or Pi in Launchers.'
+    return
+  }
+  if (!workspaceFiles.workspacePath) {
+    diagnostic.value = `Open a workspace before starting work on ${request?.title || 'this graph item'}.`
+    return
+  }
+  try {
+    diagnostic.value = ''
+    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
+      title: `Work · ${request.title || request.nodeId}`,
+      args: [String(request.prompt || '')],
+      retention: 'durable',
+      source: {
+        type: 'business-graph-work',
+        graphNodeId: request.nodeId,
+        graphNodeKind: request.nodeKind,
+        graphScopeIds: request.scopeIds || [],
+        graphRevision: request.graphRevision,
+      },
+    })
+    workbench.setPaneState('activity', 'expanded')
+  } catch (cause) {
+    diagnostic.value = `Could not start work on ${request?.title || request?.nodeId || 'graph item'}: ${errorMessage(cause)}`
   }
 }
 
@@ -586,6 +584,24 @@ function reorderActivities(ids) {
   })
 }
 
+function reorderTools(ids) {
+  const visible = new Set(toolRows.value.map((row) => row.id))
+  const retained = (Array.isArray(settings.sidebarToolOrder)
+    ? settings.sidebarToolOrder
+    : []
+  ).filter((id) => !visible.has(id))
+  settings.set('sidebarToolOrder', [...ids, ...retained])
+}
+
+function reorderLaunchers(ids) {
+  const visible = new Set(newActivityRows.value.map((row) => row.id))
+  const retained = (Array.isArray(settings.sidebarNewActivityOrder)
+    ? settings.sidebarNewActivityOrder
+    : []
+  ).filter((id) => !visible.has(id))
+  settings.set('sidebarNewActivityOrder', [...ids, ...retained])
+}
+
 function sortActivities(mode) {
   settings.set('activityNavigator', {
     mode: ACTIVITY_SORT_MODES.includes(mode) ? mode : 'manual',
@@ -593,134 +609,24 @@ function sortActivities(mode) {
   })
 }
 
-function openAppsSettings() {
-  editorRef.value?.mimOpenSettings?.('apps')
-}
-
 function openSettings() {
   editorRef.value?.mimOpenSettings?.('appearance')
 }
 
-async function openFileInEditor(path) {
+async function openFileInEditor(request) {
+  const path = typeof request === 'string' ? request : request?.path
   if (!path) return
   try {
-    await editorRef.value?.mimOpen(path)
+    await editorRef.value?.mimOpen(path, {
+      preview: Boolean(typeof request === 'object' && request?.preview),
+      entry: typeof request === 'object' ? request?.entry || null : null,
+    })
     focusNarrowPane('editor')
     workbench.setPaneState('editor', 'expanded')
     diagnostic.value = ''
   } catch (cause) {
     diagnostic.value = `${basename(path)} could not be opened: ${errorMessage(cause)}`
   }
-}
-
-async function stopActivity(id) {
-  try {
-    await activityRuntime.stop(id)
-  } catch (cause) {
-    diagnostic.value = `Activity could not be stopped: ${errorMessage(cause)}`
-  }
-}
-
-async function renameActivity({ id, title }) {
-  try {
-    await activityRuntime.rename(id, title)
-  } catch (cause) {
-    diagnostic.value = `Activity could not be renamed: ${errorMessage(cause)}`
-  }
-}
-
-async function archiveActivity(id) {
-  try {
-    await activityRuntime.setArchived(id, true)
-    if (workbench.activeActivityId === id) openCoreActivity('files')
-  } catch (cause) {
-    diagnostic.value = `Activity could not be archived: ${errorMessage(cause)}`
-  }
-}
-
-async function restoreActivity(id) {
-  try {
-    await activityRuntime.setArchived(id, false)
-    selectActivity(id)
-  } catch (cause) {
-    diagnostic.value = `Activity could not be restored: ${errorMessage(cause)}`
-  }
-}
-
-async function clearActivity(id) {
-  try {
-    const wasActive = workbench.activeActivityId === id
-    await activityRuntime.clear(id)
-    if (wasActive) openCoreActivity('files')
-  } catch (cause) {
-    diagnostic.value = `Activity could not be cleared: ${errorMessage(cause)}`
-  }
-}
-
-async function closeActivity(id = workbench.activeActivityId) {
-  const activity = activities.byId(id)
-  if (!activity || CORE_ACTIVITY_IDS.has(activity.id)) {
-    if (workbench.paneLayout.activity.state === 'expanded') {
-      workbench.setPaneState('activity', 'rail')
-    }
-    return false
-  }
-  if (closingActivityIds.value.has(activity.id)) return true
-
-  const currentOrder = sidebarActivities.value.map((item) => item.id)
-  closingActivityIds.value = new Set([...closingActivityIds.value, activity.id])
-  moveAfterClosing(activity.id, currentOrder)
-
-  if (!isLiveActivity(activity)) {
-    await finalizeClosedActivity(activity)
-    return true
-  }
-
-  try {
-    await activityRuntime.stop(activity.id)
-    return true
-  } catch (cause) {
-    unmarkClosing(activity.id)
-    diagnostic.value = `Activity could not be closed: ${errorMessage(cause)}`
-    return false
-  }
-}
-
-function moveAfterClosing(id, currentOrder) {
-  if (workbench.activeActivityId !== id) return
-  const index = currentOrder.indexOf(id)
-  const remaining = currentOrder.filter((activityId) => activityId !== id)
-  const nextId = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]
-  if (nextId) {
-    selectActivity(nextId)
-    return
-  }
-  workbench.openActivity('files')
-  workbench.setPaneState('activity', 'rail')
-}
-
-async function finalizeClosedActivity(activity) {
-  if (finalizingClosures.has(activity.id)) return
-  finalizingClosures.add(activity.id)
-  try {
-    if (activity.retention === 'durable') {
-      await activityRuntime.setArchived(activity.id, true)
-    } else {
-      await activityRuntime.clear(activity.id)
-    }
-    unmarkClosing(activity.id)
-  } catch (cause) {
-    unmarkClosing(activity.id)
-    diagnostic.value = `Activity could not be closed: ${errorMessage(cause)}`
-  } finally {
-    finalizingClosures.delete(activity.id)
-  }
-}
-
-function unmarkClosing(id) {
-  const next = new Set(closingActivityIds.value)
-  next.delete(id)
-  closingActivityIds.value = next
 }
 
 function collapseEmptyEditor() {
@@ -730,55 +636,6 @@ function collapseEmptyEditor() {
 function onEditorNavigate() {
   focusNarrowPane('editor')
   workbench.setPaneState('editor', 'expanded')
-}
-
-async function restartActivity(payload) {
-  const activity = payload?.activity
-  if (activity?.kind === 'routine' && activity.source?.routineId) {
-    try {
-      const result = await runRoutineNow(activity.source.routineId)
-      openActivityRecord(result.activity)
-    } catch (cause) {
-      diagnostic.value = `${activity.title || 'Routine'} could not restart: ${errorMessage(cause)}`
-    }
-    return
-  }
-
-  const presetId = activity?.source?.presetId || activity?.source?.launcherId
-  const preset = presetId ? launchers.byId(presetId) : null
-  try {
-    if (activity?.kind === 'agent' && !activity.source?.appId) {
-      if (!preset) {
-        throw new Error('its launcher preset is missing')
-      }
-      await activityRuntime.launchPreset(
-        preset,
-        activity.workspacePath || workspaceFiles.workspacePath,
-        {
-          kind: activity.kind,
-          resume: Boolean(activity.host?.resumeStrategy),
-          resumeStrategy: activity.host?.resumeStrategy,
-          title: activity.title,
-        },
-      )
-      return
-    }
-    if (activity?.host?.type !== 'pty' || !activity.launch?.command) {
-      throw new Error('its original command is unavailable')
-    }
-    await activityRuntime.launchCommand({
-      title: activity.title,
-      command: activity.launch.command,
-      args: activity.launch.args || [],
-      cwd: activity.launch.cwd || activity.workspacePath || workspaceFiles.workspacePath,
-      env: activity.launch.env || {},
-      kind: activity.kind || 'terminal',
-      retention: activity.retention || 'durable',
-      source: activity.source || {},
-    })
-  } catch (cause) {
-    diagnostic.value = `${activity?.title || 'Activity'} could not restart: ${errorMessage(cause)}`
-  }
 }
 
 function surfaceFor(activity) {
@@ -965,133 +822,6 @@ async function pasteToActiveTerminal(text) {
   return Boolean(await activitySurfaces.get(activity.id)?.pasteText?.(text))
 }
 
-function onKeydown(event) {
-  if (
-    quickOpen.value
-    && (
-      event.key === 'Escape'
-      || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w')
-    )
-  ) {
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    quickOpen.value = false
-    return
-  }
-  if (quickOpen.value) return
-  if (document.querySelector('[aria-modal="true"]')) return
-  const focus = keyboardFocus(event.target)
-  const result = routeWorkbenchKey({
-    key: event.key,
-    primary: event.metaKey || event.ctrlKey,
-    alt: event.altKey,
-    shift: event.shiftKey,
-    focusOwner: focus.owner,
-    sidebarActivityId: focus.activityId,
-  })
-  if (!result) return
-
-  event.preventDefault()
-  event.stopImmediatePropagation()
-  if (result.action === 'quick-open') {
-    quickOpen.value = true
-    return
-  }
-  if (result.action === 'toggle-sidebar') {
-    toggleSidebar()
-    return
-  }
-  if (result.action === 'cycle-editor') {
-    editorRef.value?.mimCycleTab?.(result.direction)
-    return
-  }
-  if (result.action === 'cycle-activity') {
-    cycleActivity(result.direction, {
-      focusSidebar: focus.owner === 'sidebar',
-      fromId: focus.activityId,
-    })
-    return
-  }
-  if (result.action === 'close-editor') {
-    closeForFocus({ owner: 'editor', activityId: '' })
-    return
-  }
-  if (result.action === 'close-activity') {
-    closeForFocus({
-      owner: result.activityId ? 'sidebar' : 'activity',
-      activityId: result.activityId,
-    })
-  }
-}
-
-function keyboardFocus(target) {
-  const element = typeof target?.closest === 'function' ? target : document.activeElement
-  if (!element) return { owner: 'none', activityId: '' }
-  if (element.closest('[data-pane="editor"]')) {
-    return { owner: 'editor', activityId: '' }
-  }
-  if (element.closest('[data-pane="activity"]')) {
-    return { owner: 'activity', activityId: '' }
-  }
-  if (element.closest('[data-pane="sidebar"]')) {
-    const row = element.closest('[data-sidebar-row^="activity:"]')
-    const value = row?.getAttribute('data-sidebar-row') || ''
-    return {
-      owner: 'sidebar',
-      activityId: value.startsWith('activity:') ? value.slice('activity:'.length) : '',
-    }
-  }
-  return { owner: 'none', activityId: '' }
-}
-
-function rememberWorkbenchFocus(event) {
-  const focus = keyboardFocus(event.target)
-  if (focus.owner !== 'none') lastWorkbenchFocus = focus
-}
-
-function closeNativeFocusedSurface() {
-  if (quickOpen.value) {
-    quickOpen.value = false
-    return
-  }
-  const current = keyboardFocus(document.activeElement)
-  closeForFocus(current.owner === 'none' ? lastWorkbenchFocus : current)
-}
-
-function closeForFocus(focus) {
-  if (focus.owner === 'editor') {
-    if (!editorFiles.openFiles.length) collapseEmptyEditor()
-    else void editorRef.value?.mimCloseActiveTab?.()
-    return
-  }
-  if (focus.owner === 'activity') {
-    void closeActivity(workbench.activeActivityId)
-    return
-  }
-  if (focus.owner === 'sidebar' && focus.activityId) {
-    void closeActivity(focus.activityId)
-  }
-}
-
-function cycleActivity(direction, { focusSidebar = false, fromId = '' } = {}) {
-  const rows = sidebarActivities.value
-  if (!rows.length) return
-  const index = rows.findIndex((activity) => (
-    activity.id === (fromId || workbench.activeActivityId)
-  ))
-  const start = index < 0 ? (direction > 0 ? -1 : 0) : index
-  const next = (start + direction + rows.length) % rows.length
-  const nextId = rows[next].id
-  selectActivity(nextId)
-  if (focusSidebar) {
-    void nextTick(() => {
-      const row = [...document.querySelectorAll('[data-sidebar-row]')]
-        .find((element) => element.getAttribute('data-sidebar-row') === `activity:${nextId}`)
-      row?.querySelector('button')?.focus()
-    })
-  }
-}
-
 function shortcut(key) {
   const platform = navigator.userAgentData?.platform || navigator.platform || ''
   return /mac/i.test(platform) ? `⌘${key}` : `Ctrl+${key}`
@@ -1106,11 +836,6 @@ function humanStatus(status) {
   return String(status || 'ready')
     .replace(/-/g, ' ')
     .replace(/^\w/, (letter) => letter.toUpperCase())
-}
-
-function isLiveActivity(activity) {
-  return activity?.host?.type === 'pty'
-    && ['ready', 'starting', 'working', 'needs-input', 'idle'].includes(activity?.status)
 }
 
 function errorMessage(error) {
