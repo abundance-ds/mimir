@@ -1,8 +1,8 @@
 # Codebase map
 
-Read this file first, then [gotchas.md](gotchas.md), then the system document
-for the area being changed. Documentation describes the current Mim 0.1.0
-product; Git carries its history.
+This archived map routes Mim's dense implementation notes. Do not preload it or
+[gotchas.md](gotchas.md); use it only when source and focused `mimx help` are
+insufficient. Source remains canonical for local syntax and obvious behavior.
 
 ## Product shape
 
@@ -10,7 +10,7 @@ Mim is one Tauri window with three mounted panes:
 
 | Pane | Owner | Contents |
 |---|---|---|
-| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | core surfaces, installed Apps/CLI launchers, live and archived Activities, Settings |
+| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | stable Tools, fresh-run sources, live and archived Activities, Settings |
 | Activity | `src/mim/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, and launched app instances |
 | Editor | `src/editor/App.vue` | Markdown tabs, inline AI, ghost completion, diff review, comments |
 
@@ -28,6 +28,29 @@ navigation history.
 - `src-tauri/src/lib.rs` creates the main window and initializes Activities,
   Routines, the tool registry, the MCP endpoint, file indexing, and `mimx`.
 
+Startup is split: Rust registers core tools during Tauri setup, but the
+renderer starts the MCP socket only after installing tool-relay listeners.
+Editor session hydration completes before its persistence watcher and native
+listeners are installed. See
+[runtime-architecture.md](runtime-architecture.md) and [ipc.md](ipc.md).
+
+## Change routing
+
+| Change | Read | Canonical owners | Focused tests |
+|---|---|---|---|
+| Tauri bootstrap/window/quit | [runtime architecture](runtime-architecture.md), [IPC](ipc.md), [persistence](persistence.md) | `src-tauri/src/lib.rs`, `src/editor/windowCloseGuard.js`, `appQuit.js` | close/quit/session tests; relevant Rust module |
+| Workbench panes/navigation | [workbench design](workbench-design.md), [acceptance](acceptance.md) | `WorkbenchApp.vue`, `WorkbenchShell.vue`, `stores/workbench.js`, responsive/resize/key modules | Workbench/Shell/resize/responsive/key tests |
+| Activity/PTY/agent lifecycle | [activities](activities.md), [agent setup](agent-setup.md), [persistence](persistence.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores/surfaces | native supervisor/model/status/scrollback; Activity stores/components |
+| MCP/tool/provider | [MCP](mcp.md), [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
+| Files/tree/search/preview/mutation | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, Files store/service/activity/row, Editor typed-preview path | native file modules; workspace/file stores; Files Activity; Editor preview tests |
+| Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
+| Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
+| Routines/scheduler | [Routines](routines.md), [persistence](persistence.md) | `routines.rs`, `routine_runtime.rs`, Routine store/service/activity | native schema/runtime; Routine store/service/activity |
+| Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
+| Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
+| Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
+| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow | full verification set |
+
 ## Frontend map
 
 ### Workbench and Activities
@@ -36,8 +59,9 @@ navigation history.
 - `src/mim/components/`: three-pane shell, rails, sidebar, recent-project
   switcher, quick-open, pane host
 - `src/mim/activities/TerminalActivity.vue`: xterm-backed terminal and agent UI
-- `src/mim/activities/FilesActivity.vue`: recent-first inbox, actionable folder
-  browser, multi-selection, context menus, and keyboard file operations
+- `src/mim/activities/FilesActivity.vue`: Project/Recent/Favorites composition,
+  selection/action orchestration, Git decoration, and settings-backed favorites
+- `src/mim/components/FileTreeRow.vue`: stateless tree-row presentation and ARIA
 - `src/mim/activities/AppActivity.vue`: app-instance host selection
 - `src/mim/activities/RoutinesActivity.vue`: complete file-backed routine CRUD,
   run/stop state, diagnostics, context menus, and keyboard control
@@ -51,14 +75,16 @@ See [activities.md](activities.md) and [agent-setup.md](agent-setup.md).
 
 ### Files
 
-- `src/stores/workspaceFiles.js`: workspace index, directory navigation,
-  filters, selection, explicit refresh, and bounded searches
+- `src/stores/workspaceFiles.js`: metadata index/search state plus lazy
+  directory children, expansion, and refresh caches
 - `src/services/fileIndex.js`: native index/search wrappers
-- `src/services/workspaceFileOperations.js`: create, rename, duplicate, Trash,
-  reveal, default-app open, and folder-list wrappers
+- `src/services/workspaceFileOperations.js`: inspect/list/create/rename,
+  duplicate, Trash, reveal, and default-app wrappers
+- `src/mim/activities/FilesActivity.vue`: Files state composition and operations
+- `src/mim/components/FileTreeRow.vue`: tree/secondary-row rendering
 - `src/mim/components/QuickOpen.vue`: global Cmd/Ctrl+P file jump
-- `src/services/fileSystem.js`: editor open/save wrappers
-- `src/stores/files.js`: open tabs, dirty state, recent editor files
+- `src/services/fileSystem.js`: editor text and binary I/O wrappers
+- `src/stores/files.js`: typed tabs, clean-preview reuse, dirty state, recents
 
 See [files.md](files.md).
 
@@ -69,7 +95,14 @@ See [files.md](files.md).
 - `src/shared/ui/settings/AppsSettingsSection.vue`: search, launch, diagnostics,
   local scaffold/duplicate/title/Trash operations, and definition navigation
 - `src/shared/ui/settings/AppSettingsSectionRows.vue`: keyboard catalog rows
-- `src/mim/apps/`: embedded host, launch-plan host, Changes, and local app surfaces
+- `src/mim/apps/`: Today, Business graph, embedded host, launch-plan
+  host, and local app surfaces
+- `src/mim/apps/BusinessGraphApp.vue`: scope/projection shell, graph loading,
+  context trail, inspector orchestration, and Start Work event
+- `src/mim/apps/business-graph/`: Board, list, portfolio, CRM, timeline,
+  relationship graph, inspector, and create-flow components
+- `src/stores/businessGraph.js`, `src/services/businessGraph.js`: graph
+  projection state and typed native command boundary
 - `src/apps/sdk/mim-sdk.js`: app bridge for data, files, HTTP, tools, and editor
 - `src/apps/sdk/theme-base.css`: optional shared app theme base
 
@@ -95,7 +128,8 @@ See [routines.md](routines.md).
 - `src/services/comments/`: pseudo-XML parser and agent prompt builder
 
 See [editor-system.md](editor-system.md), [inline-ai.md](inline-ai.md), and
-[comments.md](comments.md).
+[comments.md](comments.md). Shared provider/model infrastructure is in
+[ai-system.md](ai-system.md).
 
 ### Shared UI
 
@@ -105,10 +139,13 @@ See [editor-system.md](editor-system.md), [inline-ai.md](inline-ai.md), and
 - `src/shared/ui/settings/`: settings sections, progressive launcher rows, and
   exact CLI-flag parsing
 - `src/stores/settings.js`: persisted settings and cross-window theme sync
+- `src/shared/workbenchZoom.js`: interface zoom ladder, key chords, and native
+  webview zoom application
 - `src/shared/fonts.js`: editor font choices
 
 See [design-system.md](design-system.md) and
-[workbench-design.md](workbench-design.md).
+[workbench-design.md](workbench-design.md). Settings persistence and
+cross-window behavior are in [settings.md](settings.md).
 
 ## Rust map
 
@@ -133,18 +170,26 @@ See [design-system.md](design-system.md) and
 
 See [mcp.md](mcp.md).
 
+Provider relays, request cancellation, file-open queuing, proposal events, and
+server lease ordering are mapped in [ipc.md](ipc.md).
+
 ### Files, Apps, and Routines
 
-- `src-tauri/src/file_index.rs`: recent-first index and bounded content search
+- `src-tauri/src/business_graph/`: bounded ontology, Markdown adapters,
+  source-aware index/query/traversal, mutations, scopes, watchers, migration
+  report, agent context, native tools, and performance contracts
+- `src-tauri/src/file_index.rs`: recent-first regular-file index and bounded
+  content search
 - `src-tauri/src/file_index_commands.rs`: native index command surface
-- `src-tauri/src/workspace_files.rs`: workspace-scoped browse and mutation
-  commands, traversal protection, system Trash, reveal, and default-app open
+- `src-tauri/src/workspace_files.rs`: workspace-scoped inspect/browse/mutation,
+  open classification, traversal protection, system Trash, reveal, and
+  default-app open
 - `src-tauri/src/file_open.rs`: supported CLI file-open handling
 - `src-tauri/src/apps.rs`: TOML catalog, safe local definition operations,
   launch resolution, app data, HTTP
 - `src-tauri/src/routines.rs`: TOML schema, cron parsing, planner rules
 - `src-tauri/src/routine_runtime.rs`: scheduler, launcher resolution, Activity runs
-- `src-tauri/src/git.rs`: Git status used by the built-in Changes app
+- `src-tauri/src/git.rs`: Git status used by Files decorations and summaries
 
 ### Editor AI and persistence
 
@@ -156,6 +201,9 @@ See [mcp.md](mcp.md).
   formats, network policy, and normalized usage
 - `src-tauri/src/persistence.rs`: atomic JSON/byte writes and corrupt quarantine
 
+See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
+[security.md](security.md).
+
 ## Local data
 
 | Path | Owner |
@@ -164,6 +212,7 @@ See [mcp.md](mcp.md).
 | `~/.mim/activities/` | durable Activity records and scrollback |
 | `~/.mim/apps/` | local app TOML and app directories |
 | `~/.mim/app-data/` | app-owned JSON values |
+| `~/.mim/graph/private/` | private local Business graph Markdown |
 | `~/.mim/routines/` | routine TOML |
 | `~/.mim/routines-state.json` | next-fire planner state |
 | `~/.mim/settings.json` | editor/workbench/settings data |
@@ -180,9 +229,17 @@ See [mcp.md](mcp.md).
 | [synthesis.md](synthesis.md) | product thesis and boundaries |
 | [acceptance.md](acceptance.md) | release behavior contract |
 | [building.md](building.md) | development, verification, packaging |
+| [testing.md](testing.md) | test topology, environment limits, change-to-test routing |
+| [runtime-architecture.md](runtime-architecture.md) | native/renderer authority, bootstrap, hydration, shutdown |
+| [ipc.md](ipc.md) | commands/events, relay ordering, queues, proposal coordination |
+| [persistence.md](persistence.md) | write ownership, serialization, quarantine, recovery |
+| [settings.md](settings.md) | mutation, persistence, cross-window and MCP semantics |
+| [security.md](security.md) | trusted-local model and exact capability boundaries |
+| [ai-system.md](ai-system.md) | model registry, credentials, providers, transport |
 | [agent-setup.md](agent-setup.md) | launchers, automatic agent connection, `mimx` |
 | [activities.md](activities.md) | universal execution lifecycle |
 | [mcp.md](mcp.md) | registry, transport, domains, dynamic providers |
+| [business-graph.md](business-graph.md) | GraphStore, ontology, physical scopes, projections, tools, migration, and recovery |
 | [files.md](files.md) | file index, search, quick-open |
 | [apps-system.md](apps-system.md) | local app formats and SDK |
 | [routines.md](routines.md) | scheduler and routine TOML |
@@ -193,3 +250,4 @@ See [mcp.md](mcp.md).
 | [design-system.md](design-system.md) | styling tokens and UI rules |
 | [gotchas.md](gotchas.md) | non-obvious implementation constraints |
 | [issues.md](issues.md) | current known issues |
+| [unified business graph delivery record](plans/unified-business-graph.md) | product decisions, parity contract, and completed delivery checklist |

@@ -10,8 +10,8 @@ It should remain comfortable for hours of terminal and document work.
 +----------------+---------------------------+---------------------------+
 | Sidebar        | Activity header           | Editor header             |
 | workspace      +---------------------------+---------------------------+
-| core surfaces  | terminal / agent / Files  | tabs                      |
-| Apps / agents  | App instance / Routine    | inline AI / diff          |
+| Tools          | terminal / agent / Files  | tabs                      |
+| New activity   | App instance / Routine    | inline AI / diff          |
 | Activities     |                           | CodeMirror / comments      |
 +----------------+---------------------------+---------------------------+
 ```
@@ -39,6 +39,10 @@ Pane controls are local and keep stable positions:
   Activity, that header adds a traffic-safe leading inset before restore and
   history controls.
 - Activity history sits at the leading edge of the Activity header.
+- PTY-specific process actions such as interrupt, stop, and resume join that
+  shared header. Native terminal interactions such as paste stay on their
+  standard keyboard shortcuts. Terminal and agent surfaces do not stack a
+  second identity or status row beneath it.
 - Activity and Editor each place expand/restore-split immediately before their
   outer-edge collapse control.
 - In embedded Editor mode the tab strip owns all width between the restore
@@ -65,10 +69,11 @@ The permanent rail system is the signature:
 - Row geometry stays aligned between expanded and collapsed Sidebar states.
 - The project mark opens the same teleported current/recent-folder switcher in
   expanded and rail states; switching never requires first expanding Sidebar.
-- Apps and Activities have independent disclosure controls in the expanded
-  Sidebar. Their local state survives pane collapse because the Sidebar remains
-  mounted; rail mode always exposes both icon lists so collapsing a section
-  cannot strand navigation. The Apps gear is a separate Settings action.
+- Tools remain directly available. New activity and Activities have independent
+  disclosure controls in the expanded Sidebar; rail mode exposes both icon
+  lists so collapsing a section cannot strand navigation. Tools and New
+  activity each keep a persistent manual order via pointer drag or
+  Shift+Alt+Up/Down. App management lives in Settings.
 - Archived Activities are a secondary set: a quiet counted disclosure is
   present, but archived rows are not rendered until the user asks for them.
 - Activity and Editor never both remain railed.
@@ -120,6 +125,10 @@ marks selection, activity, focus, and attention.
 - Failures name the failed object and remain recoverable.
 - Pane state changes are immediate. Local motion may preserve spatial
   continuity and must respect reduced-motion preferences.
+- Cmd+Plus/Minus step whole-window interface zoom and Cmd+0 resets it, in
+  every focus context including modals, Quick Open, and PTYs. The chords never
+  reach a terminal or CodeMirror. Editor content zoom has no keyboard chord;
+  it lives on the editor footer.
 
 ## Implementation rules
 

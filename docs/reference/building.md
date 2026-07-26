@@ -44,20 +44,29 @@ index, Apps, Routines, key storage, and the MCP endpoint require Tauri.
 
 ## Verification
 
-Run the same checks used by CI:
+Run the CI checks:
 
 ```bash
 npm test
 npm run build
+npm run docs:check
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
 The frontend wrappers in `scripts/test.mjs` and `scripts/build.mjs` set the Node
 flags required by the current dependency graph. Use the npm scripts rather than
 calling Vitest or Vite directly for release verification.
+
+Clippy is an additional local check; it is not currently run by CI:
+
+```bash
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```
+
+See [testing.md](testing.md) for test-environment limitations and
+change-to-test routing.
 
 ## Packaging
 

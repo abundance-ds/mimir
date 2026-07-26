@@ -48,6 +48,12 @@ Routines Activity.
 Planner state is stored atomically in `~/.mim/routines-state.json`. A corrupt
 state file is quarantined and reported without disabling valid definitions.
 
+The native worker periodically fingerprints Routine definitions and launcher
+configuration, reloads both as one consistent input set, and publishes only
+after reconciling scheduler state. The UI does not own a second scheduler and
+must not infer availability from TOML alone: an otherwise valid Routine can be
+runtime-unavailable because its current preset cannot resolve.
+
 At fire time the runtime:
 
 1. applies missed-fire and overlap policy;
@@ -62,6 +68,16 @@ only the stable `routines` core Activity renders the manager. “Run again” on
 an ended run resolves the current TOML definition, so updated prompt, flags,
 workspace, overlap, and launcher policy are not silently replaced by stale
 PTY argv.
+
+Planner cursor is committed atomically before scheduled fires are spawned. This
+prevents a crash during spawn from repeatedly treating the same instant as
+unobserved. Spawn failures remain visible as last errors; they do not roll the
+planner cursor backward. A launch reservation closes the gap between deciding
+overlap eligibility and the new Activity becoming visible to the supervisor.
+
+`run_now` refreshes changed inputs first and uses the same reservation/launch
+path, but its timestamp is the current instant rather than advancing the cron
+planner.
 
 ## UI and tools
 

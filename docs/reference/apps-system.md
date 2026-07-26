@@ -1,25 +1,38 @@
 # Apps
 
-Apps are local instruments launched from the Sidebar's Apps section. Mim ships
-Changes is built in; additional definitions live under `~/.mim/apps/`.
+Apps are local instruments. Mim ships Today and Business graph as built-ins;
+additional definitions live under `~/.mim/apps/`.
 
-There is no generic Apps Activity or launcher row. The Sidebar section contains
-the actual installed apps and configured CLI agent launchers. Its gear opens
-Settings > Apps, where the same catalog can be inspected, reloaded, diagnosed,
-searched with the keyboard, and launched. Local definitions can be opened in
-the Editor, revealed, duplicated, display-renamed, or moved to the
-operating-system Trash. The permanent Settings footer opens ordinary
-preferences.
+There is no generic Apps Activity or launcher row. The Sidebar places stable
+Apps under Tools and terminal/process Apps under New activity beside configured
+CLI launchers. Settings > Apps is the catalog: inspect, reload, diagnose,
+search, launch, open or reveal definitions, duplicate them, rename their
+display title, or move them to the operating-system Trash.
+
+Sidebar order is local presentation state, not catalog order. Pointer drag or
+Shift+Alt+Up/Down updates `sidebarToolOrder` for Tools and
+`sidebarNewActivityOrder` for fresh-run sources. Newly discovered entries
+follow the established order until placed manually.
+
+“App” describes a packaging and capability boundary, not a Sidebar group.
+Embedded, Rust-helper, window, and action Apps reopen one stable `app:<id>`
+Tool Activity; terminal/process Apps launch a fresh PTY Activity. CLI launchers
+are exact external-process presets. Stable Tool Activities stay out of
+Activities history.
 
 This is deliberately a personal/small-team local instrument manager. There is
 no marketplace, install workflow, trust gate, permission approval, enable
 switch, package origin, or team policy layer. Put code in `~/.mim/apps`, reload,
 and run it.
 
+App manifests and frames are trusted local extension code. Manifest/path
+validation protects catalog/protocol integrity; it does not sandbox SDK
+filesystem, HTTP, or registry calls. See [security.md](security.md).
+
 ## Settings workflow
 
-`Settings > Apps` is the management surface; the Sidebar remains the fast
-launch surface.
+`Settings > Apps` is the management surface; Tools and New activity are the
+fast access surfaces.
 
 - Search matches title, id, description, host mode, and declared tool metadata.
   Arrow keys move the selected row; Enter launches it.
@@ -39,6 +52,17 @@ launch surface.
 
 Mutations return the fresh catalog, so Sidebar launch rows update immediately.
 Built-ins are visible and launchable but never mutated.
+
+Today is a full-pane durable top-priority editor. It retains the former
+Scratch app's stable `scratch` id, `scratch` app-data key, and `scratch_read`
+MCP alias, so saved text and integrations survive the presentation change.
+
+Business graph is the native first-party graph, Issue Board, portfolio, and CRM
+instrument. Its `rust-helper = "business-graph"` route mounts a Vue Activity
+surface over the managed Rust `GraphRuntime`; it is not an iframe and does not
+use app-data JSON as canonical storage. The app composes physically separate
+private, project, and optional team Markdown roots. See
+[business-graph.md](business-graph.md).
 
 ## Discovery
 
@@ -85,7 +109,7 @@ Common optional fields are `description`, `args`, `env`, `launchOnly`, and
 entries are accepted explicitly.
 
 `rust-helper` names require matching host code; they are not dynamically loaded
-Rust libraries. The built-in Changes app uses `git-changes`.
+Rust libraries. Business graph uses `business-graph`.
 
 `terminal` and `process` launch directly into one PTY-backed Activity from
 Sidebar, Settings, or MCP. There is no intermediate app-plan row. Exact args
@@ -156,3 +180,24 @@ useful automation capabilities.
 - `src/mim/apps/LaunchPlanHost.vue`: window/action and restored-plan feedback
 - `src/services/appsCatalog.js`: frontend bridge
 - `src/apps/sdk/mim-sdk.js`: injected app API
+
+## Change map
+
+Launch resolution crosses native and renderer owners:
+
+- `apps.rs` validates the manifest and returns an explicit launch plan;
+- `stores/appsCatalog.js` constructs a stable renderer Activity proposal;
+- `WorkbenchApp.vue` sends terminal/process plans directly through the native
+  Activity runtime, avoiding a duplicate plan Activity;
+- `AppActivity.vue` routes embedded/window/action/Rust-helper/restored plans;
+- `EmbeddedAppHost.vue` owns frame handshake and tool-provider lifetime;
+- `LaunchPlanHost.vue` owns inspectable window/action completion and retry.
+
+App `id` is the stable key for definition collision, app data, Activity
+identity, and generated tool names. Display-title mutation must never rename
+it. Runtime tool ownership additionally includes `instanceId`; replacing an
+instance retires the prior provider before registering the new one.
+
+Tests are split accordingly: native `apps.rs`, catalog service/store, Settings
+catalog, `AppActivity`, embedded host, and launch-plan host. A manifest-mode
+change normally affects all six seams.

@@ -19,6 +19,29 @@ the selected Activity changes.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
 the attached document bridge synchronized.
 
+Tabs are typed as `text`, `pdf`, or `external`. Files passes native
+`WorkspaceEntry.openBehavior`; other `mimOpen` callers are classified through
+`workspace_file_inspect` before any read. Only text enters CodeMirror and the
+UTF-8 read/save path. `FilePreviewPage.vue` owns non-text routing;
+`PdfPreview.vue` dynamically loads PDF.js, reads bytes through
+`read_binary_file`, caps render pixel ratio, and cancels/destroys stale render
+tasks on path change or unmount.
+
+Files single-click creates a clean preview tab. `stores/files.js` reuses the
+first clean preview for later preview opens; a pinned open or text mutation
+clears preview status. Resource previews cannot become dirty or save, and do
+not mount inline AI, formatting, the footer, or CodeMirror. Preserve
+`kind`/`preview`/`meta` in tab transfer paths; session restoration currently
+excludes non-text tabs entirely, so resource previews never enter the startup
+UTF-8 hydration path.
+
+Session hydration is one transaction shared by the embedded and standalone
+Editor. It completes before the fallback draft, persistence watcher, file-open
+queue, native-menu sync, quit guard, and public bridge listeners are installed.
+Missing dirty named files recover as drafts; missing clean files disappear.
+See [persistence.md](persistence.md) and
+[runtime-architecture.md](runtime-architecture.md).
+
 ## CodeMirror surface
 
 `src/editor/codemirror/core.js` creates the editor and reconfigurable
@@ -51,6 +74,12 @@ tool call
 `useDiffReview.js` own single- and multi-file review. Inline AI uses the same
 diff surface. The Editor never silently applies a proposed replacement.
 
+The native coordinator in `src-tauri/src/lib.rs` owns proposal lifecycle across
+callers/windows, while the renderer owns presentation and dirty buffers.
+Editors register path/dirty/active snapshots so Rust can delegate an apply to
+the correct in-memory owner instead of overwriting disk. Accept/reject is not
+complete until `proposal_respond` succeeds; failure leaves the diff open.
+
 ## Agent bridge
 
 `src/editor/App.vue` exposes methods used by the MCP relay:
@@ -81,9 +110,17 @@ stored in the Markdown itself. See [comments.md](comments.md).
 
 - `src/editor/App.vue`
 - `src/editor/components/workspace/EditorSurface.vue`
+- `src/editor/components/workspace/FilePreviewPage.vue`
+- `src/editor/components/workspace/PdfPreview.vue`
 - `src/editor/components/workspace/DiffView.vue`
 - `src/editor/components/workspace/BatchDiffView.vue`
 - `src/editor/components/workspace/InlineAI.vue`
 - `src/editor/codemirror/`
 - `src/editor/composables/`
 - `src/stores/files.js`, `src/stores/diff.js`, `src/stores/comments.js`
+- `src/services/fileSystem.js`, `src/services/workspaceFileOperations.js`
+
+Primary cross-cutting tests are session restore/persist, window close/app Quit,
+tab/preview management, proposal bridge/diff review, Editor settings, and the
+relevant stores. See [files.md](files.md) for the open-classification boundary
+and [testing.md](testing.md) for change routing.

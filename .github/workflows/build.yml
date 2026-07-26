@@ -26,7 +26,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -46,6 +46,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Check documentation
+        run: npm run docs:check
+
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
@@ -54,6 +57,9 @@ jobs:
 
       - name: Check Rust
         run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
   package-macos:
     name: Package macOS arm64

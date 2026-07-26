@@ -88,12 +88,43 @@ presets and agent presets with an exact binary path resolve without running
 unrelated agent/version probes; the launcher settings screen is the explicit
 detection refresh boundary.
 
-The Pi extension discovers the live registry at session start and registers
-each tool with a `mim_` prefix. `/mim-refresh` discovers tools contributed after
-the session began.
+The Pi extension discovers the lean live catalog at session start and preserves
+its `mim_` names (legacy names receive the prefix once). `/mim-refresh`
+discovers newly exposed default tools after the session began.
 
 Ended agent Activities can start a continuation using the CLI's supported
 resume strategy. Plain terminal restart always creates a fresh Activity.
+
+## Detection and resolution boundaries
+
+Opening/reloading CLI Settings is the explicit detection refresh boundary.
+Rust resolves the login-shell PATH and runs version probes once into a process
+cache; ordinary launches reuse that cache. A preset with an explicit `binary`
+or a terminal preset does not trigger unrelated agent/version probes.
+
+Availability shown by `src/stores/launchers.js` is a renderer decoration over
+the last detection result. `launcher_resolve` remains authoritative for a
+launch: it validates the preset, chooses the binary and cwd, injects agent MCP
+arguments only when absent, and returns exact command/argv/env. The renderer
+then appends run-specific resume/prompt args and host-authoritative
+`MIM_ACTIVITY_ID`/`MIMX_MCP_URL` before spawning.
+
+Agent detection and connection injection are separate. A custom binary on an
+agent preset keeps the configured `agentId`/resume strategy and MCP injection
+without requiring the binary to match a detected catalog path.
+
+Files that must agree:
+
+- `src-tauri/src/launchers.rs`: config, detection cache, resolution/injection
+- `src/stores/launchers.js`: availability projection
+- `src/services/launchers.js`, `activities.js`: invoke boundary
+- `src/stores/activityRuntime.js`: record construction and continuation argv
+- `src/shared/ui/settings/launcherFlags.js`: shell-like UI text to exact argv
+- `bin/mimx.mjs`, `bin/pi-mim-extension.ts`, `src-tauri/src/mimx.rs`: installed
+  clients
+
+Tests: native `launchers.rs`, launcher store/Settings/flags tests,
+`activityRuntime.test.js`, and `mimxCli.test.js`.
 
 ## `mimx`
 
@@ -101,7 +132,10 @@ Mim installs `mimx` on launch and makes it available inside every Mim PTY.
 It calls the same MCP registry as the agents.
 
 ```bash
+mimx help
+mimx state
 mimx tools
+mimx tools graph
 mimx call files.search '{"scope":"project","query":"needle"}'
 mimx active
 mimx tabs
@@ -113,7 +147,19 @@ mimx comments-prompt
 mimx replace-selection --stdin
 mimx set-content --file replacement.md
 mimx save
+mimx graph [search terms]
+mimx board [status]
+mimx context <graph-node-id>
 ```
+
+Bare help stays short. `mimx help <topic>` and `mimx tools <topic>` disclose
+optional commands and registry domains without loading their schemas into every
+agent session. `mimx tools --all --json` remains available for diagnostics.
+
+The graph shortcuts call the canonical native registry rather than scraping the
+visual app: `graph` prints a compact source-aware catalog or ranked search,
+`board` groups issues by status, and `context` prints the bounded agent context
+pack used by Start Work.
 
 For a shell outside Mim:
 

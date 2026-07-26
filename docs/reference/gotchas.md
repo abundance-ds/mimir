@@ -152,6 +152,17 @@ Dock/system Quit is asynchronous: native `ExitRequested` emits
 and only then invokes `app_quit_confirmed`. Never allow the first exit request
 to bypass renderer confirmation.
 
+### Interface zoom must stay a capture-phase chord
+
+`workbenchZoom` is Tauri webview zoom, not CSS scaling; it needs the
+`core:webview:allow-set-webview-zoom` capability. WorkbenchApp handles
+Cmd+Plus/Minus/0 in its capture-phase keydown before the quick-open and modal
+guards and stops propagation, so the chords work everywhere and never reach
+xterm or CodeMirror. The standalone editor window (`?view=editor`) does not
+mount WorkbenchApp and binds the same chords in `useKeyboardShortcuts`; that
+duplicate binding is required, not accidental. The chords match only the
+platform-primary modifier so Ctrl+- keeps reaching macOS terminal readline.
+
 ### Settings writes go through `settings.set`
 
 `src/stores/settings.js` deliberately persists only explicit `set(key, value)`

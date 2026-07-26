@@ -61,9 +61,13 @@ Primary files:
 ## Models and keys
 
 Settings > Models stores keys for Anthropic, OpenAI, and Google through the OS
-keychain and selects separate models for inline and ghost work. Provider SDKs
-prepare model requests; Rust owns credential resolution, upstream transport,
-host validation, cancellation, and response handling.
+keychain and selects the ghost model. The inline surface owns its model picker;
+both choices persist in the settings store. Provider SDKs prepare model
+requests; Rust owns credential resolution, upstream transport, host validation,
+cancellation, and response handling.
 
 Debug-only fallback sources are process environment variables, repository
 `.env`, and `~/.mim/keys.env`.
+
+See [ai-system.md](ai-system.md) for registry migration, model resolution,
+credential precedence, provider normalization, and the two transport paths.

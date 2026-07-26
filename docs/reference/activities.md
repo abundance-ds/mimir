@@ -1,9 +1,9 @@
 # Activities
 
 Activity is Mim's universal execution and navigation record. Terminals, CLI
-agents, app instances, and routine runs occupy the Activity pane and sidebar
-history. Files and Routines remain stable launch surfaces; Apps owns a
-collapsible launcher section rather than a synthetic core Activity row.
+agents, process Apps, and routine runs occupy the Activity pane and sidebar
+history. Files, Routines, and stable Apps are singleton Tools: they use the same
+pane without duplicating themselves in Activities.
 
 ## Record
 
@@ -18,6 +18,26 @@ The shared Rust/renderer record in `src-tauri/src/activities/model.rs` contains:
 
 Statuses are `ready`, `starting`, `working`, `needs-input`, `idle`, `done`,
 `error`, `stopped`, and `interrupted`.
+
+## Authority split
+
+`files` and `routines` are renderer-installed singleton navigation records.
+Embedded, Rust-helper, window, and action Apps are stable Tool records and are
+renderer-hosted until their plan delegates to a process. PTY-backed terminal,
+agent, Routine run, and terminal/process App records are native-authoritative.
+
+This distinction controls mutations:
+
+- `src/stores/activityRuntime.js` handles rename/archive/clear locally for a
+  non-PTY host;
+- PTY mutations invoke `activity_commands.rs`, which enforces live/retention
+  constraints and persistence;
+- core singleton records are never restored from native Activity persistence;
+- stable Tool records are omitted from active and archived Activities lists;
+- a Routine run has `kind=routine` and `host.type=pty`; the manager singleton
+  also has `kind=routine` but is renderer-only.
+
+Do not infer authority from `kind`; inspect `host.type` and the record origin.
 
 ## Lifecycle
 
@@ -43,12 +63,18 @@ bounded scrollback under `~/.mim/activities/`. Durable records restore after
 relaunch; any process that was live becomes interrupted because Mim does not
 pretend that an old PTY is still attached.
 
+The renderer installs `mim://activity-event` before calling `activity_list`.
+Events project upsert/status/exit, while the initial list closes the startup
+gap. Native persistence uses a single batching worker that keeps the latest
+save/delete per Activity path; `activity_flush` and shutdown wait for its
+acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
+
 ## Sidebar operations
 
-- The Activities header `+` opens every enabled, available launcher that can
-  create a dynamic row: CLI agent presets, Terminal, and installed Apps. Fixed
-  Files/Routines surfaces and Chat are intentionally absent. The same compact
-  control replaces the section marker in the collapsed rail.
+- New activity and the Activities header `+` expose every enabled, available
+  source that creates a dynamic row: CLI agent presets, Terminal, and
+  terminal/process Apps. Stable Tools and Chat are intentionally absent. The
+  same compact control replaces the section marker in the collapsed rail.
 - The creation menu uses source icons, separates CLI and App targets with one
   quiet rule, flips inside the viewport, and supports Arrow Up/Down, Home, End,
   Escape, Tab, and focus restoration.
@@ -79,6 +105,9 @@ Settings, confirmation dialogs, and Quick Open consume close first. Collapsing
 and restoring panes also hands focus to visible rail/header controls, so later
 shortcuts never target aria-hidden content.
 
+Cmd/Ctrl+W on a stable Tool rails the Activity pane rather than archiving or
+deleting the singleton.
+
 ## Resume
 
 Launcher detection associates Codex, Claude, and Pi with a continuation
@@ -100,6 +129,13 @@ resolve, supervisor-spawn, and total timing in
 `activityRuntime.lastLaunchMetrics` and the `mim.activity.launch` performance
 measure.
 
+Inactive optional surfaces are split at the Activity boundary: terminal/agent
+and App hosts load on first use, then `ActivityHost` retains them for instant
+subsequent switching. Native durable output remains byte-bounded and persists
+the first output, status transitions, and final exit immediately; noisy output
+snapshots are capped at four per second so a PTY read cannot repeatedly clone
+the complete retained scrollback.
+
 ## Relevant code
 
 - `src-tauri/src/activities/`
@@ -109,3 +145,8 @@ measure.
 - `src/stores/activityRuntime.js`
 - `src/mim/activities/TerminalActivity.vue`
 - `src/mim/components/WorkbenchSidebar.vue`
+
+Primary tests are colocated native tests in `activities/model.rs`,
+`scrollback.rs`, `status.rs`, and `supervisor.rs`, plus
+`src/stores/activityRuntime.test.js`, `activities.test.js`, and Activity
+surface/sidebar tests.

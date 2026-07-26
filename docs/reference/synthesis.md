@@ -7,9 +7,9 @@ while the capability layer remains broad and hackable.
 ## Core idea
 
 CLI agents are the primary intelligence. Mim gives them a terminal, a stable
-editor they can control through MCP, a recent-first file inbox, locally defined
-apps, and scheduled routines. Native model calls are concentrated in the
-editor's inline agent and ghost completion.
+editor they can control through MCP, workspace navigation and previews, locally
+defined apps, and scheduled routines. Native model calls are concentrated in
+the editor's inline agent and ghost completion.
 
 ## Product laws
 
@@ -19,8 +19,9 @@ editor's inline agent and ghost completion.
    discoverable registry.
 3. **The Editor is the review surface.** Activity navigation never replaces the
    document being reviewed.
-4. **Files is a review inbox.** Last-edited-first is the default, with path
-   filtering, bounded content search, and global quick-open.
+4. **Files is workspace navigation.** A lazy project tree, editor-derived
+   recents, per-workspace favorites, typed previews, and global quick-open share
+   one indexed workspace boundary.
 5. **Power extends through the kernel.** New capabilities usually arrive as a
    tool, app, routine, launcher preset, or Activity rather than permanent UI.
 6. **Trusted and hackable beats administered.** Configuration is local and
@@ -49,11 +50,12 @@ accumulating in daily navigation.
 - **Tool registry:** canonical names plus MCP aliases, schema validation,
   cancellation, live revision events, core UI handlers, and app-contributed
   providers.
-- **Files:** native metadata index ordered by modification time, fast path
-  filtering, bounded content search, and Cmd/Ctrl+P.
-- **Apps:** built-in Changes plus a searchable catalog of local instruments
-  manager for TOML definitions that embed UI, launch
-  terminals/processes/windows, call tools, or use Rust helpers. Safe definition
+- **Files:** native metadata index, lazy guarded tree, bounded search,
+  Project/Recent/Favorites composition, typed Editor previews, and Cmd/Ctrl+P.
+- **Apps:** built-in Today and Business graph plus a searchable catalog of
+  local TOML instruments that embed UI, launch terminals/processes/windows,
+  call tools, or use Rust helpers. Stable instruments live under Tools;
+  fresh-run sources live under New activity. Safe definition
   creation/duplication/title/Trash operations are shared with MCP; package
   management, trust, permission, and team ceremony are intentionally absent.
 - **Routines:** TOML cron schedules that resolve launcher presets and create

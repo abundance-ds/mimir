@@ -9,8 +9,10 @@ requirements; they do not replace runtime verification.
 - Editor is mounted and visibly expanded on startup.
 - The Sidebar starts expanded and can collapse to a 52px live rail without
   reordering rows or losing status.
-- Apps and Activities disclose independently in the expanded Sidebar; the live
-  rail continues to expose both lists regardless of disclosure state.
+- New activity and Activities disclose independently in the expanded Sidebar;
+  the live rail continues to expose both lists regardless of disclosure state.
+- Tools contains stable singleton surfaces, New activity contains sources that
+  create a fresh run, and Activities contains the resulting run history.
 - The project switcher shows the current folder, recent folders, and an
   explicit native folder-picker action in both Sidebar states.
 - Archived Activity rows are hidden by default. A counted disclosure reveals
@@ -65,9 +67,11 @@ requirements; they do not replace runtime verification.
 - The MCP endpoint binds to loopback and exposes `initialize`, `ping`,
   `tools/list`, and `tools/call`.
 - One canonical registry backs MCP, Tauri callers, apps, and `mimx`.
+- Default agent discovery contains only `mim_state`, `mim_reveal`, and
+  `mim_propose`; optional domains require explicit CLI discovery.
 - Tool calls validate object schemas and return structured, stable errors.
 - Core tools cover files, editor, comments, shell, web search, Activities,
-  Apps, Routines, and settings.
+  Apps, Routines, settings, and the native Business graph domains.
 - Live app providers can add, update, remove, execute, and cancel tools without
   restarting the server.
 - Mim-launched Codex, Claude, and Pi receive the endpoint automatically.
@@ -80,26 +84,33 @@ requirements; they do not replace runtime verification.
   recently modified first with deterministic tie-breaking.
 - Path filtering remains responsive and supports keyboard selection.
 - Content search is cancellable and bounded by result, file, and byte limits.
-- Enter opens the selected path in the existing Editor; a content hit opens
-  its file.
-- Recent is the default; Browse exposes directories and breadcrumbs without
-  replacing the Editor.
-- Visible controls and empty-surface actions create files and folders in the
-  current directory.
+- Project is the default and exposes a lazy expandable directory tree; Recent
+  follows Editor-open history, and Favorites persists relative paths per
+  workspace.
+- A Project query uses the complete native file index rather than only loaded
+  tree branches.
+- Single-click opens or reuses a clean preview tab; Enter/double-click pins the
+  tab. Text mounts CodeMirror, PDFs render in the Editor, and unsupported
+  resources expose metadata plus default-app/reveal actions.
+- Visible controls and empty-surface actions create files and folders inline
+  under the selected directory.
 - Right-click and Shift+F10 expose open/default-app, rename, duplicate, reveal,
-  copy-path, and confirmed system-Trash actions.
+  favorite, copy-path, and confirmed system-Trash actions.
 - Cmd/Ctrl and Shift selection support safe bulk copy and Trash.
-- Renames keep Editor paths coherent; dirty text survives user-initiated Trash.
+- Renames keep Editor and descendant favorite paths coherent; dirty text
+  survives user-initiated Trash.
 - Native operations reject paths outside the indexed workspace.
-- Refresh reflects additions, changes, and removals without changing workspace
-  or polling full scans while Files is idle.
+- Refresh rebuilds index metadata and reloads already visited tree directories
+  without changing workspace or polling while Files is idle.
 
 ## Apps
 
-- The Sidebar Apps section lists actual configured CLI agents and installed
-  apps, not a generic Apps destination.
-- The Apps-section gear opens Settings > Apps; the bottom Settings control
-  remains visible in both Sidebar states and opens ordinary preferences.
+- Stable Apps appear under Tools; terminal/process Apps and configured CLI
+  presets appear under New activity. There is no generic Apps destination.
+- Tools and New activity each support persistent manual ordering by pointer or
+  Shift+Alt+Up/Down.
+- The bottom Settings control remains visible in both Sidebar states; Settings
+  > Apps is the catalog and management surface.
 - Settings > Apps is a searchable, keyboard-operable local instrument manager
   for built-ins and valid definitions from `~/.mim/apps`.
 - It launches and reloads Apps, opens or reveals local definitions, creates a
@@ -112,14 +123,57 @@ requirements; they do not replace runtime verification.
   visible diagnostics without hiding valid apps.
 - Embedded, terminal, process, window, Rust-helper, and action launch plans
   resolve explicitly.
-- Terminal and process Apps create one real PTY Activity from Sidebar,
-  Settings, or MCP; they never leave a duplicate launch-plan row.
+- Stable Apps reopen one singleton Tool Activity and do not duplicate
+  themselves in Activities. Terminal and process Apps create one real PTY
+  Activity from Sidebar, Settings, or MCP.
 - Embedded apps can use the host SDK for app data, files, HTTP, tools, and
   opening a file in the Editor.
 - App-defined tools join the live registry and unregister with their instance.
 - Reloading an already-mounted embedded App replaces its exact tool provider
   and reloads its frame without accumulating listeners.
-- Changes is a functional built-in app.
+- Today is a durable single-priority editor that restores former Scratch text,
+  autosaves, and exposes the live value through `scratch_read`.
+- Today and Business graph are functional built-in Tools.
+- Git state remains available through Files decorations and summaries; there
+  is no separate Changes built-in.
+
+## Business graph
+
+- Knowledge and Issue Markdown remain canonical and dual-read through one
+  Rust-owned GraphStore without mandatory source rewrites.
+- Private, current-project, and optional team roots compose into projections
+  without losing scope, source path, source revision, or legacy metadata.
+- A query limited to project or team scopes never returns private nodes,
+  backlinks, counts, or context.
+- The bounded ontology accepts business and HEOR kinds, normalizes legacy
+  `org` to `company`, and diagnoses malformed sources, duplicate ids, dangling
+  relations, and unresolved identities.
+- Issue Board behavior includes status/project grouping, drag-and-drop and
+  keyboard-equivalent movement, visible columns, filters, sorting, due and
+  attention states, revision-aware updates, and Trash/undo.
+- Projects, People, Companies, Knowledge, and All expose useful Portfolio,
+  CRM, directory, timeline, list, and relationship graph projections over the
+  same nodes.
+- Project and assignee controls resolve visible graph entities; every dropdown
+  uses a styled Vue listbox/combobox with keyboard navigation and visible focus,
+  never the platform's native `select` or `datalist` UI.
+- The inspector preserves a context trail, has deliberate Markdown edit mode,
+  opens sources and deliverables in the Editor, shows related Activities, and
+  reports revision conflicts rather than overwriting them.
+- `graph.context` bounds bodies and node count, preserves provenance and
+  selected scopes, filters hidden relations, and redacts `record` or
+  `sensitive: true` content by default.
+- Start Work creates a durable agent Activity with bounded, explicitly
+  untrusted graph context and associates that Activity with the focus node.
+- Semantic commands can move/assign/complete work, link project companies and
+  contacts, record decisions, attach deliverables, create next actions, and
+  capture HEOR evidence.
+- `graph.migration_report` never writes; explicit project/assignee resolution
+  is kind-checked; compatibility facades and golden round trips preserve
+  legacy capability and unknown metadata.
+- The 5,000-node index and 600-source startup, query, search, traversal,
+  mutation, and refresh performance contracts stay within the debug budgets
+  documented in [business-graph.md](business-graph.md).
 
 ## Routines
 
@@ -170,7 +224,8 @@ requirements; they do not replace runtime verification.
 
 ## Release checks
 
-- `npm test`, `npm run build`, Rust formatting, Rust tests, and Rust check pass.
+- `npm test`, `npm run build`, `npm run docs:check`, Rust formatting, Rust
+  tests, and Rust check pass.
 - Product version is `0.1.0` in `package.json`, `src-tauri/Cargo.toml`, and
   `src-tauri/tauri.conf.json`; the package name is `mim-workbench`.
 - Documentation references only current files and current local data paths.
