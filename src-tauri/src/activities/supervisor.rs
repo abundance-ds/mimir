@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering},
-        mpsc, Arc, Mutex, MutexGuard,
+        mpsc, Arc, Condvar, Mutex, MutexGuard,
     },
     thread,
     time::{Duration, Instant},
@@ -41,6 +41,13 @@ const NO_STOP_INTENT: u8 = 0;
 const USER_STOP_INTENT: u8 = 1;
 const QUIT_INTERRUPT_INTENT: u8 = 2;
 const OUTPUT_PERSIST_INTERVAL_MS: u64 = 250;
+/// Coalescing window for PTY output events: bytes read within one frame are
+/// published as a single `ActivityEvent::Output`. The first bytes after a
+/// quiet period flush immediately, so interactive echo never waits a frame.
+const OUTPUT_FLUSH_FRAME: Duration = Duration::from_millis(16);
+/// Pending-output cap that forces an immediate flush mid-frame and blocks the
+/// PTY reader until drained, preserving real backpressure toward the child.
+const OUTPUT_FLUSH_BUFFER_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ActivitySupervisorConfig {
@@ -256,6 +263,67 @@ struct ManagedActivity {
     last_output_persist_ms: AtomicU64,
     tracker: Mutex<Option<AgentStatusTracker>>,
     runtime_started: Instant,
+    /// Live only while a session runs; completion takes and joins it so all
+    /// buffered output is published before the exit event.
+    output_flush: Mutex<Option<OutputFlushHandle>>,
+}
+
+/// Accumulates PTY reads between frame flushes. The reader thread appends and
+/// blocks above `OUTPUT_FLUSH_BUFFER_BYTES` so the PTY keeps exerting real
+/// backpressure on the child; the flush worker drains it at most once per
+/// `OUTPUT_FLUSH_FRAME` into a single coalesced Output event.
+struct OutputCoalescer {
+    state: Mutex<CoalescerState>,
+    wakeup: Condvar,
+}
+
+#[derive(Default)]
+struct CoalescerState {
+    pending: Vec<u8>,
+    closed: bool,
+}
+
+impl OutputCoalescer {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(CoalescerState::default()),
+            wakeup: Condvar::new(),
+        })
+    }
+
+    /// Reader side: append bytes and wake the flush worker. Blocks while the
+    /// buffer is over the cap; the worker flushes immediately and notifies.
+    fn push(&self, bytes: &[u8]) {
+        let mut state = lock(&self.state);
+        state.pending.extend_from_slice(bytes);
+        self.wakeup.notify_all();
+        let _state = self
+            .wakeup
+            .wait_while(state, |state| {
+                state.pending.len() >= OUTPUT_FLUSH_BUFFER_BYTES && !state.closed
+            })
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+
+    fn close(&self) {
+        lock(&self.state).closed = true;
+        self.wakeup.notify_all();
+    }
+}
+
+struct OutputFlushHandle {
+    coalescer: Arc<OutputCoalescer>,
+    worker: thread::JoinHandle<()>,
+}
+
+impl OutputFlushHandle {
+    /// Close the coalescer and wait for the worker's final flush. Returns only
+    /// after every buffered byte has been appended to scrollback and published,
+    /// so exit events can never overtake output.
+    fn finish(self) {
+        self.coalescer.close();
+        let _ = self.worker.join();
+    }
 }
 
 struct DispatchState {
@@ -457,6 +525,7 @@ impl ActivitySupervisor {
             last_output_persist_ms: AtomicU64::new(0),
             tracker: Mutex::new(tracker),
             runtime_started: Instant::now(),
+            output_flush: Mutex::new(None),
         });
 
         {
@@ -477,12 +546,23 @@ impl ActivitySupervisor {
             )
         });
 
+        let coalescer = OutputCoalescer::new();
+        let flush_worker = {
+            let inner = self.inner.clone();
+            let activity = activity.clone();
+            let coalescer = coalescer.clone();
+            thread::spawn(move || output_flush_loop(inner, activity, coalescer))
+        };
+        *lock(&activity.output_flush) = Some(OutputFlushHandle {
+            coalescer: coalescer.clone(),
+            worker: flush_worker,
+        });
+
         let (completion_tx, completion_rx) = mpsc::channel();
-        let activity_for_reader = activity.clone();
-        let inner_for_reader = self.inner.clone();
+        let read_chunk_bytes = self.inner.config.read_chunk_bytes;
         let reader_completion = completion_tx.clone();
         thread::spawn(move || {
-            let result = reader_loop(reader, inner_for_reader, activity_for_reader);
+            let result = reader_loop(reader, read_chunk_bytes, coalescer);
             let _ = reader_completion.send(CompletionPart::Reader(result));
         });
 
@@ -915,6 +995,7 @@ impl ActivitySupervisor {
                 last_output_persist_ms: AtomicU64::new(0),
                 tracker: Mutex::new(None),
                 runtime_started: Instant::now(),
+                output_flush: Mutex::new(None),
             });
             let activity_id = lock(&activity.record).id.clone();
             lock(&self.inner.activities).insert(activity_id, activity.clone());
@@ -932,13 +1013,16 @@ impl SupervisorInner {
         publish_to_sinks(&sinks, &event);
     }
 
-    fn record_output(&self, activity: &Arc<ManagedActivity>, bytes: &[u8]) {
+    /// Record one coalesced batch of PTY output. Bytes within a batch keep
+    /// their read order, and the whole batch takes a single scrollback
+    /// sequence, so attach snapshots and live events never split a batch.
+    fn record_output(&self, activity: &Arc<ManagedActivity>, bytes: Vec<u8>) {
         let output_elapsed_ms = elapsed_ms(activity.runtime_started);
         let status_change = {
             let mut tracker = lock(&activity.tracker);
             tracker
                 .as_mut()
-                .and_then(|tracker| tracker.feed(bytes, output_elapsed_ms))
+                .and_then(|tracker| tracker.feed(&bytes, output_elapsed_ms))
         };
         let status_changed = status_change.is_some();
 
@@ -950,7 +1034,7 @@ impl SupervisorInner {
             let dispatch = lock(&self.dispatch);
             let mut record = lock(&activity.record);
             let mut scrollback = lock(&activity.scrollback);
-            let sequence = scrollback.append(bytes);
+            let sequence = scrollback.append(&bytes);
             let retained_bytes = scrollback.retained_bytes() as u64;
             if let Some(session) = record.session.as_mut() {
                 session.last_output_sequence = sequence;
@@ -969,7 +1053,7 @@ impl SupervisorInner {
             events.push(ActivityEvent::Output {
                 activity_id: record.id.clone(),
                 sequence,
-                bytes: bytes.to_vec(),
+                bytes,
             });
             if let Some(change) = status_change {
                 events.push(ActivityEvent::Status {
@@ -1025,6 +1109,13 @@ impl SupervisorInner {
         child_result: Result<ExitStatus, String>,
         reader_result: Result<(), String>,
     ) {
+        // The reader has finished, so no new bytes can arrive. Joining the
+        // flush worker publishes every buffered Output event (and feeds the
+        // status tracker) before the exit below is classified and announced.
+        let output_flush = lock(&activity.output_flush).take();
+        if let Some(output_flush) = output_flush {
+            output_flush.finish();
+        }
         let exit = classify_exit(
             activity.stop_intent.load(Ordering::Acquire),
             child_result,
@@ -1261,16 +1352,62 @@ fn command_loop(
 
 fn reader_loop(
     mut reader: Box<dyn Read + Send>,
-    inner: Arc<SupervisorInner>,
-    activity: Arc<ManagedActivity>,
+    read_chunk_bytes: usize,
+    coalescer: Arc<OutputCoalescer>,
 ) -> Result<(), String> {
-    let mut buffer = vec![0_u8; inner.config.read_chunk_bytes.max(1)];
+    let mut buffer = vec![0_u8; read_chunk_bytes.max(1)];
     loop {
         match reader.read(&mut buffer) {
             Ok(0) => return Ok(()),
-            Ok(read) => inner.record_output(&activity, &buffer[..read]),
+            Ok(read) => coalescer.push(&buffer[..read]),
             Err(error) if is_pty_eof(&error) => return Ok(()),
             Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
+/// Drains coalesced PTY output at most once per `OUTPUT_FLUSH_FRAME`. The
+/// first bytes after a quiet period flush immediately (the frame deadline has
+/// already passed), so keystroke echo stays instant; sustained floods collapse
+/// into one Output event per frame. A full buffer or a close flushes at once.
+fn output_flush_loop(
+    inner: Arc<SupervisorInner>,
+    activity: Arc<ManagedActivity>,
+    coalescer: Arc<OutputCoalescer>,
+) {
+    let mut next_flush_at = Instant::now();
+    loop {
+        let (bytes, closed) = {
+            let state = lock(&coalescer.state);
+            let mut state = coalescer
+                .wakeup
+                .wait_while(state, |state| state.pending.is_empty() && !state.closed)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            while !state.closed && state.pending.len() < OUTPUT_FLUSH_BUFFER_BYTES {
+                let Some(remaining) = next_flush_at.checked_duration_since(Instant::now()) else {
+                    break;
+                };
+                let (next_state, timeout) = coalescer
+                    .wakeup
+                    .wait_timeout(state, remaining)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state = next_state;
+                if timeout.timed_out() {
+                    break;
+                }
+            }
+            (std::mem::take(&mut state.pending), state.closed)
+        };
+        // Wake a reader blocked on the buffer cap now that it is drained.
+        coalescer.wakeup.notify_all();
+        if bytes.is_empty() {
+            debug_assert!(closed);
+            return;
+        }
+        inner.record_output(&activity, bytes);
+        next_flush_at = Instant::now() + OUTPUT_FLUSH_FRAME;
+        if closed {
+            return;
         }
     }
 }
@@ -1554,6 +1691,105 @@ mod tests {
             &last,
             OUTPUT_PERSIST_INTERVAL_MS * 2
         ));
+    }
+
+    #[test]
+    fn coalescer_applies_backpressure_and_preserves_bytes_across_drain() {
+        let coalescer = OutputCoalescer::new();
+        let pusher_coalescer = coalescer.clone();
+        let pusher = thread::spawn(move || {
+            pusher_coalescer.push(&vec![b'a'; OUTPUT_FLUSH_BUFFER_BYTES]);
+            // Reached only after the capped buffer is drained below.
+            pusher_coalescer.push(b"tail");
+            pusher_coalescer.close();
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while lock(&coalescer.state).pending.len() < OUTPUT_FLUSH_BUFFER_BYTES {
+            assert!(
+                Instant::now() < deadline,
+                "capped push never became visible"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        let drained = std::mem::take(&mut lock(&coalescer.state).pending);
+        coalescer.wakeup.notify_all();
+        pusher.join().unwrap();
+
+        assert_eq!(drained, vec![b'a'; OUTPUT_FLUSH_BUFFER_BYTES]);
+        let state = lock(&coalescer.state);
+        assert_eq!(state.pending, b"tail");
+        assert!(state.closed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rapid_output_coalesces_into_fewer_events_and_flushes_before_exit() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let (event_tx, event_rx) = mpsc::channel();
+        supervisor.subscribe(Arc::new(event_tx));
+
+        let lines = 400_usize;
+        let record = durable_record(
+            "burst",
+            "/bin/sh",
+            vec![
+                "-c".into(),
+                format!(
+                    "i=0; while [ $i -lt {lines} ]; do printf 'chunk-%04d\\n' \"$i\"; i=$((i+1)); done"
+                ),
+            ],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(record, 80, 24))
+            .unwrap();
+        let snapshot = wait_for_end(&supervisor, "burst");
+        assert_eq!(snapshot.record.status, ActivityStatus::Done);
+
+        let mut output_events = 0_usize;
+        let mut streamed = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let exit_record = loop {
+            assert!(Instant::now() < deadline, "exit event never arrived");
+            match event_rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(ActivityEvent::Output {
+                    activity_id, bytes, ..
+                }) if activity_id == "burst" => {
+                    output_events += 1;
+                    streamed.extend_from_slice(&bytes);
+                }
+                Ok(ActivityEvent::Exit {
+                    activity_id,
+                    record,
+                    ..
+                }) if activity_id == "burst" => break record,
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => panic!("event channel closed"),
+            }
+        };
+        assert_eq!(exit_record.status, ActivityStatus::Done);
+
+        // Every byte precedes the exit event: the streamed Output events alone
+        // rebuild the complete scrollback, and nothing trails the exit.
+        assert_eq!(streamed, replay_bytes(&snapshot));
+        assert!(String::from_utf8_lossy(&streamed).contains("chunk-0399"));
+        while let Ok(event) = event_rx.recv_timeout(Duration::from_millis(200)) {
+            assert!(
+                !matches!(
+                    event,
+                    ActivityEvent::Output { activity_id, .. } if activity_id == "burst"
+                ),
+                "output event arrived after exit"
+            );
+        }
+
+        assert!(output_events >= 1);
+        assert!(
+            output_events < lines / 4,
+            "expected frame coalescing to batch {lines} rapid writes, saw {output_events} output events"
+        );
     }
 
     #[cfg(unix)]
