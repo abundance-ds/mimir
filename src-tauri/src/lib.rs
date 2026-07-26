@@ -33,7 +33,7 @@ mod shell_exec;
 pub mod tool_bridge;
 pub mod tool_registry;
 mod tool_runtime;
-mod tool_server;
+pub mod tool_server;
 mod workspace_files;
 
 #[cfg(target_os = "macos")]
@@ -556,10 +556,7 @@ fn push_proposals(
 }
 
 #[tauri::command]
-fn get_proposals_for_path(
-    state: tauri::State<ProposalState>,
-    path: String,
-) -> Vec<SharedProposal> {
+fn get_proposals_for_path(state: tauri::State<ProposalState>, path: String) -> Vec<SharedProposal> {
     let store = state.0.lock().unwrap_or_else(|e| e.into_inner());
     pending_proposals(&store)
         .into_iter()

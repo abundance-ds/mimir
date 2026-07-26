@@ -381,7 +381,10 @@ async fn handle_mcp(
 
 const DEFAULT_PORT: u16 = 17532;
 
-async fn start_server(
+/// Boot the loopback tool server. Public so integration tests (see
+/// `tests/mimx_contract.rs`) can run the real transport against an
+/// ephemeral port; production code goes through [`tool_server_start`].
+pub async fn start_server(
     registry: ToolRegistry,
     port: u16,
     token: String,
