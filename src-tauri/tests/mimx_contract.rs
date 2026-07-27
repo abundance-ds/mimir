@@ -131,6 +131,18 @@ async fn run_mimx(mcp_url: &str, args: &[&str]) -> Option<Output> {
     }
 }
 
+/// Reserve an ephemeral port and immediately release it, yielding a loopback
+/// port with (almost certainly) no listener behind it.
+fn unused_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+    let port = listener
+        .local_addr()
+        .expect("listener has a local addr")
+        .port();
+    drop(listener);
+    port
+}
+
 fn stdout_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -405,6 +417,42 @@ async fn legacy_http_api_enforces_bearer_auth_and_maps_errors() {
         .expect("wrong-token request");
     assert_eq!(wrong.status(), reqwest::StatusCode::UNAUTHORIZED);
 
+    // Auth is decided before the body is parsed: an unauthenticated call is
+    // 401 even when the body is malformed or absent.
+    let unauthed_bad_body = client
+        .post(server.api_url("/api/tools/call"))
+        .header("content-type", "application/json")
+        .body("{not json")
+        .send()
+        .await
+        .expect("unauthenticated malformed-body request");
+    assert_eq!(
+        unauthed_bad_body.status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    let unauthed_no_body = client
+        .post(server.api_url("/api/tools/call"))
+        .send()
+        .await
+        .expect("unauthenticated empty-body request");
+    assert_eq!(unauthed_no_body.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // With a valid token, a malformed body is the caller's fault: 400.
+    let authed_bad_body = client
+        .post(server.api_url("/api/tools/call"))
+        .bearer_auth(TEST_TOKEN)
+        .header("content-type", "application/json")
+        .body("{not json")
+        .send()
+        .await
+        .expect("authenticated malformed-body request");
+    assert_eq!(authed_bad_body.status(), reqwest::StatusCode::BAD_REQUEST);
+    let authed_bad_body_json: Value = authed_bad_body
+        .json()
+        .await
+        .expect("malformed-body response is JSON");
+    assert_eq!(authed_bad_body_json["error"], "invalid_request");
+
     // The authenticated catalog exposes alias + canonical name.
     let schema: Value = client
         .get(server.api_url("/api/tools"))
@@ -451,6 +499,237 @@ async fn legacy_http_api_enforces_bearer_auth_and_maps_errors() {
     assert_eq!(missing.status(), reqwest::StatusCode::NOT_FOUND);
     let missing_body: Value = missing.json().await.expect("missing tool response");
     assert_eq!(missing_body["error"], "not_found");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn mimx_cli_fails_cleanly_when_the_server_is_unreachable() {
+    // No server: MIMX_MCP_URL points at a port nothing listens on.
+    let url = format!("http://127.0.0.1:{}/mcp", unused_port());
+    let Some(output) = run_mimx(&url, &["tools"]).await else {
+        eprintln!("skipping mimx contract test: `node` is not on PATH");
+        return;
+    };
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "an unreachable server should exit 1, not crash or hang",
+    );
+    assert_eq!(
+        stdout_of(&output),
+        "",
+        "connection failures must not pollute stdout",
+    );
+    let stderr = stderr_of(&output);
+    assert!(
+        stderr.contains(&url),
+        "stderr should name the URL the CLI tried, got: {stderr}",
+    );
+    assert!(
+        stderr.contains("Mim workbench") && stderr.contains("MIMX_MCP_URL"),
+        "stderr should hint that the workbench must be running and how the URL \
+         is configured, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("    at "),
+        "stderr must stay a human-readable message, not a stack trace: {stderr}",
+    );
+}
+
+#[tokio::test]
+async fn mimx_cli_fails_fast_when_pointed_at_the_bearer_guarded_api() {
+    // The MCP endpoint is deliberately unauthenticated and mimx never sends a
+    // bearer token, so the closest thing to a token failure a user can hit is
+    // pointing MIMX_MCP_URL at the bearer-guarded legacy API. That
+    // misconfiguration must fail fast with a nonzero exit and the HTTP status
+    // on stderr, not hang or dump JSON internals. Auth is decided before body
+    // parsing, so the missing token surfaces as a 401.
+    let server = TestServer::boot().await;
+    let Some(output) = run_mimx(&server.api_url("/api/tools/call"), &["state"]).await else {
+        eprintln!("skipping mimx contract test: `node` is not on PATH");
+        server.shutdown().await;
+        return;
+    };
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a rejected request should exit 1; stderr: {}",
+        stderr_of(&output),
+    );
+    assert_eq!(
+        stdout_of(&output),
+        "",
+        "rejected requests must not print results"
+    );
+    assert!(
+        stderr_of(&output).contains("mimx server returned HTTP 401"),
+        "stderr should name the HTTP status, got: {}",
+        stderr_of(&output),
+    );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn malformed_tool_arguments_fail_the_cli_without_hurting_the_server() {
+    let server = TestServer::boot().await;
+    let url = server.mcp_url();
+
+    // Wrong argument type: schema validation happens server-side and comes
+    // back as an isError tool result the CLI maps to exit 1 plus stderr.
+    let Some(wrong_type) = run_mimx(&url, &["call", "test_echo", r#"{"text":42}"#]).await else {
+        eprintln!("skipping mimx contract test: `node` is not on PATH");
+        server.shutdown().await;
+        return;
+    };
+    assert_eq!(
+        wrong_type.status.code(),
+        Some(1),
+        "wrong-typed input should fail",
+    );
+    assert!(
+        stderr_of(&wrong_type).contains("invalid input for 'test.echo'"),
+        "stderr should carry the canonical-name validation message, got: {}",
+        stderr_of(&wrong_type),
+    );
+    assert_eq!(
+        stdout_of(&wrong_type),
+        "",
+        "failed calls must not print results"
+    );
+
+    // Unparseable JSON never reaches the wire: the CLI rejects it itself.
+    let bad_json = run_mimx(&url, &["call", "test_echo", "{not json"])
+        .await
+        .unwrap();
+    assert_eq!(bad_json.status.code(), Some(1), "bad JSON should fail");
+    assert!(
+        stderr_of(&bad_json).contains("Invalid tool input JSON"),
+        "stderr should explain the parse failure, got: {}",
+        stderr_of(&bad_json),
+    );
+
+    // Raw JSON-RPC: tools/call without a tool name is a -32602 protocol error
+    // riding HTTP 200 per MCP — never a 500.
+    let client = reqwest::Client::new();
+    let nameless = client
+        .post(&url)
+        .json(&json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {} }))
+        .send()
+        .await
+        .expect("nameless tools/call request");
+    assert_eq!(nameless.status(), reqwest::StatusCode::OK);
+    let nameless_body: Value = nameless.json().await.expect("nameless tools/call response");
+    assert_eq!(nameless_body["error"]["code"], -32602);
+    assert_eq!(nameless_body["error"]["message"], "Missing tool name");
+
+    // The server survives the abuse: a follow-up call still succeeds.
+    let alive: Value = client
+        .post(&url)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": { "name": "test_echo", "arguments": { "text": "still-alive" } }
+        }))
+        .send()
+        .await
+        .expect("follow-up request")
+        .json()
+        .await
+        .expect("follow-up response");
+    assert_eq!(alive["result"]["structuredContent"]["echo"], "still-alive");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn unknown_tool_calls_name_the_tool_and_stay_inside_the_protocol() {
+    let server = TestServer::boot().await;
+    let url = server.mcp_url();
+
+    // CLI: exit 1 with the offending tool name in the message.
+    let Some(missing) = run_mimx(&url, &["call", "graph_qery", "{}"]).await else {
+        eprintln!("skipping mimx contract test: `node` is not on PATH");
+        server.shutdown().await;
+        return;
+    };
+    assert_eq!(missing.status.code(), Some(1), "unknown tool should fail");
+    assert!(
+        stderr_of(&missing).contains("tool 'graph_qery' is not registered"),
+        "stderr should name the missing tool, got: {}",
+        stderr_of(&missing),
+    );
+    assert_eq!(
+        stdout_of(&missing),
+        "",
+        "failed calls must not print results"
+    );
+
+    // Raw shape: the server keeps this an isError tool *result* carrying
+    // `not_found` on HTTP 200 — no JSON-RPC protocol error, no 500.
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": { "name": "graph_qery", "arguments": {} }
+        }))
+        .send()
+        .await
+        .expect("unknown tool request");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = response.json().await.expect("unknown tool response");
+    assert_eq!(body["result"]["isError"], true, "body: {body}");
+    assert_eq!(body["result"]["structuredContent"]["error"], "not_found");
+    assert!(body.get("error").is_none(), "body: {body}");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn mimx_cli_loop_discovers_the_lean_alias_and_round_trips_a_call() {
+    let server = TestServer::boot().await;
+    let url = server.mcp_url();
+
+    // Discover: the machine-readable lean catalog projects editor.state under
+    // its alias, and nothing else from the synthetic registry leaks in.
+    let Some(listing) = run_mimx(&url, &["tools", "--json"]).await else {
+        eprintln!("skipping mimx contract test: `node` is not on PATH");
+        server.shutdown().await;
+        return;
+    };
+    assert_success(&listing, "mimx tools --json");
+    let catalog: Value =
+        serde_json::from_str(stdout_of(&listing).trim()).expect("mimx tools --json prints JSON");
+    let tools = catalog.as_array().expect("catalog is an array");
+    assert_eq!(
+        tools.len(),
+        1,
+        "lean projection should be exactly the core tools: {catalog}",
+    );
+    let alias = tools[0]["name"].as_str().expect("tool has a name");
+    assert_eq!(alias, "mim_state");
+    assert_eq!(
+        tools[0]["inputSchema"]["properties"]["include_content"]["type"], "boolean",
+        "the canonical tool's schema should ride along with the alias: {catalog}",
+    );
+
+    // Call the discovered alias: the server resolves mim_state back to
+    // editor.state and the structured result round-trips as CLI JSON.
+    let call = run_mimx(&url, &["call", alias, r#"{"include_content":true}"#])
+        .await
+        .unwrap();
+    assert_success(&call, "mimx call mim_state");
+    let payload: Value =
+        serde_json::from_str(stdout_of(&call).trim()).expect("mimx call prints JSON");
+    assert_eq!(payload["path"], "/workspace/README.md");
+    assert_eq!(
+        payload["content"], "# Contract",
+        "arguments must reach the canonical handler through the alias: {payload}",
+    );
 
     server.shutdown().await;
 }

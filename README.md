@@ -42,25 +42,26 @@ state, and either content pane can expand into focus and restore the split.
 ## Business graph
 
 The built-in Business graph combines the former Knowledge Graph and Issue
-Board into one source-aware operating surface. Issues are typed graph nodes;
-Board, Portfolio, CRM, Timeline, directory, and relationship views are
-purpose-built projections over the same private, project, and team knowledge.
-Markdown stays canonical while a rebuildable Rust GraphStore provides fast
-search, traversal, validation, conflict-safe writes, and agent context.
+Board into one source-aware operating surface — a dispatch desk where agents
+file work around the clock and the human keeps overview, contributes,
+monitors, and corrects. Issues are typed graph nodes; the Now stream, Work
+board, Portfolio ledger, Timeline, and the All directory are purpose-built
+projections over the same private, project, and team knowledge. Markdown
+stays canonical while a rebuildable Rust GraphStore provides fast search,
+traversal, validation, conflict-safe writes, and agent context.
 
-The interface follows a fast **Scan → Peek → Focus** rhythm: projections stay
-calm and scannable, Peek is read-first, and Focus provides one spacious scroll
-for syntax-aware Markdown, business properties, and ontology-bounded
-connections. Custom Vue listboxes, calendars, dialogs, and relationship
-sentences replace browser-native form and graph-database UI.
-
-This is an internal operational instrument, not a presentation dashboard:
-Kanban geometry is fixed, important properties and controls remain visible,
-Portfolio is a data table, and hover never reveals content or moves a surface.
+The interface follows a fast **Scan → Peek → Focus** rhythm behind a single
+dispatch bar: type to look anything up, Enter to dispatch a line to a
+background agent, `!` or `work <target>` to delegate with a visible context
+pack, `/` for deterministic commands. AI work is trusted — it lands in Now as
+filed events with provenance, never behind accept/reject gates. Board rows
+show full titles with visible controls for priority, status, and due date;
+every active filter is named and one-click dismissible; hover never reveals
+content or moves a surface.
 
 Project sources remain in the workspace, private sources stay local under
 `~/.mim/graph/private/`, and an optional shared root is configured in Settings
-> Graph. **Start Work** launches a durable CLI-agent Activity with bounded
+> Graph. Delegated work launches durable CLI-agent Activities with bounded
 graph context; decisions, evidence, deliverables, and next actions remain
 linked to the project instead of disappearing into chat history.
 

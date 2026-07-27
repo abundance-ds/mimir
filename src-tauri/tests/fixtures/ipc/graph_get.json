@@ -1,0 +1,38 @@
+{
+  "id": "issue-sidebar-ordering",
+  "kind": "issue",
+  "title": "Sidebar rows lose recency ordering",
+  "summary": "Archived rows jump to the top after respawn.",
+  "body": "Repro:\n\n1. Archive a durable agent.\n2. Respawn it from the sidebar.\n",
+  "tags": [
+    "mim",
+    "ui"
+  ],
+  "relations": [
+    {
+      "relation": "part_of",
+      "target": "project-mim",
+      "legacy": false
+    },
+    {
+      "relation": "assigned_to",
+      "target": "person-paul",
+      "legacy": false
+    }
+  ],
+  "properties": {
+    "dueDate": "2026-08-01",
+    "priority": "high",
+    "rank": 3,
+    "status": "in-progress"
+  },
+  "createdAt": "2026-07-19T12:00:00Z",
+  "updatedAt": "2026-07-26T09:15:00Z",
+  "provenance": {
+    "scopeId": "project:mim",
+    "scopeKind": "project",
+    "sourcePath": "/Users/me/work/mim/.graph/issues/sidebar-ordering.md",
+    "sourceRevision": "4f6a2c88",
+    "sourceFormat": "issue"
+  }
+}

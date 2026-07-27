@@ -202,9 +202,7 @@ impl GraphNode {
                             if let Some(path) = item.as_str() {
                                 Some(path.to_string())
                             } else {
-                                item.get("path")
-                                    .and_then(Value::as_str)
-                                    .map(str::to_string)
+                                item.get("path").and_then(Value::as_str).map(str::to_string)
                             }
                         })
                         .collect()

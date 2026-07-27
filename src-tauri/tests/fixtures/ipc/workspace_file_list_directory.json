@@ -1,0 +1,22 @@
+[
+  {
+    "path": "/w/docs",
+    "relativePath": "docs",
+    "name": "docs",
+    "isDirectory": true,
+    "mtime": 1753510000000,
+    "size": 0,
+    "textReadable": false,
+    "openBehavior": "directory"
+  },
+  {
+    "path": "/w/new.md",
+    "relativePath": "new.md",
+    "name": "new.md",
+    "isDirectory": false,
+    "mtime": 1753600000000,
+    "size": 532,
+    "textReadable": true,
+    "openBehavior": "text"
+  }
+]

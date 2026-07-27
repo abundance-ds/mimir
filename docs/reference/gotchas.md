@@ -66,10 +66,12 @@ spawn/respawn — do not reintroduce a generous hardcoded default.
 ### Terminal font readiness and pixel snap are load-bearing
 
 Terminal initialization waits for the bundled IBM Plex Mono `400` and `600`
-faces before xterm measures cells. Do not open xterm against fallback metrics.
-`scheduleFit` then snaps the rendered Canvas screen onto the device pixel grid;
-without it fractional pane-split offsets soften every glyph. The transform
-must be cleared before measuring so the offset never compounds. Likewise
+faces in upright and italic styles before xterm measures cells. Do not open
+xterm against fallback metrics. `scheduleFit` then snaps the rendered WebGL
+screen onto the device pixel grid; without it fractional pane-split offsets
+soften every glyph. The transform must be cleared before measuring so the
+offset never compounds. WebGL initialization and context loss deliberately
+fall back to xterm's DOM renderer rather than ending the session. Likewise
 `allowProposedApi: true` stays as long as the Unicode 11 addon loads — without
 it xterm throws and the surface shows an attach error instead of a terminal.
 

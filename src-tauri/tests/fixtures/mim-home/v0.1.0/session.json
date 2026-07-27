@@ -1,0 +1,23 @@
+{
+  "activeFileIndex": 1,
+  "openFiles": [
+    {
+      "path": "/Users/tester/projects/acme/notes/roadmap.md"
+    },
+    {
+      "content": "# Meeting\n\nUnsaved meeting notes line.\n",
+      "dirty": true,
+      "path": "/Users/tester/projects/acme/notes/meeting.md"
+    },
+    {
+      "content": "Scratch draft that was never saved.",
+      "draftId": "draft-0001",
+      "path": null
+    }
+  ],
+  "recentFiles": [
+    "/Users/tester/projects/acme/notes/roadmap.md",
+    "/Users/tester/projects/acme/README.md"
+  ],
+  "zoomLevel": 1.1
+}

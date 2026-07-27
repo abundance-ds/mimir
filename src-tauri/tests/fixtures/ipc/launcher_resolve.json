@@ -1,0 +1,15 @@
+{
+  "presetId": "review",
+  "title": "Review",
+  "kind": "agent",
+  "agentId": "codex",
+  "resumeStrategy": "codex",
+  "command": "/opt/homebrew/bin/codex",
+  "args": [
+    "review"
+  ],
+  "cwd": "/Users/me/work/mim",
+  "env": {
+    "CODEX_HOME": "/Users/me/.codex"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "matches": [
+    {
+      "path": "/w/src/old.rs",
+      "name": "old.rs",
+      "relativePath": "src/old.rs",
+      "line": 4,
+      "column": 2,
+      "excerpt": "let needle = haystack.find(pattern);"
+    }
+  ],
+  "scannedFiles": 2,
+  "skippedFiles": 0,
+  "bytesScanned": 2580,
+  "cancelled": false,
+  "truncated": false
+}

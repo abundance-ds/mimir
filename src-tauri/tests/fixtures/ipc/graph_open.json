@@ -1,0 +1,17 @@
+{
+  "scopes": [
+    {
+      "id": "private",
+      "kind": "private",
+      "root": "/Users/me/.mim/graph"
+    },
+    {
+      "id": "project:mim",
+      "kind": "project",
+      "root": "/Users/me/work/mim/.graph"
+    }
+  ],
+  "nodeCount": 42,
+  "diagnosticCount": 1,
+  "graphRevision": 17
+}

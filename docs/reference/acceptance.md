@@ -56,6 +56,10 @@ requirements; they do not replace runtime verification.
   scrollback and final state across relaunch.
 - Live output streams once, replay is ordered, resize reaches the PTY, and stop
   is idempotent.
+- Terminal and agent surfaces use xterm 6 WebGL when available and remain
+  interactive through the DOM fallback after initialization or context loss.
+- IBM Plex Mono `400` and `600`, upright and italic, are ready before cell
+  measurement; text remains sharp at 100%, 125%, and 150% workbench zoom.
 - Durable ended Activities can be renamed, archived/restored, and cleared.
 - Cmd/Ctrl+W on a focused Sidebar Activity archives that exact durable row,
   including failed rows that are not currently selected; live rows stop before

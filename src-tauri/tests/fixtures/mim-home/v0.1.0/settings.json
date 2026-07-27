@@ -1,0 +1,35 @@
+{
+  "apps": {
+    "scratch": {
+      "expanded": true
+    }
+  },
+  "editor": {
+    "editorAutoSave": true,
+    "editorFontFamily": "mono",
+    "editorFontSize": 16,
+    "editorLineNumbers": false,
+    "editorTheme": "parchment",
+    "editorWordWrap": true,
+    "mimTerminalFontSize": 12,
+    "mimWorkspaceFolder": "/Users/tester/projects/acme",
+    "recentWorkspaceFolders": [
+      "/Users/tester/projects/acme"
+    ],
+    "workbenchLayout": {
+      "activity": {
+        "state": "expanded",
+        "width": 560
+      },
+      "editor": {
+        "state": "expanded",
+        "width": 520
+      },
+      "sidebar": {
+        "state": "expanded",
+        "width": 240
+      }
+    },
+    "workbenchZoom": 110
+  }
+}

@@ -97,6 +97,10 @@ currently a CI check.
   whenever `generate_handler!` changes.
 - Workbench tests commonly stub heavy Activity surfaces. A passing shell test
   does not prove xterm listener/resize cleanup; use `TerminalActivity.test.js`.
+- Terminal component tests cover WebGL initialization failure, context loss,
+  teardown, and device-grid snap math. Release smoke still checks the native
+  WebGL surface at 100%, 125%, and 150% zoom because happy-dom cannot validate
+  GPU rasterization or font sharpness.
 - Store tests use a fresh Pinia but module-level singleton counters/listeners
   still need explicit cleanup.
 - Async component mounts require an unmounted/disposed guard after each await
@@ -115,6 +119,26 @@ currently a CI check.
   benchmark claims.
 - `GraphSelect.test.js` encodes the no-native-dropdown contract and keyboard
   behavior shared by Board, inspector, and create flows.
+
+### Golden IPC fixtures
+
+`scripts/check-tauri-commands.mjs` only synchronizes command *names*; response
+*shapes* are pinned by golden fixtures under `src-tauri/tests/fixtures/ipc/`
+(one `<command>.json` per command). `src-tauri/src/ipc_fixtures.rs` constructs
+a representative response from the real Rust types for each fixture'd command,
+and its `ipc_fixtures_match_serialization` test fails when serde output stops
+matching the committed JSON (or when a stray fixture file has no builder).
+After an intentional shape change, regenerate with
+`UPDATE_IPC_FIXTURES=1 cargo test --manifest-path src-tauri/Cargo.toml ipc_fixtures`
+and rerun without the variable to verify.
+
+Renderer tests load the same files through `src/test/ipcFixtures.js`
+(`loadIpcFixture(name)`, or `ipcFixture(name, overrides)` for a shallow-merged
+variant) instead of hand-writing Rust payload shapes in `invoke`/service
+mocks, so a rename on either side fails a test instead of drifting silently.
+When adding or reshaping a high-traffic command with a stable struct response,
+add a fixture and consume it from the renderer tests; commands returning unit,
+streams, or trivial scalars do not need one.
 
 ## Release behavior
 

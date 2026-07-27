@@ -38,7 +38,7 @@ pub enum GraphMutationError {
     Exists(String),
     #[error("graph scope is not mounted: {0}")]
     ScopeNotFound(String),
-    #[error("graph source changed for {id}; expected {expected}, found {actual}")]
+    #[error("graph source changed for {id}; expected {expected}, found {actual}; reload the node and retry with its current source revision")]
     Conflict {
         id: String,
         expected: String,
@@ -225,36 +225,48 @@ impl GraphStore {
     where
         F: FnOnce(&Path) -> Result<(), String>,
     {
+        let GraphNodeDelete {
+            id,
+            expected_revision,
+        } = request;
         let node = self
             .nodes
-            .get(&request.id)
+            .get(&id)
             .cloned()
-            .ok_or_else(|| GraphMutationError::NotFound(request.id.clone()))?;
+            .ok_or_else(|| GraphMutationError::NotFound(id.clone()))?;
         let source_path = PathBuf::from(&node.provenance.source_path);
-        if let Some(expected) = request.expected_revision {
-            let current =
-                fs::read_to_string(&source_path).map_err(|error| GraphMutationError::Read {
-                    path: source_path.to_string_lossy().into_owned(),
-                    message: error.to_string(),
-                })?;
-            let actual = source_revision(&current);
-            if actual != expected {
-                return Err(GraphMutationError::Conflict {
-                    id: node.id,
-                    expected,
-                    actual,
-                });
-            }
+        // A caller that omits expected_revision still acted on some observed
+        // state: the store's in-memory copy, whose source_revision hashes the
+        // exact bytes last loaded from disk. Defaulting to that baseline
+        // turns an untokened delete from a blind removal into the same
+        // conflict check tokened callers get, so an external edit that landed
+        // after the last load is never silently destroyed. Every node held in
+        // memory carries a revision (load, create, and update all hash the
+        // source bytes), and a node this store never loaded is already
+        // rejected as NotFound above, so no fallback read is needed.
+        let expected = expected_revision.unwrap_or_else(|| node.provenance.source_revision.clone());
+        let current =
+            fs::read_to_string(&source_path).map_err(|error| GraphMutationError::Read {
+                path: source_path.to_string_lossy().into_owned(),
+                message: error.to_string(),
+            })?;
+        let actual = source_revision(&current);
+        if actual != expected {
+            return Err(GraphMutationError::Conflict {
+                id: node.id,
+                expected,
+                actual,
+            });
         }
         delete_source(&source_path).map_err(|message| GraphMutationError::Delete {
             path: source_path.to_string_lossy().into_owned(),
             message,
         })?;
-        self.nodes.remove(&request.id);
+        self.nodes.remove(&id);
         self.revision = self.revision.saturating_add(1);
         self.rebuild_indexes();
         Ok(GraphDeleteResult {
-            id: request.id,
+            id,
             source_path: source_path.to_string_lossy().into_owned(),
             graph_revision: self.revision,
             undo_token: None,
@@ -274,14 +286,24 @@ impl GraphStore {
                 message: error.to_string(),
             })?;
         let actual_revision = source_revision(&current_raw);
-        if let Some(expected) = patch.expected_revision {
-            if expected != actual_revision {
-                return Err(GraphMutationError::Conflict {
-                    id: node.id,
-                    expected,
-                    actual: actual_revision,
-                });
-            }
+        // A caller that omits expected_revision still acted on some observed
+        // state: the store's in-memory copy, whose source_revision hashes the
+        // exact bytes last loaded from disk. Defaulting to that baseline
+        // turns an untokened update from silent last-write-wins into the same
+        // conflict check tokened callers get, so an external edit that landed
+        // after the last load is rejected instead of overwritten. Every node
+        // held in memory carries a revision (load, create, and update all
+        // hash the source bytes), and a node this store never loaded is
+        // already rejected as NotFound above, so no fallback read is needed.
+        let expected = patch
+            .expected_revision
+            .unwrap_or_else(|| node.provenance.source_revision.clone());
+        if expected != actual_revision {
+            return Err(GraphMutationError::Conflict {
+                id: node.id,
+                expected,
+                actual: actual_revision,
+            });
         }
 
         if let Some(kind) = patch.kind {
@@ -1262,22 +1284,37 @@ mod tests {
     }
 
     #[test]
-    fn unversioned_updates_overwrite_external_edits_last_write_wins() {
-        // NOTE: captures current behavior. A patch without expected_revision
-        // skips the conflict check entirely, so a writer that never took a
-        // revision token silently replaces an external edit that landed after
-        // its last read. The replacement is atomic (the file is never torn),
-        // but the external edit's content is lost. Conflict safety therefore
-        // depends on every writer passing expected_revision.
+    fn untokened_updates_reject_external_edits_instead_of_overwriting_them() {
+        // A patch without expected_revision defaults to the revision the
+        // store last loaded for the node, so an external edit that landed
+        // after that load is detected as a conflict and survives untouched
+        // instead of being silently replaced last-write-wins.
         let (_root, mut store) = fixture();
         let node = store.get("eversana").unwrap().clone();
-        fs::write(
-            &node.provenance.source_path,
-            "---\ntitle: External truth\ntype: org\n---\nExternal body.",
-        )
-        .unwrap();
+        let external = "---\ntitle: External truth\ntype: org\n---\nExternal body.";
+        fs::write(&node.provenance.source_path, external).unwrap();
 
-        store
+        let error = store
+            .update_node(GraphNodePatch {
+                id: "eversana".into(),
+                expected_revision: None,
+                title: Some("Untokened writer".into()),
+                ..GraphNodePatch::default()
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, GraphMutationError::Conflict { .. }));
+        assert_eq!(
+            fs::read_to_string(&node.provenance.source_path).unwrap(),
+            external
+        );
+        assert_eq!(store.get("eversana").unwrap().title, "EVERSANA");
+    }
+
+    #[test]
+    fn untokened_updates_succeed_while_the_source_is_unchanged() {
+        let (_root, mut store) = fixture();
+        let updated = store
             .update_node(GraphNodePatch {
                 id: "eversana".into(),
                 expected_revision: None,
@@ -1285,12 +1322,67 @@ mod tests {
                 ..GraphNodePatch::default()
             })
             .unwrap();
-
-        let on_disk = parsed_clean_knowledge(Path::new(&node.provenance.source_path));
+        assert_eq!(updated.title, "Untokened writer");
+        let on_disk = parsed_clean_knowledge(Path::new(&updated.provenance.source_path));
         assert_eq!(on_disk.title, "Untokened writer");
-        assert!(!fs::read_to_string(&node.provenance.source_path)
-            .unwrap()
-            .contains("External truth"));
+
+        // The defaulted baseline tracks the store's own committed writes, so
+        // consecutive untokened updates keep succeeding.
+        let again = store
+            .update_node(GraphNodePatch {
+                id: "eversana".into(),
+                expected_revision: None,
+                body: Some("Second pass.".into()),
+                ..GraphNodePatch::default()
+            })
+            .unwrap();
+        assert_eq!(again.body, "Second pass.");
+        assert_eq!(
+            parsed_clean_knowledge(Path::new(&again.provenance.source_path)).body,
+            "Second pass."
+        );
+    }
+
+    #[test]
+    fn untokened_deletes_reject_external_edits_and_keep_the_source() {
+        let (_root, mut store) = fixture();
+        let node = store.get("eversana").unwrap().clone();
+        let external = "---\ntitle: Edited outside\ntype: org\n---\nKeep me.";
+        fs::write(&node.provenance.source_path, external).unwrap();
+
+        let error = store
+            .delete_node_with(
+                GraphNodeDelete {
+                    id: node.id.clone(),
+                    expected_revision: None,
+                },
+                |_| panic!("the source deleter must not run on an externally edited source"),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, GraphMutationError::Conflict { .. }));
+        assert_eq!(
+            fs::read_to_string(&node.provenance.source_path).unwrap(),
+            external
+        );
+        assert!(store.get("eversana").is_some());
+    }
+
+    #[test]
+    fn untokened_deletes_succeed_while_the_source_is_unchanged() {
+        let (_root, mut store) = fixture();
+        let deleted = store
+            .delete_node_with(
+                GraphNodeDelete {
+                    id: "project-eversana".into(),
+                    expected_revision: None,
+                },
+                |path| fs::remove_file(path).map_err(|error| error.to_string()),
+            )
+            .unwrap();
+        assert_eq!(deleted.id, "project-eversana");
+        assert!(!Path::new(&deleted.source_path).exists());
+        assert!(store.get("project-eversana").is_none());
     }
 
     #[test]

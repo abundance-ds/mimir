@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "record": {
+    "id": "agent-fixture-0001",
+    "kind": "agent",
+    "title": "Codex review",
+    "workspacePath": "/Users/tester/projects/acme",
+    "status": "done",
+    "createdAt": "2026-07-27T09:00:00Z",
+    "updatedAt": "2026-07-27T02:46:10.962052+00:00",
+    "retention": "durable",
+    "source": {
+      "type": "launcher",
+      "launcherId": "codex",
+      "presetId": "codex"
+    },
+    "host": {
+      "type": "pty",
+      "resumeStrategy": "codex"
+    },
+    "launch": {
+      "command": "/bin/echo",
+      "args": [
+        "fixture scrollback line"
+      ],
+      "env": {
+        "MIM_ACTIVITY_ID": "agent-fixture-0001"
+      }
+    },
+    "session": {
+      "runId": "08214347-6397-4e0c-8a35-52b63c93d767",
+      "startedAt": "2026-07-27T02:46:10.959741+00:00",
+      "endedAt": "2026-07-27T02:46:10.962052+00:00",
+      "agentId": "codex",
+      "exit": {
+        "reason": "completed",
+        "code": 0
+      },
+      "lastOutputSequence": 1,
+      "scrollbackBytes": 25
+    }
+  },
+  "scrollback": {
+    "chunks": [
+      {
+        "sequence": 1,
+        "bytes": [
+          102,
+          105,
+          120,
+          116,
+          117,
+          114,
+          101,
+          32,
+          115,
+          99,
+          114,
+          111,
+          108,
+          108,
+          98,
+          97,
+          99,
+          107,
+          32,
+          108,
+          105,
+          110,
+          101,
+          13,
+          10
+        ]
+      }
+    ],
+    "nextSequence": 2,
+    "truncated": false
+  }
+}

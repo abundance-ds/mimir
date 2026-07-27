@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Field notes</title>
+  <style>
+    html, body { height: 100%; }
+    body { background: var(--color-chrome-high); padding: 18px; }
+    main { display: flex; height: 100%; flex-direction: column; border: 1px solid var(--color-rule); background: var(--color-surface); }
+    header, footer { display: flex; align-items: center; gap: 16px; padding: 12px 14px; background: var(--color-chrome-high); }
+    header { border-bottom: 1px solid var(--color-rule); }
+    footer { border-top: 1px solid var(--color-rule); color: var(--color-ink-3); font-size: 11px; }
+    header div { flex: 1; }
+    h1 { margin: 2px 0 0; font-family: var(--font-serif); font-size: 19px; }
+    small, #state { color: var(--color-ink-3); font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; }
+    textarea { min-height: 0; flex: 1; resize: none; border: 0; border-radius: 0; padding: 18px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; }
+    footer span { min-width: 0; flex: 1; }
+    footer button { padding: 5px 10px; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <small>LOCAL INSTRUMENT</small>
+        <h1>Field notes</h1>
+      </div>
+      <span id="state">Ready</span>
+    </header>
+    <textarea id="note" aria-label="Field notes note" placeholder="Shape this instrument into whatever you need."></textarea>
+    <footer>
+      <span>Autosaves locally · MCP tool <code>read</code> is live while open</span>
+      <button id="save">Save now</button>
+    </footer>
+  </main>
+  <script>
+    const note = document.querySelector('#note')
+    const state = document.querySelector('#state')
+    let timer
+    async function save() {
+      clearTimeout(timer)
+      state.textContent = 'Saving'
+      await mim.data.save('note', { text: note.value, updatedAt: new Date().toISOString() })
+      state.textContent = 'Saved'
+    }
+    note.addEventListener('input', () => {
+      state.textContent = 'Unsaved'
+      clearTimeout(timer)
+      timer = setTimeout(save, 350)
+    })
+    document.querySelector('#save').addEventListener('click', save)
+    mim.tools.handle('read', () => ({
+      value: { text: note.value, characters: note.value.length },
+      displayText: note.value || '(The instrument is empty.)'
+    }))
+    mim.data.load('note').then(saved => {
+      note.value = saved?.text || ''
+      state.textContent = 'Ready'
+      note.focus()
+    }).catch(error => {
+      state.textContent = error.message
+    })
+  </script>
+</body>
+</html>

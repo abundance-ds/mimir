@@ -47,6 +47,7 @@ toml = "1"
 trash = "5"
 
 [dev-dependencies]
+proptest = "1"
 tempfile = "3"
 tauri = { version = "2", features = ["test"] }
 

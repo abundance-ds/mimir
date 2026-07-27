@@ -1,0 +1,47 @@
+{
+  "directory": "/Users/me/.mim/routines",
+  "statePath": "/Users/me/.mim/routines-state.json",
+  "revision": 4,
+  "routines": [
+    {
+      "id": "morning-brief",
+      "title": "Morning brief",
+      "enabled": true,
+      "schedule": "0 0 7 * * *",
+      "timezone": "Europe/Berlin",
+      "preset": "codex",
+      "prompt": "Summarize overnight repository activity.",
+      "overlap": "skip",
+      "missed": "run-once",
+      "workspace": "/Users/me/work/mim",
+      "available": true,
+      "nextFire": "2026-07-28T05:00:00Z",
+      "runningActivityIds": [
+        "routine:01HZX5Y2"
+      ],
+      "path": "/Users/me/.mim/routines/morning-brief.toml",
+      "sourceRevision": "9c2f4b1a"
+    }
+  ],
+  "diagnostics": [
+    {
+      "path": "/Users/me/.mim/routines/broken.toml",
+      "field": "schedule",
+      "message": "Invalid cron expression."
+    }
+  ],
+  "lastTick": {
+    "fires": [
+      {
+        "routineId": "morning-brief",
+        "scheduledFor": "2026-07-27T05:00:00Z",
+        "observedAt": "2026-07-27T05:00:01Z",
+        "reason": "scheduled"
+      }
+    ],
+    "skips": [],
+    "nextFires": {
+      "morning-brief": "2026-07-28T05:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "directory": "/Users/me/.mim/apps",
+  "apps": [
+    {
+      "id": "today",
+      "title": "Today",
+      "description": "Daily notes at a glance.",
+      "mode": "embedded",
+      "entry": "index.html",
+      "args": [],
+      "env": {},
+      "launchOnly": false,
+      "tools": [
+        {
+          "name": "today_read",
+          "description": "Read today's note.",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "mcpAlias": "today_read"
+        }
+      ],
+      "directory": "/Users/me/.mim/apps/today",
+      "manifestPath": "/Users/me/.mim/apps/today/app.toml",
+      "builtin": true
+    },
+    {
+      "id": "ledger-sync",
+      "title": "Ledger Sync",
+      "description": "",
+      "mode": "process",
+      "command": "/usr/local/bin/ledger-sync",
+      "args": [
+        "--watch"
+      ],
+      "env": {
+        "LEDGER_HOME": "/Users/me/ledger"
+      },
+      "launchOnly": true,
+      "tools": [],
+      "directory": "/Users/me/.mim/apps/ledger-sync",
+      "manifestPath": "/Users/me/.mim/apps/ledger-sync/app.toml",
+      "builtin": false
+    }
+  ],
+  "diagnostics": [
+    {
+      "path": "/Users/me/.mim/apps/broken/app.toml",
+      "field": "entry",
+      "message": "Missing entry for embedded app."
+    }
+  ]
+}

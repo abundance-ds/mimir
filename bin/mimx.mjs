@@ -144,16 +144,21 @@ export function formatBoard(items) {
 }
 
 async function request(method, params) {
-  const response = await fetch(DEFAULT_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: Date.now(),
-      method,
-      params,
-    }),
-  })
+  let response
+  try {
+    response = await fetch(DEFAULT_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method,
+        params,
+      }),
+    })
+  } catch {
+    throw new Error(`mimx could not reach ${DEFAULT_URL} — start the Mim workbench or set MIMX_MCP_URL`)
+  }
 
   if (!response.ok) {
     throw new Error(`mimx server returned HTTP ${response.status}`)

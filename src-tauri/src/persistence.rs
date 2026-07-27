@@ -29,6 +29,11 @@ static UNIQUE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 /// every 250ms) skip the redundant directory fsync.
 const DIRECTORY_SYNC_WINDOW: Duration = Duration::from_secs(2);
 
+/// Temporary files at least this old are litter from a writer that died
+/// between its temporary write and the rename. Live writers hold a temporary
+/// for milliseconds, so an hour is far beyond any writer still in flight.
+const STALE_TEMPORARY_AGE: Duration = Duration::from_secs(60 * 60);
+
 fn recent_directory_syncs() -> &'static Mutex<HashMap<PathBuf, Instant>> {
     static RECENT: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
     RECENT.get_or_init(|| Mutex::new(HashMap::new()))
@@ -183,6 +188,11 @@ fn write_bytes_atomic_inner(
     fs::rename(pending.path(), path)
         .map_err(|source| io_error("atomically replace persistence file at", path, source))?;
     pending.disarm();
+
+    // The rename succeeded, so any same-target temporary old enough to predate
+    // every live writer is litter from a crashed one; collect it before the
+    // directory sync so an fsync issued below also covers the unlinks.
+    collect_stale_temporaries(path);
 
     sync_directory_debounced(parent)?;
     Ok(())
@@ -373,6 +383,75 @@ fn temporary_name(file_name: &OsStr, attempt: u16) -> OsString {
         attempt
     ));
     name
+}
+
+/// Whether `candidate` matches the exact shape [`temporary_name`] emits for
+/// `file_name`: `.<file_name>.<pid>.<nanos>.<sequence>.<attempt>.tmp`, where
+/// every stamp field is a non-empty run of ASCII digits.
+///
+/// The four-numeric-field requirement keeps the match precise even between
+/// overlapping target names (a temporary for `state.json.backup` never matches
+/// `state.json`, and vice versa). Non-UTF-8 names never match: garbage
+/// collection prefers a false negative over touching a foreign file.
+fn is_temporary_name_for(file_name: &OsStr, candidate: &OsStr) -> bool {
+    let (Some(file_name), Some(candidate)) = (file_name.to_str(), candidate.to_str()) else {
+        return false;
+    };
+    let Some(stamp) = candidate
+        .strip_prefix('.')
+        .and_then(|rest| rest.strip_prefix(file_name))
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let mut fields = 0_usize;
+    for field in stamp.split('.') {
+        if field.is_empty() || !field.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        fields += 1;
+    }
+    fields == 4
+}
+
+/// Best-effort removal of temporary files beside `target` left by writers that
+/// died between the temporary write and the rename.
+///
+/// Called only after a successful rename. Only regular files whose name
+/// matches this target's exact temporary pattern (see
+/// [`is_temporary_name_for`]) are considered, and only when their modification
+/// time is at least [`STALE_TEMPORARY_AGE`] old — a fresh temporary may belong
+/// to a live concurrent writer. Every filesystem error is ignored: a missed
+/// collection only leaves litter for a later save, and garbage collection must
+/// never fail the save that triggered it.
+fn collect_stale_temporaries(target: &Path) {
+    let Some(file_name) = target.file_name() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(parent_directory(target)) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        if !is_temporary_name_for(file_name, &entry.file_name()) {
+            continue;
+        }
+        // DirEntry::metadata does not follow symlinks, so a symlink dressed up
+        // in a temporary name is skipped rather than dereferenced.
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let stale = metadata.is_file()
+            && metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age >= STALE_TEMPORARY_AGE);
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn quarantine_name(file_name: &OsStr, attempt: u16) -> OsString {
@@ -785,17 +864,30 @@ mod tests {
         assert!(quarantine_siblings(&path).is_empty());
     }
 
+    /// Push a file's mtime far enough into the past that the stale-temporary
+    /// collector must treat it as litter from a crashed writer.
+    fn age_beyond_stale_threshold(path: &Path) {
+        File::options()
+            .write(true)
+            .open(path)
+            .expect("aged test file should open for writing")
+            .set_modified(SystemTime::now() - STALE_TEMPORARY_AGE - Duration::from_secs(60))
+            .expect("test file mtime should be settable");
+    }
+
     #[test]
-    fn stale_temporary_files_from_a_crashed_writer_block_nothing() {
+    fn stale_temporary_files_from_a_crashed_writer_block_nothing_and_are_collected() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("state.json");
         let original = state("survivor", 1, &["kept"]);
         write_json_atomic(&path, &original).unwrap();
 
         // A writer that crashed after writing its temporary but before the
-        // rename leaves exactly this behind.
+        // rename leaves exactly this behind; hours later it cannot belong to
+        // any live writer.
         let stale = directory.path().join(".state.json.4242.1.2.0.tmp");
         fs::write(&stale, b"{ \"name\": \"half-writ").unwrap();
+        age_beyond_stale_threshold(&stale);
 
         assert_eq!(load_json_optional(&path).unwrap(), Some(original));
 
@@ -803,10 +895,66 @@ mod tests {
         write_json_atomic(&path, &replacement).unwrap();
         assert_eq!(load_json_optional(&path).unwrap(), Some(replacement));
 
-        // NOTE: stale temporaries are ignored and never block a save, but they
-        // are also never garbage-collected; they accumulate until removed by
-        // hand.
-        assert!(stale.exists());
+        // The successful save collects the crashed writer's litter.
+        assert!(!stale.exists());
+        assert!(temporary_siblings(&path).is_empty());
+    }
+
+    #[test]
+    fn stale_temporary_collection_spares_fresh_and_foreign_files() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+
+        // Fresh temporary: a concurrent writer may still be mid-flight, so it
+        // is left alone no matter that it matches the pattern.
+        let fresh = directory.path().join(".state.json.4243.9.9.0.tmp");
+        fs::write(&fresh, b"{").unwrap();
+
+        // Old files that do not match this target's exact temporary pattern
+        // are never touched, regardless of age.
+        let foreign = [
+            directory.path().join(".other.json.4242.1.2.0.tmp"),
+            directory.path().join(".state.json.backup.4242.1.2.0.tmp"),
+            directory.path().join(".state.json.4242.1.2.tmp"),
+            directory.path().join(".state.json.4242.1.2.0.extra.tmp"),
+            directory.path().join("state.json.4242.1.2.0.tmp"),
+        ];
+        for file in &foreign {
+            fs::write(file, b"not ours to delete").unwrap();
+            age_beyond_stale_threshold(file);
+        }
+
+        write_json_atomic(&path, &state("writer", 1, &[])).unwrap();
+
+        assert!(fresh.exists(), "a fresh temporary may have a live owner");
+        for file in &foreign {
+            assert!(file.exists(), "non-matching name was deleted: {file:?}");
+        }
+    }
+
+    #[test]
+    fn temporary_name_matching_is_exact() {
+        let name = OsStr::new("state.json");
+        assert!(is_temporary_name_for(
+            name,
+            OsStr::new(".state.json.4242.1.2.0.tmp")
+        ));
+        assert!(is_temporary_name_for(name, &temporary_name(name, 3)));
+
+        for miss in [
+            "state.json",
+            ".state.json.tmp",
+            ".state.json.4242.1.2.tmp",
+            ".state.json.4242.1.2.0.5.tmp",
+            ".state.json.4242.1.2.x.tmp",
+            ".state.json..1.2.0.tmp",
+            ".state.json.4242.1.2.0.tmp.bak",
+            "state.json.4242.1.2.0.tmp",
+            ".other.json.4242.1.2.0.tmp",
+            ".state.json.backup.4242.1.2.0.tmp",
+        ] {
+            assert!(!is_temporary_name_for(name, OsStr::new(miss)), "{miss}");
+        }
     }
 
     #[test]

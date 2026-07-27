@@ -67,7 +67,8 @@ listeners are installed. See
 - `src/mim/composables/usePointerReorder.js`: drag-to-reorder for sidebar rows
 - `src/mim/components/`: three-pane shell, rails, sidebar, recent-project
   switcher, quick-open, pane host
-- `src/mim/activities/TerminalActivity.vue`: xterm-backed terminal and agent UI
+- `src/mim/activities/TerminalActivity.vue`, `terminalActivity.js`: xterm-backed
+  terminal/agent surface, WebGL fallback lifecycle, fonts, bytes, and theme
 - `src/mim/activities/FilesActivity.vue`: Project/Recent/Favorites composition,
   selection/action orchestration, Git decoration, and settings-backed favorites
 - `src/mim/components/FileTreeRow.vue`: stateless tree-row presentation and ARIA

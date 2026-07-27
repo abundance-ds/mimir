@@ -1,0 +1,18 @@
+[
+  {
+    "path": "/w/new.md",
+    "name": "new.md",
+    "relativePath": "new.md",
+    "mtime": 1753600000000,
+    "size": 532,
+    "textReadable": true
+  },
+  {
+    "path": "/w/src/old.rs",
+    "name": "old.rs",
+    "relativePath": "src/old.rs",
+    "mtime": 1753500000000,
+    "size": 2048,
+    "textReadable": true
+  }
+]

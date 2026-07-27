@@ -1,4 +1,5 @@
 use axum::{
+    body::Bytes,
     extract::{Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
@@ -97,11 +98,27 @@ fn check_auth(
 async fn handle_call(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<CallBody>,
+    body: Bytes,
 ) -> impl IntoResponse {
+    // Auth is decided before the body is parsed: the `Json` extractor would
+    // otherwise reject a malformed body with 422 before `check_auth` ran.
     if let Err(error) = check_auth(&headers, &state.token) {
         return error.into_response();
     }
+
+    let body: CallBody = match serde_json::from_slice(&body) {
+        Ok(body) => body,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "message": format!("Invalid JSON body: {error}"),
+                })),
+            )
+                .into_response();
+        }
+    };
 
     let context = ToolCallContext {
         request_id: body.request_id,

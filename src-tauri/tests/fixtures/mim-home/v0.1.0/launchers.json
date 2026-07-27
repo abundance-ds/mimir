@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "id": "codex",
+      "title": "Codex",
+      "kind": "agent",
+      "enabled": true,
+      "agentId": "codex",
+      "args": [],
+      "env": {},
+      "cwd": {
+        "mode": "workspace"
+      }
+    },
+    {
+      "id": "claude",
+      "title": "Claude",
+      "kind": "agent",
+      "enabled": true,
+      "agentId": "claude",
+      "args": [],
+      "env": {},
+      "cwd": {
+        "mode": "workspace"
+      }
+    },
+    {
+      "id": "pi",
+      "title": "Pi",
+      "kind": "agent",
+      "enabled": true,
+      "agentId": "pi",
+      "args": [],
+      "env": {},
+      "cwd": {
+        "mode": "workspace"
+      }
+    },
+    {
+      "id": "terminal",
+      "title": "Terminal",
+      "kind": "terminal",
+      "enabled": true,
+      "args": [],
+      "env": {},
+      "cwd": {
+        "mode": "workspace"
+      }
+    },
+    {
+      "id": "claude-headless",
+      "title": "Claude (headless)",
+      "kind": "agent",
+      "enabled": true,
+      "agentId": "claude",
+      "binary": "claude",
+      "args": [
+        "--output-format",
+        "text"
+      ],
+      "env": {
+        "MIM_ROUTINE_RUN": "1"
+      },
+      "cwd": {
+        "mode": "home"
+      }
+    }
+  ]
+}

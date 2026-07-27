@@ -249,14 +249,14 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.update",
             "graph_update",
-            "Patch one graph node with optional optimistic source-revision checking.",
+            "Patch one graph node with conflict-safe source-revision checking; an omitted expectedRevision defaults to the last-loaded revision.",
             graph_update_properties(),
             &["id"],
         ),
         definition(
             "graph.delete",
             "graph_delete",
-            "Move one graph node source to the operating-system Trash, optionally checking its source revision.",
+            "Move one graph node source to the operating-system Trash after a conflict-safe source-revision check.",
             mutation_id_properties(),
             &["id"],
         ),
@@ -304,7 +304,9 @@ fn graph_create_properties() -> Value {
 fn graph_update_properties() -> Value {
     json!({
         "id": string_schema("Stable graph node id."),
-        "expectedRevision": string_schema("Optional source revision for optimistic concurrency."),
+        "expectedRevision": string_schema(
+            "Optional source revision for optimistic concurrency. Omitted, the check uses the revision last loaded by the workbench, so stale writes are rejected either way.",
+        ),
         "kind": { "type": "string", "enum": ENTITY_KINDS },
         "title": { "type": "string" },
         "summary": { "type": "string", "maxLength": 1000 },

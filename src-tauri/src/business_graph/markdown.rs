@@ -402,19 +402,38 @@ fn validate_node(parsed: &mut ParsedGraphNode) {
     }
 }
 
+/// True for a frontmatter delimiter line: an UNINDENTED `---`, allowing only
+/// trailing whitespace (which keeps CRLF files working — `trim_end` eats the
+/// `\r`). Indented `---` lines must NOT match: serde_yaml writes multi-line
+/// string values as literal block scalars whose content lines are always
+/// indented, so `  ---` can be legitimate frontmatter *content*. Matching it
+/// (the old `line.trim() == "---"`) truncated the frontmatter mid-value and
+/// silently corrupted the node on reload.
+///
+/// The serializer can never emit a bare column-zero `---` inside the
+/// frontmatter mapping: key lines carry a `:`, sequence items render as
+/// `- item`, block-scalar content is indented, and the only document marker
+/// serde_yaml emits is the leading `---\n` that `serialize_graph_markdown`
+/// strips. This is pinned empirically by
+/// `frontmatter_value_with_dash_line_roundtrips` and the round-trip property
+/// tests, whose generators produce `---` lines inside values.
+fn is_frontmatter_delimiter(line: &str) -> bool {
+    line.trim_end() == "---"
+}
+
 fn split_frontmatter(raw: &str) -> (&str, String) {
     let mut lines = raw.split_inclusive('\n');
     let Some(first) = lines.next() else {
         return ("", String::new());
     };
-    if first.trim() != "---" {
+    if !is_frontmatter_delimiter(first) {
         return ("", raw.to_string());
     }
 
     let frontmatter_start = first.len();
     let mut cursor = frontmatter_start;
     for line in lines {
-        if line.trim() == "---" {
+        if is_frontmatter_delimiter(line) {
             let body_start = cursor + line.len();
             return (
                 &raw[frontmatter_start..cursor],
@@ -677,6 +696,45 @@ Build the map.
     }
 
     #[test]
+    fn indented_dash_lines_are_frontmatter_content_not_delimiters() {
+        let parsed = parse(
+            GraphSourceFormat::Knowledge,
+            "---\ntitle: |-\n  before\n  ---\n  after\ntype: note\n---\nBody.\n",
+        );
+        assert_eq!(parsed.node.title, "before\n---\nafter");
+        assert_eq!(parsed.node.kind, "note");
+        assert_eq!(parsed.node.body, "Body.\n");
+    }
+
+    #[test]
+    fn closing_delimiter_tolerates_trailing_whitespace_and_crlf() {
+        let parsed = parse(
+            GraphSourceFormat::Knowledge,
+            "---\r\ntitle: Windows\r\ntype: note\r\n---\r\nBody.\r\n",
+        );
+        assert_eq!(parsed.node.title, "Windows");
+        assert_eq!(parsed.node.body, "Body.\r\n");
+
+        let padded = parse(
+            GraphSourceFormat::Knowledge,
+            "--- \ntitle: Padded\n---  \nBody.\n",
+        );
+        assert_eq!(padded.node.title, "Padded");
+        assert_eq!(padded.node.body, "Body.\n");
+    }
+
+    #[test]
+    fn indented_closing_delimiter_falls_back_to_body_without_losing_content() {
+        // A hand-written file whose only closer is indented no longer parses
+        // as frontmatter; the entire raw text is preserved as the body.
+        let raw = "---\ntitle: Handmade\n  ---\nBody.\n";
+        let parsed = parse(GraphSourceFormat::Knowledge, raw);
+        assert_eq!(parsed.node.body, raw);
+        assert_eq!(parsed.node.title, "");
+        assert!(parsed.node.properties.is_empty());
+    }
+
+    #[test]
     fn serializes_knowledge_without_losing_unknown_properties_or_relations() {
         let mut parsed = parse(
             GraphSourceFormat::Knowledge,
@@ -799,13 +857,6 @@ mod proptest_roundtrip {
         }
     }
 
-    /// Excluded from generation: multi-line values with a line trimming to
-    /// `---` reproduce the known frontmatter-truncation bug covered by the
-    /// `#[ignore]`d regression test at the bottom of this module.
-    fn no_delimiter_line(value: &str) -> bool {
-        !value.contains('\n') || value.lines().all(|line| line.trim() != "---")
-    }
-
     fn single_line() -> impl Strategy<Value = String> {
         prop_oneof![
             4 => prop::collection::vec(prop::sample::select(SCALAR_CHARS), 0..20)
@@ -815,19 +866,20 @@ mod proptest_roundtrip {
     }
 
     /// Free-form frontmatter string value: possibly multi-line, possibly with
-    /// leading/trailing whitespace or a trailing newline.
+    /// leading/trailing whitespace or a trailing newline. Multi-line values
+    /// containing `---` lines are deliberately generated: serde_yaml emits
+    /// them as indented block-scalar content, which `split_frontmatter` must
+    /// not mistake for the closing delimiter.
     fn frontmatter_text() -> impl Strategy<Value = String> {
-        (prop::collection::vec(single_line(), 1..3), any::<bool>())
-            .prop_map(|(lines, trailing_newline)| {
+        (prop::collection::vec(single_line(), 1..3), any::<bool>()).prop_map(
+            |(lines, trailing_newline)| {
                 let mut text = lines.join("\n");
                 if trailing_newline {
                     text.push('\n');
                 }
                 text
-            })
-            .prop_filter("no `---` lines in frontmatter values", |text| {
-                no_delimiter_line(text)
-            })
+            },
+        )
     }
 
     /// For fields read back through `string_field`, which trims: generated
@@ -1192,16 +1244,14 @@ mod proptest_roundtrip {
         }
     }
 
-    // KNOWN BUG (found by these property tests; generators exclude it):
-    // serde_yaml writes multi-line strings as literal block scalars, so a
-    // frontmatter value containing a line of exactly `---` is emitted as an
-    // indented `---` content line. `split_frontmatter` matches
-    // `line.trim() == "---"`, mistakes that content line for the closing
-    // delimiter, and truncates the frontmatter — silently corrupting the
-    // node on the next load. Unignore once `split_frontmatter` only accepts
-    // unindented delimiters (or the serializer forces a quoted style).
+    // Regression (found by these property tests): serde_yaml writes
+    // multi-line strings as literal block scalars, so a frontmatter value
+    // containing a line of exactly `---` is emitted as an indented `---`
+    // content line. `split_frontmatter` used to match `line.trim() == "---"`,
+    // mistake that content line for the closing delimiter, and truncate the
+    // frontmatter — silently corrupting the node on the next load. Fixed by
+    // accepting only unindented delimiters.
     #[test]
-    #[ignore = "split_frontmatter mistakes block-scalar `---` content lines for the closing delimiter"]
     fn frontmatter_value_with_dash_line_roundtrips() {
         let node = GraphNode {
             id: "dash-title".into(),

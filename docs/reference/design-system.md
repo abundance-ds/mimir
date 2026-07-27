@@ -5,17 +5,49 @@ This document defines the current visual and interaction rules for Mim.
 
 ## Principles
 
-- **Instrument, not dashboard.** Compact controls, legible state, no decorative
-  metrics.
-- **Chrome gradient.** Surfaces lighten from outer shell toward authored
-  content.
-- **One accent.** Accent marks current state and primary action, not category.
-- **Typography over decoration.** Weight, case, spacing, and mono metadata carry
-  hierarchy.
-- **Progressive disclosure.** The default surface stays calm; menus and detail
-  rows reveal depth.
+- **Workhorse, not showroom.** Mim is used all day; it should look best at
+  hour six. Density is a feature: surfaces are loud enough to read under
+  load, never themed, never decorative.
+- **Visible controls first.** Every property change has an on-surface control.
+  Keyboard chords accelerate the same action; they never gate it. A tooltip
+  is not UI.
+- **Data visibility is sacred.** No hidden or sticky filters. Every active
+  filter is named, announced on the filtered surface, and cleared in one
+  click.
+- **Cryptic is not dense.** Spell states out (`overdue`, `waiting`,
+  `due 7d`). No code alphabets on first-contact surfaces. Type floor: 9px
+  UI, 10px row data.
+- **Color is rare and purposeful.** Accent marks current selection and active
+  agents; `rem` marks overdue and diagnostics; everything else is ink
+  hierarchy. Color is never the sole carrier of meaning — always paired with
+  glyph, word, or position.
+- **One material, many shapes.** Consistency comes from shared type, hairline
+  rules, and color discipline — never from forcing every surface into the
+  same layout.
+- **Mouse first-class.** Hover signals state only: a full-width `chrome-mid`
+  band with full-ink text. Hover never reveals content, moves geometry, or
+  erases surface separation. Selection is an `accent-soft` band.
 - **Native desktop behavior.** Fast hover, visible keyboard focus, stable
   geometry, and no web-style layout moat.
+
+## Business graph material
+
+The Business graph app is a dispatch desk: agents file work around the clock;
+the human keeps overview, contributes, monitors, and intervenes. AI work is
+trusted — it lands in the Now stream as filed events for awareness and
+drill-down correction, never behind accept/reject gates.
+
+- Titles: IBM Plex Sans ~12px. Metadata: IBM Plex Mono 10–11px, tabular
+  numerals. Micro labels: uppercase letterspaced Mono ≥ 9px.
+- Rows sit directly on the projection canvas separated by 1px hairlines — no
+  wells, no raised plates — so a row can never merge into its column.
+- Radius 0–2px; no shadows except functional overlays; no gradients.
+- Colored left borders and left-edge classification devices are banned
+  everywhere, absolutely.
+- No ALL-CAPS kicker mastheads, lit lamps, blinking flags, meter bars,
+  reverse video, ASCII ornament, sparkles, suggestion chips, or AI chat
+  surfaces. Agents appear as authors and processes — initials on rows, an
+  active count, events in the stream — never as personas.
 
 ## Tokens
 
@@ -113,7 +145,8 @@ Tailwind utilities.
 
 - Native UI is non-selectable; text inputs, CodeMirror, terminal content, code,
   and preformatted content opt back into selection.
-- Controls have names or native title tooltips.
+- Controls have accessible names; tooltips may reinforce but never carry
+  meaning alone.
 - Keyboard collections expose selection and Enter activation.
 - Use `aria-live` or status roles for asynchronous feedback.
 - Reduced-motion users receive state changes without decorative animation.

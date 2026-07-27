@@ -1,0 +1,11 @@
+id = "field-notes"
+title = "Field notes"
+description = "A tiny working notebook."
+mode = "embedded"
+entry = "index.html"
+
+[[tools]]
+name = "read"
+mcpAlias = "field-notes_read"
+description = "Read this instrument's current note."
+inputSchema = { type = "object", properties = {} }

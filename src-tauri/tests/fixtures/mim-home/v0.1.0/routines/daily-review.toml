@@ -1,0 +1,10 @@
+id = "daily-review"
+title = "Daily review"
+enabled = true
+schedule = "30 8 * * 1-5"
+timezone = "Europe/Berlin"
+preset = "claude-headless"
+prompt = "Summarise yesterday's work and plan today."
+overlap = "skip"
+missed = "run-once"
+

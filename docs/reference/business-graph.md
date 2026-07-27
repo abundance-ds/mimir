@@ -2,9 +2,16 @@
 
 The Business graph is Mim's built-in operating system for a small AI-native
 HEOR consultancy. Issues, clients, people, projects, evidence, decisions, and
-deliverables are one source-aware graph. The Issue Board, CRM, portfolio,
-timeline, directories, and relationship maps are polished projections over
-that graph rather than separate applications or databases.
+deliverables are one source-aware graph. The Now stream, Work board,
+portfolio ledger, timeline, and the All directory are purpose-built
+projections over that graph rather than separate applications or databases.
+
+The interface is a **dispatch desk**. Agents file work around the clock; the
+human keeps overview, contributes, monitors, and corrects. AI work is
+trusted: it lands as filed events with provenance, open to drill-down
+correction, never gated behind accept/reject review. There is no chat
+surface; CLI agents are the workhorse intelligence and the graph is the
+blackboard both sides write to.
 
 ## Why GraphStore exists
 
@@ -92,30 +99,46 @@ Its primary sections and projections are:
 
 | Section | Projections |
 |---|---|
-| Work | Board, grouped List, Attention |
-| Projects | Portfolio, List, Timeline, Graph |
-| People | Directory, Relationships |
-| Companies | CRM, Directory, Relationships |
-| Knowledge | List, Timeline, Graph |
-| All | List, Graph, Timeline |
+| Now | Stream |
+| Work | Board, List, Attention |
+| Projects | Portfolio, List, Timeline |
+| Knowledge | List, Timeline |
+| All | List, Timeline, with a kind filter (issue, project, person, company, decision, knowledge) |
 
-The Work Board retains specialized issue interaction: status or project
-grouping, drag-and-drop movement, keyboard-equivalent movement, column
-visibility, priority and status filtering, sorting, due-soon and overdue
-states, and settings-backed view state. It is a projection over `issue` nodes,
-not an independent Issue database. Its cards have fixed geometry and persistent
-property controls; hover never reveals information or moves the layout.
+**Now** is home: a time-ordered wire of graph events — filings, status flips,
+decisions, evidence, deliverables, overdue crossings, waiting cleared — with
+author initials (human and agent) and project context on every line. FYI by
+default: one line per event, expand for field changes and provenance, drill
+to correct. **Waiting on you** pins at top as information, not a gate. A seen
+cursor (“since 08:40”) and Mark caught up replace any unread-count
+obligation.
 
-Portfolio is a dense operational table, not a presentation-card dashboard. It
-keeps company, open/waiting/done work, completion, connected evidence and
-decisions, scope, and health visible in stable columns.
+The **Work board** is the operate surface. Rows are two lines at fixed
+geometry: priority icon control (antenna bars; urgent is a red `!`) opening a
+menu with all four priorities spelled out, then the full title; metadata
+below in Mono — project slug, spelled status (a control when grouped by
+project), due date as `DD.MM` with the word `overdue` paired in `rem`,
+`waiting` spelled, author initials. Status or project grouping,
+drag-and-drop with drop-before reorder, keyboard-equivalent movement, column
+visibility, priority filter, sorting, and settings-backed view state stay.
+Every chord maps to a visible control. Any active filter renders as a named,
+dismissible strip above the board — hidden issues are always explainable at
+a glance.
+
+**Portfolio** is a strict ledger: sticky header, right-aligned tabular
+numerals for open/waiting/done/completion, spelled knowledge counts, and
+health as marker + word (`! needs attention`), never hue alone. Project Focus
+is the 30-second standing answer: open/waiting/done strip, Blocked on
+aggregated by target, recent decisions, and deliverables, each row drilling
+to its node or file.
 
 Interaction follows **Scan → Peek → Focus**. Scan projections optimize
-recognition and triage. Peek is a read-first side surface with quick issue
-properties, Markdown preview, operational context, and a plain-language
-relationship sentence. Focus is a spacious object workspace with one owning
-scroll, auto-growing text fields, syntax-aware CodeMirror Markdown, planning
-properties, connected work, and provenance.
+recognition and triage. Peek is a read-first side surface with contact facts
+for people (email, phone, role, company — each one-click copyable) at the
+top, quick issue properties, Markdown preview, operational context, and a
+plain-language relationship sentence. Focus is a spacious object workspace
+with one owning scroll, auto-growing text fields, syntax-aware CodeMirror
+Markdown, planning properties, connected work, and provenance.
 
 Focus can author the deliberately bounded relation vocabulary through a
 two-step connection composer. Known relationships such as project/company,
@@ -133,7 +156,29 @@ in-product confirmation and offers an in-session undo.
 
 The context trail preserves the path from the originating projection through
 inspected issues, projects, people, companies, decisions, and evidence.
-Graph nodes are keyboard-focusable, and graph pan/zoom has explicit controls.
+
+## Dispatch bar
+
+A permanent single-line bar at the bottom of the app is the spine and the
+front door:
+
+- **Lookup.** Typing shows live results above the bar, Spotlight-style;
+  Tab or click opens Peek. Find a fact, gone in three seconds.
+- **Dispatch.** Enter hands the line to a background CLI-agent Activity with
+  the user's context (section, view, scopes, focused node). Capture never
+  blocks and never opens a dialog: input clears immediately, jobs queue
+  behind one runner, and results land in Now as filed events. Unresolvable
+  references arrive flagged `needsDetail` instead of guessed.
+- **Delegate.** `!` or `work <target>` arms a node, shows the assembled
+  context pack (“what the agent will see”) above the bar, and launches a
+  durable work Activity on the second Enter. This replaces the retired
+  Start Work dialog; no sparkle, no suggestion chips.
+- **Power lane.** A leading `/` runs a deterministic command — `/board
+  [attention]`, `/open <id>`, `/section <name>`, `/find <terms>`, `/clear`,
+  `/help` — with plain unix-style errors in the scrollback.
+- **Echo.** GUI mutations print their `mimx call` equivalent into the
+  scrollback, dimmed. The UI teaches the CLI grammar as a side effect of
+  use.
 
 ## AI-native workflow
 
@@ -146,14 +191,14 @@ Graph nodes are keyboard-focusable, and graph pan/zoom has explicit controls.
 - filtered relationships that cannot reveal a node outside selected scopes;
 - default redaction for sensitive records.
 
-The app's **Start Work** action opens an explicit preparation surface. The user
-can choose or edit the objective and inspect which physical scopes and bounded
-context will be used before creating a durable Activity. The graph snapshot is
-marked as untrusted reference data. The Activity records its focus node, kind,
-scope ids, and graph revision, so it appears later in that node's inspector. An
-agent can then open a deliverable in the Editor and leave durable evidence, a
-decision, an issue update, or a next action instead of losing the result in
-chat history.
+Delegated work launches from the dispatch bar's `!`/`work <target>` flow (or
+programmatically from app surfaces). The assembled graph snapshot is marked
+as untrusted reference data and shown before launch. The Activity records its
+focus node, kind, scope ids, and graph revision, so it appears later in that
+node's inspector. Background dispatch Activities are durable but do not steal
+focus. An agent can then open a deliverable in the Editor and leave durable
+evidence, a decision, an issue update, or a next action instead of losing the
+result in chat history.
 
 HEOR-specific semantic actions include `research.capture_evidence`,
 `projects.record_decision`, `issues.add_deliverable`, and
@@ -229,8 +274,12 @@ Native ownership is under `src-tauri/src/business_graph/`:
 
 Renderer ownership is split between `src/services/businessGraph.js`,
 `src/stores/businessGraph.js`, the built-in app, and its components under
-`src/mim/apps/business-graph/`. `WorkbenchApp.vue` mounts roots and owns the
-Start Work handoff; `AppActivity.vue` only routes the built-in surface.
+`src/mim/apps/business-graph/` — including `WorkBoard.vue`, `NowView.vue`,
+`DispatchBar.vue`, `PortfolioView.vue`, `ProjectStanding.vue`,
+`EntityList.vue`, `TimelineView.vue`, `GraphInspector.vue`, and
+`GraphFilterBanner.vue`. `WorkbenchApp.vue` mounts roots and owns the
+work-Activity handoff (foreground delegate or background dispatch);
+`AppActivity.vue` only routes the built-in surface.
 
 When changing the graph contract, update Rust module tests, the golden sources
 under `src-tauri/tests/fixtures/business-graph/`, tool/runtime tests, the
@@ -241,8 +290,9 @@ relevant Vue projection or inspector tests, and this document.
 Golden fixtures cover every supported ontology kind and the complete legacy
 Issue field shape. Rust tests cover scope isolation, parsing and lossless
 round trips, conflicts, migration without writes, semantic actions, context
-redaction, and a realistic HEOR workflow. Frontend tests cover services, store,
-shell, board, inspector, maps, projections, Activity handoff, and `mimx`.
+redaction, and a realistic HEOR workflow. Frontend tests cover services,
+store, shell, board, dispatch bar, inspector, projections, Activity handoff,
+and `mimx`.
 
 Debug-test performance budgets and the latest measured run are:
 

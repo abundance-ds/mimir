@@ -1,0 +1,10 @@
+[
+  {
+    "activityId": "agent:01HZX3R8KQ",
+    "snippet": "… reordered the sidebar rows by recency …"
+  },
+  {
+    "activityId": "terminal:01HZX40000",
+    "snippet": "grep -rn \"sidebar\" src/mim/components"
+  }
+]

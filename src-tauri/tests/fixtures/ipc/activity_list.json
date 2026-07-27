@@ -1,0 +1,77 @@
+[
+  {
+    "id": "agent:01HZX3R8KQ",
+    "kind": "agent",
+    "title": "Codex — fix sidebar ordering",
+    "workspacePath": "/Users/me/work/mim",
+    "status": "working",
+    "createdAt": "2026-07-25T10:00:00.000Z",
+    "updatedAt": "2026-07-25T10:04:12.000Z",
+    "lastViewedAt": "2026-07-25T10:03:00.000Z",
+    "retention": "durable",
+    "source": {
+      "type": "launcher",
+      "launcherId": "codex",
+      "presetId": "codex-full",
+      "graphNodeId": "issue-sidebar-ordering",
+      "graphScopeIds": [
+        "project:mim"
+      ],
+      "graphRevision": 17
+    },
+    "host": {
+      "type": "pty",
+      "resumeStrategy": "codex"
+    },
+    "launch": {
+      "command": "/opt/homebrew/bin/codex",
+      "args": [
+        "--full-auto"
+      ],
+      "cwd": "/Users/me/work/mim",
+      "env": {
+        "MIM_ACTIVITY_ID": "agent:01HZX3R8KQ"
+      }
+    },
+    "session": {
+      "runId": "run-01HZX3RA",
+      "startedAt": "2026-07-25T10:00:01.000Z",
+      "agentId": "codex",
+      "cliSessionId": "0197c2f1-4b2d-7d10-a1e2-3f4a5b6c7d8e",
+      "lastOutputSequence": 412,
+      "scrollbackBytes": 65536
+    }
+  },
+  {
+    "id": "terminal:01HZX40000",
+    "kind": "terminal",
+    "title": "Terminal",
+    "status": "stopped",
+    "createdAt": "2026-07-24T18:30:00.000Z",
+    "updatedAt": "2026-07-24T19:02:45.000Z",
+    "archivedAt": "2026-07-25T08:00:00.000Z",
+    "retention": "durable",
+    "source": {},
+    "host": {
+      "type": "pty"
+    },
+    "launch": {
+      "command": "/bin/zsh",
+      "args": [
+        "-l"
+      ],
+      "env": {}
+    },
+    "session": {
+      "runId": "run-01HZX40001",
+      "startedAt": "2026-07-24T18:30:00.000Z",
+      "endedAt": "2026-07-24T19:02:45.000Z",
+      "exit": {
+        "reason": "stopped",
+        "signal": "SIGTERM"
+      },
+      "lastOutputSequence": 88,
+      "scrollbackBytes": 16384
+    }
+  }
+]

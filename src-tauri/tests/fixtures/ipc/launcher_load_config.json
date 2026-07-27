@@ -1,0 +1,45 @@
+{
+  "path": "/home/me/.mim/launchers.json",
+  "presets": [
+    {
+      "id": "review",
+      "title": "Review",
+      "kind": "agent",
+      "enabled": true,
+      "agentId": "codex",
+      "args": [
+        "review"
+      ],
+      "env": {
+        "CODEX_HOME": "/Users/me/.codex"
+      },
+      "cwd": {
+        "mode": "workspace"
+      }
+    },
+    {
+      "id": "claude",
+      "title": "Claude",
+      "kind": "agent",
+      "enabled": true,
+      "agentId": "claude",
+      "args": [],
+      "env": {},
+      "cwd": {
+        "mode": "workspace"
+      }
+    },
+    {
+      "id": "terminal",
+      "title": "Terminal",
+      "kind": "terminal",
+      "enabled": true,
+      "args": [],
+      "env": {},
+      "cwd": {
+        "mode": "home"
+      }
+    }
+  ],
+  "diagnostic": null
+}

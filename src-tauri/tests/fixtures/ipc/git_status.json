@@ -1,0 +1,14 @@
+[
+  {
+    "path": "README.md",
+    "status": "new"
+  },
+  {
+    "path": "gone.md",
+    "status": "deleted"
+  },
+  {
+    "path": "src/z.js",
+    "status": "modified"
+  }
+]

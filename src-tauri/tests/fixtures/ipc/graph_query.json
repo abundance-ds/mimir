@@ -1,0 +1,53 @@
+{
+  "items": [
+    {
+      "id": "issue-sidebar-ordering",
+      "kind": "issue",
+      "title": "Sidebar rows lose recency ordering",
+      "summary": "Archived rows jump to the top after respawn.",
+      "tags": [
+        "mim",
+        "ui"
+      ],
+      "status": "in-progress",
+      "priority": "high",
+      "dueDate": "2026-08-01",
+      "projectId": "project-mim",
+      "assigneeId": "person-paul",
+      "rank": 3,
+      "slug": "sidebar-ordering",
+      "needsDetail": false,
+      "relations": [
+        {
+          "relation": "part_of",
+          "target": "project-mim",
+          "legacy": false
+        },
+        {
+          "relation": "assigned_to",
+          "target": "person-paul",
+          "legacy": false
+        }
+      ],
+      "updatedAt": "2026-07-26T09:15:00Z",
+      "scopeId": "project:mim",
+      "sourceRevision": "4f6a2c88"
+    },
+    {
+      "id": "person-paul",
+      "kind": "person",
+      "title": "Paul",
+      "summary": "",
+      "tags": [],
+      "needsDetail": true,
+      "relations": [],
+      "updatedAt": "2026-07-20T08:00:00Z",
+      "scopeId": "private",
+      "sourceRevision": "1a2b3c4d"
+    }
+  ],
+  "total": 2,
+  "offset": 0,
+  "limit": 100,
+  "graphRevision": 17
+}

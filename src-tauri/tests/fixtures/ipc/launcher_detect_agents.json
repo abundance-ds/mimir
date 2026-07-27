@@ -1,0 +1,22 @@
+[
+  {
+    "id": "codex",
+    "title": "Codex",
+    "binary": "codex",
+    "resumeStrategy": "codex",
+    "installed": true,
+    "binaryPath": "/opt/homebrew/bin/codex",
+    "version": "codex-cli 0.21.0",
+    "diagnostic": null
+  },
+  {
+    "id": "claude",
+    "title": "Claude",
+    "binary": "claude",
+    "resumeStrategy": "claude",
+    "installed": false,
+    "binaryPath": null,
+    "version": null,
+    "diagnostic": "'claude' was not found in the login-shell environment."
+  }
+]
