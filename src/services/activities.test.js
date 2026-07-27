@@ -68,4 +68,15 @@ describe('activity spawn sizing', () => {
       rows: 40,
     })
   })
+
+  it('searches closed Activity transcripts with a bounded native command', async () => {
+    const api = await freshModule()
+
+    await api.searchActivityHistory('sidebar ordering', 12)
+
+    expect(invoke).toHaveBeenCalledWith('activity_search_history', {
+      query: 'sidebar ordering',
+      limit: 12,
+    })
+  })
 })
