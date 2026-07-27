@@ -155,13 +155,19 @@ describe('WorkbenchShell', () => {
     expect(wrapper.find('[data-resize-handle="editor"]').exists()).toBe(false)
   })
 
-  it('uses quiet persistent hairlines inside six-pixel resize targets', () => {
+  it('uses quiet persistent hairlines inside twelve-pixel resize targets', () => {
     const wrapper = render()
 
     for (const pane of ['sidebar', 'editor']) {
+      const boundary = wrapper.get(`[data-resize-boundary="${pane}"]`)
       const handle = wrapper.get(`[data-resize-handle="${pane}"]`)
-      expect(handle.classes()).toContain('w-1.5')
+      expect(boundary.classes()).toContain('w-3')
+      expect(boundary.classes()).toContain('-mx-1.5')
+      expect(handle.classes()).toContain('w-full')
+      expect(handle.classes()).toContain('pane-resize-handle')
+      expect(handle.classes()).toContain('touch-none')
       expect(handle.get('[data-resize-line]').classes()).toContain('w-px')
+      expect(handle.get('[data-resize-line]').classes()).toContain('left-1/2')
     }
   })
 

@@ -16,12 +16,18 @@
       >
         <slot name="sidebar" :collapsed="isRail('sidebar')" />
       </div>
+    </section>
+
+    <div
+      v-if="!isRail('sidebar')"
+      data-resize-boundary="sidebar"
+      class="relative z-20 -mx-1.5 h-full w-3 shrink-0"
+    >
       <button
-        v-if="!isRail('sidebar')"
         type="button"
         data-resize-handle="sidebar"
         aria-label="Resize sidebar"
-        class="group absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 focus-visible:outline-none"
+        class="pane-resize-handle group block h-full w-full touch-none focus-visible:outline-none"
         @pointerdown="startResize('sidebar', $event)"
       >
         <span
@@ -29,7 +35,7 @@
           class="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-rule transition-colors group-hover:bg-accent group-focus-visible:bg-accent"
         />
       </button>
-    </section>
+    </div>
 
     <section
       data-pane="activity"
@@ -56,19 +62,16 @@
       />
     </section>
 
-    <section
-      data-pane="editor"
-      :data-pane-state="layout.editor.state"
-      class="relative h-full min-h-0 min-w-0 overflow-hidden bg-surface"
-      :class="editorClass"
-      :style="editorStyle"
+    <div
+      v-if="canResizeEditor"
+      data-resize-boundary="editor"
+      class="relative z-20 -mx-1.5 h-full w-3 shrink-0"
     >
       <button
-        v-if="canResizeEditor"
         type="button"
         data-resize-handle="editor"
         aria-label="Resize editor"
-        class="group absolute inset-y-0 left-0 z-20 w-1.5 -translate-x-1/2 focus-visible:outline-none"
+        class="pane-resize-handle group block h-full w-full touch-none focus-visible:outline-none"
         @pointerdown="startResize('editor', $event)"
       >
         <span
@@ -76,6 +79,15 @@
           class="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-rule-light transition-colors group-hover:bg-accent group-focus-visible:bg-accent"
         />
       </button>
+    </div>
+
+    <section
+      data-pane="editor"
+      :data-pane-state="layout.editor.state"
+      class="relative h-full min-h-0 min-w-0 overflow-hidden bg-surface"
+      :class="editorClass"
+      :style="editorStyle"
+    >
       <div
         data-pane-stage="editor"
         class="h-full min-h-0"
@@ -181,5 +193,15 @@ async function restorePane(pane) {
 <style scoped>
 .is-dragging > section {
   transition: none;
+}
+
+.pane-resize-handle,
+.pane-resize-handle * {
+  cursor: ew-resize !important;
+}
+
+.is-dragging,
+.is-dragging * {
+  cursor: ew-resize !important;
 }
 </style>

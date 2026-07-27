@@ -7,11 +7,6 @@
     }"
     @click="$emit('click')"
   >
-    <span
-      v-if="active"
-      class="absolute inset-y-1 left-0 w-0.5 bg-accent"
-      aria-hidden="true"
-    />
     <button
       type="button"
       class="flex h-full min-w-0 flex-1 items-center text-left"
