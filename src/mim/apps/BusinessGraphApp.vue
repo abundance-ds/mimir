@@ -30,33 +30,6 @@
         </button>
       </nav>
 
-      <div class="graph-command">
-        <IconSearch :size="14" aria-hidden="true" />
-        <input
-          ref="searchInput"
-          :value="graph.searchQuery"
-          data-graph-search
-          data-graph-control="global-search"
-          type="search"
-          placeholder="Search work, people, evidence…"
-          aria-label="Search the business graph"
-          autocomplete="off"
-          @input="onSearch"
-        />
-        <span v-if="graph.searching" class="graph-searching" aria-label="Searching" />
-        <button
-          v-else-if="graph.searchQuery"
-          type="button"
-          data-graph-control="clear-search"
-          class="graph-icon-button graph-search-clear"
-          aria-label="Clear search"
-          @click="graph.clearSearch()"
-        >
-          <IconX :size="13" />
-        </button>
-        <kbd v-else>/</kbd>
-      </div>
-
       <div class="graph-actions">
         <div class="relative" data-graph-scope-root>
           <button
@@ -507,8 +480,6 @@ import {
   IconFolderOpen,
   IconPlus,
   IconRefresh,
-  IconSearch,
-  IconX,
 } from '@tabler/icons-vue'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useActivitiesStore } from '../../stores/activities.js'
@@ -555,7 +526,6 @@ const activities = useActivitiesStore()
 const graph = useBusinessGraphStore()
 const root = ref(null)
 const objectInspector = ref(null)
-const searchInput = ref(null)
 const scopeMenu = ref(false)
 const focusMode = ref(false)
 const createOpen = ref(false)
@@ -617,7 +587,6 @@ const priorityFilterOptions = [
 ]
 const visibleBoardStatuses = ref(boardStatuses.map(status => status.id))
 let viewStateHydrated = false
-let searchTimer = null
 
 const sections = BUSINESS_SECTIONS
 const viewsBySection = {
@@ -731,6 +700,10 @@ function pushEcho(kind, text) {
     ...dispatchEchoes.value.slice(-39),
     { id: echoCounter, kind, text, at: new Date().toISOString() },
   ]
+}
+
+function echoToolCall(tool, payload) {
+  pushEcho('echo', `mimx call ${tool} ${JSON.stringify(payload)}`)
 }
 
 function submitDispatch(line) {
@@ -998,12 +971,6 @@ watch(
   { deep: true },
 )
 
-function onSearch(event) {
-  clearTimeout(searchTimer)
-  const value = event.target.value
-  searchTimer = setTimeout(() => void graph.search(value), 100)
-}
-
 function openCreate(
   kind = defaultKind(),
   status = 'backlog',
@@ -1040,6 +1007,10 @@ async function createNode(create, controls) {
     })
     if (controls.another) controls.reset()
     else createOpen.value = false
+    echoToolCall(create.kind === 'issue' ? 'issues.create' : 'graph.create',
+      create.kind === 'issue'
+        ? { title: create.title }
+        : { kind: create.kind, title: create.title })
   } catch (cause) {
     createError.value = errorMessage(cause)
     emit('diagnostic', errorMessage(cause))
@@ -1107,6 +1078,7 @@ async function confirmDelete() {
   deleteError.value = ''
   try {
     await graph.remove(deleteRequest.value.id)
+    echoToolCall('graph.delete', { id: deleteRequest.value.id })
     undoError.value = ''
     deleteOpen.value = false
     deleteRequest.value = null
@@ -1129,6 +1101,7 @@ async function undoDelete() {
   undoError.value = ''
   try {
     await graph.undoDelete()
+    echoToolCall('graph.restore', { undoToken: '‹token›' })
   } catch (cause) {
     undoError.value = errorMessage(cause)
     emit('diagnostic', `Could not restore graph item: ${errorMessage(cause)}`)
@@ -1184,6 +1157,8 @@ async function moveIssue({ issue, status, projectId = null }) {
       patch.removeProperties = projectId ? [] : ['legacyProject']
     }
     await graph.update(patch)
+    if (status !== undefined) echoToolCall('issues.move', { id: issue.id, status })
+    else echoToolCall('issues.update', { id: issue.id, project: projectId || '' })
   } catch (cause) {
     emit('diagnostic', errorMessage(cause))
   }
@@ -1197,6 +1172,11 @@ async function patchIssue({ issue, setProperties = {}, removeProperties = [] }) 
       setProperties,
       removeProperties,
     })
+    const { rank, ...visible } = setProperties
+    if (Object.keys(visible).length) echoToolCall('issues.update', { id: issue.id, ...visible })
+    else if (removeProperties.length) {
+      echoToolCall('graph.update', { id: issue.id, removeProperties })
+    }
   } catch (cause) {
     emit('diagnostic', errorMessage(cause))
   }
@@ -1270,6 +1250,14 @@ async function reorderIssue({ issue, columnId, beforeId, groupBy }) {
     }
     try {
       await graph.update(patch)
+      if (candidate.id === issue.id) {
+        if (groupBy === 'project') {
+          const projectId = columnId === '__unassigned__' ? '' : columnId
+          echoToolCall('issues.update', { id: issue.id, project: projectId })
+        } else {
+          echoToolCall('issues.move', { id: issue.id, status: columnId })
+        }
+      }
     } catch (cause) {
       failures.push(`${candidate.title || candidate.id}: ${errorMessage(cause)}`)
     }
@@ -1405,14 +1393,12 @@ function onKeydown(event) {
     || event.target?.closest?.('.cm-editor')
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
-    searchInput.value?.focus()
-    searchInput.value?.select()
+    dispatchBar.value?.focusInput()
     return
   }
   if (event.key === '/' && !editing && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault()
-    searchInput.value?.focus()
-    searchInput.value?.select()
+    dispatchBar.value?.focusInput()
     return
   }
   if (event.key === 'Escape') {
@@ -1581,7 +1567,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  clearTimeout(searchTimer)
   closeColumnsMenu()
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   graph.stop()
@@ -1604,7 +1589,7 @@ onUnmounted(() => {
 .graph-topbar {
   display: grid;
   z-index: 20;
-  grid-template-columns: auto minmax(310px, 1fr) minmax(190px, 320px) auto;
+  grid-template-columns: auto minmax(310px, 1fr) auto;
   min-height: 44px;
   flex: 0 0 auto;
   align-items: center;
@@ -1705,71 +1690,6 @@ onUnmounted(() => {
   color: var(--color-ink-4);
   font-family: var(--font-mono);
   font-size: 9px;
-}
-
-.graph-command {
-  position: relative;
-  display: flex;
-  height: 34px;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--color-rule-light);
-  border-radius: 3px;
-  background: var(--graph-canvas);
-  padding: 0 8px 0 10px;
-  color: var(--color-ink-4);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    background-color 120ms ease;
-}
-
-.graph-command:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 62%, var(--color-rule));
-  background: var(--graph-raised);
-  box-shadow: 0 0 0 2px var(--graph-focus);
-}
-
-.graph-command input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--color-ink);
-  font-size: 11px;
-}
-
-.graph-command input::placeholder {
-  color: var(--color-ink-4);
-}
-
-.graph-command kbd {
-  display: grid;
-  min-width: 18px;
-  height: 18px;
-  place-items: center;
-  border: 1px solid var(--color-rule-light);
-  border-radius: 4px;
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-}
-
-.graph-searching {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--color-accent);
-  animation: graph-pulse 900ms ease-in-out infinite alternate;
-}
-
-.graph-search-clear {
-  width: 23px !important;
-  height: 23px !important;
-  margin-right: -3px;
 }
 
 .graph-actions {
@@ -2206,12 +2126,6 @@ onUnmounted(() => {
   }
 }
 
-@keyframes graph-pulse {
-  to {
-    opacity: 0.35;
-    transform: scale(0.8);
-  }
-}
 
 @container business-graph (max-width: 1050px) {
   .graph-topbar {
@@ -2222,11 +2136,6 @@ onUnmounted(() => {
     grid-column: 1 / -1;
     grid-row: 2;
     margin: -3px -4px 0;
-  }
-
-  .graph-command {
-    grid-column: 2;
-    grid-row: 1;
   }
 
   .graph-actions {
@@ -2247,14 +2156,6 @@ onUnmounted(() => {
 
   .graph-scope-trigger > span:nth-child(2) {
     display: none;
-  }
-
-  .graph-command {
-    min-width: 0;
-  }
-
-  .graph-command input {
-    font-size: 10px;
   }
 
   .graph-viewbar {

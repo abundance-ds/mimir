@@ -234,7 +234,7 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
 
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: '/' })
-    expect(document.activeElement).toBe(wrapper.get('[data-graph-search]').element)
+    expect(document.activeElement).toBe(wrapper.get('[data-dispatch-input]').element)
 
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()

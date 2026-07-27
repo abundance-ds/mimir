@@ -1,7 +1,5 @@
 export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   shell: [
-    'global-search',
-    'clear-search',
     'scope-trigger',
     'refresh',
     'create',
