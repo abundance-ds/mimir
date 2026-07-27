@@ -6,7 +6,10 @@ import '../src/shared/styles/app.css'
 import BusinessGraphApp from '../src/mim/apps/BusinessGraphApp.vue'
 
 const params = new URLSearchParams(location.search)
-document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')
+const theme = params.get('theme') || 'parchment'
+document.documentElement.setAttribute('data-theme', theme)
+// The settings store applies its configured theme on load; seed it.
+localStorage.setItem('mim:editor:settings:v1', JSON.stringify({ editorTheme: theme }))
 
 const iso = offset => {
   const date = new Date()
@@ -126,7 +129,7 @@ window.__TAURI_INTERNALS__ = {
       case 'graph_context':
         return { graphRevision: 44, markdown: '# Business graph context\n\nBounded snapshot.' }
       case 'settings_load':
-        return { settings: {}, editor: {} }
+        return { settings: {}, editor: { editorTheme: theme } }
       case 'settings_save':
       case 'settings_save_editor':
       case 'settings_changed':
