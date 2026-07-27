@@ -5,6 +5,7 @@ import {
   deleteGraphNode,
   getGraphNode,
   graphDiagnostics,
+  graphEvents,
   graphNeighbors,
   listenForGraphChanges,
   openBusinessGraph,
@@ -15,6 +16,7 @@ import {
 } from '../services/businessGraph.js'
 
 export const BUSINESS_SECTIONS = Object.freeze([
+  { id: 'now', label: 'Now', kinds: [] },
   { id: 'work', label: 'Work', kinds: ['issue'] },
   { id: 'projects', label: 'Projects', kinds: ['project'] },
   { id: 'people', label: 'People', kinds: ['person'] },
@@ -35,14 +37,17 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const status = ref(null)
   const nodes = ref([])
   const diagnostics = ref([])
+  const events = ref([])
+  const eventTotal = ref(0)
   const loading = ref(false)
   const refreshing = ref(false)
   const error = ref('')
   const conflict = ref(null)
   const activeScopeIds = ref([])
-  const section = ref('work')
-  const view = ref('board')
+  const section = ref('now')
+  const view = ref('stream')
   const sectionViews = ref({
+    now: 'stream',
     work: 'board',
     projects: 'portfolio',
     people: 'directory',
@@ -92,6 +97,13 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
     return counts
   })
+  const latestActors = computed(() => {
+    const actors = {}
+    for (const event of events.value) {
+      if (!actors[event.nodeId] && event.actor) actors[event.nodeId] = event.actor
+    }
+    return actors
+  })
 
   async function start(workspace, sharedTeamRoot = '') {
     const nextProject = String(workspace || '').trim()
@@ -122,12 +134,15 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (!quiet) refreshing.value = true
     try {
       const scopeIds = activeScopeIds.value
-      const [result, nextDiagnostics] = await Promise.all([
+      const [result, nextDiagnostics, eventPage] = await Promise.all([
         queryGraph({ scopeIds, limit: 500 }),
         graphDiagnostics(),
+        graphEvents({ scopeIds, limit: 500 }),
       ])
       nodes.value = Array.isArray(result?.items) ? result.items : []
       diagnostics.value = Array.isArray(nextDiagnostics) ? nextDiagnostics : []
+      events.value = Array.isArray(eventPage?.items) ? eventPage.items : []
+      eventTotal.value = Number(eventPage?.total) || events.value.length
       status.value = {
         ...status.value,
         nodeCount: result?.total ?? nodes.value.length,
@@ -346,6 +361,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     status.value = null
     nodes.value = []
     diagnostics.value = []
+    events.value = []
+    eventTotal.value = 0
     activeScopeIds.value = []
     selectedNode.value = null
     selectedNeighbors.value = []
@@ -411,6 +428,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       waitingFor: node.properties?.waitingFor,
       remindAt: node.properties?.remindAt,
       snoozeUntil: node.properties?.snoozeUntil,
+      rank: node.properties?.rank,
+      slug: node.properties?.slug,
+      needsDetail: Boolean(node.properties?.needsDetail),
       relations: node.relations || [],
       updatedAt: node.updatedAt || '',
       scopeId: node.provenance?.scopeId,
@@ -425,6 +445,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     status,
     nodes,
     diagnostics,
+    events,
+    eventTotal,
     loading,
     refreshing,
     error,
@@ -451,6 +473,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     companies,
     scopeCounts,
     issueCounts,
+    latestActors,
     start,
     refresh,
     search,

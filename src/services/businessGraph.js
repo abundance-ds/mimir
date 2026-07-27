@@ -39,6 +39,16 @@ export function graphDiagnostics() {
   return invoke('graph_diagnostics')
 }
 
+export function graphEvents(query = {}) {
+  return invoke('graph_events', {
+    query: {
+      scopeIds: normalizeStrings(query.scopeIds),
+      offset: Math.max(0, Number(query.offset) || 0),
+      limit: Math.min(500, Math.max(1, Number(query.limit) || 200)),
+    },
+  })
+}
+
 export function graphMigrationReport() {
   return invoke('graph_migration_report')
 }
@@ -57,21 +67,22 @@ export function refreshBusinessGraph() {
   return invoke('graph_refresh')
 }
 
-export function createGraphNode(create) {
-  return invoke('graph_create', { create })
+export function createGraphNode(create, actor = localGraphActor()) {
+  return invoke('graph_create', { create, actor })
 }
 
-export function updateGraphNode(patch) {
-  return invoke('graph_update', { patch })
+export function updateGraphNode(patch, actor = localGraphActor()) {
+  return invoke('graph_update', { patch, actor })
 }
 
-export function deleteGraphNode(request) {
-  return invoke('graph_delete', { request })
+export function deleteGraphNode(request, actor = localGraphActor()) {
+  return invoke('graph_delete', { request, actor })
 }
 
-export function restoreGraphNode(undoToken) {
+export function restoreGraphNode(undoToken, actor = localGraphActor()) {
   return invoke('graph_restore', {
     request: { undoToken: String(undoToken || '').trim() },
+    actor,
   })
 }
 
@@ -109,4 +120,13 @@ function requiredPath(value, label) {
 function optionalPath(value) {
   const path = String(value || '').trim()
   return path || null
+}
+
+function localGraphActor() {
+  return {
+    kind: 'human',
+    id: 'local-human',
+    label: 'You',
+    initials: 'ME',
+  }
 }

@@ -32,21 +32,21 @@
       data-graph-select-menu
       role="listbox"
       :aria-label="ariaLabel"
-      class="graph-select-menu fixed z-[180] border border-rule bg-surface p-1 text-ink shadow-xl"
+      class="graph-select-menu fixed z-[180] text-ink"
       :style="menuStyle"
       @keydown="onMenuKeydown"
     >
-      <div v-if="searchable" class="relative mb-1 border-b border-rule-light pb-1">
+      <div v-if="searchable" class="graph-select-search-wrap relative">
         <IconSearch
-          :size="10"
-          class="pointer-events-none absolute left-2 top-1/2 -translate-y-[calc(50%+2px)] text-ink-4"
+          :size="13"
+          class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4"
         />
         <input
           ref="searchInput"
           v-model="query"
           data-graph-select-search
           type="search"
-          class="h-7 w-full bg-chrome-high pl-7 pr-2 text-[9px] text-ink-2 placeholder:text-ink-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class="graph-select-search"
           :placeholder="searchPlaceholder"
           :aria-label="`Search ${ariaLabel.toLowerCase()}`"
           autocomplete="off"
@@ -55,7 +55,7 @@
         />
       </div>
 
-      <div class="max-h-60 overflow-y-auto">
+      <div class="graph-select-options">
         <button
           v-for="(option, index) in filteredOptions"
           :id="optionId(option.value)"
@@ -66,20 +66,20 @@
           :aria-selected="option.value === modelValue"
           :disabled="option.disabled"
           :data-graph-select-option="option.value"
-          class="graph-select-option group flex min-h-8 w-full items-center gap-2 px-2 text-left hover:bg-chrome-mid focus-visible:bg-chrome-mid focus-visible:outline-none disabled:opacity-40"
+          class="graph-select-option group"
           @mouseenter="activeIndex = index"
           @focus="activeIndex = index"
           @click="choose(option)"
         >
           <span
-            class="grid size-4 shrink-0 place-items-center border"
-            :class="option.value === modelValue ? 'border-accent/40 bg-accent-soft text-accent' : 'border-rule-light text-transparent'"
+            class="graph-select-check"
+            :class="{ 'graph-select-check-active': option.value === modelValue }"
           >
             <IconCheck :size="9" />
           </span>
           <span class="min-w-0 flex-1">
-            <span class="block truncate text-[9px] font-medium text-ink-2">{{ option.label }}</span>
-            <span v-if="option.hint" class="block truncate font-mono text-[7px] text-ink-4">
+            <span class="graph-select-option-label">{{ option.label }}</span>
+            <span v-if="option.hint" class="graph-select-option-hint">
               {{ option.hint }}
             </span>
           </span>
@@ -87,7 +87,7 @@
 
         <p
           v-if="!filteredOptions.length"
-          class="px-3 py-5 text-center text-[8px] text-ink-4"
+          class="px-3 py-7 text-center text-[11px] text-ink-4"
         >
           No matching options
         </p>
@@ -119,7 +119,7 @@ const props = defineProps({
   variant: {
     type: String,
     default: 'field',
-    validator: value => ['toolbar', 'field', 'card'].includes(value),
+    validator: value => ['toolbar', 'field', 'card', 'quiet', 'property'].includes(value),
   },
   menuMinWidth: { type: Number, default: 148 },
 })
@@ -309,22 +309,28 @@ let graphSelectCounter = 0
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 5px;
-  border: 1px solid var(--color-rule-light);
-  border-radius: 0;
+  justify-content: space-between;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: var(--color-surface);
-  color: var(--color-ink-3);
+  color: var(--color-ink-2);
+  font-weight: 520;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .graph-select-trigger:hover {
-  border-color: var(--color-rule);
+  background: var(--color-chrome-mid);
   color: var(--color-ink);
 }
 
 .graph-select-trigger:focus-visible {
-  border-color: var(--color-accent);
-  outline: 1px solid var(--color-accent);
-  outline-offset: 0;
+  border-color: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 1px;
 }
 
 .graph-select-trigger:disabled {
@@ -332,26 +338,142 @@ let graphSelectCounter = 0
 }
 
 .graph-select-toolbar {
-  height: 24px;
-  padding: 0 6px;
-  font-family: var(--font-mono);
-  font-size: 7px;
+  height: 30px;
+  padding: 0 9px;
+  border-color: var(--color-rule-light);
+  background: var(--color-surface);
+  font-size: 11px;
 }
 
 .graph-select-field {
   width: 100%;
-  min-height: 29px;
-  padding: 0 8px;
-  background: var(--color-chrome-high);
-  font-size: 10px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-color: var(--color-rule);
+  background: var(--color-surface);
+  font-size: 12px;
   color: var(--color-ink-2);
 }
 
 .graph-select-card {
-  height: 20px;
-  padding: 0 5px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  font-size: 10px;
+}
+
+.graph-select-quiet {
+  min-height: 30px;
+  padding: 0 8px;
+  background: transparent;
+  font-size: 11px;
+}
+
+.graph-select-property {
+  min-height: 32px;
+  padding: 0 9px;
+  border-color: var(--color-rule-light);
+  background: var(--color-chrome-high);
+  font-size: 11px;
+}
+
+.graph-select-menu {
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: var(--color-surface);
+  padding: 4px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+.graph-select-search-wrap {
+  margin: 0 0 4px;
+  padding: 3px 3px 6px;
+  border-bottom: 1px solid var(--color-rule-light);
+}
+
+.graph-select-search {
+  width: 100%;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-chrome-high);
+  padding: 0 10px 0 31px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+}
+
+.graph-select-search::placeholder {
+  color: var(--color-ink-4);
+}
+
+.graph-select-search:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.graph-select-options {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.graph-select-option {
+  display: flex;
+  min-height: 38px;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.graph-select-option:hover,
+.graph-select-option:focus-visible {
+  background: var(--color-chrome-mid);
+  outline: none;
+}
+
+.graph-select-option:disabled {
+  opacity: 0.4;
+}
+
+.graph-select-check {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--color-rule-light);
+  border-radius: 4px;
+  color: transparent;
+}
+
+.graph-select-check-active {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-rule));
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.graph-select-option-label {
+  display: block;
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: 12px;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-select-option-hint {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--color-ink-4);
   font-family: var(--font-mono);
-  font-size: 6px;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .graph-select-chevron {

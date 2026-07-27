@@ -3,65 +3,76 @@
     <div
       v-if="open"
       data-graph-create-dialog
-      class="fixed inset-0 z-[120] grid place-items-center bg-black/30 p-3"
+      class="create-overlay"
       @click.self="$emit('close')"
     >
       <form
-        class="w-full max-w-[470px] border border-rule bg-surface text-ink shadow-2xl"
+        ref="dialog"
+        class="create-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="graph-create-title"
         @submit.prevent="submit"
-        @keydown.esc.prevent="$emit('close')"
+        @keydown.esc.prevent.stop="close"
+        @keydown.tab="trapFocus"
       >
-        <header class="flex h-10 items-center border-b border-rule-light px-3">
-          <IconSquareRoundedPlus :size="14" class="mr-2 text-accent" />
-          <h2 id="graph-create-title" class="text-[11px] font-semibold">Add to the business graph</h2>
+        <header class="create-header">
+          <div>
+            <span>Add to the graph</span>
+            <h2 id="graph-create-title">Create {{ human(draft.kind) }}</h2>
+          </div>
           <button
             type="button"
-            class="ml-auto grid size-7 place-items-center text-ink-4 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            aria-label="Close"
-            @click="$emit('close')"
+            data-graph-control="create-close"
+            aria-label="Close create dialog"
+            @click="close"
           >
-            <IconX :size="13" />
+            <IconX :size="16" />
           </button>
         </header>
 
-        <div class="grid gap-3 p-4">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <span class="create-label">Kind</span>
+        <div v-if="error" data-graph-create-error role="alert" class="create-error">
+          <IconAlertTriangle :size="15" />
+          <span>{{ error }}</span>
+        </div>
+
+        <div class="create-scroll">
+          <div class="create-routing">
+            <label>
+              <span>Kind</span>
               <GraphSelect
                 v-model="draft.kind"
                 data-create-kind
+                data-graph-control="create-kind"
                 variant="field"
                 aria-label="Graph item kind"
                 :options="kinds"
-                :menu-min-width="220"
+                :menu-min-width="280"
                 searchable
                 search-placeholder="Find an entity kind"
               />
-            </div>
-            <div>
-              <span class="create-label">Scope</span>
+            </label>
+            <label>
+              <span>Scope</span>
               <GraphSelect
                 v-model="draft.scopeId"
                 data-create-scope
+                data-graph-control="create-scope"
                 variant="field"
                 aria-label="Physical graph scope"
                 :options="scopeOptions"
-                :menu-min-width="240"
+                :menu-min-width="280"
               />
-            </div>
+            </label>
           </div>
 
-          <label>
-            <span class="create-label">Title</span>
+          <label class="create-title-field">
+            <span>Title</span>
             <input
               ref="titleInput"
               v-model="draft.title"
               data-create-title
-              class="create-control"
+              data-graph-control="create-title"
               type="text"
               autocomplete="off"
               placeholder="What should the team recognize this as?"
@@ -69,81 +80,108 @@
             />
           </label>
 
-          <div v-if="draft.kind === 'issue'" class="grid grid-cols-2 gap-3">
-            <div>
-              <span class="create-label">Status</span>
+          <div v-if="draft.kind === 'issue'" class="create-issue-properties">
+            <label>
+              <span>Status</span>
               <GraphSelect
                 v-model="draft.status"
                 data-create-status
-                variant="field"
+                data-graph-control="create-status"
+                variant="property"
                 aria-label="Initial issue status"
                 :options="statuses"
               />
-            </div>
-            <div>
-              <span class="create-label">Priority</span>
+            </label>
+            <label>
+              <span>Priority</span>
               <GraphSelect
                 v-model="draft.priority"
                 data-create-priority
-                variant="field"
+                data-graph-control="create-priority"
+                variant="property"
                 aria-label="Initial issue priority"
                 :options="priorities"
               />
-            </div>
+            </label>
           </div>
 
-          <label v-else>
-            <span class="create-label">Summary <span class="normal-case tracking-normal text-ink-4">optional</span></span>
-            <input
-              v-model="draft.summary"
-              data-create-summary
-              class="create-control"
-              type="text"
-              placeholder="One retrieval hint for people and agents"
-            />
-          </label>
-
-          <label>
-            <span class="create-label">Tags <span class="normal-case tracking-normal text-ink-4">comma separated</span></span>
-            <input
-              v-model="draft.tags"
-              data-create-tags
-              class="create-control"
-              type="text"
-              placeholder="heor, evidence, client"
-            />
-          </label>
-
-          <label>
-            <span class="create-label">Working note <span class="normal-case tracking-normal text-ink-4">Markdown</span></span>
-            <textarea
-              v-model="draft.body"
-              data-create-body
-              class="create-control min-h-28 resize-y py-2"
-              placeholder="Context, acceptance criteria, rationale, or notes"
-            />
-          </label>
-        </div>
-
-        <footer class="flex h-12 items-center gap-3 border-t border-rule bg-chrome-high px-4">
-          <label class="flex items-center gap-2 text-[9px] text-ink-3">
-            <input v-model="createAnother" data-create-another type="checkbox" class="accent-[var(--color-accent)]" />
-            Create another
-          </label>
           <button
             type="button"
-            class="ml-auto h-7 px-3 text-[9px] font-semibold text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            @click="$emit('close')"
+            data-graph-control="create-toggle-context"
+            class="create-context-toggle"
+            :aria-expanded="detailsOpen"
+            @click="detailsOpen = !detailsOpen"
+          >
+            <span>
+              <strong>{{ detailsOpen ? 'Hide context' : 'Add context' }}</strong>
+              <small>Summary, tags, and Markdown working note</small>
+            </span>
+            <IconChevronDown :size="15" :class="{ 'rotate-180': detailsOpen }" />
+          </button>
+
+          <div v-if="detailsOpen" class="create-details">
+            <label v-if="draft.kind !== 'issue'" class="create-field">
+              <span>Retrieval summary</span>
+              <input
+                v-model="draft.summary"
+                data-create-summary
+                data-graph-control="create-summary"
+                type="text"
+                placeholder="One concise hint for people and agents"
+              />
+            </label>
+
+            <label class="create-field">
+              <span>Tags <small>comma separated</small></span>
+              <input
+                v-model="draft.tags"
+                data-create-tags
+                data-graph-control="create-tags"
+                type="text"
+                placeholder="heor, evidence, client"
+              />
+            </label>
+
+            <div class="create-note">
+              <span>Working note <small>Markdown</small></span>
+              <GraphMarkdownEditor
+                v-model="draft.body"
+                data-create-body
+                data-graph-control="create-working-note"
+                :min-height="210"
+                control-id="create-working-note"
+                aria-label="Initial working note in Markdown"
+                placeholder="Add context, acceptance criteria, rationale, or notes…"
+              />
+            </div>
+          </div>
+        </div>
+
+        <footer class="create-footer">
+          <GraphCheckbox
+            v-model="createAnother"
+            data-create-another
+            data-graph-control="create-another"
+          >
+            Create another
+          </GraphCheckbox>
+          <button
+            type="button"
+            data-graph-control="create-cancel"
+            class="create-cancel"
+            @click="close"
           >
             Cancel
           </button>
           <button
             type="submit"
             data-create-submit
-            class="h-7 border border-accent bg-accent px-3 text-[9px] font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+            data-graph-control="create-submit"
+            class="create-submit"
             :disabled="saving || !draft.title.trim() || !draft.scopeId"
           >
-            {{ saving ? 'Creating…' : `Create ${human(draft.kind)}` }}
+            <span>{{ saving ? 'Creating…' : `Create ${human(draft.kind)}` }}</span>
+            <kbd v-if="!saving">↵</kbd>
           </button>
         </footer>
       </form>
@@ -153,7 +191,9 @@
 
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { IconSquareRoundedPlus, IconX } from '@tabler/icons-vue'
+import { IconAlertTriangle, IconChevronDown, IconX } from '@tabler/icons-vue'
+import GraphCheckbox from './GraphCheckbox.vue'
+import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphSelect from './GraphSelect.vue'
 
 const props = defineProps({
@@ -162,18 +202,21 @@ const props = defineProps({
   initialKind: { type: String, default: 'issue' },
   initialStatus: { type: String, default: 'backlog' },
   saving: { type: Boolean, default: false },
+  error: { type: String, default: '' },
 })
 
 const emit = defineEmits(['close', 'create'])
+const dialog = ref(null)
 const titleInput = ref(null)
 const createAnother = ref(false)
-const kinds = [
-  { id: 'issue', label: 'Issue' },
-  { id: 'project', label: 'Project' },
-  { id: 'person', label: 'Person' },
-  { id: 'company', label: 'Company' },
-  { id: 'note', label: 'Knowledge note' },
-  { id: 'decision', label: 'Decision' },
+const detailsOpen = ref(false)
+const kinds = Object.freeze([
+  { id: 'issue', label: 'Issue', hint: 'Operational work and next actions' },
+  { id: 'project', label: 'Project', hint: 'Client or internal delivery context' },
+  { id: 'person', label: 'Person', hint: 'Team member, client, or collaborator' },
+  { id: 'company', label: 'Company', hint: 'Client, partner, or organization' },
+  { id: 'note', label: 'Knowledge note', hint: 'Reusable context and understanding' },
+  { id: 'decision', label: 'Decision', hint: 'A durable choice and its rationale' },
   { id: 'record', label: 'Record' },
   { id: 'research-question', label: 'Research question' },
   { id: 'study', label: 'Study' },
@@ -186,19 +229,36 @@ const kinds = [
   { id: 'submission', label: 'Submission' },
   { id: 'method', label: 'Method' },
   { id: 'client-request', label: 'Client request' },
-]
-const statuses = ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done']
-const priorities = ['low', 'normal', 'high', 'urgent']
+])
+const statuses = Object.freeze([
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'in-progress', label: 'In progress' },
+  { id: 'waiting', label: 'Waiting' },
+  { id: 'review', label: 'Review' },
+  { id: 'done', label: 'Done' },
+])
+const priorities = Object.freeze([
+  { id: 'urgent', label: 'Urgent' },
+  { id: 'high', label: 'High' },
+  { id: 'normal', label: 'Normal' },
+  { id: 'low', label: 'Low' },
+])
 const draft = reactive(emptyDraft())
 const scopeOptions = computed(() => props.scopes.map(scope => ({
   value: scope.id,
   label: human(scope.kind),
-  hint: scope.root,
+  hint: scopeHint(scope),
 })))
 
-watch(() => props.open, async (open) => {
-  if (!open) return
+watch(() => props.open, async open => {
+  if (!open) {
+    restoreDialogFocus()
+    return
+  }
+  rememberDialogFocus()
   Object.assign(draft, emptyDraft())
+  detailsOpen.value = false
   await nextTick()
   titleInput.value?.focus()
 })
@@ -208,7 +268,7 @@ watch(() => props.initialKind, kind => {
 })
 
 watch(() => props.initialStatus, status => {
-  if (props.open && statuses.includes(status)) draft.status = status
+  if (props.open && statuses.some(option => option.id === status)) draft.status = status
 })
 
 watch(() => props.scopes, applyDefaultScope, { immediate: true, deep: true })
@@ -257,9 +317,53 @@ function submit() {
     reset() {
       const { kind, scopeId, status, priority } = draft
       Object.assign(draft, emptyDraft(), { kind, scopeId, status, priority })
+      detailsOpen.value = false
       void nextTick(() => titleInput.value?.focus())
     },
   })
+}
+
+let restoreFocusTo = null
+
+function rememberDialogFocus() {
+  restoreFocusTo = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null
+}
+
+function restoreDialogFocus() {
+  const target = restoreFocusTo
+  restoreFocusTo = null
+  void nextTick(() => target?.isConnected && target.focus())
+}
+
+function close() {
+  emit('close')
+}
+
+function trapFocus(event) {
+  const focusable = [...(dialog.value?.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  ) || [])]
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable.at(-1)
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function scopeHint(scope) {
+  const meaning = {
+    private: 'Local to this device',
+    project: 'Shared inside this project',
+    team: 'Shared across the team',
+  }[scope.kind] || 'Graph source'
+  return `${meaning} · ${scope.root}`
 }
 
 function human(value) {
@@ -268,37 +372,315 @@ function human(value) {
 </script>
 
 <style scoped>
-.create-label {
+.create-overlay {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--color-ink) 36%, transparent);
+  padding: 18px;
+}
+
+.create-dialog {
+  display: flex;
+  width: min(590px, 100%);
+  max-height: min(780px, calc(100vh - 36px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--color-ink) 22%, transparent);
+}
+
+.create-header {
+  display: flex;
+  min-height: 65px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-rule-light);
+  padding: 10px 15px 10px 19px;
+}
+
+.create-header > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.create-header span {
   display: block;
-  margin-bottom: 4px;
+  color: var(--color-accent);
   font-family: var(--font-mono);
-  font-size: 7px;
-  font-weight: 600;
-  letter-spacing: 0.11em;
-  color: var(--color-ink-4);
+  font-size: 9px;
+  font-weight: 680;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
-.create-control {
-  width: 100%;
-  min-height: 29px;
-  border: 1px solid var(--color-rule);
-  border-radius: 0;
-  background: var(--color-chrome-high);
-  padding-inline: 8px;
-  font-size: 10px;
-  color: var(--color-ink-2);
+.create-header h2 {
+  margin-top: 3px;
+  color: var(--color-ink);
+  font-size: 15px;
+  font-weight: 670;
+  letter-spacing: -0.018em;
+  text-transform: capitalize;
 }
 
-.create-control:focus-visible {
+.create-header > button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--color-ink-4);
+}
+
+.create-header > button:hover {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.create-header > button:focus-visible,
+.create-context-toggle:focus-visible,
+.create-cancel:focus-visible,
+.create-submit:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
+  outline-offset: 1px;
+}
+
+.create-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.create-error {
+  display: flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-rem) 25%, var(--color-rule));
+  background: color-mix(in srgb, var(--color-rem) 5%, var(--color-surface));
+  padding: 9px 18px;
+  color: var(--color-rem);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.create-error svg {
+  flex: 0 0 auto;
+}
+
+.create-routing,
+.create-issue-properties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.create-routing label > span,
+.create-title-field > span,
+.create-issue-properties label > span,
+.create-field > span,
+.create-note > span {
+  display: block;
+  margin: 0 0 6px 2px;
+  color: var(--color-ink-4);
+  font-size: 10px;
+  font-weight: 680;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.create-title-field {
+  display: block;
+  margin-top: 18px;
+}
+
+.create-title-field input {
+  width: 100%;
+  height: 45px;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: var(--color-chrome-high);
+  padding: 0 13px;
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 570;
+}
+
+.create-title-field input::placeholder,
+.create-field input::placeholder {
+  color: var(--color-ink-4);
+  font-weight: 400;
+}
+
+.create-title-field input:focus-visible,
+.create-field input:focus-visible {
   border-color: var(--color-accent);
-  outline: 1px solid var(--color-accent);
-  outline-offset: 0;
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 1px;
+}
+
+.create-issue-properties {
+  margin-top: 14px;
+}
+
+.create-context-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  border-top: 1px solid var(--color-rule-light);
+  border-bottom: 1px solid var(--color-rule-light);
+  padding: 7px 5px;
+  text-align: left;
+}
+
+.create-context-toggle strong,
+.create-context-toggle small {
+  display: block;
+}
+
+.create-context-toggle strong {
+  color: var(--color-ink-2);
+  font-size: 11px;
+  font-weight: 640;
+}
+
+.create-context-toggle small {
+  margin-top: 3px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+}
+
+.create-context-toggle svg {
+  color: var(--color-ink-4);
+  transition: transform 120ms ease;
+}
+
+.create-details {
+  padding-top: 17px;
+}
+
+.create-field {
+  display: block;
+}
+
+.create-field + .create-field,
+.create-note {
+  margin-top: 15px;
+}
+
+.create-field > span small,
+.create-note > span small {
+  margin-left: 5px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.create-field input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid var(--color-rule-light);
+  border-radius: 6px;
+  background: var(--color-chrome-high);
+  padding: 0 11px;
+  color: var(--color-ink-2);
+  font-size: 12px;
+}
+
+.create-footer {
+  display: flex;
+  min-height: 59px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--color-rule);
+  background: var(--color-chrome-high);
+  padding: 9px 14px;
+}
+
+.create-cancel,
+.create-submit {
+  min-height: 35px;
+  border-radius: 5px;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.create-cancel {
+  margin-left: auto;
+  color: var(--color-ink-3);
+}
+
+.create-cancel:hover {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.create-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--color-accent);
+  color: var(--color-accent-ink, white);
+}
+
+.create-submit:hover {
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink));
+}
+
+.create-submit:disabled {
+  cursor: default;
+  opacity: 0.42;
+  filter: none;
+}
+
+.create-submit kbd {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+@media (max-width: 560px) {
+  .create-overlay {
+    padding: 0;
+  }
+
+  .create-dialog {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .create-routing,
+  .create-issue-properties {
+    grid-template-columns: 1fr;
+  }
+
+  .create-footer :deep(.graph-checkbox-control) {
+    font-size: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
-    scroll-behavior: auto !important;
+  .create-context-toggle svg {
+    transition: none;
   }
 }
 </style>
