@@ -265,6 +265,7 @@
                 data-board-columns-root
               >
                 <button
+                  ref="columnsTrigger"
                   type="button"
                   data-board-columns-trigger
                   data-graph-control="board-columns"
@@ -272,28 +273,35 @@
                   title="Visible columns"
                   aria-label="Choose visible board columns"
                   :aria-expanded="columnsMenu"
-                  @click="columnsMenu = !columnsMenu"
+                  @click="toggleColumnsMenu"
                 >
                   <IconColumns3 :size="14" />
                 </button>
-                <div v-if="columnsMenu" data-board-columns-menu class="graph-columns-menu">
-                  <p>Visible columns</p>
-                  <button
-                    v-for="status in boardStatuses"
-                    :key="status.id"
-                    type="button"
-                    :data-graph-control="`board-column-${status.id}`"
-                    @click="toggleBoardStatus(status.id)"
+                <Teleport to="body">
+                  <div
+                    v-if="columnsMenu"
+                    data-board-columns-menu
+                    class="graph-columns-menu"
+                    :style="columnsMenuStyle"
                   >
-                    <span
-                      class="graph-checkbox"
-                      :class="{ 'graph-checkbox-checked': visibleBoardStatuses.includes(status.id) }"
+                    <p>Visible columns</p>
+                    <button
+                      v-for="status in boardStatuses"
+                      :key="status.id"
+                      type="button"
+                      :data-graph-control="`board-column-${status.id}`"
+                      @click="toggleBoardStatus(status.id)"
                     >
-                      <IconCheck v-if="visibleBoardStatuses.includes(status.id)" :size="11" />
-                    </span>
-                    {{ status.label }}
-                  </button>
-                </div>
+                      <span
+                        class="graph-checkbox"
+                        :class="{ 'graph-checkbox-checked': visibleBoardStatuses.includes(status.id) }"
+                      >
+                        <IconCheck v-if="visibleBoardStatuses.includes(status.id)" :size="11" />
+                      </span>
+                      {{ status.label }}
+                    </button>
+                  </div>
+                </Teleport>
               </div>
             </div>
           </div>
@@ -454,7 +462,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
   IconCheck,
@@ -529,6 +537,8 @@ const priorityFilter = ref('')
 const boardGroup = ref('status')
 const boardSort = ref('rank')
 const columnsMenu = ref(false)
+const columnsTrigger = ref(null)
+const columnsMenuStyle = ref({})
 const boardStatuses = [
   { id: 'backlog', label: 'Backlog' },
   { id: 'plan', label: 'Plan' },
@@ -1127,8 +1137,13 @@ function refresh() {
 function onDocumentPointerDown(event) {
   const scopeRoot = root.value?.querySelector('[data-graph-scope-root]')
   if (scopeMenu.value && !scopeRoot?.contains(event.target)) scopeMenu.value = false
-  const columnsRoot = root.value?.querySelector('[data-board-columns-root]')
-  if (columnsMenu.value && !columnsRoot?.contains(event.target)) columnsMenu.value = false
+  if (
+    columnsMenu.value
+    && !event.target.closest?.('[data-board-columns-root]')
+    && !event.target.closest?.('[data-board-columns-menu]')
+  ) {
+    closeColumnsMenu()
+  }
 }
 
 function onKeydown(event) {
@@ -1149,7 +1164,7 @@ function onKeydown(event) {
   }
   if (event.key === 'Escape') {
     if (scopeMenu.value) scopeMenu.value = false
-    else if (columnsMenu.value) columnsMenu.value = false
+    else if (columnsMenu.value) closeColumnsMenu()
     else if (deleteOpen.value) closeDeleteDialog()
     else if (workOpen.value) workOpen.value = false
     else if (createOpen.value) createOpen.value = false
@@ -1208,6 +1223,35 @@ function countFor(section) {
   if (!definition?.kinds?.length) return graph.nodes.length
   const kinds = new Set(definition.kinds)
   return graph.nodes.filter(node => kinds.has(node.kind)).length
+}
+
+async function toggleColumnsMenu() {
+  if (columnsMenu.value) {
+    closeColumnsMenu()
+    return
+  }
+  columnsMenu.value = true
+  window.addEventListener('resize', positionColumnsMenu)
+  window.addEventListener('scroll', positionColumnsMenu, true)
+  await nextTick()
+  positionColumnsMenu()
+}
+
+function closeColumnsMenu() {
+  if (!columnsMenu.value) return
+  columnsMenu.value = false
+  window.removeEventListener('resize', positionColumnsMenu)
+  window.removeEventListener('scroll', positionColumnsMenu, true)
+}
+
+function positionColumnsMenu() {
+  const rect = columnsTrigger.value?.getBoundingClientRect()
+  if (!rect) return
+  const width = 180
+  columnsMenuStyle.value = {
+    top: `${rect.bottom + 4}px`,
+    left: `${Math.max(6, Math.min(rect.right - width, window.innerWidth - width - 6))}px`,
+  }
 }
 
 function toggleBoardStatus(id) {
@@ -1276,6 +1320,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearTimeout(searchTimer)
+  closeColumnsMenu()
   document.removeEventListener('pointerdown', onDocumentPointerDown)
   graph.stop()
 })
@@ -1829,9 +1874,10 @@ onUnmounted(() => {
 }
 
 .graph-columns-menu {
-  top: 35px;
-  right: 0;
+  position: fixed;
   width: 180px;
+  max-height: min(320px, calc(100vh - 80px));
+  overflow-y: auto;
   padding: 5px;
 }
 

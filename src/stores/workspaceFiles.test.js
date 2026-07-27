@@ -16,12 +16,14 @@ vi.mock('../services/workspaceFileOperations.js', () => ({
 
 import * as api from '../services/fileIndex.js'
 import { listWorkspaceDirectory } from '../services/workspaceFileOperations.js'
+import { loadIpcFixture } from '../test/ipcFixtures.js'
 import { useWorkspaceFilesStore } from './workspaceFiles.js'
 
-const files = [
-  { path: '/w/new.md', name: 'new.md', relativePath: 'new.md', mtime: 30, size: 20, textReadable: true },
-  { path: '/w/src/old.rs', name: 'old.rs', relativePath: 'src/old.rs', mtime: 10, size: 10, textReadable: true },
-]
+// Golden Rust payloads: recent-first index of /w/new.md and /w/src/old.rs, a
+// /w directory listing (docs/, new.md), and a content-search report whose only
+// match hits src/old.rs.
+const files = loadIpcFixture('file_index_files')
+const searchReport = loadIpcFixture('file_index_search')
 
 describe('workspace files store', () => {
   beforeEach(() => {
@@ -30,32 +32,10 @@ describe('workspace files store', () => {
     api.openWorkspaceIndex.mockResolvedValue(files)
     api.listIndexedFiles.mockResolvedValue(files)
     api.filterIndexedFiles.mockResolvedValue([{ file: files[1], score: 44 }])
-    api.refreshWorkspaceIndex.mockResolvedValue({ added: 0, changed: 1, removed: 0, total: 2 })
+    api.refreshWorkspaceIndex.mockResolvedValue(loadIpcFixture('file_index_refresh'))
     api.beginContentSearch.mockResolvedValue({ requestGeneration: 1, workspaceGeneration: 1 })
-    api.searchIndexedContent.mockResolvedValue({
-      matches: [{ path: files[1].path, relativePath: files[1].relativePath, line: 4, column: 2, excerpt: 'needle' }],
-      cancelled: false,
-      truncated: false,
-    })
-    listWorkspaceDirectory.mockResolvedValue([
-      {
-        path: '/w/docs',
-        relativePath: 'docs',
-        name: 'docs',
-        isDirectory: true,
-        mtime: 20,
-        size: 0,
-      },
-      {
-        path: '/w/new.md',
-        relativePath: 'new.md',
-        name: 'new.md',
-        isDirectory: false,
-        mtime: 30,
-        size: 20,
-        textReadable: true,
-      },
-    ])
+    api.searchIndexedContent.mockResolvedValue(searchReport)
+    listWorkspaceDirectory.mockResolvedValue(loadIpcFixture('workspace_file_list_directory'))
   })
 
   it('opens a workspace as a recent-first review inbox', async () => {
@@ -184,7 +164,7 @@ describe('workspace files store', () => {
       replaceAll: false,
       files: [{
         ...files[1],
-        mtime: 50,
+        mtime: files[0].mtime + 60_000,
         size: 14,
       }],
     })
@@ -203,7 +183,7 @@ describe('workspace files store', () => {
       path: '/w/docs/new.md',
       relativePath: 'docs/new.md',
       name: 'new.md',
-      mtime: 60,
+      mtime: files[0].mtime + 120_000,
       size: 4,
       textReadable: true,
     }
@@ -232,6 +212,6 @@ describe('workspace files store', () => {
       requestGeneration: 1,
       workspaceGeneration: 1,
     })
-    expect(store.contentMatches[0].excerpt).toBe('needle')
+    expect(store.contentMatches[0].excerpt).toBe(searchReport.matches[0].excerpt)
   })
 })

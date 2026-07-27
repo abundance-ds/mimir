@@ -12,25 +12,20 @@ import {
   loadLauncherConfig,
   saveLauncherConfig,
 } from '../services/launchers.js'
+import { loadIpcFixture } from '../test/ipcFixtures.js'
 import { useLaunchersStore } from './launchers.js'
+
+// Golden Rust payloads: codex installed, claude missing with a diagnostic;
+// presets review (codex), claude, terminal.
+const detectedAgents = loadIpcFixture('launcher_detect_agents')
+const launcherConfig = loadIpcFixture('launcher_load_config')
 
 describe('launchers store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.resetAllMocks()
-    detectAgents.mockResolvedValue([
-      { id: 'codex', title: 'Codex', installed: true, binaryPath: '/bin/codex' },
-      { id: 'claude', title: 'Claude', installed: false, diagnostic: 'not found' },
-    ])
-    loadLauncherConfig.mockResolvedValue({
-      path: '/home/me/.mim/launchers.json',
-      diagnostic: null,
-      presets: [
-        { id: 'review', title: 'Review', kind: 'agent', agentId: 'codex', args: ['review'] },
-        { id: 'claude', title: 'Claude', kind: 'agent', agentId: 'claude', args: [] },
-        { id: 'terminal', title: 'Terminal', kind: 'terminal', args: [] },
-      ],
-    })
+    detectAgents.mockResolvedValue(detectedAgents)
+    loadLauncherConfig.mockResolvedValue(launcherConfig)
   })
 
   it('loads detection and hackable presets concurrently', async () => {
@@ -38,11 +33,11 @@ describe('launchers store', () => {
     await store.load()
 
     expect(store.ready).toBe(true)
-    expect(store.configPath).toBe('/home/me/.mim/launchers.json')
+    expect(store.configPath).toBe(launcherConfig.path)
     expect(store.availablePresets.map((preset) => preset.id)).toEqual(['review', 'terminal'])
     expect(store.unavailablePresets[0]).toMatchObject({
       id: 'claude',
-      unavailableReason: 'not found',
+      unavailableReason: detectedAgents[1].diagnostic,
     })
   })
 

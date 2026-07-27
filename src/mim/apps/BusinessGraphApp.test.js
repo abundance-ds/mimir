@@ -262,10 +262,11 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.find('[data-graph-scope-menu]').exists()).toBe(false)
 
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
-    expect(wrapper.find('[data-board-columns-menu]').exists()).toBe(true)
+    await flushPromises()
+    expect(document.querySelector('[data-board-columns-menu]')).not.toBeNull()
     outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     await flushPromises()
-    expect(wrapper.find('[data-board-columns-menu]').exists()).toBe(false)
+    expect(document.querySelector('[data-board-columns-menu]')).toBeNull()
     wrapper.unmount()
   })
 
