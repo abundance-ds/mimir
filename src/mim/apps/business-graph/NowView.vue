@@ -1,140 +1,144 @@
 <template>
   <section data-graph-now class="now-view" aria-label="Now">
-    <header class="now-header">
-      <div>
-        <span class="now-kicker">NOW / GRAPH WIRE</span>
-        <strong>What changed</strong>
-      </div>
-      <button
-        v-if="events.length"
-        type="button"
-        data-graph-control="now-mark-seen"
-        @click="$emit('seen', events[0])"
-      >
-        Caught up to {{ compactTime(events[0].timestamp) }}
-      </button>
-    </header>
-
-    <section v-if="waiting.length" class="waiting-block">
-      <header>
-        <span>WAITING ON YOU</span>
-        <strong>{{ waiting.length }}</strong>
-      </header>
+    <section v-if="waiting.length" class="now-waiting">
+      <h2>Waiting on you · {{ waiting.length }}</h2>
       <button
         v-for="issue in waiting"
         :key="issue.id"
         type="button"
-        class="waiting-row"
+        class="now-waiting-row"
         :data-now-waiting="issue.id"
         @click="$emit('open', issue.id)"
       >
-        <span class="waiting-marker">?</span>
         <strong>{{ issue.title || 'Untitled issue' }}</strong>
-        <span>{{ issue.waitingFor || (issue.needsDetail ? 'Needs detail' : 'Decision needed') }}</span>
-        <span>{{ projectLabel(issue) }}</span>
+        <span class="now-waiting-reason">{{ waitingReason(issue) }}</span>
+        <span class="now-row-context">{{ projectLabel(issue) }}</span>
       </button>
     </section>
 
-    <section v-if="activeAgents.length" class="agent-wire">
-      <header>
-        <span>AGENTS</span>
-        <strong>{{ activeAgents.length }} active</strong>
-      </header>
+    <div v-if="unseenCount" class="now-caught-up">
+      <span>{{ unseenCount }} since {{ compactTime(seenAt) }}</span>
       <button
-        v-for="activity in activeAgents"
-        :key="activity.id"
         type="button"
-        @click="$emit('open-activity', activity.id)"
+        data-graph-control="now-mark-seen"
+        @click="$emit('seen', events[0].timestamp)"
       >
-        <time>{{ compactTime(activity.updatedAt) }}</time>
-        <span class="agent-status">{{ statusCode(activity.status) }}</span>
-        <strong>{{ activity.title }}</strong>
-        <span>{{ activity.status.replace('-', ' ') }}</span>
+        Mark caught up
       </button>
-    </section>
+    </div>
 
-    <div v-if="events.length" class="event-wire">
-      <template v-for="(event, index) in events" :key="event.id">
-        <div v-if="isSeenBoundary(index)" class="seen-divider">
-          <span>Since {{ compactTime(seenAt) }}</span>
-        </div>
-        <article
-          class="event-row"
-          :class="{ expanded: expanded.includes(event.id) }"
-          :data-graph-event="event.id"
-        >
-          <button
-            type="button"
-            class="event-main"
-            :aria-label="`${event.summary}. ${event.actor?.label || 'Unknown author'}`"
-            @click="$emit('open', event.nodeId)"
-          >
-            <time>{{ compactTime(event.timestamp) }}</time>
-            <span class="event-code">{{ eventCode(event.eventType) }}</span>
-            <strong>{{ event.summary }}</strong>
-            <span class="event-source">{{ sourceLabel(event) }}</span>
-            <span class="event-author" :title="event.actor?.label">
-              {{ event.actor?.initials || 'EX' }}
-            </span>
-          </button>
-          <button
-            v-if="event.changes?.length || event.data?.deliverable"
-            type="button"
-            class="event-expand"
-            :aria-expanded="expanded.includes(event.id)"
-            :aria-label="`Inspect ${event.summary}`"
-            @click="toggle(event.id)"
-          >
-            {{ expanded.includes(event.id) ? '−' : '+' }}
-          </button>
-          <div v-if="expanded.includes(event.id)" class="event-detail">
-            <dl v-if="event.changes?.length">
-              <div v-for="change in event.changes" :key="change.field">
-                <dt>{{ human(change.field) }}</dt>
-                <dd>
-                  <span>{{ compactValue(change.before) }}</span>
-                  <b>→</b>
-                  <span>{{ compactValue(change.after) }}</span>
-                </dd>
-              </div>
-            </dl>
-            <p v-if="event.data?.deliverable">
-              Deliverable · {{ event.data.deliverable.label || event.data.deliverable.path }}
-            </p>
-            <p class="event-provenance">
-              {{ event.actor?.label || 'External edit' }} · {{ event.action }} · revision
-              {{ event.graphRevision }}
-            </p>
+    <div v-if="dayGroups.length" class="now-stream">
+      <template v-for="group in dayGroups" :key="group.label">
+        <div class="now-day">{{ group.label }}</div>
+        <template v-for="item in group.items" :key="item.event.id">
+          <div v-if="item.boundary" class="now-seen">
+            <span>since {{ compactTime(seenAt) }}</span>
           </div>
-        </article>
+          <article
+            class="now-event"
+            :class="{ 'now-event-expanded': expanded.includes(item.event.id) }"
+          >
+            <button
+              type="button"
+              class="now-event-main"
+              :data-graph-event="item.event.id"
+              @click="$emit('open', item.event.nodeId)"
+            >
+              <time>{{ compactTime(item.event.timestamp) }}</time>
+              <span class="now-author" :title="item.event.actor?.label || 'External edit'">
+                {{ item.event.actor?.initials || 'EX' }}
+              </span>
+              <strong>{{ item.event.summary }}</strong>
+              <span class="now-row-context">{{ sourceLabel(item.event) }}</span>
+            </button>
+            <button
+              v-if="hasDetail(item.event)"
+              type="button"
+              class="now-event-expand"
+              :data-now-expand="item.event.id"
+              :aria-expanded="expanded.includes(item.event.id)"
+              :aria-label="`Inspect event: ${item.event.summary}`"
+              @click="toggle(item.event.id)"
+            >
+              <IconChevronDown :size="12" :class="{ rotated: expanded.includes(item.event.id) }" />
+            </button>
+            <div v-if="expanded.includes(item.event.id)" class="now-event-detail">
+              <dl v-if="item.event.changes?.length">
+                <div v-for="change in item.event.changes" :key="change.field">
+                  <dt>{{ human(change.field) }}</dt>
+                  <dd>
+                    <span>{{ compactValue(change.before) }}</span>
+                    <b>→</b>
+                    <span>{{ compactValue(change.after) }}</span>
+                  </dd>
+                </div>
+              </dl>
+              <p v-if="item.event.data?.deliverable" class="now-event-deliverable">
+                Deliverable ·
+                {{ item.event.data.deliverable.label || item.event.data.deliverable.path }}
+              </p>
+              <p class="now-event-provenance">
+                {{ item.event.actor?.label || 'External edit' }}
+                · {{ item.event.action }}
+                · revision {{ item.event.graphRevision }}
+              </p>
+            </div>
+          </article>
+        </template>
       </template>
     </div>
 
-    <div v-else class="now-empty">
+    <div v-else-if="!waiting.length" class="now-empty">
       <strong>No graph events yet</strong>
-      <p>New filings, status changes, evidence, decisions, and overdue work appear here.</p>
+      <p>Filings, status changes, decisions, evidence, and overdue work appear here.</p>
     </div>
   </section>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
+import { IconChevronDown } from '@tabler/icons-vue'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
   waiting: { type: Array, default: () => [] },
-  activities: { type: Array, default: () => [] },
   nodes: { type: Array, default: () => [] },
   seenAt: { type: String, default: '' },
 })
 
-defineEmits(['open', 'open-activity', 'seen'])
+const emit = defineEmits(['open', 'seen'])
 const expanded = ref([])
-const activeAgents = computed(() => props.activities.filter(activity => (
-  activity.kind === 'agent'
-  && ['starting', 'working', 'needs-input'].includes(activity.status)
-)))
 const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
+
+const unseenCount = computed(() => {
+  if (!props.seenAt) return 0
+  return props.events.filter(event => event.timestamp > props.seenAt).length
+})
+
+const decorated = computed(() => {
+  const boundaryIndex = props.seenAt
+    ? props.events.findIndex(event => event.timestamp <= props.seenAt)
+    : -1
+  return props.events.map((event, index) => ({
+    event,
+    boundary: index === boundaryIndex && boundaryIndex > 0,
+  }))
+})
+
+const dayGroups = computed(() => {
+  const groups = []
+  const byLabel = new Map()
+  for (const item of decorated.value) {
+    const label = dayLabel(item.event.timestamp)
+    if (!byLabel.has(label)) {
+      const group = { label, items: [] }
+      byLabel.set(label, group)
+      groups.push(group)
+    }
+    byLabel.get(label).items.push(item)
+  }
+  return groups
+})
 
 function toggle(id) {
   expanded.value = expanded.value.includes(id)
@@ -142,65 +146,54 @@ function toggle(id) {
     : [...expanded.value, id]
 }
 
-function isSeenBoundary(index) {
-  if (!props.seenAt) return false
-  const current = props.events[index]
-  const previous = props.events[index - 1]
-  return current?.timestamp <= props.seenAt
-    && (!previous || previous.timestamp > props.seenAt)
+function hasDetail(event) {
+  return Boolean(event.changes?.length || event.data?.deliverable)
+}
+
+function dayLabel(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Earlier'
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const day = new Date(date)
+  day.setHours(0, 0, 0, 0)
+  const diff = Math.round((today.getTime() - day.getTime()) / 86_400_000)
+  if (diff <= 0) return 'Today'
+  if (diff === 1) return 'Yesterday'
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+  }).format(date)
 }
 
 function compactTime(value) {
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value || '').slice(11, 16) || '—'
+  if (Number.isNaN(date.getTime())) return String(value || '').slice(11, 16)
   return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date)
 }
 
-function eventCode(value) {
-  return {
-    created: 'NEW',
-    updated: 'UPD',
-    deleted: 'DEL',
-    restored: 'RST',
-    'status-changed': 'STA',
-    'waiting-cleared': 'CLR',
-    'deliverable-added': 'OUT',
-    'decision-recorded': 'DEC',
-    'evidence-captured': 'EVD',
-    'next-action-created': 'NXT',
-    'became-overdue': 'OVR',
-  }[value] || 'CHG'
-}
-
-function statusCode(value) {
-  return {
-    starting: 'STR',
-    working: 'RUN',
-    'needs-input': 'YOU',
-  }[value] || 'IDL'
-}
-
-function sourceLabel(event) {
-  if (event.nodeKind === 'issue') {
-    const project = props.nodes.find(node => (
-      node.id === event.nodeId
-        ? false
-        : node.kind === 'project'
-          && props.nodes.find(candidate => candidate.id === event.nodeId)
-            ?.relations?.some(edge => edge.relation === 'part_of' && edge.target === node.id)
-    ))
-    if (project) return project.slug || project.title
-  }
-  return human(event.nodeKind)
+function waitingReason(issue) {
+  if (issue.waitingFor) return `waiting for ${issue.waitingFor}`
+  if (issue.needsDetail) return 'needs detail'
+  return 'decision needed'
 }
 
 function projectLabel(issue) {
   if (!issue.projectId) return ''
   const project = byId.value.get(issue.projectId)
-  return project?.slug || project?.title || ''
+  return project?.slug || project?.properties?.slug || project?.title || ''
+}
+
+function sourceLabel(event) {
+  if (event.nodeKind === 'issue') {
+    const issue = byId.value.get(event.nodeId)
+    if (issue) return projectLabel(issue) || human(event.nodeKind)
+  }
+  return human(event.nodeKind)
 }
 
 function compactValue(value) {
@@ -227,289 +220,252 @@ function human(value) {
   background: var(--color-surface);
 }
 
-.now-header {
-  display: flex;
-  min-height: 58px;
-  align-items: center;
-  justify-content: space-between;
+.now-waiting {
   border-bottom: 1px solid var(--color-rule);
-  padding: 8px 13px;
+  padding-bottom: 4px;
 }
 
-.now-header > div {
-  display: flex;
-  flex-direction: column;
-}
-
-.now-kicker,
-.waiting-block > header span,
-.agent-wire > header span {
-  color: var(--color-ink-4);
+.now-waiting h2 {
+  padding: 10px 13px 6px;
+  color: var(--color-ink-3);
   font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.now-header strong {
-  margin-top: 3px;
-  color: var(--color-ink);
-  font-size: 13px;
+  font-size: 9px;
   font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
-.now-header button {
-  min-height: 26px;
-  border: 1px solid var(--color-rule);
-  border-radius: 2px;
-  padding: 0 8px;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 8px;
-}
-
-.now-header button:hover,
-.now-header button:focus-visible {
-  background: var(--color-chrome-mid);
-  color: var(--color-ink);
-}
-
-.waiting-block,
-.agent-wire {
-  border-bottom: 1px solid var(--color-rule);
-}
-
-.waiting-block > header,
-.agent-wire > header {
-  display: flex;
-  min-height: 27px;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--color-rule-light);
-  background: var(--color-chrome-high);
-  padding: 0 12px;
-}
-
-.waiting-block > header strong,
-.agent-wire > header strong {
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 500;
-}
-
-.waiting-row {
-  display: grid;
-  width: 100%;
-  min-height: 34px;
-  grid-template-columns: 22px minmax(180px, 1fr) minmax(120px, 0.8fr) minmax(80px, 0.4fr);
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--color-rule-light);
-  padding: 0 12px;
-  text-align: left;
-}
-
-.waiting-row:hover,
-.waiting-row:focus-visible,
-.agent-wire button:hover,
-.agent-wire button:focus-visible {
-  background: var(--color-chrome-mid);
-}
-
-.waiting-marker {
-  color: var(--color-rem);
-  font-family: var(--font-mono);
-  font-weight: 700;
-}
-
-.waiting-row strong,
-.agent-wire button strong {
-  overflow: hidden;
-  color: var(--color-ink);
-  font-size: 10px;
-  font-weight: 620;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.waiting-row > span:not(.waiting-marker) {
-  overflow: hidden;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-wire button,
-.event-main {
+.now-waiting-row {
   display: grid;
   width: 100%;
   min-height: 32px;
-  grid-template-columns: 48px 30px minmax(180px, 1fr) minmax(90px, 0.35fr);
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.7fr) minmax(90px, 0.3fr);
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   border-bottom: 1px solid var(--color-rule-light);
-  padding: 0 12px;
+  padding: 3px 13px;
   text-align: left;
 }
 
-.agent-wire time,
-.event-main time,
-.agent-status,
-.event-code,
-.event-source,
-.event-author {
+.now-waiting-row:last-child {
+  border-bottom: 0;
+}
+
+.now-waiting-row:hover,
+.now-waiting-row:focus-visible,
+.now-event-main:hover,
+.now-event-main:focus-visible {
+  background: var(--color-chrome-mid);
+}
+
+.now-waiting-row strong {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-waiting-reason {
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-row-context {
+  overflow: hidden;
   color: var(--color-ink-4);
   font-family: var(--font-mono);
-  font-size: 8px;
-  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.agent-status {
-  color: var(--color-accent);
-  font-weight: 700;
-}
-
-.agent-wire button > span:last-child {
+.now-caught-up {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-rule-light);
+  padding: 3px 13px;
   color: var(--color-ink-3);
+  font-family: var(--font-mono);
   font-size: 9px;
 }
 
-.event-row {
+.now-caught-up button {
+  min-height: 22px;
+  border: 1px solid var(--color-rule);
+  border-radius: 2px;
+  background: var(--color-surface);
+  padding: 0 8px;
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.now-caught-up button:hover,
+.now-caught-up button:focus-visible {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.now-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--color-rule-light);
+  background: var(--color-chrome-high);
+  padding: 5px 13px 4px;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.now-event {
   position: relative;
   border-bottom: 1px solid var(--color-rule-light);
 }
 
-.event-row:hover {
-  background: var(--color-chrome-mid);
+.now-event-main {
+  display: grid;
+  width: 100%;
+  min-height: 30px;
+  grid-template-columns: 44px 26px minmax(240px, 1fr) minmax(80px, 0.25fr) 24px;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 8px 3px 13px;
+  text-align: left;
 }
 
-.event-main {
-  min-height: 31px;
-  grid-template-columns: 48px 30px minmax(190px, 1fr) minmax(70px, 0.3fr) 30px;
-  border: 0;
-  padding-right: 35px;
+.now-event-main time {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
-.event-main strong {
+.now-author {
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.now-event-main strong {
   overflow: hidden;
   color: var(--color-ink-2);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 520;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.event-code {
-  color: var(--color-ink-3);
-  font-weight: 700;
+.now-event-main:hover strong {
+  color: var(--color-ink);
 }
 
-.event-row:has(.event-code:nth-child(2)) .event-code {
-  font-variant-numeric: tabular-nums;
-}
-
-.event-author {
-  color: var(--color-ink-3);
-  font-weight: 700;
-  text-align: right;
-}
-
-.event-expand {
+.now-event-expand {
   position: absolute;
-  top: 3px;
-  right: 7px;
+  top: 4px;
+  right: 8px;
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   place-items: center;
-  border-radius: 1px;
+  border-radius: 2px;
   color: var(--color-ink-4);
-  font-family: var(--font-mono);
 }
 
-.event-expand:hover,
-.event-expand:focus-visible {
+.now-event-expand:hover,
+.now-event-expand:focus-visible {
   background: var(--color-chrome-high);
   color: var(--color-ink);
 }
 
-.event-detail {
-  border-top: 1px solid var(--color-rule-light);
-  background: color-mix(in srgb, var(--color-chrome-high) 72%, var(--color-surface));
-  padding: 8px 12px 9px 90px;
+.now-event-expand svg.rotated {
+  transform: rotate(180deg);
 }
 
-.event-detail dl {
+.now-event-detail {
+  border-top: 1px solid var(--color-rule-light);
+  background: var(--color-chrome-high);
+  padding: 8px 13px 9px 92px;
+}
+
+.now-event-detail dl {
   display: grid;
   gap: 4px;
 }
 
-.event-detail dl > div {
+.now-event-detail dl > div {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 9px;
 }
 
-.event-detail dt,
-.event-detail dd,
-.event-detail p {
+.now-event-detail dt,
+.now-event-detail dd,
+.now-event-detail p {
   color: var(--color-ink-3);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 9px;
   line-height: 1.5;
 }
 
-.event-detail dt {
+.now-event-detail dt {
   color: var(--color-ink-4);
-  text-transform: uppercase;
 }
 
-.event-detail dd {
+.now-event-detail dd {
   display: flex;
   min-width: 0;
   gap: 6px;
 }
 
-.event-detail dd span {
+.now-event-detail dd span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.event-detail dd b {
+.now-event-detail dd b {
   color: var(--color-ink-4);
   font-weight: 400;
 }
 
-.event-provenance {
+.now-event-deliverable {
+  margin-top: 5px;
+  color: var(--color-ink-2) !important;
+}
+
+.now-event-provenance {
   margin-top: 6px;
   color: var(--color-ink-4) !important;
 }
 
-.seen-divider {
+.now-seen {
   display: flex;
-  min-height: 25px;
+  min-height: 24px;
   align-items: center;
   gap: 8px;
   color: var(--color-accent);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 9px;
 }
 
-.seen-divider::before,
-.seen-divider::after {
+.now-seen::before,
+.now-seen::after {
   height: 1px;
   flex: 1 1 auto;
   background: var(--color-accent);
   content: '';
-  opacity: 0.38;
-}
-
-.seen-divider span {
-  flex: 0 0 auto;
+  opacity: 0.35;
 }
 
 .now-empty {
@@ -535,17 +491,17 @@ function human(value) {
 }
 
 @container business-graph (max-width: 700px) {
-  .event-source,
-  .waiting-row > span:last-child {
+  .now-row-context,
+  .now-waiting-reason {
     display: none;
   }
 
-  .event-main {
-    grid-template-columns: 42px 28px minmax(150px, 1fr) 28px;
+  .now-event-main {
+    grid-template-columns: 42px 24px minmax(150px, 1fr) 24px;
   }
 
-  .waiting-row {
-    grid-template-columns: 20px minmax(140px, 1fr) minmax(90px, 0.6fr);
+  .now-waiting-row {
+    grid-template-columns: minmax(150px, 1fr) minmax(100px, 0.5fr);
   }
 }
 </style>

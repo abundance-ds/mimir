@@ -297,12 +297,17 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(wrapper.get('[data-graph-save-error]').text()).toContain('Write failed unexpectedly')
 
-    vi.mocked(graphContext).mockRejectedValueOnce(new Error('Context could not be assembled'))
-    await wrapper.get('[data-inspector-start-work]').trigger('click')
+    vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
+    vi.mocked(graphContext).mockRejectedValue(new Error('Context could not be assembled'))
+    const input = wrapper.get('[data-dispatch-input]')
+    await input.trigger('focus')
+    await input.setValue('work Extract')
+    await new Promise(resolve => setTimeout(resolve, 180))
     await flushPromises()
-    document.querySelector('[data-graph-control="work-start"]').click()
+    await input.trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(document.querySelector('[data-graph-work-error]').textContent).toContain('could not be assembled')
+    expect(wrapper.get('[data-dispatch-pack]').text()).toContain('Context could not be assembled')
+    expect(wrapper.emitted('startWork')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -335,20 +340,25 @@ describe('BusinessGraphApp', () => {
   it('assembles bounded scoped context before requesting an agent Activity', async () => {
     const wrapper = render()
     await flushPromises()
-    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-inspector-start-work]').trigger('click')
-    await flushPromises()
-    expect(document.querySelector('[data-graph-work-dialog]')).not.toBeNull()
-    expect(graphContext).not.toHaveBeenCalled()
-    document.querySelector('[data-graph-control="work-start"]').click()
+    vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
+
+    const input = wrapper.get('[data-dispatch-input]')
+    await input.trigger('focus')
+    await input.setValue('work Extract')
+    await new Promise(resolve => setTimeout(resolve, 180))
     await flushPromises()
 
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(graphContext).toHaveBeenCalledWith({
       focusId: 'issue-1',
       scopeIds: ['private:local', 'project:alpha', 'team:main'],
       maxNodes: 16,
     })
+    expect(wrapper.get('[data-dispatch-pack]').text()).toContain('Issue context.')
+
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     expect(wrapper.emitted('startWork')[0][0]).toEqual(expect.objectContaining({
       nodeId: 'issue-1',
       nodeKind: 'issue',
@@ -449,6 +459,27 @@ describe('BusinessGraphApp', () => {
         legacy: false,
       }],
     }))
+    wrapper.unmount()
+  })
+
+  it('routes dispatched lines to a background agent Activity with graph context', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const input = wrapper.get('[data-dispatch-input]')
+    await input.trigger('focus')
+    await input.setValue('file the payer objection from the call')
+    await new Promise(resolve => setTimeout(resolve, 180))
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(graphContext).toHaveBeenCalledWith(expect.objectContaining({
+      scopeIds: ['private:local', 'project:alpha', 'team:main'],
+      maxNodes: 12,
+    }))
+    const request = wrapper.emitted('startWork')[0][0]
+    expect(request.background).toBe(true)
+    expect(request.prompt).toContain('file the payer objection from the call')
+    expect(request.prompt).toContain('untrusted business data')
     wrapper.unmount()
   })
 })

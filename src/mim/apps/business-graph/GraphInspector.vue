@@ -222,16 +222,6 @@
           Focus
           <kbd>F</kbd>
         </button>
-        <button
-          type="button"
-          data-inspector-start-work
-          data-graph-control="peek-start-work"
-          class="object-secondary-action"
-          @click="startWork"
-        >
-          <IconSparkles :size="14" />
-          Start work
-        </button>
         <div class="peek-more-wrap" data-peek-more-root>
           <button
             type="button"
@@ -742,16 +732,6 @@
           <IconTrash :size="15" />
         </button>
         <button
-          type="button"
-          data-inspector-start-work
-          data-graph-control="focus-start-work"
-          class="object-secondary-action"
-          @click="startWork"
-        >
-          <IconSparkles :size="14" />
-          Start work
-        </button>
-        <button
           v-if="node.kind === 'issue'"
           type="button"
           data-inspector-next-action
@@ -812,7 +792,6 @@ import {
   IconMaximize,
   IconPlus,
   IconScale,
-  IconSparkles,
   IconTrash,
   IconX,
 } from '@tabler/icons-vue'
@@ -850,7 +829,6 @@ const emit = defineEmits([
   'openActivity',
   'quickCreate',
   'delete',
-  'startWork',
 ])
 const titleInput = ref(null)
 const inspectorRoot = ref(null)
@@ -1226,10 +1204,6 @@ function openActivity(id) {
 
 function quickCreate(kind) {
   commitThen(() => emit('quickCreate', { kind, parent: props.node }))
-}
-
-function startWork() {
-  commitThen(() => emit('startWork', props.node))
 }
 
 const lookupFacts = computed(() => {

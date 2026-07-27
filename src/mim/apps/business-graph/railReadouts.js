@@ -21,7 +21,7 @@ function hasValidDue(issue) {
   return /^\d{4}-\d{2}-\d{2}$/.test(issue.dueDate || '')
 }
 
-function waitingOnHuman(issue) {
+export function waitingOnHuman(issue) {
   const waiting = String(issue.waitingFor || '').trim().toLowerCase()
   return Boolean(
     issue.needsDetail

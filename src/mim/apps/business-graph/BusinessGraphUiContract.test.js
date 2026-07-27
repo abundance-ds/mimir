@@ -90,6 +90,8 @@ describe('Business Graph UI contract', () => {
       'data-dispatch-',
       'data-rail-',
       'data-standing-',
+      'data-now-',
+      'data-graph-event',
       'data-project-card',
       'data-company-card',
       'data-timeline-node',
@@ -105,6 +107,7 @@ describe('Business Graph UI contract', () => {
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphMarkdownEditor.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphRelationshipLine.vue')
-    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphWorkDialog.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('NowView.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('DispatchBar.vue')
   })
 })

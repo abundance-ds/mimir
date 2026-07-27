@@ -115,8 +115,7 @@ let lookupGeneration = 0
 const trimmed = computed(() => value.value.trim())
 const powerMode = computed(() => trimmed.value.startsWith('/'))
 const delegateMode = computed(() => (
-  trimmed.value === '!'
-  || trimmed.value.startsWith('! ')
+  trimmed.value.startsWith('!')
   || /^work(?:\s|$)/i.test(trimmed.value)
 ))
 const delegateTerms = computed(() => {

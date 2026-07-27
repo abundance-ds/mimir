@@ -182,7 +182,6 @@
         @open-node="openRelatedNode"
         @open-file="openFile"
         @open-activity="$emit('openActivity', $event)"
-        @start-work="prepareWork"
         @quick-create="openRelatedCreate"
       />
 
@@ -328,8 +327,17 @@
             data-graph-control="board-columns-filter-clear"
             @clear="showAllBoardStatuses"
           />
+          <NowView
+            v-if="graph.section === 'now'"
+            :events="graph.events"
+            :waiting="waitingOnYouIssues"
+            :nodes="graph.nodes"
+            :seen-at="nowSeenAt"
+            @open="openNode"
+            @seen="markNowSeen"
+          />
           <WorkBoard
-            v-if="graph.section === 'work' && graph.view === 'board'"
+            v-else-if="graph.section === 'work' && graph.view === 'board'"
             :issues="boardIssues"
             :nodes="graph.nodes"
             :projects="graph.projects"
@@ -406,7 +414,6 @@
           @open-node="openRelatedNode"
           @open-file="openFile"
           @open-activity="$emit('openActivity', $event)"
-          @start-work="prepareWork"
           @quick-create="openRelatedCreate"
         />
       </template>
@@ -449,15 +456,6 @@
       @close="createOpen = false"
       @create="createNode"
     />
-    <GraphWorkDialog
-      :open="workOpen"
-      :node="workNode"
-      :scopes="graph.selectedScopes"
-      :starting="workStarting"
-      :error="workError"
-      @close="workOpen = false"
-      @start="startWork"
-    />
     <GraphConfirmDialog
       :open="deleteOpen"
       :title="deleteTitle"
@@ -498,7 +496,7 @@ import GraphMap from './business-graph/GraphMap.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSelect from './business-graph/GraphSelect.vue'
-import GraphWorkDialog from './business-graph/GraphWorkDialog.vue'
+import NowView from './business-graph/NowView.vue'
 import PortfolioView from './business-graph/PortfolioView.vue'
 import StatusRail from './business-graph/StatusRail.vue'
 import StatusRailPanel from './business-graph/StatusRailPanel.vue'
@@ -507,6 +505,7 @@ import WorkBoard from './business-graph/WorkBoard.vue'
 import {
   activeAgentActivities,
   RAIL_ISSUE_READOUTS,
+  waitingOnHuman,
 } from './business-graph/railReadouts.js'
 
 const props = defineProps({
@@ -529,14 +528,10 @@ const objectInspector = ref(null)
 const scopeMenu = ref(false)
 const focusMode = ref(false)
 const createOpen = ref(false)
-const workOpen = ref(false)
-const workNode = ref(null)
-const workStarting = ref(false)
 const deleteOpen = ref(false)
 const deleteRequest = ref(null)
 const deleting = ref(false)
 const createError = ref('')
-const workError = ref('')
 const deleteError = ref('')
 const undoError = ref('')
 const saveError = ref('')
@@ -676,6 +671,13 @@ const hiddenColumnIssues = computed(() => {
   return projectionNodes.value.filter(item => !visible.has(item.status || 'backlog')).length
 })
 const agentActivities = computed(() => activeAgentActivities(activities.activities))
+const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
+const nowSeenAt = ref(settings.businessGraphNowSeenAt || '')
+
+function markNowSeen(timestamp) {
+  nowSeenAt.value = timestamp
+  settings.set('businessGraphNowSeenAt', timestamp)
+}
 const railReadout = computed(() => (
   RAIL_ISSUE_READOUTS.find(item => item.id === railFilter.value) || null
 ))
@@ -1108,38 +1110,6 @@ async function undoDelete() {
   }
 }
 
-function prepareWork(node) {
-  workError.value = ''
-  workNode.value = graph.selectedNode?.id === node.id ? graph.selectedNode : node
-  workOpen.value = true
-}
-
-async function startWork({ node, intent }) {
-  workStarting.value = true
-  workError.value = ''
-  try {
-    const context = await graphContext({
-      focusId: node.id,
-      scopeIds: graph.activeScopeIds,
-      maxNodes: 16,
-    })
-    emit('startWork', {
-      nodeId: node.id,
-      nodeKind: node.kind,
-      title: node.title || node.id,
-      scopeIds: [...graph.activeScopeIds],
-      graphRevision: context.graphRevision,
-      prompt: buildWorkPrompt(node, context.markdown, intent),
-    })
-    workOpen.value = false
-  } catch (cause) {
-    workError.value = errorMessage(cause)
-    emit('diagnostic', `Could not assemble graph context: ${errorMessage(cause)}`)
-  } finally {
-    workStarting.value = false
-  }
-}
-
 async function moveIssue({ issue, status, projectId = null }) {
   try {
     const patch = {
@@ -1405,7 +1375,6 @@ function onKeydown(event) {
     if (scopeMenu.value) scopeMenu.value = false
     else if (columnsMenu.value) closeColumnsMenu()
     else if (deleteOpen.value) closeDeleteDialog()
-    else if (workOpen.value) workOpen.value = false
     else if (createOpen.value) createOpen.value = false
     else if (focusMode.value) objectInspector.value?.requestBack?.()
     else if (graph.selectedNode) closeObject()
