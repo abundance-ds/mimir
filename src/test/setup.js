@@ -26,7 +26,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'graph_open', 'graph_status', 'graph_get', 'graph_query', 'graph_search',
   'graph_neighbors', 'graph_diagnostics', 'graph_refresh', 'graph_update',
   'graph_create', 'graph_delete', 'graph_restore', 'graph_migration_report',
-  'graph_context',
+  'graph_context', 'graph_events',
   // git
   'git_status',
   // IPC / window coordination (top-level)

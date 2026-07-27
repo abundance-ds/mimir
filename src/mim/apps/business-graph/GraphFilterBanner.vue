@@ -12,8 +12,8 @@
       </span>
     </span>
     <button
+      v-bind="$attrs"
       type="button"
-      :data-graph-control="clearControl"
       :aria-label="`Clear filter: ${label}`"
       @click="$emit('clear')"
     >
@@ -26,10 +26,11 @@
 <script setup>
 import { IconX } from '@tabler/icons-vue'
 
+defineOptions({ inheritAttrs: false })
+
 defineProps({
   label: { type: String, required: true },
   hiddenCount: { type: Number, default: 0 },
-  clearControl: { type: String, default: 'filter-clear' },
 })
 
 defineEmits(['clear'])

@@ -183,6 +183,13 @@
     </div>
 
     <div v-else class="graph-workspace relative flex min-h-0 flex-1">
+      <StatusRail
+        :issues="graph.issues"
+        :activities="activities.activities"
+        :diagnostics="graph.diagnostics"
+        :active="railActive"
+        @toggle="toggleRail"
+      />
       <GraphInspector
         v-if="graph.selectedNode && focusMode"
         ref="objectInspector"
@@ -306,18 +313,40 @@
             </div>
           </div>
 
+          <template v-if="railPanel">
+            <GraphFilterBanner
+              :label="railPanel === 'agents' ? 'active agents' : 'diagnostics'"
+              data-graph-control="rail-panel-clear"
+              @clear="railPanel = ''"
+            />
+            <StatusRailPanel
+              :kind="railPanel"
+              :activities="agentActivities"
+              :diagnostics="graph.diagnostics"
+              @open-activity="$emit('openActivity', $event)"
+              @open-node="openNode"
+            />
+          </template>
+          <template v-else>
+          <GraphFilterBanner
+            v-if="graph.section === 'work' && railReadout"
+            :label="railReadout.label"
+            :hidden-count="railFilterHidden"
+            data-graph-control="rail-filter-clear"
+            @clear="railFilter = ''"
+          />
           <GraphFilterBanner
             v-if="graph.section === 'work' && priorityFilter"
             :label="`priority = ${priorityFilter}`"
             :hidden-count="priorityFilterHidden"
-            clear-control="board-priority-filter-clear"
+            data-graph-control="board-priority-filter-clear"
             @clear="priorityFilter = ''"
           />
           <GraphFilterBanner
             v-if="graph.section === 'work' && graph.view === 'board' && boardGroup === 'status' && hiddenBoardStatuses.length"
             :label="`columns hidden: ${hiddenBoardStatuses.join(', ')}`"
             :hidden-count="hiddenColumnIssues"
-            clear-control="board-columns-filter-clear"
+            data-graph-control="board-columns-filter-clear"
             @clear="showAllBoardStatuses"
           />
           <WorkBoard
@@ -376,6 +405,7 @@
             @open="openNode"
             @create="openCreate()"
           />
+          </template>
         </main>
 
         <GraphInspector
@@ -492,8 +522,14 @@ import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSelect from './business-graph/GraphSelect.vue'
 import GraphWorkDialog from './business-graph/GraphWorkDialog.vue'
 import PortfolioView from './business-graph/PortfolioView.vue'
+import StatusRail from './business-graph/StatusRail.vue'
+import StatusRailPanel from './business-graph/StatusRailPanel.vue'
 import TimelineView from './business-graph/TimelineView.vue'
 import WorkBoard from './business-graph/WorkBoard.vue'
+import {
+  activeAgentActivities,
+  RAIL_ISSUE_READOUTS,
+} from './business-graph/railReadouts.js'
 
 const props = defineProps({
   workspacePath: { type: String, default: '' },
@@ -539,6 +575,8 @@ const boardSort = ref('rank')
 const columnsMenu = ref(false)
 const columnsTrigger = ref(null)
 const columnsMenuStyle = ref({})
+const railFilter = ref('')
+const railPanel = ref('')
 const boardStatuses = [
   { id: 'backlog', label: 'Backlog' },
   { id: 'plan', label: 'Plan' },
@@ -630,6 +668,7 @@ const projectionNodes = computed(() => {
   let items = graph.visibleNodes
   if (graph.section === 'work') {
     if (priorityFilter.value) items = items.filter(item => item.priority === priorityFilter.value)
+    if (railReadout.value) items = items.filter(item => railReadout.value.matches(item))
     if (graph.view === 'attention') items = items.filter(needsAttention)
   }
   return items
@@ -654,6 +693,15 @@ const hiddenBoardStatuses = computed(() => {
 const hiddenColumnIssues = computed(() => {
   const visible = new Set(visibleBoardStatuses.value)
   return projectionNodes.value.filter(item => !visible.has(item.status || 'backlog')).length
+})
+const agentActivities = computed(() => activeAgentActivities(activities.activities))
+const railReadout = computed(() => (
+  RAIL_ISSUE_READOUTS.find(item => item.id === railFilter.value) || null
+))
+const railActive = computed(() => railPanel.value || railFilter.value)
+const railFilterHidden = computed(() => {
+  if (!railReadout.value) return 0
+  return graph.visibleNodes.filter(item => !railReadout.value.matches(item)).length
 })
 const relatedActivities = computed(() => {
   const nodeId = graph.selectedNode?.id
@@ -1094,6 +1142,7 @@ async function performStepTo(index) {
 function setSection(section) {
   const change = () => {
     focusMode.value = false
+    railPanel.value = ''
     if (graph.selectedNode) graph.closeInspector({ restore: false })
     graph.setSection(section)
   }
@@ -1104,11 +1153,25 @@ function setSection(section) {
 function setView(view) {
   const change = () => {
     focusMode.value = false
+    railPanel.value = ''
     if (graph.selectedNode) graph.closeInspector({ restore: false })
     graph.setView(view)
   }
   if (objectInspector.value?.commitThen) objectInspector.value.commitThen(change)
   else change()
+}
+
+function toggleRail(id) {
+  if (id === 'agents' || id === 'diag') {
+    railPanel.value = railPanel.value === id ? '' : id
+    return
+  }
+  if (railFilter.value === id) {
+    railFilter.value = ''
+    return
+  }
+  railFilter.value = id
+  if (graph.section !== 'work') setSection('work')
 }
 
 function toggleScope(scopeId) {
@@ -1170,6 +1233,15 @@ function onKeydown(event) {
     else if (createOpen.value) createOpen.value = false
     else if (focusMode.value) objectInspector.value?.requestBack?.()
     else if (graph.selectedNode) closeObject()
+    return
+  }
+  if (event.altKey && !event.metaKey && !event.ctrlKey && event.code?.startsWith('Digit')) {
+    const ids = [...RAIL_ISSUE_READOUTS.map(item => item.id), 'agents', 'diag']
+    const index = Number(event.code.slice(5)) - 1
+    if (index >= 0 && index < ids.length) {
+      event.preventDefault()
+      toggleRail(ids[index])
+    }
     return
   }
   if (editing || event.metaKey || event.ctrlKey || event.altKey) return

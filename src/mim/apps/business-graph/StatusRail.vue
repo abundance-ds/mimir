@@ -1,18 +1,19 @@
 <template>
-  <aside class="status-rail" aria-label="Business graph status">
+  <aside class="status-rail" aria-label="Graph status">
     <button
       v-for="(item, index) in readouts"
       :key="item.id"
       type="button"
-      :data-status-filter="item.id"
+      :data-status-readout="item.id"
       :data-graph-control="`status-${item.id}`"
+      class="status-readout"
       :class="[
-        `status-${item.tone}`,
-        { active: activeFilter === item.id },
+        { active: active === item.id, nonzero: item.count > 0 },
+        item.tone ? `status-${item.tone}` : '',
       ]"
-      :aria-pressed="activeFilter === item.id"
-      :title="`${item.label}: ${item.count}. Alt+${index + 1}`"
-      @click="$emit('filter', item.id)"
+      :aria-pressed="active === item.id"
+      :title="`${item.label} · Alt+${index + 1}`"
+      @click="$emit('toggle', item.id)"
     >
       <strong>{{ item.count }}</strong>
       <span>{{ item.short }}</span>
@@ -22,165 +23,115 @@
 
 <script setup>
 import { computed } from 'vue'
+import {
+  activeAgentActivities,
+  RAIL_ISSUE_READOUTS,
+} from './railReadouts.js'
 
 const props = defineProps({
   issues: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
   diagnostics: { type: Array, default: () => [] },
-  activeFilter: { type: String, default: '' },
+  active: { type: String, default: '' },
 })
 
-defineEmits(['filter'])
+defineEmits(['toggle'])
 
-const readouts = computed(() => {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const todayValue = dateValue(today)
-  const week = new Date(today)
-  week.setDate(week.getDate() + 7)
-  const weekValue = dateValue(week)
-  const open = props.issues.filter(issue => !['done', 'cancelled'].includes(issue.status))
-  const agents = props.activities.filter(activity => (
-    activity.kind === 'agent'
-    && ['starting', 'working', 'needs-input'].includes(activity.status)
-  ))
-  return [
-    {
-      id: 'waiting-on-you',
-      label: 'Waiting on you',
-      short: 'YOU',
-      count: open.filter(waitingOnYou).length,
-      tone: 'ink',
-    },
-    {
-      id: 'overdue',
-      label: 'Overdue',
-      short: 'OVER',
-      count: open.filter(issue => issue.dueDate && issue.dueDate < todayValue).length,
-      tone: 'rem',
-    },
-    {
-      id: 'waiting',
-      label: 'Waiting',
-      short: 'WAIT',
-      count: open.filter(issue => issue.status === 'waiting' || issue.waitingFor).length,
-      tone: 'ink',
-    },
-    {
-      id: 'due-soon',
-      label: 'Due within seven days',
-      short: '7 DAY',
-      count: open.filter(issue => (
-        issue.dueDate
-        && issue.dueDate >= todayValue
-        && issue.dueDate <= weekValue
-      )).length,
-      tone: 'ink',
-    },
-    {
-      id: 'agents',
-      label: 'Agents active',
-      short: 'AGNT',
-      count: agents.length,
-      tone: 'accent',
-    },
-    {
-      id: 'diagnostics',
-      label: 'Diagnostics',
-      short: 'DIAG',
-      count: props.diagnostics.length,
-      tone: 'rem',
-    },
-  ]
-})
-
-function waitingOnYou(issue) {
-  const waiting = String(issue.waitingFor || '').trim().toLowerCase()
-  return Boolean(
-    issue.needsDetail
-    || issue.waitingOnYou
-    || ['you', 'me', 'human', 'owner'].includes(waiting),
-  )
-}
-
-function dateValue(date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
+const readouts = computed(() => [
+  ...RAIL_ISSUE_READOUTS.map(readout => ({
+    id: readout.id,
+    label: readout.label,
+    short: readout.short,
+    count: props.issues.filter(issue => readout.matches(issue)).length,
+    tone: readout.id === 'overdue' ? 'rem' : '',
+  })),
+  {
+    id: 'agents',
+    label: 'agents active',
+    short: 'agents',
+    count: activeAgentActivities(props.activities).length,
+    tone: 'accent',
+  },
+  {
+    id: 'diag',
+    label: 'diagnostics',
+    short: 'diag',
+    count: props.diagnostics.length,
+    tone: '',
+  },
+])
 </script>
 
 <style scoped>
 .status-rail {
   display: flex;
-  width: 48px;
-  min-width: 48px;
+  width: 66px;
+  min-width: 66px;
   flex: 0 0 auto;
   flex-direction: column;
-  border-right: 1px solid var(--color-rule);
+  overflow-y: auto;
   background: var(--color-chrome-high);
 }
 
-.status-rail button {
+.status-readout {
   display: grid;
-  min-height: 52px;
+  min-height: 50px;
+  flex: 0 0 auto;
   place-content: center;
   justify-items: center;
+  gap: 2px;
   border-bottom: 1px solid var(--color-rule-light);
+  padding: 6px 3px;
   color: var(--color-ink-3);
 }
 
-.status-rail button:hover,
-.status-rail button:focus-visible {
+.status-readout:hover,
+.status-readout:focus-visible {
   background: var(--color-chrome-mid);
   color: var(--color-ink);
 }
 
-.status-rail button:focus-visible {
+.status-readout:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
 
-.status-rail button.active {
+.status-readout.active {
   background: var(--color-accent-soft);
   color: var(--color-ink);
 }
 
-.status-rail strong {
-  color: currentColor;
+.status-readout strong {
+  color: var(--color-ink-2);
   font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 560;
   font-variant-numeric: tabular-nums;
-  line-height: 17px;
+  line-height: 16px;
 }
 
-.status-rail span {
-  margin-top: 3px;
+.status-readout span {
+  color: inherit;
   font-family: var(--font-mono);
-  font-size: 7px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 9px;
+  letter-spacing: 0.01em;
+  line-height: 11px;
+  text-align: center;
+  white-space: nowrap;
 }
 
-.status-rail .status-rem:not(.active) strong {
+.status-readout.status-rem.nonzero strong {
   color: var(--color-rem);
 }
 
-.status-rail .status-accent:not(.active) strong {
+.status-readout.status-accent.nonzero strong {
   color: var(--color-accent);
-}
-
-.status-rail button strong:empty,
-.status-rail button strong:first-child:last-child {
-  color: var(--color-ink-4);
 }
 
 @container business-graph (max-width: 620px) {
   .status-rail {
-    width: 42px;
-    min-width: 42px;
+    width: 56px;
+    min-width: 56px;
   }
 }
 </style>

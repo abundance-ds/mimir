@@ -101,9 +101,16 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'confirm-cancel',
     'confirm-submit',
   ],
+  filters: [
+    'board-priority-filter-clear',
+    'board-columns-filter-clear',
+    'rail-filter-clear',
+    'rail-panel-clear',
+  ],
 })
 
 export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
+  'status-',
   'section-',
   'view-',
   'scope-',
@@ -147,6 +154,9 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphSelect.vue',
   'GraphWorkDialog.vue',
   'PortfolioView.vue',
+  'StatusRail.vue',
+  'StatusRailPanel.vue',
+  'GraphFilterBanner.vue',
   'TimelineView.vue',
   'WorkBoard.vue',
 ])
