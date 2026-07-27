@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
@@ -58,6 +58,13 @@ struct CallBody {
 struct AppState {
     registry: ToolRegistry,
     token: String,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpClientContext {
+    activity_id: Option<String>,
+    agent_id: Option<String>,
 }
 
 // ── Bearer auth (legacy HTTP API only) ───────────────────────────
@@ -298,10 +305,27 @@ fn render_tool_error(error: ToolError) -> serde_json::Value {
     })
 }
 
+#[cfg(test)]
 async fn handle_mcp(
     State(state): State<AppState>,
     Json(request): Json<serde_json::Value>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    handle_mcp_request(state, McpClientContext::default(), request).await
+}
+
+async fn handle_mcp_http(
+    Query(client): Query<McpClientContext>,
+    State(state): State<AppState>,
+    Json(request): Json<serde_json::Value>,
+) -> axum::response::Response {
+    handle_mcp_request(state, client, request).await
+}
+
+async fn handle_mcp_request(
+    state: AppState,
+    client: McpClientContext,
+    request: serde_json::Value,
+) -> axum::response::Response {
     let method = request
         .get("method")
         .and_then(serde_json::Value::as_str)
@@ -353,15 +377,26 @@ async fn handle_mcp(
                 serde_json::Value::Number(value) => Some(value.to_string()),
                 _ => None,
             };
+            let mut metadata = request
+                .pointer("/params/_meta")
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(activity_id) = client.activity_id {
+                metadata
+                    .entry("activityId")
+                    .or_insert(serde_json::Value::String(activity_id));
+            }
+            if let Some(agent_id) = client.agent_id {
+                metadata
+                    .entry("agentId")
+                    .or_insert(serde_json::Value::String(agent_id));
+            }
             let context = ToolCallContext {
                 request_id,
                 caller: ToolCaller::Mcp,
                 cwd: None,
-                metadata: request
-                    .pointer("/params/_meta")
-                    .and_then(serde_json::Value::as_object)
-                    .cloned()
-                    .unwrap_or_default(),
+                metadata,
             };
             let result = match state
                 .registry
@@ -393,7 +428,7 @@ pub async fn start_server(
     let router = Router::new()
         .route("/api/tools/call", post(handle_call))
         .route("/api/tools", get(handle_schema))
-        .route("/mcp", post(handle_mcp))
+        .route("/mcp", post(handle_mcp_http))
         .with_state(state);
 
     let address: std::net::SocketAddr = ([127, 0, 0, 1], port).into();

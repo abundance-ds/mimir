@@ -126,6 +126,12 @@ impl ActivityRetention {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityOrigin {
+    #[serde(
+        default,
+        rename = "type",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launcher_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -138,6 +144,18 @@ pub struct ActivityOrigin {
     pub scheduled_for: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_activity_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch_job_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_node_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_scope_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_section: Option<String>,
 }
 
 /// Runtime surface selected by the Activity pane.
@@ -323,6 +341,10 @@ mod tests {
             source: ActivityOrigin {
                 launcher_id: Some("codex".into()),
                 preset_id: Some("codex-full".into()),
+                source_type: Some("business-graph-work".into()),
+                graph_node_id: Some("issue-1".into()),
+                graph_scope_ids: vec!["project:test".into()],
+                graph_revision: Some(7),
                 ..ActivityOrigin::default()
             },
             host: ActivityHost::pty(Some("codex".into())),
@@ -339,6 +361,10 @@ mod tests {
         let value = serde_json::to_value(&record).unwrap();
         assert_eq!(value["workspacePath"], "/work");
         assert_eq!(value["source"]["launcherId"], "codex");
+        assert_eq!(value["source"]["type"], "business-graph-work");
+        assert_eq!(value["source"]["graphNodeId"], "issue-1");
+        assert_eq!(value["source"]["graphScopeIds"][0], "project:test");
+        assert_eq!(value["source"]["graphRevision"], 7);
         assert_eq!(value["host"]["type"], "pty");
         assert_eq!(value["host"]["resumeStrategy"], "codex");
         assert_eq!(value["launch"]["args"][1], "two words");

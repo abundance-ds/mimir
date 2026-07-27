@@ -180,6 +180,17 @@ impl GraphNode {
                 .get("snoozeUntil")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            rank: self.properties.get("rank").and_then(Value::as_i64),
+            slug: self
+                .properties
+                .get("slug")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            needs_detail: self
+                .properties
+                .get("needsDetail")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             relations: self.relations.clone(),
             updated_at: self.updated_at.clone(),
             scope_id: self.provenance.scope_id.clone(),
@@ -212,11 +223,119 @@ pub struct GraphNodeSummary {
     pub remind_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snooze_until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rank: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub needs_detail: bool,
     #[serde(default)]
     pub relations: Vec<GraphRelation>,
     pub updated_at: String,
     pub scope_id: String,
     pub source_revision: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GraphActorKind {
+    Human,
+    Agent,
+    System,
+    #[default]
+    External,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphActor {
+    #[serde(default)]
+    pub kind: GraphActorKind,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub initials: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_id: Option<String>,
+}
+
+impl GraphActor {
+    pub fn human() -> Self {
+        Self {
+            kind: GraphActorKind::Human,
+            id: "local-human".into(),
+            label: "You".into(),
+            initials: "ME".into(),
+            activity_id: None,
+        }
+    }
+
+    pub fn external() -> Self {
+        Self {
+            kind: GraphActorKind::External,
+            id: "external".into(),
+            label: "External edit".into(),
+            initials: "EX".into(),
+            activity_id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphFieldChange {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEvent {
+    pub id: String,
+    pub event_type: String,
+    pub action: String,
+    pub timestamp: String,
+    pub graph_revision: u64,
+    pub node_id: String,
+    pub node_kind: String,
+    pub title: String,
+    pub scope_id: String,
+    pub source_path: String,
+    pub summary: String,
+    pub actor: GraphActor,
+    #[serde(default)]
+    pub changes: Vec<GraphFieldChange>,
+    #[serde(default)]
+    pub data: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEventQuery {
+    #[serde(default)]
+    pub scope_ids: BTreeSet<String>,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default = "default_event_limit")]
+    pub limit: usize,
+}
+
+fn default_event_limit() -> usize {
+    200
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEventPage {
+    pub items: Vec<GraphEvent>,
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

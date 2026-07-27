@@ -138,6 +138,10 @@ impl GraphStore {
         self.nodes.get(id)
     }
 
+    pub(crate) fn snapshot_nodes(&self) -> Vec<GraphNode> {
+        self.nodes.values().cloned().collect()
+    }
+
     pub fn create_node(
         &mut self,
         root: &GraphSourceRoot,

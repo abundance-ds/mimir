@@ -1,5 +1,6 @@
 use super::model::{
-    GraphChanged, GraphDeleteResult, GraphDiagnostic, GraphNeighbor, GraphNode, GraphNodeCreate,
+    GraphActor, GraphActorKind, GraphChanged, GraphDeleteResult, GraphDiagnostic, GraphEvent,
+    GraphEventPage, GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode, GraphNodeCreate,
     GraphNodeDelete, GraphNodePatch, GraphOpenResult, GraphQuery, GraphQueryResult,
     GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSourceRoot,
 };
@@ -8,8 +9,9 @@ use super::{build_migration_report, GraphContextPack, GraphContextRequest, Graph
 use crate::persistence;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use sha2::{Digest, Sha256};
+use serde_json::{json, Map, Value};
 use std::{
-    collections::{BTreeSet, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fs,
     path::{Path, PathBuf},
     sync::{mpsc, Mutex, RwLock},
@@ -19,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 const GRAPH_CHANGED_EVENT: &str = "mim://graph-changed";
+const MAX_GRAPH_EVENTS: usize = 2_000;
 
 #[derive(Default)]
 pub struct GraphRuntime {
@@ -26,6 +29,8 @@ pub struct GraphRuntime {
     roots: RwLock<Vec<GraphSourceRoot>>,
     watchers: Mutex<Vec<RecommendedWatcher>>,
     deleted: Mutex<VecDeque<DeletedGraphSource>>,
+    events: Mutex<VecDeque<GraphEvent>>,
+    event_path: RwLock<Option<PathBuf>>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +49,8 @@ impl GraphRuntime {
             roots: RwLock::new(roots),
             watchers: Mutex::new(Vec::new()),
             deleted: Mutex::new(VecDeque::new()),
+            events: Mutex::new(VecDeque::new()),
+            event_path: RwLock::new(None),
         }
     }
 
@@ -64,7 +71,7 @@ impl GraphRuntime {
             GraphSourceRoot::new(
                 project_scope_id(&project_root),
                 GraphScopeKind::Project,
-                project_root,
+                project_root.clone(),
             ),
         ];
         if let Some(team_root) = team_root {
@@ -77,12 +84,16 @@ impl GraphRuntime {
         }
         deduplicate_roots(&mut roots);
 
+        let event_path = graph_event_path(&project_root)?;
+        let events = load_graph_events(&event_path)?;
         let store = GraphStore::load(&roots);
         let result = open_result(&roots, &store);
         let watchers = watch_roots(app.clone(), &roots)?;
         *self.store.write().map_err(|error| error.to_string())? = store;
         *self.roots.write().map_err(|error| error.to_string())? = roots;
         *self.watchers.lock().map_err(|error| error.to_string())? = watchers;
+        *self.events.lock().map_err(|error| error.to_string())? = events;
+        *self.event_path.write().map_err(|error| error.to_string())? = Some(event_path);
         Ok(result)
     }
 
@@ -92,16 +103,19 @@ impl GraphRuntime {
             .read()
             .map_err(|error| error.to_string())?
             .clone();
-        let next_revision = self
-            .store
-            .read()
-            .map_err(|error| error.to_string())?
-            .revision()
-            .saturating_add(1);
+        let (next_revision, before_nodes) = {
+            let store = self.store.read().map_err(|error| error.to_string())?;
+            (
+                store.revision().saturating_add(1),
+                store.snapshot_nodes(),
+            )
+        };
         let mut store = GraphStore::load(&roots);
         store.set_revision(next_revision);
+        let after_nodes = store.snapshot_nodes();
         let changed = changed_result(&store, paths);
         *self.store.write().map_err(|error| error.to_string())? = store;
+        self.record_external_changes(before_nodes, after_nodes, &changed.paths)?;
         Ok(changed)
     }
 
@@ -160,6 +174,82 @@ impl GraphRuntime {
             .map_err(|error| error.to_string())?
             .diagnostics()
             .to_vec())
+    }
+
+    pub fn events(&self, query: &GraphEventQuery) -> Result<GraphEventPage, String> {
+        self.record_temporal_events()?;
+        let events = self.events.lock().map_err(|error| error.to_string())?;
+        let visible = events
+            .iter()
+            .filter(|event| {
+                query.scope_ids.is_empty() || query.scope_ids.contains(&event.scope_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let total = visible.len();
+        let offset = query.offset.min(total);
+        let limit = query.limit.clamp(1, 500);
+        Ok(GraphEventPage {
+            items: visible.into_iter().skip(offset).take(limit).collect(),
+            total,
+            offset,
+            limit,
+        })
+    }
+
+    pub fn record_mutation(
+        &self,
+        action: impl Into<String>,
+        actor: GraphActor,
+        before: Option<GraphNode>,
+        after: Option<GraphNode>,
+        source_path: impl Into<String>,
+    ) -> Result<GraphEvent, String> {
+        let action = action.into();
+        let source_path = source_path.into();
+        let graph_revision = self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .revision();
+        let node = after.as_ref().or(before.as_ref()).ok_or_else(|| {
+            "A graph event needs the node state before or after the mutation.".to_string()
+        })?;
+        let changes = graph_field_changes(before.as_ref(), after.as_ref());
+        let event_type = graph_event_type(&action, before.as_ref(), after.as_ref(), &changes);
+        let summary = graph_event_summary(
+            &event_type,
+            &action,
+            before.as_ref(),
+            after.as_ref(),
+            node,
+        );
+        let mut data = Map::new();
+        if let Some(due_date) = node.properties.get("dueDate").and_then(Value::as_str) {
+            data.insert("dueDate".into(), Value::String(due_date.into()));
+        }
+        if let Some(deliverable) = newest_deliverable(before.as_ref(), after.as_ref()) {
+            data.insert("deliverable".into(), deliverable);
+        }
+        let event = GraphEvent {
+            id: Uuid::new_v4().to_string(),
+            event_type,
+            action,
+            timestamp: chrono::Utc::now()
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            graph_revision,
+            node_id: node.id.clone(),
+            node_kind: node.kind.clone(),
+            title: node.title.clone(),
+            scope_id: node.provenance.scope_id.clone(),
+            source_path,
+            summary,
+            actor,
+            changes,
+            data,
+        };
+        self.append_event(event.clone())?;
+        Ok(event)
     }
 
     pub fn migration_report(&self) -> Result<GraphMigrationReport, String> {
@@ -287,6 +377,366 @@ impl GraphRuntime {
         queue.retain(|item| item.undo_token != request.undo_token);
         Ok(restored)
     }
+
+    fn record_external_changes(
+        &self,
+        before: Vec<GraphNode>,
+        after: Vec<GraphNode>,
+        paths: &[String],
+    ) -> Result<(), String> {
+        let before = before
+            .into_iter()
+            .map(|node| (node.provenance.source_path.clone(), node))
+            .collect::<BTreeMap<_, _>>();
+        let after = after
+            .into_iter()
+            .map(|node| (node.provenance.source_path.clone(), node))
+            .collect::<BTreeMap<_, _>>();
+        let changed_paths = if paths.is_empty() {
+            before
+                .keys()
+                .chain(after.keys())
+                .cloned()
+                .collect::<BTreeSet<_>>()
+        } else {
+            paths.iter().cloned().collect()
+        };
+        for path in changed_paths {
+            let previous = before.get(&path).cloned();
+            let next = after.get(&path).cloned();
+            if previous == next {
+                continue;
+            }
+            self.record_mutation(
+                "external.file-change",
+                GraphActor::external(),
+                previous,
+                next,
+                path,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn record_temporal_events(&self) -> Result<(), String> {
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let revision = self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .revision();
+        let overdue = self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .snapshot_nodes()
+            .into_iter()
+            .filter(|node| {
+                node.kind == "issue"
+                    && !matches!(node.status(), Some("done" | "cancelled"))
+                    && node
+                        .properties
+                        .get("dueDate")
+                        .and_then(Value::as_str)
+                        .is_some_and(|due| due < today.as_str())
+            })
+            .collect::<Vec<_>>();
+        for node in overdue {
+            let due_date = node
+                .properties
+                .get("dueDate")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let exists = self
+                .events
+                .lock()
+                .map_err(|error| error.to_string())?
+                .iter()
+                .any(|event| {
+                    event.event_type == "became-overdue"
+                        && event.node_id == node.id
+                        && event.data.get("dueDate").and_then(Value::as_str)
+                            == Some(due_date.as_str())
+                });
+            if exists {
+                continue;
+            }
+            let event = GraphEvent {
+                id: Uuid::new_v4().to_string(),
+                event_type: "became-overdue".into(),
+                action: "system.due-clock".into(),
+                timestamp: chrono::Utc::now()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                graph_revision: revision,
+                node_id: node.id.clone(),
+                node_kind: node.kind.clone(),
+                title: node.title.clone(),
+                scope_id: node.provenance.scope_id.clone(),
+                source_path: node.provenance.source_path.clone(),
+                summary: format!("Became overdue · {}", node.title),
+                actor: GraphActor {
+                    kind: GraphActorKind::System,
+                    id: "due-clock".into(),
+                    label: "Due clock".into(),
+                    initials: "SYS".into(),
+                    activity_id: None,
+                },
+                changes: Vec::new(),
+                data: Map::from_iter([("dueDate".into(), Value::String(due_date))]),
+            };
+            self.append_event(event)?;
+        }
+        Ok(())
+    }
+
+    fn append_event(&self, event: GraphEvent) -> Result<(), String> {
+        {
+            let mut events = self.events.lock().map_err(|error| error.to_string())?;
+            events.push_front(event);
+            while events.len() > MAX_GRAPH_EVENTS {
+                events.pop_back();
+            }
+        }
+        self.persist_events()
+    }
+
+    fn persist_events(&self) -> Result<(), String> {
+        let Some(path) = self
+            .event_path
+            .read()
+            .map_err(|error| error.to_string())?
+            .clone()
+        else {
+            return Ok(());
+        };
+        let events = self
+            .events
+            .lock()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        persistence::write_json_atomic(&path, &events).map_err(|error| error.to_string())
+    }
+}
+
+fn graph_event_path(project_root: &Path) -> Result<PathBuf, String> {
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(project_root.to_string_lossy().as_bytes())
+    );
+    dirs::home_dir()
+        .map(|home| {
+            home.join(".mim")
+                .join("graph")
+                .join("events")
+                .join(format!("{}.json", &digest[..24]))
+        })
+        .ok_or_else(|| "Could not resolve the Business graph event directory.".into())
+}
+
+fn load_graph_events(path: &Path) -> Result<VecDeque<GraphEvent>, String> {
+    match persistence::load_json_optional_quarantining::<Vec<GraphEvent>>(path)
+        .map_err(|error| error.to_string())?
+    {
+        persistence::QuarantinedLoad::Loaded(events) => {
+            Ok(events.into_iter().take(MAX_GRAPH_EVENTS).collect())
+        }
+        persistence::QuarantinedLoad::Missing => Ok(VecDeque::new()),
+        persistence::QuarantinedLoad::Quarantined { path, reason } => {
+            log::warn!(
+                "Invalid Business graph event journal moved to '{}': {reason}",
+                path.display()
+            );
+            Ok(VecDeque::new())
+        }
+    }
+}
+
+fn graph_field_changes(
+    before: Option<&GraphNode>,
+    after: Option<&GraphNode>,
+) -> Vec<GraphFieldChange> {
+    let (Some(before), Some(after)) = (before, after) else {
+        return Vec::new();
+    };
+    let mut changes = Vec::new();
+    push_change(&mut changes, "title", json!(before.title), json!(after.title));
+    push_change(
+        &mut changes,
+        "summary",
+        json!(before.summary),
+        json!(after.summary),
+    );
+    if before.body != after.body {
+        push_change(
+            &mut changes,
+            "body",
+            json!({ "characters": before.body.chars().count() }),
+            json!({ "characters": after.body.chars().count() }),
+        );
+    }
+    push_change(&mut changes, "tags", json!(before.tags), json!(after.tags));
+    push_change(
+        &mut changes,
+        "relations",
+        json!(before.relations),
+        json!(after.relations),
+    );
+    let keys = before
+        .properties
+        .keys()
+        .chain(after.properties.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for key in keys {
+        let previous = before.properties.get(&key).cloned();
+        let next = after.properties.get(&key).cloned();
+        if previous != next {
+            changes.push(GraphFieldChange {
+                field: key,
+                before: previous,
+                after: next,
+            });
+        }
+    }
+    changes
+}
+
+fn push_change(changes: &mut Vec<GraphFieldChange>, field: &str, before: Value, after: Value) {
+    if before == after {
+        return;
+    }
+    changes.push(GraphFieldChange {
+        field: field.into(),
+        before: Some(before),
+        after: Some(after),
+    });
+}
+
+fn graph_event_type(
+    action: &str,
+    before: Option<&GraphNode>,
+    after: Option<&GraphNode>,
+    changes: &[GraphFieldChange],
+) -> String {
+    if before.is_none() && after.is_some() {
+        if action.contains("restore") {
+            return "restored".into();
+        }
+        if action.contains("record_decision") {
+            return "decision-recorded".into();
+        }
+        if action.contains("capture_evidence") {
+            return "evidence-captured".into();
+        }
+        if action.contains("create_next_action") {
+            return "next-action-created".into();
+        }
+        return "created".into();
+    }
+    if before.is_some() && after.is_none() {
+        return "deleted".into();
+    }
+    let changed = |field: &str| changes.iter().any(|change| change.field == field);
+    let cleared = |field: &str| {
+        changes.iter().any(|change| {
+            change.field == field
+                && change.before.as_ref().is_some_and(non_empty_value)
+                && !change.after.as_ref().is_some_and(non_empty_value)
+        })
+    };
+    if cleared("waitingFor") {
+        return "waiting-cleared".into();
+    }
+    if changed("status") {
+        return "status-changed".into();
+    }
+    if deliverable_count(after) > deliverable_count(before) {
+        return "deliverable-added".into();
+    }
+    if action.contains("record_decision") {
+        return "decision-recorded".into();
+    }
+    if action.contains("capture_evidence") {
+        return "evidence-captured".into();
+    }
+    "updated".into()
+}
+
+fn non_empty_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(value) => !value.trim().is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+        Value::Bool(value) => *value,
+        Value::Number(_) => true,
+    }
+}
+
+fn deliverable_count(node: Option<&GraphNode>) -> usize {
+    node.and_then(|node| node.properties.get("deliverables"))
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0)
+}
+
+fn newest_deliverable(before: Option<&GraphNode>, after: Option<&GraphNode>) -> Option<Value> {
+    if deliverable_count(after) <= deliverable_count(before) {
+        return None;
+    }
+    after
+        .and_then(|node| node.properties.get("deliverables"))
+        .and_then(Value::as_array)
+        .and_then(|items| items.last())
+        .cloned()
+}
+
+fn graph_event_summary(
+    event_type: &str,
+    action: &str,
+    before: Option<&GraphNode>,
+    after: Option<&GraphNode>,
+    node: &GraphNode,
+) -> String {
+    match event_type {
+        "created" => format!("Filed {} · {}", human_kind(&node.kind), node.title),
+        "restored" => format!("Restored {}", node.title),
+        "deleted" => format!("Moved {} to Trash", node.title),
+        "decision-recorded" => format!("Recorded decision · {}", node.title),
+        "evidence-captured" => format!("Captured evidence · {}", node.title),
+        "next-action-created" => format!("Filed next action · {}", node.title),
+        "status-changed" => format!(
+            "{} → {} · {}",
+            human_kind(
+                before
+                    .and_then(GraphNode::status)
+                    .unwrap_or("backlog")
+            ),
+            human_kind(after.and_then(GraphNode::status).unwrap_or("backlog")),
+            node.title
+        ),
+        "waiting-cleared" => format!("Waiting cleared · {}", node.title),
+        "deliverable-added" => format!("Added deliverable · {}", node.title),
+        _ if action == "external.file-change" => format!("Source changed · {}", node.title),
+        _ => format!("Updated {}", node.title),
+    }
+}
+
+fn human_kind(value: &str) -> String {
+    value
+        .split('-')
+        .map(|part| {
+            let mut characters = part.chars();
+            characters
+                .next()
+                .map(|first| first.to_uppercase().collect::<String>() + characters.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[tauri::command]
@@ -352,6 +802,14 @@ pub fn graph_diagnostics(
 }
 
 #[tauri::command]
+pub fn graph_events(
+    runtime: tauri::State<'_, GraphRuntime>,
+    query: GraphEventQuery,
+) -> Result<GraphEventPage, String> {
+    runtime.events(&query)
+}
+
+#[tauri::command]
 pub fn graph_migration_report(
     runtime: tauri::State<'_, GraphRuntime>,
 ) -> Result<GraphMigrationReport, String> {
@@ -386,8 +844,17 @@ pub fn graph_update(
     app: AppHandle,
     runtime: tauri::State<'_, GraphRuntime>,
     patch: GraphNodePatch,
+    actor: Option<GraphActor>,
 ) -> Result<GraphNode, String> {
+    let before = runtime.get(&patch.id)?;
     let updated = runtime.update(patch).map_err(|error| error.to_string())?;
+    runtime.record_mutation(
+        "graph.update",
+        actor.unwrap_or_else(GraphActor::human),
+        before,
+        Some(updated.clone()),
+        updated.provenance.source_path.clone(),
+    )?;
     let status = runtime.open_result()?;
     let changed = GraphChanged {
         graph_revision: status.graph_revision,
@@ -405,8 +872,16 @@ pub fn graph_create(
     app: AppHandle,
     runtime: tauri::State<'_, GraphRuntime>,
     create: GraphNodeCreate,
+    actor: Option<GraphActor>,
 ) -> Result<GraphNode, String> {
     let created = runtime.create(create).map_err(|error| error.to_string())?;
+    runtime.record_mutation(
+        "graph.create",
+        actor.unwrap_or_else(GraphActor::human),
+        None,
+        Some(created.clone()),
+        created.provenance.source_path.clone(),
+    )?;
     emit_mutation_changed(&app, &runtime, created.provenance.source_path.clone())?;
     Ok(created)
 }
@@ -416,8 +891,17 @@ pub fn graph_delete(
     app: AppHandle,
     runtime: tauri::State<'_, GraphRuntime>,
     request: GraphNodeDelete,
+    actor: Option<GraphActor>,
 ) -> Result<GraphDeleteResult, String> {
+    let before = runtime.get(&request.id)?;
     let deleted = runtime.delete(request).map_err(|error| error.to_string())?;
+    runtime.record_mutation(
+        "graph.delete",
+        actor.unwrap_or_else(GraphActor::human),
+        before,
+        None,
+        deleted.source_path.clone(),
+    )?;
     emit_mutation_changed(&app, &runtime, deleted.source_path.clone())?;
     Ok(deleted)
 }
@@ -427,10 +911,18 @@ pub fn graph_restore(
     app: AppHandle,
     runtime: tauri::State<'_, GraphRuntime>,
     request: GraphRestoreRequest,
+    actor: Option<GraphActor>,
 ) -> Result<GraphNode, String> {
     let restored = runtime
         .restore(request)
         .map_err(|error| error.to_string())?;
+    runtime.record_mutation(
+        "graph.restore",
+        actor.unwrap_or_else(GraphActor::human),
+        None,
+        Some(restored.clone()),
+        restored.provenance.source_path.clone(),
+    )?;
     emit_mutation_changed(&app, &runtime, restored.provenance.source_path.clone())?;
     Ok(restored)
 }
@@ -666,6 +1158,8 @@ mod tests {
             roots: RwLock::new(roots),
             watchers: Mutex::new(Vec::new()),
             deleted: Mutex::new(VecDeque::new()),
+            events: Mutex::new(VecDeque::new()),
+            event_path: RwLock::new(None),
         };
         let project_result = runtime
             .query(&GraphQuery {

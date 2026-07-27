@@ -22,8 +22,9 @@ pub use migration::{
     GraphMigrationScope,
 };
 pub use model::{
-    canonical_kind, is_known_kind, is_valid_id, GraphChanged, GraphDeleteResult, GraphDiagnostic,
-    GraphDiagnosticLevel, GraphNeighbor, GraphNode, GraphNodeCreate, GraphNodeDelete,
+    canonical_kind, is_known_kind, is_valid_id, GraphActor, GraphActorKind, GraphChanged,
+    GraphDeleteResult, GraphDiagnostic, GraphDiagnosticLevel, GraphEvent, GraphEventPage,
+    GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode, GraphNodeCreate, GraphNodeDelete,
     GraphNodePatch, GraphNodeSummary, GraphOpenResult, GraphProvenance, GraphQuery,
     GraphQueryResult, GraphRelation, GraphRelationDirection, GraphRestoreRequest,
     GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSourceFormat, GraphSourceRoot,
