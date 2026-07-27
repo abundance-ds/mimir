@@ -23,11 +23,16 @@ vi.mock('@xterm/xterm', () => ({
       this.open = vi.fn()
       this.write = vi.fn()
       this.focus = vi.fn()
+      this.reset = vi.fn()
       this.dispose = vi.fn()
       this.dataDisposable = { dispose: vi.fn() }
       this.onData = vi.fn((callback) => {
         this.dataCallback = callback
         return this.dataDisposable
+      })
+      this.unicode = { activeVersion: '6' }
+      this.attachCustomKeyEventHandler = vi.fn((handler) => {
+        this.customKeyHandler = handler
       })
       xterm.terminals.push(this)
     }
@@ -45,6 +50,19 @@ vi.mock('@xterm/addon-fit', () => ({
 
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class MockWebLinksAddon {},
+}))
+
+vi.mock('@xterm/addon-unicode11', () => ({
+  Unicode11Addon: class MockUnicode11Addon {},
+}))
+
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class MockWebglAddon {
+    constructor() {
+      this.onContextLoss = vi.fn()
+      this.dispose = vi.fn()
+    }
+  },
 }))
 
 vi.mock('../../services/activities.js', () => ({
@@ -185,7 +203,10 @@ describe('TerminalActivity', () => {
     expect(order).toEqual(['listen', 'snapshot'])
     expect(writtenBytes(xterm.terminals[0])).toEqual([[0xf0, 0x9f], [0x99, 0x82]])
     expect(wrapper.emitted('ready')[0][0]).toMatchObject({ activityId: 'agent:one' })
-    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(2)
+    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(4)
+    expect(xterm.terminals[0].unicode.activeVersion).toBe('11')
+    // The Unicode 11 addon throws at load time without the proposed API flag.
+    expect(xterm.terminals[0].options.allowProposedApi).toBe(true)
   })
 
   it('keeps process controls and leaves identity chrome to the shared pane header', async () => {
@@ -302,6 +323,38 @@ describe('TerminalActivity', () => {
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
   })
 
+  it('turns Shift+Enter into a line feed instead of a submit', async () => {
+    await initialize()
+    const terminal = xterm.terminals[0]
+    const key = (overrides = {}) => ({
+      type: 'keydown',
+      key: 'Enter',
+      shiftKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      isComposing: false,
+      ...overrides,
+    })
+
+    expect(terminal.customKeyHandler(key())).toBe(false)
+    await flushPromises()
+    expect(api.write).toHaveBeenCalledTimes(1)
+    expect(Array.from(api.write.mock.calls[0][1])).toEqual([10])
+
+    // keyup for the same combo stays blocked but must not send twice.
+    expect(terminal.customKeyHandler(key({ type: 'keyup' }))).toBe(false)
+    await flushPromises()
+    expect(api.write).toHaveBeenCalledTimes(1)
+
+    // Plain Enter and modified combos keep xterm's default handling.
+    expect(terminal.customKeyHandler(key({ shiftKey: false }))).toBe(true)
+    expect(terminal.customKeyHandler(key({ metaKey: true }))).toBe(true)
+    expect(terminal.customKeyHandler(key({ isComposing: true }))).toBe(true)
+    await flushPromises()
+    expect(api.write).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps interrupt, stop, and restart as explicit actions', async () => {
     const wrapper = await initialize()
     await wrapper.vm.pasteText('pasted')
@@ -375,6 +428,40 @@ describe('TerminalActivity', () => {
     expect(api.snapshot).toHaveBeenLastCalledWith('agent:one', 2)
     expect(writtenBytes(terminal).at(-1)).toEqual([65])
     expect(xterm.terminals).toHaveLength(1)
+  })
+
+  it('restarts replay in place when a resumed session reuses the Activity identity', async () => {
+    const first = { ...agent, session: { runId: 'run-1' } }
+    const wrapper = await initialize(render({ activity: first }))
+    const terminal = xterm.terminals[0]
+
+    api.callback({
+      type: 'exit',
+      activityId: 'agent:one',
+      exit: { reason: 'interrupted' },
+      record: { ...first, status: 'interrupted', session: { runId: 'run-1', exit: { reason: 'interrupted' } } },
+    })
+    await nextTick()
+    expect(wrapper.find('[data-terminal-restart]').exists()).toBe(true)
+
+    api.snapshot.mockResolvedValueOnce(snapshot({
+      record: { ...agent, status: 'idle', session: { runId: 'run-2' } },
+      scrollback: {
+        chunks: [{ sequence: 1, bytes: [66] }],
+        lastSequence: 1,
+      },
+    }))
+    await wrapper.setProps({
+      activity: { ...agent, status: 'idle', session: { runId: 'run-2' } },
+    })
+    await flushPromises()
+
+    expect(terminal.reset).toHaveBeenCalledTimes(1)
+    expect(xterm.terminals).toHaveLength(1)
+    expect(api.snapshot).toHaveBeenLastCalledWith('agent:one', null)
+    expect(writtenBytes(terminal).at(-1)).toEqual([66])
+    expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
+    expect(wrapper.find('[data-terminal-stop]').exists()).toBe(true)
   })
 
   it('cannot strand a rapid active-inactive-active surface without a listener', async () => {

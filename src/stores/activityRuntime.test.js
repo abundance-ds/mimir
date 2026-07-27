@@ -7,6 +7,7 @@ vi.mock('../services/activities.js', () => ({
   listActivities: vi.fn(),
   renameActivity: vi.fn(),
   resolveLauncher: vi.fn(),
+  respawnActivity: vi.fn(),
   setActivityArchived: vi.fn(),
   spawnActivity: vi.fn(),
   stopActivity: vi.fn(),
@@ -53,6 +54,11 @@ describe('activity runtime store', () => {
       env: {},
     })
     api.spawnActivity.mockImplementation(async (record) => ({ record: { ...record, status: 'idle' }, scrollback: { chunks: [] }, live: true }))
+    api.respawnActivity.mockImplementation(async (record) => ({
+      record: { ...record, status: 'idle', session: { runId: 'run-2' } },
+      scrollback: { chunks: [] },
+      live: true,
+    }))
     api.stopActivity.mockResolvedValue()
   })
 
@@ -127,8 +133,7 @@ describe('activity runtime store', () => {
     expect(resumeArguments(args, strategy)).toEqual(expected)
   })
 
-  it('launches a resumable agent session without losing configured flags', async () => {
-    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce('resume-id')
+  it('resumes an ended agent inside its existing Activity identity', async () => {
     api.resolveLauncher.mockResolvedValueOnce({
       presetId: 'codex',
       title: 'Codex',
@@ -141,17 +146,28 @@ describe('activity runtime store', () => {
       env: {},
     })
     const runtime = useActivityRuntimeStore()
-    await runtime.launchPreset({ id: 'codex' }, '/w', {
-      resume: true,
-      resumeStrategy: 'codex',
-    })
+    const ended = {
+      ...backendRecord,
+      status: 'interrupted',
+      session: { runId: 'run-1', exit: { reason: 'interrupted' } },
+    }
 
-    expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'agent:resume-id',
+    const record = await runtime.resumePreset({ id: 'codex' }, ended)
+
+    expect(api.spawnActivity).not.toHaveBeenCalled()
+    expect(api.respawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'agent:one',
+      status: 'ready',
+      host: { type: 'pty', resumeStrategy: 'codex' },
       launch: expect.objectContaining({
+        command: '/bin/codex',
         args: ['resume', '--last', '--model', 'gpt-5', '-c', 'mcp_servers.mim_workbench.url="http://127.0.0.1:17532/mcp"'],
+        env: expect.objectContaining({ MIM_ACTIVITY_ID: 'agent:one' }),
       }),
     }))
+    expect(record.session.runId).toBe('run-2')
+    expect(useActivitiesStore().byId('agent:one')).toMatchObject({ status: 'idle' })
+    expect(useWorkbenchStore().activeActivityId).toBe('agent:one')
   })
 
   it('reconciles status and exit events from process truth', async () => {

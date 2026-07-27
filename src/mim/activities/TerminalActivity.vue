@@ -73,7 +73,7 @@
         tabindex="-1"
         role="application"
         :aria-label="`${activity.title} ${mode} session`"
-        class="terminal-canvas absolute inset-0 overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+        class="terminal-canvas absolute overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       />
 
       <div
@@ -102,6 +102,8 @@ import '@xterm/xterm/css/xterm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import {
   IconPlayerPause,
@@ -163,6 +165,7 @@ const restartTitle = computed(() => (
 ))
 let terminal = null
 let fitAddon = null
+let webglAddon = null
 let webLinksAddon = null
 let dataDisposable = null
 let resizeObserver = null
@@ -191,12 +194,19 @@ async function initialize() {
       scrollback: 10_000,
       allowTransparency: false,
       convertEol: false,
+      customGlyphs: true,
+      // The Unicode 11 addon registers itself through xterm's proposed API.
+      allowProposedApi: true,
     })
     fitAddon = new FitAddon()
     webLinksAddon = new WebLinksAddon()
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(webLinksAddon)
+    terminal.loadAddon(new Unicode11Addon())
+    terminal.unicode.activeVersion = '11'
+    terminal.attachCustomKeyEventHandler(handleCustomKey)
     terminal.open(surface.value)
+    installWebglRenderer()
     dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
     if (props.active) await attachActiveSurface()
   } catch (cause) {
@@ -343,6 +353,39 @@ function enqueueInput(bytes) {
   return inputQueue
 }
 
+// Shift+Enter inserts a line break instead of submitting. LF (Ctrl+J) is the
+// newline binding Claude and Codex document, and shells treat a lone LF
+// exactly like Enter, so plain terminal sessions lose nothing.
+function handleCustomKey(event) {
+  if (
+    event.key !== 'Enter'
+    || !event.shiftKey
+    || event.ctrlKey
+    || event.metaKey
+    || event.altKey
+    || event.isComposing
+  ) return true
+  if (event.type === 'keydown') enqueueInput(terminalBytes('\n'))
+  return false
+}
+
+// The WebGL renderer keeps heavy TUI output smooth and, with customGlyphs,
+// draws box-drawing and powerline characters pixel-perfect. WebViews without
+// a WebGL2 context, and any later context loss, keep the DOM renderer.
+function installWebglRenderer() {
+  try {
+    const addon = new WebglAddon()
+    addon.onContextLoss(() => {
+      addon.dispose()
+      if (webglAddon === addon) webglAddon = null
+    })
+    terminal.loadAddon(addon)
+    webglAddon = addon
+  } catch {
+    webglAddon = null
+  }
+}
+
 async function interrupt() {
   const sent = await enqueueInput(Uint8Array.of(3))
   if (sent) emit('interrupt', { activityId: activityId.value })
@@ -424,6 +467,28 @@ function installThemeObserver() {
   })
 }
 
+// A respawned session reuses this Activity identity. Replay sequences restart
+// from the new session's first byte, so the surface must drop the previous
+// run's screen and sequence watermark before hydrating again.
+watch(
+  () => props.activity.session?.runId,
+  async (runId, previousRunId) => {
+    if (!runId || !previousRunId || runId === previousRunId || disposed) return
+    hasExited.value = false
+    live.value = true
+    stopping.value = false
+    error.value = ''
+    lastSequence = 0
+    lastSize = { cols: 0, rows: 0 }
+    terminal?.reset()
+    if (props.active) {
+      detachInactiveSurface()
+      loading.value = true
+      await attachActiveSurface()
+    }
+  },
+)
+
 watch(
   () => [props.activity.status, props.activity.session?.exit],
   ([nextStatus, sessionExit]) => {
@@ -472,6 +537,7 @@ onBeforeUnmount(() => {
   dataDisposable = null
   terminal?.dispose()
   terminal = null
+  webglAddon = null
   // ActivitySupervisor owns the process. Detaching this renderer surface must
   // never stop, interrupt, or otherwise mutate the running Activity.
 })
@@ -502,12 +568,12 @@ function statusFromExit(reason) {
 
 <style scoped>
 .terminal-canvas {
+  inset: 8px 4px 6px 8px;
   contain: strict;
 }
 
 .terminal-canvas :deep(.xterm) {
   height: 100%;
-  padding: 10px 10px 8px 12px;
 }
 
 .terminal-canvas :deep(.xterm-viewport) {

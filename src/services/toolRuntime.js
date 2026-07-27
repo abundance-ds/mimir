@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { spawnActivity } from './activities.js'
 import { createMimTools } from './ai/tools/index.js'
 
 const CORE_TOOL_ALIASES = Object.freeze({
@@ -111,11 +112,7 @@ export async function executeToolRequest(request, options = {}) {
     case 'activities.spawn':
       return options.spawnActivity
         ? options.spawnActivity(input)
-        : invoke('activity_spawn', {
-            record: input.record,
-            cols: input.cols ?? 100,
-            rows: input.rows ?? 30,
-          })
+        : spawnActivity(input.record, { cols: input.cols, rows: input.rows })
     case 'activities.stop':
       if (options.stopActivity) return options.stopActivity(input.activity_id)
       await invoke('activity_stop', { activityId: input.activity_id })

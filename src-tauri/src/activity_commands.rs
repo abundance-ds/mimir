@@ -46,6 +46,23 @@ pub async fn activity_spawn(
 }
 
 #[tauri::command]
+pub async fn activity_respawn(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    record: ActivityRecord,
+    cols: u16,
+    rows: u16,
+) -> Result<ActivitySnapshot, String> {
+    let supervisor = supervisor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        supervisor
+            .respawn(SpawnActivityRequest::new(record, cols, rows))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Activity respawn task failed: {error}"))?
+}
+
+#[tauri::command]
 pub fn activity_snapshot(
     supervisor: tauri::State<'_, ActivitySupervisor>,
     activity_id: String,

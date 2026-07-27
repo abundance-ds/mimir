@@ -5,6 +5,7 @@ import {
   listenToActivityEvents,
   resolveLauncher,
   renameActivity,
+  respawnActivity,
   setActivityArchived,
   spawnActivity,
   stopActivity,
@@ -39,14 +40,16 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const resolved = await resolveLauncher(preset, workspacePath)
     const resolvedAt = monotonicNow()
     const kind = options.kind || resolved.kind
-    const resumeStrategy = normalizedResumeStrategy(
-      options.resumeStrategy || resolved.resumeStrategy,
-    )
-    const resolvedArgs = options.resume
-      ? resumeArguments(resolved.args, resumeStrategy)
-      : resolved.args
+    const resumeStrategy = normalizedResumeStrategy(resolved.resumeStrategy)
     const id = `${kind}:${crypto.randomUUID()}`
     const timestamp = new Date().toISOString()
+    const mcpUrl = activityContextUrl(
+      resolved.env?.MIMX_MCP_URL || 'http://127.0.0.1:17532/mcp',
+      {
+        activityId: id,
+        agentId: resolved.agentId || resolved.presetId,
+      },
+    )
     const record = {
       id,
       kind,
@@ -69,23 +72,74 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       },
       launch: {
         command: resolved.command,
-        args: [...resolvedArgs, ...(options.args || [])],
+        args: [...resolved.args, ...(options.args || [])]
+          .map(argument => replaceMcpUrl(argument, resolved.env?.MIMX_MCP_URL, mcpUrl)),
         cwd: resolved.cwd,
         env: {
           ...(resolved.env || {}),
           ...(options.env || {}),
           MIM_ACTIVITY_ID: id,
-          MIMX_MCP_URL: 'http://127.0.0.1:17532/mcp',
+          MIM_AGENT_ID: resolved.agentId || resolved.presetId,
+          MIMX_MCP_URL: mcpUrl,
         },
       },
     }
     const snapshot = await spawnActivity(record)
     const spawnedAt = monotonicNow()
     activities.upsert(snapshot.record)
-    workbench.openActivity(id)
+    if (options.open !== false) workbench.openActivity(id)
     recordLaunchMetrics({
       presetId: resolved.presetId,
       kind,
+      resolveMs: resolvedAt - startedAt,
+      spawnMs: spawnedAt - resolvedAt,
+      totalMs: spawnedAt - startedAt,
+    })
+    return snapshot.record
+  }
+
+  // Resume continues the interrupted agent inside its existing Activity row.
+  // The backend respawn preserves the record id and creation time; only the
+  // launch spec, session, and scrollback restart.
+  async function resumePreset(preset, activity) {
+    const startedAt = monotonicNow()
+    const resolved = await resolveLauncher(preset, activity.workspacePath)
+    const resolvedAt = monotonicNow()
+    const resumeStrategy = normalizedResumeStrategy(
+      activity.host?.resumeStrategy || resolved.resumeStrategy,
+    )
+    const record = {
+      ...activity,
+      status: 'ready',
+      updatedAt: new Date().toISOString(),
+      archivedAt: undefined,
+      session: undefined,
+      error: undefined,
+      workspacePath: resolved.cwd,
+      host: {
+        type: 'pty',
+        ...(resumeStrategy !== 'none'
+          ? { resumeStrategy }
+          : {}),
+      },
+      launch: {
+        command: resolved.command,
+        args: resumeArguments(resolved.args, resumeStrategy),
+        cwd: resolved.cwd,
+        env: {
+          ...(resolved.env || {}),
+          MIM_ACTIVITY_ID: activity.id,
+          MIMX_MCP_URL: 'http://127.0.0.1:17532/mcp',
+        },
+      },
+    }
+    const snapshot = await respawnActivity(record)
+    const spawnedAt = monotonicNow()
+    activities.upsert(snapshot.record)
+    workbench.openActivity(activity.id)
+    recordLaunchMetrics({
+      presetId: resolved.presetId,
+      kind: activity.kind,
       resolveMs: resolvedAt - startedAt,
       spawnMs: spawnedAt - resolvedAt,
       totalMs: spawnedAt - startedAt,
@@ -102,6 +156,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     kind = 'terminal',
     retention = 'durable',
     source = {},
+    open = true,
   }) {
     if (!command) throw new Error('A command is required.')
     if (!cwd) throw new Error('A working directory is required.')
@@ -131,7 +186,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     }
     const snapshot = await spawnActivity(record)
     activities.upsert(snapshot.record)
-    workbench.openActivity(id)
+    if (open) workbench.openActivity(id)
     return snapshot.record
   }
 
@@ -198,6 +253,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     lastLaunchMetrics,
     initialize,
     launchPreset,
+    resumePreset,
     launchCommand,
     stop,
     rename,
@@ -226,6 +282,31 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
 
 function message(error) {
   return error instanceof Error ? error.message : String(error || 'Activity runtime failed.')
+}
+
+export function activityContextUrl(value, context = {}) {
+  const fallback = 'http://127.0.0.1:17532/mcp'
+  try {
+    const url = new URL(String(value || fallback))
+    for (const [key, entry] of Object.entries(context)) {
+      if (entry) url.searchParams.set(key, String(entry))
+    }
+    return url.toString()
+  } catch {
+    return fallback
+  }
+}
+
+function replaceMcpUrl(argument, original, replacement) {
+  if (typeof argument !== 'string' || !replacement) return argument
+  const candidates = [
+    original,
+    'http://127.0.0.1:17532/mcp',
+  ].filter(Boolean)
+  return candidates.reduce(
+    (value, candidate) => value.replaceAll(String(candidate), replacement),
+    argument,
+  )
 }
 
 export function resumeArguments(args = [], strategy = 'none') {

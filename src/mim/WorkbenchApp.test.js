@@ -65,6 +65,7 @@ vi.mock('../services/activities.js', () => ({
   listenToActivityEvents: vi.fn(),
   resolveLauncher: vi.fn(),
   renameActivity: vi.fn(),
+  respawnActivity: vi.fn(),
   setActivityArchived: vi.fn(),
   spawnActivity: vi.fn(),
   stopActivity: vi.fn(),
@@ -236,6 +237,11 @@ describe('WorkbenchApp', () => {
     })
     activityApi.spawnActivity.mockImplementation(async (record) => ({
       record: { ...record, status: 'idle' },
+      scrollback: { chunks: [] },
+      live: true,
+    }))
+    activityApi.respawnActivity.mockImplementation(async (record) => ({
+      record: { ...record, status: 'idle', session: { runId: 'run-2' } },
       scrollback: { chunks: [] },
       live: true,
     }))
@@ -557,6 +563,45 @@ describe('WorkbenchApp', () => {
       }),
     }))
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
+  })
+
+  it('resumes an interrupted agent into the same Activity row instead of spawning a new one', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    store.upsert({
+      id: 'agent:resume-me',
+      kind: 'agent',
+      title: 'Review with Codex',
+      workspacePath: '/w',
+      status: 'interrupted',
+      createdAt: '2026-07-25T10:00:00Z',
+      updatedAt: '2026-07-25T10:00:00Z',
+      retention: 'durable',
+      source: { launcherId: 'codex', presetId: 'review' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      launch: { command: '/bin/codex', args: ['review'], cwd: '/w', env: {} },
+      session: { runId: 'run-1', exit: { reason: 'interrupted' } },
+    })
+    useWorkbenchStore().openActivity('agent:resume-me')
+    await flushPromises()
+
+    wrapper.findAllComponents({ name: 'TerminalActivity' })
+      .find((component) => component.props('activity').id === 'agent:resume-me')
+      .vm.$emit('restart', { activity: store.byId('agent:resume-me') })
+    await flushPromises()
+
+    expect(activityApi.spawnActivity).not.toHaveBeenCalled()
+    expect(activityApi.respawnActivity).toHaveBeenCalledTimes(1)
+    const respawned = activityApi.respawnActivity.mock.calls[0][0]
+    expect(respawned.id).toBe('agent:resume-me')
+    expect(respawned.launch.args).toEqual(['resume', '--last', 'review'])
+    expect(respawned.launch.env.MIM_ACTIVITY_ID).toBe('agent:resume-me')
+    expect(store.activities.filter((activity) => activity.kind === 'agent')).toHaveLength(1)
+    expect(useWorkbenchStore().activeActivityId).toBe('agent:resume-me')
+    expect(store.byId('agent:resume-me')).toMatchObject({
+      status: 'idle',
+      session: { runId: 'run-2' },
+    })
   })
 
   it('launches a fresh Terminal Activity from the Activity plus menu', async () => {

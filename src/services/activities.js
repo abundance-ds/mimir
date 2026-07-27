@@ -14,8 +14,24 @@ export function resolveLauncher(preset, workspacePath) {
   })
 }
 
-export function spawnActivity(record, { cols = 100, rows = 30 } = {}) {
-  return invoke('activity_spawn', { record, cols, rows })
+// The shell prints its first prompt before the terminal surface mounts and
+// reports its fitted size. zsh pads its partial-line mark to the PTY width, so
+// a spawn wider than the eventual pane leaves a stray wrapped "%" line in
+// scrollback. Spawning at (or under) the last fitted size keeps that padding
+// on the prompt line, and the first fit corrects any undershoot invisibly.
+let fittedSize = null
+
+export function spawnActivity(record, size = {}) {
+  return invoke('activity_spawn', { record, ...spawnSize(size) })
+}
+
+export function respawnActivity(record, size = {}) {
+  return invoke('activity_respawn', { record, ...spawnSize(size) })
+}
+
+function spawnSize({ cols, rows } = {}) {
+  if (cols > 0 && rows > 0) return { cols, rows }
+  return fittedSize || { cols: 64, rows: 20 }
 }
 
 export function activitySnapshot(activityId, afterSequence = null) {
@@ -30,6 +46,7 @@ export function writeActivity(activityId, value) {
 }
 
 export function resizeActivity(activityId, cols, rows) {
+  if (cols > 0 && rows > 0) fittedSize = { cols, rows }
   return invoke('activity_resize', { activityId, cols, rows })
 }
 

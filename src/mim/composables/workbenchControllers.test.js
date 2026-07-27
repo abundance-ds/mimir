@@ -74,6 +74,57 @@ describe('Workbench controllers', () => {
     controller.dispose()
   })
 
+  it('resumes an interrupted agent inside its existing Activity row', async () => {
+    const preset = { id: 'codex', title: 'Codex', kind: 'agent' }
+    const interrupted = activity('agent:one', {
+      kind: 'agent',
+      status: 'interrupted',
+      workspacePath: '',
+      source: { presetId: 'codex' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+    })
+    const activityRuntime = {
+      resumePreset: vi.fn(async () => interrupted),
+      launchPreset: vi.fn(async () => {}),
+    }
+    const diagnostic = ref('')
+    const controller = useActivityLifecycle({
+      activities: { records: [], byId: () => null },
+      activityRuntime,
+      launchers: { byId: id => (id === 'codex' ? preset : null) },
+      workbench: reactive({ activeActivityId: '', paneLayout: { activity: { state: 'normal' } } }),
+      workspacePath: ref('/w'),
+      diagnostic,
+      coreActivityIds: new Set(),
+      getSidebarActivities: () => [],
+      openCoreActivity: vi.fn(),
+      selectActivity: vi.fn(),
+      openActivityRecord: vi.fn(),
+    })
+
+    await controller.restartActivity({ activity: interrupted })
+    expect(activityRuntime.resumePreset).toHaveBeenCalledWith(
+      preset,
+      expect.objectContaining({ id: 'agent:one', workspacePath: '/w' }),
+    )
+    expect(activityRuntime.launchPreset).not.toHaveBeenCalled()
+
+    const plain = activity('agent:two', {
+      kind: 'agent',
+      status: 'done',
+      source: { presetId: 'codex' },
+      host: { type: 'pty' },
+    })
+    await controller.restartActivity({ activity: plain })
+    expect(activityRuntime.resumePreset).toHaveBeenCalledTimes(1)
+    expect(activityRuntime.launchPreset).toHaveBeenCalledWith(preset, '/w', {
+      kind: 'agent',
+      title: 'agent:two',
+    })
+    expect(diagnostic.value).toBe('')
+    controller.dispose()
+  })
+
   it('routes close to the last meaningful focus owner after native chrome takes focus', () => {
     const quickOpen = ref(false)
     const closeActivity = vi.fn()

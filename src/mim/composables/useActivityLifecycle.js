@@ -155,13 +155,20 @@ export function useActivityLifecycle({
     try {
       if (activity?.kind === 'agent' && !activity.source?.appId) {
         if (!preset) throw new Error('its launcher preset is missing')
+        if (activity.host?.resumeStrategy && activity.host?.type === 'pty') {
+          // Resume continues the same Activity row; only agents without a
+          // continuation strategy start over as a fresh Activity.
+          await activityRuntime.resumePreset(preset, {
+            ...activity,
+            workspacePath: activity.workspacePath || workspacePath.value,
+          })
+          return
+        }
         await activityRuntime.launchPreset(
           preset,
           activity.workspacePath || workspacePath.value,
           {
             kind: activity.kind,
-            resume: Boolean(activity.host?.resumeStrategy),
-            resumeStrategy: activity.host?.resumeStrategy,
             title: activity.title,
           },
         )

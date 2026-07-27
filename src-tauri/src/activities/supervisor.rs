@@ -408,6 +408,24 @@ impl ActivitySupervisor {
         &self,
         request: SpawnActivityRequest,
     ) -> Result<ActivitySnapshot, SupervisorError> {
+        self.spawn_session(request, false)
+    }
+
+    /// Start a new session for an existing, ended PTY activity. The durable
+    /// identity — id, creation time, sidebar position — survives; the new
+    /// session replaces the previous run's scrollback and exit record.
+    pub fn respawn(
+        &self,
+        request: SpawnActivityRequest,
+    ) -> Result<ActivitySnapshot, SupervisorError> {
+        self.spawn_session(request, true)
+    }
+
+    fn spawn_session(
+        &self,
+        request: SpawnActivityRequest,
+        replace_ended: bool,
+    ) -> Result<ActivitySnapshot, SupervisorError> {
         let mut record = request.record;
         if record.id.trim().is_empty() {
             return Err(SupervisorError::EmptyActivityId);
@@ -423,7 +441,23 @@ impl ActivitySupervisor {
         let mut reservation = {
             let activities = lock(&self.inner.activities);
             let mut spawning_ids = lock(&self.inner.spawning_ids);
-            if activities.contains_key(&record.id) || !spawning_ids.insert(record.id.clone()) {
+            if replace_ended {
+                let existing = activities
+                    .get(&record.id)
+                    .ok_or_else(|| SupervisorError::NotFound(record.id.clone()))?;
+                let existing_record = lock(&existing.record);
+                if lock(&existing.command_tx).is_some() || existing_record.status.is_live() {
+                    return Err(SupervisorError::NotEnded {
+                        activity_id: record.id.clone(),
+                        operation: "resumed",
+                    });
+                }
+                record.created_at = existing_record.created_at.clone();
+                record.archived_at = None;
+            } else if activities.contains_key(&record.id) {
+                return Err(SupervisorError::AlreadyExists(record.id));
+            }
+            if !spawning_ids.insert(record.id.clone()) {
                 return Err(SupervisorError::AlreadyExists(record.id));
             }
             SpawnReservation {
@@ -791,6 +825,12 @@ impl ActivitySupervisor {
     /// delete is guaranteed to follow every session write.
     pub fn clear(&self, activity_id: &str) -> Result<ActivityRecord, SupervisorError> {
         let mut activities = lock(&self.inner.activities);
+        if lock(&self.inner.spawning_ids).contains(activity_id) {
+            return Err(SupervisorError::NotEnded {
+                activity_id: activity_id.to_string(),
+                operation: "cleared",
+            });
+        }
         let activity = activities
             .get(activity_id)
             .cloned()
@@ -2008,6 +2048,84 @@ mod tests {
             interrupted.record.session.unwrap().exit.unwrap().reason,
             SessionExitReason::Interrupted
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn respawn_reuses_the_ended_activity_identity_with_a_fresh_session() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let first = durable_record(
+            "resume",
+            "/bin/sh",
+            vec!["-c".into(), "printf first".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(first, 80, 24))
+            .unwrap();
+        let ended = wait_for_end(&supervisor, "resume");
+        assert!(String::from_utf8_lossy(&replay_bytes(&ended)).contains("first"));
+        let first_run_id = ended.record.session.unwrap().run_id;
+
+        let mut again = durable_record(
+            "resume",
+            "/bin/sh",
+            vec!["-c".into(), "printf second-run".into()],
+        );
+        again.created_at = "2027-01-01T00:00:00Z".into();
+        let resumed = supervisor
+            .respawn(SpawnActivityRequest::new(again, 80, 24))
+            .unwrap();
+        assert_eq!(resumed.record.created_at, "2026-07-25T00:00:00Z");
+        assert!(resumed.record.archived_at.is_none());
+        assert_ne!(resumed.record.session.unwrap().run_id, first_run_id);
+
+        let finished = wait_for_end(&supervisor, "resume");
+        let replay = String::from_utf8_lossy(&replay_bytes(&finished)).to_string();
+        assert!(replay.contains("second-run"));
+        assert!(!replay.contains("first"));
+        assert_ne!(finished.record.session.unwrap().run_id, first_run_id);
+        assert_eq!(supervisor.list().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn respawn_rejects_missing_and_live_activities() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let missing = durable_record("ghost", "/bin/sh", vec!["-c".into(), "true".into()]);
+        assert!(matches!(
+            supervisor.respawn(SpawnActivityRequest::new(missing, 80, 24)),
+            Err(SupervisorError::NotFound(id)) if id == "ghost"
+        ));
+
+        let running = durable_record(
+            "live",
+            "/bin/sh",
+            vec!["-c".into(), "while :; do sleep 1; done".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(running.clone(), 80, 24))
+            .unwrap();
+        assert!(matches!(
+            supervisor.respawn(SpawnActivityRequest::new(running.clone(), 80, 24)),
+            Err(SupervisorError::NotEnded {
+                operation: "resumed",
+                ..
+            })
+        ));
+
+        supervisor.stop("live").unwrap();
+        wait_for_end(&supervisor, "live");
+        supervisor
+            .respawn(SpawnActivityRequest::new(
+                durable_record("live", "/bin/sh", vec!["-c".into(), "printf back".into()]),
+                80,
+                24,
+            ))
+            .unwrap();
+        let finished = wait_for_end(&supervisor, "live");
+        assert!(String::from_utf8_lossy(&replay_bytes(&finished)).contains("back"));
     }
 
     #[cfg(unix)]
