@@ -135,10 +135,9 @@ const displayValue = computed(() => {
   const date = parseDate(props.modelValue)
   if (!date) return props.modelValue
   if (props.variant === 'row') {
-    return new Intl.DateTimeFormat(undefined, {
-      day: '2-digit',
-      month: '2-digit',
-    }).format(date)
+    const day = String(date.getDate()).padStart(2, '0')
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    return `${day}.${month}`
   }
   return new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
@@ -337,14 +336,15 @@ onUnmounted(close)
 .graph-date-row {
   width: auto;
   min-width: 34px;
-  height: 18px;
+  height: 19px;
   justify-content: flex-start;
   border-color: transparent;
+  border-radius: 2px;
   background: transparent;
   padding: 0 2px;
   color: inherit;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 

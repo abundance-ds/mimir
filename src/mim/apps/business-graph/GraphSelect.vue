@@ -15,10 +15,13 @@
     @keydown="onTriggerKeydown"
   >
     <span class="min-w-0 flex-1 truncate text-left">
-      {{ selectedOption?.label || placeholder }}
+      <slot name="trigger" :option="selectedOption">
+        {{ selectedOption?.label || placeholder }}
+      </slot>
     </span>
     <IconChevronDown
-      :size="variant === 'card' ? 8 : 10"
+      v-if="chevron"
+      :size="variant === 'card' ? 8 : variant === 'row' ? 9 : 10"
       class="graph-select-chevron shrink-0"
       :class="{ 'rotate-180': open }"
     />
@@ -77,6 +80,9 @@
           >
             <IconCheck :size="9" />
           </span>
+          <span v-if="option.icon" class="graph-select-option-icon">
+            <component :is="option.icon" :size="13" />
+          </span>
           <span class="min-w-0 flex-1">
             <span class="graph-select-option-label">{{ option.label }}</span>
             <span v-if="option.hint" class="graph-select-option-hint">
@@ -119,9 +125,10 @@ const props = defineProps({
   variant: {
     type: String,
     default: 'field',
-    validator: value => ['toolbar', 'field', 'card', 'quiet', 'property'].includes(value),
+    validator: value => ['toolbar', 'field', 'card', 'quiet', 'property', 'row'].includes(value),
   },
   menuMinWidth: { type: Number, default: 148 },
+  chevron: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:modelValue', 'change'])
@@ -144,6 +151,7 @@ const normalizedOptions = computed(() => props.options.map(option => (
         value: option.value ?? option.id ?? '',
         label: option.label ?? option.title ?? human(option.value ?? option.id),
         hint: option.hint ?? option.description ?? '',
+        icon: option.icon || null,
         disabled: Boolean(option.disabled),
       }
 )))
@@ -377,6 +385,25 @@ let graphSelectCounter = 0
   font-size: 11px;
 }
 
+.graph-select-row {
+  min-width: 0;
+  height: 19px;
+  padding: 0 3px;
+  border-color: transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 520;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-select-row:hover {
+  border-color: var(--color-rule);
+  background: var(--color-chrome-high);
+}
+
 .graph-select-menu {
   overflow: hidden;
   border: 1px solid var(--color-rule);
@@ -453,6 +480,13 @@ let graphSelectCounter = 0
   border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-rule));
   background: var(--color-accent-soft);
   color: var(--color-accent);
+}
+
+.graph-select-option-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-ink-3);
 }
 
 .graph-select-option-label {

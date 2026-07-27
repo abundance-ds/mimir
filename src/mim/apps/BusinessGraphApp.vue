@@ -298,6 +298,20 @@
             </div>
           </div>
 
+          <GraphFilterBanner
+            v-if="graph.section === 'work' && priorityFilter"
+            :label="`priority = ${priorityFilter}`"
+            :hidden-count="priorityFilterHidden"
+            clear-control="board-priority-filter-clear"
+            @clear="priorityFilter = ''"
+          />
+          <GraphFilterBanner
+            v-if="graph.section === 'work' && graph.view === 'board' && boardGroup === 'status' && hiddenBoardStatuses.length"
+            :label="`columns hidden: ${hiddenBoardStatuses.join(', ')}`"
+            :hidden-count="hiddenColumnIssues"
+            clear-control="board-columns-filter-clear"
+            @clear="showAllBoardStatuses"
+          />
           <WorkBoard
             v-if="graph.section === 'work' && graph.view === 'board'"
             :issues="boardIssues"
@@ -463,6 +477,7 @@ import ContextTrail from './business-graph/ContextTrail.vue'
 import CrmView from './business-graph/CrmView.vue'
 import EntityList from './business-graph/EntityList.vue'
 import GraphConfirmDialog from './business-graph/GraphConfirmDialog.vue'
+import GraphFilterBanner from './business-graph/GraphFilterBanner.vue'
 import GraphMap from './business-graph/GraphMap.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
@@ -618,6 +633,18 @@ const mapNodes = computed(() => {
   return graph.nodes.filter(node => visibleIds.has(node.id))
 })
 const boardIssues = computed(() => [...projectionNodes.value].sort(issueSort(boardSort.value)))
+const priorityFilterHidden = computed(() => {
+  if (!priorityFilter.value) return 0
+  return graph.visibleNodes.filter(item => item.priority !== priorityFilter.value).length
+})
+const hiddenBoardStatuses = computed(() => {
+  const visible = new Set(visibleBoardStatuses.value)
+  return boardStatuses.filter(status => !visible.has(status.id)).map(status => status.label)
+})
+const hiddenColumnIssues = computed(() => {
+  const visible = new Set(visibleBoardStatuses.value)
+  return projectionNodes.value.filter(item => !visible.has(item.status || 'backlog')).length
+})
 const relatedActivities = computed(() => {
   const nodeId = graph.selectedNode?.id
   if (!nodeId) return []
@@ -1190,6 +1217,10 @@ function toggleBoardStatus(id) {
   visibleBoardStatuses.value = boardStatuses
     .map(status => status.id)
     .filter(status => visible.has(status))
+}
+
+function showAllBoardStatuses() {
+  visibleBoardStatuses.value = boardStatuses.map(status => status.id)
 }
 
 function issueSort(mode) {

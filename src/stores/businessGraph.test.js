@@ -6,6 +6,7 @@ vi.mock('../services/businessGraph.js', () => ({
   deleteGraphNode: vi.fn(),
   getGraphNode: vi.fn(),
   graphDiagnostics: vi.fn(),
+  graphEvents: vi.fn(),
   graphNeighbors: vi.fn(),
   listenForGraphChanges: vi.fn(),
   openBusinessGraph: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../services/businessGraph.js', () => ({
 import {
   getGraphNode,
   graphDiagnostics,
+  graphEvents,
   graphNeighbors,
   listenForGraphChanges,
   openBusinessGraph,
@@ -69,6 +71,7 @@ describe('business graph store', () => {
       graphRevision: 1,
     })
     vi.mocked(graphDiagnostics).mockResolvedValue([])
+    vi.mocked(graphEvents).mockResolvedValue({ items: [], total: 0 })
     vi.mocked(listenForGraphChanges).mockResolvedValue(vi.fn())
     vi.mocked(searchGraph).mockResolvedValue([])
     vi.mocked(graphNeighbors).mockResolvedValue([])

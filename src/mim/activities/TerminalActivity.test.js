@@ -2,7 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
-const xterm = vi.hoisted(() => ({ terminals: [], fits: [] }))
+const xterm = vi.hoisted(() => ({
+  terminals: [],
+  fits: [],
+  webglAddons: [],
+}))
 const api = vi.hoisted(() => ({
   callback: null,
   unlisten: vi.fn(),
@@ -52,8 +56,18 @@ vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class MockWebLinksAddon {},
 }))
 
-vi.mock('@xterm/addon-canvas', () => ({
-  CanvasAddon: class MockCanvasAddon {},
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class MockWebglAddon {
+    constructor() {
+      this.dispose = vi.fn()
+      this.contextLossDisposable = { dispose: vi.fn() }
+      this.onContextLoss = vi.fn((callback) => {
+        this.contextLossCallback = callback
+        return this.contextLossDisposable
+      })
+      xterm.webglAddons.push(this)
+    }
+  },
 }))
 
 vi.mock('@xterm/addon-unicode11', () => ({
@@ -88,6 +102,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   xterm.terminals.length = 0
   xterm.fits.length = 0
+  xterm.webglAddons.length = 0
   api.callback = null
   api.listen.mockImplementation(async (callback) => {
     api.callback = callback
@@ -208,6 +223,19 @@ describe('TerminalActivity', () => {
     })
     // The Unicode 11 addon throws at load time without the proposed API flag.
     expect(xterm.terminals[0].options.allowProposedApi).toBe(true)
+    expect(wrapper.get('[data-terminal-surface]').attributes('data-renderer')).toBe('webgl')
+  })
+
+  it('falls back to the DOM renderer after WebGL context loss', async () => {
+    const wrapper = await initialize()
+    const addon = xterm.webglAddons[0]
+
+    addon.contextLossCallback()
+    await nextTick()
+
+    expect(addon.contextLossDisposable.dispose).toHaveBeenCalledOnce()
+    expect(addon.dispose).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-terminal-surface]').attributes('data-renderer')).toBe('dom')
   })
 
   it('keeps process controls and leaves identity chrome to the shared pane header', async () => {

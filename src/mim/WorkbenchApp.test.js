@@ -932,6 +932,29 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
   })
 
+  it('routes Escape through the Go to hierarchy before closing the root', async () => {
+    const wrapper = await render({ workspace: '/w' })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+    await wrapper.get('[data-quick-open-type="new-activity-enter"]').trigger('click')
+    expect(wrapper.get('[data-quick-open-type="new-activity"]').exists()).toBe(true)
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(false)
+
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+    expect(wrapper.get('[data-quick-open]').exists()).toBe(true)
+    expect(wrapper.get('[data-quick-open-type="new-activity-enter"]').exists()).toBe(true)
+
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+  })
+
   it('keeps closed work out of the Sidebar and restores it through @ History', async () => {
     const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()

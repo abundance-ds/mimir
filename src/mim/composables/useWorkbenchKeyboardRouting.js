@@ -26,12 +26,14 @@ export function useWorkbenchKeyboardRouting({
       )
       return
     }
+    // Escape belongs to the mounted Go to dialog so a nested view can consume
+    // it as Back before the root view closes. This router runs in capture phase,
+    // so handling Escape here would always skip the dialog's hierarchy.
+    if (quickOpen.value && event.key === 'Escape') return
     if (
       quickOpen.value
-      && (
-        event.key === 'Escape'
-        || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w')
-      )
+      && (event.metaKey || event.ctrlKey)
+      && event.key.toLowerCase() === 'w'
     ) {
       consume(event)
       quickOpen.value = false

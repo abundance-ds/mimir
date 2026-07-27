@@ -37,13 +37,15 @@ describe('terminal activity byte and lifecycle helpers', () => {
     expect(snapshot.scrollback.chunks[0].sequence).toBe(2)
   })
 
-  it('loads the exact regular and semibold terminal faces before xterm measures', async () => {
+  it('loads upright and italic regular and semibold faces before xterm measures', async () => {
     const load = vi.fn().mockResolvedValue([])
     await prepareTerminalFonts(13, { load })
 
     expect(load.mock.calls).toEqual([
       ['400 13px "IBM Plex Mono"', 'MW'],
+      ['italic 400 13px "IBM Plex Mono"', 'MW'],
       ['600 13px "IBM Plex Mono"', 'MW'],
+      ['italic 600 13px "IBM Plex Mono"', 'MW'],
     ])
   })
 
@@ -61,6 +63,8 @@ describe('terminal activity byte and lifecycle helpers', () => {
     expect(theme.black).toBe('#151622')
     expect(theme.white).toBe('#b8b4c8')
     expect(theme.brightWhite).toBe('#f0eef8')
+    expect(theme.scrollbarSliderBackground).toBe('#7e7a9266')
+    expect(theme.scrollbarSliderHoverBackground).toBe('#b8b4c899')
     root.remove()
   })
 })

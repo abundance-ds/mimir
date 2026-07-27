@@ -28,14 +28,12 @@
         @drop.prevent="dropOnColumn(column.id)"
       >
         <header class="board-column-header">
-          <span class="board-column-code">{{ column.code }}</span>
           <span class="board-column-name">{{ column.label }}</span>
           <span class="board-column-count">{{ grouped[column.id]?.length || 0 }}</span>
           <button
             type="button"
             :data-board-add="column.id"
             :data-graph-control="`board-add-${column.id}`"
-            :title="`Create in ${column.label}`"
             :aria-label="`Create in ${column.label}`"
             @click="$emit('create', { columnId: column.id, groupBy })"
           >
@@ -73,53 +71,69 @@
             @click="selectOrOpen($event, issue, column.id, index)"
             @keydown="onRowKeydown($event, issue, column.id, index)"
           >
-            <button
-              type="button"
+            <GraphSelect
+              :model-value="issue.priority || 'normal'"
+              :options="priorities"
+              variant="row"
               class="board-priority"
               :class="`priority-${issue.priority || 'normal'}`"
               :data-card-priority="issue.id"
               :data-graph-control="`card-priority-${issue.id}`"
-              :aria-label="`Cycle priority for ${issue.title}`"
-              :title="`${human(issue.priority || 'normal')} priority · P to cycle`"
-              @click.stop="cyclePriority(issue)"
+              :aria-label="`${human(issue.priority || 'normal')} priority for ${issue.title || 'issue'}`"
+              :menu-min-width="132"
+              @click.stop
+              @update:model-value="setPriority(issue, $event)"
             >
-              {{ priorityGlyph(issue.priority) }}
-            </button>
-
-            <span class="board-row-copy">
-              <strong>{{ issue.title || 'Untitled issue' }}</strong>
-              <span class="board-row-meta">
-                <span v-if="groupBy === 'project'" class="meta-status">
-                  {{ statusCode(issue.status) }}
-                </span>
-                <span v-else-if="projectLabel(issue)" class="meta-project">
-                  {{ projectLabel(issue) }}
-                </span>
-                <GraphDatePicker
-                  :model-value="issue.dueDate || ''"
-                  :data-card-due="issue.id"
-                  :data-graph-control="`card-due-${issue.id}`"
-                  variant="row"
-                  placeholder="—"
-                  :class="{
-                    overdue: overdue(issue.dueDate),
-                    soon: dueSoon(issue.dueDate),
-                  }"
-                  :aria-label="`Due date for ${issue.title || 'issue'}`"
-                  @click.stop
-                  @update:model-value="patchDue(issue, $event)"
+              <template #trigger>
+                <component
+                  :is="priorityIcons[issue.priority || 'normal']"
+                  :size="13"
+                  :stroke-width="2"
                 />
-                <span v-if="overdue(issue.dueDate)" class="meta-overdue" title="Overdue">!</span>
-                <span v-if="issue.waitingFor" class="meta-flag" title="Waiting">W</span>
-                <span v-if="issue.snoozeUntil" class="meta-flag" title="Snoozed">S</span>
-                <span v-if="issue.needsDetail" class="meta-flag" title="Needs detail">?</span>
-                <span
-                  v-if="actorFor(issue.id)?.initials"
-                  class="meta-author"
-                  :title="actorFor(issue.id).label"
-                >
-                  {{ actorFor(issue.id).initials }}
-                </span>
+              </template>
+            </GraphSelect>
+            <span class="board-row-title">{{ issue.title || 'Untitled issue' }}</span>
+
+            <span class="board-row-meta">
+              <GraphSelect
+                v-if="groupBy === 'project'"
+                :model-value="issue.status || 'backlog'"
+                :options="statusOptions"
+                variant="row"
+                class="meta-status"
+                :data-card-status="issue.id"
+                :data-graph-control="`card-status-${issue.id}`"
+                :aria-label="`Status for ${issue.title || 'issue'}`"
+                :menu-min-width="128"
+                @click.stop
+                @update:model-value="setStatus(issue, $event)"
+              />
+              <span v-else-if="projectLabel(issue)" class="meta-project">
+                {{ projectLabel(issue) }}
+              </span>
+              <GraphDatePicker
+                :model-value="issue.dueDate || ''"
+                :data-card-due="issue.id"
+                :data-graph-control="`card-due-${issue.id}`"
+                variant="row"
+                class="meta-due"
+                placeholder="set date"
+                :class="{
+                  overdue: overdue(issue.dueDate),
+                  soon: dueSoon(issue.dueDate),
+                }"
+                :aria-label="`Due date for ${issue.title || 'issue'}`"
+                @click.stop
+                @update:model-value="patchDue(issue, $event)"
+              />
+              <span v-if="overdue(issue.dueDate)" class="meta-overdue">overdue</span>
+              <span v-if="issue.waitingFor" class="meta-waiting">waiting</span>
+              <span
+                v-if="actorFor(issue.id)?.initials"
+                class="meta-author"
+                :title="actorFor(issue.id).label"
+              >
+                {{ actorFor(issue.id).initials }}
               </span>
             </span>
           </article>
@@ -151,8 +165,15 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { IconPlus } from '@tabler/icons-vue'
+import {
+  IconAntennaBars2,
+  IconAntennaBars3,
+  IconAntennaBars4,
+  IconExclamationMark,
+  IconPlus,
+} from '@tabler/icons-vue'
 import GraphDatePicker from './GraphDatePicker.vue'
+import GraphSelect from './GraphSelect.vue'
 
 const props = defineProps({
   issues: { type: Array, default: () => [] },
@@ -179,13 +200,28 @@ const selectedIds = ref([])
 const selectionAnchor = ref(null)
 
 const statuses = Object.freeze([
-  { id: 'backlog', label: 'Backlog', code: 'BCK' },
-  { id: 'plan', label: 'Plan', code: 'PLN' },
-  { id: 'in-progress', label: 'In progress', code: 'PRG' },
-  { id: 'waiting', label: 'Waiting', code: 'WAT' },
-  { id: 'review', label: 'Review', code: 'REV' },
-  { id: 'done', label: 'Done', code: 'DON' },
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'in-progress', label: 'In progress' },
+  { id: 'waiting', label: 'Waiting' },
+  { id: 'review', label: 'Review' },
+  { id: 'done', label: 'Done' },
 ])
+const statusOptions = Object.freeze(
+  statuses.map(status => ({ value: status.id, label: status.label })),
+)
+const priorities = Object.freeze([
+  { value: 'urgent', label: 'Urgent', icon: IconExclamationMark },
+  { value: 'high', label: 'High', icon: IconAntennaBars4 },
+  { value: 'normal', label: 'Normal', icon: IconAntennaBars3 },
+  { value: 'low', label: 'Low', icon: IconAntennaBars2 },
+])
+const priorityIcons = Object.freeze({
+  urgent: IconExclamationMark,
+  high: IconAntennaBars4,
+  normal: IconAntennaBars3,
+  low: IconAntennaBars2,
+})
 const priorityOrder = ['low', 'normal', 'high', 'urgent']
 const boardColumns = computed(() => {
   if (props.groupBy === 'project') {
@@ -193,9 +229,8 @@ const boardColumns = computed(() => {
       ...props.projects.map(project => ({
         id: project.id,
         label: project.properties?.slug || project.slug || project.title || 'Untitled project',
-        code: 'PRJ',
       })),
-      { id: '__unassigned__', label: 'No project', code: '—' },
+      { id: '__unassigned__', label: 'No project' },
     ]
   }
   const visible = new Set(props.visibleStatuses.length
@@ -344,17 +379,25 @@ function moveToColumn(issue, columnId) {
   }
 }
 
+function setPriority(issue, priority) {
+  applyPatch(issue, { priority })
+}
+
+function setStatus(issue, status) {
+  applyPatch(issue, { status })
+}
+
 function cyclePriority(issue) {
-  const selected = selectedIssues(issue)
   const current = priorityOrder.indexOf(issue.priority || 'normal')
-  const priority = priorityOrder[(current + 1) % priorityOrder.length]
+  applyPatch(issue, { priority: priorityOrder[(current + 1) % priorityOrder.length] })
+}
+
+function applyPatch(issue, setProperties) {
+  const selected = selectedIssues(issue)
   if (selected.length > 1) {
-    emit('bulk-patch', {
-      issues: selected,
-      setProperties: { priority },
-    })
+    emit('bulk-patch', { issues: selected, setProperties })
   } else {
-    emit('patch', { issue, setProperties: { priority } })
+    emit('patch', { issue, setProperties })
   }
 }
 
@@ -382,19 +425,6 @@ function actorFor(id) {
   return props.actors?.[id] || null
 }
 
-function priorityGlyph(priority = 'normal') {
-  return {
-    urgent: '!!!',
-    high: '!!',
-    normal: '',
-    low: '·',
-  }[priority] ?? ''
-}
-
-function statusCode(status = 'backlog') {
-  return statuses.find(item => item.id === status)?.code || 'BCK'
-}
-
 function overdue(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
     && value < new Date().toISOString().slice(0, 10)
@@ -412,9 +442,11 @@ function dueSoon(value) {
 function rowLabel(issue, column) {
   return [
     issue.title || 'Untitled issue',
-    human(issue.priority || 'normal'),
+    `${human(issue.priority || 'normal')} priority`,
     `in ${column.label}`,
-    issue.dueDate ? `due ${issue.dueDate}` : '',
+    issue.dueDate ? `due ${issue.dueDate}` : 'no due date',
+    overdue(issue.dueDate) ? 'overdue' : '',
+    issue.waitingFor ? 'waiting' : '',
     'P cycles priority, D sets due date, arrows move',
   ].filter(Boolean).join('. ')
 }
@@ -444,7 +476,7 @@ function human(value) {
 
 .board-column {
   display: flex;
-  width: 258px;
+  width: 262px;
   height: 100%;
   flex-direction: column;
   overflow: hidden;
@@ -459,26 +491,18 @@ function human(value) {
   display: grid;
   min-height: 34px;
   flex: 0 0 auto;
-  grid-template-columns: 30px minmax(0, 1fr) auto 26px;
+  grid-template-columns: minmax(0, 1fr) auto 26px;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   border-bottom: 1px solid var(--color-rule);
-  padding: 0 5px 0 8px;
+  padding: 0 5px 0 9px;
   background: var(--color-chrome-high);
-}
-
-.board-column-code,
-.board-column-count {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
 }
 
 .board-column-name {
   overflow: hidden;
   color: var(--color-ink-2);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -486,6 +510,9 @@ function human(value) {
 
 .board-column-count {
   color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .board-column-header button {
@@ -493,7 +520,7 @@ function human(value) {
   width: 24px;
   height: 24px;
   place-items: center;
-  border-radius: 1px;
+  border-radius: 2px;
   color: var(--color-ink-4);
 }
 
@@ -519,10 +546,11 @@ function human(value) {
   position: relative;
   display: grid;
   width: 100%;
-  height: 42px;
-  min-height: 42px;
-  grid-template-columns: 31px minmax(0, 1fr);
-  align-items: stretch;
+  height: 41px;
+  min-height: 41px;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 22px 19px;
+  align-items: center;
   border-bottom: 1px solid var(--color-rule-light);
   background: var(--color-surface);
   color: var(--color-ink);
@@ -531,6 +559,11 @@ function human(value) {
 
 .board-row:hover {
   background: var(--color-chrome-mid);
+}
+
+.board-row:hover .board-row-title,
+.board-row:hover .meta-author {
+  color: var(--color-ink);
 }
 
 .board-row-selected {
@@ -555,41 +588,31 @@ function human(value) {
 }
 
 .board-priority {
-  display: grid;
-  width: 31px;
-  height: 41px;
-  place-items: center;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: -0.08em;
-}
-
-.board-priority:hover,
-.board-priority:focus-visible {
-  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
-  color: var(--color-ink);
+  align-self: center;
+  margin-left: 4px;
+  color: var(--color-ink-2);
 }
 
 .board-priority.priority-urgent {
   color: var(--color-rem);
 }
 
-.board-row-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  padding: 3px 7px 3px 0;
+.board-priority.priority-normal {
+  color: var(--color-ink-3);
 }
 
-.board-row-copy strong {
+.board-priority.priority-low {
+  color: var(--color-ink-4);
+}
+
+.board-row-title {
   overflow: hidden;
+  align-self: center;
+  padding-right: 8px;
   color: var(--color-ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 620;
-  line-height: 15px;
+  line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -597,40 +620,53 @@ function human(value) {
 .board-row-meta {
   display: flex;
   min-width: 0;
-  height: 16px;
+  grid-column: 1 / -1;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   overflow: hidden;
-  color: var(--color-ink-4);
+  padding: 0 8px 0 9px;
+  color: var(--color-ink-3);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   line-height: 14px;
   white-space: nowrap;
 }
 
 .meta-status {
-  width: 23px;
   flex: 0 0 auto;
   color: var(--color-ink-3);
 }
 
 .meta-project {
   overflow: hidden;
-  max-width: 92px;
+  max-width: 96px;
+  flex: 0 1 auto;
   color: var(--color-ink-3);
   text-overflow: ellipsis;
 }
 
-.meta-flag {
-  color: var(--color-ink-3);
-  font-weight: 700;
+.meta-overdue {
+  flex: 0 0 auto;
+  color: var(--color-rem);
 }
 
-.meta-overdue,
+.meta-due:not(.overdue):not(.soon) {
+  color: var(--color-ink-4);
+}
+
+.meta-waiting {
+  flex: 0 0 auto;
+  color: var(--color-ink-2);
+}
+
+:deep(.graph-date-row) {
+  flex: 0 0 auto;
+}
+
 :deep(.graph-date-row.overdue) {
   color: var(--color-rem);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 :deep(.graph-date-row.soon) {
@@ -640,19 +676,19 @@ function human(value) {
 .meta-author {
   margin-left: auto;
   color: var(--color-ink-3);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .board-empty-column {
   display: flex;
   width: 100%;
-  min-height: 42px;
+  min-height: 41px;
   align-items: center;
   justify-content: center;
   gap: 5px;
   border-bottom: 1px solid var(--color-rule-light);
   color: var(--color-ink-4);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .board-empty-column:hover,

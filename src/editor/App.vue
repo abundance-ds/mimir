@@ -232,6 +232,7 @@ import { readFile } from '../services/fileSystem.js'
 import { createWindowCloseGuard } from './windowCloseGuard.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
+import { taskCheckboxExtension } from './codemirror/taskCheckboxes.js'
 import { commentsExtension, setActiveComment as setActiveCommentEffect, getCommentsFromState, commentMutation } from './codemirror/comments.js'
 import { escapeAttr } from '../services/comments/parser.js'
 import { buildCommentsPrompt } from '../services/comments/prompt.js'
@@ -492,6 +493,7 @@ const editorExtensions = computed(() => [
     () => editorSettings.editorLivePreview,
     () => currentFile.value?.path,
   ),
+  ...taskCheckboxExtension(() => editorSettings.editorLivePreview && isMarkdownPath(currentFile.value?.path)),
 ])
 
 // --- Content sync + save ---

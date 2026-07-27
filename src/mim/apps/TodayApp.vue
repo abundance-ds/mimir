@@ -65,6 +65,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
+import { taskCheckboxExtension } from '../../editor/codemirror/taskCheckboxes.js'
 import {
   listenForAppTools,
   loadAppData,
@@ -223,6 +224,7 @@ function createMarkdownEditor() {
       drawSelection(),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       syntaxHighlighting(todayHighlightStyle),
+      taskCheckboxExtension(() => true),
       todayEditorTheme,
       placeholder('What needs your attention today?'),
       keymap.of([

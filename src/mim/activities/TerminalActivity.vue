@@ -72,6 +72,7 @@
       <div
         ref="surface"
         data-terminal-surface
+        :data-renderer="renderer"
         tabindex="-1"
         role="application"
         :aria-label="`${activity.title} ${mode} session`"
@@ -103,9 +104,9 @@
 import '@xterm/xterm/css/xterm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
-import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import {
   IconPlayerPause,
@@ -151,6 +152,7 @@ const live = ref(!hasExited.value)
 const loading = ref(true)
 const stopping = ref(false)
 const error = ref('')
+const renderer = ref('dom')
 
 const activityId = computed(() => props.activity.id)
 const mode = computed(() => props.activity.kind === 'agent' ? 'agent' : 'terminal')
@@ -168,7 +170,8 @@ const restartTitle = computed(() => (
 ))
 let terminal = null
 let fitAddon = null
-let canvasAddon = null
+let webglAddon = null
+let webglContextLossDisposable = null
 let webLinksAddon = null
 let dataDisposable = null
 let resizeObserver = null
@@ -216,7 +219,7 @@ async function initialize() {
     terminal.unicode.activeVersion = '11'
     terminal.attachCustomKeyEventHandler(handleCustomKey)
     terminal.open(surface.value)
-    installCanvasRenderer()
+    installWebglRenderer()
     dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
     if (props.active) await attachActiveSurface()
   } catch (cause) {
@@ -379,16 +382,32 @@ function handleCustomKey(event) {
   return false
 }
 
-// Canvas keeps xterm's layered renderer and custom glyphs without WebGL's
-// mipmapped texture sampling, which softens small type in macOS webviews.
-// If 2D canvas setup fails, xterm's built-in DOM renderer remains usable.
-function installCanvasRenderer() {
+// WebGL keeps sustained terminal and full-screen TUI output on the GPU. xterm
+// starts with its DOM renderer, so initialization failure or context loss can
+// fall back without losing the session.
+function installWebglRenderer() {
+  let addon = null
+  let contextLossDisposable = null
   try {
-    const addon = new CanvasAddon()
+    addon = new WebglAddon()
+    contextLossDisposable = addon.onContextLoss(() => {
+      if (webglAddon !== addon) return
+      webglContextLossDisposable?.dispose()
+      webglContextLossDisposable = null
+      webglAddon.dispose()
+      webglAddon = null
+      renderer.value = 'dom'
+    })
     terminal.loadAddon(addon)
-    canvasAddon = addon
+    webglAddon = addon
+    webglContextLossDisposable = contextLossDisposable
+    renderer.value = 'webgl'
   } catch {
-    canvasAddon = null
+    contextLossDisposable?.dispose()
+    addon?.dispose()
+    webglAddon = null
+    webglContextLossDisposable = null
+    renderer.value = 'dom'
   }
 }
 
@@ -468,9 +487,9 @@ function scheduleFit() {
   })
 }
 
-// Canvas glyph layers soften when the compositor places their origin between
-// physical pixels. Pane splits create fractional positions frequently, so
-// align the rendered screen—not merely the outer pane—to the device grid.
+// WebGL glyphs are bitmap blits. Pane splits frequently place their canvas at
+// fractional device pixels, so align the rendered screen—not merely its pane—
+// to the physical grid and avoid compositor resampling.
 function snapToDeviceGrid(rect) {
   const scale = window.devicePixelRatio || 1
   const x = snapDelta(rect.left, scale)
@@ -561,9 +580,12 @@ onBeforeUnmount(() => {
   detachInactiveSurface()
   dataDisposable?.dispose()
   dataDisposable = null
+  webglContextLossDisposable?.dispose()
+  webglContextLossDisposable = null
   terminal?.dispose()
   terminal = null
-  canvasAddon = null
+  webglAddon = null
+  renderer.value = 'dom'
   // ActivitySupervisor owns the process. Detaching this renderer surface must
   // never stop, interrupt, or otherwise mutate the running Activity.
 })

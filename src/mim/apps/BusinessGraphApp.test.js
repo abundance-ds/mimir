@@ -8,6 +8,7 @@ vi.mock('../../services/businessGraph.js', () => ({
   getGraphNode: vi.fn(),
   graphContext: vi.fn(),
   graphDiagnostics: vi.fn(),
+  graphEvents: vi.fn(),
   graphNeighbors: vi.fn(),
   listenForGraphChanges: vi.fn(),
   openBusinessGraph: vi.fn(),
@@ -23,6 +24,7 @@ import {
   getGraphNode,
   graphContext,
   graphDiagnostics,
+  graphEvents,
   graphNeighbors,
   listenForGraphChanges,
   openBusinessGraph,
@@ -101,6 +103,7 @@ describe('BusinessGraphApp', () => {
       graphRevision: 7,
     })
     vi.mocked(graphDiagnostics).mockResolvedValue([])
+    vi.mocked(graphEvents).mockResolvedValue({ items: [], total: 0 })
     vi.mocked(graphContext).mockResolvedValue({
       graphRevision: 7,
       markdown: '# Business graph context\n\nIssue context.',
@@ -153,7 +156,7 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-business-graph-app]').exists()).toBe(true)
     expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
     expect(wrapper.get('[data-board-card="issue-1"]').text()).toContain('Extract evidence')
-    expect(wrapper.findAll('[data-graph-section]')).toHaveLength(6)
+    expect(wrapper.findAll('[data-graph-section]')).toHaveLength(7)
 
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()
@@ -182,7 +185,7 @@ describe('BusinessGraphApp', () => {
     expect(updateGraphNode).toHaveBeenCalledWith(expect.objectContaining({
       id: 'issue-1',
       expectedRevision: 'issue-rev',
-      setProperties: { status: 'in-progress' },
+      setProperties: expect.objectContaining({ status: 'in-progress' }),
     }))
     wrapper.unmount()
   })

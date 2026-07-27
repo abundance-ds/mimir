@@ -56,8 +56,14 @@ describe('business graph service', () => {
     await updateGraphNode(patch)
     await graphNeighbors('alpha', { scopeIds: ['project:test'] })
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'graph_create', { create })
-    expect(invoke).toHaveBeenNthCalledWith(2, 'graph_update', { patch })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'graph_create', {
+      create,
+      actor: expect.objectContaining({ kind: 'human' }),
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'graph_update', {
+      patch,
+      actor: expect.objectContaining({ kind: 'human' }),
+    })
     expect(invoke).toHaveBeenNthCalledWith(3, 'graph_neighbors', {
       id: 'alpha',
       scopeIds: ['project:test'],
@@ -68,6 +74,7 @@ describe('business graph service', () => {
     await restoreGraphNode('undo-123')
     expect(invoke).toHaveBeenCalledWith('graph_restore', {
       request: { undoToken: 'undo-123' },
+      actor: expect.objectContaining({ kind: 'human' }),
     })
   })
 

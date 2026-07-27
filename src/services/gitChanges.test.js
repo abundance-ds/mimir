@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
+import { loadIpcFixture } from '../test/ipcFixtures.js'
 import {
   absoluteWorkspacePath,
   loadGitChanges,
@@ -10,11 +11,9 @@ describe('gitChanges', () => {
   beforeEach(() => vi.mocked(invoke).mockClear())
 
   it('loads and normalizes the workspace status ledger', async () => {
-    vi.mocked(invoke).mockResolvedValue([
-      { path: 'src/z.js', status: 'modified' },
-      { path: 'README.md', status: 'new' },
-      { path: 'gone.md', status: 'deleted' },
-    ])
+    // Golden `git_status` payload: byte-order path sort (README.md before
+    // gone.md), which normalize re-sorts locale-aware below.
+    vi.mocked(invoke).mockResolvedValue(loadIpcFixture('git_status'))
 
     await expect(loadGitChanges('/work')).resolves.toEqual([
       { path: 'gone.md', status: 'deleted' },

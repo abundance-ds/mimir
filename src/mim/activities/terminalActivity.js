@@ -50,7 +50,9 @@ export async function prepareTerminalFonts(
   const size = Math.max(9, Math.min(24, Number(fontSize) || 12))
   await Promise.allSettled([
     fonts.load(`400 ${size}px "IBM Plex Mono"`, 'MW'),
+    fonts.load(`italic 400 ${size}px "IBM Plex Mono"`, 'MW'),
     fonts.load(`600 ${size}px "IBM Plex Mono"`, 'MW'),
+    fonts.load(`italic 600 ${size}px "IBM Plex Mono"`, 'MW'),
   ])
 }
 
@@ -70,6 +72,10 @@ export function readTerminalTheme(root = document.documentElement) {
     cursor: accent,
     cursorAccent: surface,
     selectionBackground: withAlpha(accent, '33'),
+    selectionInactiveBackground: withAlpha(accent, '1f'),
+    scrollbarSliderBackground: withAlpha(ink3, '66'),
+    scrollbarSliderHoverBackground: withAlpha(ink2, '99'),
+    scrollbarSliderActiveBackground: withAlpha(accent, 'aa'),
     black: dark ? token('--color-chrome', '#1e1e1e') : ink,
     red: token('--color-rem', '#c05d3c'),
     green: token('--color-add', '#5e8b3e'),
