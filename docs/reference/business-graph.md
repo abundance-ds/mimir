@@ -105,13 +105,14 @@ Its primary sections and projections are:
 | Knowledge | List, Timeline |
 | All | List, Timeline, with a kind filter (issue, project, person, company, decision, knowledge) |
 
-**Now** is home: a time-ordered wire of graph events — filings, status flips,
-decisions, evidence, deliverables, overdue crossings, waiting cleared — with
-author initials (human and agent) and project context on every line. FYI by
-default: one line per event, expand for field changes and provenance, drill
-to correct. **Waiting on you** pins at top as information, not a gate. A seen
-cursor (“since 08:40”) and Mark caught up replace any unread-count
-obligation.
+**Work** is the startup surface — it is where the day happens. **Now** is
+the catch-up wire one key away: a time-ordered stream of graph events —
+filings, status flips, decisions, evidence, deliverables, overdue crossings,
+waiting cleared — with author initials (human and agent) and project context
+on every line. FYI by default: one line per event, expand for field changes
+and provenance, drill to correct. **Waiting on you** pins at top as
+information, not a gate. A seen cursor (“since 08:40”) and Mark caught up
+replace any unread-count obligation.
 
 The **Work board** is the operate surface. Rows are two lines at fixed
 geometry: priority icon control (antenna bars; urgent is a red `!`) opening a

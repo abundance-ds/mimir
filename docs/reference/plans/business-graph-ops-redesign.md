@@ -1,5 +1,42 @@
 # Business Graph OPS redesign
 
+Status: **implemented and corrected by owner review.** Read the addendum
+first — it overrides §7/§8 and parts of §11/§12.
+
+## Owner correction pass (verdicts, absolute)
+
+After the full build order landed, the owner reviewed and issued these
+verdicts. They supersede the plan wherever they conflict:
+
+1. **The status rail is permanently dead.** It was built exactly to the §8
+   corrections and the owner rejected it again on sight: counts without a
+   surface are furniture. The autopsy's "rail feels useless" was never an
+   implementation problem — the *concept* is dead. **Do not rebuild a rail,
+   counts strip, or status sidebar in any form, ever.** Now pins
+   waiting-on-you; the board shows work state; that is enough.
+2. **The graph/relationship map view is dead** ("3 columns and rounded
+   edges — why?"). `GraphMap.vue` is deleted; do not resurrect node-edge
+   canvases as a projection.
+3. **People and Companies are not sections.** They merged into **All** with
+   a visible kind filter (announced by the loud filter banner). Sections are
+   Now / Work / Projects / Knowledge / All. `CrmView.vue` is deleted.
+4. **Board readability outranks density targets.** Columns are 340px and
+   priority icons 16px because titles must read in full. The §11 row anatomy
+   stands; the §14 density budgets yield to "can I read it".
+5. **Priority is an icon control**, per owner: antenna bars
+   (`IconAntennaBars2/3/4` for low/normal/high) and a red `!`
+   (`IconExclamationMark`) for urgent. The menu still spells all four out.
+6. **Work is the startup surface.** Now shipped properly, but the day
+   starts on the board (J2 ~20×/day beats J1 2–3×/day). Now stays section
+   1 and one key away.
+
+What survived review unchanged: the Now stream with seen cursor, the
+dispatch bar (lookup / dispatch / delegate / power lane / echo), the loud
+filter banners, the portfolio ledger, the project standing view, the §11 row
+grammar, and every hard rule in §2.
+
+---
+
 Status: direction approved by owner; execution protocol defined; ready for
 step 1 (Work board). **Read this whole file before writing any code.** It is
 the single source of truth for taste, hard rules, and build order. It exists

@@ -42,8 +42,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const error = ref('')
   const conflict = ref(null)
   const activeScopeIds = ref([])
-  const section = ref('now')
-  const view = ref('stream')
+  const section = ref('work')
+  const view = ref('board')
   const sectionViews = ref({
     now: 'stream',
     work: 'board',

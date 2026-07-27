@@ -41,8 +41,6 @@ const DEFAULTS = {
     sectionViews: {
       work: 'board',
       projects: 'portfolio',
-      people: 'directory',
-      companies: 'crm',
       knowledge: 'list',
       all: 'list',
     },

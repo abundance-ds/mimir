@@ -284,7 +284,6 @@ function resultContext(item) {
   }
   if (item.kind === 'person') {
     return [item.role, item.email, item.phone].filter(Boolean).join(' · ')
-      || human(item.kind)
   }
   return [item.summary].filter(Boolean).join('') || human(item.kind)
 }
