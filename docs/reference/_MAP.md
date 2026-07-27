@@ -92,7 +92,8 @@ See [activities.md](activities.md) and [agent-setup.md](agent-setup.md).
 - `src/mim/activities/FilesActivity.vue`: Files state composition and operations
 - `src/mim/components/FileTreeRow.vue`: tree/secondary-row rendering
 - `src/mim/components/QuickOpen.vue`: compact global Cmd/Ctrl+P Go to for
-  Tools, expandable New activity, recent/files search, and closed History
+  a focused New activity subview, Tools, recent/files search, and closed
+  History
 - `src/mim/quickOpenResults.js`: typed launcher result ordering and `/`, `@`,
   and `+` query scopes
 - `src/services/fileSystem.js`: editor text and binary I/O wrappers

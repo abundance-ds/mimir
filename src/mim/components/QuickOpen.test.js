@@ -83,9 +83,9 @@ describe('QuickOpen', () => {
   it('shows a compact new-activity row, recent files, and history without live activities', () => {
     const wrapper = render()
     expect(wrapper.findAll('[data-quick-open-type]').map((row) => row.attributes('data-quick-open-type'))).toEqual([
+      'new-activity-enter',
       'tool',
       'tool',
-      'new-activity-toggle',
       'file',
       'file',
       'history',
@@ -96,18 +96,56 @@ describe('QuickOpen', () => {
     ])
     expect(wrapper.text()).toContain('Reopen last closed activity')
     expect(wrapper.get('[data-quick-open-panel]').classes())
-      .toContain('max-h-[min(420px,calc(100vh-32px))]')
+      .toContain('max-h-[min(420px,calc(100vh-48px))]')
+    expect(wrapper.get('[data-quick-open]').classes()).toContain('pt-6')
   })
 
-  it('expands new activity choices downward without closing the launcher', async () => {
+  it('enters a focused new activity subview and returns without closing', async () => {
     const wrapper = render()
 
-    await wrapper.get('[data-quick-open-type="new-activity-toggle"]').trigger('click')
+    await wrapper.get('[data-quick-open-type="new-activity-enter"]').trigger('click')
 
-    expect(wrapper.find('[data-quick-open-type="new-activity"]').text()).toContain('Codex')
-    expect(wrapper.get('[data-quick-open-type="new-activity-toggle"]').text()).toContain('Collapse')
+    expect(wrapper.get('[data-quick-open-type="new-activity"]').text()).toContain('Codex')
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-type="file"]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-type="history"]').exists()).toBe(false)
+    expect(wrapper.get('[data-quick-open-input]').attributes()).toMatchObject({
+      autocomplete: 'off',
+      autocorrect: 'off',
+      autocapitalize: 'off',
+      spellcheck: 'false',
+    })
     expect(wrapper.emitted('activate')).toBeUndefined()
     expect(wrapper.emitted('close')).toBeUndefined()
+
+    await wrapper.get('[data-quick-open-back]').trigger('click')
+    expect(wrapper.get('[data-quick-open-type="new-activity-enter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(true)
+  })
+
+  it('uses Escape as Back inside New activity, then closes from the root', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-quick-open-type="new-activity-enter"]').trigger('click')
+
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.get('[data-quick-open-type="new-activity-enter"]').exists()).toBe(true)
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('starts the selected source from the focused New activity subview', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-quick-open-type="new-activity-enter"]').trigger('click')
+
+    await wrapper.get('[data-quick-open-type="new-activity"]').trigger('click')
+
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({
+      type: 'new-activity',
+      targetId: 'preset:codex',
+    })
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
   it('exposes one keyboard-contained dialog with combobox and listbox semantics', async () => {

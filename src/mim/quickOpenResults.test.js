@@ -41,28 +41,25 @@ describe('quick open results', () => {
     })
 
     expect(results.map(result => result.type)).toEqual([
+      'new-activity-enter',
       'tool',
-      'new-activity-toggle',
       ...Array(8).fill('file'),
       'history',
     ])
     expect(results.find(result => result.type === 'history').title).toBe('Reopen last closed activity')
   })
 
-  it('expands new activity choices without adding current activity rows', () => {
+  it('enters a focused new activity result set without other navigation rows', () => {
     const results = buildQuickOpenResults({
       tools: [tool],
       newActivity: [launcher],
       history: [archived],
       files,
-      newActivityExpanded: true,
+      newActivityView: true,
     })
 
-    expect(results.map(result => result.type)).not.toContain('activity')
-    expect(results.find(result => result.type === 'new-activity-toggle').verb).toBe('Collapse')
-    expect(results.find(result => result.type === 'new-activity').verb).toBe('Start')
-    expect(results.find(result => result.type === 'history').verb).toBe('Restore & open')
-    expect(results.find(result => result.type === 'file').verb).toBe('Open in Editor')
+    expect(results.map(result => result.type)).toEqual(['new-activity'])
+    expect(results[0].verb).toBe('Start')
   })
 
   it('uses workspace and time instead of a provider-only history title', () => {

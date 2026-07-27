@@ -52,17 +52,12 @@ vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class MockWebLinksAddon {},
 }))
 
-vi.mock('@xterm/addon-unicode11', () => ({
-  Unicode11Addon: class MockUnicode11Addon {},
+vi.mock('@xterm/addon-canvas', () => ({
+  CanvasAddon: class MockCanvasAddon {},
 }))
 
-vi.mock('@xterm/addon-webgl', () => ({
-  WebglAddon: class MockWebglAddon {
-    constructor() {
-      this.onContextLoss = vi.fn()
-      this.dispose = vi.fn()
-    }
-  },
+vi.mock('@xterm/addon-unicode11', () => ({
+  Unicode11Addon: class MockUnicode11Addon {},
 }))
 
 vi.mock('../../services/activities.js', () => ({
@@ -205,6 +200,12 @@ describe('TerminalActivity', () => {
     expect(wrapper.emitted('ready')[0][0]).toMatchObject({ activityId: 'agent:one' })
     expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(4)
     expect(xterm.terminals[0].unicode.activeVersion).toBe('11')
+    expect(xterm.terminals[0].options).toMatchObject({
+      fontWeight: '400',
+      fontWeightBold: '600',
+      lineHeight: 1.15,
+      minimumContrastRatio: 3,
+    })
     // The Unicode 11 addon throws at load time without the proposed API flag.
     expect(xterm.terminals[0].options.allowProposedApi).toBe(true)
   })
@@ -323,7 +324,7 @@ describe('TerminalActivity', () => {
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
   })
 
-  it('snaps the surface onto the device pixel grid so WebGL glyphs stay crisp', async () => {
+  it('snaps the surface onto the device pixel grid so Canvas glyphs stay crisp', async () => {
     vi.stubGlobal('devicePixelRatio', 2)
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 640,

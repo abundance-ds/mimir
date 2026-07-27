@@ -92,16 +92,21 @@ recreate an overflowing two-pane split.
 
 ## Go to
 
-Cmd/Ctrl+P opens a compact, top-anchored launcher rather than a tall centered
-palette. The empty view contains Tools, one expandable New activity row, recent
-files, and Reopen last closed. Expansion grows downward without moving the top
-edge. Current Activities are deliberately absent because
+Cmd/Ctrl+P opens a compact launcher at a fixed near-window-top offset rather
+than a tall centered palette. The empty view starts with Start new activity,
+then Tools, recent files, and Reopen last closed. Entering Start new activity
+replaces those root results with launch sources; Back, empty-query Backspace,
+or Escape returns without closing Go to. Current Activities are deliberately
+absent because
 Option/Alt+Cmd/Ctrl+Left/Right already cycles them.
 
 Typing searches Tools, launch sources, closed History, and indexed files.
 `/` restricts results to files, `@` to History, and `+` to New activity.
 History transcript search is lazy and native; recent files remain visible in
 the empty state because Go to is the fastest keyboard route back to files.
+The document root disables autocorrect and autocapitalization; focused search
+fields also disable autocomplete and spellcheck so operating-system suggestion
+UI does not cover launcher results.
 
 Layout and Activity-order preferences remain debounced during interaction, but
 Workbench teardown explicitly snapshots and flushes them. Native quit confirms

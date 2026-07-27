@@ -5,13 +5,13 @@
         v-if="open"
         ref="dialog"
         data-quick-open
-        class="fixed inset-0 z-[240] flex justify-center bg-black/20 px-4 pt-[6vh]"
+        class="fixed inset-0 z-[240] flex justify-center bg-black/20 px-4 pt-6"
         role="dialog"
         aria-modal="true"
         aria-labelledby="quick-open-title"
         @keydown="onDialogKeydown"
       >
-        <h2 id="quick-open-title" class="sr-only">Go to</h2>
+        <h2 id="quick-open-title" class="sr-only">{{ dialogTitle }}</h2>
         <button
           type="button"
           data-quick-open-backdrop
@@ -22,12 +22,23 @@
         />
         <div
           data-quick-open-panel
-          class="relative flex max-h-[min(420px,calc(100vh-32px))] w-full max-w-[640px] flex-col self-start overflow-hidden border border-rule bg-surface"
+          class="relative flex max-h-[min(420px,calc(100vh-48px))] w-full max-w-[640px] flex-col self-start overflow-hidden border border-rule bg-surface"
         >
           <div class="flex h-11 shrink-0 items-center gap-2 border-b border-rule px-3">
-            <IconSearch :size="16" :stroke-width="1.7" class="text-ink-3" />
+            <button
+              v-if="inNewActivityView"
+              type="button"
+              data-quick-open-back
+              title="Back to Go to"
+              aria-label="Back to Go to"
+              class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              @click="leaveNewActivityView"
+            >
+              <IconArrowLeft :size="15" :stroke-width="1.8" />
+            </button>
+            <IconSearch v-else :size="16" :stroke-width="1.7" class="text-ink-3" />
             <span
-              v-if="scope !== 'all'"
+              v-if="scope !== 'all' && !inNewActivityView"
               data-quick-open-scope
               class="shrink-0 bg-chrome-high px-1.5 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-2"
             >
@@ -38,7 +49,11 @@
               v-model="query"
               data-quick-open-input
               type="search"
-              placeholder="Go to tools, files, or history…"
+              :placeholder="inputPlaceholder"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
               role="combobox"
               aria-autocomplete="list"
               aria-controls="quick-open-results"
@@ -51,15 +66,16 @@
               @keydown.home.prevent="selectEdge('start')"
               @keydown.end.prevent="selectEdge('end')"
               @keydown.enter.prevent="confirm"
+              @keydown.backspace="onInputBackspace"
             />
-            <kbd class="font-mono text-[9px] text-ink-3">ESC</kbd>
+            <kbd class="font-mono text-[9px] text-ink-3">{{ inNewActivityView ? 'ESC BACK' : 'ESC' }}</kbd>
           </div>
 
           <div
             id="quick-open-results"
             class="min-h-0 overflow-y-auto py-1"
             role="listbox"
-            aria-label="Tools, new activities, history, and files"
+            :aria-label="resultsLabel"
           >
             <template v-for="(result, index) in results" :key="result.key">
               <div
@@ -140,14 +156,16 @@
               v-else-if="!results.length"
               class="grid h-24 place-items-center text-[11px] text-ink-3"
             >
-              {{ files.workspacePath ? 'No matching tools, history, or files.' : 'No matching tools or history.' }}
+              {{ emptyMessage }}
             </div>
           </div>
 
           <div class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[9px] text-ink-3">
             <span>↑↓ select</span>
             <span>↵ {{ selectedResult?.verb || 'open' }}</span>
-            <span class="ml-auto">/ files · @ history · + new</span>
+            <span class="ml-auto">
+              {{ inNewActivityView ? 'Esc back · choose a source' : '/ files · @ history · + new' }}
+            </span>
           </div>
         </div>
       </div>
@@ -159,6 +177,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   IconApps,
+  IconArrowLeft,
   IconClockPlay,
   IconFile,
   IconFileStack,
@@ -197,9 +216,31 @@ const selectedIndex = ref(0)
 const searching = ref(false)
 const searchError = ref('')
 const historySnippets = ref(new Map())
-const newActivityExpanded = ref(false)
+const view = ref('root')
+const inNewActivityView = computed(() => view.value === 'new-activity')
 const parsedQuery = computed(() => parseQuickOpenQuery(query.value))
-const scope = computed(() => parsedQuery.value.scope)
+const scope = computed(() => (
+  inNewActivityView.value ? 'new-activity' : parsedQuery.value.scope
+))
+const dialogTitle = computed(() => (
+  inNewActivityView.value ? 'Go to: New activity' : 'Go to'
+))
+const inputPlaceholder = computed(() => (
+  inNewActivityView.value
+    ? 'Find an activity source…'
+    : 'Go to tools, files, or history…'
+))
+const resultsLabel = computed(() => (
+  inNewActivityView.value
+    ? 'New activity sources'
+    : 'Tools, new activities, history, and files'
+))
+const emptyMessage = computed(() => {
+  if (inNewActivityView.value) return 'No matching activity sources.'
+  return files.workspacePath
+    ? 'No matching tools, history, or files.'
+    : 'No matching tools or history.'
+})
 const scopeLabel = computed(() => ({
   files: 'Files',
   history: 'History',
@@ -212,7 +253,7 @@ const results = computed(() => buildQuickOpenResults({
   history: props.history,
   files: files.visibleFiles,
   historySnippets: historySnippets.value,
-  newActivityExpanded: newActivityExpanded.value,
+  newActivityView: inNewActivityView.value,
 }))
 const selectedResult = computed(() => results.value[selectedIndex.value] || null)
 let queryTimer = null
@@ -237,7 +278,7 @@ watch(
     selectedIndex.value = 0
     searchError.value = ''
     historySnippets.value = new Map()
-    newActivityExpanded.value = false
+    view.value = 'root'
     await files.setQuery('')
     if (!props.open) return
     await nextTick()
@@ -260,7 +301,11 @@ function onInput() {
   cancelPendingSearch()
   selectedIndex.value = 0
   historySnippets.value = new Map()
-  newActivityExpanded.value = false
+  if (inNewActivityView.value) {
+    searching.value = false
+    searchError.value = ''
+    return
+  }
   const { scope: nextScope, term } = parsedQuery.value
   const generation = ++searchGeneration
   const searchFiles = nextScope === 'all' || nextScope === 'files'
@@ -303,8 +348,8 @@ function confirm() {
 }
 
 function activate(result) {
-  if (result.type === 'new-activity-toggle') {
-    newActivityExpanded.value = !newActivityExpanded.value
+  if (result.type === 'new-activity-enter') {
+    enterNewActivityView()
     return
   }
   emit('activate', result)
@@ -313,6 +358,36 @@ function activate(result) {
 
 function requestClose() {
   emit('close')
+}
+
+async function enterNewActivityView() {
+  cancelPendingSearch()
+  view.value = 'new-activity'
+  query.value = ''
+  selectedIndex.value = 0
+  searchError.value = ''
+  historySnippets.value = new Map()
+  await nextTick()
+  input.value?.focus()
+}
+
+async function leaveNewActivityView() {
+  cancelPendingSearch()
+  view.value = 'root'
+  query.value = ''
+  selectedIndex.value = 0
+  searchError.value = ''
+  historySnippets.value = new Map()
+  await files.setQuery('')
+  await nextTick()
+  input.value?.focus()
+}
+
+function onInputBackspace(event) {
+  if (inNewActivityView.value && !query.value) {
+    event.preventDefault()
+    void leaveNewActivityView()
+  }
 }
 
 function setSelection(index) {
@@ -344,10 +419,14 @@ function startsGroup(index) {
 }
 
 function onDialogKeydown(event) {
-  if (
-    event.key === 'Escape'
-    || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w')
-  ) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    if (inNewActivityView.value) void leaveNewActivityView()
+    else requestClose()
+    return
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') {
     event.preventDefault()
     event.stopPropagation()
     requestClose()
@@ -355,6 +434,7 @@ function onDialogKeydown(event) {
   }
   if (event.key !== 'Tab') return
   const targets = [
+    dialog.value?.querySelector('[data-quick-open-back]'),
     input.value,
     dialog.value?.querySelector('[data-quick-open-row][tabindex="0"]'),
   ].filter(Boolean)

@@ -215,8 +215,8 @@ function createMarkdownEditor() {
       EditorView.contentAttributes.of({
         'aria-label': 'Top priority for today',
         spellcheck: 'true',
-        autocorrect: 'on',
-        autocapitalize: 'sentences',
+        autocorrect: 'off',
+        autocapitalize: 'off',
       }),
       readOnlyCompartment.of(readOnlyExtensions(true)),
       history(),

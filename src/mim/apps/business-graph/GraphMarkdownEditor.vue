@@ -115,8 +115,8 @@ onMounted(() => {
       EditorView.contentAttributes.of({
         'aria-label': props.ariaLabel,
         spellcheck: 'true',
-        autocorrect: 'on',
-        autocapitalize: 'sentences',
+        autocorrect: 'off',
+        autocapitalize: 'off',
         'data-graph-control': props.controlId,
       }),
       editableCompartment.of(editableExtensions(props.disabled)),

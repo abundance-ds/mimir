@@ -63,14 +63,15 @@ line at the top of scrollback; undershoot is corrected invisibly by the first
 fit. `src/services/activities.js` remembers the last pane-fitted size for
 spawn/respawn — do not reintroduce a generous hardcoded default.
 
-### The terminal surface's sub-pixel translate is load-bearing
+### Terminal font readiness and pixel snap are load-bearing
 
-`scheduleFit` in `TerminalActivity.vue` snaps the surface onto the device
-pixel grid; without it the WebGL canvas sits at fractional pane-split offsets
-and every glyph blurs from resampling. The transform must be cleared before
-measuring so the offset never compounds. Likewise `allowProposedApi: true`
-stays as long as the Unicode 11 addon loads — without it xterm throws and the
-surface shows an attach error instead of a terminal.
+Terminal initialization waits for the bundled IBM Plex Mono `400` and `600`
+faces before xterm measures cells. Do not open xterm against fallback metrics.
+`scheduleFit` then snaps the rendered Canvas screen onto the device pixel grid;
+without it fractional pane-split offsets soften every glyph. The transform
+must be cleared before measuring so the offset never compounds. Likewise
+`allowProposedApi: true` stays as long as the Unicode 11 addon loads — without
+it xterm throws and the surface shows an attach error instead of a terminal.
 
 ## MCP and apps
 

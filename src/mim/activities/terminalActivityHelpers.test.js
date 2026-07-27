@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   eventActivityId,
   isEndedStatus,
   orderedReplayChunks,
+  prepareTerminalFonts,
+  readTerminalTheme,
   terminalBytes,
   terminalStatusLabel,
 } from './terminalActivity.js'
@@ -33,5 +35,32 @@ describe('terminal activity byte and lifecycle helpers', () => {
     }
     expect(orderedReplayChunks(snapshot).map((chunk) => chunk.sequence)).toEqual([1, 2])
     expect(snapshot.scrollback.chunks[0].sequence).toBe(2)
+  })
+
+  it('loads the exact regular and semibold terminal faces before xterm measures', async () => {
+    const load = vi.fn().mockResolvedValue([])
+    await prepareTerminalFonts(13, { load })
+
+    expect(load.mock.calls).toEqual([
+      ['400 13px "IBM Plex Mono"', 'MW'],
+      ['600 13px "IBM Plex Mono"', 'MW'],
+    ])
+  })
+
+  it('uses strong default ink and keeps ANSI black dark on dark themes', () => {
+    const root = document.createElement('div')
+    root.style.setProperty('--color-surface', '#1e1f2e')
+    root.style.setProperty('--color-chrome', '#151622')
+    root.style.setProperty('--color-ink', '#f0eef8')
+    root.style.setProperty('--color-ink-2', '#b8b4c8')
+    root.style.setProperty('--color-ink-3', '#7e7a92')
+    document.body.append(root)
+
+    const theme = readTerminalTheme(root)
+    expect(theme.foreground).toBe('#f0eef8')
+    expect(theme.black).toBe('#151622')
+    expect(theme.white).toBe('#b8b4c8')
+    expect(theme.brightWhite).toBe('#f0eef8')
+    root.remove()
   })
 })

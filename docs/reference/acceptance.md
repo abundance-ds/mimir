@@ -31,12 +31,15 @@ requirements; they do not replace runtime verification.
 - Changing Activity leaves Editor tabs, selection, unsaved state, and review
   state intact.
 - Cmd/Ctrl+B toggles the Sidebar and Cmd/Ctrl+P opens the compact Go to panel.
-- Empty Go to shows Tools, one expandable New activity row, recent files, and
-  Reopen last closed. `/` scopes files, `@` scopes closed History, and `+`
-  scopes fresh-run sources; live Activities stay on the cycle shortcut.
+- Empty Go to shows Start new activity first, then Tools, recent files, and
+  Reopen last closed. Entering Start new activity replaces the root results
+  with only launch sources; Back, empty-query Backspace, or Escape returns.
+  `/` scopes files, `@` scopes closed History, and `+` scopes fresh-run
+  sources; live Activities stay on the cycle shortcut.
 - Go to traps and restores focus, ignores stale async results, and contains
-  workbench shortcuts; Escape or Cmd/Ctrl+W closes it first. Its fixed top
-  edge does not move when New activity expands downward.
+  workbench shortcuts; Escape or Cmd/Ctrl+W closes it first from the root. Its
+  top edge stays at a fixed near-window-top offset while subviews replace
+  results.
 - Unmodified Arrow Up/Down and Home/End move Sidebar row focus without
   activation. Option/Alt+Cmd/Ctrl+Left/Right cycles active Activity rows.
 - Collapsing or restoring any pane transfers focus to visible chrome rather

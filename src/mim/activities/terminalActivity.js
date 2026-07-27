@@ -42,38 +42,64 @@ export function orderedReplayChunks(snapshot) {
     .sort((left, right) => Number(left.sequence) - Number(right.sequence))
 }
 
+export async function prepareTerminalFonts(
+  fontSize,
+  fonts = typeof document === 'undefined' ? null : document.fonts,
+) {
+  if (!fonts?.load) return
+  const size = Math.max(9, Math.min(24, Number(fontSize) || 12))
+  await Promise.allSettled([
+    fonts.load(`400 ${size}px "IBM Plex Mono"`, 'MW'),
+    fonts.load(`600 ${size}px "IBM Plex Mono"`, 'MW'),
+  ])
+}
+
 export function readTerminalTheme(root = document.documentElement) {
   const styles = getComputedStyle(root)
   const token = (name, fallback) => styles.getPropertyValue(name).trim() || fallback
   const accent = token('--color-accent', '#c05d3c')
   const surface = token('--color-surface', '#ffffff')
+  const ink = token('--color-ink', '#1a1a18')
+  const ink2 = token('--color-ink-2', '#4a4a44')
+  const ink3 = token('--color-ink-3', '#8a8a80')
+  const dark = isDarkHex(surface)
 
   return {
     background: surface,
-    foreground: token('--color-ink-2', '#4a4a44'),
+    foreground: ink,
     cursor: accent,
     cursorAccent: surface,
     selectionBackground: withAlpha(accent, '33'),
-    black: token('--color-ink', '#1a1a18'),
+    black: dark ? token('--color-chrome', '#1e1e1e') : ink,
     red: token('--color-rem', '#c05d3c'),
     green: token('--color-add', '#5e8b3e'),
     yellow: '#d4a520',
     blue: '#4a7c9b',
     magenta: '#7c4dff',
     cyan: '#5a9e8f',
-    white: token('--color-rule', '#d8d7d2'),
-    brightBlack: token('--color-ink-3', '#8a8a80'),
+    white: dark ? ink2 : ink3,
+    brightBlack: ink3,
     brightRed: '#e07070',
     brightGreen: '#7cc68a',
     brightYellow: '#f0c040',
     brightBlue: '#6ea8c8',
     brightMagenta: '#b39dff',
     brightCyan: '#7cc6b8',
-    brightWhite: token('--color-ink', '#1a1a18'),
+    brightWhite: ink,
   }
 }
 
 function withAlpha(color, alpha) {
   if (/^#[0-9a-f]{6}$/i.test(color)) return `${color}${alpha}`
   return color
+}
+
+function isDarkHex(color) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color)
+  if (!match) return false
+  const value = Number.parseInt(match[1], 16)
+  const red = value >> 16
+  const green = (value >> 8) & 0xff
+  const blue = value & 0xff
+  return (red * 299 + green * 587 + blue * 114) / 255_000 < 0.5
 }

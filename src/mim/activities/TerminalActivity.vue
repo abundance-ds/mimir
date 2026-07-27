@@ -61,9 +61,11 @@
       v-if="mode === 'agent' && status === 'needs-input'"
       data-terminal-attention
       role="status"
-      class="flex h-7 shrink-0 items-center border-b border-accent/25 bg-accent-soft px-3 font-mono text-[9px] text-accent"
+      class="flex h-8 shrink-0 items-center gap-2 border-b border-accent/25 bg-accent-soft px-3 text-[10px]"
     >
-      Input requested · focus the session to continue
+      <span class="size-1.5 shrink-0 bg-accent" aria-hidden="true" />
+      <strong class="font-semibold text-accent">Input requested</strong>
+      <span class="truncate text-ink-3">Focus the session to continue</span>
     </div>
 
     <div class="relative min-h-0 flex-1 bg-surface">
@@ -82,7 +84,7 @@
         role="status"
         class="pointer-events-none absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-rule-light"
       >
-        <div class="h-full w-1/3 bg-accent motion-safe:animate-pulse" />
+        <div class="terminal-loading-bar h-full w-1/3 bg-accent" />
       </div>
     </div>
 
@@ -101,9 +103,9 @@
 import '@xterm/xterm/css/xterm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import {
   IconPlayerPause,
@@ -121,6 +123,7 @@ import {
   eventActivityId,
   isEndedStatus,
   orderedReplayChunks,
+  prepareTerminalFonts,
   readTerminalTheme,
   terminalBytes,
 } from './terminalActivity.js'
@@ -165,7 +168,7 @@ const restartTitle = computed(() => (
 ))
 let terminal = null
 let fitAddon = null
-let webglAddon = null
+let canvasAddon = null
 let webLinksAddon = null
 let dataDisposable = null
 let resizeObserver = null
@@ -183,18 +186,25 @@ onMounted(initialize)
 
 async function initialize() {
   try {
+    const fontSize = clampFontSize(props.fontSize)
+    await prepareTerminalFonts(fontSize)
+    if (disposed || !surface.value) return
     terminal = new Terminal({
       theme: readTerminalTheme(),
       fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-      fontSize: clampFontSize(props.fontSize),
+      fontSize,
       fontWeight: '400',
       fontWeightBold: '600',
+      lineHeight: 1.15,
       cursorBlink: true,
       cursorStyle: mode.value === 'agent' ? 'bar' : 'block',
+      cursorInactiveStyle: 'outline',
       scrollback: 10_000,
       allowTransparency: false,
       convertEol: false,
       customGlyphs: true,
+      drawBoldTextInBrightColors: false,
+      minimumContrastRatio: 3,
       // The Unicode 11 addon registers itself through xterm's proposed API.
       allowProposedApi: true,
     })
@@ -206,7 +216,7 @@ async function initialize() {
     terminal.unicode.activeVersion = '11'
     terminal.attachCustomKeyEventHandler(handleCustomKey)
     terminal.open(surface.value)
-    installWebglRenderer()
+    installCanvasRenderer()
     dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
     if (props.active) await attachActiveSurface()
   } catch (cause) {
@@ -369,20 +379,16 @@ function handleCustomKey(event) {
   return false
 }
 
-// The WebGL renderer keeps heavy TUI output smooth and, with customGlyphs,
-// draws box-drawing and powerline characters pixel-perfect. WebViews without
-// a WebGL2 context, and any later context loss, keep the DOM renderer.
-function installWebglRenderer() {
+// Canvas keeps xterm's layered renderer and custom glyphs without WebGL's
+// mipmapped texture sampling, which softens small type in macOS webviews.
+// If 2D canvas setup fails, xterm's built-in DOM renderer remains usable.
+function installCanvasRenderer() {
   try {
-    const addon = new WebglAddon()
-    addon.onContextLoss(() => {
-      addon.dispose()
-      if (webglAddon === addon) webglAddon = null
-    })
+    const addon = new CanvasAddon()
     terminal.loadAddon(addon)
-    webglAddon = addon
+    canvasAddon = addon
   } catch {
-    webglAddon = null
+    canvasAddon = null
   }
 }
 
@@ -445,12 +451,15 @@ function scheduleFit() {
     surface.value.style.transform = ''
     const rect = surface.value.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return
-    snapToDeviceGrid(rect)
     try {
       fitAddon.fit()
     } catch {
       return
     }
+    const renderRect = surface.value
+      .querySelector('.xterm-screen canvas, .xterm-screen')
+      ?.getBoundingClientRect() || rect
+    snapToDeviceGrid(renderRect)
     const size = { cols: terminal.cols, rows: terminal.rows }
     if (size.cols <= 0 || size.rows <= 0) return
     if (size.cols === lastSize.cols && size.rows === lastSize.rows) return
@@ -459,10 +468,9 @@ function scheduleFit() {
   })
 }
 
-// WebGL glyphs are bitmap blits: composited at a fractional device-pixel
-// offset they get resampled and soften. Pane splits produce fractional
-// positions constantly, so cancel the remainder with a sub-pixel translate
-// that lands the canvas origin on the physical pixel grid.
+// Canvas glyph layers soften when the compositor places their origin between
+// physical pixels. Pane splits create fractional positions frequently, so
+// align the rendered screen—not merely the outer pane—to the device grid.
 function snapToDeviceGrid(rect) {
   const scale = window.devicePixelRatio || 1
   const x = snapDelta(rect.left, scale)
@@ -555,7 +563,7 @@ onBeforeUnmount(() => {
   dataDisposable = null
   terminal?.dispose()
   terminal = null
-  webglAddon = null
+  canvasAddon = null
   // ActivitySupervisor owns the process. Detaching this renderer surface must
   // never stop, interrupt, or otherwise mutate the running Activity.
 })
@@ -609,5 +617,24 @@ function statusFromExit(reason) {
 
 .terminal-canvas :deep(.xterm-screen canvas) {
   image-rendering: auto;
+}
+
+.terminal-loading-bar {
+  animation: terminal-loading 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes terminal-loading {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-loading-bar {
+    animation: none;
+  }
 }
 </style>

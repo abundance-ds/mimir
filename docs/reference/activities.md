@@ -78,10 +78,13 @@ acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
 `src/mim/activities/TerminalActivity.vue` hosts xterm.js for terminal and
 agent Activities. Its non-defaults are deliberate:
 
-- The WebGL renderer is loaded after `terminal.open()` for GPU-composited
-  output; `customGlyphs` draws box-drawing and powerline characters
-  pixel-perfect. A missing WebGL2 context or a later context loss disposes the
-  addon and keeps xterm's DOM renderer.
+- The 2D Canvas renderer is loaded after `terminal.open()` for layered,
+  device-resolution output without WebGL texture filtering. `customGlyphs`
+  keeps box-drawing and powerline characters exact. If Canvas setup fails,
+  xterm's built-in DOM renderer remains usable.
+- The bundled IBM Plex Mono regular and semibold faces load before xterm
+  measures cells. This prevents fallback metrics or glyphs from entering the
+  renderer and gives bold terminal spans a real `600` face.
 - The Unicode 11 addon supplies correct emoji/wide-character cell widths and
   requires `allowProposedApi: true`; without the flag the addon throws at load
   and the surface shows an attach error instead of a terminal.
@@ -89,10 +92,9 @@ agent Activities. Its non-defaults are deliberate:
   Ctrl+J as insert-newline; shells bind LF to accept-line, identical to Enter,
   so plain terminals lose nothing.
 - Each fit pass clears and re-applies a sub-pixel `translate()` on the surface
-  so the canvas origin lands on a whole device pixel. Pane splits produce
+  so the rendered screen lands on whole device pixels. Pane splits produce
   fractional positions, and a bitmap canvas composited at a fractional offset
-  is resampled into uniform blur. DOM-rendered text never shows this, so the
-  regression is invisible until the WebGL renderer is active.
+  is resampled into uniform blur.
 
 Spawn size comes from `src/services/activities.js`, which remembers the last
 pane-fitted cols/rows and applies them to `spawnActivity`/`respawnActivity`

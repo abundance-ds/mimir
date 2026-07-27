@@ -23,23 +23,25 @@ export function buildQuickOpenResults({
   history = [],
   files = [],
   historySnippets = new Map(),
-  newActivityExpanded = false,
+  newActivityView = false,
 }) {
+  if (newActivityView) {
+    const normalized = String(query || '').trim().toLocaleLowerCase()
+    return withOptionIds(matchingRows(newActivity.map(newActivityResult), normalized))
+  }
+
   const { scope, term } = parseQuickOpenQuery(query)
   const normalized = term.toLocaleLowerCase()
   const searching = Boolean(normalized)
   const results = []
 
-  if (scope === 'all') {
-    results.push(...matchingRows(tools.map(toolResult), normalized))
-  }
   if (scope === 'all' && !searching) {
-    results.push(newActivityToggleResult(newActivity, newActivityExpanded))
-    if (newActivityExpanded) {
-      results.push(...newActivity.map(newActivityResult))
-    }
+    results.push(newActivityEnterResult(newActivity))
   } else if (scope === 'all' || scope === 'new-activity') {
     results.push(...matchingRows(newActivity.map(newActivityResult), normalized))
+  }
+  if (scope === 'all') {
+    results.push(...matchingRows(tools.map(toolResult), normalized))
   }
   if (scope === 'all' || scope === 'files') {
     const limit = scope === 'files'
@@ -57,6 +59,10 @@ export function buildQuickOpenResults({
     }
   }
 
+  return withOptionIds(results)
+}
+
+function withOptionIds(results) {
   return results.map((result, index) => ({
     ...result,
     optionId: `quick-open-option-${index}`,
@@ -96,16 +102,15 @@ function newActivityResult(launcher) {
   })
 }
 
-function newActivityToggleResult(launchers, expanded) {
+function newActivityEnterResult(launchers) {
   return result({
-    key: 'new:toggle',
-    type: 'new-activity-toggle',
+    key: 'new:enter',
+    type: 'new-activity-enter',
     group: 'New activity',
     title: 'Start new activity',
     meta: `${launchers.length} ${launchers.length === 1 ? 'source' : 'sources'}`,
-    verb: expanded ? 'Collapse' : 'Choose',
+    verb: 'Enter',
     icon: 'new-activity',
-    expanded,
     search: [],
   })
 }
