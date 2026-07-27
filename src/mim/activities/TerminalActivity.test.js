@@ -323,6 +323,27 @@ describe('TerminalActivity', () => {
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
   })
 
+  it('snaps the surface onto the device pixel grid so WebGL glyphs stay crisp', async () => {
+    vi.stubGlobal('devicePixelRatio', 2)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 640,
+      height: 480,
+      top: 50.6,
+      left: 100.3,
+      right: 740.3,
+      bottom: 530.6,
+      x: 100.3,
+      y: 50.6,
+      toJSON() {},
+    })
+    const wrapper = await initialize()
+
+    // 100.3 CSS px = 200.6 device px → nearest whole device pixel is 100.5;
+    // 50.6 CSS px = 101.2 device px → nearest is 50.5.
+    expect(wrapper.get('[data-terminal-surface]').element.style.transform)
+      .toBe('translate(0.2px, -0.1px)')
+  })
+
   it('turns Shift+Enter into a line feed instead of a submit', async () => {
     await initialize()
     const terminal = xterm.terminals[0]

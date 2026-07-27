@@ -441,8 +441,11 @@ function scheduleFit() {
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = 0
     if (disposed || !surface.value) return
+    // Measure with the previous snap offset cleared so it never compounds.
+    surface.value.style.transform = ''
     const rect = surface.value.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return
+    snapToDeviceGrid(rect)
     try {
       fitAddon.fit()
     } catch {
@@ -454,6 +457,21 @@ function scheduleFit() {
     lastSize = size
     resizeActivity(activityId.value, size.cols, size.rows).catch(() => {})
   })
+}
+
+// WebGL glyphs are bitmap blits: composited at a fractional device-pixel
+// offset they get resampled and soften. Pane splits produce fractional
+// positions constantly, so cancel the remainder with a sub-pixel translate
+// that lands the canvas origin on the physical pixel grid.
+function snapToDeviceGrid(rect) {
+  const scale = window.devicePixelRatio || 1
+  const x = snapDelta(rect.left, scale)
+  const y = snapDelta(rect.top, scale)
+  if (x || y) surface.value.style.transform = `translate(${x}px, ${y}px)`
+}
+
+function snapDelta(value, scale) {
+  return Number((Math.round(value * scale) / scale - value).toFixed(3))
 }
 
 function installThemeObserver() {
