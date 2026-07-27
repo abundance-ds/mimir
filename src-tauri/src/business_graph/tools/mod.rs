@@ -127,9 +127,7 @@ fn is_create_action(action: &str) -> bool {
     action.ends_with(".create")
         || matches!(
             action,
-            "projects.record_decision"
-                | "issues.create_next_action"
-                | "research.capture_evidence"
+            "projects.record_decision" | "issues.create_next_action" | "research.capture_evidence"
         )
 }
 

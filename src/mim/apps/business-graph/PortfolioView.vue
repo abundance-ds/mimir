@@ -4,8 +4,10 @@
       <div class="portfolio-header" aria-hidden="true">
         <span>Project</span>
         <span>Company / scope</span>
-        <span>Work</span>
-        <span>Complete</span>
+        <span class="num">Open</span>
+        <span class="num">Waiting</span>
+        <span class="num">Done</span>
+        <span class="num">Complete</span>
         <span>Knowledge</span>
         <span>Health</span>
       </div>
@@ -26,22 +28,15 @@
           <strong>{{ company(project) }}</strong>
           <small>{{ scope(project.scopeId) }}</small>
         </div>
-        <dl class="project-work">
-          <div><dd>{{ metrics(project).open }}</dd><dt>open</dt></div>
-          <div><dd :class="{ attention: metrics(project).waiting }">{{ metrics(project).waiting }}</dd><dt>wait</dt></div>
-          <div><dd>{{ metrics(project).done }}</dd><dt>done</dt></div>
-        </dl>
-        <span class="project-completion">{{ completion(project) }}%</span>
-        <div class="project-knowledge">
-          <span>{{ knowledge(project).evidence }} evidence</span>
-          <span>
-            {{ knowledge(project).decisions }}
-            {{ knowledge(project).decisions === 1 ? 'decision' : 'decisions' }}
-          </span>
-          <span>{{ knowledge(project).other }} other</span>
-        </div>
+        <span class="project-num">{{ metrics(project).open }}</span>
+        <span class="project-num" :class="{ flagged: metrics(project).waiting }">
+          {{ metrics(project).waiting }}
+        </span>
+        <span class="project-num">{{ metrics(project).done }}</span>
+        <span class="project-num project-completion">{{ completion(project) }}%</span>
+        <span class="project-knowledge">{{ knowledgeText(project) }}</span>
         <span class="project-health" :class="health(project).class">
-          <i />
+          <b v-if="health(project).marker" aria-hidden="true">{{ health(project).marker }}</b>
           {{ health(project).label }}
         </span>
       </button>
@@ -107,29 +102,36 @@ function connectedNodes(project) {
   ))
 }
 
+const EVIDENCE_KINDS = new Set([
+  'study',
+  'evidence',
+  'dataset',
+  'analysis',
+  'model',
+  'endpoint',
+  'publication',
+  'submission',
+  'research-question',
+  'method',
+  'client-request',
+])
+
 function knowledge(project) {
   const connected = connectedNodes(project)
-  const evidenceKinds = new Set([
-    'study',
-    'evidence',
-    'dataset',
-    'analysis',
-    'model',
-    'endpoint',
-    'publication',
-    'submission',
-    'research-question',
-    'method',
-    'client-request',
-  ])
   return {
-    evidence: connected.filter(node => evidenceKinds.has(node.kind)).length,
+    evidence: connected.filter(node => EVIDENCE_KINDS.has(node.kind)).length,
     decisions: connected.filter(node => node.kind === 'decision').length,
     other: connected.filter(node => (
-      !evidenceKinds.has(node.kind)
+      !EVIDENCE_KINDS.has(node.kind)
       && !['decision', 'issue', 'person', 'company', 'project'].includes(node.kind)
     )).length,
   }
+}
+
+function knowledgeText(project) {
+  const values = knowledge(project)
+  const decisions = `${values.decisions} ${values.decisions === 1 ? 'decision' : 'decisions'}`
+  return `${values.evidence} evidence · ${decisions} · ${values.other} other`
 }
 
 function health(project) {
@@ -139,9 +141,11 @@ function health(project) {
     && issue.dueDate < new Date().toISOString().slice(0, 10)
     && !['done', 'cancelled'].includes(issue.status)
   ))
-  if (overdue || values.waiting > 1) return { label: 'Needs attention', class: 'health-attention' }
-  if (values.open) return { label: 'Active', class: 'health-active' }
-  return { label: 'Clear', class: 'health-clear' }
+  if (overdue || values.waiting > 1) {
+    return { label: 'needs attention', marker: '!', class: 'health-attention' }
+  }
+  if (values.open) return { label: 'active', marker: '', class: 'health-active' }
+  return { label: 'clear', marker: '', class: 'health-clear' }
 }
 
 function company(project) {
@@ -158,61 +162,71 @@ function scope(id) {
 .portfolio {
   min-height: 0;
   flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 12px;
+  overflow: auto;
+  background: var(--color-surface);
 }
 
 .portfolio-table {
-  min-width: 920px;
-  border: 1px solid var(--color-rule-light);
-  background: var(--color-surface);
+  min-width: 980px;
 }
 
 .portfolio-header,
 .project-row {
   display: grid;
   grid-template-columns:
-    minmax(240px, 1.35fr)
-    minmax(150px, 0.8fr)
-    160px
-    76px
-    minmax(180px, 0.9fr)
-    116px;
+    minmax(200px, 1.3fr)
+    minmax(130px, 0.8fr)
+    52px
+    64px
+    52px
+    72px
+    minmax(150px, 0.9fr)
+    128px;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .portfolio-header {
-  min-height: 32px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 30px;
   border-bottom: 1px solid var(--color-rule);
   background: var(--color-chrome-high);
   padding: 0 13px;
   color: var(--color-ink-4);
   font-family: var(--font-mono);
   font-size: 9px;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.portfolio-header .num,
+.project-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .project-row {
   width: 100%;
-  min-height: 70px;
+  min-height: 46px;
   border-bottom: 1px solid var(--color-rule-light);
-  padding: 9px 13px;
+  padding: 4px 13px;
   color: var(--color-ink-2);
   text-align: left;
 }
 
-.project-row:last-child {
-  border-bottom: 0;
+.project-row:hover {
+  background: var(--color-chrome-mid);
 }
 
-.project-row:hover {
-  background: var(--color-chrome-high);
+.project-row:hover .project-identity strong,
+.project-row:hover .project-context strong {
+  color: var(--color-ink);
 }
 
 .project-row:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
+  outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
 
@@ -236,68 +250,47 @@ function scope(id) {
   color: var(--color-ink);
   font-size: 12px;
   font-weight: 640;
+  line-height: 16px;
+}
+
+.project-identity small {
+  margin-top: 2px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+  line-height: 12px;
 }
 
 .project-context strong {
   color: var(--color-ink-2);
   font-size: 10px;
   font-weight: 600;
+  line-height: 14px;
 }
 
-.project-identity small,
 .project-context small {
-  margin-top: 4px;
+  margin-top: 2px;
   color: var(--color-ink-4);
-  font-size: 9px;
-}
-
-.project-context small {
   font-family: var(--font-mono);
-  text-transform: uppercase;
+  font-size: 9px;
+  line-height: 12px;
 }
 
-.project-work {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.project-work div {
-  min-width: 0;
-}
-
-.project-work dd {
+.project-num {
   color: var(--color-ink);
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 560;
 }
 
-.project-work dd.attention {
-  color: var(--color-rem);
-}
-
-.project-work dt {
-  margin-top: 2px;
-  color: var(--color-ink-4);
-  font-size: 9px;
+.project-num.flagged {
+  font-weight: 700;
 }
 
 .project-completion {
-  color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
 }
 
 .project-knowledge {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.project-knowledge span {
   overflow: hidden;
   color: var(--color-ink-3);
   font-family: var(--font-mono);
@@ -308,31 +301,27 @@ function scope(id) {
 
 .project-health {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
+  gap: 4px;
   color: var(--color-ink-3);
-  font-size: 9px;
-  font-weight: 620;
+  font-size: 10px;
 }
 
-.project-health i {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: currentColor;
+.project-health b {
+  font-family: var(--font-mono);
+  font-weight: 700;
 }
 
-.health-attention {
+.project-health.health-attention {
   color: var(--color-rem);
 }
 
-.health-active {
-  color: var(--color-accent);
+.project-health.health-active {
+  color: var(--color-ink-2);
 }
 
-.health-clear {
-  color: var(--color-add);
+.project-health.health-clear {
+  color: var(--color-ink-4);
 }
 
 .portfolio-empty {
@@ -363,7 +352,7 @@ function scope(id) {
   min-height: 34px;
   margin-top: 16px;
   border: 1px solid var(--color-rule);
-  border-radius: 5px;
+  border-radius: 2px;
   background: var(--color-surface);
   padding: 0 11px;
   color: var(--color-ink-2);

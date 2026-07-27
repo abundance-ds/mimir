@@ -22,6 +22,8 @@ pub mod file_index;
 mod file_index_commands;
 mod file_open;
 mod git;
+#[cfg(test)]
+mod ipc_fixtures;
 mod launchers;
 mod local_settings;
 pub mod mimx;
@@ -34,6 +36,8 @@ pub mod tool_bridge;
 pub mod tool_registry;
 mod tool_runtime;
 pub mod tool_server;
+#[cfg(test)]
+mod upgrade_fixtures;
 mod workspace_files;
 
 #[cfg(target_os = "macos")]

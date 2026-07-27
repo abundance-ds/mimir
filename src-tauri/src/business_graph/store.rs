@@ -1093,6 +1093,284 @@ mod tests {
         assert_eq!(store.get("eversana").unwrap().title, "EVERSANA");
     }
 
+    fn parsed_clean_knowledge(path: &Path) -> GraphNode {
+        let raw = fs::read_to_string(path).unwrap();
+        let parsed = parse_graph_markdown(
+            path,
+            "project:test",
+            GraphScopeKind::Project,
+            GraphSourceFormat::Knowledge,
+            &raw,
+        )
+        .unwrap();
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "source must reparse without diagnostics: {:?}",
+            parsed.diagnostics
+        );
+        parsed.node
+    }
+
+    #[test]
+    fn racing_stores_on_one_node_keep_the_first_write_and_reject_the_stale_one() {
+        let (root, mut first) = fixture();
+        let roots = [GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            root.path(),
+        )];
+        let mut second = GraphStore::load(&roots);
+        let token = first
+            .get("eversana")
+            .unwrap()
+            .provenance
+            .source_revision
+            .clone();
+
+        let winner = first
+            .update_node(GraphNodePatch {
+                id: "eversana".into(),
+                expected_revision: Some(token.clone()),
+                title: Some("Winner".into()),
+                ..GraphNodePatch::default()
+            })
+            .unwrap();
+        let error = second
+            .update_node(GraphNodePatch {
+                id: "eversana".into(),
+                expected_revision: Some(token),
+                title: Some("Loser".into()),
+                ..GraphNodePatch::default()
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, GraphMutationError::Conflict { .. }));
+        let source_path = PathBuf::from(&winner.provenance.source_path);
+        let on_disk = parsed_clean_knowledge(&source_path);
+        assert_eq!(on_disk.title, "Winner");
+        assert!(!fs::read_to_string(&source_path).unwrap().contains("Loser"));
+        assert_eq!(second.get("eversana").unwrap().title, "EVERSANA");
+    }
+
+    #[test]
+    fn racing_stores_on_different_nodes_both_commit_valid_sources() {
+        let (root, mut first) = fixture();
+        let roots = [GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            root.path(),
+        )];
+        let mut second = GraphStore::load(&roots);
+
+        for (store, id, title) in [
+            (&mut first, "eversana", "EVERSANA rewritten"),
+            (&mut second, "project-eversana", "Engagement rewritten"),
+        ] {
+            let token = store.get(id).unwrap().provenance.source_revision.clone();
+            store
+                .update_node(GraphNodePatch {
+                    id: id.into(),
+                    expected_revision: Some(token),
+                    title: Some(title.into()),
+                    ..GraphNodePatch::default()
+                })
+                .unwrap();
+        }
+
+        let reloaded = GraphStore::load(&roots);
+        assert_eq!(reloaded.len(), 3);
+        assert!(reloaded.diagnostics().is_empty());
+        assert_eq!(
+            reloaded.get("eversana").unwrap().title,
+            "EVERSANA rewritten"
+        );
+        assert_eq!(
+            reloaded.get("project-eversana").unwrap().title,
+            "Engagement rewritten"
+        );
+        for id in ["eversana", "project-eversana"] {
+            let path = PathBuf::from(&reloaded.get(id).unwrap().provenance.source_path);
+            parsed_clean_knowledge(&path);
+        }
+    }
+
+    #[test]
+    fn racing_creates_with_one_explicit_id_keep_the_first_source() {
+        let (root, mut first) = fixture();
+        let roots = [GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            root.path(),
+        )];
+        let mut second = GraphStore::load(&roots);
+        let source = roots[0].clone();
+
+        first
+            .create_node(
+                &source,
+                GraphNodeCreate {
+                    id: Some("race-note".into()),
+                    kind: "note".into(),
+                    title: "First to file".into(),
+                    ..GraphNodeCreate::default()
+                },
+            )
+            .unwrap();
+        // The second store has not seen the new node, so only the exclusive
+        // create on the filesystem stands between it and clobbering the file.
+        let error = second
+            .create_node(
+                &source,
+                GraphNodeCreate {
+                    id: Some("race-note".into()),
+                    kind: "note".into(),
+                    title: "Second to file".into(),
+                    ..GraphNodeCreate::default()
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(error, GraphMutationError::Exists("race-note".into()));
+        let path = root.path().join("knowledge/race-note.md");
+        assert_eq!(parsed_clean_knowledge(&path).title, "First to file");
+        assert!(second.get("race-note").is_none());
+    }
+
+    #[test]
+    fn delete_rejects_stale_revisions_and_preserves_the_external_edit() {
+        let (_root, mut store) = fixture();
+        let node = store.get("eversana").unwrap().clone();
+        let external = "---\ntitle: Edited outside\ntype: org\n---\nKeep me.";
+        fs::write(&node.provenance.source_path, external).unwrap();
+
+        let error = store
+            .delete_node_with(
+                GraphNodeDelete {
+                    id: node.id.clone(),
+                    expected_revision: Some(node.provenance.source_revision),
+                },
+                |_| panic!("the source deleter must not run on a stale revision"),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, GraphMutationError::Conflict { .. }));
+        assert_eq!(
+            fs::read_to_string(&node.provenance.source_path).unwrap(),
+            external
+        );
+        assert!(store.get("eversana").is_some());
+    }
+
+    #[test]
+    fn unversioned_updates_overwrite_external_edits_last_write_wins() {
+        // NOTE: captures current behavior. A patch without expected_revision
+        // skips the conflict check entirely, so a writer that never took a
+        // revision token silently replaces an external edit that landed after
+        // its last read. The replacement is atomic (the file is never torn),
+        // but the external edit's content is lost. Conflict safety therefore
+        // depends on every writer passing expected_revision.
+        let (_root, mut store) = fixture();
+        let node = store.get("eversana").unwrap().clone();
+        fs::write(
+            &node.provenance.source_path,
+            "---\ntitle: External truth\ntype: org\n---\nExternal body.",
+        )
+        .unwrap();
+
+        store
+            .update_node(GraphNodePatch {
+                id: "eversana".into(),
+                expected_revision: None,
+                title: Some("Untokened writer".into()),
+                ..GraphNodePatch::default()
+            })
+            .unwrap();
+
+        let on_disk = parsed_clean_knowledge(Path::new(&node.provenance.source_path));
+        assert_eq!(on_disk.title, "Untokened writer");
+        assert!(!fs::read_to_string(&node.provenance.source_path)
+            .unwrap()
+            .contains("External truth"));
+    }
+
+    #[test]
+    fn load_flags_corrupt_sources_without_panicking_deleting_or_rewriting_them() {
+        let root = TempDir::new().unwrap();
+        let knowledge = root.path().join("knowledge");
+        fs::create_dir_all(&knowledge).unwrap();
+        let sources: [(&str, &[u8]); 6] = [
+            (
+                "healthy.md",
+                b"---\ntitle: Healthy\ntype: note\n---\nStill fine.",
+            ),
+            ("empty.md", b""),
+            (
+                "truncated.md",
+                b"---\ntitle: Truncated frontmatter never closes",
+            ),
+            ("bad-yaml.md", b"---\ntitle: [unclosed\n---\nBody.\n"),
+            ("not-an-object.md", b"---\n- just\n- a list\n---\nBody.\n"),
+            ("binary.md", b"\xff\xfe\x00not utf-8"),
+        ];
+        for (name, bytes) in &sources {
+            fs::write(knowledge.join(name), bytes).unwrap();
+        }
+
+        let store = GraphStore::load(&[GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            root.path(),
+        )]);
+
+        assert_eq!(store.get("healthy").unwrap().title, "Healthy");
+        assert!(store.get("bad-yaml").is_none());
+        assert!(store.get("not-an-object").is_none());
+        assert!(store.get("binary").is_none());
+        let codes = store
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            codes
+                .iter()
+                .filter(|code| **code == "source-file-invalid")
+                .count(),
+            2
+        );
+        assert!(codes.contains(&"source-file-unreadable"));
+
+        // NOTE: captures current behavior. An empty file and an unterminated
+        // frontmatter fence are not skipped: they load as untitled 'note'
+        // nodes (the whole file becomes the body) with a 'missing-title'
+        // warning, and a later tokened update would rewrite the file in the
+        // canonical shape.
+        assert_eq!(store.len(), 3);
+        assert_eq!(store.get("empty").unwrap().title, "");
+        assert_eq!(store.get("truncated").unwrap().kind, "note");
+        assert!(store
+            .get("truncated")
+            .unwrap()
+            .body
+            .contains("never closes"));
+        assert_eq!(
+            codes
+                .iter()
+                .filter(|code| **code == "missing-title")
+                .count(),
+            2
+        );
+
+        // Loading must never delete, rewrite, or quarantine a source file.
+        for (name, bytes) in &sources {
+            assert_eq!(
+                fs::read(knowledge.join(name)).unwrap().as_slice(),
+                *bytes,
+                "{name} must stay byte-identical after load"
+            );
+        }
+    }
+
     #[test]
     fn delete_checks_revision_and_removes_the_source_and_indexes() {
         let (_root, mut store) = fixture();

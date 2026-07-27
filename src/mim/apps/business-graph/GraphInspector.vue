@@ -426,6 +426,14 @@
             </label>
           </header>
 
+          <ProjectStanding
+            v-if="node.kind === 'project'"
+            :project="node"
+            :nodes="nodes"
+            @open-node="openRelated"
+            @open-file="openSource"
+          />
+
           <section class="focus-relationship">
             <span class="focus-section-kicker">Relational context</span>
             <GraphRelationshipLine
@@ -811,6 +819,7 @@ import {
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphMarkdownPreview from './GraphMarkdownPreview.vue'
 import GraphRelationshipLine from './GraphRelationshipLine.vue'
+import ProjectStanding from './ProjectStanding.vue'
 import GraphSelect from './GraphSelect.vue'
 import GraphDatePicker from './GraphDatePicker.vue'
 import GraphDateTimeField from './GraphDateTimeField.vue'

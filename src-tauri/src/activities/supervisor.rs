@@ -647,11 +647,7 @@ impl ActivitySupervisor {
         records
     }
 
-    pub fn search_history(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Vec<ActivityHistorySearchHit> {
+    pub fn search_history(&self, query: &str, limit: usize) -> Vec<ActivityHistorySearchHit> {
         let needle = query.trim().to_ascii_lowercase();
         if needle.is_empty() || limit == 0 {
             return Vec::new();
@@ -1874,9 +1870,7 @@ mod tests {
             ))
             .unwrap();
         wait_for_end(&supervisor, "history-search");
-        supervisor
-            .set_archived("history-search", true)
-            .unwrap();
+        supervisor.set_archived("history-search", true).unwrap();
 
         let hits = supervisor.search_history("sidebar ordering", 10);
         assert_eq!(hits.len(), 1);

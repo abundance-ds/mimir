@@ -141,4 +141,115 @@ mod tests {
             .contains("JSON object"));
         assert!(!path.exists());
     }
+
+    #[test]
+    fn truncated_session_is_quarantined_and_recovery_round_trips() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        let original = serde_json::json!({
+            "openFiles": [
+                { "path": "/work/notes.md", "content": "unsaved work", "dirty": true }
+            ],
+            "activeFileIndex": 0
+        });
+        save_session_at(&path, &original).unwrap();
+        let full = std::fs::read(&path).unwrap();
+        let truncated = full[..full.len() * 6 / 10].to_vec();
+        std::fs::write(&path, &truncated).unwrap();
+
+        let loaded = load_session_at(&path).unwrap();
+        assert!(loaded.session.is_none());
+        assert!(loaded.diagnostic.as_deref().unwrap().contains("moved"));
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(&quarantined).unwrap(), truncated);
+
+        let replacement = serde_json::json!({ "openFiles": [] });
+        save_session_at(&path, &replacement).unwrap();
+        assert_eq!(load_session_at(&path).unwrap().session, Some(replacement));
+        assert_eq!(std::fs::read(&quarantined).unwrap(), truncated);
+    }
+
+    #[test]
+    fn empty_session_file_is_quarantined_with_bytes_preserved() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        std::fs::write(&path, b"").unwrap();
+
+        let loaded = load_session_at(&path).unwrap();
+        assert!(loaded.session.is_none());
+        assert!(loaded.diagnostic.is_some());
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert!(std::fs::read(&quarantined).unwrap().is_empty());
+
+        let replacement = serde_json::json!({ "openFiles": [] });
+        save_session_at(&path, &replacement).unwrap();
+        assert_eq!(load_session_at(&path).unwrap().session, Some(replacement));
+    }
+
+    #[test]
+    fn non_utf8_session_bytes_are_quarantined_byte_for_byte() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        let corrupt = b"\xC3\x28{\"openFiles\"";
+        std::fs::write(&path, corrupt).unwrap();
+
+        let loaded = load_session_at(&path).unwrap();
+        assert!(loaded.session.is_none());
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(quarantined).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn session_path_occupied_by_a_directory_errors_without_destroying_it() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("user-file.txt"), b"precious").unwrap();
+
+        assert!(load_session_at(&path).is_err());
+        assert!(save_session_at(&path, &serde_json::json!({})).is_err());
+        assert!(path.is_dir());
+        assert_eq!(
+            std::fs::read(path.join("user-file.txt")).unwrap(),
+            b"precious"
+        );
+    }
+
+    #[test]
+    fn unexpected_field_types_inside_the_session_object_load_verbatim() {
+        // NOTE: the native layer validates only the top-level shape; the
+        // renderer owns the inner session schema and must tolerate drift.
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        let session = serde_json::json!({
+            "openFiles": "not-an-array",
+            "activeFileIndex": { "nested": true },
+            "zoomLevel": null
+        });
+        save_session_at(&path, &session).unwrap();
+
+        let loaded = load_session_at(&path).unwrap();
+        assert_eq!(loaded.session, Some(session));
+        assert!(loaded.diagnostic.is_none());
+    }
+
+    #[test]
+    fn stale_temporary_files_beside_the_session_block_nothing() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        let original = serde_json::json!({ "openFiles": [] });
+        save_session_at(&path, &original).unwrap();
+        let stale = directory.path().join(".session.json.4242.1.2.0.tmp");
+        std::fs::write(&stale, b"{\"openFiles\":[").unwrap();
+
+        assert_eq!(load_session_at(&path).unwrap().session, Some(original));
+
+        let replacement = serde_json::json!({ "openFiles": [], "zoomLevel": 1.5 });
+        save_session_at(&path, &replacement).unwrap();
+        assert_eq!(load_session_at(&path).unwrap().session, Some(replacement));
+        assert!(stale.exists());
+    }
 }

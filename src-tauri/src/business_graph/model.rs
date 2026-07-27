@@ -191,6 +191,25 @@ impl GraphNode {
                 .get("needsDetail")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            deliverables: self
+                .properties
+                .get("deliverables")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            if let Some(path) = item.as_str() {
+                                Some(path.to_string())
+                            } else {
+                                item.get("path")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string)
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             relations: self.relations.clone(),
             updated_at: self.updated_at.clone(),
             scope_id: self.provenance.scope_id.clone(),
@@ -229,6 +248,8 @@ pub struct GraphNodeSummary {
     pub slug: Option<String>,
     #[serde(default)]
     pub needs_detail: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<String>,
     #[serde(default)]
     pub relations: Vec<GraphRelation>,
     pub updated_at: String,

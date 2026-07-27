@@ -156,6 +156,7 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphSelect.vue',
   'GraphWorkDialog.vue',
   'PortfolioView.vue',
+  'ProjectStanding.vue',
   'StatusRail.vue',
   'StatusRailPanel.vue',
   'GraphFilterBanner.vue',

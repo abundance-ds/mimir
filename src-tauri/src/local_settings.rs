@@ -219,4 +219,138 @@ mod tests {
                 .contains("JSON object")
         );
     }
+
+    #[test]
+    fn truncated_settings_are_quarantined_and_a_clean_save_round_trips() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let original = serde_json::json!({
+            "editor": { "editorTheme": "parchment", "workbenchZoom": 125 },
+            "apps": { "ledger": { "expanded": true } }
+        });
+        save_settings_at(&path, &original).unwrap();
+        let full = std::fs::read(&path).unwrap();
+        let truncated = full[..full.len() * 6 / 10].to_vec();
+        std::fs::write(&path, &truncated).unwrap();
+
+        let loaded = load_settings_at(&path).unwrap();
+        assert_eq!(loaded.settings, serde_json::json!({}));
+        assert!(loaded.diagnostic.as_deref().unwrap().contains("moved"));
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(&quarantined).unwrap(), truncated);
+
+        let replacement = serde_json::json!({ "editor": { "editorTheme": "slate" } });
+        save_settings_at(&path, &replacement).unwrap();
+        assert_eq!(load_settings_at(&path).unwrap().settings, replacement);
+        assert_eq!(std::fs::read(&quarantined).unwrap(), truncated);
+    }
+
+    #[test]
+    fn empty_settings_file_is_quarantined_and_defaults_apply() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, b"").unwrap();
+
+        let loaded = load_settings_at(&path).unwrap();
+        assert_eq!(loaded.settings, serde_json::json!({}));
+        assert_eq!(workbench_zoom_factor_from(&loaded.settings), 1.0);
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert!(std::fs::read(&quarantined).unwrap().is_empty());
+    }
+
+    #[test]
+    fn top_level_array_settings_are_quarantined_with_bytes_preserved() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(&path, b"[\"dark\"]").unwrap();
+
+        let loaded = load_settings_at(&path).unwrap();
+        assert_eq!(loaded.settings, serde_json::json!({}));
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(quarantined).unwrap(), b"[\"dark\"]");
+    }
+
+    #[test]
+    fn non_utf8_settings_bytes_are_quarantined_byte_for_byte() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let corrupt = b"\xFF\xFE{\"editor\"";
+        std::fs::write(&path, corrupt).unwrap();
+
+        let loaded = load_settings_at(&path).unwrap();
+        assert_eq!(loaded.settings, serde_json::json!({}));
+        let quarantined = PathBuf::from(loaded.quarantined_path.unwrap());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(quarantined).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn settings_path_occupied_by_a_directory_errors_without_destroying_it() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("user-file.txt"), b"precious").unwrap();
+
+        assert!(load_settings_at(&path).is_err());
+        assert!(save_settings_at(&path, &serde_json::json!({})).is_err());
+        assert!(save_editor_settings_at(&path, &serde_json::json!({})).is_err());
+        assert!(path.is_dir());
+        assert_eq!(
+            std::fs::read(path.join("user-file.txt")).unwrap(),
+            b"precious"
+        );
+    }
+
+    #[test]
+    fn editor_save_over_corrupt_settings_quarantines_before_writing_a_clean_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let corrupt = b"{\"apps\": {\"ledger\": {\"expanded\": tru";
+        std::fs::write(&path, corrupt).unwrap();
+
+        save_editor_settings_at(&path, &serde_json::json!({ "editorTheme": "parchment" })).unwrap();
+
+        // NOTE: sections held only by the corrupt file (here "apps") survive
+        // solely in the quarantined copy; the fresh file contains just the
+        // editor section. Nothing is silently deleted, but the live file does
+        // not regain them.
+        assert_eq!(
+            load_settings_at(&path).unwrap().settings,
+            serde_json::json!({ "editor": { "editorTheme": "parchment" } })
+        );
+        let quarantined: Vec<PathBuf> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("settings.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(quarantined.len(), 1);
+        assert_eq!(std::fs::read(&quarantined[0]).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn stale_temporary_files_beside_settings_block_nothing() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let original = serde_json::json!({ "editor": { "editorTheme": "parchment" } });
+        save_settings_at(&path, &original).unwrap();
+        let stale = directory.path().join(".settings.json.4242.1.2.0.tmp");
+        std::fs::write(&stale, b"{\"editor\":").unwrap();
+
+        assert_eq!(load_settings_at(&path).unwrap().settings, original);
+
+        let replacement = serde_json::json!({ "editor": {} });
+        save_settings_at(&path, &replacement).unwrap();
+        assert_eq!(load_settings_at(&path).unwrap().settings, replacement);
+        assert!(stale.exists());
+    }
 }

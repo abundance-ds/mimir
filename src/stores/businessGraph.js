@@ -431,6 +431,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       rank: node.properties?.rank,
       slug: node.properties?.slug,
       needsDetail: Boolean(node.properties?.needsDetail),
+      deliverables: (Array.isArray(node.properties?.deliverables) ? node.properties.deliverables : [])
+        .map(item => (typeof item === 'string' ? item : item?.path || ''))
+        .filter(Boolean),
       relations: node.relations || [],
       updatedAt: node.updatedAt || '',
       scopeId: node.provenance?.scopeId,

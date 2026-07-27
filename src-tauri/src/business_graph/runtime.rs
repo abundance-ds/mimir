@@ -8,8 +8,8 @@ use super::store::{GraphMutationError, GraphStore};
 use super::{build_migration_report, GraphContextPack, GraphContextRequest, GraphMigrationReport};
 use crate::persistence;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use sha2::{Digest, Sha256};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fs,
@@ -105,10 +105,7 @@ impl GraphRuntime {
             .clone();
         let (next_revision, before_nodes) = {
             let store = self.store.read().map_err(|error| error.to_string())?;
-            (
-                store.revision().saturating_add(1),
-                store.snapshot_nodes(),
-            )
+            (store.revision().saturating_add(1), store.snapshot_nodes())
         };
         let mut store = GraphStore::load(&roots);
         store.set_revision(next_revision);
@@ -181,9 +178,7 @@ impl GraphRuntime {
         let events = self.events.lock().map_err(|error| error.to_string())?;
         let visible = events
             .iter()
-            .filter(|event| {
-                query.scope_ids.is_empty() || query.scope_ids.contains(&event.scope_id)
-            })
+            .filter(|event| query.scope_ids.is_empty() || query.scope_ids.contains(&event.scope_id))
             .cloned()
             .collect::<Vec<_>>();
         let total = visible.len();
@@ -217,13 +212,8 @@ impl GraphRuntime {
         })?;
         let changes = graph_field_changes(before.as_ref(), after.as_ref());
         let event_type = graph_event_type(&action, before.as_ref(), after.as_ref(), &changes);
-        let summary = graph_event_summary(
-            &event_type,
-            &action,
-            before.as_ref(),
-            after.as_ref(),
-            node,
-        );
+        let summary =
+            graph_event_summary(&event_type, &action, before.as_ref(), after.as_ref(), node);
         let mut data = Map::new();
         if let Some(due_date) = node.properties.get("dueDate").and_then(Value::as_str) {
             data.insert("dueDate".into(), Value::String(due_date.into()));
@@ -235,8 +225,7 @@ impl GraphRuntime {
             id: Uuid::new_v4().to_string(),
             event_type,
             action,
-            timestamp: chrono::Utc::now()
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             graph_revision,
             node_id: node.id.clone(),
             node_kind: node.kind.clone(),
@@ -466,8 +455,7 @@ impl GraphRuntime {
                 id: Uuid::new_v4().to_string(),
                 event_type: "became-overdue".into(),
                 action: "system.due-clock".into(),
-                timestamp: chrono::Utc::now()
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 graph_revision: revision,
                 node_id: node.id.clone(),
                 node_kind: node.kind.clone(),
@@ -562,7 +550,12 @@ fn graph_field_changes(
         return Vec::new();
     };
     let mut changes = Vec::new();
-    push_change(&mut changes, "title", json!(before.title), json!(after.title));
+    push_change(
+        &mut changes,
+        "title",
+        json!(before.title),
+        json!(after.title),
+    );
     push_change(
         &mut changes,
         "summary",
@@ -710,11 +703,7 @@ fn graph_event_summary(
         "next-action-created" => format!("Filed next action · {}", node.title),
         "status-changed" => format!(
             "{} → {} · {}",
-            human_kind(
-                before
-                    .and_then(GraphNode::status)
-                    .unwrap_or("backlog")
-            ),
+            human_kind(before.and_then(GraphNode::status).unwrap_or("backlog")),
             human_kind(after.and_then(GraphNode::status).unwrap_or("backlog")),
             node.title
         ),
@@ -1100,8 +1089,37 @@ fn changed_result(store: &GraphStore, paths: Vec<String>) -> GraphChanged {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::business_graph::markdown::parse_graph_markdown;
+    use crate::business_graph::model::GraphSourceFormat;
     use crate::business_graph::GraphRelation;
     use tempfile::TempDir;
+
+    fn knowledge_root(files: &[(&str, &str)]) -> TempDir {
+        let root = TempDir::new().unwrap();
+        fs::create_dir_all(root.path().join("knowledge")).unwrap();
+        for (name, raw) in files {
+            fs::write(root.path().join("knowledge").join(name), raw).unwrap();
+        }
+        root
+    }
+
+    fn parsed_clean_knowledge(path: &Path) -> GraphNode {
+        let raw = fs::read_to_string(path).unwrap();
+        let parsed = parse_graph_markdown(
+            path,
+            "project:test",
+            GraphScopeKind::Project,
+            GraphSourceFormat::Knowledge,
+            &raw,
+        )
+        .unwrap();
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "source must reparse without diagnostics: {:?}",
+            parsed.diagnostics
+        );
+        parsed.node
+    }
 
     #[test]
     fn recognizes_only_graph_markdown_below_supported_directories() {
@@ -1254,6 +1272,158 @@ mod tests {
             .is_file());
         let shared = fs::read_to_string(team.path().join("knowledge/shared-method.md")).unwrap();
         assert!(!shared.contains("my-method-annotation"));
+    }
+
+    #[test]
+    fn racing_writers_on_one_node_serialize_to_a_single_winner() {
+        let project = knowledge_root(&[(
+            "shared-note.md",
+            "---\ntitle: Shared note\ntype: note\n---\nBody.",
+        )]);
+        let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            project.path(),
+        )]);
+        let token = runtime
+            .get("shared-note")
+            .unwrap()
+            .unwrap()
+            .provenance
+            .source_revision;
+
+        let results = std::thread::scope(|scope| {
+            ["First writer", "Second writer"]
+                .map(|title| {
+                    let token = token.clone();
+                    let runtime = &runtime;
+                    scope.spawn(move || {
+                        runtime.update(GraphNodePatch {
+                            id: "shared-note".into(),
+                            expected_revision: Some(token),
+                            title: Some(title.into()),
+                            ..GraphNodePatch::default()
+                        })
+                    })
+                })
+                .map(|handle| handle.join().unwrap())
+        });
+
+        let winners = results
+            .iter()
+            .filter_map(|result| result.as_ref().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(winners.len(), 1, "exactly one racing writer must win");
+        assert!(
+            results
+                .iter()
+                .any(|result| matches!(result, Err(GraphMutationError::Conflict { .. }))),
+            "the losing writer must see a clean conflict: {results:?}"
+        );
+
+        let path = project.path().join("knowledge/shared-note.md");
+        let on_disk = parsed_clean_knowledge(&path);
+        assert_eq!(on_disk.title, winners[0].title);
+        assert_eq!(
+            runtime.get("shared-note").unwrap().unwrap().title,
+            winners[0].title
+        );
+    }
+
+    #[test]
+    fn racing_writers_on_distinct_nodes_both_commit_valid_sources() {
+        let project = knowledge_root(&[
+            ("alpha.md", "---\ntitle: Alpha\ntype: note\n---\n"),
+            ("beta.md", "---\ntitle: Beta\ntype: note\n---\n"),
+        ]);
+        let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            project.path(),
+        )]);
+
+        let results = std::thread::scope(|scope| {
+            ["alpha", "beta"]
+                .map(|id| {
+                    let token = runtime.get(id).unwrap().unwrap().provenance.source_revision;
+                    let runtime = &runtime;
+                    scope.spawn(move || {
+                        runtime.update(GraphNodePatch {
+                            id: id.into(),
+                            expected_revision: Some(token),
+                            title: Some(format!("{id} rewritten")),
+                            ..GraphNodePatch::default()
+                        })
+                    })
+                })
+                .map(|handle| handle.join().unwrap())
+        });
+        for result in results {
+            result.unwrap();
+        }
+
+        for id in ["alpha", "beta"] {
+            let path = project.path().join(format!("knowledge/{id}.md"));
+            assert_eq!(
+                parsed_clean_knowledge(&path).title,
+                format!("{id} rewritten")
+            );
+            assert_eq!(
+                runtime.get(id).unwrap().unwrap().title,
+                format!("{id} rewritten")
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_racing_a_writer_never_harms_the_source_and_reconverges() {
+        let project =
+            knowledge_root(&[("race-note.md", "---\ntitle: Race note\ntype: note\n---\n")]);
+        let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            project.path(),
+        )]);
+        let token = runtime
+            .get("race-note")
+            .unwrap()
+            .unwrap()
+            .provenance
+            .source_revision;
+
+        std::thread::scope(|scope| {
+            let refresher = scope.spawn(|| runtime.refresh(Vec::new()));
+            let writer = scope.spawn(|| {
+                runtime.update(GraphNodePatch {
+                    id: "race-note".into(),
+                    expected_revision: Some(token.clone()),
+                    title: Some("Rewritten during refresh".into()),
+                    ..GraphNodePatch::default()
+                })
+            });
+            refresher.join().unwrap().unwrap();
+            writer.join().unwrap().unwrap();
+        });
+
+        // Whatever the interleaving, the Markdown source holds the writer's
+        // committed content and stays parseable.
+        let path = project.path().join("knowledge/race-note.md");
+        assert_eq!(
+            parsed_clean_knowledge(&path).title,
+            "Rewritten during refresh"
+        );
+
+        // NOTE: captures current behavior. refresh() loads the graph from disk
+        // without holding the store lock, so a write that commits between that
+        // load and the store swap can be missing from the in-memory index until
+        // the next refresh; the source file itself is never harmed. A follow-up
+        // refresh must converge the index to the on-disk state.
+        runtime.refresh(Vec::new()).unwrap();
+        assert_eq!(
+            runtime.get("race-note").unwrap().unwrap().title,
+            "Rewritten during refresh"
+        );
+        assert_eq!(runtime.open_result().unwrap().node_count, 1);
     }
 
     #[test]

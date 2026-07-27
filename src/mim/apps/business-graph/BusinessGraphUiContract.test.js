@@ -89,6 +89,7 @@ describe('Business Graph UI contract', () => {
       'data-card-',
       'data-dispatch-',
       'data-rail-',
+      'data-standing-',
       'data-project-card',
       'data-company-card',
       'data-timeline-node',
@@ -100,7 +101,7 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(23)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(24)
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphMarkdownEditor.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphRelationshipLine.vue')

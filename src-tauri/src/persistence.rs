@@ -526,6 +526,37 @@ mod tests {
             .collect()
     }
 
+    fn quarantine_siblings(path: &Path) -> Vec<PathBuf> {
+        let expected_prefix = format!(
+            "{}.corrupt-",
+            path.file_name()
+                .expect("test path should have a name")
+                .to_string_lossy()
+        );
+        fs::read_dir(parent_directory(path))
+            .expect("test directory should be readable")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .expect("directory entry should have a name")
+                    .to_string_lossy()
+                    .starts_with(&expected_prefix)
+            })
+            .collect()
+    }
+
+    fn expect_quarantined(outcome: QuarantinedLoad<TestState>) -> PathBuf {
+        match outcome {
+            QuarantinedLoad::Quarantined { path, .. } => path,
+            QuarantinedLoad::Missing => panic!("corrupt state was treated as missing"),
+            QuarantinedLoad::Loaded(state) => {
+                panic!("corrupt state unexpectedly parsed: {state:?}")
+            }
+        }
+    }
+
     #[test]
     fn pretty_json_round_trip_creates_parent_directories() {
         let directory = tempdir().unwrap();
@@ -668,5 +699,128 @@ mod tests {
         let path = directory.path().join("missing.json");
 
         assert_eq!(quarantine_corrupt_file(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn truncated_json_is_quarantined_and_a_fresh_save_round_trips() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        write_json_atomic(&path, &state("before-crash", 3, &["a", "b"])).unwrap();
+        let full = fs::read(&path).unwrap();
+        let truncated = full[..full.len() * 6 / 10].to_vec();
+        fs::write(&path, &truncated).unwrap();
+
+        let quarantined_path = expect_quarantined(load_json_optional_quarantining(&path).unwrap());
+
+        assert!(!path.exists());
+        assert_eq!(fs::read(&quarantined_path).unwrap(), truncated);
+
+        let replacement = state("after-recovery", 4, &["c"]);
+        write_json_atomic(&path, &replacement).unwrap();
+        assert_eq!(load_json_optional(&path).unwrap(), Some(replacement));
+        assert_eq!(fs::read(&quarantined_path).unwrap(), truncated);
+    }
+
+    #[test]
+    fn empty_file_is_quarantined_with_the_original_preserved() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        fs::write(&path, b"").unwrap();
+
+        let quarantined_path = expect_quarantined(load_json_optional_quarantining(&path).unwrap());
+
+        assert!(!path.exists());
+        assert!(fs::read(&quarantined_path).unwrap().is_empty());
+
+        let replacement = state("fresh", 1, &[]);
+        write_json_atomic(&path, &replacement).unwrap();
+        assert_eq!(load_json_optional(&path).unwrap(), Some(replacement));
+    }
+
+    #[test]
+    fn wrong_shape_json_is_quarantined_with_bytes_preserved() {
+        let directory = tempdir().unwrap();
+
+        let array = directory.path().join("array.json");
+        fs::write(&array, b"[1, 2, 3]").unwrap();
+        let quarantined = expect_quarantined(load_json_optional_quarantining(&array).unwrap());
+        assert_eq!(fs::read(quarantined).unwrap(), b"[1, 2, 3]");
+        assert!(!array.exists());
+
+        let wrong_types = directory.path().join("types.json");
+        let contents = b"{ \"name\": 7, \"count\": \"seven\", \"entries\": {} }";
+        fs::write(&wrong_types, contents).unwrap();
+        let quarantined =
+            expect_quarantined(load_json_optional_quarantining(&wrong_types).unwrap());
+        assert_eq!(fs::read(quarantined).unwrap(), contents);
+        assert!(!wrong_types.exists());
+    }
+
+    #[test]
+    fn non_utf8_bytes_are_quarantined_byte_for_byte() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let corrupt = b"\xFF\xFE{\"name\": \"x\"";
+        fs::write(&path, corrupt).unwrap();
+
+        let quarantined_path = expect_quarantined(load_json_optional_quarantining(&path).unwrap());
+
+        assert!(!path.exists());
+        assert_eq!(fs::read(&quarantined_path).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn loading_a_directory_at_the_state_path_is_an_error_not_a_quarantine() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("inner.txt"), b"user data").unwrap();
+
+        let result: Result<QuarantinedLoad<TestState>, PersistenceError> =
+            load_json_optional_quarantining(&path);
+
+        assert!(matches!(result, Err(PersistenceError::Io { .. })));
+        assert!(path.is_dir());
+        assert_eq!(fs::read(path.join("inner.txt")).unwrap(), b"user data");
+        assert!(quarantine_siblings(&path).is_empty());
+    }
+
+    #[test]
+    fn stale_temporary_files_from_a_crashed_writer_block_nothing() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let original = state("survivor", 1, &["kept"]);
+        write_json_atomic(&path, &original).unwrap();
+
+        // A writer that crashed after writing its temporary but before the
+        // rename leaves exactly this behind.
+        let stale = directory.path().join(".state.json.4242.1.2.0.tmp");
+        fs::write(&stale, b"{ \"name\": \"half-writ").unwrap();
+
+        assert_eq!(load_json_optional(&path).unwrap(), Some(original));
+
+        let replacement = state("replacement", 2, &[]);
+        write_json_atomic(&path, &replacement).unwrap();
+        assert_eq!(load_json_optional(&path).unwrap(), Some(replacement));
+
+        // NOTE: stale temporaries are ignored and never block a save, but they
+        // are also never garbage-collected; they accumulate until removed by
+        // hand.
+        assert!(stale.exists());
+    }
+
+    #[test]
+    fn repeated_corruption_quarantines_every_generation_without_overwriting() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+
+        fs::write(&path, b"first corruption").unwrap();
+        let first = expect_quarantined(load_json_optional_quarantining(&path).unwrap());
+        fs::write(&path, b"second corruption").unwrap();
+        let second = expect_quarantined(load_json_optional_quarantining(&path).unwrap());
+
+        assert_ne!(first, second);
+        assert_eq!(fs::read(&first).unwrap(), b"first corruption");
+        assert_eq!(fs::read(&second).unwrap(), b"second corruption");
     }
 }

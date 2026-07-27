@@ -728,3 +728,494 @@ Build the map.
         );
     }
 }
+
+/// Property-based round-trip coverage: Markdown files are the canonical
+/// database, so `serialize → parse` must reproduce the node exactly and
+/// re-serializing the parsed node must be byte-identical (canonical form).
+#[cfg(test)]
+mod proptest_roundtrip {
+    use super::*;
+    use crate::business_graph::model::ENTITY_KINDS;
+    use proptest::prelude::*;
+    use proptest::test_runner::TestCaseError;
+
+    /// Characters that stress YAML quoting: indicators, quotes, whitespace,
+    /// and non-ASCII text.
+    const SCALAR_CHARS: &[char] = &[
+        'a', 'b', 'z', 'A', 'Z', '0', '9', ' ', ':', '#', '-', '[', ']', '\'', '"', '|', '.', ',',
+        '_', '/', '&', '?', '*', '@', '`', '\\', '\t', '<', '>', 'ä', 'ß', 'é', '中', 'λ', '🦀',
+        '😀',
+    ];
+
+    /// Hand-picked scalars that look like YAML syntax or non-string types.
+    const NASTY_SCALARS: &[&str] = &[
+        "---",
+        "----",
+        ": #not-a-comment",
+        "- [ ] task",
+        "'single' \"double\"",
+        "|pipe >fold",
+        "  padded  ",
+        "true",
+        "null",
+        "~",
+        "0x1f",
+        "1e3",
+        "-42",
+        ".inf",
+        "{flow}",
+        "[seq]",
+        "a: b",
+        "🦀 emoji ünïcode 中文",
+    ];
+
+    /// Keys the issue serializer maps to dedicated frontmatter fields; custom
+    /// properties must avoid them (as well as the schema field lists).
+    const RESERVED_PROPERTY_KEYS: &[&str] = &[
+        "status",
+        "priority",
+        "dueDate",
+        "legacyProject",
+        "legacyAssignee",
+        "labels",
+        "waitingFor",
+        "snoozeUntil",
+        "remindAt",
+        "deliverables",
+    ];
+
+    fn config() -> ProptestConfig {
+        ProptestConfig {
+            // Small fixed default keeps the suite fast; CI can raise it via
+            // the standard PROPTEST_CASES environment variable.
+            cases: std::env::var("PROPTEST_CASES")
+                .ok()
+                .and_then(|cases| cases.parse().ok())
+                .unwrap_or(64),
+            // Never write failure-seed files into the source tree; a failing
+            // seed is printed and can be replayed by hand.
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        }
+    }
+
+    /// Excluded from generation: multi-line values with a line trimming to
+    /// `---` reproduce the known frontmatter-truncation bug covered by the
+    /// `#[ignore]`d regression test at the bottom of this module.
+    fn no_delimiter_line(value: &str) -> bool {
+        !value.contains('\n') || value.lines().all(|line| line.trim() != "---")
+    }
+
+    fn single_line() -> impl Strategy<Value = String> {
+        prop_oneof![
+            4 => prop::collection::vec(prop::sample::select(SCALAR_CHARS), 0..20)
+                .prop_map(|chars| chars.into_iter().collect()),
+            1 => prop::sample::select(NASTY_SCALARS).prop_map(str::to_string),
+        ]
+    }
+
+    /// Free-form frontmatter string value: possibly multi-line, possibly with
+    /// leading/trailing whitespace or a trailing newline.
+    fn frontmatter_text() -> impl Strategy<Value = String> {
+        (prop::collection::vec(single_line(), 1..3), any::<bool>())
+            .prop_map(|(lines, trailing_newline)| {
+                let mut text = lines.join("\n");
+                if trailing_newline {
+                    text.push('\n');
+                }
+                text
+            })
+            .prop_filter("no `---` lines in frontmatter values", |text| {
+                no_delimiter_line(text)
+            })
+    }
+
+    /// For fields read back through `string_field`, which trims: generated
+    /// values must be trim-stable or they cannot round-trip.
+    fn trimmed_text() -> impl Strategy<Value = String> {
+        frontmatter_text().prop_map(|text| text.trim().to_string())
+    }
+
+    /// `string_field` also drops empty values, so optional fields must be
+    /// non-empty when present.
+    fn nonempty_trimmed_text() -> impl Strategy<Value = String> {
+        trimmed_text().prop_map(|text| if text.is_empty() { "x".into() } else { text })
+    }
+
+    /// Slugs accepted by `is_valid_id` (relation targets and node ids).
+    fn graph_id() -> impl Strategy<Value = String> {
+        "[a-z0-9][a-z0-9-]{0,16}[a-z0-9]"
+    }
+
+    fn timestamp() -> impl Strategy<Value = String> {
+        (2000u32..2100u32, 1u32..13u32, 1u32..29u32, 0u32..86400u32).prop_map(
+            |(year, month, day, second)| {
+                format!(
+                    "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000Z",
+                    second / 3600,
+                    (second / 60) % 60,
+                    second % 60
+                )
+            },
+        )
+    }
+
+    /// Empty timestamps are legal: serialize omits the field, parse defaults
+    /// the model field to "".
+    fn optional_timestamp() -> impl Strategy<Value = String> {
+        prop_oneof![1 => Just(String::new()), 3 => timestamp()]
+    }
+
+    /// Kinds must be `canonical_kind` fixed points (lowercase, no org alias,
+    /// non-empty); unknown kinds only warn and must still round-trip.
+    fn knowledge_kind() -> impl Strategy<Value = String> {
+        prop_oneof![
+            4 => prop::sample::select(ENTITY_KINDS).prop_map(str::to_string),
+            1 => "[a-z][a-z-]{0,10}[a-z]"
+                .prop_filter("kind must be canonical", |kind| canonical_kind(kind) == *kind),
+        ]
+    }
+
+    /// Generated relations are always `legacy: false`: the object form in
+    /// `links` parses as non-legacy, so a `legacy: true` flag cannot survive
+    /// (issue project relations are derived separately in `issue_node`).
+    fn relation() -> impl Strategy<Value = GraphRelation> {
+        (
+            prop_oneof![
+                3 => prop::sample::select(
+                    &["part_of", "depends_on", "references", "related_to", "has_contact", "assigned_to"][..],
+                )
+                .prop_map(str::to_string),
+                1 => "[a-z][a-z_]{0,14}",
+            ],
+            graph_id(),
+        )
+            .prop_map(|(relation, target)| GraphRelation {
+                relation,
+                target,
+                legacy: false,
+            })
+    }
+
+    fn custom_key() -> impl Strategy<Value = String> {
+        "[a-z][a-zA-Z0-9_]{0,11}".prop_filter("custom keys must not collide with schema", |key| {
+            !COMMON_FIELDS.contains(&key.as_str())
+                && !ISSUE_FIELDS.contains(&key.as_str())
+                && !RESERVED_PROPERTY_KEYS.contains(&key.as_str())
+        })
+    }
+
+    /// Business property values are copied verbatim, so anything that
+    /// survives YAML is legal. Floats are excluded (not schema-realistic and
+    /// their text formatting is not round-trip guaranteed).
+    fn custom_value() -> impl Strategy<Value = Value> {
+        prop_oneof![
+            4 => frontmatter_text().prop_map(Value::String),
+            1 => any::<i64>().prop_map(Value::from),
+            1 => any::<bool>().prop_map(Value::Bool),
+            1 => Just(Value::Null),
+            1 => prop::collection::vec(frontmatter_text().prop_map(Value::String), 0..3)
+                .prop_map(Value::Array),
+            1 => (custom_key(), frontmatter_text())
+                .prop_map(|(key, value)| serde_json::json!({ key: value })),
+        ]
+    }
+
+    fn custom_properties() -> impl Strategy<Value = Map<String, Value>> {
+        prop::collection::btree_map(custom_key(), custom_value(), 0..4)
+            .prop_map(|properties| properties.into_iter().collect())
+    }
+
+    /// Bodies live after the closing delimiter and round-trip verbatim, so
+    /// delimiter lines, code fences, and blank lines are all legal here.
+    fn body_text() -> impl Strategy<Value = String> {
+        (
+            prop::collection::vec(
+                prop_oneof![
+                    3 => single_line(),
+                    1 => prop::sample::select(
+                        &["---", "```", "```rust", "- [ ] task", "# heading", "  indented", "| a | b |", ""][..],
+                    )
+                    .prop_map(str::to_string),
+                ],
+                0..5,
+            ),
+            any::<bool>(),
+        )
+            .prop_map(|(lines, trailing_newline)| {
+                let mut body = lines.join("\n");
+                if trailing_newline {
+                    body.push('\n');
+                }
+                body
+            })
+    }
+
+    fn provenance_for(id: &str, source_format: GraphSourceFormat) -> GraphProvenance {
+        let directory = match source_format {
+            GraphSourceFormat::Knowledge => "knowledge",
+            GraphSourceFormat::Issue => "issues",
+        };
+        GraphProvenance {
+            scope_id: "project:work".into(),
+            scope_kind: GraphScopeKind::Project,
+            source_path: format!("/work/{directory}/{id}.md"),
+            // Patched to the serialized content hash inside `assert_roundtrip`.
+            source_revision: String::new(),
+            source_format,
+        }
+    }
+
+    fn knowledge_node() -> impl Strategy<Value = GraphNode> {
+        (
+            graph_id(),
+            knowledge_kind(),
+            trimmed_text(),
+            trimmed_text(),
+            body_text(),
+            prop::collection::vec(nonempty_trimmed_text(), 0..4),
+            prop::collection::vec(relation(), 0..4),
+            custom_properties(),
+            (optional_timestamp(), optional_timestamp()),
+        )
+            .prop_map(
+                |(
+                    id,
+                    kind,
+                    title,
+                    summary,
+                    body,
+                    tags,
+                    relations,
+                    properties,
+                    (created_at, updated_at),
+                )| {
+                    let provenance = provenance_for(&id, GraphSourceFormat::Knowledge);
+                    GraphNode {
+                        id,
+                        kind,
+                        title,
+                        summary,
+                        body,
+                        tags,
+                        relations,
+                        properties,
+                        created_at,
+                        updated_at,
+                        provenance,
+                    }
+                },
+            )
+    }
+
+    /// Projects that are `project-` slugs derive a legacy relation on parse;
+    /// non-slug projects stay plain `legacyProject` strings.
+    fn project_value() -> impl Strategy<Value = String> {
+        prop_oneof![
+            3 => "[a-z0-9][a-z0-9-]{0,12}[a-z0-9]".prop_map(|slug| format!("project-{slug}")),
+            1 => Just("Acme Health GmbH".to_string()),
+        ]
+    }
+
+    /// Label objects round-trip verbatim as long as `name` is a string and
+    /// `color` is present (parse fills a missing color with gray).
+    fn issue_label() -> impl Strategy<Value = (String, String)> {
+        (
+            frontmatter_text(),
+            prop::sample::select(&["gray", "blue", "red", "teal"][..]).prop_map(str::to_string),
+        )
+    }
+
+    fn deliverables_value() -> impl Strategy<Value = Value> {
+        prop::collection::vec(
+            frontmatter_text().prop_map(|path| serde_json::json!({ "path": path })),
+            1..3,
+        )
+        .prop_map(Value::Array)
+    }
+
+    fn issue_node() -> impl Strategy<Value = GraphNode> {
+        (
+            (
+                graph_id(),
+                trimmed_text(),
+                prop::sample::select(ISSUE_STATUSES).prop_map(str::to_string),
+                prop::sample::select(ISSUE_PRIORITIES).prop_map(str::to_string),
+            ),
+            prop::collection::vec(issue_label(), 0..3),
+            prop::option::of(project_value()),
+            (
+                prop::option::of(timestamp()),
+                prop::option::of(nonempty_trimmed_text()),
+                prop::option::of(timestamp()),
+                prop::option::of(timestamp()),
+            ),
+            prop::option::of(nonempty_trimmed_text()),
+            prop::option::of(deliverables_value()),
+            prop::collection::vec(relation(), 0..3),
+            custom_properties(),
+            body_text(),
+            (optional_timestamp(), optional_timestamp()),
+        )
+            .prop_map(
+                |(
+                    (id, title, status, priority),
+                    labels,
+                    project,
+                    (due_date, waiting_for, snooze_until, remind_at),
+                    assignee,
+                    deliverables,
+                    mut relations,
+                    custom,
+                    body,
+                    (created_at, updated_at),
+                )| {
+                    // Mirror `parse_issue`'s property layout exactly.
+                    let mut properties = Map::new();
+                    properties.insert("status".into(), Value::String(status));
+                    properties.insert("priority".into(), Value::String(priority));
+                    if !labels.is_empty() {
+                        properties.insert(
+                            "labels".into(),
+                            Value::Array(
+                                labels
+                                    .iter()
+                                    .map(|(name, color)| {
+                                        serde_json::json!({ "name": name, "color": color })
+                                    })
+                                    .collect(),
+                            ),
+                        );
+                    }
+                    for (key, value) in [
+                        ("dueDate", &due_date),
+                        ("waitingFor", &waiting_for),
+                        ("snoozeUntil", &snooze_until),
+                        ("remindAt", &remind_at),
+                        ("legacyAssignee", &assignee),
+                        ("legacyProject", &project),
+                    ] {
+                        if let Some(value) = value {
+                            properties.insert(key.into(), Value::String(value.clone()));
+                        }
+                    }
+                    if let Some(deliverables) = deliverables {
+                        properties.insert("deliverables".into(), deliverables);
+                    }
+                    properties.extend(custom);
+
+                    // Parsing derives a trailing legacy `part_of` relation
+                    // from a slug-shaped `project:` field, so the generated
+                    // node must already carry it to be a fixed point.
+                    if let Some(project) = &project {
+                        if is_valid_id(project) && project.starts_with("project-") {
+                            relations.push(GraphRelation {
+                                relation: "part_of".into(),
+                                target: project.clone(),
+                                legacy: true,
+                            });
+                        }
+                    }
+
+                    let provenance = provenance_for(&id, GraphSourceFormat::Issue);
+                    GraphNode {
+                        id,
+                        kind: "issue".into(),
+                        title,
+                        // `parse_issue` always resets issue summaries.
+                        summary: String::new(),
+                        body,
+                        // Issue tags are derived from label names on parse.
+                        tags: labels.into_iter().map(|(name, _)| name).collect(),
+                        relations,
+                        properties,
+                        created_at,
+                        updated_at,
+                        provenance,
+                    }
+                },
+            )
+    }
+
+    fn assert_roundtrip(node: &GraphNode) -> Result<(), TestCaseError> {
+        let serialized = serialize_graph_markdown(node)
+            .map_err(|error| TestCaseError::fail(format!("serialize failed: {error}")))?;
+        let serialized_again = serialize_graph_markdown(node)
+            .map_err(|error| TestCaseError::fail(format!("serialize failed: {error}")))?;
+        prop_assert_eq!(
+            &serialized,
+            &serialized_again,
+            "serialize must be deterministic"
+        );
+
+        let parsed = parse_graph_markdown(
+            Path::new(&node.provenance.source_path),
+            &node.provenance.scope_id,
+            node.provenance.scope_kind,
+            node.provenance.source_format,
+            &serialized,
+        )
+        .map_err(|error| TestCaseError::fail(format!("reparse failed: {error}\n{serialized}")))?;
+
+        // (a) Semantic identity, up to the recomputed content hash.
+        let mut expected = node.clone();
+        expected.provenance.source_revision = source_revision(&serialized);
+        prop_assert_eq!(
+            &parsed.node,
+            &expected,
+            "parse(serialize(node)) must preserve the node\n{}",
+            serialized
+        );
+
+        // (b) Canonical form: re-serializing the parsed node is byte-stable.
+        let reserialized = serialize_graph_markdown(&parsed.node)
+            .map_err(|error| TestCaseError::fail(format!("re-serialize failed: {error}")))?;
+        prop_assert_eq!(
+            &serialized,
+            &reserialized,
+            "canonical form must be byte-stable"
+        );
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+
+        #[test]
+        fn knowledge_nodes_roundtrip_through_markdown(node in knowledge_node()) {
+            assert_roundtrip(&node)?;
+        }
+
+        #[test]
+        fn issue_nodes_roundtrip_through_markdown(node in issue_node()) {
+            assert_roundtrip(&node)?;
+        }
+    }
+
+    // KNOWN BUG (found by these property tests; generators exclude it):
+    // serde_yaml writes multi-line strings as literal block scalars, so a
+    // frontmatter value containing a line of exactly `---` is emitted as an
+    // indented `---` content line. `split_frontmatter` matches
+    // `line.trim() == "---"`, mistakes that content line for the closing
+    // delimiter, and truncates the frontmatter — silently corrupting the
+    // node on the next load. Unignore once `split_frontmatter` only accepts
+    // unindented delimiters (or the serializer forces a quoted style).
+    #[test]
+    #[ignore = "split_frontmatter mistakes block-scalar `---` content lines for the closing delimiter"]
+    fn frontmatter_value_with_dash_line_roundtrips() {
+        let node = GraphNode {
+            id: "dash-title".into(),
+            kind: "note".into(),
+            title: "before\n---\nafter".into(),
+            summary: String::new(),
+            body: "Body.\n".into(),
+            tags: Vec::new(),
+            relations: Vec::new(),
+            properties: Map::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            provenance: provenance_for("dash-title", GraphSourceFormat::Knowledge),
+        };
+        assert_roundtrip(&node).unwrap();
+    }
+}
