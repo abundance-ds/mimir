@@ -22,9 +22,10 @@ Mim has one three-pane window:
 
 - **Sidebar** follows one lifecycle rule. **Tools** reopen stable surfaces such
   as Files, Routines, Today, and Business graph. **New activity** starts a fresh
-  CLI, terminal, or process run. **Activities** contains the resulting live and
-  historical runs. Tools and launch sources each support local manual ordering.
-  The Activities `+` menu mirrors New activity; Apps are managed in Settings.
+  CLI, terminal, or process run. **Activities** contains the active working set;
+  closed runs live in Cmd/Ctrl+P History. Tools and launch sources each support
+  local manual ordering. The Activities `+` menu mirrors New activity; Apps are
+  managed in Settings.
 - **Activity** is the universal execution surface. Each run and full-pane tool
   has one stable Activity identity, while singleton Tools stay out of run
   history.

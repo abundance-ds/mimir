@@ -55,6 +55,23 @@ not enforcement.
 normal case for a macOS GUI launch. `local` is therefore usually UTC, not the
 system timezone; write an explicit IANA name for local-time schedules.
 
+### Never spawn a PTY wider than its eventual pane
+
+The shell prints its first prompt before the terminal surface mounts, and zsh
+pads its partial-line mark to the PTY width. Overshoot strands a wrapped `%`
+line at the top of scrollback; undershoot is corrected invisibly by the first
+fit. `src/services/activities.js` remembers the last pane-fitted size for
+spawn/respawn — do not reintroduce a generous hardcoded default.
+
+### The terminal surface's sub-pixel translate is load-bearing
+
+`scheduleFit` in `TerminalActivity.vue` snaps the surface onto the device
+pixel grid; without it the WebGL canvas sits at fractional pane-split offsets
+and every glyph blurs from resampling. The transform must be cleared before
+measuring so the offset never compounds. Likewise `allowProposedApi: true`
+stays as long as the Unicode 11 addon loads — without it xterm throws and the
+surface shows an attach error instead of a terminal.
+
 ## MCP and apps
 
 ### Install renderer listeners before starting MCP

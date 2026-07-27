@@ -12,11 +12,11 @@ requirements; they do not replace runtime verification.
 - New activity and Activities disclose independently in the expanded Sidebar;
   the live rail continues to expose both lists regardless of disclosure state.
 - Tools contains stable singleton surfaces, New activity contains sources that
-  create a fresh run, and Activities contains the resulting run history.
+  create a fresh run, and Activities contains the active working set.
 - The project switcher shows the current folder, recent folders, and an
   explicit native folder-picker action in both Sidebar states.
-- Archived Activity rows are hidden by default. A counted disclosure reveals
-  them without mixing them into the active working set.
+- The Sidebar has no Archived list. Closed durable work is searchable and
+  restorable through Cmd/Ctrl+P History.
 - Activity and Editor can each collapse to a mounted 44px rail.
 - Activity and Editor cannot both remain railed; recovery always leaves a
   usable content surface.
@@ -30,9 +30,15 @@ requirements; they do not replace runtime verification.
   snapshot order on Workbench teardown and before confirmed native quit.
 - Changing Activity leaves Editor tabs, selection, unsaved state, and review
   state intact.
-- Cmd/Ctrl+B toggles the Sidebar and Cmd/Ctrl+P opens workspace quick-open.
-- Quick Open traps and restores focus, ignores stale async results, and
-  contains workbench shortcuts; Escape or Cmd/Ctrl+W closes it first.
+- Cmd/Ctrl+B toggles the Sidebar and Cmd/Ctrl+P opens the compact Go to panel.
+- Empty Go to shows Tools, one expandable New activity row, recent files, and
+  Reopen last closed. `/` scopes files, `@` scopes closed History, and `+`
+  scopes fresh-run sources; live Activities stay on the cycle shortcut.
+- Go to traps and restores focus, ignores stale async results, and contains
+  workbench shortcuts; Escape or Cmd/Ctrl+W closes it first. Its fixed top
+  edge does not move when New activity expands downward.
+- Unmodified Arrow Up/Down and Home/End move Sidebar row focus without
+  activation. Option/Alt+Cmd/Ctrl+Left/Right cycles active Activity rows.
 - Collapsing or restoring any pane transfers focus to visible chrome rather
   than leaving keyboard ownership in hidden content.
 

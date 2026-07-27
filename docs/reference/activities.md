@@ -73,6 +73,36 @@ gap. Native persistence uses a single batching worker that keeps the latest
 save/delete per Activity path; `activity_flush` and shutdown wait for its
 acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
 
+## Terminal surface
+
+`src/mim/activities/TerminalActivity.vue` hosts xterm.js for terminal and
+agent Activities. Its non-defaults are deliberate:
+
+- The WebGL renderer is loaded after `terminal.open()` for GPU-composited
+  output; `customGlyphs` draws box-drawing and powerline characters
+  pixel-perfect. A missing WebGL2 context or a later context loss disposes the
+  addon and keeps xterm's DOM renderer.
+- The Unicode 11 addon supplies correct emoji/wide-character cell widths and
+  requires `allowProposedApi: true`; without the flag the addon throws at load
+  and the surface shows an attach error instead of a terminal.
+- Shift+Enter sends LF (`\n`, Ctrl+J) instead of CR. Claude and Codex document
+  Ctrl+J as insert-newline; shells bind LF to accept-line, identical to Enter,
+  so plain terminals lose nothing.
+- Each fit pass clears and re-applies a sub-pixel `translate()` on the surface
+  so the canvas origin lands on a whole device pixel. Pane splits produce
+  fractional positions, and a bitmap canvas composited at a fractional offset
+  is resampled into uniform blur. DOM-rendered text never shows this, so the
+  regression is invisible until the WebGL renderer is active.
+
+Spawn size comes from `src/services/activities.js`, which remembers the last
+pane-fitted cols/rows and applies them to `spawnActivity`/`respawnActivity`
+(fallback 64×20 before any fit). The first prompt is printed before the
+surface mounts and reports its real size, and zsh pads its partial-line mark
+to the PTY width: spawning wider than the eventual pane strands that padding
+as a wrapped `%` line at the top of scrollback, while spawning narrower is
+corrected invisibly by the first fit resize. Undershoot is safe; overshoot is
+visible.
+
 ## Sidebar operations
 
 - New activity and the Activities header `+` expose every enabled, available
@@ -82,14 +112,17 @@ acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
 - The creation menu uses source icons, separates CLI and App targets with one
   quiet rule, flips inside the viewport, and supports Arrow Up/Down, Home, End,
   Escape, Tab, and focus restoration.
-- Every dynamic and archived row can be renamed from double-click, F2,
-  right-click, or its always-discoverable actions button.
+- Every visible dynamic row can be renamed from double-click, F2, right-click,
+  or its always-discoverable actions button.
 - Source metadata selects recognizable Codex/OpenAI, Claude/Anthropic, Pi,
   Terminal, App, and Routine marks in expanded and rail layouts.
 - A process-backed live Activity can be stopped. A renderer-hosted app is not
   presented as a process merely because its stable status is `ready`.
-- Durable non-running Activities can be archived and restored. Delete
-  permanently removes a non-running record and its persisted scrollback.
+- Durable non-running Activities can be archived. Cmd/Ctrl+P History searches
+  closed task/workspace metadata and lazily searches ANSI-stripped bounded
+  scrollback; selecting a result restores and opens that Activity. Delete
+  permanently removes a restored non-running record and its persisted
+  scrollback.
 - Manual pointer drag, Shift+Alt+Up/Down, and Move Up/Down actions update a
   stable-id order without rewriting record identity or status. New Activities
   appear above an established manual order.

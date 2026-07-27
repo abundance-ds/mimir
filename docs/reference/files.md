@@ -16,6 +16,12 @@ directories, applies native workspace/symlink guards, and classifies each entry
 for opening. Do not derive the tree from the index: ignored or unindexed
 directory structure would disappear and expansion would require a full scan.
 
+Cmd/Ctrl+P keeps the eight most recently modified indexed files in its empty
+Go to view, after Tools and the single expandable New activity row. Typing `/`
+restricts the launcher to file paths and exposes up to 100 keyboard-selectable
+results. Choosing one opens it in the mounted Editor. Closed History uses `@`;
+it does not displace the recent-file route.
+
 ## View composition
 
 - Project flattens `treeChildren` according to `expandedDirectories`. Expanding

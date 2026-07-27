@@ -40,8 +40,8 @@ reviewable diffs, and comments.
 
 The project switcher keeps the current folder and a small most-recent-first
 list at the top of the Sidebar. Active Activities remain the default working
-set; archived rows stay behind an explicit counted disclosure instead of
-accumulating in daily navigation.
+set; closed work leaves the Sidebar and stays searchable/restorable through
+Cmd/Ctrl+P History.
 
 ## Kernel
 

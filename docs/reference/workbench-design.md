@@ -74,8 +74,9 @@ The permanent rail system is the signature:
   lists so collapsing a section cannot strand navigation. Tools and New
   activity each keep a persistent manual order via pointer drag or
   Shift+Alt+Up/Down. App management lives in Settings.
-- Archived Activities are a secondary set: a quiet counted disclosure is
-  present, but archived rows are not rendered until the user asks for them.
+- Closed Activities do not form a Sidebar list. Cmd/Ctrl+P History searches
+  useful task/workspace metadata and bounded transcript text, then restores the
+  selected Activity into the working set.
 - Activity and Editor never both remain railed.
 - Restore controls live in adjacent pane headers so the shell is recoverable.
 
@@ -88,6 +89,19 @@ space returns without ever clipping the current shell.
 Below the single-pane threshold, every restore/expand entry point switches the
 focused content pane and rails its sibling; header controls cannot accidentally
 recreate an overflowing two-pane split.
+
+## Go to
+
+Cmd/Ctrl+P opens a compact, top-anchored launcher rather than a tall centered
+palette. The empty view contains Tools, one expandable New activity row, recent
+files, and Reopen last closed. Expansion grows downward without moving the top
+edge. Current Activities are deliberately absent because
+Option/Alt+Cmd/Ctrl+Left/Right already cycles them.
+
+Typing searches Tools, launch sources, closed History, and indexed files.
+`/` restricts results to files, `@` to History, and `+` to New activity.
+History transcript search is lazy and native; recent files remain visible in
+the empty state because Go to is the fastest keyboard route back to files.
 
 Layout and Activity-order preferences remain debounced during interaction, but
 Workbench teardown explicitly snapshots and flushes them. Native quit confirms

@@ -10,7 +10,7 @@ Mim is one Tauri window with three mounted panes:
 
 | Pane | Owner | Contents |
 |---|---|---|
-| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | stable Tools, fresh-run sources, live and archived Activities, Settings |
+| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | stable Tools, fresh-run sources, active Activities, Settings |
 | Activity | `src/mim/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, and launched app instances |
 | Editor | `src/editor/App.vue` | Markdown tabs, inline AI, ghost completion, diff review, comments |
 
@@ -91,7 +91,10 @@ See [activities.md](activities.md) and [agent-setup.md](agent-setup.md).
   duplicate, Trash, reveal, and default-app wrappers
 - `src/mim/activities/FilesActivity.vue`: Files state composition and operations
 - `src/mim/components/FileTreeRow.vue`: tree/secondary-row rendering
-- `src/mim/components/QuickOpen.vue`: global Cmd/Ctrl+P file jump
+- `src/mim/components/QuickOpen.vue`: compact global Cmd/Ctrl+P Go to for
+  Tools, expandable New activity, recent/files search, and closed History
+- `src/mim/quickOpenResults.js`: typed launcher result ordering and `/`, `@`,
+  and `+` query scopes
 - `src/services/fileSystem.js`: editor text and binary I/O wrappers
 - `src/stores/files.js`: typed tabs, clean-preview reuse, dirty state, recents
 
