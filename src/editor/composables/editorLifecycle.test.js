@@ -179,7 +179,7 @@ describe('Editor lifecycle controllers', () => {
     expect(persistence.dispose).toHaveBeenCalledTimes(1)
   })
 
-  it('owns proposal event reconciliation and clears native subscriptions on dispose', () => {
+  it('owns proposal event reconciliation and disposes its watchers', () => {
     const file = {
       path: '/w/a.md',
       content: 'hello world',
@@ -233,10 +233,6 @@ describe('Editor lifecycle controllers', () => {
       modified: 'hello Mim',
     }))
 
-    lifecycle.onFileUpdated({ payload: { path: '/w/a.md', content: 'saved' } })
-    expect(file.content).toBe('saved')
-    expect(file.dirty).toBe(false)
-    expect(diffStore.deactivate).toHaveBeenCalled()
     lifecycle.dispose()
   })
 })

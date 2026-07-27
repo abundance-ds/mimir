@@ -243,6 +243,7 @@ import { useEditorSessionLifecycle } from './composables/useEditorSessionLifecyc
 import { useEditorCommandApi } from './composables/useEditorCommandApi.js'
 import { useFileOpen } from './composables/useFileOpen.js'
 import { useContentSync } from './composables/useContentSync.js'
+import { useExternalFileSync } from './composables/useExternalFileSync.js'
 import { useCommentMutations } from './composables/useCommentMutations.js'
 import { useDiffReview } from './composables/useDiffReview.js'
 import { useTabManagement } from './composables/useTabManagement.js'
@@ -502,6 +503,16 @@ const contentSync = useContentSync({
   documentBridge,
 })
 const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot } = contentSync
+
+const externalFileSync = useExternalFileSync({
+  fileManager,
+  readFile,
+  onReloaded: (file) => {
+    if (fileManager.currentFile !== file) return
+    if (diffStore.active) diffStore.deactivate()
+    syncOpenFileSnapshot()
+  },
+})
 
 const editorSession = useEditorSessionLifecycle({
   fileManager,
@@ -1235,6 +1246,8 @@ onMounted(async () => {
   await nativeFileOpen.setup()
   if (editorDisposed) return
   syncOpenFileSnapshot()
+  await externalFileSync.start()
+  if (editorDisposed) return
   await nativeLifecycle.start()
   if (editorDisposed) return
 
@@ -1263,6 +1276,7 @@ onUnmounted(() => {
   autoSave.clear()
   clearTimeout(documentStatsTimer)
   contentSync.dispose()
+  externalFileSync.dispose()
   nativeLifecycle.dispose()
   proposalLifecycle.dispose()
   saveFeedback.dispose()

@@ -99,7 +99,6 @@ export function useEditorProposalLifecycle({
     try {
       const { listen } = await import('@tauri-apps/api/event')
       const registrations = await Promise.all([
-        listen('mim://file-updated', onFileUpdated),
         listen('mim://proposals-changed', onProposalsChanged),
       ])
       if (disposed) {
@@ -108,17 +107,6 @@ export function useEditorProposalLifecycle({
         unlisteners.push(...registrations)
       }
     } catch {}
-  }
-
-  function onFileUpdated(event) {
-    const { path, content } = event.payload || {}
-    if (!path) return
-    const file = fileManager.openFiles.find(candidate => candidate.path === path)
-    if (!file) return
-    file.content = content
-    file.dirty = false
-    fileManager.clearFileReviews(file)
-    if (fileManager.currentFile === file && diffStore.active) diffStore.deactivate()
   }
 
   function onProposalsChanged(event) {
@@ -190,7 +178,6 @@ export function useEditorProposalLifecycle({
     bridge,
     checkProposalsForFile,
     dispose,
-    onFileUpdated,
     onProposalsChanged,
     scheduleRegistration,
   }

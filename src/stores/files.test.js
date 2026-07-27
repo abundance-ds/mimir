@@ -168,6 +168,28 @@ describe('files store', () => {
     expect(store.openFiles[0].content).toBe('')
   })
 
+  it('replaces clean disk-backed content but never overwrites a dirty buffer', async () => {
+    const store = useFileStore()
+    await store.openFile('/tmp/readme.md', 'before')
+    const file = store.currentFile
+    store.setFileReviews(file, [{ proposalId: 'review-1' }])
+
+    expect(store.replaceCleanContent(file, 'external edit')).toBe(true)
+    expect(file).toMatchObject({
+      content: 'external edit',
+      dirty: false,
+      saveState: 'idle',
+      reviews: null,
+    })
+
+    store.updateContent('my unsaved edit')
+    expect(store.replaceCleanContent(file, 'second external edit')).toBe(false)
+    expect(file).toMatchObject({
+      content: 'my unsaved edit',
+      dirty: true,
+    })
+  })
+
   // 11. setActiveTab(idx): clamps to valid range
   it('setActiveTab clamps to valid range', () => {
     const store = useFileStore()

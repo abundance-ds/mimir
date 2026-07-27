@@ -331,6 +331,28 @@ export const useFileStore = defineStore('files', () => {
     markFileDirty(file)
   }
 
+  // Replace a disk-backed snapshot only while the Editor still considers it
+  // clean. Native watcher reads are asynchronous, so this guard belongs in
+  // the store at the exact mutation boundary rather than only at read start.
+  function replaceCleanContent(file, content) {
+    if (
+      !file
+      || !openFiles.value.includes(file)
+      || !file.path
+      || file.kind !== 'text'
+      || file.dirty
+    ) {
+      return false
+    }
+    const nextContent = String(content)
+    if (file.content === nextContent) return false
+    file.content = nextContent
+    file.saveState = SAVE_STATE.idle
+    file.saveError = null
+    file.reviews = null
+    return true
+  }
+
   // Switch tab
   function setActiveTab(idx) {
     if (idx >= 0 && idx < openFiles.value.length) {
@@ -525,6 +547,7 @@ export const useFileStore = defineStore('files', () => {
     collapseLegacyDuplicateDrafts,
     updateContent,
     markDirty,
+    replaceCleanContent,
     setActiveTab,
     closeFile,
     addRecentFile,
