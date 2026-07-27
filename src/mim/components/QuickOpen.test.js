@@ -4,6 +4,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import QuickOpen from './QuickOpen.vue'
 
+const activityApi = vi.hoisted(() => ({
+  searchHistory: vi.fn(),
+}))
+
+vi.mock('../../services/activities.js', () => ({
+  searchActivityHistory: activityApi.searchHistory,
+}))
+
 vi.mock('../../services/fileIndex.js', () => ({
   openWorkspaceIndex: vi.fn(),
   listIndexedFiles: vi.fn(),
@@ -14,12 +22,33 @@ vi.mock('../../services/fileIndex.js', () => ({
   searchIndexedContent: vi.fn(),
 }))
 
+const tools = [
+  { id: 'core:files', title: 'Files', icon: 'files' },
+  { id: 'app:scratch', title: 'Today', icon: 'today' },
+]
+const launchers = [
+  { id: 'preset:codex', title: 'Codex', icon: 'codex' },
+]
+const history = [{
+  id: 'agent:closed',
+  kind: 'agent',
+  title: 'Codex',
+  status: 'done',
+  workspacePath: '/w',
+  createdAt: '2026-07-25T10:00:00Z',
+  updatedAt: '2026-07-25T11:00:00Z',
+  archivedAt: '2026-07-25T12:00:00Z',
+  source: { presetId: 'codex' },
+}]
+
 describe('QuickOpen', () => {
   let pinia
 
   beforeEach(() => {
     pinia = createPinia()
     setActivePinia(pinia)
+    activityApi.searchHistory.mockReset()
+    activityApi.searchHistory.mockResolvedValue([])
     const files = useWorkspaceFilesStore()
     files.workspacePath = '/w'
     files.files = [
@@ -30,22 +59,55 @@ describe('QuickOpen', () => {
 
   function render(open = true, options = {}) {
     return mount(QuickOpen, {
-      props: { open },
       ...options,
+      props: {
+        open,
+        tools,
+        newActivity: launchers,
+        history,
+        ...(options.props || {}),
+      },
       global: {
         plugins: [pinia],
-        stubs: { Teleport: true, Transition: false },
+        stubs: {
+          Teleport: true,
+          Transition: false,
+          IconProviderOpenAI: true,
+          IconProviderAnthropic: true,
+        },
         ...(options.global || {}),
       },
     })
   }
 
-  it('uses the shared recent-first index', () => {
+  it('shows a compact new-activity row, recent files, and history without live activities', () => {
     const wrapper = render()
-    expect(wrapper.findAll('[data-quick-open-row]').map((row) => row.text())).toEqual([
+    expect(wrapper.findAll('[data-quick-open-type]').map((row) => row.attributes('data-quick-open-type'))).toEqual([
+      'tool',
+      'tool',
+      'new-activity-toggle',
+      'file',
+      'file',
+      'history',
+    ])
+    expect(wrapper.findAll('[data-quick-open-type="file"]').map((row) => row.text())).toEqual([
       expect.stringContaining('a.md'),
       expect.stringContaining('b.rs'),
     ])
+    expect(wrapper.text()).toContain('Reopen last closed activity')
+    expect(wrapper.get('[data-quick-open-panel]').classes())
+      .toContain('max-h-[min(420px,calc(100vh-32px))]')
+  })
+
+  it('expands new activity choices downward without closing the launcher', async () => {
+    const wrapper = render()
+
+    await wrapper.get('[data-quick-open-type="new-activity-toggle"]').trigger('click')
+
+    expect(wrapper.find('[data-quick-open-type="new-activity"]').text()).toContain('Codex')
+    expect(wrapper.get('[data-quick-open-type="new-activity-toggle"]').text()).toContain('Collapse')
+    expect(wrapper.emitted('activate')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
   })
 
   it('exposes one keyboard-contained dialog with combobox and listbox semantics', async () => {
@@ -76,15 +138,33 @@ describe('QuickOpen', () => {
     previous.remove()
   })
 
-  it('moves selection and opens without replacing Activity', async () => {
+  it('uses scopes and emits the selected typed action', async () => {
     const wrapper = render()
     const input = wrapper.get('[data-quick-open-input]')
 
-    await input.trigger('keydown', { key: 'ArrowDown' })
+    await input.setValue('/ a')
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('Files')
+    expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
+      .toEqual(['file'])
     await input.trigger('keydown', { key: 'Enter' })
 
-    expect(wrapper.emitted('openFile')[0]).toEqual(['/w/b.rs'])
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({
+      type: 'file',
+      path: '/w/a.md',
+      verb: 'Open in Editor',
+    })
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('uses @ for closed history rather than current activities', async () => {
+    const wrapper = render()
+    const input = wrapper.get('[data-quick-open-input]')
+
+    await input.setValue('@')
+
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('History')
+    expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
+      .toEqual(['history'])
   })
 
   it('closes on Escape or backdrop press', async () => {
@@ -94,7 +174,7 @@ describe('QuickOpen', () => {
     expect(wrapper.emitted('close')).toHaveLength(2)
   })
 
-  it('cancels a delayed query when it closes', async () => {
+  it('cancels delayed file and history queries when it closes', async () => {
     vi.useFakeTimers()
     try {
       const filter = vi.mocked(
@@ -102,17 +182,18 @@ describe('QuickOpen', () => {
       )
       filter.mockClear()
       const wrapper = render()
-      await wrapper.get('[data-quick-open-input]').setValue('src')
+      await wrapper.get('[data-quick-open-input]').setValue('sidebar')
       await wrapper.setProps({ open: false })
       await vi.advanceTimersByTimeAsync(400)
 
       expect(filter).not.toHaveBeenCalled()
+      expect(activityApi.searchHistory).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('debounces typing at roughly 130ms before querying the index', async () => {
+  it('debounces file and lazy history search at roughly 130ms', async () => {
     vi.useFakeTimers()
     try {
       const filter = vi.mocked(
@@ -120,19 +201,28 @@ describe('QuickOpen', () => {
       )
       filter.mockClear()
       filter.mockResolvedValue([])
+      activityApi.searchHistory.mockResolvedValue([{
+        activityId: 'agent:closed',
+        snippet: 'changed sidebar ordering',
+      }])
       const wrapper = render()
-      await wrapper.get('[data-quick-open-input]').setValue('src')
+      await wrapper.get('[data-quick-open-input]').setValue('sidebar')
 
       await vi.advanceTimersByTimeAsync(100)
       expect(filter).not.toHaveBeenCalled()
+      expect(activityApi.searchHistory).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(40)
-      expect(filter).toHaveBeenCalledWith('src', 250)
+      await flushPromises()
+      expect(filter).toHaveBeenCalledWith('sidebar', 250)
+      expect(activityApi.searchHistory).toHaveBeenCalledWith('sidebar', 30)
+      expect(wrapper.get('[data-quick-open-type="history"] [data-quick-open-snippet]').text())
+        .toContain('sidebar ordering')
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('keeps keyboard selection inside the rendered 100-result bound', async () => {
+  it('keeps file-scope keyboard selection inside the rendered 100-result bound', async () => {
     const files = useWorkspaceFilesStore()
     files.files = Array.from({ length: 101 }, (_, index) => ({
       path: `/w/${index}.md`,
@@ -141,12 +231,16 @@ describe('QuickOpen', () => {
     }))
     const wrapper = render()
     const input = wrapper.get('[data-quick-open-input]')
+    await input.setValue('/')
 
+    expect(wrapper.findAll('[data-quick-open-type="file"]')).toHaveLength(100)
     await input.trigger('keydown', { key: 'ArrowUp' })
-    expect(files.selectionIndex).toBe(99)
     await input.trigger('keydown', { key: 'Enter' })
 
-    expect(wrapper.emitted('openFile')[0]).toEqual(['/w/99.md'])
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({
+      type: 'file',
+      path: '/w/99.md',
+    })
   })
 
   it('does not render while closed', () => {

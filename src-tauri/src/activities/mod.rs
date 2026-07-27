@@ -13,7 +13,8 @@ pub use status::{
     AgentStatusTrackerConfig,
 };
 pub use supervisor::{
-    ActivityAttachment, ActivityEvent, ActivityEventSink, ActivitySnapshot, ActivitySubscriptionId,
-    ActivitySupervisor, ActivitySupervisorConfig, SpawnActivityRequest, SupervisorError,
-    DEFAULT_DURABLE_SCROLLBACK_BYTES, DEFAULT_TERMINAL_SCROLLBACK_BYTES,
+    ActivityAttachment, ActivityEvent, ActivityEventSink, ActivityHistorySearchHit,
+    ActivitySnapshot, ActivitySubscriptionId, ActivitySupervisor, ActivitySupervisorConfig,
+    SpawnActivityRequest, SupervisorError, DEFAULT_DURABLE_SCROLLBACK_BYTES,
+    DEFAULT_TERMINAL_SCROLLBACK_BYTES,
 };

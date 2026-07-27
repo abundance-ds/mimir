@@ -17,7 +17,6 @@
         :tools="toolRows"
         :new-activity="newActivityRows"
         :activities="sidebarActivities"
-        :archived-activities="archivedSidebarActivities"
         :active-activity-id="workbench.activeActivityId || ''"
         :activity-sort="activityNavigator.mode"
         @launch="onLaunch"
@@ -28,7 +27,6 @@
         @rename-activity="renameActivity"
         @stop-activity="stopActivity"
         @archive-activity="archiveActivity"
-        @restore-activity="restoreActivity"
         @clear-activity="clearActivity"
         @reorder-tools="reorderTools"
         @reorder-launchers="reorderLaunchers"
@@ -111,8 +109,11 @@
 
   <QuickOpen
     :open="quickOpen"
+    :tools="toolRows"
+    :new-activity="newActivityRows"
+    :history="historyActivities"
     @close="quickOpen = false"
-    @open-file="openFileInEditor"
+    @activate="activateQuickOpenResult"
   />
 </template>
 
@@ -291,7 +292,7 @@ const sidebarActivities = computed(() => (
     },
   )
 ))
-const archivedSidebarActivities = computed(() => (
+const historyActivities = computed(() => (
   activities.archivedActivities.filter(activity => !isToolActivity(activity))
 ))
 const activeActivity = computed(() => (
@@ -329,7 +330,7 @@ const toolRows = computed(() => orderSidebarRows([
     activityId: 'files',
     title: 'Files',
     icon: 'files',
-    shortcut: shortcut('P'),
+    shortcut: '',
     available: true,
   },
   {
@@ -613,6 +614,21 @@ function openSettings() {
   editorRef.value?.mimOpenSettings?.('appearance')
 }
 
+function activateQuickOpenResult(result) {
+  if (!result?.type) return
+  if (result.type === 'file') {
+    void openFileInEditor(result.path)
+    return
+  }
+  if (result.type === 'tool' || result.type === 'new-activity') {
+    void onLaunch(result.targetId)
+    return
+  }
+  if (result.type === 'history') {
+    void restoreActivity(result.activityId)
+  }
+}
+
 async function openFileInEditor(request) {
   const path = typeof request === 'string' ? request : request?.path
   if (!path) return
@@ -820,11 +836,6 @@ async function pasteToActiveTerminal(text) {
   const activity = activities.byId(workbench.activeActivityId)
   if (!activity || activity.host?.type !== 'pty') return false
   return Boolean(await activitySurfaces.get(activity.id)?.pasteText?.(text))
-}
-
-function shortcut(key) {
-  const platform = navigator.userAgentData?.platform || navigator.platform || ''
-  return /mac/i.test(platform) ? `⌘${key}` : `Ctrl+${key}`
 }
 
 function basename(path) {

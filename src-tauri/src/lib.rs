@@ -933,6 +933,7 @@ pub fn run() {
             spell_suggest,
             shell_exec::shell_exec,
             activity_commands::activity_list,
+            activity_commands::activity_search_history,
             activity_commands::activity_spawn,
             activity_commands::activity_respawn,
             activity_commands::activity_snapshot,

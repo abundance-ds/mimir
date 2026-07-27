@@ -53,7 +53,8 @@ const editorShortcuts = [
 ]
 
 const workbenchShortcuts = [
-  { action: 'Quick open', keys: ['⌘', 'P'] },
+  { action: 'Go to', keys: ['⌘', 'P'] },
+  { action: 'Cycle activities', keys: ['⌥', '⌘', '←', '/', '⌥', '⌘', '→'] },
   { action: 'Toggle sidebar', keys: ['⌘', 'B'] },
   { action: 'Zoom in / out', keys: ['⌘', '+', '/', '⌘', '−'] },
   { action: 'Reset zoom', keys: ['⌘', '0'] },

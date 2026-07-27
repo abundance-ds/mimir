@@ -66,6 +66,7 @@ vi.mock('../services/activities.js', () => ({
   resolveLauncher: vi.fn(),
   renameActivity: vi.fn(),
   respawnActivity: vi.fn(),
+  searchActivityHistory: vi.fn(),
   setActivityArchived: vi.fn(),
   spawnActivity: vi.fn(),
   stopActivity: vi.fn(),
@@ -246,6 +247,7 @@ describe('WorkbenchApp', () => {
       live: true,
     }))
     activityApi.stopActivity.mockResolvedValue()
+    activityApi.searchActivityHistory.mockResolvedValue([])
     activityApi.renameActivity.mockImplementation(async (id, title) => ({
       ...useActivitiesStore().byId(id),
       title,
@@ -928,6 +930,39 @@ describe('WorkbenchApp', () => {
     }))
     await nextTick()
     expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
+  })
+
+  it('keeps closed work out of the Sidebar and restores it through @ History', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:closed', 'Review sidebar order', '2026-07-25T12:00:00Z'),
+      status: 'done',
+      archivedAt: '2026-07-25T13:00:00Z',
+    })
+    await nextTick()
+
+    expect(wrapper.find('[data-sidebar-row="activity:agent:closed"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Archived')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+    const input = wrapper.get('[data-quick-open-input]')
+    await input.setValue('@')
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('History')
+    expect(wrapper.get('[data-quick-open-type="history"]').text()).toContain('Review sidebar order')
+
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(activityApi.setActivityArchived).toHaveBeenCalledWith('agent:closed', false)
+    expect(store.byId('agent:closed').archivedAt).toBeNull()
+    expect(useWorkbenchStore().activeActivityId).toBe('agent:closed')
+    expect(wrapper.get('[data-sidebar-row="activity:agent:closed"]').exists()).toBe(true)
   })
 
   it('steps interface zoom with modifier chords and resets with 0, even behind a modal', async () => {

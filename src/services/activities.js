@@ -7,6 +7,10 @@ export function listActivities() {
   return invoke('activity_list')
 }
 
+export function searchActivityHistory(query, limit = 30) {
+  return invoke('activity_search_history', { query, limit })
+}
+
 export function resolveLauncher(preset, workspacePath) {
   return invoke('launcher_resolve', {
     preset,

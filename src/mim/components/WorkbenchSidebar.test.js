@@ -4,7 +4,7 @@ import { nextTick } from 'vue'
 import WorkbenchSidebar from './WorkbenchSidebar.vue'
 
 const tools = [
-  { id: 'files', activityId: 'files', title: 'Files', icon: 'files', shortcut: '⌘P' },
+  { id: 'files', activityId: 'files', title: 'Files', icon: 'files', shortcut: '' },
   { id: 'app:scratch', activityId: 'app:scratch', title: 'Today', icon: 'today' },
 ]
 
@@ -78,9 +78,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-row="launcher:codex"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
     expect(wrapper.get('[data-sidebar-row="launcher:codex"] svg').attributes('viewBox')).toBe('0 0 256 260')
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"] svg').attributes('viewBox')).toBe('0 0 256 260')
-    const fileShortcut = wrapper.get('[data-sidebar-row="tool:files"] [data-sidebar-meta]')
-    expect(fileShortcut.text()).toBe('⌘P')
-    expect(fileShortcut.element.parentElement.classList.contains('pr-3')).toBe(true)
+    expect(wrapper.find('[data-sidebar-row="tool:files"] [data-sidebar-meta]').exists()).toBe(false)
   })
 
   it('keeps the same rows and exposes source identity in rail mode', async () => {
@@ -125,27 +123,12 @@ describe('WorkbenchSidebar', () => {
 
   it('discloses New activity and Activities independently while Tools remain stable', async () => {
     const wrapper = render()
-    await wrapper.setProps({
-      archivedActivities: [{
-        ...activities[0],
-        id: 'agent:archived',
-        title: 'Archived review',
-        status: 'done',
-        archivedAt: '2026-07-25T11:00:00Z',
-      }],
-    })
 
     const newActivityToggle = wrapper.get('[data-sidebar-new-activity-toggle]')
     const activitiesToggle = wrapper.get('[data-sidebar-activities-toggle]')
     expect(newActivityToggle.attributes('aria-expanded')).toBe('true')
     expect(activitiesToggle.attributes('aria-expanded')).toBe('true')
-    expect(wrapper.get('[data-sidebar-archived-toggle]').attributes('aria-expanded')).toBe('false')
-    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
-
-    await wrapper.get('[data-sidebar-archived-toggle]').trigger('click')
-    expect(wrapper.get('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(true)
-    await wrapper.get('[data-sidebar-archived-toggle]').trigger('click')
-    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Archived')
 
     await newActivityToggle.trigger('click')
     expect(wrapper.find('[data-sidebar-row="launcher:codex"]').exists()).toBe(false)
@@ -159,13 +142,10 @@ describe('WorkbenchSidebar', () => {
 
     await activitiesToggle.trigger('click')
     expect(wrapper.find('[data-sidebar-row="activity:agent:one"]').exists()).toBe(false)
-    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
 
     await wrapper.setProps({ collapsed: true })
     expect(wrapper.get('[data-sidebar-row="launcher:codex"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-archived-toggle]').exists()).toBe(true)
-    expect(wrapper.find('[data-sidebar-row="archived:agent:archived"]').exists()).toBe(false)
   })
 
   it('uses status and unread overlays without duplicating rows', () => {
@@ -186,6 +166,27 @@ describe('WorkbenchSidebar', () => {
     expect(terminal.find('button').attributes('title')).toBe('Terminal — shell unavailable')
     expect(terminal.attributes('title')).toBe('Terminal — shell unavailable')
     expect(terminal.text()).toContain('missing')
+  })
+
+  it('moves contextual row focus with arrows and Home/End without activating', async () => {
+    const wrapper = render(false, true)
+    const files = wrapper.get('[data-sidebar-row="tool:files"]').find('button')
+    files.element.focus()
+
+    await files.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(
+      wrapper.get('[data-sidebar-row="tool:app:scratch"]').find('button').element,
+    )
+    await wrapper.get('[data-sidebar-row="tool:app:scratch"]').find('button')
+      .trigger('keydown', { key: 'End' })
+    expect(document.activeElement).toBe(
+      wrapper.get('[data-sidebar-row="activity:terminal:two"]').find('button').element,
+    )
+    await wrapper.get('[data-sidebar-row="activity:terminal:two"]').find('button')
+      .trigger('keydown', { key: 'Home' })
+    expect(document.activeElement).toBe(files.element)
+    expect(wrapper.emitted('launch')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('makes rename discoverable by double-click, F2, and the actions menu', async () => {

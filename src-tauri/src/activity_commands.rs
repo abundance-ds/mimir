@@ -1,6 +1,6 @@
 use crate::activities::{
-    ActivityEvent, ActivityEventSink, ActivityRecord, ActivitySnapshot, ActivitySupervisor,
-    SpawnActivityRequest,
+    ActivityEvent, ActivityEventSink, ActivityHistorySearchHit, ActivityRecord, ActivitySnapshot,
+    ActivitySupervisor, SpawnActivityRequest,
 };
 use std::sync::Arc;
 use tauri::Emitter;
@@ -26,6 +26,20 @@ impl ActivityEventSink for TauriActivitySink {
 #[tauri::command]
 pub fn activity_list(supervisor: tauri::State<'_, ActivitySupervisor>) -> Vec<ActivityRecord> {
     supervisor.list()
+}
+
+#[tauri::command]
+pub async fn activity_search_history(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<ActivityHistorySearchHit>, String> {
+    let supervisor = supervisor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        supervisor.search_history(&query, limit.unwrap_or(30).min(100))
+    })
+    .await
+    .map_err(|error| format!("Activity history search task failed: {error}"))
 }
 
 #[tauri::command]

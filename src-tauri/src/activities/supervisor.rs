@@ -113,6 +113,13 @@ pub struct ActivitySnapshot {
     pub process_id: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityHistorySearchHit {
+    pub activity_id: String,
+    pub snippet: String,
+}
+
 pub type ActivitySubscriptionId = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -638,6 +645,45 @@ impl ActivitySupervisor {
                 .then_with(|| left.id.cmp(&right.id))
         });
         records
+    }
+
+    pub fn search_history(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Vec<ActivityHistorySearchHit> {
+        let needle = query.trim().to_ascii_lowercase();
+        if needle.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+
+        let activities: Vec<_> = lock(&self.inner.activities).values().cloned().collect();
+        let mut hits = activities
+            .into_iter()
+            .filter_map(|activity| {
+                let record = lock(&activity.record).clone();
+                record.archived_at.as_ref()?;
+                let bytes = lock(&activity.scrollback)
+                    .persisted_chunks()
+                    .into_iter()
+                    .flat_map(|chunk| chunk.bytes)
+                    .collect::<Vec<_>>();
+                let text = terminal_search_text(&bytes);
+                let index = text.to_ascii_lowercase().find(&needle)?;
+                Some((
+                    record.archived_at.clone().unwrap_or(record.updated_at),
+                    ActivityHistorySearchHit {
+                        activity_id: record.id,
+                        snippet: search_snippet(&text, index, needle.len()),
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        hits.sort_by(|left, right| right.0.cmp(&left.0));
+        hits.into_iter()
+            .take(limit.min(100))
+            .map(|(_, hit)| hit)
+            .collect()
     }
 
     pub fn snapshot(
@@ -1638,6 +1684,82 @@ fn is_pty_eof(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::UnexpectedEof || (cfg!(unix) && error.raw_os_error() == Some(5))
 }
 
+fn terminal_search_text(bytes: &[u8]) -> String {
+    #[derive(Clone, Copy)]
+    enum State {
+        Text,
+        Escape,
+        Csi,
+        Osc,
+        OscEscape,
+    }
+
+    let mut state = State::Text;
+    let mut plain = Vec::with_capacity(bytes.len());
+    for &byte in bytes {
+        state = match state {
+            State::Text => match byte {
+                0x1b => State::Escape,
+                b'\n' | b'\r' | b'\t' => {
+                    plain.push(b' ');
+                    State::Text
+                }
+                0x20..=0x7e | 0x80..=0xff => {
+                    plain.push(byte);
+                    State::Text
+                }
+                _ => State::Text,
+            },
+            State::Escape => match byte {
+                b'[' => State::Csi,
+                b']' => State::Osc,
+                _ => State::Text,
+            },
+            State::Csi => {
+                if (0x40..=0x7e).contains(&byte) {
+                    State::Text
+                } else {
+                    State::Csi
+                }
+            }
+            State::Osc => match byte {
+                0x07 => State::Text,
+                0x1b => State::OscEscape,
+                _ => State::Osc,
+            },
+            State::OscEscape => {
+                if byte == b'\\' {
+                    State::Text
+                } else {
+                    State::Osc
+                }
+            }
+        };
+    }
+
+    String::from_utf8_lossy(&plain)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn search_snippet(text: &str, index: usize, needle_len: usize) -> String {
+    let mut start = index.saturating_sub(56);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = index
+        .saturating_add(needle_len)
+        .saturating_add(96)
+        .min(text.len());
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let prefix = if start > 0 { "…" } else { "" };
+    let suffix = if end < text.len() { "…" } else { "" };
+    format!("{prefix}{}{suffix}", text[start..end].trim())
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -1731,6 +1853,37 @@ mod tests {
             &last,
             OUTPUT_PERSIST_INTERVAL_MS * 2
         ));
+    }
+
+    #[test]
+    fn archived_history_search_returns_plain_bounded_context() {
+        let temp = tempfile::tempdir().unwrap();
+        let supervisor = create_supervisor(&temp);
+        supervisor
+            .spawn(SpawnActivityRequest::new(
+                durable_record(
+                    "history-search",
+                    "/bin/sh",
+                    vec![
+                        "-c".into(),
+                        "printf '\\033[31mreviewed sidebar ordering\\033[0m\\n'".into(),
+                    ],
+                ),
+                80,
+                24,
+            ))
+            .unwrap();
+        wait_for_end(&supervisor, "history-search");
+        supervisor
+            .set_archived("history-search", true)
+            .unwrap();
+
+        let hits = supervisor.search_history("sidebar ordering", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].activity_id, "history-search");
+        assert!(hits[0].snippet.contains("reviewed sidebar ordering"));
+        assert!(!hits[0].snippet.contains("\u{1b}["));
+        assert!(supervisor.search_history("not present", 10).is_empty());
     }
 
     #[test]

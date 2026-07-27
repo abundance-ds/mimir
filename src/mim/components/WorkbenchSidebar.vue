@@ -386,116 +386,6 @@
         Runs stay here while you work.
       </div>
 
-      <template v-if="archivedActivities.length">
-        <div class="mx-3 my-2 h-px bg-rule" />
-        <button
-          type="button"
-          data-sidebar-archived-toggle
-          :aria-expanded="archivedOpen"
-          :title="archivedOpen ? 'Hide archived Activities' : `Show ${archivedActivities.length} archived Activities`"
-          class="group relative flex h-8 w-full items-center text-left text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-          @click="archivedOpen = !archivedOpen"
-          @keydown.right.prevent="archivedOpen = true"
-          @keydown.left.prevent="archivedOpen = false"
-        >
-          <span class="ml-3 grid size-7 shrink-0 place-items-center">
-            <IconArchive :size="14" :stroke-width="1.7" />
-          </span>
-          <template v-if="!collapsed">
-            <span class="ml-2 min-w-0 flex-1 font-sans text-[10px]">Archived</span>
-            <span class="mr-2 font-mono text-[9px] tabular-nums text-ink-4">{{ archivedActivities.length }}</span>
-            <IconChevronDown
-              v-if="archivedOpen"
-              :size="12"
-              :stroke-width="2"
-              class="mr-3 shrink-0"
-            />
-            <IconChevronRight
-              v-else
-              :size="12"
-              :stroke-width="2"
-              class="mr-3 shrink-0"
-            />
-          </template>
-          <span
-            v-else
-            class="absolute ml-7 mt-[-18px] min-w-3 rounded-full bg-chrome-high px-0.5 text-center font-mono text-[7px] leading-3 text-ink-2"
-          >{{ archivedActivities.length }}</span>
-        </button>
-        <SidebarRow
-          v-for="activity in (archivedOpen ? archivedActivities : [])"
-          :key="`archived:${activity.id}`"
-          :data-sidebar-row="`archived:${activity.id}`"
-          :title="`${activity.title} — archived`"
-          :label="activity.title"
-          meta="archived"
-          :collapsed="collapsed"
-          muted
-          @dblclick.stop="beginRename(activity)"
-          @contextmenu.prevent="openActivityMenu(activity.id)"
-          @keydown="onActivityKeydown($event, activity)"
-        >
-          <span
-            class="grid size-7 place-items-center font-mono text-[10px] font-semibold"
-            :data-activity-identity="activityIdentity(activity)"
-          >
-            <component
-              :is="activityIcon(activity)"
-              :size="15"
-              :stroke-width="1.7"
-              :monochrome="true"
-            />
-          </span>
-          <template #label>
-            <input
-              v-if="renamingId === activity.id"
-              :data-activity-rename="activity.id"
-              v-model="renameDraft"
-              class="h-6 w-full min-w-0 border border-accent bg-surface px-1.5 text-[11px] text-ink outline-none"
-              aria-label="Activity name"
-              @click.stop
-              @keydown.enter.prevent="commitRename(activity)"
-              @keydown.escape.prevent="cancelRename"
-              @blur="commitRename(activity)"
-            />
-            <span v-else>{{ activity.title }}</span>
-          </template>
-          <template #trailing>
-            <button
-              type="button"
-              :data-activity-menu-button="activity.id"
-              :aria-expanded="activityMenuId === activity.id"
-              aria-haspopup="menu"
-              title="Archived Activity actions"
-              aria-label="Archived Activity actions"
-              class="grid size-7 place-items-center text-ink-4 opacity-60 hover:bg-chrome-high hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
-              @pointerdown.stop
-              @click.stop="toggleActivityMenu(activity.id)"
-            >
-              <IconDots :size="14" />
-            </button>
-            <div
-              v-if="activityMenuId === activity.id"
-              :data-activity-menu="activity.id"
-              class="absolute right-1 top-8 z-50 w-36 border border-rule bg-surface py-1 shadow-lg"
-              role="menu"
-              @pointerdown.stop
-              @click.stop
-              @keydown="onMenuKeydown($event, 'activity', activity.id)"
-            >
-              <button class="activity-menu-item" role="menuitem" tabindex="-1" @click="beginRename(activity)">
-                <IconPencil :size="12" /> Rename
-              </button>
-              <button class="activity-menu-item" role="menuitem" tabindex="-1" @click="runAction('restoreActivity', activity.id)">
-                <IconArchiveOff :size="12" /> Restore
-              </button>
-              <button class="activity-menu-item text-rem" role="menuitem" tabindex="-1" @click="runAction('clearActivity', activity.id)">
-                <IconTrash :size="12" /> Delete
-              </button>
-            </div>
-          </template>
-        </SidebarRow>
-      </template>
       </template>
     </nav>
 
@@ -526,7 +416,6 @@ import {
   IconArrowDown,
   IconArrowUp,
   IconArchive,
-  IconArchiveOff,
   IconApps,
   IconArrowsSort,
   IconCheck,
@@ -563,7 +452,6 @@ const props = defineProps({
   tools: { type: Array, default: () => [] },
   newActivity: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
-  archivedActivities: { type: Array, default: () => [] },
   activeActivityId: { type: String, default: '' },
   activitySort: { type: String, default: 'manual' },
 })
@@ -577,7 +465,6 @@ const emit = defineEmits([
   'renameActivity',
   'stopActivity',
   'archiveActivity',
-  'restoreActivity',
   'clearActivity',
   'reorderTools',
   'reorderLaunchers',
@@ -589,7 +476,6 @@ const activityMenuId = ref('')
 const sortMenuOpen = ref(false)
 const newActivityCollapsed = ref(false)
 const activitiesCollapsed = ref(false)
-const archivedOpen = ref(false)
 const renamingId = ref('')
 const renameDraft = ref('')
 const sidebarRoot = ref(null)
@@ -943,6 +829,7 @@ function moveTool(id, direction) {
 }
 
 function onToolKeydown(event, tool) {
+  if (navigateSidebarRows(event)) return
   if (
     event.altKey
     && event.shiftKey
@@ -962,6 +849,7 @@ function moveLauncher(id, direction) {
 }
 
 function onLauncherKeydown(event, launcher) {
+  if (navigateSidebarRows(event)) return
   if (
     event.altKey
     && event.shiftKey
@@ -974,6 +862,7 @@ function onLauncherKeydown(event, launcher) {
 
 function onActivityKeydown(event, activity) {
   if (event.target?.tagName === 'INPUT') return
+  if (navigateSidebarRows(event)) return
   if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
     event.preventDefault()
     event.stopPropagation()
@@ -993,6 +882,33 @@ function onActivityKeydown(event, activity) {
     event.preventDefault()
     moveActivity(activity.id, event.key === 'ArrowUp' ? -1 : 1)
   }
+}
+
+function navigateSidebarRows(event) {
+  if (
+    event.metaKey
+    || event.ctrlKey
+    || event.altKey
+    || event.shiftKey
+    || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+  ) return false
+  const currentRow = event.target?.closest?.('[data-sidebar-row]')
+  if (!currentRow) return false
+  const rows = [...(sidebarRoot.value?.querySelectorAll('[data-sidebar-row]') || [])]
+  const index = rows.indexOf(currentRow)
+  if (index < 0 || !rows.length) return false
+  const nextIndex = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? rows.length - 1
+      : Math.min(
+          Math.max(index + (event.key === 'ArrowDown' ? 1 : -1), 0),
+          rows.length - 1,
+        )
+  event.preventDefault()
+  event.stopPropagation()
+  rows[nextIndex]?.querySelector('button')?.focus()
+  return true
 }
 
 function onMenuKeydown(event, kind, activityId = '') {
