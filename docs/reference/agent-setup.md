@@ -93,7 +93,8 @@ its `mim_` names (legacy names receive the prefix once). `/mim-refresh`
 discovers newly exposed default tools after the session began.
 
 Ended agent Activities can start a continuation using the CLI's supported
-resume strategy. Plain terminal restart always creates a fresh Activity.
+resume strategy; the continuation respawns inside the same Activity record.
+Plain terminal restart always creates a fresh Activity.
 
 ## Detection and resolution boundaries
 

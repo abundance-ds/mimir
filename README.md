@@ -36,6 +36,8 @@ All panes resize. Editor is visible on startup. The Sidebar collapses to a 52px
 live rail; Activity and Editor collapse to 44px rails without losing their
 state, and either content pane can expand into focus and restore the split.
 
+**Interface rule: NEVER USE border left coloured as a style element!**
+
 ## Business graph
 
 The built-in Business graph combines the former Knowledge Graph and Issue
@@ -44,6 +46,16 @@ Board, Portfolio, CRM, Timeline, directory, and relationship views are
 purpose-built projections over the same private, project, and team knowledge.
 Markdown stays canonical while a rebuildable Rust GraphStore provides fast
 search, traversal, validation, conflict-safe writes, and agent context.
+
+The interface follows a fast **Scan → Peek → Focus** rhythm: projections stay
+calm and scannable, Peek is read-first, and Focus provides one spacious scroll
+for syntax-aware Markdown, business properties, and ontology-bounded
+connections. Custom Vue listboxes, calendars, dialogs, and relationship
+sentences replace browser-native form and graph-database UI.
+
+This is an internal operational instrument, not a presentation dashboard:
+Kanban geometry is fixed, important properties and controls remain visible,
+Portfolio is a data table, and hover never reveals content or moves a surface.
 
 Project sources remain in the workspace, private sources stay local under
 `~/.mim/graph/private/`, and an optional shared root is configured in Settings
@@ -55,7 +67,7 @@ The same system is continuously available through `graph.*`, `knowledge.*`,
 `issues.*`, `projects.*`, and `research.*` tools, plus `mimx graph`,
 `mimx board`, and `mimx context`. See
 [Business graph](docs/reference/business-graph.md) for ontology, scopes,
-projections, migration, recovery, and architecture.
+projections, interaction design, migration, recovery, and architecture.
 
 ## Capability layer
 

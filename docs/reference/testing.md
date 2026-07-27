@@ -81,6 +81,7 @@ currently a CI check.
 | Workbench pane/focus/shortcuts | shell/sidebar/workbench component test, responsive/key router test, desktop narrow/wide smoke |
 | Activity lifecycle or resume | activity store/service tests plus native supervisor/launcher tests; live PTY smoke |
 | Editor tab/session/close | relevant composable/store test plus session/close tests; dirty Quit smoke |
+| External edit synchronization | external-file-sync and file-store race tests; desktop CLI edit of one clean and one dirty open file |
 | CodeMirror extension | extension unit test and EditorSurface integration; real focus/selection smoke |
 | MCP definition/alias | Rust runtime/registry/server tests and `services/toolRuntime.test.js`; `mimx tools/call` smoke |
 | App manifest/SDK/provider | `apps.rs`, app catalog service/store, embedded host tests; local app smoke |

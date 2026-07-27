@@ -38,6 +38,7 @@ reject a real command or conceal a removed one.
 | `mim://proposal-apply` | proposal coordinator | owning Editor window | delegated apply; Editor must answer through `proposal_respond` |
 | `mim://proposal-result` | proposal coordinator | main Editor | terminal lifecycle result; failed/conflict/stale stays reviewable |
 | `mim://file-updated` | native proposal or renderer comment tools | Editor | refresh open clean content without replacing unsaved ownership |
+| `mim://workspace-files-changed` | native file-index watcher | Files store and Editor | debounced metadata delta; Editor reads only matching open clean text paths |
 | `mim://settings-changed` | `settings_changed` command | other windows | notification excludes caller; receiver flushes its local snapshot before reload |
 | `mim://theme-changed` | settings store | terminal/app observers | renderer event used for live theme projection, not persistence |
 | `mim://quit-requested` | Rust `ExitRequested` handler | Editor | begins guarded asynchronous Quit; native exit remains prevented |

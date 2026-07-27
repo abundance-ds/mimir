@@ -115,10 +115,15 @@ deleting the singleton.
 ## Resume
 
 Launcher detection associates Codex, Claude, and Pi with a continuation
-strategy. Restarting an ended agent Activity resolves its current preset,
-preserves exact argv, and adds the CLI-specific continuation flag. The new run
-is a new Activity; the previous durable record remains reviewable until
-archived or cleared.
+strategy. Resuming an ended agent Activity resolves its current preset,
+preserves exact argv, and adds the CLI-specific continuation flag, then
+respawns the new session inside the same Activity record: id, creation time,
+and manual sidebar position survive while the session, launch spec, and
+scrollback restart. The supervisor's `activity_respawn` only replaces ended
+PTY records — live sessions and unknown ids are rejected — and the terminal
+surface watches the session `runId` to reset its replay watermark to the new
+session's first byte. Agents without a continuation strategy start over as a
+fresh Activity.
 
 Ended routine runs restart through the current routine definition. Ended plain
 terminal, process-App, and terminal-App Activities rerun their exact stored

@@ -137,5 +137,6 @@ See [security.md](security.md).
 | row visuals, focus, selection, context actions | `FilesActivity.vue`, `mim/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity and file-controller tests |
 | favorites | `mim/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
+| external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |
 | rename/Trash with open buffers | `mim/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
 | MCP mutation surface | `tool_runtime.rs`, renderer file tool handlers, `workspace_files.rs` | tool runtime and native mutation tests |

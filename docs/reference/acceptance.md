@@ -57,7 +57,8 @@ requirements; they do not replace runtime verification.
   details, and no kind/agent/cwd select maze.
 - Disabled or unavailable CLI presets do not clutter the Sidebar; they remain
   diagnosable and configurable in Settings.
-- Supported agents resume through their CLI-specific continuation command.
+- Supported agents resume through their CLI-specific continuation command
+  inside the same Activity row; resume never creates a second record.
 - Routine reruns resolve the current routine definition. Plain terminal and
   app-process reruns preserve their exact stored command, argv, cwd, and env.
 - `mimx` is on PATH in every Mim-launched PTY.
@@ -152,20 +153,34 @@ requirements; they do not replace runtime verification.
 - Issue Board behavior includes status/project grouping, drag-and-drop and
   keyboard-equivalent movement, visible columns, filters, sorting, due and
   attention states, revision-aware updates, and Trash/undo.
+- Kanban cards keep fixed geometry and persistent priority/status/due controls.
+  No Business Graph surface uses colored left edges, content-revealing hover,
+  hover transforms, scaling, filters, or shadows.
 - Projects, People, Companies, Knowledge, and All expose useful Portfolio,
   CRM, directory, timeline, list, and relationship graph projections over the
-  same nodes.
-- Project and assignee controls resolve visible graph entities; every dropdown
-  uses a styled Vue listbox/combobox with keyboard navigation and visible focus,
-  never the platform's native `select` or `datalist` UI.
-- The inspector preserves a context trail, has deliberate Markdown edit mode,
-  opens sources and deliverables in the Editor, shows related Activities, and
-  reports revision conflicts rather than overwriting them.
+  same nodes. Portfolio is an operational table rather than presentation
+  tiles.
+- Project and assignee controls resolve visible graph entities. Focus also
+  authors the bounded business relation vocabulary without exposing a generic
+  schema editor.
+- Every dropdown and date/datetime control uses a styled Vue
+  listbox/combobox or calendar with keyboard navigation and visible focus,
+  never the platform's native `select`, `datalist`, date, or datetime UI.
+- The app follows Scan → Peek → Focus: projections remain scannable, Peek is
+  read-first with quick issue properties and a relationship sentence, and
+  Focus uses one spacious scroll with syntax-aware Markdown and auto-growing
+  text fields.
+- The inspector preserves a context trail, commits drafts before every
+  replacing navigation or scope refresh, opens sources and deliverables in the
+  Editor, shows related Activities, and reports revision conflicts rather than
+  overwriting them.
 - `graph.context` bounds bodies and node count, preserves provenance and
   selected scopes, filters hidden relations, and redacts `record` or
   `sensitive: true` content by default.
-- Start Work creates a durable agent Activity with bounded, explicitly
-  untrusted graph context and associates that Activity with the focus node.
+- Start Work first presents an editable objective and explains the selected
+  scopes and bounded context. Explicit confirmation creates a durable agent
+  Activity with explicitly untrusted graph context and associates that
+  Activity with the focus node.
 - Semantic commands can move/assign/complete work, link project companies and
   contacts, record decisions, attach deliverables, create next actions, and
   capture HEOR evidence.
@@ -207,6 +222,9 @@ requirements; they do not replace runtime verification.
 - Dirty named documents and untitled drafts survive a crash. Native
   close/Dock Quit confirms every dirty document, serializes the final session,
   and never resurrects an explicitly discarded draft.
+- Clean open workspace text documents refresh automatically after an external
+  disk write, including edits from a CLI agent. Only matching open paths are
+  read; an unsaved dirty buffer remains authoritative.
 - Cmd/Ctrl+K opens inline AI with or without a selection.
 - Inline AI resolves `Auto` from the rewrite-model registry per request,
   explains missing provider configuration, and covers loading, tool, retry,

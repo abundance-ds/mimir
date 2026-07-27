@@ -20,6 +20,7 @@ subsystems:
 | startup restore, fallback draft, reactive persistence | `useEditorSessionLifecycle.js` |
 | native menu/focus synchronization and application Quit | `useEditorNativeLifecycle.js` |
 | proposal registration, native events, and review projection | `useEditorProposalLifecycle.js` |
+| clean-buffer refresh after external workspace edits | `useExternalFileSync.js` |
 | public Mim/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
 | tab close/reorder/new behavior | `useTabManagement.js` |
 | CodeMirror/store/document synchronization | `useContentSync.js` |
@@ -31,6 +32,13 @@ surfaces are installed.
 `src/stores/files.js` owns open files and save state.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
 the attached document bridge synchronized.
+
+The Editor also consumes the debounced native workspace watcher. A changed
+open text file is read by path and replaced only if its buffer is still clean
+when that asynchronous read completes. Unchanged content is ignored and dirty
+buffers retain ownership. CodeMirror applies accepted disk content as one
+minimal changed range, preserving the surrounding editor state without a
+polling loop or full-workspace reload.
 
 Tabs are typed as `text`, `pdf`, or `external`. Files passes native
 `WorkspaceEntry.openBehavior`; other `mimOpen` callers are classified through

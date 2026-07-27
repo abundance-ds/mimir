@@ -49,13 +49,22 @@ listeners are installed. See
 | Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
-| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow | full verification set |
+| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, `scripts/check-tauri-commands.mjs` | full verification set; `src-tauri/tests/mimx_contract.rs` |
 
 ## Frontend map
 
 ### Workbench and Activities
 
 - `src/mim/WorkbenchApp.vue`: top-level orchestration and core Activity records
+- `src/mim/composables/useActivityLifecycle.js`: Activity creation, close,
+  archive, and status-tracking lifecycle extracted from WorkbenchApp
+- `src/mim/composables/useWorkspaceBootstrap.js`: startup hydration, settings
+  load, and restore sequence
+- `src/mim/composables/useWorkbenchKeyboardRouting.js`: global keyboard dispatch
+  for workbench-level shortcuts
+- `src/mim/composables/useWorkbenchResize.js`: pane drag with rAF-coalesced
+  store writes and exact flush on release
+- `src/mim/composables/usePointerReorder.js`: drag-to-reorder for sidebar rows
 - `src/mim/components/`: three-pane shell, rails, sidebar, recent-project
   switcher, quick-open, pane host
 - `src/mim/activities/TerminalActivity.vue`: xterm-backed terminal and agent UI
@@ -119,9 +128,20 @@ See [routines.md](routines.md).
 ### Editor
 
 - `src/editor/App.vue`: editor orchestration and public Mim editor bridge
+- `src/editor/composables/useEditorSessionLifecycle.js`: session hydration,
+  persistence watcher, and close-guard coordination
+- `src/editor/composables/useEditorNativeLifecycle.js`: native menu, window
+  events, and Tauri listener setup/teardown
+- `src/editor/composables/useEditorProposalLifecycle.js`: proposal polling,
+  apply/reject coordination, and batch-diff orchestration
+- `src/editor/composables/useEditorCommandApi.js`: editor bridge command surface
+  exposed to MCP tools and the workbench
+- `src/editor/composables/useContentSync.js`: debounced doc↔store content sync
+- `src/editor/composables/useDocumentBridge.js`: cross-window document context
+- `src/editor/composables/useKeyboardShortcuts.js`: editor keyboard chord dispatch
 - `src/editor/components/workspace/`: tabs, CodeMirror surface, inline AI, diffs
-- `src/editor/codemirror/`: editor core, formatting, live preview, ghost, comments
-- `src/editor/composables/`: file, tab, content, diff, comment, and key handling
+- `src/editor/codemirror/core.js`: CodeMirror extension composition factory
+- `src/editor/codemirror/`: formatting, live preview, ghost, comments
 - `src/stores/files.js`, `diff.js`, `comments.js`, `editorUI.js`: editor state
 - `src/services/ai/`: inline/ghost model transport and provider helpers
 - `src/services/ai/tools/`: renderer implementations for workspace MCP tools
@@ -169,6 +189,10 @@ cross-window behavior are in [settings.md](settings.md).
 - `bin/mimx.mjs`: tool discovery, generic calls, and editor shortcuts
 - `bin/pi-mim-extension.ts`: dynamic Pi registration of current Mim tools
 
+- `src-tauri/tests/mimx_contract.rs`: end-to-end MCP contract test — boots a
+  real tool server on an ephemeral port and drives it via `bin/mimx.mjs` CLI
+  invocations and raw JSON-RPC HTTP
+
 See [mcp.md](mcp.md).
 
 Provider relays, request cancellation, file-open queuing, proposal events, and
@@ -178,7 +202,11 @@ server lease ordering are mapped in [ipc.md](ipc.md).
 
 - `src-tauri/src/business_graph/`: bounded ontology, Markdown adapters,
   source-aware index/query/traversal, mutations, scopes, watchers, migration
-  report, agent context, native tools, and performance contracts
+  report, agent context, and performance contracts
+- `src-tauri/src/business_graph/tools/`: per-domain MCP tool modules —
+  `mod.rs` (registration + dispatch), `support.rs` (shared schema/result
+  builders), `graph.rs`, `knowledge.rs`, `issues.rs`, `projects.rs`,
+  `research.rs`
 - `src-tauri/src/file_index.rs`: recent-first regular-file index and bounded
   content search
 - `src-tauri/src/file_index_commands.rs`: native index command surface
@@ -253,3 +281,5 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 | [gotchas.md](gotchas.md) | non-obvious implementation constraints |
 | [issues.md](issues.md) | current known issues |
 | [unified business graph delivery record](plans/unified-business-graph.md) | product decisions, parity contract, and completed delivery checklist |
+| [Business Graph experience redesign](plans/business-graph-experience-redesign.md) | Scan/Peek/Focus UX contract, exhaustive control inventory, review gates, and two-pass review log |
+| [Business Graph OPS redesign](plans/business-graph-ops-redesign.md) | OPS flow direction and implementation plan |

@@ -103,13 +103,33 @@ The Work Board retains specialized issue interaction: status or project
 grouping, drag-and-drop movement, keyboard-equivalent movement, column
 visibility, priority and status filtering, sorting, due-soon and overdue
 states, and settings-backed view state. It is a projection over `issue` nodes,
-not an independent Issue database.
+not an independent Issue database. Its cards have fixed geometry and persistent
+property controls; hover never reveals information or moves the layout.
 
-The inspector uses expected source revisions, reports conflicts instead of
-overwriting, and supports deliberate Markdown read/edit mode. It exposes
-project, assignee, reminders, waiting, snooze, labels, deliverables, related
-entities, and graph-associated Activities. Delete moves the source to the
-operating-system Trash and offers an in-session undo.
+Portfolio is a dense operational table, not a presentation-card dashboard. It
+keeps company, open/waiting/done work, completion, connected evidence and
+decisions, scope, and health visible in stable columns.
+
+Interaction follows **Scan → Peek → Focus**. Scan projections optimize
+recognition and triage. Peek is a read-first side surface with quick issue
+properties, Markdown preview, operational context, and a plain-language
+relationship sentence. Focus is a spacious object workspace with one owning
+scroll, auto-growing text fields, syntax-aware CodeMirror Markdown, planning
+properties, connected work, and provenance.
+
+Focus can author the deliberately bounded relation vocabulary through a
+two-step connection composer. Known relationships such as project/company,
+project/contact, person/company, dependencies, references, and general
+business connections remain purposeful options rather than a generic
+node-edge schema form. Issue Project and Owner stay first-class controls.
+
+The inspector uses expected source revisions, commits a dirty draft before
+scope refreshes or replacing navigation, and reports conflicts instead of
+overwriting. It exposes project, assignee, reminders, waiting, snooze, labels,
+deliverables, related entities, and graph-associated Activities. All selects,
+dates, datetimes, and confirmations are custom keyboard-accessible Vue
+surfaces. Delete moves the source to operating-system Trash through an
+in-product confirmation and offers an in-session undo.
 
 The context trail preserves the path from the originating projection through
 inspected issues, projects, people, companies, decisions, and evidence.
@@ -126,12 +146,14 @@ Graph nodes are keyboard-focusable, and graph pan/zoom has explicit controls.
 - filtered relationships that cannot reveal a node outside selected scopes;
 - default redaction for sensitive records.
 
-The app's **Start Work** action selects the first available agent launcher,
-creates a durable Activity, and supplies the bounded graph snapshot as
-untrusted reference data. The Activity records its focus node, kind, scope ids,
-and graph revision, so it appears later in that node's inspector. An agent can
-then open a deliverable in the Editor and leave durable evidence, a decision,
-an issue update, or a next action instead of losing the result in chat history.
+The app's **Start Work** action opens an explicit preparation surface. The user
+can choose or edit the objective and inspect which physical scopes and bounded
+context will be used before creating a durable Activity. The graph snapshot is
+marked as untrusted reference data. The Activity records its focus node, kind,
+scope ids, and graph revision, so it appears later in that node's inspector. An
+agent can then open a deliverable in the Editor and leave durable evidence, a
+decision, an issue update, or a next action instead of losing the result in
+chat history.
 
 HEOR-specific semantic actions include `research.capture_evidence`,
 `projects.record_decision`, `issues.add_deliverable`, and
