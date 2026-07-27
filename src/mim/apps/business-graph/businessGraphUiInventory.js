@@ -11,7 +11,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-sort',
     'board-priority',
     'board-columns',
-    'diagnostics',
     'undo-delete',
   ],
   emptyStates: [
@@ -106,6 +105,10 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-columns-filter-clear',
     'rail-filter-clear',
     'rail-panel-clear',
+    'search-filter-clear',
+  ],
+  dispatch: [
+    'dispatch',
   ],
 })
 
@@ -140,6 +143,7 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'BusinessGraphApp.vue',
   'ContextTrail.vue',
   'CrmView.vue',
+  'DispatchBar.vue',
   'EntityList.vue',
   'GraphCheckbox.vue',
   'GraphConfirmDialog.vue',

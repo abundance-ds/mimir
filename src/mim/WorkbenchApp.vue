@@ -519,18 +519,21 @@ async function startGraphWork(request) {
   try {
     diagnostic.value = ''
     await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
-      title: `Work · ${request.title || request.nodeId}`,
+      title: request.background
+        ? request.title || 'Dispatch'
+        : `Work · ${request.title || request.nodeId}`,
       args: [String(request.prompt || '')],
       retention: 'durable',
+      open: !request.background,
       source: {
-        type: 'business-graph-work',
+        type: request.background ? 'business-graph-dispatch' : 'business-graph-work',
         graphNodeId: request.nodeId,
         graphNodeKind: request.nodeKind,
         graphScopeIds: request.scopeIds || [],
         graphRevision: request.graphRevision,
       },
     })
-    workbench.setPaneState('activity', 'expanded')
+    if (!request.background) workbench.setPaneState('activity', 'expanded')
   } catch (cause) {
     diagnostic.value = `Could not start work on ${request?.title || request?.nodeId || 'graph item'}: ${errorMessage(cause)}`
   }

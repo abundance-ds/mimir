@@ -48,6 +48,20 @@
       </div>
 
       <div class="peek-scroll">
+        <section v-if="lookupFacts.length" class="peek-lookup-facts" aria-label="Contact facts">
+          <button
+            v-for="fact in lookupFacts"
+            :key="fact.label"
+            type="button"
+            :data-peek-fact="fact.label.toLowerCase()"
+            class="peek-fact"
+            @click="copyFact(fact)"
+          >
+            <span>{{ fact.label }}</span>
+            <strong>{{ copiedFact === fact.label ? 'Copied' : fact.value }}</strong>
+          </button>
+        </section>
+
         <section class="peek-hero">
           <h1 data-inspector-title>{{ node.title || node.id }}</h1>
           <p v-if="node.summary" class="peek-summary">{{ node.summary }}</p>
@@ -834,6 +848,8 @@ const inspectorRoot = ref(null)
 const summaryInput = ref(null)
 const deliverablesInput = ref(null)
 const dirty = ref(false)
+const copiedFact = ref('')
+let copiedFactTimer = null
 const saved = ref(false)
 const moreOpen = ref(false)
 const connectionRelation = ref('')
@@ -1207,6 +1223,37 @@ function startWork() {
   commitThen(() => emit('startWork', props.node))
 }
 
+const lookupFacts = computed(() => {
+  if (props.node?.kind !== 'person') return []
+  const properties = props.node.properties || {}
+  const companyId = (props.node.relations || [])
+    .find(edge => edge.relation === 'works_at')?.target || ''
+  const company = companyId
+    ? props.nodes.find(node => node.id === companyId)?.title || companyId
+    : ''
+  return [
+    ['Email', properties.email],
+    ['Phone', properties.phone],
+    ['Role', properties.role],
+    ['Company', company],
+  ]
+    .filter(([, value]) => value)
+    .map(([label, value]) => ({ label, value }))
+})
+
+function copyFact(fact) {
+  try {
+    navigator.clipboard?.writeText(fact.value)
+  } catch {
+    // Clipboard unavailable (insecure context); the fact stays visible.
+  }
+  copiedFact.value = fact.label
+  clearTimeout(copiedFactTimer)
+  copiedFactTimer = setTimeout(() => {
+    copiedFact.value = ''
+  }, 1200)
+}
+
 function commitThen(action) {
   if (!dirty.value && !props.saving) {
     action()
@@ -1523,6 +1570,48 @@ onUnmounted(() => {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
+}
+
+.peek-lookup-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.peek-fact {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--color-rule-light);
+  padding: 8px 12px 9px;
+  text-align: left;
+}
+
+.peek-fact:last-child {
+  border-right: 0;
+}
+
+.peek-fact:hover,
+.peek-fact:focus-visible {
+  background: var(--color-chrome-mid);
+}
+
+.peek-fact span {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.peek-fact strong {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .peek-hero {
