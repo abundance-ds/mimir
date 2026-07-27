@@ -1,67 +1,129 @@
 # Business Graph OPS redesign
 
-Status: direction approved, ready for implementation
+Status: direction approved by owner; execution protocol defined; ready for
+step 1 (Work board). **Read this whole file before writing any code.** It is
+the single source of truth for taste, hard rules, and build order. It exists
+because three previous attempts failed in instructive ways — the failures are
+documented here so they are not repeated a fourth time.
 
 Supersedes the visual and interaction direction of
 [business-graph-experience-redesign.md](business-graph-experience-redesign.md)
-where they conflict. The Scan → Peek → Focus rhythm, the bounded ontology,
-GraphStore, scopes, and all tool surfaces are unchanged — this plan reshapes
-how the app looks, reads, and routes work.
+where they conflict. Scan → Peek → Focus, the bounded ontology, GraphStore,
+scopes, and all tool surfaces (`graph.*`, `knowledge.*`, `issues.*`,
+`projects.*`, `research.*`, `mimx`) are unchanged.
 
-## Why this plan exists
+Safety references:
 
-Three iterations of graph UI drifted into the same attractor: a calm,
-editorial "precision instrument" — tasteful, quiet, and wrong for the job.
-Symptoms in the current build:
+- `cc41071` — full snapshot of the working state before this rebuild.
+- `ba213c84` — the rejected OPS sprint (see autopsy below). Its
+  `DispatchBar.vue` survives only in stash parent `ec970aa`.
 
-- board cards disappear on hover (hover background equals column background);
-- priority — the primary triage signal — is a dropdown pinned to the card's
-  bottom edge;
-- every card renders its machine id, which carries zero information;
-- AI collaboration is a sparkle button with suggestion chips, consumer-SaaS
-  chrome on top of what is actually a CLI-agent architecture;
-- the whole surface feels like a dashboard for looking at, not a workhorse
-  for working in.
+---
 
-The graph app is used every day, all day, by a small AI-native HEOR
-consultancy. Functionality outranks form, decisively. The goal is not calm;
-the goal is **legible under load**.
+## 1. Session lineage: three failures and what they taught
 
-### Banned vocabulary
+### Failure 1 — the "editorial precision instrument" drift (3 iterations)
 
-These words describe the failed direction. Do not use them in specs, code
-comments, class names, or copy for this surface, and treat their appearance
-in a proposal as a drift signal:
+Every design iteration converged to the same rejected aesthetic: calm,
+typographic, "precision instrument" minimalism. Diagnosed causes, in order
+of fixability:
+
+1. **The repo primed it.** `design-system.md` said "Instrument, not
+   dashboard", "Typography over decoration", "stays calm"; `business-graph.md`
+   said "internal operational instrument". Agents echoed the docs back.
+2. **Reference laundering.** "Bloomberg terminal" got interpreted as its
+   tasteful mood-board subset (mono + tabular numerals), not the real thing
+   (dense, loud, purpose-built panels). Same for TE/Braun.
+3. **Tasteful-mean regression.** "Calm precision" is the lowest-risk way for
+   an agent to signal competence; character gets optimized away iteration
+   over iteration.
+4. **"Functional" mistranslated as "minimalist".** Real workhorse density is
+   visually loud (trading desks, Excel, radar). The goal was never calm —
+   it is **legible under load**.
+
+### Failure 2 — the TUI overcorrection
+
+The corrective swung to all-in terminal cosplay (fixed rows, all-mono,
+minibuffer, reverse video). Owner's correction, verbatim in spirit:
+*Bloomberg is a terminal but doesn't try to work like a unix shell with
+fixed rows.* The lesson extracted: Bloomberg's real architecture is **one
+command grammar routing to many purpose-built panels, each shaped like its
+job** — not a uniform text grid. Design must start from user journeys, not
+from an aesthetic.
+
+### Failure 3 — the rejected OPS sprint (`ba213c84`)
+
+A coding agent implemented the first version of this plan. The owner
+rejected it as "totally shit" and rolled it back. The five complaints and
+their confirmed code causes are the most valuable taste data we have —
+see §10 autopsy. Headline lessons:
+
+- **Invisible filters are the one unforgivable sin.** A sticky, silent
+  `statusFilter` made the owner's issues "disappear" from the board.
+- **Keyboard chords without visible controls are hostile.** Priority became
+  click-to-cycle glyphs; date hid behind the `d` chord; the owner had to
+  "go deep into the content" to change anything.
+- **Cryptic is not dense.** Bare `W`/`S`/`?` flags and 8px dates read as
+  noise. A tooltip is not UI.
+- **Novelty-first sequencing kills trust.** The sprint built the shiny new
+  surfaces and left the daily surface (the board) broken in its original
+  ways.
+
+## 2. Banned vocabulary and banned patterns
+
+Words that signal drift into the rejected direction — never use in specs,
+code, class names, or copy for this surface:
 
 `calm` · `precision` · `instrument` · `editorial` · `elevated` · `hero` ·
 `clean` · `minimal` · `delight`
 
-### What this is not
+Patterns that are banned outright:
 
-- Not a unix shell. Fixed-row TUI cosplay wastes the modern UI toolkit.
-- Not a cockpit. No lit lamps, no bezel theater, no semaphore color.
-- Not a spreadsheet. Gridlines-everywhere brutality was considered and cut.
-- Not a chat product. No AI chat surface anywhere, ever. CLI agents running
-  as Activities are the intelligence; the app renders the blackboard both
-  humans and agents write to.
+- ALL-CAPS "kicker" labels (`NOW / GRAPH WIRE`) and theme-park mastheads.
+- Code alphabets on first-contact surfaces (`NEW/UPD/STA`, `STR/RUN/YOU`,
+  bare `W`/`S`/`?` flags). See rule 8 in §8.
+- Type below 9px anywhere; row data below 10px.
+- Lit lamps, blinking flags, bezel-button theater, htop meter bars, reverse
+  video, ASCII ornament.
+- Sparkles, suggestion chips, "assistant" personas, any AI chat surface.
+- Colored left borders or left-edge classification devices (house rule,
+  absolute).
+- Hover that reveals content, moves geometry, or erases surface separation.
 
-## Stance: a dispatch desk
+## 3. Stance: a dispatch desk
 
-The working metaphor is a **dispatch desk**: agents file work around the
-clock, the human keeps overview, contributes, monitors, and intervenes.
-Bloomberg's real lesson is not "looks like a terminal" — it is *one desk,
-many tools*: one command grammar routing to several purpose-built surfaces,
-each shaped like its job. Consistency comes from shared material, not from
-forcing every surface into the same shape.
+The working metaphor is a **dispatch desk**. Agents file work around the
+clock; the human keeps overview, contributes, monitors, and intervenes.
+One desk, many tools — consistency comes from shared material (type, rules,
+color discipline), never from forcing every surface into the same shape.
 
-Agents are trusted by default. Their work is **not** gated behind
-accept/reject review. The human's posture is awareness with the ability to
-drill in and correct — not adjudication of a merge queue.
+AI posture for 2028, per owner:
 
-## Journeys
+- **We trust agents.** Their work is *not* gated behind accept/reject
+  review. The human's posture is awareness with the ability to drill in and
+  correct — FYI, not a merge queue.
+- **CLI agents are the workhorse intelligence.** There is no chat bubble in
+  this app, ever. Codex/Claude/Pi run as Activities; the app renders the
+  blackboard (the Markdown graph) that humans and agents both write to.
+- **Agents appear as authors and processes** — initials on rows, an active
+  count, events in the stream — never as a persona.
 
-These six jobs drive every decision. Frequency and time budget are part of
-the spec.
+Owner-endorsed summaries to hold onto: the app is "living state"; humans
+need to keep overview, understand what is going on, contribute, monitor,
+review. Functional requirements outrank form, decisively. The app is used
+every day, all day. It should look best at hour six of a workday.
+
+## 4. The feel test (apply before calling any step done)
+
+1. A screenshot looks like **work in progress**, not a marketing shot and
+   not a themed skin.
+2. Everything on first contact is **self-explanatory without tooltips**.
+3. Type is legible at arm's length at 100% zoom on a laptop display.
+4. Color is rare enough that when it appears, it means something.
+5. Nothing moved, hid, or demanded attention without a real event.
+6. Check all eight themes; nothing in this design depends on darkness.
+
+## 5. Journeys (the spec's backbone)
 
 | # | Journey | Budget | Frequency |
 |---|---|---|---|
@@ -72,237 +134,310 @@ the spec.
 | J5 | Monitor agent output, correct when needed | ambient | all day |
 | J6 | Portfolio pulse: which engagements are at risk | 15 min | weekly |
 
-## Architecture: four postures, one material
+## 6. Architecture: four postures, one material
 
-The app has four primary postures. Each existing section maps onto one;
-nothing is removed, but the frame changes from "sections of a database" to
-"jobs of a desk".
+Each surface gets the reading rhythm its job demands. The rhythm differs;
+the material (§9) never does.
 
-| Surface | Posture | Reading rhythm | Job |
+| Surface | Posture | Rhythm | Job |
 |---|---|---|---|
 | **Now** | read | wire | what changed, time-ordered, FYI |
 | **Work** | operate | board | track and move issues spatially |
-| **Projects** | compare | ledger | where engagements stand, aligned columns |
-| **Lookup** | pit stop | spotlight | find a fact, gone in 3 seconds |
+| **Projects** | compare | ledger | where engagements stand |
+| **Lookup** | pit stop | spotlight | find a fact, gone in 3 s |
 
-People, Companies, Knowledge, and All remain as directories and projections;
-they inherit the material language and the list row grammar. Lookup's front
-door is the dispatch bar, not a section.
+People, Companies, Knowledge, All remain as directories/projections sharing
+the material language and the list row grammar.
 
-## Now (home surface)
+### Now (home, J1/J5)
 
-Now is the landing surface and answers J1/J5: *what happened, and does
-anything wait on me.*
-
-- A time-ordered stream of graph events: agent filings, status flips,
-  decisions recorded, evidence captured, deliverables added, items that went
-  overdue, waiting that cleared. Both agent and human authorship appear;
-  provenance is a visible property of every line.
-- **FYI by default.** One line per event; expand if curious; drill to Peek
-  or Focus to correct. No accept/reject machinery, no unread-count
-  obligation. A "seen" cursor (e.g., a divider at "since 08:40") replaces
-  inbox-zero.
+- Time-ordered stream of graph events: filings, status flips, decisions,
+  evidence, deliverables, overdue crossings, waiting cleared. Agent and
+  human authorship both visible; provenance is a property of every line.
+- FYI by default: one line per event, expand if curious, drill to correct.
+  **No accept/reject machinery, no unread-count obligation.** A seen cursor
+  ("since 08:40"), not inbox-zero.
 - **Waiting on you** pins at top: items blocked until the human answers or
-  decides (agent flagged needs-detail, blocked_by you, waiting-on-you).
-  This is information, not a gate.
-- Wire rhythm: timestamps lead, events read like bulletins, thin time
-  dividers. Exact grouping (per hour vs per day vs continuous) is an
-  implementation decision — optimize for "catch up in one screen."
-- Agent-produced content (a deliverable, a diff) is inspectable behind
-  expand for spot checks. It is context, not a merge request.
+  decides. Information, not a gate.
+- Grouping granularity, seen-cursor presentation: implementation decision,
+  optimize for "catch up in one screen".
+- Needs the graph event log. The rejected sprint built a scope-filtered,
+  redaction-tested events API in `src-tauri/src/business_graph/runtime.rs`
+  (see `git show ba213c84:src-tauri/src/business_graph/runtime.rs`) —
+  salvage the *approach*, review line by line; do not restore wholesale.
 
-## Work (board)
+### Work (board) — step 1, spec in §11
 
-The board keeps kanban geometry — triage is spatial, and position carries
-meaning (which column, where in it). Everything else about the card changes.
+### Projects (portfolio, J6/J3)
 
-- **Rows, not cards.** Board items are fixed-geometry rows, two lines,
-  roughly 40px (implementer tunes ±6px). List projections use the same
-  anatomy at one line. Target ≥15 issues per column on a typical viewport.
-- **Row anatomy** (applies to every list-like surface):
-  - Priority in column zero as a glyph run (e.g., `!!!` `!!` `!`, blank for
-    normal). Never a dropdown, never at the bottom. Settable by keyboard
-    (e.g., `p` cycles).
-  - Title, one line, Sans, truncated not wrapped. No summary, no tags, no id
-    on the row — those live in Peek and provenance.
-  - Metadata line in Mono: status as a fixed-width 3-letter code
-    (`BCK PLN PRG WAT REV DON`) in list views (redundant on the board, which
-    groups by status), project slug, due date as tabular `DD.MM`, flags
-    (`W` waiting, `S` snoozed), author initials (humans and agents alike,
-    e.g., `WK`, `CX`, `CL`).
-  - Overdue dates take the theme's `rem` color **plus** a visible marker
-    (e.g., a `!` suffix). Color never carries meaning alone.
-- Rows sit directly on the projection canvas separated by 1px hairlines.
-  There are no wells and no raised plates, so a row can never merge into its
-  column. (The current disappearing-card bug dies structurally, not via a
-  different hover color.)
-- Hover: full-width band (chrome-mid) with full-ink text. Selected:
-  accent-soft band. Hover signals state only — it never reveals content and
-  never moves geometry.
-- Mouse is first-class: drag between columns, shift-select for bulk
-  property edits, inline date popover on the due field. Every action has
-  keyboard parity (e.g., ←/→ to move a row between columns).
+- Ledger posture: strict column grid, right-aligned tabular numerals;
+  project, company/scope, open/waiting/done, completion, knowledge, health.
+- Health is computed state expressed with marker + word, never hue alone.
+- Project Focus is the J3 surface: one screen answering "where does this
+  engagement stand" in 30 s — open/waiting/done, blocked on whom, recent
+  decisions, deliverables. Give it deliberate design attention.
 
-## Projects (portfolio)
+### Lookup (J4-adjacent)
 
-Portfolio keeps its table bones and leans into the ledger posture: its job
-is comparison.
+- The dispatch bar doubles as the front door: typing without Enter shows
+  live results under the bar (Spotlight-style); selecting opens Peek with
+  facts at the very top — person: email, phone, role, company — each
+  one-click copyable. No scrolling, no Focus.
 
-- Strict column grid; numbers right-aligned in tabular Mono; project,
-  company/scope, open/waiting/done, completion, connected knowledge, health.
-- Health is computed state (overdue present, waiting stack, idle project),
-  expressed with marker + word, not hue alone.
-- Row height and padding serve scan speed, not touch targets; this is a
-  desktop surface.
-- Row → Peek; project Focus is the J3 surface: one screen that answers
-  "where does this engagement stand" in 30 seconds — open/waiting/done,
-  what is blocked and on whom, recent decisions, deliverables. This view is
-  worth deliberate design attention; it is the client-on-the-phone view.
+## 7. Dispatch bar (build in step 3)
 
-## Lookup
+A permanent single-line bar at the bottom of the graph app. The only
+terminal-shaped element; it earns its place as the spine.
 
-Lookup is a pit stop, not a journey: find an email, a role, a name.
-
-- The dispatch bar doubles as the lookup front door. Typing without
-  dispatching shows live results beneath the bar (Spotlight-style).
-- Selecting a result opens Peek with the facts at the very top — for a
-  person: email, phone, role, company — each one-click copyable. No
-  scrolling, no Focus required.
-- Directories remain for browsing; the bar is for finding.
-
-## Dispatch bar
-
-A permanent single-line bar at the bottom of the app. It is the only
-terminal-shaped element, and it earns its place as the spine.
-
-- **Default behavior: natural language dispatch.** Enter hands the line to
-  a background CLI-agent Activity as a job. Dispatch never blocks; jobs
-  queue; the user keeps typing. This is how capture works (J4): the agent
-  files richly — summary, relations, labels, due dates, resolved references
-  ("Jana" → person node) — producing issues richer than anyone would type.
-- Each job carries the user's **current context**: active section, selected
-  scopes, focused project or node. Terse input resolves against what the
-  user is looking at.
+- **Default: natural-language dispatch.** Enter hands the line to a
+  background CLI-agent Activity as a job. Never blocks; jobs queue; the
+  user keeps typing. This is capture (J4): the agent files *richly* —
+  summary, relations, labels, due dates, resolved references ("Jana" →
+  person node) — richer than anyone would type in a hurry.
+- Each job carries the user's **current context**: active section, scopes,
+  focused project/node. Terse input resolves against what is on screen.
 - Results land in **Now** as filed events. If the agent cannot resolve
-  something it does not guess: the item arrives flagged *needs detail* and
-  the fix is one Peek edit. No chat loop, no conversational UI.
-- **Power lane:** a leading `/` runs a deterministic mimx command
-  (e.g., `/board waiting`) with instant, unambiguous execution and plain
-  unix-style errors. Never required, always available.
-- **Echo:** GUI mutations print their mimx equivalent into the bar's
-  scrollback, dimmed. The UI continuously teaches the CLI grammar.
-- The delegate flow (today's Start Work) lives here: `!` or `work <node>`
-  expands the command with scopes and context budget, shows the context
-  pack ("what the agent will see") in Peek, launches on Enter. The existing
-  preparation dialog and its suggestion chips are retired.
+  something it does not guess: item arrives flagged *needs detail*; the fix
+  is one Peek edit. No chat loop, no conversational UI.
+- **Power lane:** leading `/` runs a deterministic mimx command
+  (`/board waiting`) with plain unix-style errors. Never required.
+- **Echo:** GUI mutations print their mimx equivalent into the bar
+  scrollback, dimmed. The UI teaches the CLI grammar.
+- **Delegate flow** (replaces Start Work / `GraphWorkDialog`, which is
+  retired): `!` or `work <node>` expands with scopes and context budget,
+  shows the context pack ("what the agent will see") in Peek, launches on
+  Enter. No sparkle, no suggestion chips.
+- The rejected sprint's `DispatchBar.vue` (556 lines) survives at
+  `git show ec970aa:src/mim/apps/business-graph/DispatchBar.vue`. Mine it
+  for ideas only; its visual language (mode codes, `ERR`, `GUI` badges) is
+  the rejected costume.
 
-## Status rail
+## 8. Status rail (build in step 2, with these corrections)
 
-A narrow fixed rail at the left edge of the graph app: the always-on
-system-state column. Five to seven numerals with micro labels, stacked —
-indicatively: **waiting on you**, overdue, waiting, due within 7d, agents
-active, diagnostics.
+A narrow fixed rail at the left edge: always-on system state. The sprint
+version failed (§10); these are the corrected requirements:
 
-- Each numeral is a button: click (or its chord) filters the main field to
-  exactly that set. Any alert → its list in one action.
-- Color is purposeful and rare: `overdue` numeral takes `rem` when > 0,
-  `agents` takes accent when > 0; everything else stays ink. Exact set and
-  order of readouts is an implementation decision.
+- Readouts (indicative set): **waiting on you**, overdue, waiting, due
+  within 7 days, agents active, diagnostics. Each a button.
+- Labels must be legible: full words or unambiguous short forms
+  (`overdue`, `waiting`, `due 7d`, `agents`, `diag`) — never cryptic codes
+  (`YOU/OVER/AGNT`).
+- Clicking a readout filters the corresponding surface **and announces it**:
+  a named, dismissible banner on the filtered surface ("Showing: waiting ·
+  ✕ clear"). No silent filters. No sticky state that survives invisibly
+  across sections. Clicking the same readout again clears in place —
+  never teleports the user to another section.
+- Agents/diagnostics readouts open their content *as ordinary lists in the
+  current surface*, never a modal hijack of the whole main area.
+- Color: `overdue` numeral takes `rem` when > 0; `agents` takes accent when
+  > 0; everything else ink.
 
-## Material language
+## 9. Material language (shared, never varies per surface)
 
-Shared across every surface; this is what makes one desk of many tools.
-
-- **Type:** IBM Plex everywhere. Titles Sans (~12px), metadata Mono
-  (~10px), micro labels uppercase letterspaced Mono. Tabular numerals for
-  all data columns.
-- **Geometry:** hairline rules, 0–2px radius, no shadows except functional
-  overlays. Square belongs to work surfaces; dialogs may keep their
-  rounding.
+- **Type:** IBM Plex. Titles Sans ~12px; metadata Mono 10–11px; micro
+  labels uppercase letterspaced Mono ≥ 9px. Tabular numerals for data.
+  Floor: 9px UI, 10px row data. The current build's 8px micro-type was a
+  named complaint.
+- **Geometry:** hairline rules; 0–2px radius; no shadows except functional
+  overlays. Rows sit directly on the projection canvas separated by 1px
+  hairlines — no wells, no raised plates, so a row can never merge into its
+  column (the original disappearing-card bug dies structurally).
 - **Color:** rare and purposeful. Accent = current selection and active
-  agents. `rem` = overdue and diagnostics. Everything else uses the ink
-  hierarchy. Never color as the sole carrier of meaning. No colored left
-  borders anywhere, ever (house rule).
-- **Themes:** all eight themes are first-class. Nothing in this design
-  depends on darkness; every rule above is token-driven.
-- **Feel test:** a screenshot should look like work in progress, not a
-  marketing shot. The app should look best at hour six of a workday.
+  agents. `rem` = overdue and diagnostics. Everything else ink hierarchy.
+  Never the sole carrier of meaning — always paired with glyph, word, or
+  position. Tasteful additional hues are acceptable *only* with a clear
+  job (owner's words).
+- **Themes:** all eight first-class and equal.
+- **Hover:** full-width `chrome-mid` band + full-ink text. Selected:
+  `accent-soft` band. Hover signals state only.
+- **Mouse first-class.** Every action also has a keyboard chord; every
+  chord has a visible on-row control. Chords accelerate, never gate.
 
-## Interaction grammar
+## 10. Autopsy of the rejected sprint (`ba213c84`)
 
-- Mouse first-class; every action has keyboard parity. Chords are
-  implementation decisions, but the set must cover: row navigation,
-  open/peek/focus, move between columns, cycle priority, set due, dispatch,
-  jump to each rail filter.
-- Scan → Peek → Focus is unchanged as a rhythm. Peek stays read-first with
-  quick properties; Focus is the deep-work surface (J2) and hosts the
-  delegate flow's context-pack preview.
-- Context trail, GraphMap, Timeline, and directories remain; they adopt the
-  row grammar and material language where they render lists.
+Keep this section. These are the owner's five verbatim complaints mapped to
+their confirmed causes. Do not reintroduce any of these patterns.
 
-## Invariants
+1. **"I need to go deep into the content to change a date, priority, or
+   status."** Priority became a click-to-cycle glyph (`priorityGlyph`,
+   "P to cycle") with no visible options; date hid behind the `d` chord;
+   status only via drag/arrows. → Rule: *visible controls first; chords
+   accelerate, never gate.*
+2. **"ALL my issues are gone from work Board — 5 wait, 1 over, the
+   rest???"** Clicking a rail readout set a sticky `statusFilter` and
+   force-navigated (`applyStatusFilter` → `setSection('work');
+   setView('list')`); the filter persisted invisibly on the board with no
+   indicator and no obvious way to clear. → Rule: *no hidden or sticky
+   filters; active filters are named, loud, one-click dismissible on the
+   filtered surface. Data visibility is sacred.*
+3. **"Date is super small, what does 'w' mean?"** 8–9px dates; flags as
+   bare `<b>W</b>`/`<b>S</b>`/`<b>?</b>` with explanations only in `title`
+   tooltips. → Rule: *cryptic is not dense; spell it out; a tooltip is not
+   UI. 9px floor.*
+4. **"The left rail feels totally useless."** 48px of cryptic codes whose
+   click either hijacked the main surface (`SystemList` for
+   agents/diagnostics) or silently filtered and teleported. → Rail
+   corrected per §8.
+5. **"SHIT FUCK… it is a shit app now!"** The aggregate of the above,
+   shipped as one uncommitted 32-file ±1,680-line big-bang stash blob
+   (its own backup lost `DispatchBar.vue`), while the board — the daily
+   surface — kept its original flaws. → Rule: *one surface per commit;
+   build order is enforced; nothing new until the board is fixed.*
 
-Budgets the design must hold; treat as acceptance criteria.
+Also recorded from the autopsy: dead CSS shipped
+(`.event-row:has(.event-code:nth-child(2))`); three stacked micro-grids with
+misaligned column templates in one view; old topbar + new rail + old cards
+= three visual languages on one screen. Ship each surface *complete* in the
+new material, or not at all.
+
+What was right (salvage list): the Rust event-wire approach (scope-filtered,
+redaction-tested); retiring `GraphWorkDialog`; `EntityList`'s row-grammar
+*direction* (priority first, due state visible, author initials) — its
+cryptic flags were the wrong part, not the grammar.
+
+## 11. Step 1 spec: Work board rows (build this first, alone)
+
+Current state of `src/mim/apps/business-graph/WorkBoard.vue` (715 lines):
+already row-based (`board-row`) with glyph-only priority cycle, row date
+picker (`GraphDatePicker variant="row"`, placeholder `—`), `!`/`W`/`S`/`?`
+flags, author initials, bulk selection, drag with drop-before reorder,
+`p`/`d`/arrow chords. It was judged "totally unusable" — do not reskin it;
+rebuild the row to the spec below.
+
+Row anatomy (two lines, ~40px, target ≥15 rows per column at 100% zoom):
+
+- **Line 1 — priority control + title.**
+  - Priority is a *visible control*, not a bare glyph: current priority
+    rendered legibly (glyph or short word — implementation decision, but it
+    must be self-explanatory on first contact; `normal` renders neutral,
+    never a cryptic mark). Activating it opens a small menu listing all
+    four priorities **spelled out** (Urgent / High / Normal / Low) with the
+    current one marked. `p` cycles as an accelerator for the same action.
+  - Title: Sans ~12px, one line, truncated not wrapped. No id, no summary,
+    no tags on the row — they live in Peek and provenance.
+- **Line 2 — metadata, Mono 10px, left to right:**
+  - Project slug (spelled as the project's own title/slug; fine — it's the
+    user's own vocabulary).
+  - Status: only when grouped by project (on a status-grouped board,
+    position *is* the status). Rendered as a spelled word or an established
+    short form with an on-surface legend — no orphan codes.
+  - Due date as `DD.MM`, opening the existing date picker on click (keep
+    `GraphDatePicker`; make it legible, no `—` placeholder crypticism — an
+    empty date shows nothing or a quiet "set date" affordance). Overdue =
+    `rem` color **plus** the word `overdue` or a `!` suffix; due soon may
+    get a quiet marker. Never color alone.
+  - `waiting` spelled as the word (with the `waitingFor` target in Peek);
+    drop the bare `S`/`?` flags from the row entirely — snooze and
+    needs-detail live in Peek.
+  - Author initials (human and agent) with the full name one click away in
+    Peek.
+- **Selection and hover** per §9. Bulk selection, drag-and-drop with
+  drop-before reordering, and full keyboard parity (arrows move, `p`
+  priority, `d` date, Enter open) stay — but every chord maps to a visible
+  control.
+- **Column chrome** ships in the same commit, same material: spelled column
+  label, count, add button. No meter bars, no dots-only semantics.
+- **Filters:** any active board filter (priority filter, column visibility)
+  renders as a named, dismissible strip above the board. Hidden issues must
+  always be explainable at a glance ("12 hidden by filter: priority ≥
+  high · ✕").
+
+Do **not** touch any other surface in step 1. No rail, no Now, no dispatch
+bar, no shell restyle.
+
+## 12. File map (current state, verified)
+
+Renderer:
+
+- `src/mim/apps/BusinessGraphApp.vue` (~1987 lines) — shell: topbar
+  (brand, sections, search, scope menu, refresh, New), viewbar with board
+  controls (group/sort/priority filter/columns), projection routing,
+  Peek/Focus mount (`GraphInspector`), status bar, dialogs
+  (`GraphCreateDialog`, `GraphWorkDialog` — to be retired in step 5,
+  `GraphConfirmDialog`), undo toast. Sections come from
+  `BUSINESS_SECTIONS` in the store.
+- `src/mim/apps/business-graph/WorkBoard.vue` (715) — step 1 target; see §11.
+- `src/mim/apps/business-graph/EntityList.vue` — list rows; row-grammar
+  reference, same cryptic-flag disease; fix when its section comes.
+- `src/mim/apps/business-graph/PortfolioView.vue` — ledger bones are good;
+  step 4.
+- `src/mim/apps/business-graph/GraphInspector.vue` (~2400) — Peek + Focus;
+  hosts quick properties, relationship line, activities, Start Work button
+  (retire in step 5). Peek must surface lookup facts (email/phone) at top.
+- `src/mim/apps/business-graph/GraphSelect.vue`, `GraphDatePicker.vue` —
+  existing custom controls; reuse for the priority menu and due control.
+- `src/mim/apps/business-graph/NowView.vue`, `StatusRail.vue` — **orphans
+  from the rejected sprint, unwired. Reference only; do not resurrect
+  as-is.**
+- `src/stores/businessGraph.js` — section/view state (currently defaults
+  `section='now'`, `view='stream'` — reset default to `work`/`board` until
+  Now ships properly), `BUSINESS_SECTIONS`, projection state.
+- `src/services/businessGraph.js` — IPC/service layer to Rust tools.
+- `src/mim/WorkbenchApp.vue` — mounts roots, owns the Start Work handoff.
+- `src/shared/styles/themes.css` (8 themes), `app.css` (tokens),
+  `src/shared/styles/fonts.css`.
+
+Native:
+
+- `src-tauri/src/business_graph/` — `model.rs` (ontology, DTOs),
+  `markdown.rs` (loss-preserving serialization), `store.rs` (indexes,
+  queries, mutations), `runtime.rs` (mounted roots, watchers,
+  `mim://graph-changed`), `context.rs` (bounded agent context, redaction),
+  `tools/` (registry). The rejected sprint's event log lived in
+  `runtime.rs` — see §6 Now for salvage guidance.
+- Golden fixtures: `src-tauri/tests/fixtures/business-graph/`.
+
+Docs to reconcile when this lands: `docs/reference/business-graph.md`
+(interaction sections), `docs/reference/design-system.md` (the "calm
+instrument" language that primed failure 1 — revise to this plan's
+principles).
+
+## 13. Execution protocol (enforce strictly)
+
+1. **One surface per commit, in the build order below.** Each commit must
+   leave the app fully working and each surface *complete* in the new
+   material — no half-styled grafts onto old chrome.
+2. **Before calling a step done:** run it, look at it, apply the feel test
+   (§4) on light and dark themes at minimum; run `npm test` and, if native
+   code changed, `cargo test --manifest-path src-tauri/Cargo.toml`.
+3. **Commit early, commit per step.** Never deliver a stash blob.
+4. Build order:
+   1. **Work board rows** (§11) — alone.
+   2. **Status rail** (§8) + loud-filter banner infrastructure.
+   3. **Dispatch bar** (§7): lookup first, then agent dispatch, then `/`
+      lane + echo.
+   4. **Portfolio ledger polish + project Focus (J3 view).**
+   5. **Now stream** (§6) with the salvaged event-wire approach; retire
+      `GraphWorkDialog` into the bar's delegate flow.
+   6. Directories, Timeline, GraphMap inherit the material language;
+      `EntityList` gets the §11 row grammar.
+5. Hard rules from §2/§8/§9 are acceptance criteria, not guidelines:
+   - no colored left borders; no ids on rows; priority leads and is a
+     visible control; color never alone; 9px type floor; no code alphabets
+     on first contact; no hidden filters; no AI chat or sparkle chrome;
+     hover never erases separation.
+
+## 14. Invariants (acceptance budgets)
 
 - ≥15 issues visible per board column; ≥25 rows per list view
-- Any rail alert → its filtered list in ≤1 click or key
-- Any property change ≤2 keys, no dialog required
+- Any property change ≤2 keys **with a visible control for the same action**
+- Any active filter explainable at a glance and cleared in 1 click
+- Any rail alert → its (announced) filtered list in 1 click or key
 - Capture never blocks and never opens a dialog
-- Project status (J3) answerable in ≤30 s from anywhere in the app
-- Hover never erases surface separation; no geometry shifts on hover
-- Zero AI chat surfaces; zero sparkle/chip AI chrome
+- J3 answerable in ≤30 s from anywhere
+- Zero AI chat surfaces; zero sparkle/chip chrome
 
-## Hard rules
+## 15. Open decisions (for implementers)
 
-1. No colored left borders or left-edge classification devices, anywhere.
-2. No node ids on rows or cards; ids live in Peek and provenance.
-3. Priority leads (column zero); never buried, never only a dropdown.
-4. Color always paired with glyph, label, or position.
-5. Agents appear as authors and processes (initials, rail count, Now
-   events) — never as an assistant persona.
+Intent is fixed; settle these in component work, reviewed against the
+invariants and the feel test:
 
-## Open decisions (for implementers)
-
-Intent is fixed; these specifics are deliberately left to the coding
-agents, to be settled in the component work and reviewed against the
-invariants:
-
-- exact row metrics, truncation points, and metadata column widths;
-- the priority glyph run and status code set (keep fixed-width and
-  theme-proof);
+- priority rendering (icon set vs short words) — must be self-explanatory
+  on first contact; `normal` neutral;
+- exact row metrics, truncation points, metadata column spacing;
 - Now grouping granularity and seen-cursor presentation;
-- rail readout set, order, and width;
-- the full chord map;
-- dispatch job concurrency model (single queued runner vs parallel
-  Activities) — start simple, one durable runner;
-- how bulk selection composes with board drag;
-- per-theme tuning of the two functional colors.
-
-## Relationship to existing docs
-
-- [business-graph.md](../business-graph.md): ontology, scopes, projections,
-  and tool surfaces unchanged. Interaction-design sections describing card
-  layout, the Start Work dialog, and hover behavior are superseded by this
-  plan.
-- [design-system.md](../design-system.md): its "instrument, not dashboard"
-  and "stays calm" language describes the rejected direction and should be
-  revised when this lands — the principles here (legible under load, color
-  as rare signal, material over skin) are the successor.
-- [business-graph-experience-redesign.md](business-graph-experience-redesign.md):
-  superseded as visual direction; its Scan → Peek → Focus architecture is
-  retained.
-
-## Suggested build order
-
-1. **Work board rows** — row anatomy, hover fix, priority col-0, id removal.
-   Highest daily impact, self-contained.
-2. **Status rail + Now skeleton** — rail filters over existing projections;
-   Now fed by graph change events (both agent and human authored).
-3. **Dispatch bar** — lookup first (live results, Peek facts), then agent
-   dispatch with current-context jobs, then `/` power lane and mimx echo.
-4. **Portfolio ledger polish + project Focus (J3 view).**
-5. **Delegate flow in the bar**, retiring the sparkle dialog.
-6. Directories, Timeline, GraphMap inherit the material language.
-
-Each step must hold the invariants and pass the feel test on all eight
-themes.
+- rail readout set/order/width (labels per §8);
+- the chord map (must mirror visible controls);
+- dispatch job concurrency — start simple: one durable background runner;
+- bulk-selection composition with board drag;
+- per-theme tuning of the two functional colors (accent, rem).
