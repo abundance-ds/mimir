@@ -1,10 +1,5 @@
 <template>
   <div class="entity-list-shell">
-    <div v-if="nodes.length" class="entity-list-header" aria-hidden="true">
-      <span>Type</span>
-      <span>Object</span>
-      <span>Context</span>
-    </div>
     <div
       data-graph-entity-list
       class="entity-list"
@@ -30,31 +25,38 @@
         @mouseenter="selection = index"
         @click="$emit('open', node.id)"
       >
-        <span class="entity-kind">
-          <i :class="kindClass(node.kind)" />
-          {{ human(node.kind) }}
+        <span class="entity-line-1">
+          <component
+            :is="priorityIcon(node.priority)"
+            v-if="node.kind === 'issue'"
+            :size="14"
+            :stroke-width="2.1"
+            class="entity-priority"
+            :class="`priority-${node.priority || 'normal'}`"
+            aria-hidden="true"
+          />
+          <strong>{{ node.title || node.id }}</strong>
         </span>
-        <span class="entity-main">
-          <span class="entity-title-line">
-            <strong>{{ node.title || node.id }}</strong>
-            <span v-if="node.status" class="entity-state" :class="stateClass(node.status)">
-              {{ human(node.status) }}
+        <span class="entity-line-2">
+          <template v-if="node.kind === 'issue'">
+            <span class="entity-status" :class="stateClass(node.status)">
+              {{ human(node.status || 'backlog') }}
             </span>
-            <span v-if="node.priority && node.priority !== 'normal'" class="entity-priority">
-              {{ human(node.priority) }}
+            <span v-if="projectLabel(node)" class="entity-project">{{ projectLabel(node) }}</span>
+            <span v-if="node.dueDate" class="entity-due" :class="{ overdue: overdue(node.dueDate) }">
+              {{ shortDate(node.dueDate) }}
             </span>
-          </span>
-          <span v-if="node.summary" class="entity-summary">{{ node.summary }}</span>
-          <span v-else class="entity-id">{{ node.id }}</span>
-        </span>
-        <span class="entity-context">
-          <span v-if="node.tags?.length" class="entity-tags">
-            {{ node.tags.slice(0, 2).join(' · ') }}
-          </span>
-          <span class="entity-scope">
-            <i :class="scopeClass(node.scopeId)" />
-            {{ scopeLabel(node.scopeId) }}
-          </span>
+            <span v-if="overdue(node.dueDate)" class="entity-overdue">overdue</span>
+            <span v-if="node.waitingFor" class="entity-waiting">waiting</span>
+            <span v-if="actorInitials(node)" class="entity-author" :title="actorLabel(node)">
+              {{ actorInitials(node) }}
+            </span>
+          </template>
+          <template v-else>
+            <span class="entity-kind">{{ human(node.kind) }}</span>
+            <span v-if="node.summary" class="entity-summary">{{ node.summary }}</span>
+            <span class="entity-updated">{{ shortDate(node.updatedAt) }}</span>
+          </template>
         </span>
       </button>
 
@@ -74,17 +76,25 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import {
+  IconAntennaBars2,
+  IconAntennaBars3,
+  IconAntennaBars4,
+  IconExclamationMark,
+} from '@tabler/icons-vue'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   scopes: { type: Array, default: () => [] },
+  actors: { type: Object, default: () => ({}) },
   emptyTitle: { type: String, default: 'Nothing here yet' },
   emptyCopy: { type: String, default: 'Create an item or choose another scope.' },
 })
 
 const emit = defineEmits(['open', 'create'])
 const selection = ref(0)
+const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
 
 watch(() => props.nodes.length, length => {
   selection.value = Math.min(selection.value, Math.max(0, length - 1))
@@ -100,28 +110,44 @@ function openSelected() {
   if (node) emit('open', node.id)
 }
 
-function scopeLabel(id) {
-  return props.scopes.find(scope => scope.id === id)?.kind || 'source'
+function priorityIcon(priority = 'normal') {
+  return {
+    urgent: IconExclamationMark,
+    high: IconAntennaBars4,
+    normal: IconAntennaBars3,
+    low: IconAntennaBars2,
+  }[priority] || IconAntennaBars3
 }
 
-function scopeClass(id) {
-  return `scope-${scopeLabel(id)}`
+function projectLabel(node) {
+  if (!node.projectId) return ''
+  const project = byId.value.get(node.projectId)
+  return project?.slug || project?.properties?.slug || project?.title || ''
 }
 
-function kindClass(kind) {
-  if (kind === 'issue') return 'kind-work'
-  if (kind === 'project') return 'kind-project'
-  if (['person', 'company'].includes(kind)) return 'kind-business'
-  return 'kind-knowledge'
+function actorInitials(node) {
+  return props.actors?.[node.id]?.initials || ''
+}
+
+function actorLabel(node) {
+  return props.actors?.[node.id]?.label || ''
+}
+
+function overdue(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && value < new Date().toISOString().slice(0, 10)
+}
+
+function shortDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${day}.${month}`
 }
 
 function stateClass(status) {
-  return {
-    'in-progress': 'state-active',
-    waiting: 'state-waiting',
-    review: 'state-review',
-    done: 'state-done',
-  }[status] || ''
+  return status === 'waiting' ? 'state-waiting' : ''
 }
 
 function human(value) {
@@ -137,22 +163,6 @@ function human(value) {
   flex-direction: column;
 }
 
-.entity-list-header {
-  display: grid;
-  min-height: 33px;
-  flex: 0 0 auto;
-  grid-template-columns: 100px minmax(240px, 1fr) minmax(110px, 0.42fr);
-  align-items: center;
-  gap: 16px;
-  border-bottom: 1px solid var(--color-rule-light);
-  padding: 0 18px;
-  color: var(--color-ink-4);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-}
-
 .entity-list {
   min-height: 0;
   flex: 1 1 auto;
@@ -165,21 +175,18 @@ function human(value) {
 }
 
 .entity-row {
-  position: relative;
-  display: grid;
+  display: flex;
   width: 100%;
-  min-height: 68px;
-  grid-template-columns: 100px minmax(240px, 1fr) minmax(110px, 0.42fr);
-  align-items: center;
-  gap: 16px;
+  min-height: 42px;
+  flex-direction: column;
+  justify-content: center;
   border-bottom: 1px solid var(--color-rule-light);
-  padding: 10px 18px;
+  padding: 3px 14px;
   text-align: left;
-  transition: background-color 110ms ease;
 }
 
 .entity-row:hover {
-  background: var(--color-chrome-high);
+  background: var(--color-chrome-mid);
 }
 
 .entity-row:focus-visible {
@@ -189,120 +196,115 @@ function human(value) {
 }
 
 .entity-row-selected {
-  background: color-mix(in srgb, var(--color-accent-soft) 62%, transparent);
+  background: var(--color-accent-soft);
 }
 
-.entity-kind,
-.entity-scope {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--color-ink-3);
-  font-size: 10px;
-  text-transform: capitalize;
+.entity-row-selected:hover {
+  background: color-mix(in srgb, var(--color-accent-soft) 78%, var(--color-chrome-mid));
 }
 
-.entity-kind i,
-.entity-scope i {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--color-ink-4);
-}
-
-.entity-kind .kind-work,
-.entity-scope .scope-project {
-  background: var(--color-accent);
-}
-
-.entity-kind .kind-project,
-.entity-scope .scope-team {
-  background: var(--color-add);
-}
-
-.entity-kind .kind-business,
-.entity-scope .scope-private {
-  background: var(--color-ink-3);
-}
-
-.entity-main,
-.entity-context {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.entity-title-line {
+.entity-line-1 {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 7px;
-}
-
-.entity-title-line strong {
-  overflow: hidden;
-  color: var(--color-ink);
-  font-size: 12px;
-  font-weight: 630;
-  letter-spacing: -0.008em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.entity-state,
-.entity-priority {
-  flex: 0 0 auto;
-  padding: 0;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 620;
-  text-transform: capitalize;
-}
-
-.entity-state.state-active {
-  color: var(--color-accent);
-}
-
-.entity-state.state-waiting {
-  color: var(--color-rem);
-}
-
-.entity-state.state-done {
-  color: var(--color-add);
-}
-
-.entity-summary,
-.entity-id {
-  display: block;
-  overflow: hidden;
-  margin-top: 4px;
-  color: var(--color-ink-3);
-  font-size: 10px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.entity-id {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-}
-
-.entity-context {
-  align-items: flex-end;
   gap: 6px;
 }
 
-.entity-tags {
+.entity-line-1 strong {
   overflow: hidden;
-  max-width: 100%;
-  color: var(--color-ink-3);
-  font-size: 9px;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 17px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.entity-priority {
+  flex: 0 0 auto;
+  color: var(--color-ink-2);
+}
+
+.entity-priority.priority-urgent {
+  color: var(--color-rem);
+}
+
+.entity-priority.priority-normal {
+  color: var(--color-ink-3);
+}
+
+.entity-priority.priority-low {
+  color: var(--color-ink-4);
+}
+
+.entity-line-2 {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.entity-status,
+.entity-kind {
+  flex: 0 0 auto;
+  color: var(--color-ink-3);
+}
+
+.entity-status.state-waiting {
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.entity-project {
+  flex: 0 1 auto;
+  overflow: hidden;
+  max-width: 110px;
+  text-overflow: ellipsis;
+}
+
+.entity-due {
+  flex: 0 0 auto;
+  color: var(--color-ink-2);
+}
+
+.entity-due.overdue,
+.entity-overdue {
+  color: var(--color-rem);
+}
+
+.entity-overdue {
+  flex: 0 0 auto;
+}
+
+.entity-waiting {
+  flex: 0 0 auto;
+  color: var(--color-ink-2);
+}
+
+.entity-author {
+  margin-left: auto;
+  color: var(--color-ink-3);
+  font-weight: 650;
+}
+
+.entity-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink-4);
+  text-overflow: ellipsis;
+}
+
+.entity-updated {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--color-ink-4);
 }
 
 .entity-empty {
@@ -333,7 +335,7 @@ function human(value) {
   min-height: 32px;
   margin-top: 16px;
   border: 1px solid var(--color-rule);
-  border-radius: 5px;
+  border-radius: 2px;
   background: var(--color-surface);
   padding: 0 11px;
   color: var(--color-ink-2);
@@ -343,31 +345,5 @@ function human(value) {
 
 .entity-empty button:hover {
   background: var(--color-chrome-mid);
-}
-
-@container business-graph (max-width: 620px) {
-  .entity-list-header {
-    display: none;
-  }
-
-  .entity-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    padding-inline: 14px;
-  }
-
-  .entity-kind {
-    grid-column: 1 / -1;
-    margin-bottom: -6px;
-    font-size: 9px;
-  }
-
-  .entity-context {
-    align-items: flex-end;
-  }
-
-  .entity-tags {
-    display: none;
-  }
 }
 </style>

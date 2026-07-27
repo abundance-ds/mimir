@@ -4,8 +4,7 @@ import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
 import WorkBoard from '../src/mim/apps/business-graph/WorkBoard.vue'
 import GraphFilterBanner from '../src/mim/apps/business-graph/GraphFilterBanner.vue'
-import StatusRail from '../src/mim/apps/business-graph/StatusRail.vue'
-import StatusRailPanel from '../src/mim/apps/business-graph/StatusRailPanel.vue'
+import EntityList from '../src/mim/apps/business-graph/EntityList.vue'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')
@@ -72,15 +71,6 @@ const actors = Object.fromEntries(issues.map((issue, index) => [
     : { kind: 'human', label: 'Waq R', initials: 'WA' },
 ]))
 
-const activities = [
-  { id: 'act-1', kind: 'agent', title: 'Work · Build evidence map', status: 'working', updatedAt: new Date().toISOString() },
-  { id: 'act-2', kind: 'agent', title: 'Dispatch · file payer objections', status: 'needs-input', updatedAt: new Date(Date.now() - 7 * 60000).toISOString() },
-  { id: 'act-3', kind: 'terminal', title: 'Shell', status: 'idle', updatedAt: new Date().toISOString() },
-]
-const diagnostics = params.get('diag') === '1'
-  ? [{ level: 'warning', code: 'relation-unresolved', message: 'Relation target “evidence-paper” is missing', nodeId: 'issue-7' }]
-  : []
-
 const groupBy = ref(params.get('group') || 'status')
 const app = createApp({
   components: { WorkBoard, GraphFilterBanner },
@@ -99,34 +89,21 @@ const app = createApp({
             hiddenCount: 4,
           })
         : null,
-      h('div', { style: 'flex: 1 1 auto; min-height: 0; display: flex; background: var(--color-rule); gap: 1px;' }, [
-        h(StatusRail, {
-          issues,
-          activities,
-          diagnostics,
-          active: params.get('rail') || '',
-        }),
-        params.get('panel')
-          ? h('div', { style: 'flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column;' }, [
-              h(GraphFilterBanner, {
-                label: params.get('panel') === 'agents' ? 'active agents' : 'diagnostics',
-              }),
-              h(StatusRailPanel, {
-                kind: params.get('panel'),
-                activities: activities.filter(a => a.kind === 'agent'),
-                diagnostics,
-              }),
-            ])
-          : h(WorkBoard, {
-              issues,
-              nodes: [...projects, ...issues],
-              projects,
-              actors,
-              groupBy: groupBy.value,
-              visibleStatuses: statuses,
-              style: 'flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;',
-            }),
-      ]),
+      params.get('list') === '1'
+        ? h(EntityList, {
+            nodes: [...issues.slice(0, 10), ...projects.map(p => ({ ...p, summary: 'Global value evidence strategy', updatedAt: new Date().toISOString() }))],
+            actors,
+            style: 'flex: 1 1 auto; min-height: 0;',
+          })
+        : h(WorkBoard, {
+            issues,
+            nodes: [...projects, ...issues],
+            projects,
+            actors,
+            groupBy: groupBy.value,
+            visibleStatuses: statuses,
+            style: 'flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;',
+          }),
     ]
   },
 })

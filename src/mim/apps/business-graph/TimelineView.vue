@@ -1,30 +1,24 @@
 <template>
   <div data-graph-timeline class="timeline">
     <section v-for="group in groups" :key="group.key" class="timeline-group">
-      <time>{{ group.label }}</time>
-      <div class="timeline-items">
-        <button
-          v-for="node in group.nodes"
-          :key="node.id"
-          type="button"
-          :data-timeline-node="node.id"
-          :data-graph-control="`timeline-open-${node.id}`"
-          class="timeline-item"
-          @click="$emit('open', node.id)"
-        >
-          <span class="timeline-node" :class="kindClass(node.kind)" aria-hidden="true" />
-          <span class="timeline-copy">
-            <small>{{ human(node.kind) }}</small>
-            <strong>{{ node.title || node.id }}</strong>
-            <span v-if="node.summary">{{ node.summary }}</span>
-            <span v-else class="timeline-id">{{ node.id }}</span>
-          </span>
-          <span v-if="node.status" class="timeline-state" :class="stateClass(node.status)">
-            {{ human(node.status) }}
-          </span>
-          <IconArrowUpRight :size="14" class="timeline-open-icon" aria-hidden="true" />
-        </button>
-      </div>
+      <time class="timeline-month">{{ group.label }}</time>
+      <button
+        v-for="node in group.nodes"
+        :key="node.id"
+        type="button"
+        :data-timeline-node="node.id"
+        :data-graph-control="`timeline-open-${node.id}`"
+        class="timeline-item"
+        @click="$emit('open', node.id)"
+      >
+        <span class="timeline-kind">{{ human(node.kind) }}</span>
+        <strong>{{ node.title || node.id }}</strong>
+        <span v-if="node.summary" class="timeline-summary">{{ node.summary }}</span>
+        <span v-if="node.status" class="timeline-state" :class="stateClass(node.status)">
+          {{ human(node.status) }}
+        </span>
+        <span class="timeline-date">{{ shortDate(node.updatedAt) }}</span>
+      </button>
     </section>
 
     <div v-if="!groups.length" class="timeline-empty">
@@ -43,7 +37,6 @@
 
 <script setup>
 import { computed } from 'vue'
-import { IconArrowUpRight } from '@tabler/icons-vue'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -74,19 +67,16 @@ function monthLabel(key) {
   return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(date)
 }
 
-function kindClass(kind) {
-  if (kind === 'issue') return 'node-work'
-  if (kind === 'project') return 'node-project'
-  if (['person', 'company'].includes(kind)) return 'node-business'
-  return 'node-knowledge'
+function stateClass(status) {
+  return status === 'waiting' ? 'state-waiting' : ''
 }
 
-function stateClass(status) {
-  return {
-    'in-progress': 'state-active',
-    waiting: 'state-attention',
-    done: 'state-done',
-  }[status] || ''
+function shortDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${day}.${month}`
 }
 
 function human(value) {
@@ -99,151 +89,92 @@ function human(value) {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 18px clamp(14px, 3cqw, 28px) 44px;
+  background: var(--color-surface);
 }
 
-.timeline-group {
-  display: grid;
-  grid-template-columns: 122px minmax(0, 760px);
-  gap: 25px;
-  justify-content: center;
-}
-
-.timeline-group > time {
+.timeline-month {
   position: sticky;
-  top: 16px;
-  align-self: start;
-  padding-top: 14px;
-  color: var(--color-ink-3);
-  font-size: 11px;
-  font-weight: 630;
-  text-align: right;
-}
-
-.timeline-items {
-  position: relative;
-  padding: 0 0 22px 22px;
-}
-
-.timeline-items::before {
-  position: absolute;
-  inset: 0 auto 0 5px;
-  width: 1px;
-  background: var(--color-rule);
-  content: "";
-}
-
-.timeline-item {
-  position: relative;
-  display: grid;
-  width: 100%;
-  min-height: 74px;
-  grid-template-columns: minmax(0, 1fr) auto 20px;
-  align-items: center;
-  gap: 12px;
+  top: 0;
+  z-index: 1;
+  display: block;
   border-bottom: 1px solid var(--color-rule-light);
-  padding: 10px 8px;
-  text-align: left;
-}
-
-.timeline-item:hover {
-  background: color-mix(in srgb, var(--color-surface) 62%, transparent);
-}
-
-.timeline-item:focus-visible {
-  border-radius: 6px;
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
-  outline-offset: 1px;
-}
-
-.timeline-node {
-  position: absolute;
-  top: 29px;
-  left: -21px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid var(--color-chrome-high);
-  border-radius: 50%;
-  background: var(--color-ink-4);
-  box-shadow: 0 0 0 1px var(--color-rule);
-}
-
-.timeline-node.node-work {
-  background: var(--color-accent);
-}
-
-.timeline-node.node-project {
-  background: var(--color-add);
-}
-
-.timeline-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timeline-copy small {
+  background: var(--color-chrome-high);
+  padding: 5px 13px 4px;
   color: var(--color-ink-4);
+  font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 620;
-  letter-spacing: 0.055em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.timeline-copy strong {
-  overflow: hidden;
-  margin-top: 4px;
+.timeline-item {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: 84px minmax(220px, 1fr) minmax(140px, 0.7fr) auto 42px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-rule-light);
+  padding: 3px 13px;
+  text-align: left;
+}
+
+.timeline-item:hover,
+.timeline-item:focus-visible {
+  background: var(--color-chrome-mid);
+}
+
+.timeline-item:hover strong {
   color: var(--color-ink);
-  font-size: 12px;
-  font-weight: 630;
+}
+
+.timeline-kind {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.timeline-item strong {
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.timeline-copy > span {
+.timeline-summary {
   overflow: hidden;
-  margin-top: 3px;
   color: var(--color-ink-3);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.timeline-copy .timeline-id {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-}
-
 .timeline-state {
-  padding: 0;
   color: var(--color-ink-3);
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 620;
-  text-transform: capitalize;
 }
 
-.timeline-state.state-active {
-  color: var(--color-accent);
+.timeline-state.state-waiting {
+  color: var(--color-ink);
+  font-weight: 650;
 }
 
-.timeline-state.state-attention {
-  color: var(--color-rem);
-}
-
-.timeline-state.state-done {
-  color: var(--color-add);
-}
-
-.timeline-open-icon {
+.timeline-date {
   color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .timeline-empty {
   display: grid;
   min-height: 300px;
   place-content: center;
+  justify-items: center;
   text-align: center;
 }
 
@@ -265,7 +196,7 @@ function human(value) {
   min-height: 34px;
   margin-top: 16px;
   border: 1px solid var(--color-rule);
-  border-radius: 5px;
+  border-radius: 2px;
   background: var(--color-surface);
   padding: 0 11px;
   color: var(--color-ink-2);
@@ -277,16 +208,13 @@ function human(value) {
   background: var(--color-chrome-mid);
 }
 
-@container business-graph (max-width: 600px) {
-  .timeline-group {
-    grid-template-columns: 1fr;
-    gap: 6px;
+@container business-graph (max-width: 700px) {
+  .timeline-summary {
+    display: none;
   }
 
-  .timeline-group > time {
-    position: static;
-    padding: 14px 0 2px 22px;
-    text-align: left;
+  .timeline-item {
+    grid-template-columns: 72px minmax(140px, 1fr) auto 40px;
   }
 }
 </style>

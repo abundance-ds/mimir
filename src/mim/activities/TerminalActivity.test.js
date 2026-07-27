@@ -6,6 +6,7 @@ const xterm = vi.hoisted(() => ({
   terminals: [],
   fits: [],
   webglAddons: [],
+  failWebgl: false,
 }))
 const api = vi.hoisted(() => ({
   callback: null,
@@ -59,6 +60,7 @@ vi.mock('@xterm/addon-web-links', () => ({
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: class MockWebglAddon {
     constructor() {
+      if (xterm.failWebgl) throw new Error('WebGL2 unavailable')
       this.dispose = vi.fn()
       this.contextLossDisposable = { dispose: vi.fn() }
       this.onContextLoss = vi.fn((callback) => {
@@ -103,6 +105,7 @@ beforeEach(() => {
   xterm.terminals.length = 0
   xterm.fits.length = 0
   xterm.webglAddons.length = 0
+  xterm.failWebgl = false
   api.callback = null
   api.listen.mockImplementation(async (callback) => {
     api.callback = callback
@@ -238,6 +241,17 @@ describe('TerminalActivity', () => {
     expect(wrapper.get('[data-terminal-surface]').attributes('data-renderer')).toBe('dom')
   })
 
+  it('keeps the DOM renderer when WebGL cannot initialize', async () => {
+    xterm.failWebgl = true
+
+    const wrapper = await initialize()
+
+    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(3)
+    expect(xterm.webglAddons).toHaveLength(0)
+    expect(wrapper.get('[data-terminal-surface]').attributes('data-renderer')).toBe('dom')
+    expect(wrapper.find('[data-terminal-error]').exists()).toBe(false)
+  })
+
   it('keeps process controls and leaves identity chrome to the shared pane header', async () => {
     const wrapper = await initialize()
 
@@ -352,7 +366,7 @@ describe('TerminalActivity', () => {
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
   })
 
-  it('snaps the surface onto the device pixel grid so Canvas glyphs stay crisp', async () => {
+  it('snaps the surface onto the device pixel grid so WebGL glyphs stay crisp', async () => {
     vi.stubGlobal('devicePixelRatio', 2)
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 640,
@@ -549,12 +563,14 @@ describe('TerminalActivity', () => {
   it('detaches cleanly without stopping the supervised process', async () => {
     const wrapper = await initialize()
     const terminal = xterm.terminals[0]
+    const addon = xterm.webglAddons[0]
     const observer = resizeObservers[0]
     wrapper.unmount()
 
     expect(api.unlisten).toHaveBeenCalledTimes(1)
     expect(terminal.dataDisposable.dispose).toHaveBeenCalledTimes(1)
     expect(observer.disconnect).toHaveBeenCalledTimes(1)
+    expect(addon.contextLossDisposable.dispose).toHaveBeenCalledTimes(1)
     expect(terminal.dispose).toHaveBeenCalledTimes(1)
     expect(api.stop).not.toHaveBeenCalled()
     expect(api.write).not.toHaveBeenCalled()

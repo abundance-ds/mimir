@@ -19,8 +19,6 @@ export const BUSINESS_SECTIONS = Object.freeze([
   { id: 'now', label: 'Now', kinds: [] },
   { id: 'work', label: 'Work', kinds: ['issue'] },
   { id: 'projects', label: 'Projects', kinds: ['project'] },
-  { id: 'people', label: 'People', kinds: ['person'] },
-  { id: 'companies', label: 'Companies', kinds: ['company'] },
   {
     id: 'knowledge',
     label: 'Knowledge',
@@ -50,8 +48,6 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     now: 'stream',
     work: 'board',
     projects: 'portfolio',
-    people: 'directory',
-    companies: 'crm',
     knowledge: 'list',
     all: 'list',
   })

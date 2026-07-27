@@ -172,7 +172,6 @@ let terminal = null
 let fitAddon = null
 let webglAddon = null
 let webglContextLossDisposable = null
-let webLinksAddon = null
 let dataDisposable = null
 let resizeObserver = null
 let themeObserver = null
@@ -212,9 +211,8 @@ async function initialize() {
       allowProposedApi: true,
     })
     fitAddon = new FitAddon()
-    webLinksAddon = new WebLinksAddon()
     terminal.loadAddon(fitAddon)
-    terminal.loadAddon(webLinksAddon)
+    terminal.loadAddon(new WebLinksAddon())
     terminal.loadAddon(new Unicode11Addon())
     terminal.unicode.activeVersion = '11'
     terminal.attachCustomKeyEventHandler(handleCustomKey)

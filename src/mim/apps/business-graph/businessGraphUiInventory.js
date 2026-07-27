@@ -15,9 +15,7 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-empty-create',
     'list-empty-create',
     'portfolio-empty-create',
-    'crm-empty-create',
     'timeline-empty-create',
-    'map-empty-create',
   ],
   create: [
     'create-close',
@@ -74,11 +72,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'focus-record-decision',
     'focus-save',
   ],
-  map: [
-    'map-zoom-in',
-    'map-reset',
-    'map-zoom-out',
-  ],
   datePicker: [
     'date-previous-month',
     'date-next-month',
@@ -93,9 +86,9 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   filters: [
     'board-priority-filter-clear',
     'board-columns-filter-clear',
-    'rail-filter-clear',
-    'rail-panel-clear',
     'search-filter-clear',
+    'all-kind',
+    'all-kind-filter-clear',
   ],
   dispatch: [
     'dispatch',
@@ -103,7 +96,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
 })
 
 export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
-  'status-',
   'section-',
   'view-',
   'scope-',
@@ -115,10 +107,7 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
   'card-due-',
   'list-open-',
   'portfolio-open-',
-  'crm-open-',
-  'crm-contact-',
   'timeline-open-',
-  'map-open-',
   'context-',
   'relationship-',
   'peek-activity-',
@@ -132,7 +121,6 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
 export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'BusinessGraphApp.vue',
   'ContextTrail.vue',
-  'CrmView.vue',
   'DispatchBar.vue',
   'EntityList.vue',
   'GraphCheckbox.vue',
@@ -141,7 +129,6 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphDatePicker.vue',
   'GraphDateTimeField.vue',
   'GraphInspector.vue',
-  'GraphMap.vue',
   'GraphMarkdownEditor.vue',
   'GraphMarkdownPreview.vue',
   'GraphRelationshipLine.vue',
@@ -149,8 +136,6 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'NowView.vue',
   'PortfolioView.vue',
   'ProjectStanding.vue',
-  'StatusRail.vue',
-  'StatusRailPanel.vue',
   'GraphFilterBanner.vue',
   'TimelineView.vue',
   'WorkBoard.vue',

@@ -156,7 +156,7 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-business-graph-app]').exists()).toBe(true)
     expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
     expect(wrapper.get('[data-board-card="issue-1"]').text()).toContain('Extract evidence')
-    expect(wrapper.findAll('[data-graph-section]')).toHaveLength(7)
+    expect(wrapper.findAll('[data-graph-section]')).toHaveLength(5)
 
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()

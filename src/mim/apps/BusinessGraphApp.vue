@@ -156,13 +156,6 @@
     </div>
 
     <div v-else class="graph-workspace relative flex min-h-0 flex-1">
-      <StatusRail
-        :issues="graph.issues"
-        :activities="activities.activities"
-        :diagnostics="graph.diagnostics"
-        :active="railActive"
-        @toggle="toggleRail"
-      />
       <GraphInspector
         v-if="graph.selectedNode && focusMode"
         ref="objectInspector"
@@ -283,23 +276,20 @@
                 </Teleport>
               </div>
             </div>
+
+            <div v-if="graph.section === 'all'" class="graph-work-controls">
+              <GraphSelect
+                v-model="allKindFilter"
+                data-all-kind-filter
+                data-graph-control="all-kind"
+                class="w-[138px]"
+                variant="toolbar"
+                aria-label="Filter by kind"
+                :options="allKindOptions"
+              />
+            </div>
           </div>
 
-          <template v-if="railPanel">
-            <GraphFilterBanner
-              :label="railPanel === 'agents' ? 'active agents' : 'diagnostics'"
-              data-graph-control="rail-panel-clear"
-              @clear="railPanel = ''"
-            />
-            <StatusRailPanel
-              :kind="railPanel"
-              :activities="agentActivities"
-              :diagnostics="graph.diagnostics"
-              @open-activity="$emit('openActivity', $event)"
-              @open-node="openNode"
-            />
-          </template>
-          <template v-else>
           <GraphFilterBanner
             v-if="graph.searchQuery"
             :label="`search “${graph.searchQuery}”`"
@@ -307,11 +297,11 @@
             @clear="graph.clearSearch()"
           />
           <GraphFilterBanner
-            v-if="graph.section === 'work' && railReadout"
-            :label="railReadout.label"
-            :hidden-count="railFilterHidden"
-            data-graph-control="rail-filter-clear"
-            @clear="railFilter = ''"
+            v-if="graph.section === 'all' && allKindFilter"
+            :label="`kind = ${allKindFilter}`"
+            :hidden-count="allKindFilterHidden"
+            data-graph-control="all-kind-filter-clear"
+            @clear="allKindFilter = ''"
           />
           <GraphFilterBanner
             v-if="graph.section === 'work' && priorityFilter"
@@ -361,22 +351,6 @@
             @open="openNode"
             @create="openCreate('project')"
           />
-          <CrmView
-            v-else-if="graph.section === 'companies' && graph.view === 'crm'"
-            :companies="projectionNodes"
-            :people="graph.people"
-            :projects="graph.projects"
-            :issues="graph.issues"
-            @open="openNode"
-            @create="openCreate('company')"
-          />
-          <GraphMap
-            v-else-if="['graph', 'relationships'].includes(graph.view)"
-            :nodes="mapNodes"
-            :purpose="mapPurpose"
-            @open="openNode"
-            @create="openCreate()"
-          />
           <TimelineView
             v-else-if="graph.view === 'timeline'"
             :nodes="projectionNodes"
@@ -387,12 +361,12 @@
             v-else
             :nodes="projectionNodes"
             :scopes="graph.scopes"
+            :actors="graph.latestActors"
             :empty-title="emptyTitle"
             :empty-copy="emptyCopy"
             @open="openNode"
             @create="openCreate()"
           />
-          </template>
         </main>
 
         <GraphInspector
@@ -487,26 +461,18 @@ import {
   useBusinessGraphStore,
 } from '../../stores/businessGraph.js'
 import ContextTrail from './business-graph/ContextTrail.vue'
-import CrmView from './business-graph/CrmView.vue'
 import DispatchBar from './business-graph/DispatchBar.vue'
 import EntityList from './business-graph/EntityList.vue'
 import GraphConfirmDialog from './business-graph/GraphConfirmDialog.vue'
 import GraphFilterBanner from './business-graph/GraphFilterBanner.vue'
-import GraphMap from './business-graph/GraphMap.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSelect from './business-graph/GraphSelect.vue'
 import NowView from './business-graph/NowView.vue'
 import PortfolioView from './business-graph/PortfolioView.vue'
-import StatusRail from './business-graph/StatusRail.vue'
-import StatusRailPanel from './business-graph/StatusRailPanel.vue'
 import TimelineView from './business-graph/TimelineView.vue'
 import WorkBoard from './business-graph/WorkBoard.vue'
-import {
-  activeAgentActivities,
-  RAIL_ISSUE_READOUTS,
-  waitingOnHuman,
-} from './business-graph/railReadouts.js'
+import { waitingOnHuman } from './business-graph/predicates.js'
 
 const props = defineProps({
   workspacePath: { type: String, default: '' },
@@ -547,8 +513,7 @@ const boardSort = ref('rank')
 const columnsMenu = ref(false)
 const columnsTrigger = ref(null)
 const columnsMenuStyle = ref({})
-const railFilter = ref('')
-const railPanel = ref('')
+const allKindFilter = ref('')
 const dispatchBar = ref(null)
 const dispatchEchoes = ref([])
 const dispatchQueue = ref([])
@@ -597,28 +562,25 @@ const viewsBySection = {
     { id: 'portfolio', label: 'Portfolio' },
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
-    { id: 'graph', label: 'Graph' },
-  ],
-  people: [
-    { id: 'directory', label: 'Directory' },
-    { id: 'relationships', label: 'Relationships' },
-  ],
-  companies: [
-    { id: 'crm', label: 'CRM' },
-    { id: 'directory', label: 'Directory' },
-    { id: 'relationships', label: 'Relationships' },
   ],
   knowledge: [
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
-    { id: 'graph', label: 'Graph' },
   ],
   all: [
     { id: 'list', label: 'List' },
-    { id: 'graph', label: 'Graph' },
     { id: 'timeline', label: 'Timeline' },
   ],
 }
+const allKindOptions = [
+  { value: '', label: 'All kinds' },
+  { value: 'issue', label: 'Issues' },
+  { value: 'project', label: 'Projects' },
+  { value: 'person', label: 'People' },
+  { value: 'company', label: 'Companies' },
+  { value: 'decision', label: 'Decisions' },
+  { value: 'knowledge', label: 'Knowledge' },
+]
 const currentSection = computed(() => sections.find(item => item.id === graph.section))
 const viewOptions = computed(() => viewsBySection[graph.section] || viewsBySection.all)
 const scopeSummary = computed(() => {
@@ -633,30 +595,29 @@ const deleteTitle = computed(() => (
 const deleteCopy = computed(() => (
   'The Markdown source leaves the active graph and moves to Trash. Its relationships disappear from projections until restored.'
 ))
-const mapPurpose = computed(() => ({
-  projects: 'Project dependencies and business context',
-  people: 'People, companies, and the work connecting them',
-  companies: 'Client, contact, and project relationships',
-  knowledge: 'Evidence, decisions, and research lineage',
-  all: 'Cross-scope relationship overview',
-}[graph.section] || 'Relationship overview'))
 const projectionNodes = computed(() => {
   let items = graph.visibleNodes
   if (graph.section === 'work') {
     if (priorityFilter.value) items = items.filter(item => item.priority === priorityFilter.value)
-    if (railReadout.value) items = items.filter(item => railReadout.value.matches(item))
     if (graph.view === 'attention') items = items.filter(needsAttention)
+  }
+  if (graph.section === 'all' && allKindFilter.value) {
+    items = items.filter(item => matchesAllKind(item, allKindFilter.value))
   }
   return items
 })
-const mapNodes = computed(() => {
-  if (graph.section === 'all') return graph.visibleNodes
-  const visibleIds = new Set(projectionNodes.value.map(node => node.id))
-  for (const node of projectionNodes.value) {
-    for (const relation of node.relations || []) visibleIds.add(relation.target)
-  }
-  return graph.nodes.filter(node => visibleIds.has(node.id))
+const allKindFilterHidden = computed(() => {
+  if (!allKindFilter.value) return 0
+  return graph.visibleNodes.filter(item => !matchesAllKind(item, allKindFilter.value)).length
 })
+
+function matchesAllKind(item, filter) {
+  if (filter === 'knowledge') {
+    const definition = sections.find(section => section.id === 'knowledge')
+    return definition?.kinds?.includes(item.kind)
+  }
+  return item.kind === filter
+}
 const boardIssues = computed(() => [...projectionNodes.value].sort(issueSort(boardSort.value)))
 const priorityFilterHidden = computed(() => {
   if (!priorityFilter.value) return 0
@@ -670,7 +631,6 @@ const hiddenColumnIssues = computed(() => {
   const visible = new Set(visibleBoardStatuses.value)
   return projectionNodes.value.filter(item => !visible.has(item.status || 'backlog')).length
 })
-const agentActivities = computed(() => activeAgentActivities(activities.activities))
 const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
 const nowSeenAt = ref(settings.businessGraphNowSeenAt || '')
 
@@ -678,14 +638,6 @@ function markNowSeen(timestamp) {
   nowSeenAt.value = timestamp
   settings.set('businessGraphNowSeenAt', timestamp)
 }
-const railReadout = computed(() => (
-  RAIL_ISSUE_READOUTS.find(item => item.id === railFilter.value) || null
-))
-const railActive = computed(() => railPanel.value || railFilter.value)
-const railFilterHidden = computed(() => {
-  if (!railReadout.value) return 0
-  return graph.visibleNodes.filter(item => !railReadout.value.matches(item)).length
-})
 const DISPATCH_LIVE_STATUSES = ['ready', 'starting', 'working', 'needs-input']
 const dispatchRunningCount = computed(() => activities.activities.filter(activity => (
   activity.source?.type === 'business-graph-dispatch'
@@ -782,22 +734,17 @@ function runPowerCommand(line) {
   const arg = rest.join(' ')
   const name = command.toLowerCase()
   if (!name || name === 'help') {
-    pushEcho('ok', '/board [waiting|overdue|due|on-you] · /open <id> · /section <name> · /find <terms> · /clear')
+    pushEcho('ok', '/board [attention] · /open <id> · /section <name> · /find <terms> · /clear')
     return
   }
   if (name === 'board') {
-    const filters = { waiting: 'waiting', overdue: 'overdue', due: 'due-7d', 'on-you': 'on-you' }
-    const filter = filters[arg.toLowerCase()]
-    if (arg && !filter) {
-      pushEcho('error', `/board: unknown filter "${arg}" (waiting, overdue, due, on-you)`)
+    if (arg && arg.toLowerCase() !== 'attention') {
+      pushEcho('error', `/board: unknown filter "${arg}" (try attention)`)
       return
     }
-    railFilter.value = filter || ''
     setSection('work')
-    setView('board')
-    pushEcho('ok', arg
-      ? `/board ${arg} — filter announced above the board`
-      : '/board — filters cleared')
+    setView(arg ? 'attention' : 'board')
+    pushEcho('ok', arg ? '/board attention — needs-attention view' : '/board — work board')
     return
   }
   if (name === 'open') {
@@ -833,8 +780,8 @@ function runPowerCommand(line) {
     return
   }
   if (name === 'clear') {
-    railFilter.value = ''
     priorityFilter.value = ''
+    allKindFilter.value = ''
     graph.clearSearch()
     pushEcho('ok', '/clear — filters cleared')
     return
@@ -878,8 +825,6 @@ const emptyTitle = computed(() => {
   return {
     work: 'No work in these scopes',
     projects: 'No projects yet',
-    people: 'No people yet',
-    companies: 'No companies yet',
     knowledge: 'No knowledge yet',
     all: 'The graph is empty',
   }[graph.section] || 'Nothing here yet'
@@ -1290,7 +1235,6 @@ async function performStepTo(index) {
 function setSection(section) {
   const change = () => {
     focusMode.value = false
-    railPanel.value = ''
     if (graph.selectedNode) graph.closeInspector({ restore: false })
     graph.setSection(section)
   }
@@ -1301,25 +1245,11 @@ function setSection(section) {
 function setView(view) {
   const change = () => {
     focusMode.value = false
-    railPanel.value = ''
     if (graph.selectedNode) graph.closeInspector({ restore: false })
     graph.setView(view)
   }
   if (objectInspector.value?.commitThen) objectInspector.value.commitThen(change)
   else change()
-}
-
-function toggleRail(id) {
-  if (id === 'agents' || id === 'diag') {
-    railPanel.value = railPanel.value === id ? '' : id
-    return
-  }
-  if (railFilter.value === id) {
-    railFilter.value = ''
-    return
-  }
-  railFilter.value = id
-  if (graph.section !== 'work') setSection('work')
 }
 
 function toggleScope(scopeId) {
@@ -1380,15 +1310,6 @@ function onKeydown(event) {
     else if (graph.selectedNode) closeObject()
     return
   }
-  if (event.altKey && !event.metaKey && !event.ctrlKey && event.code?.startsWith('Digit')) {
-    const ids = [...RAIL_ISSUE_READOUTS.map(item => item.id), 'agents', 'diag']
-    const index = Number(event.code.slice(5)) - 1
-    if (index >= 0 && index < ids.length) {
-      event.preventDefault()
-      toggleRail(ids[index])
-    }
-    return
-  }
   if (editing || event.metaKey || event.ctrlKey || event.altKey) return
   if (event.key.toLowerCase() === 'n') {
     event.preventDefault()
@@ -1411,8 +1332,6 @@ function defaultKind() {
   return {
     work: 'issue',
     projects: 'project',
-    people: 'person',
-    companies: 'company',
     knowledge: 'note',
     all: 'note',
   }[graph.section]

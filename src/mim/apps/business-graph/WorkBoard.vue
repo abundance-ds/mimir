@@ -87,8 +87,8 @@
               <template #trigger>
                 <component
                   :is="priorityIcons[issue.priority || 'normal']"
-                  :size="13"
-                  :stroke-width="2"
+                  :size="16"
+                  :stroke-width="2.2"
                 />
               </template>
             </GraphSelect>
@@ -476,7 +476,7 @@ function human(value) {
 
 .board-column {
   display: flex;
-  width: 262px;
+  width: 340px;
   height: 100%;
   flex-direction: column;
   overflow: hidden;
@@ -589,7 +589,7 @@ function human(value) {
 
 .board-priority {
   align-self: center;
-  margin-left: 4px;
+  margin-left: 5px;
   color: var(--color-ink-2);
 }
 
