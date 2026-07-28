@@ -1,0 +1,119 @@
+import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import AppActivity from './AppActivity.vue'
+
+function activity(app, plan = {}) {
+  return {
+    id: `app:${app.id}`,
+    kind: 'app',
+    title: app.title,
+    status: 'ready',
+    workspacePath: '/work',
+    source: { type: 'app', appId: app.id, app },
+    launch: { plan: { appId: app.id, mode: app.mode, ...plan } },
+  }
+}
+
+describe('AppActivity', () => {
+  it('routes the restored scratch identity to the focused Today surface', () => {
+    const record = activity({
+      id: 'scratch',
+      title: 'Today',
+      mode: 'embedded',
+      entry: 'mimir://builtin/scratch',
+      tools: [],
+    }, { url: 'mimir://builtin/scratch' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { TodayApp: true, EmbeddedAppHost: true } },
+    })
+
+    expect(wrapper.findComponent({ name: 'TodayApp' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
+  it('routes the built-in business graph to its native Vue surface', () => {
+    const record = activity({
+      id: 'business-graph',
+      title: 'Business graph',
+      mode: 'rust-helper',
+      helper: 'business-graph',
+    }, { helper: 'business-graph' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          BusinessGraphApp: true,
+          EmbeddedAppHost: true,
+        },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'BusinessGraphApp' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
+  it('bubbles graph Activity handoffs through the ordinary app surface contract', async () => {
+    const record = activity({
+      id: 'business-graph',
+      title: 'Business graph',
+      mode: 'rust-helper',
+      helper: 'business-graph',
+    }, { helper: 'business-graph' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { BusinessGraphApp: true } },
+    })
+    const payload = { nodeId: 'issue-1', prompt: 'Work from graph context.' }
+
+    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('startWork', payload)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('startWork')).toEqual([[payload]])
+  })
+
+  it('routes embedded apps and gives their host a stable instance identity', () => {
+    const record = activity({
+      id: 'ledger',
+      title: 'Ledger',
+      mode: 'embedded',
+      entry: 'index.html',
+      tools: [],
+    }, { url: 'mimir-app://ledger/index.html' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { EmbeddedAppHost: true } },
+    })
+    const embedded = wrapper.findComponent({ name: 'EmbeddedAppHost' })
+
+    expect(embedded.exists()).toBe(true)
+    expect(embedded.props('instanceId')).toBe('app:ledger')
+  })
+
+  it('routes external launch plans through a callback event', async () => {
+    const record = activity({
+      id: 'runner',
+      title: 'Runner',
+      mode: 'process',
+    }, { command: 'runner', args: [], cwd: '/work' })
+    const wrapper = mount(AppActivity, { props: { activity: record, active: true } })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('launchPlan')).toHaveLength(1)
+    expect(wrapper.emitted('launchPlan')[0][0].plan.command).toBe('runner')
+  })
+
+  it('renders an actionable diagnostic for malformed durable records', () => {
+    const record = {
+      id: 'app:missing',
+      kind: 'app',
+      title: 'Missing',
+      status: 'interrupted',
+      source: {},
+      launch: {},
+    }
+    const wrapper = mount(AppActivity, { props: { activity: record, active: true } })
+
+    expect(wrapper.get('[data-app-activity-invalid]').text()).toContain('definition is missing')
+  })
+})
