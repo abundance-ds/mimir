@@ -71,5 +71,5 @@ export function clearActivity(activityId) {
 }
 
 export function listenToActivityEvents(callback) {
-  return listen('mim://activity-event', (event) => callback(event.payload))
+  return listen('mimir://activity-event', (event) => callback(event.payload))
 }

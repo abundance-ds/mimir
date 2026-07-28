@@ -7,9 +7,9 @@ import {
   formatToolCatalog,
   helpText,
   terminalGraphCommand,
-} from '../../bin/mimx.mjs'
+} from '../../bin/mimir.mjs'
 
-describe('mimx MCP client', () => {
+describe('mimir MCP client', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -80,10 +80,10 @@ describe('mimx MCP client', () => {
 
   it('keeps default help short and progressively discloses focused topics', () => {
     expect(helpText()).toContain('Use normal file and shell tools')
-    expect(helpText()).toContain('mimx help <topic>')
+    expect(helpText()).toContain('mimir help <topic>')
     expect(helpText()).not.toContain('replace-selection')
     expect(helpText('editor')).toContain('replace-selection')
-    expect(helpText('review')).toContain('mim_propose')
+    expect(helpText('review')).toContain('mimir_propose')
     expect(helpText('docs')).toContain('docs/reference/')
   })
 
@@ -93,13 +93,13 @@ describe('mimx MCP client', () => {
         name: 'files_browse',
         description: 'Browse files.',
         inputSchema: { type: 'object' },
-        _meta: { 'mim/canonicalName': 'files.browse' },
+        _meta: { 'mimir/canonicalName': 'files.browse' },
       },
       {
         name: 'graph_search',
         description: 'Search the graph.',
         inputSchema: { type: 'object' },
-        _meta: { 'mim/canonicalName': 'graph.search' },
+        _meta: { 'mimir/canonicalName': 'graph.search' },
       },
     ]
 

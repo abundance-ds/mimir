@@ -248,7 +248,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     if (watchUnlisten || watchStartPromise) return watchStartPromise
     if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) return false
     watchStartPromise = import('@tauri-apps/api/event')
-      .then(({ listen }) => listen('mim://workspace-files-changed', (event) => {
+      .then(({ listen }) => listen('mimir://workspace-files-changed', (event) => {
         watchApplyQueue = watchApplyQueue
           .catch(() => {})
           .then(() => applyWorkspaceChange(event.payload))

@@ -11,7 +11,7 @@ import { limitText, MAX_TOOL_OUTPUT_CHARS } from './helpers'
 
 export { limitText, MAX_TOOL_OUTPUT_CHARS }
 
-export function createMimTools(context = {}) {
+export function createMimirTools(context = {}) {
   const tools = {
     ...createReadTool(context),
     ...createListTool(context),

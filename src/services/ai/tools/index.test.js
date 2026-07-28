@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { createMimTools } from './index'
+import { createMimirTools } from './index'
 
-describe('createMimTools', () => {
+describe('createMimirTools', () => {
   it('returns core tools that need no workspace context', () => {
-    const tools = createMimTools()
+    const tools = createMimirTools()
     const names = Object.keys(tools)
 
     // Always present (no workspace/project required)
@@ -17,7 +17,7 @@ describe('createMimTools', () => {
   })
 
   it('returns workspace-dependent tools when context provided', () => {
-    const tools = createMimTools({ workspacePath: '/proj', projectId: 'p1' })
+    const tools = createMimirTools({ workspacePath: '/proj', projectId: 'p1' })
     const names = Object.keys(tools)
 
     expect(names).toContain('shell')
@@ -25,7 +25,7 @@ describe('createMimTools', () => {
   })
 
   it('every tool has description and execute', () => {
-    const tools = createMimTools({ workspacePath: '/proj', projectId: 'p1' })
+    const tools = createMimirTools({ workspacePath: '/proj', projectId: 'p1' })
     for (const [name, tool] of Object.entries(tools)) {
       expect(tool, `${name} missing description`).toHaveProperty('description')
       expect(tool, `${name} missing execute`).toHaveProperty('execute')
@@ -33,7 +33,7 @@ describe('createMimTools', () => {
   })
 
   it('respects disabledTools context', () => {
-    const tools = createMimTools({ disabledTools: ['search_web'] })
+    const tools = createMimirTools({ disabledTools: ['search_web'] })
     expect(Object.keys(tools)).not.toContain('search_web')
   })
 })

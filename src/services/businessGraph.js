@@ -87,7 +87,7 @@ export function restoreGraphNode(undoToken, actor = localGraphActor()) {
 }
 
 export function listenForGraphChanges(handler) {
-  return listen('mim://graph-changed', event => handler(event.payload))
+  return listen('mimir://graph-changed', event => handler(event.payload))
 }
 
 function normalizeQuery(query) {

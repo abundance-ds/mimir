@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
-export const APP_TOOL_REQUEST_EVENT = 'mim://tool-relay-request'
-export const APP_TOOL_CANCEL_EVENT = 'mim://tool-relay-cancel'
+export const APP_TOOL_REQUEST_EVENT = 'mimir://tool-relay-request'
+export const APP_TOOL_CANCEL_EVENT = 'mimir://tool-relay-cancel'
 
 export async function loadAppsCatalog() {
   return normalizeCatalog(await invoke('app_catalog'))
@@ -213,7 +213,7 @@ export function dynamicToolDefinitions(appId, tools = []) {
 export function embeddedAppUrl(app, launch) {
   const url = String(launch?.url || '')
   if (!url) return ''
-  if (/^(https?:|app:|mim:)/i.test(url)) return url
+  if (/^(https?:|app:|mimir:)/i.test(url)) return url
   if (url.startsWith('file://')) {
     const entry = String(app?.entry || 'index.html')
       .split('/')

@@ -2,7 +2,7 @@ import { getModelRegistry } from './client'
 import { createAiBridgeFetch } from './bridgeFetch'
 import { controlForModel, resolveFeatureDefault } from './modelControls'
 
-const DUMMY_KEY = 'mim-local-key'
+const DUMMY_KEY = 'mimir-local-key'
 
 async function loadProvider(provider) {
   switch (provider) {

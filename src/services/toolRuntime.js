@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { spawnActivity } from './activities.js'
-import { createMimTools } from './ai/tools/index.js'
+import { createMimirTools } from './ai/tools/index.js'
 
 const CORE_TOOL_ALIASES = Object.freeze({
   'files.read': 'read',
@@ -27,10 +27,10 @@ export function createToolRuntime(options = {}) {
   async function start() {
     if (started) return
     // The listeners must exist before the server begins accepting requests.
-    unlistenRequest = await listen('mim://tool-relay-request', ({ payload }) => {
+    unlistenRequest = await listen('mimir://tool-relay-request', ({ payload }) => {
       void handle(payload)
     })
-    unlistenCancel = await listen('mim://tool-relay-cancel', ({ payload }) => {
+    unlistenCancel = await listen('mimir://tool-relay-cancel', ({ payload }) => {
       pending.get(payload?.id)?.abort()
       pending.delete(payload?.id)
     })
@@ -263,8 +263,8 @@ function normalizeRoutineDefinition(value = {}) {
     id: String(value.id || '').trim(),
     title: String(value.title || '').trim(),
     enabled: value.enabled !== false,
-    schedule: String(value.schedule || '').trim(),
-    timezone: String(value.timezone || 'UTC').trim(),
+    schedule: String(value.schedule || '').trim() || null,
+    timezone: String(value.timezone || '').trim() || 'local',
     preset: String(value.preset || '').trim(),
     prompt: String(value.prompt || ''),
     overlap: String(value.overlap || 'skip'),
@@ -294,7 +294,7 @@ async function invokeNativeTool(command, args) {
 function executeEditorCommentTool(editor, tool, input) {
   const action = tool.slice('comments.'.length)
   if (!input?.comment_id) throw invalidInputError('comment_id is required.')
-  const result = editor.mimCommentAction?.(action, input.comment_id)
+  const result = editor.mimirCommentAction?.(action, input.comment_id)
   if (!result) throw unavailableError('The attached editor does not support comment actions.')
   if (result.ok === false) throw toolError('handler', result.error || `Could not ${action} comment.`)
   return {
@@ -311,13 +311,13 @@ async function executeWorkspaceTool(request, options) {
   const workspacePath = options.getWorkspacePath?.()
     || request.context?.cwd
     || null
-  const tools = createMimTools({
+  const tools = createMimirTools({
     sessionId: request.context?.activityId || 'mcp',
     projectId: 'workspace',
     projectPath: workspacePath,
     disabledTools: [],
-    getDocument: () => editor?.mimActive?.({ includeContent: true }) || null,
-    setDocument: content => editor?.mimSetContent?.(content),
+    getDocument: () => editor?.mimirActive?.({ includeContent: true }) || null,
+    setDocument: content => editor?.mimirSetContent?.(content),
     onProposal: options.onProposal || createEditorProposalBridge(editor, request),
     signal: options.signal,
   })
@@ -328,7 +328,7 @@ async function executeWorkspaceTool(request, options) {
 
 async function executeEditorProposal(request, options) {
   const editor = resolveEditor(options)
-  if (request.input?.path) await editor.mimOpen(request.input.path)
+  if (request.input?.path) await editor.mimirOpen(request.input.path)
   return executeWorkspaceTool({
     ...request,
     tool: 'files.edit',
@@ -345,7 +345,7 @@ function createEditorProposalBridge(editor, request) {
   return async (proposal) => {
     if (proposal?.status !== 'pending') return proposal
 
-    const active = editor?.mimActive?.() || null
+    const active = editor?.mimirActive?.() || null
     const path = proposal.path || active?.path || null
     const enriched = {
       ...proposal,
@@ -358,7 +358,7 @@ function createEditorProposalBridge(editor, request) {
     // Open the review immediately in the stable editor surface. Registering it
     // natively afterwards keeps the same proposal visible to every caller and
     // lets accept/reject complete the shared lifecycle.
-    await editor?.mimReviewProposal?.(enriched)
+    await editor?.mimirReviewProposal?.(enriched)
     await invoke('proposal_create', { proposal: enriched })
     return enriched
   }
@@ -375,27 +375,27 @@ function resolveEditor(options, required = true) {
 async function executeEditorTool(editor, tool, input) {
   switch (tool) {
     case 'editor.open':
-      return editor.mimOpen(input.path)
+      return editor.mimirOpen(input.path)
     case 'editor.state':
-      return editor.mimState({ includeContent: Boolean(input.include_content) })
+      return editor.mimirState({ includeContent: Boolean(input.include_content) })
     case 'editor.active':
-      return editor.mimActive({ includeContent: Boolean(input.includeContent) })
+      return editor.mimirActive({ includeContent: Boolean(input.includeContent) })
     case 'editor.tabs':
-      return editor.mimTabs()
+      return editor.mimirTabs()
     case 'editor.content':
-      return editor.mimActive({ includeContent: true })
+      return editor.mimirActive({ includeContent: true })
     case 'editor.selection':
-      return editor.mimSelection()
+      return editor.mimirSelection()
     case 'editor.comments':
-      return editor.mimComments()
+      return editor.mimirComments()
     case 'editor.replace_selection':
-      return editor.mimReplaceSelection(input.text || '')
+      return editor.mimirReplaceSelection(input.text || '')
     case 'editor.set_content':
-      return editor.mimSetContent(input.content || '')
+      return editor.mimirSetContent(input.content || '')
     case 'editor.reveal':
-      return await editor.mimReveal(input)
+      return await editor.mimirReveal(input)
     case 'editor.save':
-      return editor.mimSave()
+      return editor.mimirSave()
     default:
       throw notFoundError(`Unknown editor tool '${tool}'.`)
   }
@@ -443,7 +443,7 @@ function hasCompatibleSettingShape(current, next) {
 }
 
 function isPublicSetting(key) {
-  return /^(editor|ai|comment|mimWorkspace|workbench)/.test(key)
+  return /^(editor|ai|comment|mimirWorkspace|workbench)/.test(key)
 }
 
 async function respondSuccess(id, value) {

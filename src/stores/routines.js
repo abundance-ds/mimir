@@ -41,7 +41,10 @@ export const useRoutinesStore = defineStore('routines', () => {
     routines.value.reduce((count, routine) => count + routine.runningActivityIds.length, 0)
   ))
   const enabledCount = computed(() => (
-    routines.value.filter((routine) => routine.enabled && routine.available).length
+    routines.value.filter((routine) => routine.enabled && routine.available && routine.schedule).length
+  ))
+  const manualCount = computed(() => (
+    routines.value.filter((routine) => !routine.schedule).length
   ))
 
   async function initialize() {
@@ -274,6 +277,7 @@ export const useRoutinesStore = defineStore('routines', () => {
     selectedRoutine,
     runningCount,
     enabledCount,
+    manualCount,
     initialize,
     load,
     reload,

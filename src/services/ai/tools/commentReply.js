@@ -51,7 +51,7 @@ export function createCommentReplyTool(context = {}) {
           } else {
             if (!resolvedPath) return { error: 'No file path available. Open a document or provide a path.' }
             await invoke('write_text_file', { path: resolvedPath, content: modified })
-            await emit('mim://file-updated', { path: resolvedPath, content: modified })
+            await emit('mimir://file-updated', { path: resolvedPath, content: modified })
           }
 
           return { reply_id: replyId, comment_id, status: 'replied' }

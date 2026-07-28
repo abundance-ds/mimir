@@ -11,8 +11,8 @@ export async function readDocument(contextGetDocument) {
     }
   }
   if (content == null) {
-    content = localStorage.getItem('mim:doc')
-    path = localStorage.getItem('mim:doc:path') || null
+    content = localStorage.getItem('mimir:doc')
+    path = localStorage.getItem('mimir:doc:path') || null
   }
   if (content != null) {
     return {

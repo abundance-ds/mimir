@@ -28,8 +28,8 @@ vi.mock('../services/routines.js', () => ({
 vi.mock('../services/activities.js', () => ({ stopActivity: vi.fn() }))
 
 const baseCatalog = {
-  directory: '/home/me/.mim/routines',
-  statePath: '/home/me/.mim/routines-state.json',
+  directory: '/home/me/.mimir/routines',
+  statePath: '/home/me/.mimir/routines-state.json',
   revision: 2,
   routines: [
     {
@@ -43,7 +43,7 @@ const baseCatalog = {
       overlap: 'skip',
       missed: 'run-once',
       workspace: null,
-      path: '/home/me/.mim/routines/morning.toml',
+      path: '/home/me/.mimir/routines/morning.toml',
       sourceRevision: 'rev-morning',
       available: true,
       nextFire: '2026-07-27T07:00:00Z',
@@ -62,7 +62,7 @@ const baseCatalog = {
       overlap: 'parallel',
       missed: 'skip',
       workspace: '/work',
-      path: '/home/me/.mim/routines/nightly.toml',
+      path: '/home/me/.mimir/routines/nightly.toml',
       sourceRevision: 'rev-nightly',
       available: true,
       nextFire: null,

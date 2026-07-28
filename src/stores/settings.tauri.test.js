@@ -100,7 +100,7 @@ describe('settings store native persistence lifecycle', () => {
 
     const release = store.startSync()
     await vi.waitFor(() => expect(eventListen).toHaveBeenCalledWith(
-      'mim://settings-changed',
+      'mimir://settings-changed',
       expect.any(Function),
     ))
     release()

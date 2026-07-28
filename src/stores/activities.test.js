@@ -24,7 +24,7 @@ const base = {
     command: '/opt/bin/codex',
     args: ['--full-auto'],
     cwd: '/work',
-    env: { MIM_ACTIVITY_ID: 'agent:one' },
+    env: { MIMIR_ACTIVITY_ID: 'agent:one' },
   },
 }
 

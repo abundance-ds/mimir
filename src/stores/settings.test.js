@@ -41,8 +41,8 @@ describe('settings store', () => {
     expect(store.aiGhostSuggestions).toBe(true)
     expect(store.aiGhostModel).toBe('auto')
     expect(store.aiInlineRewrite).toBe(true)
-    expect(store.mimWorkspaceFolder).toBe('')
-    expect(store.mimTeamGraphFolder).toBe('')
+    expect(store.mimirWorkspaceFolder).toBe('')
+    expect(store.mimirTeamGraphFolder).toBe('')
     expect(store.sidebarToolOrder).toEqual([])
     expect(store.sidebarNewActivityOrder).toEqual([])
     expect(store.businessGraphViewState).toEqual({
@@ -84,7 +84,7 @@ describe('settings store', () => {
   })
 
   it('normalizes persisted workbenchZoom during load', async () => {
-    storage.set('mim:editor:settings:v1', JSON.stringify({ workbenchZoom: 5 }))
+    storage.set('mimir:editor:settings:v1', JSON.stringify({ workbenchZoom: 5 }))
     const store = useSettingsStore()
     await store.load()
     expect(store.workbenchZoom).toBe(50)
@@ -186,7 +186,7 @@ describe('settings store', () => {
     expect(setItemSpy).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(300)
     expect(setItemSpy).toHaveBeenCalled()
-    const persisted = JSON.parse(storage.get('mim:editor:settings:v1'))
+    const persisted = JSON.parse(storage.get('mimir:editor:settings:v1'))
     expect(persisted.editorFontSize).toBe(16)
   })
 
@@ -202,7 +202,7 @@ describe('settings store', () => {
 
     await vi.advanceTimersByTimeAsync(300)
     expect(setItemSpy).toHaveBeenCalledTimes(1)
-    const persisted = JSON.parse(storage.get('mim:editor:settings:v1'))
+    const persisted = JSON.parse(storage.get('mimir:editor:settings:v1'))
     expect(persisted.editorFontSize).toBe(18)
   })
 
@@ -211,7 +211,7 @@ describe('settings store', () => {
   it('load() does not trigger save', async () => {
     vi.useFakeTimers()
 
-    storage.set('mim:editor:settings:v1', JSON.stringify({
+    storage.set('mimir:editor:settings:v1', JSON.stringify({
       editorFontSize: 20,
       editorTheme: 'monokai',
     }))
@@ -230,7 +230,7 @@ describe('settings store', () => {
   // ── load() correctness ──
 
   it('load() applies saved values over defaults', async () => {
-    storage.set('mim:editor:settings:v1', JSON.stringify({
+    storage.set('mimir:editor:settings:v1', JSON.stringify({
       editorFontSize: 16,
       editorWordWrap: false,
       editorTheme: 'slate',
@@ -253,7 +253,7 @@ describe('settings store', () => {
   })
 
   it('load() tolerates corrupt localStorage', async () => {
-    storage.set('mim:editor:settings:v1', 'not json')
+    storage.set('mimir:editor:settings:v1', 'not json')
     const store = useSettingsStore()
     await store.load()
     expect(store.editorFontSize).toBe(16)
@@ -269,7 +269,7 @@ describe('settings store', () => {
     store.set('editorFontSize', 22)
     await store.save()
 
-    const raw = JSON.parse(storage.get('mim:editor:settings:v1'))
+    const raw = JSON.parse(storage.get('mimir:editor:settings:v1'))
     expect(raw.editorFontSize).toBe(22)
   })
 

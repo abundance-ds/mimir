@@ -181,6 +181,13 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
   }
 
+  function prepareSearch(value) {
+    searchGeneration += 1
+    searchQuery.value = String(value || '')
+    searchResults.value = []
+    searching.value = false
+  }
+
   function clearSearch() {
     searchGeneration += 1
     searchQuery.value = ''
@@ -350,6 +357,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     unlisten?.()
     unlisten = null
     searchGeneration += 1
+    searching.value = false
   }
 
   function reset() {
@@ -364,6 +372,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     selectedNeighbors.value = []
     contextTrail.value = []
     lastDeletion.value = null
+    searchQuery.value = ''
+    searchResults.value = []
     error.value = ''
     conflict.value = null
     projectRoot.value = ''
@@ -476,6 +486,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     start,
     refresh,
     search,
+    prepareSearch,
     clearSearch,
     openNode,
     stepTo,

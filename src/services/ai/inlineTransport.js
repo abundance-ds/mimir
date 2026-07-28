@@ -30,7 +30,7 @@ function buildInlineTools(ctx, onEdit) {
 
 export function buildInlineSystemPrompt({ text, contextBefore, contextAfter }) {
   const parts = [
-    'You are the inline writing agent in Mim, used by senior research professionals.',
+    'You are the inline writing agent in Mimir, used by senior research professionals.',
     '',
     'The user selected text in their document. Here is the selection and surrounding context:',
     '',

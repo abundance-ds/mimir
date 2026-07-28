@@ -35,7 +35,7 @@ describe('editor session service', () => {
     invoke.mockResolvedValue({
       session,
       diagnostic: 'Invalid editor session was moved aside.',
-      quarantinedPath: '/home/me/.mim/session.json.corrupt-1',
+      quarantinedPath: '/home/me/.mimir/session.json.corrupt-1',
     })
 
     await expect(loadSession()).resolves.toEqual(session)

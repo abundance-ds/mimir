@@ -22,7 +22,7 @@ describe('appsCatalog service', () => {
 
   it('normalizes and sorts the Rust catalog without losing manifest tools', async () => {
     vi.mocked(invoke).mockResolvedValue({
-      directory: '/home/me/.mim/apps',
+      directory: '/home/me/.mimir/apps',
       apps: [
         { id: 'z', title: 'Zulu', mode: 'process', tools: [] },
         {
@@ -62,7 +62,7 @@ describe('appsCatalog service', () => {
 
   it('routes local definition mutations to the native catalog and normalizes every result', async () => {
     vi.mocked(invoke).mockResolvedValue({
-      directory: '/home/me/.mim/apps',
+      directory: '/home/me/.mimir/apps',
       apps: [{ id: 'notes', title: 'Notes', mode: 'embedded', builtin: false }],
       diagnostics: [],
     })
@@ -110,10 +110,10 @@ describe('appsCatalog service', () => {
     const onCall = vi.fn()
     await listenForAppTools({ appId: 'ledger', instanceId: 'one', onCall })
 
-    listeners.get('mim://tool-relay-request')({
+    listeners.get('mimir://tool-relay-request')({
       payload: { id: 'wrong', target: { kind: 'app', app_id: 'ledger', instance_id: 'two' } },
     })
-    listeners.get('mim://tool-relay-request')({
+    listeners.get('mimir://tool-relay-request')({
       payload: { id: 'right', target: { kind: 'app', app_id: 'ledger', instance_id: 'one' } },
     })
 

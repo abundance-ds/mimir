@@ -43,5 +43,5 @@ export async function searchIndexedContent(token, request) {
 }
 
 export function listenForWorkspaceFileChanges(callback) {
-  return listen('mim://workspace-files-changed', (event) => callback(event.payload))
+  return listen('mimir://workspace-files-changed', (event) => callback(event.payload))
 }

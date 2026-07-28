@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { invoke, listeners, createMimTools } = vi.hoisted(() => ({
+const { invoke, listeners, createMimirTools } = vi.hoisted(() => ({
   invoke: vi.fn(),
   listeners: new Map(),
-  createMimTools: vi.fn(),
+  createMimirTools: vi.fn(),
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   }),
 }))
 vi.mock('./ai/tools/index.js', () => ({
-  createMimTools,
+  createMimirTools,
 }))
 
 import {
@@ -27,8 +27,8 @@ describe('canonical renderer tool runtime', () => {
   beforeEach(() => {
     invoke.mockReset()
     listeners.clear()
-    createMimTools.mockReset()
-    createMimTools.mockImplementation(() => ({
+    createMimirTools.mockReset()
+    createMimirTools.mockImplementation(() => ({
       read: { execute: vi.fn(async input => ({ read: input.target })) },
     }))
   })
@@ -36,8 +36,8 @@ describe('canonical renderer tool runtime', () => {
   it('installs request and cancellation listeners before starting MCP', async () => {
     invoke.mockImplementation(async command => {
       if (command === 'tool_server_start') {
-        expect(listeners.has('mim://tool-relay-request')).toBe(true)
-        expect(listeners.has('mim://tool-relay-cancel')).toBe(true)
+        expect(listeners.has('mimir://tool-relay-request')).toBe(true)
+        expect(listeners.has('mimir://tool-relay-cancel')).toBe(true)
       }
     })
     const runtime = createToolRuntime()
@@ -52,8 +52,8 @@ describe('canonical renderer tool runtime', () => {
         startedClientId = invoke.mock.calls.at(-1)[1].clientId
       }
       if (command === 'tool_server_stop') {
-        expect(listeners.has('mim://tool-relay-request')).toBe(true)
-        expect(listeners.has('mim://tool-relay-cancel')).toBe(true)
+        expect(listeners.has('mimir://tool-relay-request')).toBe(true)
+        expect(listeners.has('mimir://tool-relay-cancel')).toBe(true)
         expect(invoke.mock.calls.at(-1)[1].clientId).toBe(startedClientId)
       }
     })
@@ -62,20 +62,20 @@ describe('canonical renderer tool runtime', () => {
     await runtime.stop()
 
     expect(runtime.started).toBe(false)
-    expect(listeners.has('mim://tool-relay-request')).toBe(false)
-    expect(listeners.has('mim://tool-relay-cancel')).toBe(false)
+    expect(listeners.has('mimir://tool-relay-request')).toBe(false)
+    expect(listeners.has('mimir://tool-relay-cancel')).toBe(false)
   })
 
   it('routes editor calls without replacing or hiding dirty editor state', async () => {
     const editor = {
-      mimActive: vi.fn(() => ({ path: '/work/a.md', dirty: true, content: 'draft' })),
+      mimirActive: vi.fn(() => ({ path: '/work/a.md', dirty: true, content: 'draft' })),
     }
     const result = await executeToolRequest({
       tool: 'editor.content',
       input: {},
     }, { editor })
     expect(result).toEqual({ path: '/work/a.md', dirty: true, content: 'draft' })
-    expect(editor.mimActive).toHaveBeenCalledWith({ includeContent: true })
+    expect(editor.mimirActive).toHaveBeenCalledWith({ includeContent: true })
   })
 
   it('returns the composed lean editor state in one call', async () => {
@@ -87,19 +87,19 @@ describe('canonical renderer tool runtime', () => {
       comments: { total: 2, unresolved: 1, resolved: 1 },
     }
     const editor = {
-      mimState: vi.fn(() => state),
+      mimirState: vi.fn(() => state),
     }
 
     await expect(executeToolRequest({
       tool: 'editor.state',
       input: { include_content: true },
     }, { editor })).resolves.toEqual(state)
-    expect(editor.mimState).toHaveBeenCalledWith({ includeContent: true })
+    expect(editor.mimirState).toHaveBeenCalledWith({ includeContent: true })
   })
 
   it('routes resolve, reopen, and delete through the active editor comment model', async () => {
     const editor = {
-      mimCommentAction: vi.fn(() => ({ ok: true })),
+      mimirCommentAction: vi.fn(() => ({ ok: true })),
     }
 
     await expect(executeToolRequest({
@@ -115,7 +115,7 @@ describe('canonical renderer tool runtime', () => {
       input: { comment_id: 'c1' },
     }, { editor })).resolves.toEqual({ comment_id: 'c1', status: 'deleted' })
 
-    expect(editor.mimCommentAction.mock.calls).toEqual([
+    expect(editor.mimirCommentAction.mock.calls).toEqual([
       ['resolve', 'c1'],
       ['reopen', 'c1'],
       ['delete', 'c1'],
@@ -322,10 +322,10 @@ describe('canonical renderer tool runtime', () => {
 
   it('opens MCP editor edits as real reviews and registers their lifecycle', async () => {
     const editor = {
-      mimActive: vi.fn(() => ({ path: '/work/a.md', dirty: true })),
-      mimReviewProposal: vi.fn(async proposal => ({ proposalId: proposal.id })),
+      mimirActive: vi.fn(() => ({ path: '/work/a.md', dirty: true })),
+      mimirReviewProposal: vi.fn(async proposal => ({ proposalId: proposal.id })),
     }
-    createMimTools.mockImplementation(context => ({
+    createMimirTools.mockImplementation(context => ({
       edit: {
         execute: vi.fn(async () => {
           const proposal = {
@@ -349,7 +349,7 @@ describe('canonical renderer tool runtime', () => {
     }, { editor })
 
     expect(result).toEqual({ status: 'pending_review' })
-    expect(editor.mimReviewProposal).toHaveBeenCalledWith(expect.objectContaining({
+    expect(editor.mimirReviewProposal).toHaveBeenCalledWith(expect.objectContaining({
       id: 'proposal-1',
       path: '/work/a.md',
       sessionId: 'agent-1',
@@ -365,11 +365,11 @@ describe('canonical renderer tool runtime', () => {
 
   it('opens an optional path and routes lean proposals through review', async () => {
     const editor = {
-      mimOpen: vi.fn(async () => ({ path: '/work/a.md' })),
-      mimActive: vi.fn(() => ({ path: '/work/a.md', dirty: false })),
-      mimReviewProposal: vi.fn(async proposal => ({ proposalId: proposal.id })),
+      mimirOpen: vi.fn(async () => ({ path: '/work/a.md' })),
+      mimirActive: vi.fn(() => ({ path: '/work/a.md', dirty: false })),
+      mimirReviewProposal: vi.fn(async proposal => ({ proposalId: proposal.id })),
     }
-    createMimTools.mockImplementation(context => ({
+    createMimirTools.mockImplementation(context => ({
       edit: {
         execute: vi.fn(async (input) => {
           expect(input.target).toBe('@editor')
@@ -401,8 +401,8 @@ describe('canonical renderer tool runtime', () => {
       status: 'pending_review',
     })
 
-    expect(editor.mimOpen).toHaveBeenCalledWith('/work/a.md')
-    expect(editor.mimReviewProposal).toHaveBeenCalledWith(expect.objectContaining({
+    expect(editor.mimirOpen).toHaveBeenCalledWith('/work/a.md')
+    expect(editor.mimirReviewProposal).toHaveBeenCalledWith(expect.objectContaining({
       id: 'proposal-lean',
       path: '/work/a.md',
       sessionId: 'agent-lean',
@@ -421,7 +421,7 @@ describe('canonical renderer tool runtime', () => {
     invoke.mockClear()
     const pending = runtime.handle({ id: 'call-1', tool: 'activities.list' })
     await Promise.resolve()
-    listeners.get('mim://tool-relay-cancel')?.({ payload: { id: 'call-1' } })
+    listeners.get('mimir://tool-relay-cancel')?.({ payload: { id: 'call-1' } })
     resolve(['late'])
     await pending
     expect(invoke).not.toHaveBeenCalledWith('tool_relay_response', expect.anything())

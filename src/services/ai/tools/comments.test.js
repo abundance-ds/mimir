@@ -60,7 +60,7 @@ describe('comment_add tool', () => {
     expect(written).toContain('text="This needs revision"')
     expect(written).toContain('>test document</comment>')
 
-    expect(mockEmit).toHaveBeenCalledWith('mim://file-updated', {
+    expect(mockEmit).toHaveBeenCalledWith('mimir://file-updated', {
       path: '/project/test.md',
       content: written,
     })

@@ -119,6 +119,47 @@ describe('business graph store', () => {
     expect(store.view).toBe('portfolio')
   })
 
+  it('invalidates an in-flight result when a newer search draft is prepared', async () => {
+    let resolveSearch
+    vi.mocked(searchGraph).mockReturnValue(new Promise(resolve => {
+      resolveSearch = resolve
+    }))
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+
+    const pending = store.search('b')
+    expect(store.searching).toBe(true)
+
+    store.prepareSearch('ba')
+    expect(store.searchQuery).toBe('ba')
+    expect(store.searchResults).toEqual([])
+    expect(store.searching).toBe(false)
+
+    resolveSearch([{ node: summaries[1] }])
+    await pending
+    expect(store.searchQuery).toBe('ba')
+    expect(store.searchResults).toEqual([])
+  })
+
+  it('cannot remain stuck in a searching state after the graph stops', async () => {
+    let resolveSearch
+    vi.mocked(searchGraph).mockReturnValue(new Promise(resolve => {
+      resolveSearch = resolve
+    }))
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+
+    const pending = store.search('bank')
+    expect(store.searching).toBe(true)
+    store.stop()
+    expect(store.searching).toBe(false)
+
+    resolveSearch([{ node: summaries[0] }])
+    await pending
+    expect(store.searching).toBe(false)
+    expect(store.searchResults).toEqual([])
+  })
+
   it('rolls back optimistic edits and exposes revision conflicts', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')

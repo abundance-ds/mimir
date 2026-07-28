@@ -20,7 +20,7 @@ export async function detectAgents() {
 
 export async function loadLauncherConfig() {
   if (!window.__TAURI_INTERNALS__) {
-    return { path: '~/.mim/launchers.json', presets: structuredClone(FALLBACK_PRESETS), diagnostic: null }
+    return { path: '~/.mimir/launchers.json', presets: structuredClone(FALLBACK_PRESETS), diagnostic: null }
   }
   return invoke('launcher_load_config')
 }

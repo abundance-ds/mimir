@@ -44,7 +44,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const id = `${kind}:${crypto.randomUUID()}`
     const timestamp = new Date().toISOString()
     const mcpUrl = activityContextUrl(
-      resolved.env?.MIMX_MCP_URL || 'http://127.0.0.1:17532/mcp',
+      resolved.env?.MIMIR_MCP_URL || 'http://127.0.0.1:17532/mcp',
       {
         activityId: id,
         agentId: resolved.agentId || resolved.presetId,
@@ -73,14 +73,14 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       launch: {
         command: resolved.command,
         args: [...resolved.args, ...(options.args || [])]
-          .map(argument => replaceMcpUrl(argument, resolved.env?.MIMX_MCP_URL, mcpUrl)),
+          .map(argument => replaceMcpUrl(argument, resolved.env?.MIMIR_MCP_URL, mcpUrl)),
         cwd: resolved.cwd,
         env: {
           ...(resolved.env || {}),
           ...(options.env || {}),
-          MIM_ACTIVITY_ID: id,
-          MIM_AGENT_ID: resolved.agentId || resolved.presetId,
-          MIMX_MCP_URL: mcpUrl,
+          MIMIR_ACTIVITY_ID: id,
+          MIMIR_AGENT_ID: resolved.agentId || resolved.presetId,
+          MIMIR_MCP_URL: mcpUrl,
         },
       },
     }
@@ -128,8 +128,8 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         cwd: resolved.cwd,
         env: {
           ...(resolved.env || {}),
-          MIM_ACTIVITY_ID: activity.id,
-          MIMX_MCP_URL: 'http://127.0.0.1:17532/mcp',
+          MIMIR_ACTIVITY_ID: activity.id,
+          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp',
         },
       },
     }
@@ -179,8 +179,8 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         cwd,
         env: {
           ...env,
-          MIM_ACTIVITY_ID: id,
-          MIMX_MCP_URL: 'http://127.0.0.1:17532/mcp',
+          MIMIR_ACTIVITY_ID: id,
+          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp',
         },
       },
     }
@@ -269,7 +269,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     ]))
     lastLaunchMetrics.value = rounded
     try {
-      performance.measure('mim.activity.launch', {
+      performance.measure('mimir.activity.launch', {
         start: performance.now() - metrics.totalMs,
         end: performance.now(),
         detail: rounded,

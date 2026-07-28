@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
-export const ROUTINES_CHANGED_EVENT = 'mim://routines-changed'
+export const ROUTINES_CHANGED_EVENT = 'mimir://routines-changed'
 
 export async function loadRoutineCatalog() {
   return normalizeRoutineCatalog(await invoke('routine_catalog'))
@@ -94,8 +94,8 @@ function normalizeRoutine(value) {
     id: String(routine.id || ''),
     title: String(routine.title || routine.id || 'Untitled routine'),
     enabled: routine.enabled !== false,
-    schedule: String(routine.schedule || ''),
-    timezone: String(routine.timezone || 'UTC'),
+    schedule: optionalString(routine.schedule),
+    timezone: String(routine.timezone || 'local'),
     preset: String(routine.preset || ''),
     prompt: String(routine.prompt || ''),
     overlap: String(routine.overlap || 'skip'),
@@ -124,8 +124,9 @@ function serializeDefinition(value) {
     id: requiredId(definition.id),
     title: String(definition.title || '').trim(),
     enabled: definition.enabled !== false,
-    schedule: String(definition.schedule || '').trim(),
-    timezone: String(definition.timezone || 'UTC').trim(),
+    // No schedule means manual-only: the routine runs exclusively on demand.
+    schedule: String(definition.schedule || '').trim() || null,
+    timezone: String(definition.timezone || '').trim() || 'local',
     preset: String(definition.preset || '').trim(),
     prompt: String(definition.prompt || ''),
     overlap: String(definition.overlap || 'skip'),

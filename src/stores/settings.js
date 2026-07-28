@@ -4,7 +4,7 @@ import { emit, listen } from '@tauri-apps/api/event'
 import { DEFAULT_WORKBENCH_ZOOM, applyWorkbenchZoom, clampWorkbenchZoom } from '../shared/workbenchZoom.js'
 
 const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
-const STORAGE_KEY = 'mim:editor:settings:v1'
+const STORAGE_KEY = 'mimir:editor:settings:v1'
 
 const DARK_THEMES = ['slate', 'monokai', 'dracula', 'zenith', 'synthwave']
 
@@ -24,7 +24,7 @@ const DEFAULTS = {
   aiGhostModel: 'auto',
   aiInlineRewrite: true,
   aiInlineModel: 'auto',
-  mimTerminalFontSize: 12,
+  mimirTerminalFontSize: 12,
   recentAppIds: [],
   activityNavigator: {
     mode: 'manual',
@@ -34,8 +34,8 @@ const DEFAULTS = {
   sidebarNewActivityOrder: [],
   workbenchFileFavorites: {},
   commentGateSkip: false,
-  mimWorkspaceFolder: '',
-  mimTeamGraphFolder: '',
+  mimirWorkspaceFolder: '',
+  mimirTeamGraphFolder: '',
   businessGraphViewState: {
     section: 'work',
     sectionViews: {
@@ -167,9 +167,9 @@ export const useSettingsStore = defineStore('settings', () => {
     const t = theme || 'parchment'
     document.documentElement.setAttribute('data-theme', t)
     if (isTauri()) {
-      Promise.resolve(emit('mim://theme-changed', { theme: t })).catch(() => {})
+      Promise.resolve(emit('mimir://theme-changed', { theme: t })).catch(() => {})
     }
-    try { localStorage.setItem('mim:theme', t) } catch {}
+    try { localStorage.setItem('mimir:theme', t) } catch {}
   }
 
   watch(settings.editorTheme, (val) => applyTheme(val))
@@ -182,7 +182,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (!isTauri() || syncUnlisten) return Promise.resolve()
     if (syncInstallPromise) return syncInstallPromise
     syncInstallPromise = Promise.resolve(
-      listen('mim://settings-changed', async () => {
+      listen('mimir://settings-changed', async () => {
         // Preserve this window's latest local edit before accepting another
         // window's complete snapshot.
         await flush()

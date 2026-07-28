@@ -21,8 +21,8 @@ describe('local data service', () => {
   })
 
   it('retains the config-directory query for user-facing paths', async () => {
-    invoke.mockResolvedValue('/home/me/.mim')
-    await expect(getDataDir()).resolves.toBe('/home/me/.mim')
+    invoke.mockResolvedValue('/home/me/.mimir')
+    await expect(getDataDir()).resolves.toBe('/home/me/.mimir')
     expect(invoke).toHaveBeenCalledWith('ai_config_dir')
   })
 
@@ -31,7 +31,7 @@ describe('local data service', () => {
     invoke.mockResolvedValue({
       settings: { editor: { editorTheme: 'parchment' } },
       diagnostic: 'Invalid settings were moved aside.',
-      quarantinedPath: '/home/me/.mim/settings.json.corrupt-1',
+      quarantinedPath: '/home/me/.mimir/settings.json.corrupt-1',
     })
 
     await expect(loadSettings()).resolves.toEqual({

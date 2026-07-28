@@ -23,8 +23,8 @@ describe('routines service', () => {
 
   it('normalizes, sorts, and preserves the complete runtime state', async () => {
     vi.mocked(invoke).mockResolvedValue({
-      directory: '/home/me/.mim/routines',
-      statePath: '/home/me/.mim/routines-state.json',
+      directory: '/home/me/.mimir/routines',
+      statePath: '/home/me/.mimir/routines-state.json',
       revision: 7,
       routines: [
         {
@@ -50,7 +50,7 @@ describe('routines service', () => {
           timezone: 'Europe/Berlin',
           preset: 'codex',
           prompt: 'Review.',
-          path: '/home/me/.mim/routines/a-morning.toml',
+          path: '/home/me/.mimir/routines/a-morning.toml',
           sourceRevision: 'rev-morning',
           available: true,
           nextFire: '2026-07-27T07:00:00Z',
@@ -81,7 +81,7 @@ describe('routines service', () => {
       missed: 'skip',
     })
     expect(catalog.routines[0]).toMatchObject({
-      path: '/home/me/.mim/routines/a-morning.toml',
+      path: '/home/me/.mimir/routines/a-morning.toml',
       sourceRevision: 'rev-morning',
     })
     expect(catalog.lastTick.fires[0].routineId).toBe('a-morning')

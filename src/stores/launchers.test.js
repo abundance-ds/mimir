@@ -64,7 +64,7 @@ describe('launchers store', () => {
         title: 'Local reviewer',
         kind: 'agent',
         agentId: 'custom',
-        binary: '/opt/mim/bin/reviewer',
+        binary: '/opt/mimir/bin/reviewer',
         args: ['--fast'],
       }],
     })
@@ -75,7 +75,7 @@ describe('launchers store', () => {
     expect(store.availablePresets).toHaveLength(1)
     expect(store.availablePresets[0]).toMatchObject({
       id: 'local-reviewer',
-      binary: '/opt/mim/bin/reviewer',
+      binary: '/opt/mimir/bin/reviewer',
       available: true,
       unavailableReason: '',
     })

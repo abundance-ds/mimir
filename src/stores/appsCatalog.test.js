@@ -27,7 +27,7 @@ const apps = [
     id: 'scratch',
     title: 'Today',
     mode: 'embedded',
-    entry: 'mim://builtin/scratch',
+    entry: 'mimir://builtin/scratch',
     builtin: true,
     tools: [],
   },
@@ -45,7 +45,7 @@ describe('appsCatalog store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(loadAppsCatalog).mockReset().mockResolvedValue({
-      directory: '/home/me/.mim/apps',
+      directory: '/home/me/.mimir/apps',
       apps,
       diagnostics: [],
     })
@@ -62,7 +62,7 @@ describe('appsCatalog store', () => {
       trashLocalApp,
     ]) {
       vi.mocked(operation).mockReset().mockResolvedValue({
-        directory: '/home/me/.mim/apps',
+        directory: '/home/me/.mimir/apps',
         apps,
         diagnostics: [],
       })
@@ -114,7 +114,7 @@ describe('appsCatalog store', () => {
       title: 'Field Notes',
     }
     vi.mocked(createLocalApp).mockResolvedValue({
-      directory: '/home/me/.mim/apps',
+      directory: '/home/me/.mimir/apps',
       apps: [...apps, created],
       diagnostics: [],
     })
