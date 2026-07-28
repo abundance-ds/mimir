@@ -3,13 +3,13 @@ import { createPinia } from 'pinia'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
-import BusinessGraphApp from '../src/mim/apps/BusinessGraphApp.vue'
+import BusinessGraphApp from '../src/mimir/apps/BusinessGraphApp.vue'
 
 const params = new URLSearchParams(location.search)
 const theme = params.get('theme') || 'parchment'
 document.documentElement.setAttribute('data-theme', theme)
 // The settings store applies its configured theme on load; seed it.
-localStorage.setItem('mim:editor:settings:v1', JSON.stringify({ editorTheme: theme }))
+localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({ editorTheme: theme }))
 
 const iso = offset => {
   const date = new Date()
@@ -23,7 +23,7 @@ const stamp = (h, m) => {
 }
 
 const scopes = [
-  { id: 'private:local', kind: 'private', root: '/Users/waqr/.mim/graph/private' },
+  { id: 'private:local', kind: 'private', root: '/Users/waqr/.mimir/graph/private' },
   { id: 'project:atlas', kind: 'project', root: '/work/atlas' },
   { id: 'team:main', kind: 'team', root: '/team/graph' },
 ]

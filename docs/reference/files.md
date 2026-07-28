@@ -7,7 +7,7 @@ Files spans four state owners. Keep them separate when changing behavior:
 | regular-file metadata, fuzzy path results, bounded content hits | `src-tauri/src/file_index.rs`, `file_index_commands.rs` | `src/services/fileIndex.js`, `src/stores/workspaceFiles.js` |
 | immediate directory children and mutation safety | `src-tauri/src/workspace_files.rs` | `src/services/workspaceFileOperations.js`, `workspaceFiles.treeChildren` |
 | open tabs and user-opened recents | — | `src/stores/files.js` |
-| Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mim/activities/FilesActivity.vue`, `src/mim/files/`, `src/mim/components/FileTreeRow.vue` |
+| Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mimir/activities/FilesActivity.vue`, `src/mimir/files/`, `src/mimir/components/FileTreeRow.vue` |
 
 The metadata index and directory tree are intentionally different projections.
 The index contains reviewable regular files, respects ignore/noise rules, and
@@ -42,7 +42,7 @@ it does not displace the recent-file route.
   is a derived descendant marker and is not stored in either file projection.
 
 `FilesActivity.vue` composes ephemeral surface state while focused controllers
-under `src/mim/files/` own selection/navigation, context-menu lifetime,
+under `src/mimir/files/` own selection/navigation, context-menu lifetime,
 favorites identity, path normalization, and filesystem mutations. Mutation
 state and cleanup must stay in `useFileMutations.js`; tree rows remain
 presentation-only.
@@ -61,7 +61,7 @@ the row creates per-row authorities and breaks keyboard/multi-select behavior.
 | `pdf` | read bytes and render the PDF preview |
 | `external` | mount metadata/default-app actions without reading as text |
 
-`src/editor/App.vue::mimOpen` trusts a supplied entry only when it already has
+`src/editor/App.vue::mimirOpen` trusts a supplied entry only when it already has
 `openBehavior`; every other caller is classified by
 `workspace_file_inspect`. Keep that inspection on any new open path so binary
 files are not sent through the UTF-8 command.
@@ -141,9 +141,9 @@ See [security.md](security.md).
 |---|---|---|
 | scan, ordering, ignore, path/content query | `file_index.rs`, `file_index_commands.rs`, `fileIndex.js`, `workspaceFiles.js`, Quick Open | native index tests; store and Quick Open tests |
 | tree load/expand/refresh | `workspace_files.rs`, `workspaceFileOperations.js`, `workspaceFiles.js`, `FilesActivity.vue` | native workspace-file, service, store, Files Activity tests |
-| row visuals, focus, selection, context actions | `FilesActivity.vue`, `mim/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity and file-controller tests |
-| favorites | `mim/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
+| row visuals, focus, selection, context actions | `FilesActivity.vue`, `mimir/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity and file-controller tests |
+| favorites | `mimir/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
 | external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |
-| rename/Trash with open buffers | `mim/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
+| rename/Trash with open buffers | `mimir/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
 | MCP mutation surface | `tool_runtime.rs`, renderer file tool handlers, `workspace_files.rs` | tool runtime and native mutation tests |

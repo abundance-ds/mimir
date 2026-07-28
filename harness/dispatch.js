@@ -2,7 +2,7 @@ import { createApp, h, ref } from 'vue'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
-import DispatchBar from '../src/mim/apps/business-graph/DispatchBar.vue'
+import DispatchBar from '../src/mimir/apps/business-graph/DispatchBar.vue'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')
@@ -58,7 +58,7 @@ window.__TAURI_INTERNALS__ = {
 const echoes = params.get('echo') === '1'
   ? [
       { id: 1, kind: 'job', text: '→ jana owes us the comparator list by friday', at: new Date(Date.now() - 9 * 60000).toISOString() },
-      { id: 2, kind: 'echo', text: 'mimx call issues.move {"id":"issue-2","status":"waiting"}', at: new Date(Date.now() - 5 * 60000).toISOString() },
+      { id: 2, kind: 'echo', text: 'mimir call issues.move {"id":"issue-2","status":"waiting"}', at: new Date(Date.now() - 5 * 60000).toISOString() },
       { id: 3, kind: 'error', text: '/bord: unknown command (try /help)', at: new Date(Date.now() - 2 * 60000).toISOString() },
       { id: 4, kind: 'ok', text: '/board waiting — filter announced above the board', at: new Date(Date.now() - 60000).toISOString() },
     ]

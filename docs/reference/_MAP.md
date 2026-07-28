@@ -1,32 +1,32 @@
 # Codebase map
 
-This archived map routes Mim's dense implementation notes. Do not preload it or
-[gotchas.md](gotchas.md); use it only when source and focused `mimx help` are
+This archived map routes Mimir's dense implementation notes. Do not preload it or
+[gotchas.md](gotchas.md); use it only when source and focused `mimir help` are
 insufficient. Source remains canonical for local syntax and obvious behavior.
 
 ## Product shape
 
-Mim is one Tauri window with three mounted panes:
+Mimir is one Tauri window with three mounted panes:
 
 | Pane | Owner | Contents |
 |---|---|---|
-| Sidebar | `src/mim/components/WorkbenchSidebar.vue` | stable Tools, fresh-run sources, active Activities, Settings |
-| Activity | `src/mim/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, and launched app instances |
+| Sidebar | `src/mimir/components/WorkbenchSidebar.vue` | stable Tools, fresh-run sources, active Activities, Settings |
+| Activity | `src/mimir/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, and launched app instances |
 | Editor | `src/editor/App.vue` | Markdown tabs, inline AI, ghost completion, diff review, comments |
 
-`src/mim/WorkbenchApp.vue` composes the panes and connects them to the Rust
-runtimes. `src/mim/components/WorkbenchShell.vue` and
+`src/mimir/WorkbenchApp.vue` composes the panes and connects them to the Rust
+runtimes. `src/mimir/components/WorkbenchShell.vue` and
 `src/stores/workbench.js` own resizing, pane rails, widths, and Activity
 navigation history.
 
 ## Entry points
 
-- `src/main.js` mounts `src/mim/App.vue` by default.
+- `src/main.js` mounts `src/mimir/App.vue` by default.
 - `?view=editor` mounts `src/editor/App.vue` as a standalone editor surface.
 - `src-tauri/src/main.rs` calls the Tauri library entry in
   `src-tauri/src/lib.rs`.
 - `src-tauri/src/lib.rs` creates the main window and initializes Activities,
-  Routines, the tool registry, the MCP endpoint, file indexing, and `mimx`.
+  Routines, the tool registry, the MCP endpoint, file indexing, and `mimir`.
 
 Startup is split: Rust registers core tools during Tauri setup, but the
 renderer starts the MCP socket only after installing tool-relay listeners.
@@ -49,31 +49,31 @@ listeners are installed. See
 | Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
-| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, `scripts/check-tauri-commands.mjs` | full verification set; `src-tauri/tests/mimx_contract.rs` |
+| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, `scripts/check-tauri-commands.mjs` | full verification set; `src-tauri/tests/mimir_cli_contract.rs` |
 
 ## Frontend map
 
 ### Workbench and Activities
 
-- `src/mim/WorkbenchApp.vue`: top-level orchestration and core Activity records
-- `src/mim/composables/useActivityLifecycle.js`: Activity creation, close,
+- `src/mimir/WorkbenchApp.vue`: top-level orchestration and core Activity records
+- `src/mimir/composables/useActivityLifecycle.js`: Activity creation, close,
   archive, and status-tracking lifecycle extracted from WorkbenchApp
-- `src/mim/composables/useWorkspaceBootstrap.js`: startup hydration, settings
+- `src/mimir/composables/useWorkspaceBootstrap.js`: startup hydration, settings
   load, and restore sequence
-- `src/mim/composables/useWorkbenchKeyboardRouting.js`: global keyboard dispatch
+- `src/mimir/composables/useWorkbenchKeyboardRouting.js`: global keyboard dispatch
   for workbench-level shortcuts
-- `src/mim/composables/useWorkbenchResize.js`: pane drag with rAF-coalesced
+- `src/mimir/composables/useWorkbenchResize.js`: pane drag with rAF-coalesced
   store writes and exact flush on release
-- `src/mim/composables/usePointerReorder.js`: drag-to-reorder for sidebar rows
-- `src/mim/components/`: three-pane shell, rails, sidebar, recent-project
+- `src/mimir/composables/usePointerReorder.js`: drag-to-reorder for sidebar rows
+- `src/mimir/components/`: three-pane shell, rails, sidebar, recent-project
   switcher, quick-open, pane host
-- `src/mim/activities/TerminalActivity.vue`, `terminalActivity.js`: xterm-backed
+- `src/mimir/activities/TerminalActivity.vue`, `terminalActivity.js`: xterm-backed
   terminal/agent surface, WebGL fallback lifecycle, fonts, bytes, and theme
-- `src/mim/activities/FilesActivity.vue`: Project/Recent/Favorites composition,
+- `src/mimir/activities/FilesActivity.vue`: Project/Recent/Favorites composition,
   selection/action orchestration, Git decoration, and settings-backed favorites
-- `src/mim/components/FileTreeRow.vue`: stateless tree-row presentation and ARIA
-- `src/mim/activities/AppActivity.vue`: app-instance host selection
-- `src/mim/activities/RoutinesActivity.vue`: complete file-backed routine CRUD,
+- `src/mimir/components/FileTreeRow.vue`: stateless tree-row presentation and ARIA
+- `src/mimir/activities/AppActivity.vue`: app-instance host selection
+- `src/mimir/activities/RoutinesActivity.vue`: complete file-backed routine CRUD,
   run/stop state, diagnostics, context menus, and keyboard control
 - `src/stores/activities.js`: renderer Activity records
 - `src/stores/activityRuntime.js`: native lifecycle, PTY I/O, resume, events
@@ -90,12 +90,12 @@ See [activities.md](activities.md) and [agent-setup.md](agent-setup.md).
 - `src/services/fileIndex.js`: native index/search wrappers
 - `src/services/workspaceFileOperations.js`: inspect/list/create/rename,
   duplicate, Trash, reveal, and default-app wrappers
-- `src/mim/activities/FilesActivity.vue`: Files state composition and operations
-- `src/mim/components/FileTreeRow.vue`: tree/secondary-row rendering
-- `src/mim/components/QuickOpen.vue`: compact global Cmd/Ctrl+P Go to for
+- `src/mimir/activities/FilesActivity.vue`: Files state composition and operations
+- `src/mimir/components/FileTreeRow.vue`: tree/secondary-row rendering
+- `src/mimir/components/QuickOpen.vue`: compact global Cmd/Ctrl+P Go to for
   a focused New activity subview, Tools, recent/files search, and closed
   History
-- `src/mim/quickOpenResults.js`: typed launcher result ordering and `/`, `@`,
+- `src/mimir/quickOpenResults.js`: typed launcher result ordering and `/`, `@`,
   and `+` query scopes
 - `src/services/fileSystem.js`: editor text and binary I/O wrappers
 - `src/stores/files.js`: typed tabs, clean-preview reuse, dirty state, recents
@@ -109,15 +109,15 @@ See [files.md](files.md).
 - `src/shared/ui/settings/AppsSettingsSection.vue`: search, launch, diagnostics,
   local scaffold/duplicate/title/Trash operations, and definition navigation
 - `src/shared/ui/settings/AppSettingsSectionRows.vue`: keyboard catalog rows
-- `src/mim/apps/`: Today, Business graph, embedded host, launch-plan
+- `src/mimir/apps/`: Today, Business graph, embedded host, launch-plan
   host, and local app surfaces
-- `src/mim/apps/BusinessGraphApp.vue`: scope/projection shell, graph loading,
+- `src/mimir/apps/BusinessGraphApp.vue`: scope/projection shell, graph loading,
   context trail, inspector orchestration, and Start Work event
-- `src/mim/apps/business-graph/`: Board, list, portfolio, CRM, timeline,
+- `src/mimir/apps/business-graph/`: Board, list, portfolio, CRM, timeline,
   relationship graph, inspector, and create-flow components
 - `src/stores/businessGraph.js`, `src/services/businessGraph.js`: graph
   projection state and typed native command boundary
-- `src/apps/sdk/mim-sdk.js`: app bridge for data, files, HTTP, tools, and editor
+- `src/apps/sdk/mimir-sdk.js`: app bridge for data, files, HTTP, tools, and editor
 - `src/apps/sdk/theme-base.css`: optional shared app theme base
 
 See [apps-system.md](apps-system.md).
@@ -126,13 +126,13 @@ See [apps-system.md](apps-system.md).
 
 - `src/stores/routines.js`: live catalog, source-aware mutations, and run state
 - `src/services/routines.js`: native CRUD/reveal commands and change events
-- `src/mim/activities/RoutinesActivity.vue`: scheduler control surface
+- `src/mimir/activities/RoutinesActivity.vue`: scheduler control surface
 
 See [routines.md](routines.md).
 
 ### Editor
 
-- `src/editor/App.vue`: editor orchestration and public Mim editor bridge
+- `src/editor/App.vue`: editor orchestration and public Mimir editor bridge
 - `src/editor/composables/useEditorSessionLifecycle.js`: session hydration,
   persistence watcher, and close-guard coordination
 - `src/editor/composables/useEditorNativeLifecycle.js`: native menu, window
@@ -182,7 +182,7 @@ cross-window behavior are in [settings.md](settings.md).
 - `src-tauri/src/activities/status.rs`: agent working/input/done inference
 - `src-tauri/src/activity_commands.rs`: Tauri lifecycle and PTY commands
 - `src-tauri/src/launchers.rs`: presets, detection, exact argv, MCP injection
-- `src-tauri/src/mimx.rs`: installs `mimx` and the Pi extension
+- `src-tauri/src/mimir_cli.rs`: installs `mimir` and the Pi extension
 
 ### MCP and tools
 
@@ -191,11 +191,11 @@ cross-window behavior are in [settings.md](settings.md).
 - `src-tauri/src/tool_runtime.rs`: core definitions and live provider ownership
 - `src-tauri/src/tool_server.rs`: loopback MCP transport and legacy debug routes
 - `src-tauri/src/shell_exec.rs`: bounded shell execution with sensitive-env filtering behind `shell.run`
-- `bin/mimx.mjs`: tool discovery, generic calls, and editor shortcuts
-- `bin/pi-mim-extension.ts`: dynamic Pi registration of current Mim tools
+- `bin/mimir.mjs`: tool discovery, generic calls, and editor shortcuts
+- `bin/pi-mimir-extension.ts`: dynamic Pi registration of current Mimir tools
 
-- `src-tauri/tests/mimx_contract.rs`: end-to-end MCP contract test — boots a
-  real tool server on an ephemeral port and drives it via `bin/mimx.mjs` CLI
+- `src-tauri/tests/mimir_cli_contract.rs`: end-to-end MCP contract test — boots a
+  real tool server on an ephemeral port and drives it via `bin/mimir.mjs` CLI
   invocations and raw JSON-RPC HTTP
 
 See [mcp.md](mcp.md).
@@ -243,19 +243,19 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 
 | Path | Owner |
 |---|---|
-| `~/.mim/launchers.json` | launcher presets |
-| `~/.mim/activities/` | durable Activity records and scrollback |
-| `~/.mim/apps/` | local app TOML and app directories |
-| `~/.mim/app-data/` | app-owned JSON values |
-| `~/.mim/graph/private/` | private local Business graph Markdown |
-| `~/.mim/routines/` | routine TOML |
-| `~/.mim/routines-state.json` | next-fire planner state |
-| `~/.mim/settings.json` | editor/workbench/settings data |
-| `~/.mim/session.json` | open editor tabs, drafts, recents, and zoom |
-| `~/.mim/models.json` | inline/ghost AI provider and model registry |
-| `~/.mim/bin/` | installed `mimx` |
-| `~/.mim/pi/mim-tools.ts` | installed Pi extension |
-| `~/.mim/keys.env` | debug-only plaintext key fallback |
+| `~/.mimir/launchers.json` | launcher presets |
+| `~/.mimir/activities/` | durable Activity records and scrollback |
+| `~/.mimir/apps/` | local app TOML and app directories |
+| `~/.mimir/app-data/` | app-owned JSON values |
+| `~/.mimir/graph/private/` | private local Business graph Markdown |
+| `~/.mimir/routines/` | routine TOML |
+| `~/.mimir/routines-state.json` | next-fire planner state |
+| `~/.mimir/settings.json` | editor/workbench/settings data |
+| `~/.mimir/session.json` | open editor tabs, drafts, recents, and zoom |
+| `~/.mimir/models.json` | inline/ghost AI provider and model registry |
+| `~/.mimir/bin/` | installed `mimir` |
+| `~/.mimir/pi/mimir-tools.ts` | installed Pi extension |
+| `~/.mimir/keys.env` | debug-only plaintext key fallback |
 
 ## Documentation
 
@@ -271,7 +271,7 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 | [settings.md](settings.md) | mutation, persistence, cross-window and MCP semantics |
 | [security.md](security.md) | trusted-local model and exact capability boundaries |
 | [ai-system.md](ai-system.md) | model registry, credentials, providers, transport |
-| [agent-setup.md](agent-setup.md) | launchers, automatic agent connection, `mimx` |
+| [agent-setup.md](agent-setup.md) | launchers, automatic agent connection, `mimir` |
 | [activities.md](activities.md) | universal execution lifecycle |
 | [mcp.md](mcp.md) | registry, transport, domains, dynamic providers |
 | [business-graph.md](business-graph.md) | GraphStore, ontology, physical scopes, projections, tools, migration, and recovery |

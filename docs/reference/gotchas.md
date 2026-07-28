@@ -1,6 +1,6 @@
 # Gotchas
 
-Non-obvious constraints that are still current in Mim 0.1.0.
+Non-obvious constraints that are still current in Mimir 0.1.0.
 
 ## CSS and input
 
@@ -29,17 +29,17 @@ Settings presents those boundaries as one familiar CLI-flags field.
 escaped input becomes an argv array before save. Do not move parsing into the
 native spawn path or execute the field through a shell.
 
-### Keep Codex's injected MCP name app-specific
+### Keep Codex's injected MCP name product-owned
 
 Codex config overrides merge with existing tables. Injecting
-`mcp_servers.mim.url` into a user config where `mim` is a stdio server creates
-an invalid hybrid transport. Keep the one-run HTTP entry under
-`mcp_servers.mim_workbench` unless a full migration strategy replaces it.
+`mcp_servers.mimir.url` into a user config where `mimir` is a stdio server creates
+an invalid hybrid transport. The clean Mimir identity owns `mcp_servers.mimir`;
+do not reuse that id for a different transport.
 
 ### Durable does not mean a process survives relaunch
 
 Durable Activity metadata and bounded scrollback survive. PTY and child handles
-do not. A record restored after Mim exits becomes interrupted and can start a
+do not. A record restored after Mimir exits becomes interrupted and can start a
 new continuation where its CLI supports one.
 
 ### Archive and clear require an ended durable Activity
@@ -97,7 +97,7 @@ protocol versions instead of echoing arbitrary client input.
 
 ### Registry names and aliases are separate
 
-Canonical names such as `files.read` identify capabilities inside Mim. MCP
+Canonical names such as `files.read` identify capabilities inside Mimir. MCP
 aliases such as `read` are client-facing. Both must remain unique and every
 tool's canonical metadata must survive transport listing.
 
@@ -175,7 +175,7 @@ Compare discarded files by stable path/draft identity because Pinia may expose
 reactive proxies rather than the raw confirmation object.
 
 Dock/system Quit is asynchronous: native `ExitRequested` emits
-`mim://quit-requested`, the Editor completes dirty-document and session guards,
+`mimir://quit-requested`, the Editor completes dirty-document and session guards,
 and only then invokes `app_quit_confirmed`. Never allow the first exit request
 to bypass renderer confirmation.
 
@@ -199,7 +199,7 @@ debounced disk write.
 ### API key plaintext fallback is debug-only
 
 Production key writes use the OS keychain. Repository `.env` and
-`~/.mim/keys.env` are read only by debug builds; do not make them the release
+`~/.mimir/keys.env` are read only by debug builds; do not make them the release
 storage path. Its atomic writer enforces owner-only permissions on Unix before
 secret bytes are written.
 
@@ -222,7 +222,7 @@ index generation.
 
 Startup arguments, Finder/file-association events, and second-instance
 arguments append absolute decoded paths to one native queue. The renderer
-installs `mim://open-files-pending` before draining `take_pending_files`; do not
+installs `mimir://open-files-pending` before draining `take_pending_files`; do not
 send paths only as an event payload or reintroduce the listen/drain race.
 
 ### Guard platform-only window APIs
@@ -235,5 +235,5 @@ across an async delay; a closed window makes it invalid.
 ### Keep product identity synchronized
 
 Version must match in `package.json`, `src-tauri/Cargo.toml`, and
-`src-tauri/tauri.conf.json`. The package/crate name is `mim-workbench`; the
-desktop product name is `Mim`.
+`src-tauri/tauri.conf.json`. The package/crate name is `mimir`; the
+desktop product name is `Mimir`.

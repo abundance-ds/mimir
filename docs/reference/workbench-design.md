@@ -1,6 +1,6 @@
 # Workbench design
 
-Mim is a local instrument for directing capable CLI agents and reviewing the
+Mimir is a local instrument for directing capable CLI agents and reviewing the
 files they change. The visual posture is dense, quiet, tactile, and precise.
 It should remain comfortable for hours of terminal and document work.
 

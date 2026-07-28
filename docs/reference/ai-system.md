@@ -21,7 +21,7 @@ shared by inline rewrite and ghost completion; interaction behavior remains in
 
 ## Registry semantics
 
-`~/.mim/models.json` is a migrated registry, not a fully user-authoritative
+`~/.mimir/models.json` is a migrated registry, not a fully user-authoritative
 copy. On load:
 
 - missing/corrupt state is replaced from the embedded registry;

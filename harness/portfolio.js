@@ -2,8 +2,8 @@ import { createApp, h } from 'vue'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
-import PortfolioView from '../src/mim/apps/business-graph/PortfolioView.vue'
-import ProjectStanding from '../src/mim/apps/business-graph/ProjectStanding.vue'
+import PortfolioView from '../src/mimir/apps/business-graph/PortfolioView.vue'
+import ProjectStanding from '../src/mimir/apps/business-graph/ProjectStanding.vue'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')

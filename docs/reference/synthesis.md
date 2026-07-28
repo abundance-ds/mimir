@@ -1,12 +1,12 @@
 # Product synthesis
 
-Mim 0.1.0 combines a fast local editor with a polished environment for CLI
+Mimir 0.1.0 combines a fast local editor with a polished environment for CLI
 agents. It is for one person and a few teammates, so the surface stays calm
 while the capability layer remains broad and hackable.
 
 ## Core idea
 
-CLI agents are the primary intelligence. Mim gives them a terminal, a stable
+CLI agents are the primary intelligence. Mimir gives them a terminal, a stable
 editor they can control through MCP, workspace navigation and previews, locally
 defined apps, and scheduled routines. Native model calls are concentrated in
 the editor's inline agent and ghost completion.
@@ -15,7 +15,7 @@ the editor's inline agent and ghost completion.
 
 1. **Activities are the execution UI.** Terminals, agents, apps, and routine
    runs use one lifecycle and one sidebar tray.
-2. **MCP is the capability layer.** Agents, apps, routines, and `mimx` share one
+2. **MCP is the capability layer.** Agents, apps, routines, and `mimir` share one
    discoverable registry.
 3. **The Editor is the review surface.** Activity navigation never replaces the
    document being reviewed.
@@ -67,6 +67,6 @@ Cmd/Ctrl+P History.
 
 ## Surface boundary
 
-Mim has no general-purpose internal chat. The permanent navigation remains
+Mimir has no general-purpose internal chat. The permanent navigation remains
 Sidebar, Activity, and Editor. Additional workflows belong in Apps, tools,
 Routines, or launcher presets.

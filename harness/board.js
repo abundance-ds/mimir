@@ -2,9 +2,9 @@ import { createApp, h, ref } from 'vue'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
-import WorkBoard from '../src/mim/apps/business-graph/WorkBoard.vue'
-import GraphFilterBanner from '../src/mim/apps/business-graph/GraphFilterBanner.vue'
-import EntityList from '../src/mim/apps/business-graph/EntityList.vue'
+import WorkBoard from '../src/mimir/apps/business-graph/WorkBoard.vue'
+import GraphFilterBanner from '../src/mimir/apps/business-graph/GraphFilterBanner.vue'
+import EntityList from '../src/mimir/apps/business-graph/EntityList.vue'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')

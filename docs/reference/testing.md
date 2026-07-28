@@ -83,7 +83,7 @@ currently a CI check.
 | Editor tab/session/close | relevant composable/store test plus session/close tests; dirty Quit smoke |
 | External edit synchronization | external-file-sync and file-store race tests; desktop CLI edit of one clean and one dirty open file |
 | CodeMirror extension | extension unit test and EditorSurface integration; real focus/selection smoke |
-| MCP definition/alias | Rust runtime/registry/server tests and `services/toolRuntime.test.js`; `mimx tools/call` smoke |
+| MCP definition/alias | Rust runtime/registry/server tests and `services/toolRuntime.test.js`; `mimir tools/call` smoke |
 | App manifest/SDK/provider | `apps.rs`, app catalog service/store, embedded host tests; local app smoke |
 | Business graph source/tool/projection | native graph modules and golden fixtures; graph service/store/app/projection/CLI tests; desktop board/inspector smoke |
 | Routine planner/mutation | `routines.rs`, `routine_runtime.rs`, store/service/activity tests |

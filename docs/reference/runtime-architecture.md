@@ -9,15 +9,15 @@ native state, cross-pane coordination, or shutdown.
 | Concern | Authority | Renderer projection |
 |---|---|---|
 | PTYs, process exit, durable Activity records | `src-tauri/src/activities/supervisor.rs` | `src/stores/activityRuntime.js`, `src/stores/activities.js` |
-| Activity navigation and pane geometry | `src/stores/workbench.js` | `src/mim/WorkbenchApp.vue`, `src/mim/components/WorkbenchShell.vue` |
+| Activity navigation and pane geometry | `src/stores/workbench.js` | `src/mimir/WorkbenchApp.vue`, `src/mimir/components/WorkbenchShell.vue` |
 | Tool definitions, aliases, providers, calls | `src-tauri/src/tool_registry.rs`, `tool_runtime.rs` | `src/services/toolRuntime.js`, app-provider relay |
 | Tool-server socket lifetime | `src-tauri/src/tool_server.rs` | renderer client leases in `src/services/toolRuntime.js` |
 | Routine definitions and scheduler | `src-tauri/src/routines.rs`, `routine_runtime.rs` | `src/stores/routines.js` |
 | Workspace index and safe manager mutations | `src-tauri/src/file_index.rs`, `workspace_files.rs` | `src/stores/workspaceFiles.js` |
 | Business graph Markdown, indexes, scopes, revisions | physical graph roots through `business_graph::GraphRuntime` | `src/stores/businessGraph.js`, built-in Business graph app |
 | Open buffers, dirty state, editor review state | renderer Pinia stores and `src/editor/App.vue` | native session/proposal coordination only where required |
-| Settings snapshot | `~/.mim/settings.json` through `local_settings.rs` | `src/stores/settings.js` |
-| Unsaved editor recovery | `~/.mim/session.json` through `session.rs` | `sessionPersist.js`, `sessionRestore.js` |
+| Settings snapshot | `~/.mimir/settings.json` through `local_settings.rs` | `src/stores/settings.js` |
+| Unsaved editor recovery | `~/.mimir/session.json` through `session.rs` | `sessionPersist.js`, `sessionRestore.js` |
 | AI credentials and upstream transport | Rust keychain/transport modules | renderer builds requests and consumes streams |
 
 Do not move authority into a convenient caller. In particular, renderer stores
@@ -30,7 +30,7 @@ Routine, proposal, and registry results.
 supervisor, Routine runtime, and managed Business graph runtime before building
 Tauri. Setup then performs this order:
 
-1. install `mimx` and the Pi extension;
+1. install `mimir` and the Pi extension;
 2. create the `main` window;
 3. attach Activity and Routine event sinks;
 4. start the Routine runtime;
@@ -77,7 +77,7 @@ Opening or switching a workspace mounts the Business graph separately through
 `useWorkspaceBootstrap.js`: local private, current-project, and optional team
 roots are normalized into one `GraphRuntime`. Native filesystem watchers
 rebuild the disposable index after an external Markdown change and emit
-`mim://graph-changed`; the renderer reloads its projection. A failed team root
+`mimir://graph-changed`; the renderer reloads its projection. A failed team root
 does not change the physical meaning of the private or project source.
 
 `useEditorSessionLifecycle.js` owns a second hydration transaction inside the
@@ -117,7 +117,7 @@ Normal window close and application Quit are guarded differently but converge
 before native exit:
 
 1. Rust intercepts an application `ExitRequested`, prevents it, emits
-   `mim://quit-requested`, and focuses `main`.
+   `mimir://quit-requested`, and focuses `main`.
 2. `src/editor/appQuit.js` runs the editor close guard without closing the
    native window.
 3. The guard awaits hydration, flushes CodeMirror, asks about every dirty

@@ -1,11 +1,11 @@
 # Design system
 
-This document defines the current visual and interaction rules for Mim.
+This document defines the current visual and interaction rules for Mimir.
 [workbench-design.md](workbench-design.md) defines the shell-specific layout.
 
 ## Principles
 
-- **Workhorse, not showroom.** Mim is used all day; it should look best at
+- **Workhorse, not showroom.** Mimir is used all day; it should look best at
   hour six. Density is a feature: surfaces are loud enough to read under
   load, never themed, never decorative.
 - **Visible controls first.** Every property change has an on-surface control.

@@ -1,6 +1,6 @@
 # Inline AI
 
-Mim has two native model interactions inside the Editor: the Cmd/Ctrl+K inline
+Mimir has two native model interactions inside the Editor: the Cmd/Ctrl+K inline
 agent and `++` ghost completion. CLI agents remain the primary general-purpose
 intelligence.
 
@@ -67,7 +67,7 @@ requests; Rust owns credential resolution, upstream transport, host validation,
 cancellation, and response handling.
 
 Debug-only fallback sources are process environment variables, repository
-`.env`, and `~/.mim/keys.env`.
+`.env`, and `~/.mimir/keys.env`.
 
 See [ai-system.md](ai-system.md) for registry migration, model resolution,
 credential precedence, provider normalization, and the two transport paths.

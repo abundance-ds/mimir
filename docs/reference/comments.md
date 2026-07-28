@@ -54,7 +54,7 @@ can pass the protection layer and remain undoable.
 
 The MCP registry exposes add, reply, resolve, reopen, and delete operations.
 `editor.comments` returns structured threads plus a focused agent prompt.
-`mimx comments` and `mimx comments-prompt` use that same editor tool.
+`mimir comments` and `mimir comments-prompt` use that same editor tool.
 
 `src/services/comments/prompt.js` includes path, line, anchor, thread content,
 and reply history without changing the document representation.

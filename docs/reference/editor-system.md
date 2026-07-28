@@ -1,6 +1,6 @@
 # Editor
 
-The Editor is Mim's stable authoring and review surface. It stays mounted while
+The Editor is Mimir's stable authoring and review surface. It stays mounted while
 the selected Activity changes.
 
 ## Files and tabs
@@ -21,7 +21,7 @@ subsystems:
 | native menu/focus synchronization and application Quit | `useEditorNativeLifecycle.js` |
 | proposal registration, native events, and review projection | `useEditorProposalLifecycle.js` |
 | clean-buffer refresh after external workspace edits | `useExternalFileSync.js` |
-| public Mim/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
+| public Mimir/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
 | tab close/reorder/new behavior | `useTabManagement.js` |
 | CodeMirror/store/document synchronization | `useContentSync.js` |
 
@@ -41,7 +41,7 @@ minimal changed range, preserving the surrounding editor state without a
 polling loop or full-workspace reload.
 
 Tabs are typed as `text`, `pdf`, or `external`. Files passes native
-`WorkspaceEntry.openBehavior`; other `mimOpen` callers are classified through
+`WorkspaceEntry.openBehavior`; other `mimirOpen` callers are classified through
 `workspace_file_inspect` before any read. Only text enters CodeMirror and the
 UTF-8 read/save path. `FilePreviewPage.vue` owns non-text routing;
 `PdfPreview.vue` dynamically loads PDF.js, reads bytes through

@@ -4,7 +4,7 @@ Status: shipped implementation record; final desktop visual audit pending
 
 ## Goal
 
-Build Mim's durable operating graph for a five-to-ten-person AI-native HEOR
+Build Mimir's durable operating graph for a five-to-ten-person AI-native HEOR
 research consultancy.
 
 The finished system combines the Knowledge Graph and Issue Board into one
@@ -20,7 +20,7 @@ projects and business workflows into exceptional interactive maps.
    behavior, not a generic graph query rendered as columns.
 3. Rust owns parsing, validation, indexing, traversal, conflict detection,
    source-aware writes, and change events.
-4. Vue owns the high-quality interactive UI inside an ordinary Mim Activity.
+4. Vue owns the high-quality interactive UI inside an ordinary Mimir Activity.
 5. Markdown remains source of truth. Every cache and index is disposable.
 6. The initial ontology is deliberately bounded and business-specific.
 7. Private, project, and team scopes use physical source separation. This
@@ -28,7 +28,7 @@ projects and business workflows into exceptional interactive maps.
 8. Existing `knowledge.*` and `issues.*` tool behavior remains available
    through compatibility facades while the shared graph API becomes canonical.
 9. Existing files are dual-read before any optional physical migration.
-10. Project maps are polished first-party instruments. Mim will not begin with
+10. Project maps are polished first-party instruments. Mimir will not begin with
     a generic no-code dashboard builder.
 
 ## Non-goals
@@ -57,7 +57,7 @@ counts, suggestions, and projections operate only over that set.
 Initial storage convention:
 
 ```text
-~/.mim/graph/private/                 private local source
+~/.mimir/graph/private/                 private local source
 <workspace>/knowledge/                legacy/current project knowledge source
 <workspace>/issues/                   legacy/current project issue source
 <configured-team-graph>/knowledge/    shared team source
@@ -220,7 +220,7 @@ safer for agents than unconstrained graph patches.
 
 ## Combined app
 
-The built-in app appears as one stable App Activity. It uses the native Mim
+The built-in app appears as one stable App Activity. It uses the native Mimir
 theme and interaction grammar rather than an iframe-local design system.
 
 Primary scopes:
@@ -255,7 +255,7 @@ consumer-dashboard polish. The full interaction and review contract lives in
   fields, syntax-aware Markdown, and bounded relation authoring.
 - The context trail remains the navigation signature and restores the exact
   originating projection when stepped backward.
-- Mim theme tokens, visible focus, keyboard parity, and reduced-motion
+- Mimir theme tokens, visible focus, keyboard parity, and reduced-motion
   behavior apply across every custom listbox, calendar, dialog, and action.
 - Source/scope/revision metadata stays restrained; primary content never
   collapses into tiny, repeated bordered forms.
@@ -398,7 +398,7 @@ The graph is successful when an agent can:
 - [x] Implement `issues.*` compatibility.
 - [x] Add semantic issue/project commands.
 - [x] Add concise agent context and sensitive-record handling.
-- [x] Add MCP, `mimx`, and app-caller integration tests.
+- [x] Add MCP, `mimir`, and app-caller integration tests.
 
 ### 4. Built-in app foundation
 

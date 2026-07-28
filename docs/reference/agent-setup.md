@@ -1,13 +1,13 @@
 # Agent setup
 
-Mim detects Codex, Claude, and Pi from the user's login-shell PATH. Installed
+Mimir detects Codex, Claude, and Pi from the user's login-shell PATH. Installed
 and enabled presets appear as one-click launchers in the Sidebar. Missing
 binaries remain visible with their diagnostics in Settings > CLI tools instead
 of occupying the launch surface.
 
 ## Launcher presets
 
-Presets live in `~/.mim/launchers.json`. Mim writes the default file on first
+Presets live in `~/.mimir/launchers.json`. Mimir writes the default file on first
 load and can edit the same data in Settings > CLI tools.
 
 ```json
@@ -69,18 +69,18 @@ Each `args` item is one exact argv entry. No shell string is reconstructed.
 
 ## Automatic MCP connection
 
-Every Mim-launched preset receives:
+Every Mimir-launched preset receives:
 
-- `MIMX_MCP_URL=http://127.0.0.1:17532/mcp`
-- `~/.mim/bin` prepended to PATH
+- `MIMIR_MCP_URL=http://127.0.0.1:17532/mcp`
+- `~/.mimir/bin` prepended to PATH
 
 Agent-specific connection is added unless the preset already supplies it:
 
-- Codex receives a one-off `mcp_servers.mim_workbench.url` configuration
+- Codex receives a one-off `mcp_servers.mimir.url` configuration
   override. The app-specific name cannot merge with a user's unrelated stdio
-  server named `mim`.
+  server named `mimir`.
 - Claude receives an inline `--mcp-config` HTTP server definition.
-- Pi receives `--extension ~/.mim/pi/mim-tools.ts`.
+- Pi receives `--extension ~/.mimir/pi/mimir-tools.ts`.
 
 Detection understands both two-argument and `--mcp-config=…` Claude forms, so
 preconfigured flags are kept verbatim and never injected twice. Terminal
@@ -89,7 +89,7 @@ unrelated agent/version probes; the launcher settings screen is the explicit
 detection refresh boundary.
 
 The Pi extension discovers the lean live catalog at session start and preserves
-its `mim_` names (legacy names receive the prefix once). `/mim-refresh`
+its `mimir_` names (legacy names receive the prefix once). `/mimir-refresh`
 discovers newly exposed default tools after the session began.
 
 Ended agent Activities can start a continuation using the CLI's supported
@@ -108,7 +108,7 @@ the last detection result. `launcher_resolve` remains authoritative for a
 launch: it validates the preset, chooses the binary and cwd, injects agent MCP
 arguments only when absent, and returns exact command/argv/env. The renderer
 then appends run-specific resume/prompt args and host-authoritative
-`MIM_ACTIVITY_ID`/`MIMX_MCP_URL` before spawning.
+`MIMIR_ACTIVITY_ID`/`MIMIR_MCP_URL` before spawning.
 
 Agent detection and connection injection are separate. A custom binary on an
 agent preset keeps the configured `agentId`/resume strategy and MCP injection
@@ -121,53 +121,53 @@ Files that must agree:
 - `src/services/launchers.js`, `activities.js`: invoke boundary
 - `src/stores/activityRuntime.js`: record construction and continuation argv
 - `src/shared/ui/settings/launcherFlags.js`: shell-like UI text to exact argv
-- `bin/mimx.mjs`, `bin/pi-mim-extension.ts`, `src-tauri/src/mimx.rs`: installed
+- `bin/mimir.mjs`, `bin/pi-mimir-extension.ts`, `src-tauri/src/mimir_cli.rs`: installed
   clients
 
 Tests: native `launchers.rs`, launcher store/Settings/flags tests,
-`activityRuntime.test.js`, and `mimxCli.test.js`.
+`activityRuntime.test.js`, and `mimirCli.test.js`.
 
-## `mimx`
+## `mimir`
 
-Mim installs `mimx` on launch and makes it available inside every Mim PTY.
+Mimir installs `mimir` on launch and makes it available inside every Mimir PTY.
 It calls the same MCP registry as the agents.
 
 ```bash
-mimx help
-mimx state
-mimx tools
-mimx tools graph
-mimx call files.search '{"scope":"project","query":"needle"}'
-mimx active
-mimx tabs
-mimx open /absolute/path/to/file.md
-mimx reveal /absolute/path/to/file.md:42
-mimx selection
-mimx comments
-mimx comments-prompt
-mimx replace-selection --stdin
-mimx set-content --file replacement.md
-mimx save
-mimx graph [search terms]
-mimx board [status]
-mimx context <graph-node-id>
+mimir help
+mimir state
+mimir tools
+mimir tools graph
+mimir call files.search '{"scope":"project","query":"needle"}'
+mimir active
+mimir tabs
+mimir open /absolute/path/to/file.md
+mimir reveal /absolute/path/to/file.md:42
+mimir selection
+mimir comments
+mimir comments-prompt
+mimir replace-selection --stdin
+mimir set-content --file replacement.md
+mimir save
+mimir graph [search terms]
+mimir board [status]
+mimir context <graph-node-id>
 ```
 
-Bare help stays short. `mimx help <topic>` and `mimx tools <topic>` disclose
+Bare help stays short. `mimir help <topic>` and `mimir tools <topic>` disclose
 optional commands and registry domains without loading their schemas into every
-agent session. `mimx tools --all --json` remains available for diagnostics.
+agent session. `mimir tools --all --json` remains available for diagnostics.
 
 The graph shortcuts call the canonical native registry rather than scraping the
 visual app: `graph` prints a compact source-aware catalog or ranked search,
 `board` groups issues by status, and `context` prints the bounded agent context
 pack used by Start Work.
 
-For a shell outside Mim:
+For a shell outside Mimir:
 
 ```bash
-export PATH="$HOME/.mim/bin:$PATH"
-export MIMX_MCP_URL="http://127.0.0.1:17532/mcp"
+export PATH="$HOME/.mimir/bin:$PATH"
+export MIMIR_MCP_URL="http://127.0.0.1:17532/mcp"
 ```
 
-Mim must be running for `mimx` and automatically connected agents to reach the
+Mimir must be running for `mimir` and automatically connected agents to reach the
 renderer-backed tools.

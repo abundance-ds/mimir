@@ -27,21 +27,21 @@ reject a real command or conceal a removed one.
 
 | Event | Publisher | Consumer | Non-obvious contract |
 |---|---|---|---|
-| `mim://activity-event` | `activity_commands.rs` sink | `activityRuntime.js` | ordered native upsert/status/exit projection; listener precedes initial `activity_list` |
-| `mim://routines-changed` | `routine_runtime.rs` sink | `services/routines.js` | notification payload may update catalog/run state; explicit catalog load remains recovery path |
-| `mim://open-files-pending` | `file_open.rs` | `useFileOpen.js` | payload is empty; consumer drains the native queue with `take_pending_files` |
-| `mim://tool-relay-request` | Rust UI/app provider | core renderer or app relay | request id owns timeout/cancel/response |
-| `mim://tool-relay-cancel` | Rust provider | same relay | abort before deleting pending entry; late response is ignored |
-| `mim://tools-list-changed` | registry revision observer | dynamic clients | revision notification only; clients fetch a new snapshot |
-| `mim://proposals-changed` | proposal coordinator | Editor | pending proposal list used for display/reconciliation |
-| `mim://proposals-state` | proposal coordinator | other proposal consumers | complete state snapshot, unlike the pending-only event |
-| `mim://proposal-apply` | proposal coordinator | owning Editor window | delegated apply; Editor must answer through `proposal_respond` |
-| `mim://proposal-result` | proposal coordinator | main Editor | terminal lifecycle result; failed/conflict/stale stays reviewable |
-| `mim://file-updated` | native proposal or renderer comment tools | Editor | refresh open clean content without replacing unsaved ownership |
-| `mim://workspace-files-changed` | native file-index watcher | Files store and Editor | debounced metadata delta; Editor reads only matching open clean text paths |
-| `mim://settings-changed` | `settings_changed` command | other windows | notification excludes caller; receiver flushes its local snapshot before reload |
-| `mim://theme-changed` | settings store | terminal/app observers | renderer event used for live theme projection, not persistence |
-| `mim://quit-requested` | Rust `ExitRequested` handler | Editor | begins guarded asynchronous Quit; native exit remains prevented |
+| `mimir://activity-event` | `activity_commands.rs` sink | `activityRuntime.js` | ordered native upsert/status/exit projection; listener precedes initial `activity_list` |
+| `mimir://routines-changed` | `routine_runtime.rs` sink | `services/routines.js` | notification payload may update catalog/run state; explicit catalog load remains recovery path |
+| `mimir://open-files-pending` | `file_open.rs` | `useFileOpen.js` | payload is empty; consumer drains the native queue with `take_pending_files` |
+| `mimir://tool-relay-request` | Rust UI/app provider | core renderer or app relay | request id owns timeout/cancel/response |
+| `mimir://tool-relay-cancel` | Rust provider | same relay | abort before deleting pending entry; late response is ignored |
+| `mimir://tools-list-changed` | registry revision observer | dynamic clients | revision notification only; clients fetch a new snapshot |
+| `mimir://proposals-changed` | proposal coordinator | Editor | pending proposal list used for display/reconciliation |
+| `mimir://proposals-state` | proposal coordinator | other proposal consumers | complete state snapshot, unlike the pending-only event |
+| `mimir://proposal-apply` | proposal coordinator | owning Editor window | delegated apply; Editor must answer through `proposal_respond` |
+| `mimir://proposal-result` | proposal coordinator | main Editor | terminal lifecycle result; failed/conflict/stale stays reviewable |
+| `mimir://file-updated` | native proposal or renderer comment tools | Editor | refresh open clean content without replacing unsaved ownership |
+| `mimir://workspace-files-changed` | native file-index watcher | Files store and Editor | debounced metadata delta; Editor reads only matching open clean text paths |
+| `mimir://settings-changed` | `settings_changed` command | other windows | notification excludes caller; receiver flushes its local snapshot before reload |
+| `mimir://theme-changed` | settings store | terminal/app observers | renderer event used for live theme projection, not persistence |
+| `mimir://quit-requested` | Rust `ExitRequested` handler | Editor | begins guarded asynchronous Quit; native exit remains prevented |
 
 AI streaming events are correlation-scoped rather than stable names:
 `ai-stream-chunk-<id>`, `ai-stream-done-<id>`, and
@@ -56,7 +56,7 @@ The path for a renderer-backed MCP call is:
 HTTP tools/call
   -> ToolRegistry schema validation and canonical lookup
   -> UiToolProvider pending call + timeout
-  -> mim://tool-relay-request
+  -> mimir://tool-relay-request
   -> src/services/toolRuntime.js
   -> editor/store/native service handler
   -> tool_relay_response
@@ -72,7 +72,7 @@ creates an accepted-call race.
 
 App providers use the same Rust relay but a separate renderer implementation
 in `src/services/appsCatalog.js` and frame protocol in
-`src/mim/apps/EmbeddedAppHost.vue`. Provider identity is
+`src/mimir/apps/EmbeddedAppHost.vue`. Provider identity is
 `(appId, instanceId)`; a replacement instance unregisters stale ownership
 before reconciling its definitions.
 
@@ -82,7 +82,7 @@ Startup arguments, file associations, Finder open events, and second-instance
 arguments all append normalized absolute paths to
 `PendingFilePaths`. The native event contains no path by design:
 
-1. renderer installs `mim://open-files-pending`;
+1. renderer installs `mimir://open-files-pending`;
 2. renderer calls `take_pending_files`;
 3. any later producer appends and emits another notification.
 
@@ -96,7 +96,7 @@ See `src-tauri/src/file_open.rs`, `src/editor/composables/useFileOpen.js`, and
 has opened its diff. Editors periodically register their path/dirty/active
 snapshot through `proposal_register_editor`. On apply, Rust selects an owner:
 
-- a matching dirty/open Editor receives `mim://proposal-apply`;
+- a matching dirty/open Editor receives `mimir://proposal-apply`;
 - otherwise Rust applies against disk after its conflict checks;
 - an unavailable delegated window becomes `failed`;
 - Editor responses map `applied`, `rejected`, `not-found`, and `conflict` into

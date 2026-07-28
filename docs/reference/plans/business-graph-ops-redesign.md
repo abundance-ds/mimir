@@ -47,7 +47,7 @@ Supersedes the visual and interaction direction of
 [business-graph-experience-redesign.md](business-graph-experience-redesign.md)
 where they conflict. Scan → Peek → Focus, the bounded ontology, GraphStore,
 scopes, and all tool surfaces (`graph.*`, `knowledge.*`, `issues.*`,
-`projects.*`, `research.*`, `mimx`) are unchanged.
+`projects.*`, `research.*`, `mimir`) are unchanged.
 
 Safety references:
 
@@ -236,16 +236,16 @@ terminal-shaped element; it earns its place as the spine.
 - Results land in **Now** as filed events. If the agent cannot resolve
   something it does not guess: item arrives flagged *needs detail*; the fix
   is one Peek edit. No chat loop, no conversational UI.
-- **Power lane:** leading `/` runs a deterministic mimx command
+- **Power lane:** leading `/` runs a deterministic mimir command
   (`/board waiting`) with plain unix-style errors. Never required.
-- **Echo:** GUI mutations print their mimx equivalent into the bar
+- **Echo:** GUI mutations print their mimir equivalent into the bar
   scrollback, dimmed. The UI teaches the CLI grammar.
 - **Delegate flow** (replaces Start Work / `GraphWorkDialog`, which is
   retired): `!` or `work <node>` expands with scopes and context budget,
   shows the context pack ("what the agent will see") in Peek, launches on
   Enter. No sparkle, no suggestion chips.
 - The rejected sprint's `DispatchBar.vue` (556 lines) survives at
-  `git show ec970aa:src/mim/apps/business-graph/DispatchBar.vue`. Mine it
+  `git show ec970aa:src/mimir/apps/business-graph/DispatchBar.vue`. Mine it
   for ideas only; its visual language (mode codes, `ERR`, `GUI` badges) is
   the rejected costume.
 
@@ -334,7 +334,7 @@ cryptic flags were the wrong part, not the grammar.
 
 ## 11. Step 1 spec: Work board rows (build this first, alone)
 
-Current state of `src/mim/apps/business-graph/WorkBoard.vue` (715 lines):
+Current state of `src/mimir/apps/business-graph/WorkBoard.vue` (715 lines):
 already row-based (`board-row`) with glyph-only priority cycle, row date
 picker (`GraphDatePicker variant="row"`, placeholder `—`), `!`/`W`/`S`/`?`
 flags, author initials, bulk selection, drag with drop-before reorder,
@@ -386,31 +386,31 @@ bar, no shell restyle.
 
 Renderer:
 
-- `src/mim/apps/BusinessGraphApp.vue` (~1987 lines) — shell: topbar
+- `src/mimir/apps/BusinessGraphApp.vue` (~1987 lines) — shell: topbar
   (brand, sections, search, scope menu, refresh, New), viewbar with board
   controls (group/sort/priority filter/columns), projection routing,
   Peek/Focus mount (`GraphInspector`), status bar, dialogs
   (`GraphCreateDialog`, `GraphWorkDialog` — to be retired in step 5,
   `GraphConfirmDialog`), undo toast. Sections come from
   `BUSINESS_SECTIONS` in the store.
-- `src/mim/apps/business-graph/WorkBoard.vue` (715) — step 1 target; see §11.
-- `src/mim/apps/business-graph/EntityList.vue` — list rows; row-grammar
+- `src/mimir/apps/business-graph/WorkBoard.vue` (715) — step 1 target; see §11.
+- `src/mimir/apps/business-graph/EntityList.vue` — list rows; row-grammar
   reference, same cryptic-flag disease; fix when its section comes.
-- `src/mim/apps/business-graph/PortfolioView.vue` — ledger bones are good;
+- `src/mimir/apps/business-graph/PortfolioView.vue` — ledger bones are good;
   step 4.
-- `src/mim/apps/business-graph/GraphInspector.vue` (~2400) — Peek + Focus;
+- `src/mimir/apps/business-graph/GraphInspector.vue` (~2400) — Peek + Focus;
   hosts quick properties, relationship line, activities, Start Work button
   (retire in step 5). Peek must surface lookup facts (email/phone) at top.
-- `src/mim/apps/business-graph/GraphSelect.vue`, `GraphDatePicker.vue` —
+- `src/mimir/apps/business-graph/GraphSelect.vue`, `GraphDatePicker.vue` —
   existing custom controls; reuse for the priority menu and due control.
-- `src/mim/apps/business-graph/NowView.vue`, `StatusRail.vue` — **orphans
+- `src/mimir/apps/business-graph/NowView.vue`, `StatusRail.vue` — **orphans
   from the rejected sprint, unwired. Reference only; do not resurrect
   as-is.**
 - `src/stores/businessGraph.js` — section/view state (currently defaults
   `section='now'`, `view='stream'` — reset default to `work`/`board` until
   Now ships properly), `BUSINESS_SECTIONS`, projection state.
 - `src/services/businessGraph.js` — IPC/service layer to Rust tools.
-- `src/mim/WorkbenchApp.vue` — mounts roots, owns the Start Work handoff.
+- `src/mimir/WorkbenchApp.vue` — mounts roots, owns the Start Work handoff.
 - `src/shared/styles/themes.css` (8 themes), `app.css` (tokens),
   `src/shared/styles/fonts.css`.
 
@@ -419,7 +419,7 @@ Native:
 - `src-tauri/src/business_graph/` — `model.rs` (ontology, DTOs),
   `markdown.rs` (loss-preserving serialization), `store.rs` (indexes,
   queries, mutations), `runtime.rs` (mounted roots, watchers,
-  `mim://graph-changed`), `context.rs` (bounded agent context, redaction),
+  `mimir://graph-changed`), `context.rs` (bounded agent context, redaction),
   `tools/` (registry). The rejected sprint's event log lived in
   `runtime.rs` — see §6 Now for salvage guidance.
 - Golden fixtures: `src-tauri/tests/fixtures/business-graph/`.

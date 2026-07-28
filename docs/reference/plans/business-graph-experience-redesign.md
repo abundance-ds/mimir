@@ -38,7 +38,7 @@ editable.
 
 ### Theme-native palette
 
-The application inherits Mim's light and dark themes. These reference colors
+The application inherits Mimir's light and dark themes. These reference colors
 describe the intended relationships rather than introducing hard-coded theme
 values:
 
@@ -56,8 +56,8 @@ every field. Shadows are limited to functional overlays. Accent is scarce.
 
 ### Type and geometry
 
-- Mim's sans is the interface and reading face.
-- Mim's mono is reserved for IDs, scope paths, revisions, metadata, and
+- Mimir's sans is the interface and reading face.
+- Mimir's mono is reserved for IDs, scope paths, revisions, metadata, and
   keyboard hints.
 - Body text does not drop below 11px; core labels and controls target 12–13px.
 - Working surfaces use 0–3px corners; ordinary controls may use up to 5px.

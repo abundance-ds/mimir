@@ -10,7 +10,7 @@ mirror the full list here.
 `src/stores/settings.js` is the renderer API. It creates one ref per key from
 `DEFAULTS`; Pinia unwraps those refs for component consumers. Desktop
 persistence stores the complete snapshot under the top-level `editor` key in
-`~/.mim/settings.json`.
+`~/.mimir/settings.json`.
 
 | Layer | Files | Responsibility |
 |---|---|---|
@@ -18,7 +18,7 @@ persistence stores the complete snapshot under the top-level `editor` key in
 | Native persistence | `src-tauri/src/local_settings.rs` | atomic JSON, corruption quarantine, serialized read-modify-write |
 | Invoke wrapper | `src/services/dataDir.js` | unwrap diagnostics and select full/editor saves |
 | Controls | `src/shared/ui/SettingsDialog.vue`, `settings/*.vue` | UI validation and calls to `settings.set` |
-| Workbench projection | `src/mim/WorkbenchApp.vue` | workspace, layout, Activity ordering |
+| Workbench projection | `src/mimir/WorkbenchApp.vue` | workspace, layout, Activity ordering |
 | Editor projection | `src/editor/App.vue` | editor/AI behavior and cross-window sync lease |
 | MCP projection | `src/services/toolRuntime.js` | filtered public keys and shape-compatible updates |
 
@@ -41,7 +41,7 @@ persisting API.
 
 Each mounted Workbench/standalone Editor acquires a settings sync lease.
 After a successful native write, the caller invokes `settings_changed`; Rust
-emits `mim://settings-changed` to every other window.
+emits `mimir://settings-changed` to every other window.
 
 On receipt, a window:
 
@@ -79,7 +79,7 @@ scale only editor text.
 
 Business graph settings follow the same mutation invariant:
 
-- `mimTeamGraphFolder` is the optional physical `team:main` source configured
+- `mimirTeamGraphFolder` is the optional physical `team:main` source configured
   in Settings > Graph. An empty value mounts only private and project scopes.
 - `businessGraphViewState` stores the active section, per-section projection,
   Board grouping/sort/priority filter, and visible status columns. It is local
@@ -92,7 +92,7 @@ changing view state must use `settings.set` with a newly constructed object.
 
 `settings.get` and `settings.update` are implemented in
 `src/services/toolRuntime.js`, not Rust. Public keys match the prefixes
-`editor`, `ai`, `comment`, `mimWorkspace`, or `workbench`.
+`editor`, `ai`, `comment`, `mimirWorkspace`, or `workbench`.
 
 Updates enforce only:
 

@@ -1,6 +1,6 @@
-# Building Mim
+# Building Mimir
 
-Mim 0.1.0 is the `mim-workbench` npm and Cargo package.
+Mimir 0.1.0 is the `mimir` npm and Cargo package.
 
 ## Prerequisites
 
@@ -78,8 +78,7 @@ npm run tauri -- build
 
 The GitHub workflow verifies frontend and Rust on Linux. Its manual packaging
 job builds an Apple Silicon DMG on macOS. A local macOS build produces
-`src-tauri/target/release/bundle/macos/Mim.app` and a versioned image under
-`src-tauri/target/release/bundle/dmg/`.
+**Mimir.app** and a versioned disk image under Tauri's release bundle output.
 
 Keep the version synchronized in:
 
@@ -87,16 +86,16 @@ Keep the version synchronized in:
 - `src-tauri/Cargo.toml`
 - `src-tauri/tauri.conf.json`
 
-The product name is `Mim`; the package and crate are `mim-workbench`.
+The product name is `Mimir`; the package and crate are `mimir`.
 
 ## Local runtime files
 
-Launching the desktop app installs `mimx` into `~/.mim/bin/` and the Pi
-extension into `~/.mim/pi/`. It also creates runtime directories as their
+Launching the desktop app installs `mimir` into `~/.mimir/bin/` and the Pi
+extension into `~/.mimir/pi/`. It also creates runtime directories as their
 systems are used. See [agent-setup.md](agent-setup.md) and
 [docs/_MAP.md](_MAP.md#local-data).
 
 API keys saved in Settings use the OS keychain. In debug builds only, key
 resolution may also read process environment variables, the repository `.env`,
-and `~/.mim/keys.env`. The fallback file is atomically replaced and owner-only
+and `~/.mimir/keys.env`. The fallback file is atomically replaced and owner-only
 on Unix; it remains a debug convenience, not release credential storage.

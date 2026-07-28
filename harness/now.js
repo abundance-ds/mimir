@@ -2,7 +2,7 @@ import { createApp, h } from 'vue'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
-import NowView from '../src/mim/apps/business-graph/NowView.vue'
+import NowView from '../src/mimir/apps/business-graph/NowView.vue'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')

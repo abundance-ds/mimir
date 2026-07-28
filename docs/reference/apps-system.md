@@ -1,7 +1,7 @@
 # Apps
 
-Apps are local instruments. Mim ships Today and Business graph as built-ins;
-additional definitions live under `~/.mim/apps/`.
+Apps are local instruments. Mimir ships Today and Business graph as built-ins;
+additional definitions live under `~/.mimir/apps/`.
 
 There is no generic Apps Activity or launcher row. The Sidebar places stable
 Apps under Tools and terminal/process Apps under New activity beside configured
@@ -22,7 +22,7 @@ Activities history.
 
 This is deliberately a personal/small-team local instrument manager. There is
 no marketplace, install workflow, trust gate, permission approval, enable
-switch, package origin, or team policy layer. Put code in `~/.mim/apps`, reload,
+switch, package origin, or team policy layer. Put code in `~/.mimir/apps`, reload,
 and run it.
 
 App manifests and frames are trusted local extension code. Manifest/path
@@ -69,8 +69,8 @@ private, project, and optional team Markdown roots. See
 
 The native catalog accepts either:
 
-- `~/.mim/apps/<name>/app.toml`
-- `~/.mim/apps/<name>.toml`
+- `~/.mimir/apps/<name>/app.toml`
+- `~/.mimir/apps/<name>.toml`
 
 Definitions are loaded independently. Invalid TOML, bad fields, missing
 entries, and duplicate IDs appear as diagnostics while valid apps remain
@@ -114,31 +114,31 @@ Rust libraries. Business graph uses `business-graph`.
 
 `terminal` and `process` launch directly into one PTY-backed Activity from
 Sidebar, Settings, or MCP. There is no intermediate app-plan row. Exact args
-and app env are preserved, while the new Activity id and Mim MCP endpoint
+and app env are preserved, while the new Activity id and Mimir MCP endpoint
 remain host-authoritative. Window/action plans keep an inspectable renderer
 host for completion, failure, and explicit relaunch feedback.
 
 ## Embedded SDK
 
-Local HTML is served through Mim's `app://` protocol. The host injects
-`src/apps/sdk/theme-base.css` and `src/apps/sdk/mim-sdk.js`, exposing:
+Local HTML is served through Mimir's `app://` protocol. The host injects
+`src/apps/sdk/theme-base.css` and `src/apps/sdk/mimir-sdk.js`, exposing:
 
 ```js
-window.mim.app
-window.mim.data.load(key)
-window.mim.data.save(key, value)
-window.mim.data.delete(key)
-window.mim.fs.readText(path)
-window.mim.fs.writeText(path, content)
-window.mim.fs.exists(path)
-window.mim.http.fetch(url, options)
-window.mim.tools.list()
-window.mim.tools.call(name, input)
-window.mim.tools.handle(name, handler)
-window.mim.workspace.openFile(path)
+window.mimir.app
+window.mimir.data.load(key)
+window.mimir.data.save(key, value)
+window.mimir.data.delete(key)
+window.mimir.fs.readText(path)
+window.mimir.fs.writeText(path, content)
+window.mimir.fs.exists(path)
+window.mimir.http.fetch(url, options)
+window.mimir.tools.list()
+window.mimir.tools.call(name, input)
+window.mimir.tools.handle(name, handler)
+window.mimir.workspace.openFile(path)
 ```
 
-App data is namespaced below `~/.mim/app-data/<app-id>/`.
+App data is namespaced below `~/.mimir/app-data/<app-id>/`.
 
 ## App-contributed tools
 
@@ -146,7 +146,7 @@ Each manifest tool becomes a canonical name `app.<app-id>.<name>` unless its
 name is already qualified. Its default MCP alias is `<app-id>_<name>`.
 
 The embedded app attaches the implementation with
-`mim.tools.handle(name, handler)`. Calls flow through the canonical registry to
+`mimir.tools.handle(name, handler)`. Calls flow through the canonical registry to
 that specific app instance. Instance teardown unregisters its provider and
 cancels outstanding calls. Reloading a manifest while its stable Activity is
 mounted replaces that exact provider, reconciles the new tool definitions, and
@@ -154,7 +154,7 @@ reloads the frame without stacking message or registry listeners.
 
 ## App catalog through MCP
 
-App management expands the same canonical registry used by the UI, `mimx`,
+App management expands the same canonical registry used by the UI, `mimir`,
 launched agents, routines, and apps:
 
 | Canonical name | MCP alias | Effect |
@@ -176,11 +176,11 @@ useful automation capabilities.
   validation, launch resolution, protocol, app data, and HTTP
 - `src/shared/ui/settings/AppsSettingsSection.vue`: searchable management UI
 - `src/shared/ui/settings/AppSettingsSectionRows.vue`: keyboard catalog rows
-- `src/mim/activities/AppActivity.vue`: instance surface routing
-- `src/mim/apps/EmbeddedAppHost.vue`: iframe and dynamic tool relay
-- `src/mim/apps/LaunchPlanHost.vue`: window/action and restored-plan feedback
+- `src/mimir/activities/AppActivity.vue`: instance surface routing
+- `src/mimir/apps/EmbeddedAppHost.vue`: iframe and dynamic tool relay
+- `src/mimir/apps/LaunchPlanHost.vue`: window/action and restored-plan feedback
 - `src/services/appsCatalog.js`: frontend bridge
-- `src/apps/sdk/mim-sdk.js`: injected app API
+- `src/apps/sdk/mimir-sdk.js`: injected app API
 
 ## Change map
 

@@ -1,16 +1,17 @@
 {
-  "name": "mim-workbench",
+  "name": "mimir",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "mimx": "bin/mimx.mjs"
+    "mimir": "bin/mimir.mjs"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/build.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "check:commands": "node scripts/check-tauri-commands.mjs",
+    "check:identity": "node scripts/check-identity.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "tauri",
     "test": "node scripts/test.mjs",

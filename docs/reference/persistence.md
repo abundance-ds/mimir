@@ -9,20 +9,20 @@ crash.
 
 | Artifact | Writer/loader | Non-obvious behavior |
 |---|---|---|
-| `~/.mim/settings.json` | `local_settings.rs`, `stores/settings.js` | one top-level object; renderer settings live under `editor`; partial editor save preserves other top-level namespaces |
-| `~/.mim/session.json` | `session.rs`, `sessionPersist.js` | contains recovery content only for dirty named files and nonempty drafts |
-| `~/.mim/models.json` | `ai_models.rs` | embedded product defaults replace known model/provider metadata on version migration; unknown user models survive |
-| `~/.mim/launchers.json` | `launchers.rs` | versioned whole-file config; malformed/unsupported input recovers to defaults with diagnostics |
-| `~/.mim/activities/*.activity.json` | Activity persistence worker | only durable records; scrollback chunks and sequence state share the same snapshot |
-| `~/.mim/routines/*.toml` | user, Routine UI/MCP | source files are the database; mutation is revision-guarded |
-| `~/.mim/routines-state.json` | `routine_runtime.rs` | planner cursor only; definitions remain TOML authority |
-| `~/.mim/apps/*.toml`, `*/app.toml` | user, Apps UI/MCP | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
-| `~/.mim/app-data/<app-id>/<key>.json` | app SDK through `apps.rs` | namespaced by validated app id/key; value bytes are opaque to Rust |
+| `~/.mimir/settings.json` | `local_settings.rs`, `stores/settings.js` | one top-level object; renderer settings live under `editor`; partial editor save preserves other top-level namespaces |
+| `~/.mimir/session.json` | `session.rs`, `sessionPersist.js` | contains recovery content only for dirty named files and nonempty drafts |
+| `~/.mimir/models.json` | `ai_models.rs` | embedded product defaults replace known model/provider metadata on version migration; unknown user models survive |
+| `~/.mimir/launchers.json` | `launchers.rs` | versioned whole-file config; malformed/unsupported input recovers to defaults with diagnostics |
+| `~/.mimir/activities/*.activity.json` | Activity persistence worker | only durable records; scrollback chunks and sequence state share the same snapshot |
+| `~/.mimir/routines/*.toml` | user, Routine UI/MCP | source files are the database; mutation is revision-guarded |
+| `~/.mimir/routines-state.json` | `routine_runtime.rs` | planner cursor only; definitions remain TOML authority |
+| `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI/MCP | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
+| `~/.mimir/app-data/<app-id>/<key>.json` | app SDK through `apps.rs` | namespaced by validated app id/key; value bytes are opaque to Rust |
 | private/project/team `knowledge/*.md`, `issues/*.md` | user, GraphRuntime UI/tools | Markdown is canonical; every node retains physical scope/path/revision; the in-memory GraphStore is disposable |
-| `~/.mim/keys.env` | `ai_keys.rs`, debug only | owner-only atomic plaintext fallback when keychain storage fails |
+| `~/.mimir/keys.env` | `ai_keys.rs`, debug only | owner-only atomic plaintext fallback when keychain storage fails |
 
 API keys in release builds are not file persistence: the OS keychain service
-is `com.mim.terminal`, keyed by the provider environment-variable name.
+is `rs.shoulde.mimir`, keyed by the provider environment-variable name.
 
 ## Atomic writer
 

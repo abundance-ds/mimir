@@ -1,6 +1,6 @@
 # Activities
 
-Activity is Mim's universal execution and navigation record. Terminals, CLI
+Activity is Mimir's universal execution and navigation record. Terminals, CLI
 agents, process Apps, and routine runs occupy the Activity pane and sidebar
 history. Files, Routines, and stable Apps are singleton Tools: they use the same
 pane without duplicating themselves in Activities.
@@ -59,15 +59,15 @@ ordered record subscription for upserts, status, and exit.
   without a listener.
 
 Plain terminals are ephemeral. Agent and routine runs are durable and persist
-bounded scrollback under `~/.mim/activities/`. Retained scrollback defaults to
+bounded scrollback under `~/.mimir/activities/`. Retained scrollback defaults to
 1 MB for terminals and 2 MB for durable agent/routine runs
 (`DEFAULT_TERMINAL_SCROLLBACK_BYTES` / `DEFAULT_DURABLE_SCROLLBACK_BYTES` in
 `supervisor.rs`); `ActivitySpawnRequest.scrollback_byte_cap` overrides the cap
 per spawn. Durable records restore after relaunch; any process that was live
-becomes interrupted because Mim does not pretend that an old PTY is still
+becomes interrupted because Mimir does not pretend that an old PTY is still
 attached.
 
-The renderer installs `mim://activity-event` before calling `activity_list`.
+The renderer installs `mimir://activity-event` before calling `activity_list`.
 Events project upsert/status/exit, while the initial list closes the startup
 gap. Native persistence uses a single batching worker that keeps the latest
 save/delete per Activity path; `activity_flush` and shutdown wait for its
@@ -75,7 +75,7 @@ acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
 
 ## Terminal surface
 
-`src/mim/activities/TerminalActivity.vue` hosts xterm.js for terminal and
+`src/mimir/activities/TerminalActivity.vue` hosts xterm.js for terminal and
 agent Activities. Its non-defaults are deliberate:
 
 - xterm 6's WebGL renderer is loaded after `terminal.open()` for GPU-backed
@@ -140,7 +140,7 @@ Sidebar Activity row targets that exact row, even when another Activity is
 selected or the focused run ended in error. Durable rows archive (after a live
 process stops); ephemeral terminal rows are cleared. The Activity pane rails
 when its last closable row is gone. Editor focus closes its tab instead;
-closing the last embedded tab rails Editor and never closes Mim. The macOS
+closing the last embedded tab rails Editor and never closes Mimir. The macOS
 native menu accelerator delegates through the same focus-aware path. Open
 Settings, confirmation dialogs, and Quick Open consume close first. Collapsing
 and restoring panes also hands focus to visible rail/header controls, so later
@@ -172,7 +172,7 @@ refreshes the installed-agent catalog; repeated agent launches reuse that
 refreshable cache, preserving exact command/argv/MCP flags without the former
 login-shell and `--version` work on every click. Each launch records separate
 resolve, supervisor-spawn, and total timing in
-`activityRuntime.lastLaunchMetrics` and the `mim.activity.launch` performance
+`activityRuntime.lastLaunchMetrics` and the `mimir.activity.launch` performance
 measure.
 
 Inactive optional surfaces are split at the Activity boundary: terminal/agent
@@ -189,10 +189,10 @@ the complete retained scrollback.
 - `src-tauri/src/launchers.rs`
 - `src/stores/activities.js`
 - `src/stores/activityRuntime.js`
-- `src/mim/composables/useActivityLifecycle.js`
-- `src/mim/composables/useWorkbenchKeyboardRouting.js`
-- `src/mim/activities/TerminalActivity.vue`
-- `src/mim/components/WorkbenchSidebar.vue`
+- `src/mimir/composables/useActivityLifecycle.js`
+- `src/mimir/composables/useWorkbenchKeyboardRouting.js`
+- `src/mimir/activities/TerminalActivity.vue`
+- `src/mimir/components/WorkbenchSidebar.vue`
 
 Primary tests are colocated native tests in `activities/model.rs`,
 `scrollback.rs`, `status.rs`, and `supervisor.rs`, plus

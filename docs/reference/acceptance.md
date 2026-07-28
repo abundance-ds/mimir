@@ -1,6 +1,6 @@
 # Product acceptance contract
 
-This is the release behavior contract for Mim 0.1.0. Unit tests support these
+This is the release behavior contract for Mimir 0.1.0. Unit tests support these
 requirements; they do not replace runtime verification.
 
 ## Workbench
@@ -74,23 +74,23 @@ requirements; they do not replace runtime verification.
   inside the same Activity row; resume never creates a second record.
 - Routine reruns resolve the current routine definition. Plain terminal and
   app-process reruns preserve their exact stored command, argv, cwd, and env.
-- `mimx` is on PATH in every Mim-launched PTY.
+- `mimir` is on PATH in every Mimir-launched PTY.
 
 ## MCP
 
 - The MCP endpoint binds to loopback and exposes `initialize`, `ping`,
   `tools/list`, and `tools/call`.
-- One canonical registry backs MCP, Tauri callers, apps, and `mimx`.
-- Default agent discovery contains only `mim_state`, `mim_reveal`, and
-  `mim_propose`; optional domains require explicit CLI discovery.
+- One canonical registry backs MCP, Tauri callers, apps, and `mimir`.
+- Default agent discovery contains only `mimir_state`, `mimir_reveal`, and
+  `mimir_propose`; optional domains require explicit CLI discovery.
 - Tool calls validate object schemas and return structured, stable errors.
 - Core tools cover files, editor, comments, shell, web search, Activities,
   Apps, Routines, settings, and the native Business graph domains.
 - Live app providers can add, update, remove, execute, and cancel tools without
   restarting the server.
-- Mim-launched Codex, Claude, and Pi receive the endpoint automatically.
-- Codex uses the app-specific `mcp_servers.mim_workbench` HTTP entry so an
-  existing stdio server named `mim` cannot make one-run configuration invalid.
+- Mimir-launched Codex, Claude, and Pi receive the endpoint automatically.
+- Codex uses the app-specific `mcp_servers.mimir` HTTP entry so an
+  existing stdio server named `mimir` cannot make one-run configuration invalid.
 
 ## Files
 
@@ -126,7 +126,7 @@ requirements; they do not replace runtime verification.
 - The bottom Settings control remains visible in both Sidebar states; Settings
   > Apps is the catalog and management surface.
 - Settings > Apps is a searchable, keyboard-operable local instrument manager
-  for built-ins and valid definitions from `~/.mim/apps`.
+  for built-ins and valid definitions from `~/.mimir/apps`.
 - It launches and reloads Apps, opens or reveals local definitions, creates a
   runnable starter app, duplicates local packages, updates display titles
   without changing stable ids, and moves exact definitions to Trash.
@@ -206,10 +206,10 @@ requirements; they do not replace runtime verification.
 
 ## Routines
 
-- TOML definitions load from `~/.mim/routines` with per-file diagnostics.
+- TOML definitions load from `~/.mimir/routines` with per-file diagnostics.
 - Five-, six-, and seven-field cron expressions and IANA timezones resolve
   deterministically.
-- Scheduler state survives relaunch in `~/.mim/routines-state.json`.
+- Scheduler state survives relaunch in `~/.mimir/routines-state.json`.
 - Enabled routines fire once per scheduled instant according to overlap and
   missed-fire policy.
 - Every run resolves its current launcher preset and becomes a durable Activity.
@@ -261,5 +261,5 @@ requirements; they do not replace runtime verification.
 - `npm test`, `npm run build`, `npm run docs:check`, Rust formatting, Rust
   tests, and Rust check pass.
 - Product version is `0.1.0` in `package.json`, `src-tauri/Cargo.toml`, and
-  `src-tauri/tauri.conf.json`; the package name is `mim-workbench`.
+  `src-tauri/tauri.conf.json`; the package name is `mimir`.
 - Documentation references only current files and current local data paths.

@@ -1,6 +1,6 @@
 # Business graph
 
-The Business graph is Mim's built-in operating system for a small AI-native
+The Business graph is Mimir's built-in operating system for a small AI-native
 HEOR consultancy. Issues, clients, people, projects, evidence, decisions, and
 deliverables are one source-aware graph. The Now stream, Work board,
 portfolio ledger, timeline, and the All directory are purpose-built
@@ -28,9 +28,9 @@ rebuildable Rust read model that makes those files behave like an application:
 - diagnostics expose malformed sources, duplicate ids, dangling links, and
   migration ambiguity;
 - filesystem watchers rebuild the disposable index and emit
-  `mim://graph-changed`.
+  `mimir://graph-changed`.
 
-This gives Mim graph-database interaction speed without introducing another
+This gives Mimir graph-database interaction speed without introducing another
 canonical store, synchronization protocol, or opaque export format.
 
 ## Physical scopes
@@ -39,7 +39,7 @@ Scope is deliberately simple and concrete for a five-to-ten-person team:
 
 | Scope | Root | Intended use |
 |---|---|---|
-| Private | `~/.mim/graph/private/` | local notes, reminders, annotations, drafts, sensitive records |
+| Private | `~/.mimir/graph/private/` | local notes, reminders, annotations, drafts, sensitive records |
 | Project | current workspace | engagement issues, decisions, evidence, analyses, and deliverables |
 | Team | Settings > Graph configured folder | shared companies, people, projects, methods, and reusable knowledge |
 
@@ -51,7 +51,7 @@ team-only projection cannot include a private node.
 
 This is a storage boundary, not an enterprise permission system. Sharing a
 project or team root uses the repository, synced folder, or filesystem access
-the team already trusts. Mim binds its agent capability endpoint to loopback
+the team already trusts. Mimir binds its agent capability endpoint to loopback
 and does not add roles or policy administration.
 
 The workbench mounts `private:local`, the current `project:<root-hash>`, and
@@ -92,7 +92,7 @@ packs.
 ## Built-in app
 
 Business graph is a stable built-in Rust-helper App Activity implemented by
-`src/mim/apps/BusinessGraphApp.vue`. It keeps the graph context open in the
+`src/mimir/apps/BusinessGraphApp.vue`. It keeps the graph context open in the
 Activity pane while files and deliverables open in the persistent Editor.
 
 Its primary sections and projections are:
@@ -158,10 +158,18 @@ in-product confirmation and offers an in-session undo.
 The context trail preserves the path from the originating projection through
 inspected issues, projects, people, companies, decisions, and evidence.
 
+## Search
+
+A persistent graph search field filters the active projection across indexed
+titles, ids, tags, summaries, and body text. Input is debounced, ranked results
+replace the projection in place, and the visible result count updates without
+opening a separate search surface. Cmd/Ctrl+F focuses the field; Escape or the
+clear control restores the projection immediately.
+
 ## Dispatch bar
 
-A permanent single-line bar at the bottom of the app is the spine and the
-front door:
+A permanent single-line bar at the bottom of the app is the spine for capture,
+lookup, delegation, and deterministic commands:
 
 - **Lookup.** Typing shows live results above the bar, Spotlight-style;
   Tab or click opens Peek. Find a fact, gone in three seconds.
@@ -177,7 +185,7 @@ front door:
 - **Power lane.** A leading `/` runs a deterministic command — `/board
   [attention]`, `/open <id>`, `/section <name>`, `/find <terms>`, `/clear`,
   `/help` — with plain unix-style errors in the scrollback.
-- **Echo.** GUI mutations print their `mimx call` equivalent into the
+- **Echo.** GUI mutations print their `mimir call` equivalent into the
   scrollback, dimmed. The UI teaches the CLI grammar as a side effect of
   use.
 
@@ -219,19 +227,19 @@ remain available while the visual app is closed.
 | `research.*` | capture evidence |
 
 All 37 definitions use the same schema validation, structured errors, and
-canonical/MCP aliases as other Mim tools. Generic writes exist for complete
+canonical/MCP aliases as other Mimir tools. Generic writes exist for complete
 coverage; semantic commands are preferred because they validate target kinds
 and create the right relations.
 
 Terminal shortcuts use that same registry:
 
 ```bash
-mimx graph
-mimx graph cost effectiveness evidence
-mimx board
-mimx board in-progress
-mimx context project-alpha
-mimx call projects.record_decision '{"id":"project-alpha","title":"Use matched cohort"}'
+mimir graph
+mimir graph cost effectiveness evidence
+mimir board
+mimir board in-progress
+mimir context project-alpha
+mimir call projects.record_decision '{"id":"project-alpha","title":"Use matched cohort"}'
 ```
 
 ## Migration and compatibility
@@ -275,7 +283,7 @@ Native ownership is under `src-tauri/src/business_graph/`:
 
 Renderer ownership is split between `src/services/businessGraph.js`,
 `src/stores/businessGraph.js`, the built-in app, and its components under
-`src/mim/apps/business-graph/` — including `WorkBoard.vue`, `NowView.vue`,
+`src/mimir/apps/business-graph/` — including `WorkBoard.vue`, `NowView.vue`,
 `DispatchBar.vue`, `PortfolioView.vue`, `ProjectStanding.vue`,
 `EntityList.vue`, `TimelineView.vue`, `GraphInspector.vue`, and
 `GraphFilterBanner.vue`. `WorkbenchApp.vue` mounts roots and owns the
@@ -293,7 +301,7 @@ Issue field shape. Rust tests cover scope isolation, parsing and lossless
 round trips, conflicts, migration without writes, semantic actions, context
 redaction, and a realistic HEOR workflow. Frontend tests cover services,
 store, shell, board, dispatch bar, inspector, projections, Activity handoff,
-and `mimx`.
+and `mimir`.
 
 Debug-test performance budgets and the latest measured run are:
 

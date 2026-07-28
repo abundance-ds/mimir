@@ -1,6 +1,6 @@
 # Trust and security boundaries
 
-Mim is a trusted-local workbench, not a sandbox or multi-tenant agent host.
+Mimir is a trusted-local workbench, not a sandbox or multi-tenant agent host.
 This document prevents agents from mistaking validation in one subsystem for a
 global permission boundary.
 
@@ -10,8 +10,8 @@ The user trusts:
 
 - CLI agents launched with their user account;
 - local App definitions and their JavaScript;
-- callers able to connect to Mim's loopback MCP port;
-- Routine definitions and launcher presets under `~/.mim`;
+- callers able to connect to Mimir's loopback MCP port;
+- Routine definitions and launcher presets under `~/.mimir`;
 - the currently opened workspace.
 
 There is no per-agent identity, permission prompt, package signature, App
@@ -33,7 +33,7 @@ naming the exact boundary it enforces.
 | AI transport | model registry host allowlist; release rejects localhost | provider receives prompt/context by design |
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
 | Launcher/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment |
-| API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mim before filtering elsewhere |
+| API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
 
 ## MCP endpoint
 
@@ -64,7 +64,7 @@ not an access-control rule.
 Generic commands in `src-tauri/src/lib.rs` (`read_text_file`,
 `write_text_file`, binary variants, directory listing) accept arbitrary paths.
 Core MCP file tools add renderer-side workspace checks before invoking them.
-Embedded Apps call the generic commands directly through `mim-sdk.js`, so App
+Embedded Apps call the generic commands directly through `mimir-sdk.js`, so App
 code is equivalent to trusted local extension code.
 
 ## Apps
@@ -112,7 +112,7 @@ Credential resolution order is:
 1. OS keychain;
 2. process environment;
 3. debug-only repository/ancestor `.env` candidates;
-4. debug-only `~/.mim/keys.env`.
+4. debug-only `~/.mimir/keys.env`.
 
 Release builds refuse plaintext fallback when keychain writes fail.
 `ai_transport.rs` permits only hosts from built-in/provider registry URLs;

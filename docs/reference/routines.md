@@ -5,7 +5,7 @@ or manual run becomes an ordinary durable Activity with status and scrollback.
 
 ## Definition
 
-Place one TOML file per routine in `~/.mim/routines/`:
+Place one TOML file per routine in `~/.mimir/routines/`:
 
 ```toml
 id = "morning-review"
@@ -29,7 +29,7 @@ Fields:
 | `enabled` | defaults to `true` |
 | `schedule` | five-, six-, or seven-field cron expression |
 | `timezone` | IANA timezone or `local`; `local` resolves the `TZ` environment variable and falls back to UTC when `TZ` is unset |
-| `preset` | ID from `~/.mim/launchers.json` |
+| `preset` | ID from `~/.mimir/launchers.json` |
 | `prompt` | final CLI prompt argument |
 | `overlap` | `skip` or `parallel` |
 | `missed` | `skip` or `run-once` |
@@ -45,7 +45,7 @@ configuration through a short native tick. It validates both inputs, resolves
 the preset, calculates next fire times, and publishes catalog changes to the
 Routines Activity.
 
-Planner state is stored atomically in `~/.mim/routines-state.json`. A corrupt
+Planner state is stored atomically in `~/.mimir/routines-state.json`. A corrupt
 state file is quarantined and reported without disabling valid definitions.
 
 The native worker periodically fingerprints Routine definitions and launcher
@@ -127,4 +127,4 @@ state.
 - `src-tauri/src/routine_runtime.rs`
 - `src/services/routines.js`
 - `src/stores/routines.js`
-- `src/mim/activities/RoutinesActivity.vue`
+- `src/mimir/activities/RoutinesActivity.vue`

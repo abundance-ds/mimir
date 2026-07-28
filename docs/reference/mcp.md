@@ -1,7 +1,7 @@
 # MCP registry
 
-Mim exposes one canonical capability registry to CLI agents, embedded apps,
-Routines, the renderer, and `mimx`.
+Mimir exposes one canonical capability registry to CLI agents, embedded apps,
+Routines, the renderer, and `mimir`.
 
 ## Transport
 
@@ -23,7 +23,7 @@ require MCP session ids. Registry changes are observed through the revision in
 HTTP transport has no outbound notification channel.
 
 The endpoint binds only to `127.0.0.1`. The older `/api/tools` routes exist for
-local debugging and require the runtime bearer token; agents and `mimx` use
+local debugging and require the runtime bearer token; agents and `mimir` use
 `/mcp`. The MCP endpoint is a trusted-local capability surface: it has no
 per-agent tokens or role policy, and must not be exposed beyond loopback.
 
@@ -60,9 +60,9 @@ unknown/late id rather than reviving the call.
 
 | Tool | Purpose |
 |---|---|
-| `mim_state` | active document, tabs, selection, visible range, dirty state, and comment counts |
-| `mim_reveal` | open a file and optionally reveal a line or offset |
-| `mim_propose` | show one exact replacement as an accept/reject review |
+| `mimir_state` | active document, tabs, selection, visible range, dirty state, and comment counts |
+| `mimir_reveal` | open a file and optionally reveal a line or offset |
+| `mimir_propose` | show one exact replacement as an accept/reject review |
 
 These are transport projections over `editor.state`, `editor.reveal`, and
 `editor.propose`. The descriptions are deliberately one sentence each and the
@@ -90,8 +90,8 @@ context.
 | `research.*` | capture source-aware HEOR evidence |
 
 Optional aliases such as `read`, `comment_resolve`, `activities_list`, and
-`routines_run` remain in the internal registry and explicit `mimx` catalog.
-Canonical names are used inside Mim and are also accepted by the registry.
+`routines_run` remain in the internal registry and explicit `mimir` catalog.
+Canonical names are used inside Mimir and are also accepted by the registry.
 
 File-manager aliases are namespaced (`files_browse`, `files_create_folder`,
 `files_rename`, `files_duplicate`, `files_trash`) so the long-standing
@@ -116,20 +116,20 @@ are explicit lower-level operations.
 
 - Codex and Claude receive the MCP URL through launcher flags.
 - Pi receives a generated extension that discovers and registers the aliases.
-- `mimx tools` lists the three default tools without schemas.
-- `mimx tools <topic>` or `mimx tools --all` discloses optional capabilities;
+- `mimir tools` lists the three default tools without schemas.
+- `mimir tools <topic>` or `mimir tools --all` discloses optional capabilities;
   `--json` includes their schemas.
-- `mimx call <canonical-or-alias> <json>` performs a generic call.
-- `mimx graph [terms]`, `mimx board [status]`, and `mimx context <id>` expose
+- `mimir call <canonical-or-alias> <json>` performs a generic call.
+- `mimir graph [terms]`, `mimir board [status]`, and `mimir context <id>` expose
   readable terminal projections over the native graph tools.
-- Embedded apps use `window.mim.tools.list()`, `.call()`, and `.handle()`.
+- Embedded apps use `window.mimir.tools.list()`, `.call()`, and `.handle()`.
 - Routine runs use their launcher preset and therefore inherit the same agent
   connection.
 
 See [agent-setup.md](agent-setup.md) and [apps-system.md](apps-system.md).
 
 MCP results carry both human-readable `content` and machine-readable
-`structuredContent`. `mimx` returns `structuredContent` when present and keeps
+`structuredContent`. `mimir` returns `structuredContent` when present and keeps
 the text form only as a compatibility fallback.
 
 ## Lifetime and change map
@@ -149,7 +149,7 @@ When adding/changing a core tool, update:
   implementation under `src/services/ai/tools/`;
 - `CORE_TOOL_ALIASES` if it uses the legacy renderer tool set;
 - Rust registry/runtime/server tests and `toolRuntime.test.js`;
-- `bin/mimx.mjs` only for a new convenience command, not generic call support;
+- `bin/mimir.mjs` only for a new convenience command, not generic call support;
 - this document only for a new domain or non-obvious lifecycle rule.
 
 Do not hand-maintain a second complete tool-schema table here; the definition
