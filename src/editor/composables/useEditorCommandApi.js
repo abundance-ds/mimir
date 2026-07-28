@@ -24,7 +24,7 @@ export function useEditorCommandApi({
   openSettings,
   commentPrompt,
 }) {
-  async function mimOpen(path, { preview = false, entry = null } = {}) {
+  async function mimirOpen(path, { preview = false, entry = null } = {}) {
     if (!path) throw new Error('path is required')
     flushEditorContent({ bridge: 'flush' })
     let inspected = entry?.openBehavior ? entry : null
@@ -51,10 +51,10 @@ export function useEditorCommandApi({
     if (kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
     emitNavigate({ path })
     if (kind === 'text') restoreEditorFocus()
-    return mimActive()
+    return mimirActive()
   }
 
-  function mimActive({ includeContent = false } = {}) {
+  function mimirActive({ includeContent = false } = {}) {
     flushEditorContent({ bridge: 'flush' })
     const file = currentFile.value
     if (!file) return null
@@ -71,7 +71,7 @@ export function useEditorCommandApi({
     }
   }
 
-  function mimTabs() {
+  function mimirTabs() {
     flushEditorContent({ bridge: 'flush' })
     return openFiles.value.map((file, index) => ({
       index,
@@ -82,10 +82,10 @@ export function useEditorCommandApi({
     }))
   }
 
-  function mimState({ includeContent = false } = {}) {
-    const active = mimActive({ includeContent })
-    const tabs = mimTabs()
-    const selection = mimSelection()
+  function mimirState({ includeContent = false } = {}) {
+    const active = mimirActive({ includeContent })
+    const tabs = mimirTabs()
+    const selection = mimirSelection()
     const view = editorSurfaceRef.value?.getView?.()
     const comments = view ? getCommentsFromState(view.state) : []
     const visible = view?.visibleRanges?.[0]
@@ -109,15 +109,15 @@ export function useEditorCommandApi({
     }
   }
 
-  function mimSelection() {
+  function mimirSelection() {
     return editorSurfaceRef.value?.getSelection?.() || null
   }
 
-  function mimComments() {
+  function mimirComments() {
     const view = editorSurfaceRef.value?.getView()
     const comments = view ? getCommentsFromState(view.state) : []
     return {
-      ...mimActive(),
+      ...mimirActive(),
       comments: comments.map((comment) => {
         const line = view
           ? view.state.doc.lineAt(Math.min(comment.contentFrom, view.state.doc.length))
@@ -151,7 +151,7 @@ export function useEditorCommandApi({
     }
   }
 
-  function mimCommentAction(action, commentId, text = '') {
+  function mimirCommentAction(action, commentId, text = '') {
     const handlers = {
       reply: id => commentMutations.addReply(id, text),
       resolve: commentMutations.resolve,
@@ -163,7 +163,7 @@ export function useEditorCommandApi({
     return handler(commentId)
   }
 
-  function mimReplaceSelection(text = '') {
+  function mimirReplaceSelection(text = '') {
     const selection = editorSurfaceRef.value?.getSelection?.()
     if (!selection) throw new Error('No active selection')
     editorSurfaceRef.value?.replaceRange(selection.from, selection.to, text)
@@ -174,14 +174,14 @@ export function useEditorCommandApi({
     }
   }
 
-  function mimSetContent(content = '') {
+  function mimirSetContent(content = '') {
     if (!currentFile.value) throw new Error('No document is open.')
     const current = editorSurfaceRef.value?.getContent?.() || ''
     editorSurfaceRef.value?.replaceRange(0, current.length, content)
-    return mimActive()
+    return mimirActive()
   }
 
-  function mimReviewProposal(proposal) {
+  function mimirReviewProposal(proposal) {
     if (!proposal?.id || !proposal?.targetText) {
       throw new Error('A review proposal needs an id and targetText.')
     }
@@ -213,7 +213,7 @@ export function useEditorCommandApi({
     return { proposalId: review.proposalId, status: 'pending_review' }
   }
 
-  async function mimReveal({ path, line, offset } = {}) {
+  async function mimirReveal({ path, line, offset } = {}) {
     if (path) {
       const index = openFiles.value.findIndex(file => file.path === path)
       if (index >= 0) {
@@ -221,7 +221,7 @@ export function useEditorCommandApi({
         fileManager.setActiveTab(index)
         emitNavigate({ path })
       } else {
-        await mimOpen(path)
+        await mimirOpen(path)
       }
     }
     await nextTick()
@@ -232,20 +232,20 @@ export function useEditorCommandApi({
     }
     editorSurfaceRef.value?.scrollToPos(position)
     restoreEditorFocus()
-    return mimActive()
+    return mimirActive()
   }
 
-  async function mimSave() {
+  async function mimirSave() {
     flushEditorContent({ bridge: 'flush' })
-    const saved = await saveCurrentFile({ source: 'mimx' })
-    return { saved, active: mimActive() }
+    const saved = await saveCurrentFile({ source: 'mimir' })
+    return { saved, active: mimirActive() }
   }
 
-  function mimOwnsFocus() {
+  function mimirOwnsFocus() {
     return Boolean(editorShellRef.value?.contains(document.activeElement))
   }
 
-  function mimCycleTab(direction = 1) {
+  function mimirCycleTab(direction = 1) {
     const length = openFiles.value.length
     if (length < 2) return false
     const next = (activeFileIndex.value + direction + length) % length
@@ -253,32 +253,32 @@ export function useEditorCommandApi({
     return true
   }
 
-  async function mimCloseActiveTab() {
+  async function mimirCloseActiveTab() {
     if (await dismissEditorSurface()) return true
     return closeEditorTab(activeFileIndex.value)
   }
 
-  function mimOpenSettings(section = 'appearance') {
+  function mimirOpenSettings(section = 'appearance') {
     openSettings(section)
   }
 
   return {
-    mimActive,
-    mimCloseActiveTab,
-    mimCommentAction,
-    mimComments,
-    mimCycleTab,
-    mimOpen,
-    mimOpenSettings,
-    mimOwnsFocus,
-    mimReplaceSelection,
-    mimReveal,
-    mimReviewProposal,
-    mimSave,
-    mimSelection,
-    mimSetContent,
-    mimState,
-    mimTabs,
+    mimirActive,
+    mimirCloseActiveTab,
+    mimirCommentAction,
+    mimirComments,
+    mimirCycleTab,
+    mimirOpen,
+    mimirOpenSettings,
+    mimirOwnsFocus,
+    mimirReplaceSelection,
+    mimirReveal,
+    mimirReviewProposal,
+    mimirSave,
+    mimirSelection,
+    mimirSetContent,
+    mimirState,
+    mimirTabs,
   }
 }
 

@@ -12,7 +12,7 @@ describe('graph settings', () => {
   })
 
   it('explains the three physical scopes and stores one optional team folder', async () => {
-    vi.mocked(open).mockResolvedValue('/shared/mim-team-graph')
+    vi.mocked(open).mockResolvedValue('/shared/mimir-team-graph')
     const wrapper = mount(GraphSettingsSection)
     await flushPromises()
 
@@ -22,10 +22,10 @@ describe('graph settings', () => {
 
     await wrapper.get('[data-graph-team-choose]').trigger('click')
     await flushPromises()
-    expect(useSettingsStore().mimTeamGraphFolder).toBe('/shared/mim-team-graph')
+    expect(useSettingsStore().mimirTeamGraphFolder).toBe('/shared/mimir-team-graph')
     expect(wrapper.get('[role="status"]').text()).toContain('compose it automatically')
 
     await wrapper.get('[data-graph-team-clear]').trigger('click')
-    expect(useSettingsStore().mimTeamGraphFolder).toBe('')
+    expect(useSettingsStore().mimirTeamGraphFolder).toBe('')
   })
 })

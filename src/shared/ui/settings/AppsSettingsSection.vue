@@ -39,7 +39,7 @@
         <button
           type="button"
           data-apps-reveal-directory
-          title="Reveal ~/.mim/apps"
+          title="Reveal ~/.mimir/apps"
           aria-label="Reveal apps directory"
           :disabled="!catalog.directory"
           class="grid size-8 shrink-0 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-35"
@@ -69,7 +69,7 @@
           {{ catalog.localApps.length }} local · {{ catalog.builtins.length }} built in
           <template v-if="catalog.diagnostics.length"> · {{ catalog.diagnostics.length }} problem{{ catalog.diagnostics.length === 1 ? '' : 's' }}</template>
         </span>
-        <span class="ml-auto min-w-0 truncate">{{ catalog.directory || '~/.mim/apps' }}</span>
+        <span class="ml-auto min-w-0 truncate">{{ catalog.directory || '~/.mimir/apps' }}</span>
       </div>
     </header>
 
@@ -408,7 +408,7 @@ const operationTitle = computed(() => ({
   trash: `Move ${operationApp.value?.title || 'app'} to Trash?`,
 })[operation.value] || '')
 const operationDetail = computed(() => ({
-  create: 'Mim writes a small autosaving HTML app, app.toml, and a live read tool. Open the files and make it yours.',
+  create: 'Mimir writes a small autosaving HTML app, app.toml, and a live read tool. Open the files and make it yours.',
   duplicate: 'The local package and assets are copied. The new id gets its own data and MCP tool names.',
   rename: 'Only the display title changes. The stable id keeps app data, tools, and Activities connected.',
   trash: 'The exact local definition or package moves to the operating-system Trash. App data is kept.',
@@ -442,7 +442,7 @@ async function launch(app) {
   error.value = ''
   try {
     catalog.select(app.id)
-    const payload = await catalog.prepareActivity(app, String(settings.mimWorkspaceFolder || ''))
+    const payload = await catalog.prepareActivity(app, String(settings.mimirWorkspaceFolder || ''))
     emit('launchApp', payload)
   } catch (cause) {
     error.value = `${app.title} could not open: ${errorMessage(cause)}`

@@ -68,7 +68,7 @@ describe('useFileOpen', () => {
     expect(filesStore.openFiles[1].path).toBe('/docs/notes.txt')
   })
 
-  it('drains the native queue when mim://open-files-pending signals', async () => {
+  it('drains the native queue when mimir://open-files-pending signals', async () => {
     mountComposable(() => useFileOpen())
     await vi.waitFor(() => {
       expect(listenCallback).toBeTruthy()

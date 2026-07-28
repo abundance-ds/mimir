@@ -34,17 +34,17 @@
         <button
           class="stepper-btn"
           aria-label="Decrease terminal font size"
-          :disabled="settings.mimTerminalFontSize <= 9"
-          @click="settings.set('mimTerminalFontSize', settings.mimTerminalFontSize - 1)"
+          :disabled="settings.mimirTerminalFontSize <= 9"
+          @click="settings.set('mimirTerminalFontSize', settings.mimirTerminalFontSize - 1)"
         >
           <IconMinus :size="10" />
         </button>
-        <span class="stepper-value">{{ settings.mimTerminalFontSize }}px</span>
+        <span class="stepper-value">{{ settings.mimirTerminalFontSize }}px</span>
         <button
           class="stepper-btn"
           aria-label="Increase terminal font size"
-          :disabled="settings.mimTerminalFontSize >= 24"
-          @click="settings.set('mimTerminalFontSize', settings.mimTerminalFontSize + 1)"
+          :disabled="settings.mimirTerminalFontSize >= 24"
+          @click="settings.set('mimirTerminalFontSize', settings.mimirTerminalFontSize + 1)"
         >
           <IconPlus :size="10" />
         </button>

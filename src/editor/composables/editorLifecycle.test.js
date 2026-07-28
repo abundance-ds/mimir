@@ -104,31 +104,31 @@ describe('Editor lifecycle controllers', () => {
       commentPrompt: vi.fn(),
     })
 
-    expect(commands.mimActive({ includeContent: true })).toMatchObject({
+    expect(commands.mimirActive({ includeContent: true })).toMatchObject({
       path: '/w/a.md',
       content: 'hello world',
       cursor: { line: 1, column: 2 },
     })
-    expect(commands.mimReplaceSelection('hi')).toEqual({
+    expect(commands.mimirReplaceSelection('hi')).toEqual({
       from: 0,
       to: 2,
       replaced: 5,
     })
-    expect(commands.mimReviewProposal({
+    expect(commands.mimirReviewProposal({
       id: 'proposal:1',
       targetText: 'world',
-      replacement: 'Mim',
+      replacement: 'Mimir',
     })).toEqual({
       proposalId: 'proposal:1',
       status: 'pending_review',
     })
     expect(activateDiff).toHaveBeenCalledWith(
       'hello world',
-      'hello Mim',
+      'hello Mimir',
       expect.objectContaining({ review: expect.any(Object) }),
     )
 
-    await commands.mimOpen('/w/b.md', { preview: true })
+    await commands.mimirOpen('/w/b.md', { preview: true })
     expect(fileManager.openFile).toHaveBeenCalledWith(
       '/w/b.md',
       '# document',
@@ -224,13 +224,13 @@ describe('Editor lifecycle controllers', () => {
         id: 'proposal:1',
         path: '/w/a.md',
         targetText: 'world',
-        replacement: 'Mim',
+        replacement: 'Mimir',
       }],
     })
     expect(fileManager.setFileReviews).toHaveBeenCalled()
     expect(diffStore.activate).toHaveBeenCalledWith(expect.objectContaining({
       original: 'hello world',
-      modified: 'hello Mim',
+      modified: 'hello Mimir',
     }))
 
     lifecycle.dispose()

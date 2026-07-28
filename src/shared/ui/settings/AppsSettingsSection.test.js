@@ -37,16 +37,16 @@ const local = {
   description: 'Project numbers',
   mode: 'embedded',
   builtin: false,
-  manifestPath: '/home/me/.mim/apps/ledger/app.toml',
+  manifestPath: '/home/me/.mimir/apps/ledger/app.toml',
   tools: [{ name: 'total', mcpAlias: 'ledger_total' }],
 }
 
 function catalog(apps = [builtIn, local]) {
   return {
-    directory: '/home/me/.mim/apps',
+    directory: '/home/me/.mimir/apps',
     apps,
     diagnostics: [{
-      path: '/home/me/.mim/apps/bad/app.toml',
+      path: '/home/me/.mimir/apps/bad/app.toml',
       field: 'entry',
       message: 'Entry does not exist.',
     }],
@@ -141,7 +141,7 @@ describe('AppsSettingsSection', () => {
 
     await wrapper.get('[data-app-open-definition]').trigger('click')
     expect(wrapper.emitted('openDefinition')).toEqual([
-      ['/home/me/.mim/apps/ledger/app.toml'],
+      ['/home/me/.mimir/apps/ledger/app.toml'],
     ])
     wrapper.unmount()
   })
@@ -151,7 +151,7 @@ describe('AppsSettingsSection', () => {
       ...local,
       id: 'local-instrument',
       title: 'Local Instrument',
-      manifestPath: '/home/me/.mim/apps/local-instrument/app.toml',
+      manifestPath: '/home/me/.mimir/apps/local-instrument/app.toml',
     }
     vi.mocked(createLocalApp).mockResolvedValue(catalog([builtIn, local, created]))
     const wrapper = render()

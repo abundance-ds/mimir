@@ -60,7 +60,7 @@ export function useFileOpen({
       // Register first. Native launch/open events append to the durable queue
       // and only signal that it should be drained, so no path can fall into a
       // take→listen race.
-      const stop = await getCurrentWindow().listen('mim://open-files-pending', () => {
+      const stop = await getCurrentWindow().listen('mimir://open-files-pending', () => {
         void drainPending().catch(onError)
       })
       if (disposed) {

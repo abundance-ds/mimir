@@ -803,7 +803,7 @@ function onSettingsAppLaunch(payload) {
 
 async function onSettingsOpenDefinition(path) {
   closeSettings()
-  if (path) await mimOpen(path)
+  if (path) await mimirOpen(path)
 }
 
 async function onSaveStatusClick(status) {
@@ -1008,8 +1008,8 @@ async function onInlineCommentAction({ type, id, text, replyId }) {
   }
 
   if (type === 'terminal-prompt') {
-    if (!window.__mim_activityPaste) return { ok: false, error: 'Terminal Activity not available.' }
-    const ok = await window.__mim_activityPaste(commentPrompt(id))
+    if (!window.__mimir_activityPaste) return { ok: false, error: 'Terminal Activity not available.' }
+    const ok = await window.__mimir_activityPaste(commentPrompt(id))
     if (!ok) return { ok: false, error: 'No active terminal. Open a terminal tab first.' }
     return { ok: true }
   }
@@ -1126,41 +1126,41 @@ const editorCommands = useEditorCommandApi({
   commentPrompt,
 })
 const {
-  mimActive,
-  mimCloseActiveTab,
-  mimCommentAction,
-  mimComments,
-  mimCycleTab,
-  mimOpen,
-  mimOpenSettings,
-  mimOwnsFocus,
-  mimReplaceSelection,
-  mimReveal,
-  mimReviewProposal,
-  mimSave,
-  mimSelection,
-  mimSetContent,
-  mimState,
-  mimTabs,
+  mimirActive,
+  mimirCloseActiveTab,
+  mimirCommentAction,
+  mimirComments,
+  mimirCycleTab,
+  mimirOpen,
+  mimirOpenSettings,
+  mimirOwnsFocus,
+  mimirReplaceSelection,
+  mimirReveal,
+  mimirReviewProposal,
+  mimirSave,
+  mimirSelection,
+  mimirSetContent,
+  mimirState,
+  mimirTabs,
 } = editorCommands
 
 defineExpose({
-  mimOpen,
-  mimState,
-  mimActive,
-  mimTabs,
-  mimSelection,
-  mimComments,
-  mimCommentAction,
-  mimReplaceSelection,
-  mimSetContent,
-  mimReviewProposal,
-  mimReveal,
-  mimSave,
-  mimOwnsFocus,
-  mimCycleTab,
-  mimCloseActiveTab,
-  mimOpenSettings,
+  mimirOpen,
+  mimirState,
+  mimirActive,
+  mimirTabs,
+  mimirSelection,
+  mimirComments,
+  mimirCommentAction,
+  mimirReplaceSelection,
+  mimirSetContent,
+  mimirReviewProposal,
+  mimirReveal,
+  mimirSave,
+  mimirOwnsFocus,
+  mimirCycleTab,
+  mimirCloseActiveTab,
+  mimirOpenSettings,
 })
 
 // --- Diff review ---

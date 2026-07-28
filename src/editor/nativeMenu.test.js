@@ -18,7 +18,7 @@ describe('native Editor menu', () => {
   it('routes Quit through the asynchronous Editor close guard', async () => {
     const quit = vi.fn()
     const menu = buildNativeEditorMenuItems([], { quit })
-    const appMenu = menu.find((entry) => entry.text === 'Mim')
+    const appMenu = menu.find((entry) => entry.text === 'Mimir')
     const quitItem = appMenu.items.find((entry) => entry.id === 'editor:quit')
 
     expect(quitItem.accelerator).toBe('CmdOrCtrl+Q')

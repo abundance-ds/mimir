@@ -108,7 +108,7 @@
         <IconFileCode :size="13" class="shrink-0 text-ink-3" />
         <span class="text-[9px] text-ink-3">Configuration</span>
         <code class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-ink-4">
-          {{ launchers.configPath || '~/.mim/launchers.json' }}
+          {{ launchers.configPath || '~/.mimir/launchers.json' }}
         </code>
         <button
           type="button"

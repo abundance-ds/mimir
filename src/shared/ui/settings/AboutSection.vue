@@ -1,7 +1,7 @@
 <template>
   <div class="about-page">
     <div class="about-hero">
-      <span class="about-title">Mim</span>
+      <span class="about-title">Mimir</span>
       <span class="about-version">v0.1.0</span>
     </div>
 
@@ -12,7 +12,7 @@
     <section class="agent-instructions" aria-labelledby="agent-instructions-title">
       <div>
         <h2 id="agent-instructions-title">Agent instructions</h2>
-        <p>Optional starter text. Mim never writes project instruction files.</p>
+        <p>Optional starter text. Mimir never writes project instruction files.</p>
       </div>
       <div class="instruction-actions">
         <button type="button" data-copy-agents @click="copy('agents')">

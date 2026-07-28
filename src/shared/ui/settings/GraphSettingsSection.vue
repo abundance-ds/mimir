@@ -14,14 +14,14 @@
           <div class="scope-title">Private</div>
           <p class="scope-copy">Local notes, annotations, and drafts. Never loaded from a shared folder.</p>
         </div>
-        <code class="scope-path">~/.mim/graph/private</code>
+        <code class="scope-path">~/.mimir/graph/private</code>
       </div>
 
       <div class="scope-row">
         <div class="scope-mark scope-project"><IconFolder :size="13" /></div>
         <div class="min-w-0 flex-1">
           <div class="scope-title">Project</div>
-          <p class="scope-copy">Knowledge and issues travel with the workspace currently open in Mim.</p>
+          <p class="scope-copy">Knowledge and issues travel with the workspace currently open in Mimir.</p>
         </div>
         <span class="scope-badge">automatic</span>
       </div>
@@ -89,18 +89,18 @@ import {
 import { useSettingsStore } from '../../../stores/settings.js'
 
 const settings = useSettingsStore()
-const teamRoot = ref(settings.mimTeamGraphFolder || '')
+const teamRoot = ref(settings.mimirTeamGraphFolder || '')
 const notice = ref('')
 const error = ref('')
 
-watch(() => settings.mimTeamGraphFolder, (value) => {
+watch(() => settings.mimirTeamGraphFolder, (value) => {
   if (String(value || '') !== teamRoot.value) teamRoot.value = String(value || '')
 })
 
 function save() {
   const path = teamRoot.value.trim()
   teamRoot.value = path
-  settings.set('mimTeamGraphFolder', path)
+  settings.set('mimirTeamGraphFolder', path)
   error.value = ''
   notice.value = path
     ? 'Team graph saved. Open workspaces now compose it automatically.'

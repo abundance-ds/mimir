@@ -67,15 +67,15 @@ describe('EditorSection', () => {
 
     expect(row.get('.stepper-value').text()).toBe('12px')
     await increase.trigger('click')
-    expect(store.mimTerminalFontSize).toBe(13)
+    expect(store.mimirTerminalFontSize).toBe(13)
     await decrease.trigger('click')
-    expect(store.mimTerminalFontSize).toBe(12)
+    expect(store.mimirTerminalFontSize).toBe(12)
 
-    store.set('mimTerminalFontSize', 9)
+    store.set('mimirTerminalFontSize', 9)
     await nextTick()
     expect(decrease.attributes('disabled')).toBeDefined()
 
-    store.set('mimTerminalFontSize', 24)
+    store.set('mimirTerminalFontSize', 24)
     await nextTick()
     expect(increase.attributes('disabled')).toBeDefined()
   })

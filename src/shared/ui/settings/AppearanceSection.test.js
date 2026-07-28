@@ -62,12 +62,12 @@ describe('AppearanceSection', () => {
     expect(swatchFor(wrapper, 'Light').classes()).not.toContain('active')
     expect(wrapper.findAll('.theme-swatch.active')).toHaveLength(1)
     expect(document.documentElement.getAttribute('data-theme')).toBe('slate')
-    expect(localStorage.getItem('mim:theme')).toBe('slate')
+    expect(localStorage.getItem('mimir:theme')).toBe('slate')
 
     // Persist immediately so the debounced editor-settings save cannot leak
     // into a later test, then verify the snapshot survived.
     await store.flush()
-    const saved = JSON.parse(localStorage.getItem('mim:editor:settings:v1'))
+    const saved = JSON.parse(localStorage.getItem('mimir:editor:settings:v1'))
     expect(saved.editorTheme).toBe('slate')
   })
 

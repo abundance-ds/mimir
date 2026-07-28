@@ -46,7 +46,7 @@ describe('external file sync', () => {
     const sync = createSync()
     await sync.start()
 
-    callbacks.get('mim://workspace-files-changed')({
+    callbacks.get('mimir://workspace-files-changed')({
       payload: { paths: ['/work/README.md', '/work/not-open.md'] },
     })
 
@@ -57,8 +57,8 @@ describe('external file sync', () => {
     expect(onReloaded).toHaveBeenCalledWith(files.openFiles[0])
 
     sync.dispose()
-    expect(unlisteners.get('mim://file-updated')).toHaveBeenCalledTimes(1)
-    expect(unlisteners.get('mim://workspace-files-changed')).toHaveBeenCalledTimes(1)
+    expect(unlisteners.get('mimir://file-updated')).toHaveBeenCalledTimes(1)
+    expect(unlisteners.get('mimir://workspace-files-changed')).toHaveBeenCalledTimes(1)
   })
 
   it('does not replace unsaved content if the buffer becomes dirty during the disk read', async () => {
@@ -122,12 +122,12 @@ describe('external file sync', () => {
     const sync = createSync()
     await sync.start()
 
-    callbacks.get('mim://file-updated')({
-      payload: { path: '/work/README.md', content: 'updated by Mim' },
+    callbacks.get('mimir://file-updated')({
+      payload: { path: '/work/README.md', content: 'updated by Mimir' },
     })
 
     expect(files.currentFile).toMatchObject({
-      content: 'updated by Mim',
+      content: 'updated by Mimir',
       dirty: false,
       saveState: 'idle',
     })

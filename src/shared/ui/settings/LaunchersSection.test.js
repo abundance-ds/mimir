@@ -50,7 +50,7 @@ describe('CLI tool settings', () => {
       },
     ])
     loadLauncherConfig.mockResolvedValue({
-      path: '/home/me/.mim/launchers.json',
+      path: '/home/me/.mimir/launchers.json',
       presets: [{
         id: 'codex',
         title: 'Codex',
@@ -89,7 +89,7 @@ describe('CLI tool settings', () => {
     expect(wrapper.findAll('[data-launcher-preset]')).toHaveLength(2)
     expect(wrapper.text()).toContain('/bin/codex')
     expect(wrapper.text()).toContain('0.145.0')
-    expect(wrapper.text()).toContain('/home/me/.mim/launchers.json')
+    expect(wrapper.text()).toContain('/home/me/.mimir/launchers.json')
     expect(wrapper.find('select').exists()).toBe(false)
     expect(wrapper.find('[data-launcher-args]').exists()).toBe(false)
 
@@ -106,7 +106,7 @@ describe('CLI tool settings', () => {
     await customise(wrapper, 'terminal')
     await wrapper.get('[data-launcher-args]').setValue('--model "gpt 5" --label=hello\\ world \'\'')
     await openAdvanced(wrapper, 'terminal')
-    await wrapper.get('[data-launcher-env]').setValue('MIM_MODE=fast\nLABEL= hello world ')
+    await wrapper.get('[data-launcher-env]').setValue('MIMIR_MODE=fast\nLABEL= hello world ')
     await wrapper.get('[data-launcher-save]').trigger('click')
     await flushPromises()
 
@@ -122,7 +122,7 @@ describe('CLI tool settings', () => {
         kind: 'terminal',
         enabled: true,
         args: ['--model', 'gpt 5', '--label=hello world', ''],
-        env: { MIM_MODE: 'fast', LABEL: ' hello world ' },
+        env: { MIMIR_MODE: 'fast', LABEL: ' hello world ' },
         cwd: { mode: 'workspace' },
       },
     ])

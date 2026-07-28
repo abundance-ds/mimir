@@ -86,7 +86,7 @@ export function useEditorNativeLifecycle({
     if (!isTauriRuntime()) return
     try {
       const { listen } = await import('@tauri-apps/api/event')
-      const stop = await listen('mim://quit-requested', () => {
+      const stop = await listen('mimir://quit-requested', () => {
         void requestAppQuit().catch(onError)
       })
       if (disposed) stop()

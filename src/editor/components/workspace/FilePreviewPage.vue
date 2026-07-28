@@ -24,7 +24,7 @@
       </div>
 
       <p class="mt-8 text-[11px] leading-relaxed text-ink-2">
-        Mim does not edit this file type yet. Open it with its default application, or manage the file from this workspace.
+        Mimir does not edit this file type yet. Open it with its default application, or manage the file from this workspace.
       </p>
 
       <div class="mt-5 flex flex-wrap gap-2">

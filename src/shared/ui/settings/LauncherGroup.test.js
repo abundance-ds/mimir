@@ -159,8 +159,8 @@ describe('LauncherGroup', () => {
     await binary.setValue('/usr/local/bin/codex')
     expect(row.binary).toBe('/usr/local/bin/codex')
 
-    await advanced.get('[data-launcher-env]').setValue('MIM_MODE=fast\nDEBUG=1')
-    expect(row.envText).toBe('MIM_MODE=fast\nDEBUG=1')
+    await advanced.get('[data-launcher-env]').setValue('MIMIR_MODE=fast\nDEBUG=1')
+    expect(row.envText).toBe('MIMIR_MODE=fast\nDEBUG=1')
   })
 
   it('emits remove with the row key from the advanced panel', async () => {

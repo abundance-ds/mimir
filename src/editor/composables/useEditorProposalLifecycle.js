@@ -99,7 +99,7 @@ export function useEditorProposalLifecycle({
     try {
       const { listen } = await import('@tauri-apps/api/event')
       const registrations = await Promise.all([
-        listen('mim://proposals-changed', onProposalsChanged),
+        listen('mimir://proposals-changed', onProposalsChanged),
       ])
       if (disposed) {
         registrations.forEach(stop => stop())

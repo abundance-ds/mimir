@@ -20,10 +20,10 @@ export function useExternalFileSync({
     try {
       const { listen } = await import('@tauri-apps/api/event')
       const registrations = await Promise.all([
-        listen('mim://file-updated', event => {
+        listen('mimir://file-updated', event => {
           applyEventContent(event.payload)
         }),
-        listen('mim://workspace-files-changed', event => {
+        listen('mimir://workspace-files-changed', event => {
           void refreshChangedPaths(event.payload).catch(onError)
         }),
       ])

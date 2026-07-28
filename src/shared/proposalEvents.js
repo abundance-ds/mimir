@@ -1,4 +1,4 @@
-export const PROPOSAL_APPLY_EVENT = 'mim://proposal-apply'
-export const PROPOSAL_RESULT_EVENT = 'mim://proposal-result'
-export const DIFF_OPEN_EVENT = 'mim://diff-open'
-export const COMMENTS_SUBMIT_EVENT = 'mim://comments-submit'
+export const PROPOSAL_APPLY_EVENT = 'mimir://proposal-apply'
+export const PROPOSAL_RESULT_EVENT = 'mimir://proposal-result'
+export const DIFF_OPEN_EVENT = 'mimir://diff-open'
+export const COMMENTS_SUBMIT_EVENT = 'mimir://comments-submit'

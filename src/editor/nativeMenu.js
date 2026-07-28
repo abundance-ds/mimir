@@ -75,9 +75,9 @@ function recentMenuItems(recentFiles, actions) {
 export function buildNativeEditorMenuItems(recentFiles, actions) {
   return [
     {
-      text: 'Mim',
+      text: 'Mimir',
       items: [
-        { item: { About: { name: 'Mim' } } },
+        { item: { About: { name: 'Mimir' } } },
         separator(),
         item('editor:settings', 'Settings...', 'CmdOrCtrl+,', actions.openSettings),
         separator(),
@@ -85,7 +85,7 @@ export function buildNativeEditorMenuItems(recentFiles, actions) {
         { item: 'HideOthers' },
         { item: 'ShowAll' },
         separator(),
-        item('editor:quit', 'Quit Mim', 'CmdOrCtrl+Q', actions.quit),
+        item('editor:quit', 'Quit Mimir', 'CmdOrCtrl+Q', actions.quit),
       ],
     },
     {
@@ -132,7 +132,7 @@ export function buildNativeEditorMenuItems(recentFiles, actions) {
     {
       text: 'Help',
       items: [
-        item('editor:help-about', 'About Mim', null, null, { enabled: false }),
+        item('editor:help-about', 'About Mimir', null, null, { enabled: false }),
       ],
     },
   ]

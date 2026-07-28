@@ -38,7 +38,7 @@ const SettingsDialogStub = defineComponent({
     <div v-if="open" data-settings-stub>
       <button
         data-open-app-definition
-        @click="$emit('openDefinition', '/home/me/.mim/apps/ledger/app.toml')"
+        @click="$emit('openDefinition', '/home/me/.mimir/apps/ledger/app.toml')"
       >
         Open definition
       </button>
@@ -90,16 +90,16 @@ describe('Editor Apps Settings bridge', () => {
     })
     await flushPromises()
 
-    wrapper.vm.mimOpenSettings('apps')
+    wrapper.vm.mimirOpenSettings('apps')
     await flushPromises()
     await wrapper.get('[data-open-app-definition]').trigger('click')
     await flushPromises()
 
-    expect(readFile).toHaveBeenCalledWith('/home/me/.mim/apps/ledger/app.toml')
-    expect(useFileStore().currentFile?.path).toBe('/home/me/.mim/apps/ledger/app.toml')
+    expect(readFile).toHaveBeenCalledWith('/home/me/.mimir/apps/ledger/app.toml')
+    expect(useFileStore().currentFile?.path).toBe('/home/me/.mimir/apps/ledger/app.toml')
     expect(wrapper.find('[data-settings-stub]').exists()).toBe(false)
     expect(wrapper.emitted('navigateEditor')).toEqual([[
-      { path: '/home/me/.mim/apps/ledger/app.toml' },
+      { path: '/home/me/.mimir/apps/ledger/app.toml' },
     ]])
     wrapper.unmount()
   })
@@ -128,11 +128,11 @@ describe('Editor Apps Settings bridge', () => {
     })
     await flushPromises()
 
-    wrapper.vm.mimOpenSettings('apps')
+    wrapper.vm.mimirOpenSettings('apps')
     await flushPromises()
     expect(wrapper.find('[data-settings-stub]').exists()).toBe(true)
 
-    expect(await wrapper.vm.mimCloseActiveTab()).toBe(true)
+    expect(await wrapper.vm.mimirCloseActiveTab()).toBe(true)
     await flushPromises()
 
     expect(wrapper.find('[data-settings-stub]').exists()).toBe(false)
@@ -174,7 +174,7 @@ describe('Editor Apps Settings bridge', () => {
     store.currentFile.content = 'unsaved'
     store.currentFile.dirty = true
 
-    const closing = wrapper.vm.mimCloseActiveTab()
+    const closing = wrapper.vm.mimirCloseActiveTab()
     await flushPromises()
     const dialog = wrapper.get('[role="dialog"][aria-labelledby="close-confirm-title"]')
     expect(dialog.attributes('aria-modal')).toBe('true')
