@@ -16,6 +16,16 @@ Toolbar `mousedown` normally moves focus and collapses the editor selection.
 Formatting controls use `@mousedown.prevent`; keep that behavior when adding
 editor actions.
 
+### WebKit never focuses buttons on click
+
+WKWebView (unlike Chromium and jsdom) leaves `document.activeElement` on
+`<body>` after a `<button>` click, so focus-owner logic must not rely on
+`document.activeElement` after mouse interaction. The workbench keyboard
+router remembers the pane on capture-phase `pointerdown` and falls back to
+that remembered owner when the live focus owner is `none`. Any new
+focus-dependent feature needs the same fallback — the quirk is invisible in
+browser dev and in tests, where clicks do focus buttons.
+
 ## Activities and launchers
 
 ### Commands are exact argv, never shell strings
