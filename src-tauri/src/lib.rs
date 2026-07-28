@@ -18,6 +18,7 @@ mod ai_transport;
 mod ai_usage;
 mod apps;
 pub mod business_graph;
+mod connections;
 pub mod file_index;
 mod file_index_commands;
 mod file_open;
@@ -975,6 +976,7 @@ pub fn run() {
             workspace_files::workspace_file_create,
             workspace_files::workspace_file_rename,
             workspace_files::workspace_file_duplicate,
+            workspace_files::workspace_file_import,
             workspace_files::workspace_file_trash,
             workspace_files::workspace_file_open_native,
             workspace_files::workspace_file_reveal,

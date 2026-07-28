@@ -1,8 +1,10 @@
 use crate::persistence::{load_json_optional_quarantining, write_json_atomic, QuarantinedLoad};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet},
     ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, OnceLock},
@@ -10,7 +12,7 @@ use std::{
 
 const CONFIG_VERSION: u32 = 1;
 const DEFAULT_MIMIR_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
-const CODEX_MIMIR_SERVER_ID: &str = "mimir";
+const MIMIR_SERVER_ID: &str = "mimir_workbench";
 static DETECTED_AGENTS: OnceLock<AgentDetectionCache> = OnceLock::new();
 
 #[derive(Default)]
@@ -59,6 +61,7 @@ pub struct AgentDefinition {
 pub enum ResumeStrategy {
     Claude,
     Codex,
+    Gemini,
     Pi,
     None,
 }
@@ -141,6 +144,15 @@ pub struct ResolvedLaunch {
     pub env: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparedSkills {
+    #[serde(default)]
+    claude_root: Option<String>,
+    #[serde(default)]
+    project_skill_files: Vec<String>,
+}
+
 pub fn agent_catalog() -> Vec<AgentDefinition> {
     vec![
         AgentDefinition {
@@ -161,6 +173,12 @@ pub fn agent_catalog() -> Vec<AgentDefinition> {
             binary: "pi".into(),
             resume_strategy: ResumeStrategy::Pi,
         },
+        AgentDefinition {
+            id: "gemini".into(),
+            title: "Gemini".into(),
+            binary: "gemini".into(),
+            resume_strategy: ResumeStrategy::Gemini,
+        },
     ]
 }
 
@@ -171,6 +189,7 @@ pub fn default_config() -> LauncherConfig {
             agent_preset("codex", "Codex", "codex"),
             agent_preset("claude", "Claude", "claude"),
             agent_preset("pi", "Pi", "pi"),
+            agent_preset("gemini", "Gemini", "gemini"),
             LauncherPreset {
                 id: "terminal".into(),
                 title: "Terminal".into(),
@@ -395,7 +414,15 @@ pub fn resolve_launch(
     environment.insert("MIMIR_MCP_URL".into(), mcp_url.to_string());
     let mut args = preset.args.clone();
     if let Some(agent_id) = agent_id.as_deref() {
-        append_mimir_connection_args(agent_id, home_path, mcp_url, &mut args);
+        let skills = prepare_agent_skills(agent_id, home_path, Path::new(&cwd), &environment)?;
+        append_mimir_connection_args(
+            agent_id,
+            home_path,
+            mcp_url,
+            &environment,
+            &skills,
+            &mut args,
+        )?;
     }
 
     Ok(ResolvedLaunch {
@@ -445,29 +472,31 @@ fn append_mimir_connection_args(
     agent_id: &str,
     home: &Path,
     mcp_url: &str,
+    environment: &BTreeMap<String, String>,
+    skills: &PreparedSkills,
     args: &mut Vec<String>,
-) {
+) -> Result<(), String> {
     match agent_id {
-        "codex" if !args.iter().any(|arg| arg.contains("mcp_servers.mimir.url")) => {
+        "codex"
+            if !args
+                .iter()
+                .any(|arg| arg.contains(&format!("mcp_servers.{MIMIR_SERVER_ID}.url"))) =>
+        {
             // Keep Mimir's one-run HTTP entry under one stable, product-owned
             // server id and avoid injecting the same URL override twice.
             args.extend([
                 "-c".into(),
                 format!(
-                    "mcp_servers.{CODEX_MIMIR_SERVER_ID}.url={}",
+                    "mcp_servers.{MIMIR_SERVER_ID}.url={}",
                     serde_json::to_string(mcp_url)
                         .expect("serializing an MCP URL string cannot fail")
                 ),
             ]);
         }
-        "claude"
-            if !args
-                .iter()
-                .any(|arg| arg == "--mcp-config" || arg.starts_with("--mcp-config=")) =>
-        {
+        "claude" if !args.iter().any(|arg| arg.contains(MIMIR_SERVER_ID)) => {
             let config = serde_json::json!({
                 "mcpServers": {
-                    "mimir": {
+                    (MIMIR_SERVER_ID): {
                         "type": "http",
                         "url": mcp_url,
                     }
@@ -475,6 +504,7 @@ fn append_mimir_connection_args(
             });
             args.extend(["--mcp-config".into(), config.to_string()]);
         }
+        "claude" => {}
         "pi" => {
             let extension = crate::mimir_cli::pi_extension_path_at(home)
                 .to_string_lossy()
@@ -483,8 +513,165 @@ fn append_mimir_connection_args(
                 args.extend(["--extension".into(), extension]);
             }
         }
+        "gemini" => ensure_gemini_mcp_config(home, environment)?,
         _ => {}
     }
+    if agent_id == "claude" {
+        if let Some(root) = skills.claude_root.as_ref() {
+            if !args.iter().any(|arg| arg == root) {
+                args.extend(["--add-dir".into(), root.clone()]);
+            }
+        }
+    }
+    if agent_id == "pi" {
+        for skill in &skills.project_skill_files {
+            if !args.iter().any(|arg| arg == skill) {
+                args.extend(["--skill".into(), skill.clone()]);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn prepare_agent_skills(
+    agent_id: &str,
+    home: &Path,
+    cwd: &Path,
+    environment: &BTreeMap<String, String>,
+) -> Result<PreparedSkills, String> {
+    #[cfg(windows)]
+    let executable = home.join(".mimir").join("bin").join("mimir.cmd");
+    #[cfg(not(windows))]
+    let executable = home.join(".mimir").join("bin").join("mimir");
+
+    if !executable.is_file() {
+        return Ok(PreparedSkills::default());
+    }
+    let output = Command::new(&executable)
+        .args(["skills", "prepare", agent_id, "--json"])
+        .current_dir(cwd)
+        .envs(environment)
+        .env("MIMIR_HOME", home.join(".mimir"))
+        .output()
+        .map_err(|error| format!("Could not prepare Mimir skills: {error}"))?;
+    if !output.status.success() {
+        let diagnostic = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if diagnostic.is_empty() {
+            "Mimir skill preparation failed.".into()
+        } else {
+            format!("Mimir skill preparation failed: {diagnostic}")
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Mimir skill preparation returned invalid data: {error}"))
+}
+
+fn ensure_gemini_mcp_config(
+    home: &Path,
+    environment: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    let config_home = environment
+        .get("GEMINI_CLI_HOME")
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("GEMINI_CLI_HOME").map(PathBuf::from))
+        .map(|value| value.join(".gemini"))
+        .unwrap_or_else(|| home.join(".gemini"));
+    let path = config_home.join("settings.json");
+    let mut settings = match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(|error| {
+            format!("Gemini settings are invalid at {}: {error}", path.display())
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Value::Object(serde_json::Map::new())
+        }
+        Err(error) => {
+            return Err(format!(
+                "Could not read Gemini settings at {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    let root = settings.as_object_mut().ok_or_else(|| {
+        format!(
+            "Gemini settings at {} must contain a JSON object.",
+            path.display()
+        )
+    })?;
+
+    if root
+        .get("mcp")
+        .and_then(Value::as_object)
+        .and_then(|mcp| mcp.get("excluded"))
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str() == Some(MIMIR_SERVER_ID))
+        })
+    {
+        return Err(format!(
+            "Gemini excludes the '{MIMIR_SERVER_ID}' MCP server in {}.",
+            path.display()
+        ));
+    }
+
+    let mcp_servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| {
+            format!(
+                "Gemini mcpServers at {} must be a JSON object.",
+                path.display()
+            )
+        })?;
+    #[cfg(windows)]
+    let command = home.join(".mimir").join("bin").join("mimir.cmd");
+    #[cfg(not(windows))]
+    let command = home.join(".mimir").join("bin").join("mimir");
+    let command = command.to_string_lossy().into_owned();
+    let desired = serde_json::json!({
+        "command": command.clone(),
+        "args": ["mcp-proxy"],
+        "env": {
+            "MIMIR_MCP_URL": "$MIMIR_MCP_URL"
+        }
+    });
+    if let Some(existing) = mcp_servers.get(MIMIR_SERVER_ID) {
+        let is_mimir_proxy = existing
+            .get("args")
+            .and_then(Value::as_array)
+            .is_some_and(|args| args.len() == 1 && args[0].as_str() == Some("mcp-proxy"))
+            && existing.get("command").and_then(Value::as_str) == Some(command.as_str());
+        if !is_mimir_proxy {
+            return Err(format!(
+                "Gemini already has an unrelated '{MIMIR_SERVER_ID}' MCP server in {}.",
+                path.display()
+            ));
+        }
+    }
+    mcp_servers.insert(MIMIR_SERVER_ID.into(), desired);
+
+    if let Some(allowed) = root
+        .get_mut("mcp")
+        .and_then(Value::as_object_mut)
+        .and_then(|mcp| mcp.get_mut("allowed"))
+        .and_then(Value::as_array_mut)
+    {
+        if !allowed
+            .iter()
+            .any(|item| item.as_str() == Some(MIMIR_SERVER_ID))
+        {
+            allowed.push(Value::String(MIMIR_SERVER_ID.into()));
+        }
+    }
+    write_json_atomic(&path, &settings).map_err(|error| {
+        format!(
+            "Could not update Gemini settings at {}: {error}",
+            path.display()
+        )
+    })
 }
 
 pub fn detect_agents() -> Vec<DetectedAgent> {
@@ -676,6 +863,18 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn append_test_args(agent_id: &str, home: &Path, mcp_url: &str, args: &mut Vec<String>) {
+        append_mimir_connection_args(
+            agent_id,
+            home,
+            mcp_url,
+            &BTreeMap::new(),
+            &PreparedSkills::default(),
+            args,
+        )
+        .unwrap();
+    }
+
     #[test]
     fn defaults_are_small_real_and_valid() {
         let config = default_config();
@@ -686,7 +885,7 @@ mod tests {
                 .iter()
                 .map(|preset| preset.id.as_str())
                 .collect::<Vec<_>>(),
-            ["codex", "claude", "pi", "terminal"]
+            ["codex", "claude", "pi", "gemini", "terminal"]
         );
         assert!(config.presets.iter().all(|preset| preset.args.is_empty()));
     }
@@ -827,7 +1026,7 @@ mod tests {
                 "--model",
                 "gpt 5",
                 "-c",
-                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
             ]
         );
         assert_eq!(launch.cwd, directory.path().to_string_lossy());
@@ -1008,32 +1207,46 @@ mod tests {
         let mcp_url = "http://127.0.0.1:29999/mcp";
 
         let mut codex = Vec::new();
-        append_mimir_connection_args("codex", home, mcp_url, &mut codex);
+        append_test_args("codex", home, mcp_url, &mut codex);
         assert_eq!(
             codex,
             [
                 "-c",
-                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#
+                r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#
             ]
         );
 
         let mut claude = Vec::new();
-        append_mimir_connection_args("claude", home, mcp_url, &mut claude);
+        append_test_args("claude", home, mcp_url, &mut claude);
         assert_eq!(
             claude,
             [
                 "--mcp-config",
-                r#"{"mcpServers":{"mimir":{"type":"http","url":"http://127.0.0.1:29999/mcp"}}}"#
+                r#"{"mcpServers":{"mimir_workbench":{"type":"http","url":"http://127.0.0.1:29999/mcp"}}}"#
             ]
         );
 
         let mut pi = Vec::new();
-        append_mimir_connection_args("pi", home, mcp_url, &mut pi);
+        append_test_args("pi", home, mcp_url, &mut pi);
         assert_eq!(pi, ["--extension", "/Users/mimir/.mimir/pi/mimir-tools.ts"]);
 
-        append_mimir_connection_args("codex", home, mcp_url, &mut codex);
-        append_mimir_connection_args("claude", home, mcp_url, &mut claude);
-        append_mimir_connection_args("pi", home, mcp_url, &mut pi);
+        let gemini_home = tempdir().unwrap();
+        let mut gemini = Vec::new();
+        append_test_args("gemini", gemini_home.path(), mcp_url, &mut gemini);
+        assert!(gemini.is_empty());
+        let gemini_settings: Value = serde_json::from_slice(
+            &fs::read(gemini_home.path().join(".gemini").join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            gemini_settings["mcpServers"][MIMIR_SERVER_ID]["args"],
+            serde_json::json!(["mcp-proxy"])
+        );
+
+        append_test_args("codex", home, mcp_url, &mut codex);
+        append_test_args("claude", home, mcp_url, &mut claude);
+        append_test_args("pi", home, mcp_url, &mut pi);
+        append_test_args("gemini", gemini_home.path(), mcp_url, &mut gemini);
         assert_eq!(codex.len(), 2);
         assert_eq!(claude.len(), 2);
         assert_eq!(pi.len(), 2);
@@ -1047,11 +1260,21 @@ mod tests {
         let mut codex = vec![
             "--full-auto".into(),
             "-c".into(),
-            r#"mcp_servers.mimir.url="http://custom.example/mcp""#.into(),
+            r#"mcp_servers.mimir_workbench.url="http://custom.example/mcp""#.into(),
         ];
         let mut claude = vec![
             "--dangerously-skip-permissions".into(),
-            "--mcp-config=/tmp/mimir-mcp.json".into(),
+            format!(
+                "--mcp-config={}",
+                serde_json::json!({
+                    "mcpServers": {
+                        (MIMIR_SERVER_ID): {
+                            "type": "http",
+                            "url": "http://custom.example/mcp"
+                        }
+                    }
+                })
+            ),
         ];
         let mut pi = vec![
             "--model".into(),
@@ -1063,13 +1286,29 @@ mod tests {
         let expected_claude = claude.clone();
         let expected_pi = pi.clone();
 
-        append_mimir_connection_args("codex", home, mcp_url, &mut codex);
-        append_mimir_connection_args("claude", home, mcp_url, &mut claude);
-        append_mimir_connection_args("pi", home, mcp_url, &mut pi);
+        append_test_args("codex", home, mcp_url, &mut codex);
+        append_test_args("claude", home, mcp_url, &mut claude);
+        append_test_args("pi", home, mcp_url, &mut pi);
 
         assert_eq!(codex, expected_codex);
         assert_eq!(claude, expected_claude);
         assert_eq!(pi, expected_pi);
+    }
+
+    #[test]
+    fn claude_keeps_unrelated_mcp_config_and_adds_mimir_separately() {
+        let mut args = vec!["--mcp-config=/tmp/user-servers.json".into()];
+
+        append_test_args(
+            "claude",
+            Path::new("/Users/mimir"),
+            "http://127.0.0.1:29999/mcp",
+            &mut args,
+        );
+
+        assert_eq!(args[0], "--mcp-config=/tmp/user-servers.json");
+        assert_eq!(args[1], "--mcp-config");
+        assert!(args[2].contains(MIMIR_SERVER_ID));
     }
 
     #[test]
@@ -1079,7 +1318,7 @@ mod tests {
             r#"mcp_servers.other.command="other-server""#.into(),
         ];
 
-        append_mimir_connection_args(
+        append_test_args(
             "codex",
             Path::new("/Users/mimir"),
             "http://127.0.0.1:29999/mcp",
@@ -1092,8 +1331,91 @@ mod tests {
                 "-c",
                 r#"mcp_servers.other.command="other-server""#,
                 "-c",
-                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
             ]
         );
+    }
+
+    #[test]
+    fn claude_and_pi_receive_only_the_native_skill_paths_they_support() {
+        let home = Path::new("/Users/mimir");
+        let skills = PreparedSkills {
+            claude_root: Some("/tmp/mimir-claude".into()),
+            project_skill_files: vec!["/tmp/project/release/SKILL.md".into()],
+        };
+        let mut claude = Vec::new();
+        append_mimir_connection_args(
+            "claude",
+            home,
+            DEFAULT_MIMIR_MCP_URL,
+            &BTreeMap::new(),
+            &skills,
+            &mut claude,
+        )
+        .unwrap();
+        assert!(claude.ends_with(&["--add-dir".into(), "/tmp/mimir-claude".into()]));
+
+        let mut pi = Vec::new();
+        append_mimir_connection_args(
+            "pi",
+            home,
+            DEFAULT_MIMIR_MCP_URL,
+            &BTreeMap::new(),
+            &skills,
+            &mut pi,
+        )
+        .unwrap();
+        assert!(pi.ends_with(&["--skill".into(), "/tmp/project/release/SKILL.md".into()]));
+    }
+
+    #[test]
+    fn gemini_config_adds_only_the_owned_stdio_proxy() {
+        let home = tempdir().unwrap();
+        let gemini_cli_home = home.path().join("gemini-config");
+        let gemini_home = gemini_cli_home.join(".gemini");
+        fs::create_dir_all(&gemini_home).unwrap();
+        fs::write(
+            gemini_home.join("settings.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "theme": "user-choice",
+                "mcp": { "allowed": ["existing"] },
+                "mcpServers": {
+                    "existing": { "command": "existing-server" }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let environment = BTreeMap::from([(
+            "GEMINI_CLI_HOME".into(),
+            gemini_cli_home.to_string_lossy().into_owned(),
+        )]);
+
+        ensure_gemini_mcp_config(home.path(), &environment).unwrap();
+
+        let mut settings: Value =
+            serde_json::from_slice(&fs::read(gemini_home.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(settings["theme"], "user-choice");
+        assert_eq!(
+            settings["mcpServers"][MIMIR_SERVER_ID]["args"],
+            serde_json::json!(["mcp-proxy"])
+        );
+        assert_eq!(
+            settings["mcp"]["allowed"],
+            serde_json::json!(["existing", MIMIR_SERVER_ID])
+        );
+
+        settings["mcpServers"][MIMIR_SERVER_ID] = serde_json::json!({
+            "command": "/opt/unrelated",
+            "args": ["mcp-proxy"]
+        });
+        fs::write(
+            gemini_home.join("settings.json"),
+            serde_json::to_vec(&settings).unwrap(),
+        )
+        .unwrap();
+        assert!(ensure_gemini_mcp_config(home.path(), &environment)
+            .unwrap_err()
+            .contains("unrelated"));
     }
 }

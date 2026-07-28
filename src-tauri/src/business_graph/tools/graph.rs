@@ -22,6 +22,7 @@ pub(super) fn execute(
 ) -> Result<NativeExecution, ToolError> {
     match name {
         "graph.status" => value(runtime.open_result().map_err(internal_error)?),
+        "graph.find" => find(runtime, input),
         "graph.list" | "graph.query" => {
             let query = parse_input::<GraphQuery>(input)?;
             value(runtime.query(&query).map_err(internal_error)?)
@@ -87,6 +88,97 @@ pub(super) fn execute(
     }
 }
 
+fn find(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolError> {
+    let query_text = input
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let relation = input
+        .get("relation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let target_id = input
+        .get("targetId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let updated_after = input
+        .get("updatedAfter")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let updated_before = input
+        .get("updatedBefore")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let offset = usize_field(&input, "offset").unwrap_or(0);
+    let limit = usize_field(&input, "limit").unwrap_or(25).clamp(1, 100);
+    let mut query = parse_input::<GraphQuery>(input.clone())?;
+    query.offset = 0;
+    query.limit = 500;
+    let result = runtime.query(&query).map_err(internal_error)?;
+    let scores = query_text.map(|text| {
+        runtime
+            .search(text, &query.scope_ids, 100)
+            .map_err(internal_error)
+            .map(|items| {
+                items
+                    .into_iter()
+                    .map(|item| (item.node.id, item.score))
+                    .collect::<std::collections::HashMap<_, _>>()
+            })
+    });
+    let scores = match scores {
+        Some(result) => Some(result?),
+        None => None,
+    };
+    let mut items = result
+        .items
+        .into_iter()
+        .filter(|node| {
+            scores
+                .as_ref()
+                .is_none_or(|scores| scores.contains_key(&node.id))
+                && relation.is_none_or(|expected| {
+                    node.relations.iter().any(|edge| {
+                        edge.relation == expected
+                            && target_id.is_none_or(|target| edge.target == target)
+                    })
+                })
+                && (relation.is_some()
+                    || target_id.is_none_or(|target| {
+                        node.relations.iter().any(|edge| edge.target == target)
+                    }))
+                && updated_after.is_none_or(|after| node.updated_at.as_str() >= after)
+                && updated_before.is_none_or(|before| node.updated_at.as_str() <= before)
+        })
+        .collect::<Vec<_>>();
+    if let Some(scores) = scores.as_ref() {
+        items.sort_by(|left, right| {
+            scores[&right.id]
+                .cmp(&scores[&left.id])
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+    let total = items.len();
+    let items = items
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
+    value(json!({
+        "items": items,
+        "total": total,
+        "offset": offset.min(total),
+        "limit": limit,
+        "graphRevision": result.graph_revision,
+    }))
+}
+
 fn resolve_legacy_reference(
     runtime: &GraphRuntime,
     input: &Value,
@@ -138,6 +230,22 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
     let scopes = scopes_properties();
     let id = id_properties();
     vec![
+        definition(
+            "graph.find",
+            "graph_find",
+            "Find graph nodes by text, physical scope, kind, tags, issue status, relation, or update time.",
+            merge(
+                query_properties(),
+                json!({
+                    "query": { "type": "string", "minLength": 1, "maxLength": 500 },
+                    "relation": string_schema("Required outgoing relation name."),
+                    "targetId": string_schema("Required outgoing relation target id."),
+                    "updatedAfter": string_schema("Inclusive ISO-8601 lower update bound."),
+                    "updatedBefore": string_schema("Inclusive ISO-8601 upper update bound."),
+                }),
+            ),
+            &[],
+        ),
         definition(
             "graph.status",
             "graph_status",
@@ -263,9 +371,9 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
         definition(
             "graph.restore",
             "graph_restore",
-            "Restore one recently Trashed graph source using the undo token returned by graph.delete.",
+            "Restore one recently Trashed graph source using the undo token returned by graph_delete.",
             json!({
-                "undoToken": string_schema("Undo token returned by graph.delete."),
+                "undoToken": string_schema("Undo token returned by graph_delete."),
             }),
             &["undoToken"],
         ),

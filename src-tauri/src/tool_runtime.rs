@@ -29,18 +29,261 @@ use crate::{
 const DEFAULT_RELAY_TIMEOUT_MS: u64 = 120_000;
 const MIN_RELAY_TIMEOUT_MS: u64 = 100;
 const MAX_RELAY_TIMEOUT_MS: u64 = 600_000;
-pub(crate) const LEAN_AGENT_TOOLS: [(&str, &str, &str); 3] = [
-    ("editor.state", "mimir_state", "Get active editor state."),
-    (
-        "editor.reveal",
-        "mimir_reveal",
-        "Open a file in Mimir, optionally at a line.",
-    ),
-    (
-        "editor.propose",
-        "mimir_propose",
-        "Propose one exact text replacement for review.",
-    ),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AgentToolSpec {
+    pub canonical_name: &'static str,
+    pub public_name: &'static str,
+    pub description: &'static str,
+    pub group: &'static str,
+    pub effect: &'static str,
+    pub direct: bool,
+    pub connection: Option<&'static str>,
+}
+
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 27] = [
+    AgentToolSpec {
+        canonical_name: "editor.state",
+        public_name: "mimir_state",
+        description: "Active editor, selection, comments, and Today priority.",
+        group: "workbench",
+        effect: "read",
+        direct: true,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "editor.reveal",
+        public_name: "mimir_reveal",
+        description: "Open a file or line in Mimir.",
+        group: "workbench",
+        effect: "write",
+        direct: true,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "editor.propose",
+        public_name: "mimir_propose",
+        description: "Propose an exact reviewed replacement.",
+        group: "workbench",
+        effect: "write",
+        direct: true,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "editor.comments",
+        public_name: "comments_list",
+        description: "Read document comments.",
+        group: "workbench",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "comments.add",
+        public_name: "comments_add",
+        description: "Add an anchored document comment.",
+        group: "workbench",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "comments.reply",
+        public_name: "comments_reply",
+        description: "Reply to a document comment.",
+        group: "workbench",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "comments.resolve",
+        public_name: "comments_resolve",
+        description: "Resolve a document comment.",
+        group: "workbench",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.find",
+        public_name: "graph_find",
+        description: "Find graph nodes by text, kind, status, relations, or dates.",
+        group: "graph",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.get",
+        public_name: "graph_get",
+        description: "Read one complete graph node.",
+        group: "graph",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.create",
+        public_name: "graph_create",
+        description: "Create a validated graph node.",
+        group: "graph",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.update",
+        public_name: "graph_update",
+        description: "Update a graph node with revision protection.",
+        group: "graph",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.delete",
+        public_name: "graph_delete",
+        description: "Move a graph node to Trash.",
+        group: "graph",
+        effect: "destructive",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.restore",
+        public_name: "graph_restore",
+        description: "Restore with a graph_delete undo token.",
+        group: "graph",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.context",
+        public_name: "graph_context",
+        description: "Build bounded context around a graph node.",
+        group: "graph",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "gmail.search",
+        public_name: "gmail_search",
+        description: "Search Gmail messages.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("gmail"),
+    },
+    AgentToolSpec {
+        canonical_name: "gmail.read",
+        public_name: "gmail_read",
+        description: "Read a Gmail message or thread.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("gmail"),
+    },
+    AgentToolSpec {
+        canonical_name: "gmail.send",
+        public_name: "gmail_send",
+        description: "Send or reply to Gmail.",
+        group: "connections",
+        effect: "external-write",
+        direct: false,
+        connection: Some("gmail"),
+    },
+    AgentToolSpec {
+        canonical_name: "calendar.list",
+        public_name: "calendar_list",
+        description: "List Google Calendar events.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("calendar"),
+    },
+    AgentToolSpec {
+        canonical_name: "calendar.create",
+        public_name: "calendar_create",
+        description: "Create a Google Calendar event.",
+        group: "connections",
+        effect: "external-write",
+        direct: false,
+        connection: Some("calendar"),
+    },
+    AgentToolSpec {
+        canonical_name: "drive.search",
+        public_name: "drive_search",
+        description: "Search Google Drive files.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("drive"),
+    },
+    AgentToolSpec {
+        canonical_name: "drive.read",
+        public_name: "drive_read",
+        description: "Read Drive metadata and text content when available.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("drive"),
+    },
+    AgentToolSpec {
+        canonical_name: "granola.search",
+        public_name: "granola_search",
+        description: "Search synced Granola meetings.",
+        group: "connections",
+        effect: "read",
+        direct: false,
+        connection: Some("granola"),
+    },
+    AgentToolSpec {
+        canonical_name: "granola.get",
+        public_name: "granola_get",
+        description: "Read one synced Granola meeting.",
+        group: "connections",
+        effect: "read",
+        direct: false,
+        connection: Some("granola"),
+    },
+    AgentToolSpec {
+        canonical_name: "granola.sync",
+        public_name: "granola_sync",
+        description: "Sync Granola meetings or one transcript.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("granola"),
+    },
+    AgentToolSpec {
+        canonical_name: "slack.search",
+        public_name: "slack_search",
+        description: "Search Slack messages.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("slack"),
+    },
+    AgentToolSpec {
+        canonical_name: "slack.read",
+        public_name: "slack_read",
+        description: "Read a Slack channel or thread.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("slack"),
+    },
+    AgentToolSpec {
+        canonical_name: "slack.send",
+        public_name: "slack_send",
+        description: "Send a Slack message.",
+        group: "connections",
+        effect: "external-write",
+        direct: false,
+        connection: Some("slack"),
+    },
 ];
 const TOOL_RELAY_REQUEST_EVENT: &str = "mimir://tool-relay-request";
 const TOOL_RELAY_CANCEL_EVENT: &str = "mimir://tool-relay-cancel";
@@ -121,6 +364,10 @@ fn canonical_legacy_alias(canonical_name: &str) -> String {
         .unwrap_or_else(|| canonical_name.to_string())
 }
 
+pub(crate) fn agent_tool_by_public_name(name: &str) -> Option<&'static AgentToolSpec> {
+    AGENT_TOOLS.iter().find(|spec| spec.public_name == name)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct UiProviderKey {
     provider_id: String,
@@ -159,9 +406,9 @@ impl ToolRuntime {
 
     /// Install stable UI-backed core tools and begin emitting revision changes.
     pub fn initialize(&self, app: &tauri::AppHandle) -> Result<(), String> {
-        for (canonical_name, alias, _) in LEAN_AGENT_TOOLS {
+        for spec in AGENT_TOOLS.iter().filter(|spec| spec.direct) {
             self.registry
-                .reserve_core_tool(canonical_name, alias)
+                .reserve_core_tool(spec.canonical_name, spec.public_name)
                 .map_err(|error| error.to_string())?;
         }
         let provider = UiToolProvider::new(
@@ -175,6 +422,7 @@ impl ToolRuntime {
             .register_core(core_tool_definitions())
             .map_err(|error| error.to_string())?;
         crate::business_graph::tools::register_native_tools(&self.registry, app)?;
+        crate::connections::register_native_tools(&self.registry)?;
         *self
             .core_ui
             .lock()
@@ -1137,6 +1385,30 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn agent_catalog_is_small_unique_and_progressively_disclosed() {
+        assert_eq!(AGENT_TOOLS.len(), 27);
+
+        let canonical_names: HashSet<_> =
+            AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
+        let public_names: HashSet<_> = AGENT_TOOLS.iter().map(|spec| spec.public_name).collect();
+        assert_eq!(canonical_names.len(), AGENT_TOOLS.len());
+        assert_eq!(public_names.len(), AGENT_TOOLS.len());
+
+        let direct: Vec<_> = AGENT_TOOLS
+            .iter()
+            .filter(|spec| spec.direct)
+            .map(|spec| spec.public_name)
+            .collect();
+        assert_eq!(direct, ["mimir_state", "mimir_reveal", "mimir_propose"]);
+
+        for spec in AGENT_TOOLS {
+            assert!(!spec.public_name.contains('.'));
+            assert!(matches!(spec.group, "workbench" | "graph" | "connections"));
+            assert_eq!(spec.connection.is_some(), spec.group == "connections");
+        }
+    }
 
     #[test]
     fn core_catalog_has_unique_names_aliases_and_required_domains() {

@@ -60,6 +60,25 @@ pub enum ToolSource {
     External(String),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAnnotations {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotent_hint: Option<bool>,
+}
+
+impl ToolAnnotations {
+    pub fn is_empty(&self) -> bool {
+        self.read_only_hint.is_none()
+            && self.destructive_hint.is_none()
+            && self.idempotent_hint.is_none()
+    }
+}
+
 /// Public catalog entry. Canonical names are stable internal identifiers while
 /// `mcp_alias` is the protocol-facing spelling accepted by MCP clients.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +90,8 @@ pub struct ToolDescriptor {
     pub input_schema: Value,
     pub owner: ToolOwner,
     pub source: ToolSource,
+    #[serde(default, skip_serializing_if = "ToolAnnotations::is_empty")]
+    pub annotations: ToolAnnotations,
 }
 
 impl ToolDescriptor {
@@ -82,14 +103,57 @@ impl ToolDescriptor {
         owner: ToolOwner,
         source: ToolSource,
     ) -> Self {
+        let canonical_name = canonical_name.into();
         Self {
-            canonical_name: canonical_name.into(),
+            annotations: inferred_annotations(&canonical_name),
+            canonical_name,
             mcp_alias: mcp_alias.into(),
             description: description.into(),
             input_schema,
             owner,
             source,
         }
+    }
+
+    pub fn with_annotations(mut self, annotations: ToolAnnotations) -> Self {
+        self.annotations = annotations;
+        self
+    }
+}
+
+fn inferred_annotations(canonical_name: &str) -> ToolAnnotations {
+    let action = canonical_name.rsplit('.').next().unwrap_or(canonical_name);
+    let read_only = [
+        "active",
+        "board",
+        "browse",
+        "catalog",
+        "comments",
+        "content",
+        "context",
+        "diagnostics",
+        "events",
+        "find",
+        "get",
+        "graph",
+        "list",
+        "migration_report",
+        "neighbors",
+        "query",
+        "read",
+        "resolve_reference",
+        "search",
+        "selection",
+        "state",
+        "status",
+        "tabs",
+    ]
+    .contains(&action);
+    let destructive = ["clear", "delete", "stop", "trash"].contains(&action);
+    ToolAnnotations {
+        read_only_hint: Some(read_only),
+        destructive_hint: Some(destructive),
+        idempotent_hint: read_only.then_some(true),
     }
 }
 
@@ -664,14 +728,17 @@ impl ToolRegistry {
                 ),
             ));
         }
-        if let Err(message) = validate_json_value(&input, &descriptor.input_schema, "$") {
+        let validation_errors = collect_json_errors(&input, &descriptor.input_schema, "$");
+        if !validation_errors.is_empty() {
             return Err(ToolError::new(
                 ToolErrorCode::InvalidInput,
                 format!(
-                    "invalid input for '{}': {message}",
-                    descriptor.canonical_name
+                    "invalid input for '{}':\n- {}",
+                    descriptor.canonical_name,
+                    validation_errors.join("\n- ")
                 ),
-            ));
+            )
+            .with_data(serde_json::json!({ "errors": validation_errors })));
         }
 
         handler.call(context, input).await
@@ -1051,6 +1118,13 @@ fn validate_schema_definition_inner(
             return Err(format!("{path}.{keyword} must be a non-negative integer"));
         }
     }
+    if let Some(pattern) = object.get("pattern") {
+        let pattern = pattern
+            .as_str()
+            .ok_or_else(|| format!("{path}.pattern must be a string"))?;
+        regex::Regex::new(pattern)
+            .map_err(|error| format!("{path}.pattern is invalid: {error}"))?;
+    }
     if object
         .get("uniqueItems")
         .is_some_and(|value| value.as_bool().is_none())
@@ -1158,6 +1232,187 @@ fn validate_json_value(value: &Value, schema: &Value, path: &str) -> Result<(), 
     Ok(())
 }
 
+fn collect_json_errors(value: &Value, schema: &Value, path: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    collect_json_errors_into(value, schema, path, &mut errors);
+    errors
+}
+
+fn collect_json_errors_into(value: &Value, schema: &Value, path: &str, errors: &mut Vec<String>) {
+    if let Some(allowed) = schema.as_bool() {
+        if !allowed {
+            errors.push(format!("{path} is forbidden by the schema"));
+        }
+        return;
+    }
+    let object = schema
+        .as_object()
+        .expect("registered schemas are validated before use");
+
+    if let Some(expected) = object.get("type") {
+        let matches = match expected {
+            Value::String(expected) => value_matches_type(value, expected),
+            Value::Array(expected) => expected
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|expected| value_matches_type(value, expected)),
+            _ => false,
+        };
+        if !matches {
+            errors.push(format!(
+                "{path} must be {}, got {}",
+                render_expected_type(expected),
+                json_type(value)
+            ));
+            return;
+        }
+    }
+
+    if let Some(expected) = object.get("const") {
+        if value != expected {
+            errors.push(format!("{path} must equal {expected}"));
+        }
+    }
+    if let Some(allowed) = object.get("enum").and_then(Value::as_array) {
+        if !allowed.contains(value) {
+            errors.push(format!(
+                "{path} must be one of {}",
+                Value::Array(allowed.clone())
+            ));
+        }
+    }
+
+    if let Some(branches) = object.get("allOf").and_then(Value::as_array) {
+        for branch in branches {
+            collect_json_errors_into(value, branch, path, errors);
+        }
+    }
+    if let Some(branches) = object.get("anyOf").and_then(Value::as_array) {
+        if !branches
+            .iter()
+            .any(|branch| validate_json_value(value, branch, path).is_ok())
+        {
+            errors.push(format!("{path} does not match any allowed schema"));
+        }
+    }
+    if let Some(branches) = object.get("oneOf").and_then(Value::as_array) {
+        let matches = branches
+            .iter()
+            .filter(|branch| validate_json_value(value, branch, path).is_ok())
+            .count();
+        if matches != 1 {
+            errors.push(format!(
+                "{path} must match exactly one allowed schema (matched {matches})"
+            ));
+        }
+    }
+    if let Some(not_schema) = object.get("not") {
+        if validate_json_value(value, not_schema, path).is_ok() {
+            errors.push(format!("{path} matches a forbidden schema"));
+        }
+    }
+
+    if let Some(value) = value.as_object() {
+        if let Some(required) = object.get("required").and_then(Value::as_array) {
+            for field in required.iter().filter_map(Value::as_str) {
+                if !value.contains_key(field) {
+                    errors.push(format!("{path} is missing required property '{field}'"));
+                }
+            }
+        }
+        let properties = object.get("properties").and_then(Value::as_object);
+        for (field, field_value) in value {
+            let field_path = format!("{path}.{field}");
+            if let Some(field_schema) = properties.and_then(|properties| properties.get(field)) {
+                collect_json_errors_into(field_value, field_schema, &field_path, errors);
+                continue;
+            }
+            match object.get("additionalProperties") {
+                Some(Value::Bool(false)) => {
+                    errors.push(format!("{path} contains unknown property '{field}'"));
+                }
+                Some(additional_schema)
+                    if additional_schema.is_object() || additional_schema.is_boolean() =>
+                {
+                    collect_json_errors_into(field_value, additional_schema, &field_path, errors);
+                }
+                _ => {}
+            }
+        }
+    }
+    if let Some(value) = value.as_array() {
+        if let Some(minimum) = object.get("minItems").and_then(Value::as_u64) {
+            if value.len() < minimum as usize {
+                errors.push(format!("{path} must contain at least {minimum} items"));
+            }
+        }
+        if let Some(maximum) = object.get("maxItems").and_then(Value::as_u64) {
+            if value.len() > maximum as usize {
+                errors.push(format!("{path} must contain at most {maximum} items"));
+            }
+        }
+        if object
+            .get("uniqueItems")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && value
+                .iter()
+                .enumerate()
+                .any(|(index, item)| value[..index].contains(item))
+        {
+            errors.push(format!("{path} must contain unique items"));
+        }
+        if let Some(item_schema) = object.get("items") {
+            for (index, item) in value.iter().enumerate() {
+                collect_json_errors_into(item, item_schema, &format!("{path}[{index}]"), errors);
+            }
+        }
+    }
+    if let Some(value) = value.as_str() {
+        let character_count = value.chars().count();
+        if let Some(minimum) = object.get("minLength").and_then(Value::as_u64) {
+            if character_count < minimum as usize {
+                errors.push(format!("{path} must contain at least {minimum} characters"));
+            }
+        }
+        if let Some(maximum) = object.get("maxLength").and_then(Value::as_u64) {
+            if character_count > maximum as usize {
+                errors.push(format!("{path} must contain at most {maximum} characters"));
+            }
+        }
+        if let Some(pattern) = object.get("pattern").and_then(Value::as_str) {
+            if !regex::Regex::new(pattern)
+                .expect("registered schema patterns are validated")
+                .is_match(value)
+            {
+                errors.push(format!("{path} must match pattern {pattern:?}"));
+            }
+        }
+    }
+    if let Some(value) = value.as_f64() {
+        if let Some(minimum) = object.get("minimum").and_then(Value::as_f64) {
+            if value < minimum {
+                errors.push(format!("{path} must be at least {minimum}"));
+            }
+        }
+        if let Some(maximum) = object.get("maximum").and_then(Value::as_f64) {
+            if value > maximum {
+                errors.push(format!("{path} must be at most {maximum}"));
+            }
+        }
+        if let Some(minimum) = object.get("exclusiveMinimum").and_then(Value::as_f64) {
+            if value <= minimum {
+                errors.push(format!("{path} must be greater than {minimum}"));
+            }
+        }
+        if let Some(maximum) = object.get("exclusiveMaximum").and_then(Value::as_f64) {
+            if value >= maximum {
+                errors.push(format!("{path} must be less than {maximum}"));
+            }
+        }
+    }
+}
+
 fn validate_object(
     value: &Map<String, Value>,
     schema: &Map<String, Value>,
@@ -1230,6 +1485,14 @@ fn validate_string(value: &str, schema: &Map<String, Value>, path: &str) -> Resu
     if let Some(maximum) = schema.get("maxLength").and_then(Value::as_u64) {
         if character_count > maximum as usize {
             return Err(format!("{path} must contain at most {maximum} characters"));
+        }
+    }
+    if let Some(pattern) = schema.get("pattern").and_then(Value::as_str) {
+        if !regex::Regex::new(pattern)
+            .expect("registered schema patterns are validated")
+            .is_match(value)
+        {
+            return Err(format!("{path} must match pattern {pattern:?}"));
         }
     }
     Ok(())
@@ -1345,6 +1608,13 @@ mod tests {
                 })))
             },
         )
+    }
+
+    #[test]
+    fn find_is_inferred_as_read_only() {
+        let descriptor = descriptor("graph.find", "graph_find", ToolOwner::Core);
+        assert_eq!(descriptor.annotations.read_only_hint, Some(true));
+        assert_eq!(descriptor.annotations.idempotent_hint, Some(true));
     }
 
     #[test]
@@ -1470,6 +1740,24 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.code, ToolErrorCode::InvalidInput);
         }
+        let error = registry
+            .call(
+                "editor.replace",
+                ToolCallContext::default(),
+                json!({ "text": 5, "count": 0, "unknown": true }),
+            )
+            .await
+            .unwrap_err();
+        let errors = error
+            .data
+            .as_ref()
+            .and_then(|data| data.get("errors"))
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(errors.len(), 3);
+        assert!(error.message.contains("$.text must be string"));
+        assert!(error.message.contains("$.count must be at least 1"));
+        assert!(error.message.contains("unknown property 'unknown'"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 

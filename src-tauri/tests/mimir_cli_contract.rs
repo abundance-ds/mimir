@@ -2,7 +2,7 @@
 //! tool server.
 //!
 //! Each test boots the real axum tool server ([`mimir::tool_server`])
-//! on an ephemeral loopback port with a couple of synthetic core tools, then
+//! on an ephemeral loopback port with synthetic core tools, then
 //! exercises the wire protocol either through the actual `bin/mimir.mjs` CLI
 //! (spawned via `node`) or through raw JSON-RPC over HTTP. This catches
 //! protocol and serialization drift that the isolated unit tests on either
@@ -22,36 +22,35 @@ use mimir::{
 
 const TEST_TOKEN: &str = "contract-test-token";
 
-/// A minimal registry with two synthetic core tools:
+/// A minimal registry with three synthetic core tools:
 ///
-/// * `test.echo` (`test_echo`) — echoes input plus caller metadata, so tests
-///   can assert on argument round-trips and transport-assigned context.
-/// * `editor.state` (`editor_state`) — canonical name that participates in
-///   the lean `LEAN_AGENT_TOOLS` MCP projection (`mimir_state`) and backs the
-///   CLI's built-in `mimir state` command.
+/// * `graph.get` (`graph_get`) — returns input plus caller metadata, so tests
+///   can assert on public-tool round-trips and transport-assigned context.
+/// * `editor.state` (`editor_state`) — backs the direct `mimir_state` tool.
+/// * `graph.status` (`graph_status`) — supplies scopes for `mimir doctor`.
 fn test_registry() -> ToolRegistry {
     let registry = ToolRegistry::new();
     register_core_tool(
         &registry,
-        "test.echo",
-        "test_echo",
-        "Echo the provided text back to the caller.",
+        "graph.get",
+        "graph_get",
+        "Get one graph node.",
         json!({
             "type": "object",
-            "properties": { "text": { "type": "string", "minLength": 1 } },
-            "required": ["text"],
+            "properties": { "id": { "type": "string", "minLength": 1 } },
+            "required": ["id"],
             "additionalProperties": false
         }),
         ToolSource::Native,
         |context: ToolCallContext, input: Value| async move {
             Ok(ToolResult::new(json!({
-                "echo": input["text"],
+                "id": input["id"],
                 "caller": serde_json::to_value(&context.caller).expect("caller serializes"),
                 "requestId": context.request_id,
             })))
         },
     )
-    .expect("register test.echo");
+    .expect("register graph.get");
     register_core_tool(
         &registry,
         "editor.state",
@@ -71,6 +70,27 @@ fn test_registry() -> ToolRegistry {
         },
     )
     .expect("register editor.state");
+    register_core_tool(
+        &registry,
+        "graph.status",
+        "graph_status",
+        "Get mounted graph scopes.",
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        ToolSource::Native,
+        |_context: ToolCallContext, _input: Value| async move {
+            Ok(ToolResult::new(json!({
+                "scopes": [
+                    { "id": "private:local" },
+                    { "id": "project:contract" }
+                ]
+            })))
+        },
+    )
+    .expect("register graph.status");
     registry
 }
 
@@ -165,8 +185,8 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
     let server = TestServer::boot().await;
     let url = server.mcp_url();
 
-    // `mimir tools` — the lean/core projection: editor.state is surfaced under
-    // its projected alias, test.echo is hidden until --all.
+    // `mimir tools` — one concise list of every public tool currently backed
+    // by the registry.
     let Some(lean) = run_mimir(&url, &["tools"]).await else {
         eprintln!("skipping mimir contract test: `node` is not on PATH");
         server.shutdown().await;
@@ -175,33 +195,56 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
     assert_success(&lean, "mimir tools");
     let lean_stdout = stdout_of(&lean);
     assert!(
-        lean_stdout.contains("mimir_state\tGet active editor state."),
-        "lean listing should project editor.state as mimir_state, got: {lean_stdout}",
+        lean_stdout.contains("mimir_state"),
+        "listing should project editor.state as mimir_state, got: {lean_stdout}",
     );
     assert!(
-        !lean_stdout.contains("test_echo"),
-        "lean listing must not include non-core tools, got: {lean_stdout}",
+        lean_stdout.contains("graph_get")
+            && lean_stdout.contains("WORKBENCH")
+            && lean_stdout.contains("GRAPH"),
+        "listing should group every public tool, got: {lean_stdout}",
     );
 
-    // `mimir tools --all` — the full catalog includes the synthetic tool.
-    let all = run_mimir(&url, &["tools", "--all"]).await.unwrap();
-    assert_success(&all, "mimir tools --all");
-    let all_stdout = stdout_of(&all);
-    assert!(
-        all_stdout.contains("test_echo\tEcho the provided text back to the caller."),
-        "full listing should include test_echo, got: {all_stdout}",
-    );
-    assert!(all_stdout.contains("mimir_state"), "got: {all_stdout}");
+    // There is no second, hidden "all" catalog.
+    let old_all = run_mimir(&url, &["tools", "--all"]).await.unwrap();
+    assert_eq!(old_all.status.code(), Some(1));
+    assert!(stderr_of(&old_all).contains("Unknown option: --all"));
+
+    // Focused discovery returns the exact inputs and a ready call without a
+    // catalog dump or trial invocation.
+    let focused = run_mimir(&url, &["tool", "graph_get"]).await.unwrap();
+    assert_success(&focused, "mimir tool graph_get");
+    let focused_stdout = stdout_of(&focused);
+    assert!(focused_stdout.contains("graph_get — Read one complete graph node."));
+    assert!(focused_stdout.contains("Required:\n  id: string"));
+    assert!(focused_stdout.contains("mimir call graph_get"));
+    assert!(!focused_stdout.contains("graph_status"));
+
+    let focused_help = run_mimir(&url, &["call", "graph_get", "--help"])
+        .await
+        .unwrap();
+    assert_success(&focused_help, "mimir call graph_get --help");
+    assert_eq!(stdout_of(&focused_help), focused_stdout);
+
+    // Command-family help is parsed before any network access.
+    let offline_help = run_mimir(
+        "http://127.0.0.1:1/mcp?activityId=secret",
+        &["call", "--help"],
+    )
+    .await
+    .unwrap();
+    assert_success(&offline_help, "mimir call --help");
+    assert!(stdout_of(&offline_help).contains("Usage: mimir call"));
 
     // `mimir call` — arguments in, structuredContent out, transport metadata
     // (caller + request id) assigned by the server.
-    let call = run_mimir(&url, &["call", "test_echo", r#"{"text":"round-trip"}"#])
+    let call = run_mimir(&url, &["call", "graph_get", r#"{"id":"round-trip"}"#])
         .await
         .unwrap();
-    assert_success(&call, "mimir call test_echo");
+    assert_success(&call, "mimir call graph_get");
     let payload: Value =
         serde_json::from_str(stdout_of(&call).trim()).expect("mimir call prints JSON");
-    assert_eq!(payload["echo"], "round-trip");
+    assert_eq!(payload["id"], "round-trip");
     assert_eq!(payload["caller"]["kind"], "mcp");
     assert!(
         payload["requestId"]
@@ -210,30 +253,22 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
         "server should derive request_id from the JSON-RPC id, got: {payload}",
     );
 
-    // `mimir state` — a built-in CLI command calling by canonical tool name.
-    let state = run_mimir(&url, &["state"]).await.unwrap();
-    assert_success(&state, "mimir state");
-    let state_payload: Value =
-        serde_json::from_str(stdout_of(&state).trim()).expect("mimir state prints JSON");
-    assert_eq!(state_payload["path"], "/workspace/README.md");
-    assert_eq!(state_payload["content"], "");
-
     // Schema violations surface as CLI errors (exit 1, message on stderr).
-    let invalid = run_mimir(&url, &["call", "test_echo", "{}"]).await.unwrap();
+    let invalid = run_mimir(&url, &["call", "graph_get", "{}"]).await.unwrap();
     assert_eq!(invalid.status.code(), Some(1), "invalid input should fail");
     assert!(
-        stderr_of(&invalid).contains("invalid input for 'test.echo'"),
+        stderr_of(&invalid).contains("invalid input for 'graph_get'"),
         "stderr should carry the structured validation message, got: {}",
         stderr_of(&invalid),
     );
 
-    // Unknown tools surface the registry's not-found error.
+    // Unknown tools surface the exact rejected name.
     let missing = run_mimir(&url, &["call", "no_such_tool", "{}"])
         .await
         .unwrap();
     assert_eq!(missing.status.code(), Some(1), "missing tool should fail");
     assert!(
-        stderr_of(&missing).contains("not registered"),
+        stderr_of(&missing).contains("Unknown tool 'no_such_tool'."),
         "stderr should carry the not-found message, got: {}",
         stderr_of(&missing),
     );
@@ -271,6 +306,10 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
     assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
     assert_eq!(init["result"]["serverInfo"]["name"], "mimir");
     assert_eq!(init["result"]["capabilities"]["tools"], json!({}));
+    assert_eq!(
+        init["result"]["instructions"],
+        "Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`"
+    );
 
     // notifications (no id) are accepted with 202 and an empty body.
     let notification = client
@@ -309,7 +348,8 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
     assert_eq!(lean_tools[0]["name"], "mimir_state");
     assert_eq!(lean["result"]["_meta"]["mimir/disclosure"], "core");
 
-    // …and includeAll exposes the full catalog with canonical metadata.
+    // …and includeAll exposes only the wider public catalog, with one name
+    // per tool and compact grouping metadata.
     let all: Value = client
         .post(&url)
         .json(&json!({
@@ -325,13 +365,21 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
         .await
         .expect("tools/list includeAll response");
     let all_tools = all["result"]["tools"].as_array().expect("tools array");
-    let echo = all_tools
+    let graph = all_tools
         .iter()
-        .find(|tool| tool["name"] == "test_echo")
-        .unwrap_or_else(|| panic!("test_echo missing from full list: {all}"));
-    assert_eq!(echo["_meta"]["mimir/canonicalName"], "test.echo");
-    assert_eq!(echo["inputSchema"]["required"][0], "text");
-    assert_eq!(all["result"]["_meta"]["mimir/disclosure"], "all");
+        .find(|tool| tool["name"] == "graph_get")
+        .unwrap_or_else(|| panic!("graph_get missing from public list: {all}"));
+    assert!(graph["_meta"].get("mimir/canonicalName").is_none());
+    assert_eq!(graph["_meta"]["mimir/group"], "graph");
+    assert_eq!(graph["inputSchema"]["required"][0], "id");
+    assert_eq!(graph["annotations"]["readOnlyHint"], true);
+    let state = all_tools
+        .iter()
+        .find(|tool| tool["name"] == "mimir_state")
+        .unwrap_or_else(|| panic!("mimir_state missing from full list: {all}"));
+    assert_eq!(state["annotations"]["readOnlyHint"], true);
+    assert_eq!(state["annotations"]["idempotentHint"], true);
+    assert_eq!(all["result"]["_meta"]["mimir/disclosure"], "public");
 
     // tools/call round-trip via the lean alias: alias resolution, argument
     // delivery, text + structuredContent rendering, request id propagation.
@@ -367,7 +415,7 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
             "jsonrpc": "2.0",
             "id": 5,
             "method": "tools/call",
-            "params": { "name": "test_echo", "arguments": { "text": 42 } }
+            "params": { "name": "graph_get", "arguments": { "id": 42 } }
         }))
         .send()
         .await
@@ -393,6 +441,66 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
         .await
         .expect("unknown method response");
     assert_eq!(unknown["error"]["code"], -32601);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn mcp_http_rejects_remote_web_origins() {
+    let server = TestServer::boot().await;
+    let url = server.mcp_url();
+    let client = reqwest::Client::new();
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "origin-test", "version": "0" }
+        }
+    });
+
+    let remote = client
+        .post(&url)
+        .header("origin", "https://attacker.example")
+        .json(&payload)
+        .send()
+        .await
+        .expect("remote-origin request");
+    assert_eq!(remote.status(), reqwest::StatusCode::FORBIDDEN);
+
+    let loopback = client
+        .post(&url)
+        .header("origin", "http://localhost:5173")
+        .json(&payload)
+        .send()
+        .await
+        .expect("loopback-origin request");
+    assert_eq!(loopback.status(), reqwest::StatusCode::OK);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn mimir_doctor_reports_connection_context_scopes_and_catalog() {
+    let server = TestServer::boot().await;
+    let url = format!(
+        "{}?activityId=agent%3Acontract&agentId=codex",
+        server.mcp_url()
+    );
+    let Some(output) = run_mimir(&url, &["doctor"]).await else {
+        eprintln!("skipping mimir contract test: `node` is not on PATH");
+        server.shutdown().await;
+        return;
+    };
+    assert_success(&output, "mimir doctor");
+    assert_eq!(
+        stdout_of(&output),
+        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      2\n"
+    );
+    assert!(!stdout_of(&output).contains("agent:contract"));
+    assert!(!stdout_of(&output).contains("codex"));
 
     server.shutdown().await;
 }
@@ -464,19 +572,19 @@ async fn legacy_http_api_enforces_bearer_auth_and_maps_errors() {
         .await
         .expect("schema response");
     let tools = schema["tools"].as_array().expect("tools array");
-    let echo = tools
+    let graph = tools
         .iter()
-        .find(|tool| tool["name"] == "test_echo")
-        .unwrap_or_else(|| panic!("test_echo missing from legacy schema: {schema}"));
-    assert_eq!(echo["canonical_name"], "test.echo");
+        .find(|tool| tool["name"] == "graph_get")
+        .unwrap_or_else(|| panic!("graph_get missing from legacy schema: {schema}"));
+    assert_eq!(graph["canonical_name"], "graph.get");
 
     // Authenticated call round-trip, marked with the mimir caller.
     let call = client
         .post(server.api_url("/api/tools/call"))
         .bearer_auth(TEST_TOKEN)
         .json(&json!({
-            "tool": "test.echo",
-            "input": { "text": "legacy" },
+            "tool": "graph.get",
+            "input": { "id": "legacy" },
             "requestId": "legacy-1"
         }))
         .send()
@@ -484,7 +592,7 @@ async fn legacy_http_api_enforces_bearer_auth_and_maps_errors() {
         .expect("legacy call request");
     assert_eq!(call.status(), reqwest::StatusCode::OK);
     let call_body: Value = call.json().await.expect("legacy call response");
-    assert_eq!(call_body["result"]["echo"], "legacy");
+    assert_eq!(call_body["result"]["id"], "legacy");
     assert_eq!(call_body["result"]["caller"]["kind"], "mimir_cli");
     assert_eq!(call_body["result"]["requestId"], "legacy-1");
 
@@ -506,7 +614,8 @@ async fn legacy_http_api_enforces_bearer_auth_and_maps_errors() {
 #[tokio::test]
 async fn mimir_cli_fails_cleanly_when_the_server_is_unreachable() {
     // No server: MIMIR_MCP_URL points at a port nothing listens on.
-    let url = format!("http://127.0.0.1:{}/mcp", unused_port());
+    let base_url = format!("http://127.0.0.1:{}/mcp", unused_port());
+    let url = format!("{base_url}?activityId=secret-activity&agentId=secret-agent");
     let Some(output) = run_mimir(&url, &["tools"]).await else {
         eprintln!("skipping mimir contract test: `node` is not on PATH");
         return;
@@ -523,14 +632,14 @@ async fn mimir_cli_fails_cleanly_when_the_server_is_unreachable() {
     );
     let stderr = stderr_of(&output);
     assert!(
-        stderr.contains(&url),
-        "stderr should name the URL the CLI tried, got: {stderr}",
+        stderr.contains(&base_url),
+        "stderr should name the safe endpoint, got: {stderr}",
     );
     assert!(
-        stderr.contains("Mimir workbench") && stderr.contains("MIMIR_MCP_URL"),
-        "stderr should hint that the workbench must be running and how the URL \
-         is configured, got: {stderr}",
+        stderr.contains("connection refused") && stderr.contains("mimir doctor"),
+        "stderr should preserve the cause and useful remedy, got: {stderr}",
     );
+    assert!(!stderr.contains("secret-activity") && !stderr.contains("secret-agent"));
     assert!(
         !stderr.contains("    at "),
         "stderr must stay a human-readable message, not a stack trace: {stderr}",
@@ -546,7 +655,7 @@ async fn mimir_cli_fails_fast_when_pointed_at_the_bearer_guarded_api() {
     // on stderr, not hang or dump JSON internals. Auth is decided before body
     // parsing, so the missing token surfaces as a 401.
     let server = TestServer::boot().await;
-    let Some(output) = run_mimir(&server.api_url("/api/tools/call"), &["state"]).await else {
+    let Some(output) = run_mimir(&server.api_url("/api/tools/call"), &["tools"]).await else {
         eprintln!("skipping mimir contract test: `node` is not on PATH");
         server.shutdown().await;
         return;
@@ -563,7 +672,7 @@ async fn mimir_cli_fails_fast_when_pointed_at_the_bearer_guarded_api() {
         "rejected requests must not print results"
     );
     assert!(
-        stderr_of(&output).contains("mimir server returned HTTP 401"),
+        stderr_of(&output).contains("returned HTTP 401"),
         "stderr should name the HTTP status, got: {}",
         stderr_of(&output),
     );
@@ -577,7 +686,7 @@ async fn malformed_tool_arguments_fail_the_cli_without_hurting_the_server() {
 
     // Wrong argument type: schema validation happens server-side and comes
     // back as an isError tool result the CLI maps to exit 1 plus stderr.
-    let Some(wrong_type) = run_mimir(&url, &["call", "test_echo", r#"{"text":42}"#]).await else {
+    let Some(wrong_type) = run_mimir(&url, &["call", "graph_get", r#"{"id":42}"#]).await else {
         eprintln!("skipping mimir contract test: `node` is not on PATH");
         server.shutdown().await;
         return;
@@ -588,8 +697,8 @@ async fn malformed_tool_arguments_fail_the_cli_without_hurting_the_server() {
         "wrong-typed input should fail",
     );
     assert!(
-        stderr_of(&wrong_type).contains("invalid input for 'test.echo'"),
-        "stderr should carry the canonical-name validation message, got: {}",
+        stderr_of(&wrong_type).contains("invalid input for 'graph_get'"),
+        "stderr should carry the public-name validation message, got: {}",
         stderr_of(&wrong_type),
     );
     assert_eq!(
@@ -599,7 +708,7 @@ async fn malformed_tool_arguments_fail_the_cli_without_hurting_the_server() {
     );
 
     // Unparseable JSON never reaches the wire: the CLI rejects it itself.
-    let bad_json = run_mimir(&url, &["call", "test_echo", "{not json"])
+    let bad_json = run_mimir(&url, &["call", "graph_get", "{not json"])
         .await
         .unwrap();
     assert_eq!(bad_json.status.code(), Some(1), "bad JSON should fail");
@@ -630,7 +739,7 @@ async fn malformed_tool_arguments_fail_the_cli_without_hurting_the_server() {
             "jsonrpc": "2.0",
             "id": 8,
             "method": "tools/call",
-            "params": { "name": "test_echo", "arguments": { "text": "still-alive" } }
+            "params": { "name": "graph_get", "arguments": { "id": "still-alive" } }
         }))
         .send()
         .await
@@ -638,7 +747,7 @@ async fn malformed_tool_arguments_fail_the_cli_without_hurting_the_server() {
         .json()
         .await
         .expect("follow-up response");
-    assert_eq!(alive["result"]["structuredContent"]["echo"], "still-alive");
+    assert_eq!(alive["result"]["structuredContent"]["id"], "still-alive");
 
     server.shutdown().await;
 }
@@ -656,7 +765,7 @@ async fn unknown_tool_calls_name_the_tool_and_stay_inside_the_protocol() {
     };
     assert_eq!(missing.status.code(), Some(1), "unknown tool should fail");
     assert!(
-        stderr_of(&missing).contains("tool 'graph_qery' is not registered"),
+        stderr_of(&missing).contains("Unknown tool 'graph_qery'."),
         "stderr should name the missing tool, got: {}",
         stderr_of(&missing),
     );
@@ -666,8 +775,8 @@ async fn unknown_tool_calls_name_the_tool_and_stay_inside_the_protocol() {
         "failed calls must not print results"
     );
 
-    // Raw shape: the server keeps this an isError tool *result* carrying
-    // `not_found` on HTTP 200 — no JSON-RPC protocol error, no 500.
+    // Unknown tool names are invalid request parameters, not tool execution
+    // failures. The server returns a JSON-RPC error on HTTP 200.
     let client = reqwest::Client::new();
     let response = client
         .post(&url)
@@ -682,9 +791,10 @@ async fn unknown_tool_calls_name_the_tool_and_stay_inside_the_protocol() {
         .expect("unknown tool request");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let body: Value = response.json().await.expect("unknown tool response");
-    assert_eq!(body["result"]["isError"], true, "body: {body}");
-    assert_eq!(body["result"]["structuredContent"]["error"], "not_found");
-    assert!(body.get("error").is_none(), "body: {body}");
+    assert_eq!(body["error"]["code"], -32602, "body: {body}");
+    assert_eq!(body["error"]["message"], "Unknown tool");
+    assert_eq!(body["error"]["data"]["name"], "graph_qery");
+    assert!(body.get("result").is_none(), "body: {body}");
 
     server.shutdown().await;
 }
@@ -694,8 +804,8 @@ async fn mimir_cli_loop_discovers_the_lean_alias_and_round_trips_a_call() {
     let server = TestServer::boot().await;
     let url = server.mcp_url();
 
-    // Discover: the machine-readable lean catalog projects editor.state under
-    // its alias, and nothing else from the synthetic registry leaks in.
+    // Discover: the machine-readable catalog exposes every backed public tool
+    // and nothing else from the synthetic registry.
     let Some(listing) = run_mimir(&url, &["tools", "--json"]).await else {
         eprintln!("skipping mimir contract test: `node` is not on PATH");
         server.shutdown().await;
@@ -707,13 +817,17 @@ async fn mimir_cli_loop_discovers_the_lean_alias_and_round_trips_a_call() {
     let tools = catalog.as_array().expect("catalog is an array");
     assert_eq!(
         tools.len(),
-        1,
-        "lean projection should be exactly the core tools: {catalog}",
+        2,
+        "public projection should include state and graph get: {catalog}",
     );
-    let alias = tools[0]["name"].as_str().expect("tool has a name");
+    let state = tools
+        .iter()
+        .find(|tool| tool["name"] == "mimir_state")
+        .expect("mimir_state is public");
+    let alias = state["name"].as_str().expect("tool has a name");
     assert_eq!(alias, "mimir_state");
     assert_eq!(
-        tools[0]["inputSchema"]["properties"]["include_content"]["type"], "boolean",
+        state["inputSchema"]["properties"]["include_content"]["type"], "boolean",
         "the canonical tool's schema should ride along with the alias: {catalog}",
     );
 

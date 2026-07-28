@@ -58,7 +58,7 @@ fn definitions_are_accepted_by_the_canonical_registry() {
             ))
             .unwrap();
     }
-    assert_eq!(registry.list().len(), 38);
+    assert_eq!(registry.list().len(), 39);
 }
 
 #[test]
@@ -105,6 +105,36 @@ fn compatibility_writes_create_real_relations_and_revisions() {
         .relations
         .iter()
         .any(|edge| edge.relation == "part_of" && edge.target == "project-alpha"));
+}
+
+#[test]
+fn knowledge_redaction_is_explicit_and_applies_only_to_automatic_context() {
+    let (_root, runtime) = fixture();
+    let created = execute_native_tool(
+        &runtime,
+        "knowledge.create",
+        json!({
+            "title": "Confidential launch",
+            "body": "Direct reads keep this body.",
+            "redactFromContext": true
+        }),
+    )
+    .unwrap();
+    let id = created.value["id"].as_str().unwrap();
+    assert_eq!(created.value["redactFromContext"], true);
+    assert_eq!(created.value["body"], "Direct reads keep this body.");
+
+    let context = execute_native_tool(
+        &runtime,
+        "graph.context",
+        json!({ "focusId": id, "maxNodes": 1 }),
+    )
+    .unwrap();
+    assert_eq!(context.value["nodes"][0]["redacted"], true);
+    assert_eq!(
+        context.value["nodes"][0]["title"],
+        "[sensitive record redacted]"
+    );
 }
 
 #[test]

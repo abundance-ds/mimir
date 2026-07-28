@@ -1,13 +1,13 @@
 use axum::{
     body::Bytes,
     extract::{Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Json},
     routing::{get, post},
     Router,
 };
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use tokio::{
     sync::{watch, Mutex},
     task::JoinHandle,
@@ -18,7 +18,7 @@ use crate::{
         RegistrySnapshot, ToolCallContext, ToolCaller, ToolDescriptor, ToolError, ToolErrorCode,
         ToolRegistry, ToolResult,
     },
-    tool_runtime::{self, ToolRuntime, LEAN_AGENT_TOOLS},
+    tool_runtime::{self, AgentToolSpec, ToolRuntime, AGENT_TOOLS},
 };
 
 pub struct ToolServerState {
@@ -177,6 +177,7 @@ fn legacy_tool_schema(snapshot: &RegistrySnapshot) -> Vec<serde_json::Value> {
                 "input_schema": tool.input_schema,
                 "owner": tool.owner,
                 "source": tool.source,
+                "annotations": tool.annotations,
             })
         })
         .collect()
@@ -207,8 +208,11 @@ fn tool_error_name(code: ToolErrorCode) -> &'static str {
 
 // ── MCP (Model Context Protocol) ─────────────────────────────────
 
-const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
-const SUPPORTED_PROTOCOL_VERSIONS: [&str; 2] = [LATEST_PROTOCOL_VERSION, "2025-03-26"];
+const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
+const SUPPORTED_PROTOCOL_VERSIONS: [&str; 3] =
+    [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26"];
+const MIMIR_INSTRUCTIONS: &str =
+    "Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`";
 
 fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
     requested
@@ -239,63 +243,69 @@ fn jsonrpc_err(
 }
 
 fn mcp_tool_list(snapshot: &RegistrySnapshot, include_all: bool) -> serde_json::Value {
-    let tools: Vec<serde_json::Value> = if include_all {
-        snapshot.tools.iter().map(full_mcp_tool).collect()
-    } else {
-        LEAN_AGENT_TOOLS
-            .iter()
-            .filter_map(|(canonical_name, alias, description)| {
-                snapshot
-                    .tools
-                    .iter()
-                    .find(|tool| tool.canonical_name == *canonical_name)
-                    .map(|tool| {
-                        serde_json::json!({
-                            "name": alias,
-                            "description": description,
-                            "inputSchema": tool.input_schema,
-                        })
-                    })
-            })
-            .collect()
-    };
+    let tools: Vec<serde_json::Value> = AGENT_TOOLS
+        .iter()
+        .filter(|spec| include_all || spec.direct)
+        .filter_map(|spec| {
+            snapshot
+                .tools
+                .iter()
+                .find(|tool| tool.canonical_name == spec.canonical_name)
+                .map(|tool| public_mcp_tool(tool, spec))
+        })
+        .collect();
     serde_json::json!({
         "tools": tools,
         "_meta": {
             "mimir/registryRevision": snapshot.revision,
-            "mimir/disclosure": if include_all { "all" } else { "core" },
+            "mimir/disclosure": if include_all { "public" } else { "core" },
         }
     })
 }
 
-fn full_mcp_tool(tool: &ToolDescriptor) -> serde_json::Value {
-    let projection = LEAN_AGENT_TOOLS
+fn connection_status(snapshot: &RegistrySnapshot) -> BTreeMap<&'static str, bool> {
+    AGENT_TOOLS
         .iter()
-        .find(|(canonical_name, _, _)| *canonical_name == tool.canonical_name);
-    let name = projection
-        .map(|(_, alias, _)| *alias)
-        .unwrap_or(tool.mcp_alias.as_str());
-    let description = projection
-        .map(|(_, _, description)| *description)
-        .unwrap_or(tool.description.as_str());
-    serde_json::json!({
-        "name": name,
-        "description": description,
+        .filter_map(|spec| spec.connection)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|connection| {
+            let available = AGENT_TOOLS.iter().any(|spec| {
+                spec.connection == Some(connection)
+                    && snapshot
+                        .tools
+                        .iter()
+                        .any(|tool| tool.canonical_name == spec.canonical_name)
+            });
+            (connection, available)
+        })
+        .collect()
+}
+
+fn public_mcp_tool(tool: &ToolDescriptor, spec: &AgentToolSpec) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "name": spec.public_name,
+        "description": spec.description,
         "inputSchema": tool.input_schema,
         "_meta": {
-            "mimir/canonicalName": tool.canonical_name,
-            "mimir/owner": tool.owner,
-            "mimir/source": tool.source,
+            "mimir/group": spec.group,
+            "mimir/effect": spec.effect,
         }
-    })
+    });
+    if !tool.annotations.is_empty() {
+        value["annotations"] =
+            serde_json::to_value(&tool.annotations).expect("tool annotations must serialize");
+    }
+    value
 }
 
-fn resolve_mcp_tool_name(name: &str) -> &str {
-    LEAN_AGENT_TOOLS
-        .iter()
-        .find(|(_, alias, _)| *alias == name)
-        .map(|(canonical_name, _, _)| *canonical_name)
-        .unwrap_or(name)
+fn resolve_mcp_tool(name: &str) -> Option<&'static AgentToolSpec> {
+    tool_runtime::agent_tool_by_public_name(name)
+}
+
+fn public_tool_error(mut error: ToolError, tool: &AgentToolSpec) -> ToolError {
+    error.message = error.message.replace(tool.canonical_name, tool.public_name);
+    error
 }
 
 fn render_tool_result(result: ToolResult) -> serde_json::Value {
@@ -333,9 +343,27 @@ async fn handle_mcp(
 async fn handle_mcp_http(
     Query(client): Query<McpClientContext>,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<serde_json::Value>,
 ) -> axum::response::Response {
+    if !origin_is_allowed(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     handle_mcp_request(state, client, request).await
+}
+
+fn origin_is_allowed(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Ok(uri) = origin.parse::<Uri>() else {
+        return false;
+    };
+    matches!(uri.scheme_str(), Some("http" | "https"))
+        && matches!(uri.host(), Some("127.0.0.1" | "localhost" | "::1"))
 }
 
 async fn handle_mcp_request(
@@ -364,12 +392,50 @@ async fn handle_mcp_request(
                 serde_json::json!({
                     "protocolVersion": protocol_version,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "mimir", "version": env!("CARGO_PKG_VERSION") }
+                    "serverInfo": { "name": "mimir", "version": env!("CARGO_PKG_VERSION") },
+                    "instructions": MIMIR_INSTRUCTIONS,
                 }),
             ))
             .into_response()
         }
         "ping" => Json(jsonrpc_ok(id, serde_json::json!({}))).into_response(),
+        "mimir/doctor" => {
+            let snapshot = state.registry.snapshot();
+            let public = mcp_tool_list(&snapshot, true);
+            let graph = state
+                .registry
+                .call(
+                    "graph.status",
+                    ToolCallContext::new(ToolCaller::Internal),
+                    serde_json::json!({}),
+                )
+                .await;
+            let (graph_ok, scopes, graph_error) = match graph {
+                Ok(result) => (
+                    true,
+                    result
+                        .value
+                        .get("scopes")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([])),
+                    None,
+                ),
+                Err(error) => (false, serde_json::json!([]), Some(error.message)),
+            };
+            Json(jsonrpc_ok(
+                id,
+                serde_json::json!({
+                    "graphOk": graph_ok,
+                    "scopes": scopes,
+                    "graphError": graph_error,
+                    "tools": public["tools"].as_array().map_or(0, Vec::len),
+                    "registryRevision": snapshot.revision,
+                    "connections": connection_status(&snapshot),
+                    "connectionDiagnostics": crate::connections::local_diagnostics(),
+                }),
+            ))
+            .into_response()
+        }
         "tools/list" => {
             let snapshot = state.registry.snapshot();
             let include_all = request
@@ -385,6 +451,24 @@ async fn handle_mcp_request(
             else {
                 return Json(jsonrpc_err(id, -32602, "Missing tool name", None)).into_response();
             };
+            let Some(tool) = resolve_mcp_tool(name) else {
+                return Json(jsonrpc_err(
+                    id,
+                    -32602,
+                    "Unknown tool",
+                    Some(serde_json::json!({ "name": name })),
+                ))
+                .into_response();
+            };
+            if state.registry.descriptor(tool.canonical_name).is_none() {
+                return Json(jsonrpc_err(
+                    id,
+                    -32602,
+                    "Unknown tool",
+                    Some(serde_json::json!({ "name": name })),
+                ))
+                .into_response();
+            }
             let arguments = request
                 .pointer("/params/arguments")
                 .cloned()
@@ -417,11 +501,11 @@ async fn handle_mcp_request(
             };
             let result = match state
                 .registry
-                .call(resolve_mcp_tool_name(name), context, arguments)
+                .call(tool.canonical_name, context, arguments)
                 .await
             {
                 Ok(result) => render_tool_result(result),
-                Err(error) => render_tool_error(error),
+                Err(error) => render_tool_error(public_tool_error(error, tool)),
             };
             Json(jsonrpc_ok(id, result)).into_response()
         }
@@ -604,7 +688,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mcp_list_is_lean_by_default_and_full_on_request() {
+    fn mcp_list_is_direct_by_default_and_public_on_request() {
         let registry = ToolRegistry::new();
         register_core_tool(
             &registry,
@@ -620,9 +704,9 @@ mod tests {
         .unwrap();
         register_core_tool(
             &registry,
-            "editor.selection",
-            "editor_selection",
-            "Read selection",
+            "graph.get",
+            "graph_get",
+            "Verbose internal graph description",
             json!({ "type": "object" }),
             ToolSource::Native,
             |_context: ToolCallContext, _input| async {
@@ -634,26 +718,33 @@ mod tests {
         let list = mcp_tool_list(&registry.snapshot(), false);
         assert_eq!(list["tools"].as_array().unwrap().len(), 1);
         assert_eq!(list["tools"][0]["name"], "mimir_state");
-        assert_eq!(list["tools"][0]["description"], "Get active editor state.");
-        assert!(list["tools"][0].get("_meta").is_none());
+        assert_eq!(
+            list["tools"][0]["description"],
+            "Active editor, selection, comments, and Today priority."
+        );
+        assert_eq!(list["tools"][0]["_meta"]["mimir/group"], "workbench");
+        assert_eq!(list["tools"][0]["_meta"]["mimir/effect"], "read");
         assert_eq!(list["_meta"]["mimir/disclosure"], "core");
 
         let full = mcp_tool_list(&registry.snapshot(), true);
         assert_eq!(full["tools"].as_array().unwrap().len(), 2);
-        assert_eq!(
-            full["tools"][0]["_meta"]["mimir/canonicalName"],
-            "editor.selection",
-        );
         let projected_state = full["tools"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|tool| tool["_meta"]["mimir/canonicalName"] == "editor.state")
+            .find(|tool| tool["name"] == "mimir_state")
             .unwrap();
         assert_eq!(projected_state["name"], "mimir_state");
-        assert_eq!(projected_state["description"], "Get active editor state.");
+        let graph = full["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "graph_get")
+            .unwrap();
+        assert_eq!(graph["_meta"]["mimir/group"], "graph");
+        assert!(graph["_meta"].get("mimir/canonicalName").is_none());
         assert_eq!(full["_meta"]["mimir/registryRevision"], 2);
-        assert_eq!(full["_meta"]["mimir/disclosure"], "all");
+        assert_eq!(full["_meta"]["mimir/disclosure"], "public");
     }
 
     #[test]
@@ -670,10 +761,7 @@ mod tests {
     #[test]
     fn protocol_negotiation_accepts_supported_versions_and_rejects_blind_echoes() {
         assert_eq!(negotiate_protocol_version(Some("2025-03-26")), "2025-03-26");
-        assert_eq!(
-            negotiate_protocol_version(Some("2025-06-18")),
-            LATEST_PROTOCOL_VERSION
-        );
+        assert_eq!(negotiate_protocol_version(Some("2025-06-18")), "2025-06-18");
         assert_eq!(
             negotiate_protocol_version(Some("2099-01-01")),
             LATEST_PROTOCOL_VERSION
@@ -706,6 +794,25 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["result"]["protocolVersion"], LATEST_PROTOCOL_VERSION);
         assert_eq!(json["result"]["capabilities"]["tools"], json!({}));
+        assert_eq!(json["result"]["instructions"], MIMIR_INSTRUCTIONS);
+    }
+
+    #[test]
+    fn mcp_origin_allows_loopback_and_rejects_remote_web_origins() {
+        let mut headers = HeaderMap::new();
+        assert!(origin_is_allowed(&headers));
+
+        headers.insert(header::ORIGIN, "http://127.0.0.1:5173".parse().unwrap());
+        assert!(origin_is_allowed(&headers));
+        headers.insert(header::ORIGIN, "http://localhost:1420".parse().unwrap());
+        assert!(origin_is_allowed(&headers));
+        headers.insert(header::ORIGIN, "https://attacker.example".parse().unwrap());
+        assert!(!origin_is_allowed(&headers));
+        headers.insert(
+            header::ORIGIN,
+            "http://127.0.0.1.attacker.example".parse().unwrap(),
+        );
+        assert!(!origin_is_allowed(&headers));
     }
 
     #[tokio::test]
@@ -842,7 +949,7 @@ mod tests {
         assert_eq!(list_json["result"]["tools"][0]["name"], "mimir_state");
 
         let call_response = handle_mcp(
-            State(state),
+            State(state.clone()),
             Json(json!({
                 "jsonrpc": "2.0",
                 "id": "call-1",
@@ -864,5 +971,29 @@ mod tests {
             "document"
         );
         assert_eq!(call_json["result"]["isError"], serde_json::Value::Null);
+
+        for private_name in ["editor.state", "editor_state"] {
+            let private_response = handle_mcp(
+                State(state.clone()),
+                Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": private_name,
+                    "method": "tools/call",
+                    "params": {
+                        "name": private_name,
+                        "arguments": {}
+                    }
+                })),
+            )
+            .await
+            .into_response();
+            let private_body = axum::body::to_bytes(private_response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let private_json: serde_json::Value = serde_json::from_slice(&private_body).unwrap();
+            assert_eq!(private_json["error"]["code"], -32602);
+            assert_eq!(private_json["error"]["message"], "Unknown tool");
+            assert_eq!(private_json["error"]["data"]["name"], private_name);
+        }
     }
 }

@@ -154,6 +154,9 @@ fn knowledge_graph(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecut
 fn knowledge_create(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecution, ToolError> {
     let title = required_string(input, "title")?.to_string();
     let mut properties = object_field(input, "extra");
+    if let Some(redact) = input.get("redactFromContext").and_then(Value::as_bool) {
+        properties.insert("sensitive".into(), Value::Bool(redact));
+    }
     let kind = input
         .get("type")
         .and_then(Value::as_str)
@@ -187,6 +190,10 @@ fn knowledge_update(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecu
     let id = required_string(input, "id")?.to_string();
     let existing = require_node(runtime, &id)?;
     require_knowledge(&existing)?;
+    let mut set_properties = object_field(input, "extra");
+    if let Some(redact) = input.get("redactFromContext").and_then(Value::as_bool) {
+        set_properties.insert("sensitive".into(), Value::Bool(redact));
+    }
     let patch = GraphNodePatch {
         id,
         expected_revision: expected_revision(input),
@@ -199,7 +206,7 @@ fn knowledge_update(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecu
             .get("links")
             .map(|value| relation_vec(Some(value)))
             .transpose()?,
-        set_properties: object_field(input, "extra"),
+        set_properties,
         ..GraphNodePatch::default()
     };
     if patch.kind.as_deref() == Some("issue") {
@@ -295,6 +302,17 @@ pub(super) fn knowledge_full(node: &GraphNode) -> Value {
         ),
     );
     value.insert("extra".into(), Value::Object(node.properties.clone()));
+    value.insert(
+        "redactFromContext".into(),
+        json!(
+            node.kind == "record"
+                || node
+                    .properties
+                    .get("sensitive")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+        ),
+    );
     value.insert("created".into(), json!(node.created_at));
     value.insert("updated".into(), json!(node.updated_at));
     value.insert("body".into(), json!(node.body));
@@ -435,6 +453,11 @@ fn knowledge_write_properties(create: bool) -> Value {
             ]
         },
         "extra": { "type": "object", "additionalProperties": true },
+        "redactFromContext": {
+            "type": "boolean",
+            "default": false,
+            "description": "Exclude human content from automatic graph context. Direct reads and searches still return it."
+        },
         "body": { "type": "string" },
         "expectedRevision": string_schema("Optional source revision for optimistic concurrency."),
         "sourceRevision": string_schema("Legacy spelling of expectedRevision."),

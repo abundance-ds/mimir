@@ -150,12 +150,7 @@ pub fn builtin_apps() -> Vec<InstalledApp> {
                 helper: None,
                 action_tool: None,
                 launch_only: false,
-                tools: vec![AppToolDefinition {
-                    name: "read".into(),
-                    description: "Read the current top priority.".into(),
-                    input_schema: empty_object(),
-                    mcp_alias: Some("scratch_read".into()),
-                }],
+                tools: Vec::new(),
             },
             directory: "builtin".into(),
             manifest_path: "builtin:scratch".into(),
@@ -1322,6 +1317,15 @@ entry = "index.html"
             .apps
             .iter()
             .any(|app| app.definition.id == "scratch" && app.builtin));
+        let today = catalog
+            .apps
+            .iter()
+            .find(|app| app.definition.id == "scratch")
+            .unwrap();
+        assert!(
+            today.definition.tools.is_empty(),
+            "Today belongs in mimir_state, not a standalone tool"
+        );
         assert!(catalog
             .apps
             .iter()

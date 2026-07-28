@@ -686,9 +686,11 @@ prompt = "Review."
         let headless = routine("* * * * *");
         let serialized = toml::to_string_pretty(&headless).unwrap();
         assert!(!serialized.contains("interactive"));
-        assert!(!toml::from_str::<RoutineDefinition>(&serialized)
-            .unwrap()
-            .interactive);
+        assert!(
+            !toml::from_str::<RoutineDefinition>(&serialized)
+                .unwrap()
+                .interactive
+        );
 
         let mut interactive = routine("* * * * *");
         interactive.interactive = true;

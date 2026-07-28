@@ -1,5 +1,6 @@
 use crate::file_index_commands::FileIndexState;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -88,6 +89,21 @@ const KNOWN_EXTERNAL_EXTENSIONS: &[&str] = &[
     "sqlite3", "tar", "tiff", "ttf", "wav", "wasm", "webp", "woff", "woff2", "zip",
 ];
 
+/// Outcome of dropping outside files onto the workspace tree.
+///
+/// A drop is a batch, so one unreadable item must not discard the rest: each
+/// source lands completely or not at all, and whatever failed is described in
+/// `failures` instead of failing the call. `skipped_links` counts symbolic
+/// links passed over inside imported folders — copying them could plant a live
+/// pointer outside the workspace, so they are left behind and reported.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReport {
+    pub entries: Vec<WorkspaceEntry>,
+    pub skipped_links: usize,
+    pub failures: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceEntry {
@@ -159,6 +175,18 @@ pub async fn workspace_file_duplicate(
     tauri::async_runtime::spawn_blocking(move || duplicate_entry(&root, &path))
         .await
         .map_err(|error| format!("File duplicate task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn workspace_file_import(
+    state: tauri::State<'_, FileIndexState>,
+    destination: String,
+    sources: Vec<String>,
+) -> Result<ImportReport, String> {
+    let root = state.index()?.workspace();
+    tauri::async_runtime::spawn_blocking(move || import_entries(&root, &destination, &sources))
+        .await
+        .map_err(|error| format!("File import task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -325,6 +353,147 @@ fn duplicate_entry(root: &Path, path: &str) -> Result<WorkspaceEntry, String> {
             .map_err(|error| format!("Could not duplicate file: {error}"))?;
     }
     entry_for_path(&root, &destination)
+}
+
+/// Copy files and folders dropped from outside into `destination` (a folder
+/// relative to, or inside, the workspace). Sources are copied rather than
+/// moved: a drop must never remove someone's original from the Desktop.
+fn import_entries(
+    root: &Path,
+    destination: &str,
+    sources: &[String],
+) -> Result<ImportReport, String> {
+    if sources.is_empty() {
+        return Err("Nothing was dropped.".into());
+    }
+    let root = canonical_root(root)?;
+    let target = resolve_destination_directory(&root, destination)?;
+    let mut entries = Vec::with_capacity(sources.len());
+    let mut failures = Vec::new();
+    let mut skipped_links = 0_usize;
+
+    for source in sources {
+        match import_one(&root, &target, source) {
+            Ok((entry, skipped)) => {
+                entries.push(entry);
+                skipped_links += skipped;
+            }
+            Err(failure) => failures.push(failure),
+        }
+    }
+
+    Ok(ImportReport {
+        entries,
+        skipped_links,
+        failures,
+    })
+}
+
+/// Copy one dropped item, leaving nothing behind if it does not finish. The
+/// destination name is always fresh, so removing a partial copy can only
+/// remove what this call just created.
+fn import_one(root: &Path, target: &Path, source: &str) -> Result<(WorkspaceEntry, usize), String> {
+    let supplied = Path::new(source.trim());
+    if !supplied.is_absolute() {
+        return Err("Dropped items must have a full path.".into());
+    }
+    // Canonicalizing follows a dropped alias to what it points at, so the copy
+    // holds real content instead of a dangling link.
+    let source = supplied
+        .canonicalize()
+        .map_err(|error| format!("{} could not be read: {error}", supplied.display()))?;
+    let name = source
+        .file_name()
+        .ok_or_else(|| "A dropped item has no name.".to_string())?;
+    if target == source || target.starts_with(&source) {
+        return Err(format!(
+            "{} cannot be added to itself.",
+            name.to_string_lossy()
+        ));
+    }
+    let path = available_destination(target, name)?;
+    let metadata = fs::metadata(&source)
+        .map_err(|error| format!("Could not inspect {}: {error}", source.display()))?;
+
+    let skipped = if metadata.is_dir() {
+        copy_imported_directory(&source, &path).inspect_err(|_| {
+            let _ = fs::remove_dir_all(&path);
+        })?
+    } else {
+        fs::copy(&source, &path)
+            .map_err(|error| format!("Could not add {}: {error}", name.to_string_lossy()))
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&path);
+            })?;
+        0
+    };
+    Ok((entry_for_path(root, &path)?, skipped))
+}
+
+fn resolve_destination_directory(root: &Path, destination: &str) -> Result<PathBuf, String> {
+    let destination = destination.trim();
+    let path = if destination.is_empty() {
+        root.to_path_buf()
+    } else {
+        resolve_existing(root, destination)?
+    };
+    if !path.is_dir() {
+        return Err(format!(
+            "{} is not a folder.",
+            display_relative(root, &path)
+        ));
+    }
+    Ok(path)
+}
+
+/// Never overwrite what is already in the destination: fall back to the same
+/// " copy" naming the Duplicate action uses.
+fn available_destination(directory: &Path, name: &OsStr) -> Result<PathBuf, String> {
+    let candidate = directory.join(name);
+    if candidate.exists() {
+        return duplicate_destination(&candidate);
+    }
+    Ok(candidate)
+}
+
+/// Recursive copy for imports, returning how many symbolic links were skipped.
+/// Unlike `copy_directory` this never aborts part-way: a dropped folder that
+/// happens to contain a link still lands, minus the link.
+fn copy_imported_directory(source: &Path, destination: &Path) -> Result<usize, String> {
+    fs::create_dir(destination).map_err(|error| {
+        format!(
+            "Could not create {}: {error}",
+            destination
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| destination.display().to_string())
+        )
+    })?;
+    let mut skipped = 0_usize;
+    for item in fs::read_dir(source)
+        .map_err(|error| format!("Could not read {}: {error}", source.display()))?
+    {
+        let item = item.map_err(|error| format!("Could not read a dropped entry: {error}"))?;
+        let file_type = item
+            .file_type()
+            .map_err(|error| format!("Could not inspect a dropped entry: {error}"))?;
+        if file_type.is_symlink() {
+            skipped += 1;
+            continue;
+        }
+        let target = destination.join(item.file_name());
+        if file_type.is_dir() {
+            skipped += copy_imported_directory(&item.path(), &target)?;
+        } else {
+            fs::copy(item.path(), target).map_err(|error| {
+                format!(
+                    "Could not add {}: {error}",
+                    item.file_name().to_string_lossy()
+                )
+            })?;
+        }
+    }
+    Ok(skipped)
 }
 
 fn list_directory(root: &Path, directory: &str) -> Result<Vec<WorkspaceEntry>, String> {
@@ -622,6 +791,7 @@ fn classify_open_behavior(path: &Path, is_directory: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::slice;
     use tempfile::tempdir;
 
     #[test]
@@ -725,6 +895,205 @@ mod tests {
         let duplicated = duplicate_entry(temp.path(), "brief.final.md").unwrap();
         assert_eq!(duplicated.relative_path, "brief.final copy 2.md");
         assert_eq!(fs::read_to_string(duplicated.path).unwrap(), "one");
+    }
+
+    #[test]
+    fn import_copies_files_and_folders_into_a_subfolder() {
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(temp.path().join("docs")).unwrap();
+        fs::write(outside.path().join("brief.md"), "brief").unwrap();
+        fs::create_dir_all(outside.path().join("assets/deep")).unwrap();
+        fs::write(outside.path().join("assets/deep/logo.svg"), "svg").unwrap();
+
+        let report = import_entries(
+            temp.path(),
+            "docs",
+            &[
+                outside
+                    .path()
+                    .join("brief.md")
+                    .to_string_lossy()
+                    .to_string(),
+                outside.path().join("assets").to_string_lossy().to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            report
+                .entries
+                .iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            ["docs/brief.md", "docs/assets"]
+        );
+        assert_eq!(report.skipped_links, 0);
+        assert_eq!(
+            fs::read_to_string(temp.path().join("docs/brief.md")).unwrap(),
+            "brief"
+        );
+        assert_eq!(
+            fs::read_to_string(temp.path().join("docs/assets/deep/logo.svg")).unwrap(),
+            "svg"
+        );
+        // The source stays where it was dropped from.
+        assert!(outside.path().join("brief.md").exists());
+    }
+
+    #[test]
+    fn import_keeps_existing_files_by_renaming_the_arrival() {
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(temp.path().join("notes.md"), "mine").unwrap();
+        fs::write(outside.path().join("notes.md"), "theirs").unwrap();
+        let source = outside
+            .path()
+            .join("notes.md")
+            .to_string_lossy()
+            .to_string();
+
+        let report = import_entries(temp.path(), "", slice::from_ref(&source)).unwrap();
+        assert_eq!(report.entries[0].relative_path, "notes copy.md");
+        let again = import_entries(temp.path(), "", &[source]).unwrap();
+        assert_eq!(again.entries[0].relative_path, "notes copy 2.md");
+        assert_eq!(
+            fs::read_to_string(temp.path().join("notes.md")).unwrap(),
+            "mine"
+        );
+    }
+
+    #[test]
+    fn import_fails_the_whole_call_only_for_batch_level_problems() {
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(temp.path().join("docs")).unwrap();
+        let source = outside.path().to_string_lossy().to_string();
+
+        assert!(
+            import_entries(temp.path(), "../escape", slice::from_ref(&source))
+                .unwrap_err()
+                .contains("inside")
+        );
+        assert!(import_entries(temp.path(), "", &[])
+            .unwrap_err()
+            .contains("dropped"));
+    }
+
+    #[test]
+    fn import_reports_a_bad_source_without_discarding_the_rest_of_the_drop() {
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(temp.path().join("docs")).unwrap();
+        fs::write(outside.path().join("good.md"), "good").unwrap();
+
+        let report = import_entries(
+            temp.path(),
+            "docs",
+            &[
+                "relative/path.md".into(),
+                outside.path().join("good.md").to_string_lossy().to_string(),
+                outside.path().join("gone.md").to_string_lossy().to_string(),
+                // Dropping the workspace itself onto one of its own folders.
+                temp.path().to_string_lossy().to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            report
+                .entries
+                .iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            ["docs/good.md"]
+        );
+        assert_eq!(report.failures.len(), 3);
+        assert!(report.failures[0].contains("full path"));
+        assert!(report.failures[1].contains("could not be read"));
+        assert!(report.failures[2].contains("itself"));
+        assert!(temp.path().join("docs/good.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_leaves_no_half_copied_folder_when_a_copy_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir_all(outside.path().join("bundle/locked")).unwrap();
+        fs::write(outside.path().join("bundle/readable.txt"), "fine").unwrap();
+        fs::write(outside.path().join("bundle/locked/secret.txt"), "no").unwrap();
+        // An unreadable subdirectory fails the copy part-way through.
+        fs::set_permissions(
+            outside.path().join("bundle/locked"),
+            fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+
+        let report = import_entries(
+            temp.path(),
+            "",
+            &[outside.path().join("bundle").to_string_lossy().to_string()],
+        )
+        .unwrap();
+
+        assert!(report.entries.is_empty());
+        assert_eq!(report.failures.len(), 1);
+        assert!(!temp.path().join("bundle").exists());
+
+        fs::set_permissions(
+            outside.path().join("bundle/locked"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_skips_symlinks_inside_folders_and_follows_a_dropped_one() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(outside.path().join("bundle")).unwrap();
+        fs::write(outside.path().join("bundle/real.txt"), "real").unwrap();
+        fs::write(outside.path().join("target.txt"), "target").unwrap();
+        symlink(
+            outside.path().join("target.txt"),
+            outside.path().join("bundle/alias.txt"),
+        )
+        .unwrap();
+        symlink(
+            outside.path().join("bundle"),
+            outside.path().join("bundle-alias"),
+        )
+        .unwrap();
+
+        let report = import_entries(
+            temp.path(),
+            "",
+            &[outside.path().join("bundle").to_string_lossy().to_string()],
+        )
+        .unwrap();
+        assert_eq!(report.skipped_links, 1);
+        assert!(temp.path().join("bundle/real.txt").exists());
+        assert!(!temp.path().join("bundle/alias.txt").exists());
+
+        // A dropped alias imports what it points at, under the alias's name.
+        let followed = import_entries(
+            temp.path(),
+            "",
+            &[outside
+                .path()
+                .join("bundle-alias")
+                .to_string_lossy()
+                .to_string()],
+        )
+        .unwrap();
+        assert_eq!(followed.entries[0].relative_path, "bundle copy");
+        assert!(temp.path().join("bundle copy/real.txt").exists());
     }
 
     #[test]

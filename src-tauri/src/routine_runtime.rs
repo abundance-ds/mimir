@@ -1247,9 +1247,10 @@ pub(crate) fn interactive_argv(
         // any conflicting preset flag.
         "gemini" => args.push("--prompt-interactive".into()),
         other => {
-            return Err(format!(
+            let message = format!(
                 "Agent '{other}' has no interactive routine adapter; use codex, claude, pi, or gemini."
-            ))
+            );
+            return Err(message);
         }
     }
     args.push(prompt.into());
