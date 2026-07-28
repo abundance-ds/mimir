@@ -1109,6 +1109,36 @@ describe('WorkbenchApp', () => {
     expect(useWorkbenchStore().activeActivityId).toBe('agent:two')
   })
 
+  it('closes the clicked Sidebar row with Cmd+W while focus stays on body (WebKit)', async () => {
+    const wrapper = await render()
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:ended', 'Ended run', '2026-07-25T10:00:00Z'),
+      status: 'done',
+    })
+    await nextTick()
+    activityApi.setActivityArchived.mockClear()
+
+    const row = wrapper.get('[data-sidebar-row="activity:agent:ended"]')
+    row.find('button').element.dispatchEvent(
+      new Event('pointerdown', { bubbles: true }),
+    )
+    await row.find('button').trigger('click')
+    await nextTick()
+    expect(document.activeElement).toBe(document.body)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }))
+    await flushPromises()
+
+    expect(activityApi.setActivityArchived).toHaveBeenCalledWith('agent:ended', true)
+    expect(store.byId('agent:ended').archivedAt).toEqual(expect.any(String))
+  })
+
   it('hands focus between pane controls and visible rails in both directions', async () => {
     const wrapper = await render()
 
