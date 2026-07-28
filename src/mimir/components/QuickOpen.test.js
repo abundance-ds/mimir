@@ -96,7 +96,8 @@ describe('QuickOpen', () => {
     ])
     expect(wrapper.text()).toContain('Reopen last closed activity')
     expect(wrapper.get('[data-quick-open-panel]').classes())
-      .toContain('max-h-[min(420px,calc(100vh-48px))]')
+      .toContain('max-h-[min(520px,calc(100vh-48px))]')
+    expect(wrapper.get('[data-quick-open-panel]').classes()).toContain('max-w-[760px]')
     expect(wrapper.get('[data-quick-open]').classes()).toContain('pt-6')
   })
 
@@ -203,6 +204,28 @@ describe('QuickOpen', () => {
     expect(wrapper.get('[data-quick-open-scope]').text()).toBe('History')
     expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
       .toEqual(['history'])
+    expect(wrapper.get('[data-quick-open-detail]').text()).toBe('/w')
+  })
+
+  it('loads recent transcript context when browsing History without a search term', async () => {
+    vi.useFakeTimers()
+    try {
+      activityApi.searchHistory.mockResolvedValue([{
+        activityId: 'agent:closed',
+        snippet: 'Implemented richer history rows and verified restore.',
+      }])
+      const wrapper = render()
+      await wrapper.get('[data-quick-open-input]').setValue('@')
+
+      await vi.advanceTimersByTimeAsync(140)
+      await flushPromises()
+
+      expect(activityApi.searchHistory).toHaveBeenCalledWith('', 30)
+      expect(wrapper.get('[data-quick-open-snippet]').text())
+        .toContain('richer history rows')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('closes on Escape or backdrop press', async () => {

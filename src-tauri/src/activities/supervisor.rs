@@ -649,7 +649,7 @@ impl ActivitySupervisor {
 
     pub fn search_history(&self, query: &str, limit: usize) -> Vec<ActivityHistorySearchHit> {
         let needle = query.trim().to_ascii_lowercase();
-        if needle.is_empty() || limit == 0 {
+        if limit == 0 {
             return Vec::new();
         }
 
@@ -665,12 +665,17 @@ impl ActivitySupervisor {
                     .flat_map(|chunk| chunk.bytes)
                     .collect::<Vec<_>>();
                 let text = terminal_search_text(&bytes);
-                let index = text.to_ascii_lowercase().find(&needle)?;
+                let snippet = if needle.is_empty() {
+                    recent_snippet(&text)
+                } else {
+                    let index = text.to_ascii_lowercase().find(&needle)?;
+                    search_snippet(&text, index, needle.len())
+                };
                 Some((
                     record.archived_at.clone().unwrap_or(record.updated_at),
                     ActivityHistorySearchHit {
                         activity_id: record.id,
-                        snippet: search_snippet(&text, index, needle.len()),
+                        snippet,
                     },
                 ))
             })
@@ -1756,6 +1761,16 @@ fn search_snippet(text: &str, index: usize, needle_len: usize) -> String {
     format!("{prefix}{}{suffix}", text[start..end].trim())
 }
 
+fn recent_snippet(text: &str) -> String {
+    const CONTEXT_BYTES: usize = 180;
+    let mut start = text.len().saturating_sub(CONTEXT_BYTES);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let prefix = if start > 0 { "…" } else { "" };
+    format!("{prefix}{}", text[start..].trim())
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -1877,6 +1892,11 @@ mod tests {
         assert_eq!(hits[0].activity_id, "history-search");
         assert!(hits[0].snippet.contains("reviewed sidebar ordering"));
         assert!(!hits[0].snippet.contains("\u{1b}["));
+        let recent = supervisor.search_history("", 10);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].activity_id, "history-search");
+        assert!(recent[0].snippet.contains("reviewed sidebar ordering"));
+        assert!(!recent[0].snippet.contains("\u{1b}["));
         assert!(supervisor.search_history("not present", 10).is_empty());
     }
 

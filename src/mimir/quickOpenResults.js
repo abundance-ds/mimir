@@ -136,6 +136,7 @@ function historyResults(history, term, snippets) {
     .map((activity) => {
       const provider = activityProvider(activity)
       const workspace = basename(activity.workspacePath)
+      const workspacePath = String(activity.workspacePath || '')
       const snippet = snippets.get(activity.id) || ''
       const candidate = result({
         key: `history:${activity.id}`,
@@ -148,6 +149,7 @@ function historyResults(history, term, snippets) {
           formatActivityTime(activity.archivedAt || activity.updatedAt),
           humanStatus(activity.status),
         ),
+        detail: workspacePath,
         snippet,
         verb: 'Restore & open',
         icon: providerIcon(provider, activity.kind),
@@ -156,7 +158,11 @@ function historyResults(history, term, snippets) {
           activity.title,
           provider,
           workspace,
+          workspacePath,
+          activity.id,
           activity.status,
+          activity.createdAt,
+          activity.archivedAt,
           snippet,
         ],
       })

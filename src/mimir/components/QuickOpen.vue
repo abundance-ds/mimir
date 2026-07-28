@@ -22,7 +22,7 @@
         />
         <div
           data-quick-open-panel
-          class="relative flex max-h-[min(420px,calc(100vh-48px))] w-full max-w-[640px] flex-col self-start overflow-hidden border border-rule bg-surface"
+          class="relative flex max-h-[min(520px,calc(100vh-48px))] w-full max-w-[760px] flex-col self-start overflow-hidden border border-rule bg-surface"
         >
           <div class="flex h-11 shrink-0 items-center gap-2 border-b border-rule px-3">
             <button
@@ -94,8 +94,13 @@
                 role="option"
                 :aria-selected="index === selectedIndex"
                 :tabindex="index === selectedIndex ? 0 : -1"
-                class="group flex min-h-10 w-full items-center gap-2.5 px-3 py-1.5 text-left hover:bg-chrome-mid"
-                :class="{ 'bg-accent-soft': index === selectedIndex }"
+                class="group flex w-full gap-2.5 px-3 text-left hover:bg-chrome-mid"
+                :class="[
+                  result.type === 'history'
+                    ? 'min-h-[72px] items-start py-2.5'
+                    : 'min-h-10 items-center py-1.5',
+                  { 'bg-accent-soft': index === selectedIndex },
+                ]"
                 @focus="setSelection(index)"
                 @mouseenter="setSelection(index)"
                 @keydown.down.prevent="moveSelection(1, true)"
@@ -105,7 +110,10 @@
                 @keydown.enter.prevent="activate(result)"
                 @click="activate(result)"
               >
-                <span class="grid size-7 shrink-0 place-items-center text-ink-3">
+                <span
+                  class="grid size-7 shrink-0 place-items-center text-ink-3"
+                  :class="{ 'mt-0.5': result.type === 'history' }"
+                >
                   <component
                     :is="iconFor(result.icon)"
                     :size="15"
@@ -124,14 +132,27 @@
                     </span>
                   </span>
                   <span
+                    v-if="result.detail"
+                    data-quick-open-detail
+                    class="mt-0.5 block truncate font-mono text-[9px] text-ink-3"
+                  >
+                    {{ result.detail }}
+                  </span>
+                  <span
                     v-if="result.snippet"
                     data-quick-open-snippet
-                    class="mt-0.5 block truncate font-mono text-[9px] text-ink-3"
+                    class="block font-mono text-[9px] text-ink-3"
+                    :class="result.type === 'history'
+                      ? 'mt-1 line-clamp-2 whitespace-normal leading-[1.35]'
+                      : 'mt-0.5 truncate'"
                   >
                     {{ result.snippet }}
                   </span>
                 </span>
-                <span class="shrink-0 font-mono text-[8px] uppercase tracking-[0.06em] text-ink-4 group-hover:text-ink-2">
+                <span
+                  class="shrink-0 font-mono text-[8px] uppercase tracking-[0.06em] text-ink-4 group-hover:text-ink-2"
+                  :class="{ 'mt-1': result.type === 'history' }"
+                >
                   {{ result.verb }}
                 </span>
               </button>
@@ -309,7 +330,8 @@ function onInput() {
   const { scope: nextScope, term } = parsedQuery.value
   const generation = ++searchGeneration
   const searchFiles = nextScope === 'all' || nextScope === 'files'
-  const searchHistory = Boolean(term) && (nextScope === 'all' || nextScope === 'history')
+  const searchHistory = (Boolean(term) || nextScope === 'history')
+    && (nextScope === 'all' || nextScope === 'history')
   searching.value = Boolean(term) && (searchFiles || searchHistory)
   searchError.value = ''
   queryTimer = setTimeout(async () => {

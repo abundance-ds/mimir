@@ -64,6 +64,16 @@ describe('quick open results', () => {
 
   it('uses workspace and time instead of a provider-only history title', () => {
     expect(historyDisplayTitle(archived)).toMatch(/^mimir · /)
+    const result = buildQuickOpenResults({
+      query: '@',
+      history: [archived],
+      historySnippets: new Map([['agent:closed', 'Finished the sidebar ordering review.']]),
+    })[0]
+    expect(result).toMatchObject({
+      detail: '/work/mimir',
+      snippet: 'Finished the sidebar ordering review.',
+    })
+    expect(result.searchText).toContain('agent:closed')
   })
 
   it('limits symbol scopes to the requested result family', () => {
