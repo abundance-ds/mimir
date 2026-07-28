@@ -89,12 +89,23 @@ describe('canonical renderer tool runtime', () => {
     const editor = {
       mimirState: vi.fn(() => state),
     }
+    const getToday = vi.fn(async () => ({
+      text: 'Ship the focused review flow',
+      updatedAt: '2026-07-25T10:00:00.000Z',
+    }))
 
     await expect(executeToolRequest({
       tool: 'editor.state',
       input: { include_content: true },
-    }, { editor })).resolves.toEqual(state)
+    }, { editor, getToday })).resolves.toEqual({
+      ...state,
+      today: {
+        text: 'Ship the focused review flow',
+        updatedAt: '2026-07-25T10:00:00.000Z',
+      },
+    })
     expect(editor.mimirState).toHaveBeenCalledWith({ includeContent: true })
+    expect(getToday).toHaveBeenCalledTimes(1)
   })
 
   it('routes resolve, reopen, and delete through the active editor comment model', async () => {

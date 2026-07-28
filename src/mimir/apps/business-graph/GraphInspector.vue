@@ -1124,7 +1124,17 @@ function save(afterSave = null) {
       if (value) setProperties[key] = value
       else removeProperties.push(key)
     }
-    setProperties.labels = tags.map(name => ({ name, color: labelColor(name) }))
+    const existingLabels = normalizedLabels(props.node.properties?.labels)
+    const existingNames = existingLabels.map(label => label.name)
+    if (!sameValues(tags, existingNames)) {
+      const labelsByName = new Map(
+        existingLabels.map(label => [label.name.toLowerCase(), label]),
+      )
+      setProperties.labels = tags.map(name => ({
+        name,
+        color: labelsByName.get(name.toLowerCase())?.color || labelColor(name),
+      }))
+    }
     setProperties.deliverables = draft.deliverables
       .split('\n')
       .map(line => line.trim())
@@ -1328,6 +1338,21 @@ function labelColor(name) {
     hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0
   }
   return colors[Math.abs(hash) % colors.length]
+}
+
+function normalizedLabels(labels) {
+  return (Array.isArray(labels) ? labels : [])
+    .map(label => (
+      typeof label === 'string'
+        ? { name: label, color: '' }
+        : { name: label?.name || '', color: label?.color || '' }
+    ))
+    .filter(label => label.name)
+}
+
+function sameValues(left, right) {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index])
 }
 
 function splitValues(value) {

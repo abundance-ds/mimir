@@ -24,6 +24,12 @@ export function duplicateWorkspaceEntry(path) {
   return invoke('workspace_file_duplicate', { path })
 }
 
+// Copy files/folders dropped from outside into `destination` ('' = workspace
+// root). Resolves to { entries, skippedLinks }.
+export function importWorkspaceEntries(destination, sources) {
+  return invoke('workspace_file_import', { destination, sources })
+}
+
 export function trashWorkspaceEntries(paths) {
   return invoke('workspace_file_trash', { paths })
 }

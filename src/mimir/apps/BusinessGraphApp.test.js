@@ -304,6 +304,26 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
+  it('lands workbench entry focus in the active projection once the graph settles', async () => {
+    const wrapper = render()
+
+    // Requested while the graph is still loading: park on the root so app
+    // shortcuts work immediately.
+    wrapper.vm.focusEntry()
+    expect(document.activeElement).toBe(wrapper.get('[data-business-graph-app]').element)
+
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[data-board-card="issue-1"]').element)
+
+    // A repeat request must never steal focus already inside the app.
+    const input = wrapper.get('[data-dispatch-input]').element
+    input.focus()
+    wrapper.vm.focusEntry()
+    await flushPromises()
+    expect(document.activeElement).toBe(input)
+    wrapper.unmount()
+  })
+
   it('keeps dispatch focus usable after opening and closing a lookup result', async () => {
     const wrapper = render()
     await flushPromises()
@@ -326,6 +346,25 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
     expect(document.activeElement).toBe(input.element)
+    wrapper.unmount()
+  })
+
+  it('clears a populated search before allowing Escape to close Peek', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
+    await flushPromises()
+
+    const search = wrapper.get('[data-graph-search]')
+    search.element.focus()
+    await search.setValue('evidence')
+    await search.trigger('keydown', { key: 'Escape' })
+    expect(search.element.value).toBe('')
+    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
+
+    await search.trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
     wrapper.unmount()
   })
 

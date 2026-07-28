@@ -32,6 +32,10 @@ export function useFileMutations({
   const nameDraft = ref('')
   const operationBusy = ref(false)
   const operationError = ref('')
+  // Transient message for a mutation that succeeded but has something to say
+  // (skipped links, say). Separate from operationError so a success is never
+  // dressed up as a failure.
+  const operationNotice = ref('')
   const deleteEntries = ref([])
   const deleteError = ref('')
   const refreshing = ref(false)
@@ -282,6 +286,7 @@ export function useFileMutations({
     openContextNative,
     operationBusy,
     operationError,
+    operationNotice,
     promptDelete,
     promptNew,
     promptNewInside,

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import AppActivity from './AppActivity.vue'
 
 function activity(app, plan = {}) {
@@ -51,6 +52,60 @@ describe('AppActivity', () => {
 
     expect(wrapper.findComponent({ name: 'BusinessGraphApp' }).exists()).toBe(true)
     expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
+  it('forwards workbench entry focus to the hosted surface', () => {
+    const focusEntry = vi.fn()
+    const record = activity({
+      id: 'business-graph',
+      title: 'Business graph',
+      mode: 'rust-helper',
+      helper: 'business-graph',
+    }, { helper: 'business-graph' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          BusinessGraphApp: defineComponent({
+            name: 'BusinessGraphApp',
+            setup(_, { expose }) {
+              expose({ focusEntry })
+              return () => h('div')
+            },
+          }),
+        },
+      },
+    })
+
+    wrapper.vm.focusEntry()
+    expect(focusEntry).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards live Today state to the workbench tool runtime', () => {
+    const state = { text: 'Current draft', loading: false, dirty: true, live: true }
+    const record = activity({
+      id: 'scratch',
+      title: 'Today',
+      mode: 'embedded',
+      entry: 'mimir://builtin/scratch',
+      tools: [],
+    }, { url: 'mimir://builtin/scratch' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          TodayApp: defineComponent({
+            name: 'TodayApp',
+            setup(_, { expose }) {
+              expose({ todayState: () => state })
+              return () => h('div')
+            },
+          }),
+        },
+      },
+    })
+
+    expect(wrapper.vm.todayState()).toEqual(state)
   })
 
   it('bubbles graph Activity handoffs through the ordinary app surface contract', async () => {

@@ -21,6 +21,7 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
 import { tags as t } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
 import { detectActiveFormats } from './formatting.js'
+import { markdownListKeymap } from './markdownLists.js'
 
 export const editorTheme = EditorView.theme({
   '&': {
@@ -296,6 +297,9 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
         ...foldKeymap,
       ]),
       selectionRewriteKeymap,
+      // Inert outside markdown: the command declines when the cursor is not in
+      // a markdown context, so Enter falls through to the default keymap.
+      markdownListKeymap,
       updateListener,
       ...extensions,
     ],

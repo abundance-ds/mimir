@@ -1,6 +1,7 @@
 <template>
   <BusinessGraphApp
     v-if="surface === 'business-graph'"
+    ref="surfaceRef"
     :workspace-path="activity.workspacePath || ''"
     :active="active"
     @open-file="$emit('openFile', $event)"
@@ -11,6 +12,7 @@
   />
   <TodayApp
     v-else-if="surface === 'today'"
+    ref="surfaceRef"
     :app="app"
     :instance-id="instanceId"
     :active="active"
@@ -18,6 +20,7 @@
   />
   <EmbeddedAppHost
     v-else-if="surface === 'embedded'"
+    ref="surfaceRef"
     :app="app"
     :launch="plan"
     :workspace-path="activity.workspacePath || ''"
@@ -51,7 +54,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { IconAlertTriangle } from '@tabler/icons-vue'
 import BusinessGraphApp from '../apps/BusinessGraphApp.vue'
 import TodayApp from '../apps/TodayApp.vue'
@@ -71,6 +74,20 @@ defineEmits([
   'launchPlan',
   'diagnostic',
 ])
+
+const surfaceRef = ref(null)
+
+function focusEntry() {
+  surfaceRef.value?.focusEntry?.()
+}
+
+function todayState() {
+  return surface.value === 'today'
+    ? surfaceRef.value?.todayState?.() || null
+    : null
+}
+
+defineExpose({ focusEntry, todayState })
 
 const app = computed(() => props.activity?.source?.app || null)
 const plan = computed(() => props.activity?.launch?.plan || null)

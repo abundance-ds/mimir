@@ -186,6 +186,44 @@ describe('GraphInspector', () => {
     wrapper.unmount()
   })
 
+  it('does not rewrite label colors on unrelated saves and preserves them when adding tags', async () => {
+    const coloredIssue = {
+      ...issue,
+      properties: {
+        ...issue.properties,
+        labels: [{ name: 'review', color: 'red' }],
+      },
+    }
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, mode: 'focus', node: coloredIssue },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-inspector-title]').setValue('Updated title only')
+    await wrapper.get('[data-inspector-save]').trigger('click')
+    expect(wrapper.emitted('save')[0][0].setProperties).not.toHaveProperty('labels')
+
+    wrapper.emitted('save')[0][1].done()
+    await wrapper.get('[data-inspector-tags]').setValue('review, client')
+    await wrapper.get('[data-inspector-save]').trigger('click')
+    const labels = wrapper.emitted('save')[1][0].setProperties.labels
+    expect(labels.find(label => label.name === 'review')).toEqual({
+      name: 'review',
+      color: 'red',
+    })
+  })
+
+  it('renders each deliverable path once in either inspector mode', async () => {
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, mode: 'peek' },
+    })
+
+    expect(wrapper.findAll('[data-deliverable-path="outputs/map.xlsx"] small')).toHaveLength(1)
+    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
+    expect(wrapper.findAll('[data-deliverable-path="outputs/map.xlsx"] small')).toHaveLength(1)
+  })
+
   it('shows a spacious retrieval summary for non-issue objects', async () => {
     const wrapper = mount(GraphInspector, {
       props: {

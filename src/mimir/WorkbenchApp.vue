@@ -138,7 +138,7 @@ import { useSettingsStore } from '../stores/settings.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
-import { callAppAction, openAppWindow } from '../services/appsCatalog.js'
+import { callAppAction, loadAppData, openAppWindow } from '../services/appsCatalog.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
 import UnavailableActivity from './activities/UnavailableActivity.vue'
@@ -188,6 +188,27 @@ const activitySurfaces = new Map()
 const toolRuntime = createToolRuntime({
   getEditor: () => editorRef.value,
   getWorkspacePath: () => workspaceFiles.workspacePath || null,
+  getToday: async () => {
+    for (const [id, surface] of activitySurfaces) {
+      const activity = activities.byId(id)
+      if (activity?.source?.appId !== 'scratch') continue
+      const live = surface.todayState?.()
+      if (live && !live.loading) return live
+    }
+    try {
+      const raw = await loadAppData('scratch', 'scratch')
+      if (raw == null) return { text: '', updatedAt: null }
+      const saved = JSON.parse(raw)
+      return typeof saved === 'string'
+        ? { text: saved, updatedAt: null }
+        : {
+            text: String(saved?.text || ''),
+            updatedAt: saved?.updatedAt || null,
+          }
+    } catch {
+      return { text: '', updatedAt: null, unavailable: true }
+    }
+  },
   settings,
   listActivities: () => activities.activities,
   stopActivity: async (id) => {
@@ -405,6 +426,7 @@ function launcherIcon(preset) {
   if (source.includes('codex')) return 'codex'
   if (source.includes('claude')) return 'claude'
   if (source === 'pi' || source.includes('pi-')) return 'pi'
+  if (source.includes('gemini')) return 'gemini'
   return 'agent'
 }
 
@@ -513,7 +535,7 @@ async function onLaunch(id) {
 async function startGraphWork(request) {
   const preset = launchers.availablePresets.find(candidate => candidate.kind === 'agent')
   if (!preset) {
-    diagnostic.value = 'Start work needs one available agent launcher. Configure Codex, Claude, or Pi in Launchers.'
+    diagnostic.value = 'Start work needs one available agent launcher. Configure Codex, Claude, Pi, or Gemini in Launchers.'
     return
   }
   if (!workspaceFiles.workspacePath) {
@@ -564,6 +586,20 @@ function selectActivity(id) {
   workbench.openActivity(id)
   focusNarrowPane('activity')
   workbench.setPaneState('activity', 'expanded')
+  requestEntryFocus(id)
+}
+
+// Selecting an Activity must land keyboard focus inside its surface: WebKit
+// leaves focus on <body> after Sidebar clicks, so surfaces that expose
+// focusEntry are focused explicitly. Lazily mounted surfaces are not
+// registered yet at selection time; setActivitySurface consumes the pending
+// id once the surface appears.
+let pendingEntryFocusId = ''
+
+function requestEntryFocus(id) {
+  const surface = activitySurfaces.get(id)
+  pendingEntryFocusId = surface ? '' : id
+  if (surface) void nextTick(() => surface.focusEntry?.())
 }
 
 async function toggleSidebar() {
@@ -835,8 +871,15 @@ function showDiagnostic(message) {
 }
 
 function setActivitySurface(id, surface) {
-  if (surface) activitySurfaces.set(id, surface)
-  else activitySurfaces.delete(id)
+  if (surface) {
+    activitySurfaces.set(id, surface)
+    if (pendingEntryFocusId === id && workbench.activeActivityId === id) {
+      pendingEntryFocusId = ''
+      void nextTick(() => surface.focusEntry?.())
+    }
+  } else {
+    activitySurfaces.delete(id)
+  }
 }
 
 async function pasteToActiveTerminal(text) {

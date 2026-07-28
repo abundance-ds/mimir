@@ -37,6 +37,35 @@ describe('business graph projections', () => {
     expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-one')
   })
 
+  it('preserves selection by node ID without hijacking scroll when results change', async () => {
+    const one = { id: 'one', kind: 'note', title: 'One' }
+    const two = { id: 'two', kind: 'note', title: 'Two' }
+    const three = { id: 'three', kind: 'note', title: 'Three' }
+    const wrapper = mount(EntityList, {
+      attachTo: document.body,
+      props: { nodes: [one, two] },
+    })
+    const listbox = wrapper.get('[data-graph-entity-list]')
+    const secondRow = wrapper.get('#graph-list-option-two')
+    secondRow.element.scrollIntoView = vi.fn()
+
+    await listbox.trigger('keydown', { key: 'ArrowDown' })
+    expect(secondRow.element.scrollIntoView).toHaveBeenCalledOnce()
+    secondRow.element.scrollIntoView.mockClear()
+
+    await wrapper.setProps({ nodes: [two, one, three] })
+    expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-two')
+    expect(wrapper.get('#graph-list-option-two').attributes('aria-selected')).toBe('true')
+    expect(secondRow.element.scrollIntoView).not.toHaveBeenCalled()
+
+    expect(listbox.attributes('tabindex')).toBe('0')
+    expect(wrapper.findAll('[role="option"]').every(row => row.attributes('tabindex') === '-1'))
+      .toBe(true)
+    await wrapper.get('#graph-list-option-one').trigger('mousedown')
+    expect(document.activeElement).toBe(listbox.element)
+    wrapper.unmount()
+  })
+
   it('summarizes evidence and decisions on the project dashboard', () => {
     const project = {
       id: 'project-atlas',

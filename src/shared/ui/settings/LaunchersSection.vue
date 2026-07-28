@@ -98,7 +98,7 @@
       >
         <div>
           <p class="text-[11px] font-semibold text-ink-2">No CLI presets</p>
-          <p class="mt-1 text-[9px] text-ink-3">Add Codex, Claude, Pi, or a terminal.</p>
+          <p class="mt-1 text-[9px] text-ink-3">Add Codex, Claude, Pi, Gemini, or a terminal.</p>
         </div>
       </div>
     </template>
@@ -168,6 +168,7 @@ import {
   IconTerminal2,
 } from '@tabler/icons-vue'
 import IconProviderAnthropic from '../../../shared/icons/IconProviderAnthropic.vue'
+import IconProviderGoogle from '../../../shared/icons/IconProviderGoogle.vue'
 import IconProviderOpenAI from '../../../shared/icons/IconProviderOpenAI.vue'
 import { useLaunchersStore } from '../../../stores/launchers.js'
 import { formatLauncherFlags, parseLauncherFlags } from './launcherFlags.js'
@@ -367,6 +368,7 @@ function iconForAgent(agentId) {
   if (agentId === 'codex') return IconProviderOpenAI
   if (agentId === 'claude') return IconProviderAnthropic
   if (agentId === 'pi') return IconMathPi
+  if (agentId === 'gemini') return IconProviderGoogle
   return IconRobot
 }
 

@@ -98,7 +98,7 @@ export async function executeToolRequest(request, options = {}) {
     return executeEditorProposal(request, options)
   }
   if (tool.startsWith('editor.')) {
-    return executeEditorTool(resolveEditor(options), tool, input)
+    return executeEditorTool(resolveEditor(options), tool, input, options)
   }
   if (['comments.resolve', 'comments.reopen', 'comments.delete'].includes(tool)) {
     return executeEditorCommentTool(resolveEditor(options), tool, input)
@@ -373,12 +373,15 @@ function resolveEditor(options, required = true) {
   return editor
 }
 
-async function executeEditorTool(editor, tool, input) {
+async function executeEditorTool(editor, tool, input, options = {}) {
   switch (tool) {
     case 'editor.open':
       return editor.mimirOpen(input.path)
     case 'editor.state':
-      return editor.mimirState({ includeContent: Boolean(input.include_content) })
+      return {
+        ...editor.mimirState({ includeContent: Boolean(input.include_content) }),
+        today: options.getToday ? await options.getToday() : null,
+      }
     case 'editor.active':
       return editor.mimirActive({ includeContent: Boolean(input.includeContent) })
     case 'editor.tabs':

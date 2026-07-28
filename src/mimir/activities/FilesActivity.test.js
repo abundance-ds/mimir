@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
@@ -22,12 +22,27 @@ vi.mock('../../services/gitChanges.js', () => ({
   loadGitChanges: vi.fn(async () => []),
 }))
 
+// Records the drag-drop handlers the Files panel registers on the webview, so
+// the tests can raise the native events Tauri would deliver.
+const dragDrop = vi.hoisted(() => ({ handlers: [] }))
+
+vi.mock('@tauri-apps/api/webview', () => ({
+  getCurrentWebview: () => ({
+    setZoom: vi.fn(async () => undefined),
+    onDragDropEvent: async (handler) => {
+      dragDrop.handlers.push(handler)
+      return () => {}
+    },
+  }),
+}))
+
 vi.mock('../../services/workspaceFileOperations.js', () => ({
   listWorkspaceDirectory: vi.fn(async () => []),
   createWorkspaceFile: vi.fn(),
   createWorkspaceFolder: vi.fn(),
   renameWorkspaceEntry: vi.fn(),
   duplicateWorkspaceEntry: vi.fn(),
+  importWorkspaceEntries: vi.fn(),
   trashWorkspaceEntries: vi.fn(),
   openWorkspaceEntryNative: vi.fn(),
   revealWorkspaceEntry: vi.fn(),
@@ -345,6 +360,108 @@ describe('FilesActivity', () => {
     }
     return count
   }
+
+  describe('drag and drop from outside', () => {
+    // Tauri intercepts OS drags and reports them through the webview event
+    // instead of a DOM drop, so the test drives that event directly.
+    async function renderWithDrop() {
+      window.__TAURI_INTERNALS__ = {}
+      dragDrop.handlers.length = 0
+      const wrapper = render()
+      await flushPromises()
+      const handler = dragDrop.handlers.at(-1)
+      const list = wrapper.get('[data-files-list]').element
+      const hover = (selector) => {
+        document.elementFromPoint = vi.fn(
+          () => (selector ? wrapper.get(selector).element : list),
+        )
+      }
+      return { wrapper, handler, hover }
+    }
+
+    afterEach(() => {
+      delete window.__TAURI_INTERNALS__
+    })
+
+    it('imports into the hovered folder and marks it while dragging', async () => {
+      operations.importWorkspaceEntries.mockResolvedValue({
+        entries: [{ path: '/w/docs/brief.md', relativePath: 'docs/brief.md', name: 'brief.md' }],
+        skippedLinks: 0,
+      })
+      const { wrapper, handler, hover } = await renderWithDrop()
+
+      hover('[data-file-row="/w/docs"]')
+      await handler({ payload: { type: 'enter', position: { x: 0, y: 0 }, paths: ['/D/brief.md'] } })
+      await flushPromises()
+      expect(wrapper.get('[data-file-row="/w/docs"]').attributes('data-file-drop-target')).toBe('')
+
+      await handler({ payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/brief.md'] } })
+      await flushPromises()
+
+      expect(operations.importWorkspaceEntries).toHaveBeenCalledWith('docs', ['/D/brief.md'])
+      expect(wrapper.find('[data-file-drop-target]').exists()).toBe(false)
+      // The destination is reloaded so the arrivals show up.
+      expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
+    })
+
+    it('imports into the workspace root over empty space and reports skipped links', async () => {
+      operations.importWorkspaceEntries.mockResolvedValue({
+        entries: [{ path: '/w/photos', relativePath: 'photos', name: 'photos' }],
+        skippedLinks: 2,
+      })
+      const { wrapper, handler, hover } = await renderWithDrop()
+
+      hover(null)
+      await handler({ payload: { type: 'over', position: { x: 0, y: 0 } } })
+      await flushPromises()
+      expect(wrapper.get('[data-files-list]').attributes('data-files-drop-root')).toBe('')
+
+      await handler({ payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/photos'] } })
+      await flushPromises()
+
+      expect(operations.importWorkspaceEntries).toHaveBeenCalledWith('', ['/D/photos'])
+      // Nothing failed, so the notice must not be dressed up as an error.
+      expect(wrapper.get('[data-files-operation-notice]').text())
+        .toContain('2 symbolic links inside the drop were skipped')
+      expect(wrapper.get('[data-files-operation-notice]').attributes('role')).toBe('status')
+      expect(wrapper.find('[data-files-operation-error]').exists()).toBe(false)
+    })
+
+    it('shows what did land when only some of the drop failed', async () => {
+      operations.importWorkspaceEntries.mockResolvedValue({
+        entries: [{ path: '/w/docs/brief.md', relativePath: 'docs/brief.md', name: 'brief.md' }],
+        skippedLinks: 0,
+        failures: ['sketch.png could not be read: No such file or directory'],
+      })
+      const { wrapper, handler, hover } = await renderWithDrop()
+
+      hover('[data-file-row="/w/docs"]')
+      await handler({
+        payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/brief.md', '/D/sketch.png'] },
+      })
+      await flushPromises()
+
+      expect(wrapper.get('[data-files-operation-error]').text()).toContain('sketch.png')
+      // The file that did arrive is still reconciled into the tree.
+      expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
+    })
+
+    it('surfaces a failed import without leaving the panel highlighted', async () => {
+      operations.importWorkspaceEntries.mockRejectedValue(new Error('Disk is full'))
+      const { wrapper, handler, hover } = await renderWithDrop()
+
+      hover('[data-file-row="/w/docs"]')
+      await handler({ payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/brief.md'] } })
+      await flushPromises()
+
+      expect(wrapper.get('[data-files-operation-error]').text())
+        .toContain('Dropped items could not be added: Disk is full')
+      expect(wrapper.find('[data-file-drop-target]').exists()).toBe(false)
+      // Even a hard failure reloads the destination: earlier sources in the
+      // batch may already have landed.
+      expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
+    })
+  })
 
   it('windows large trees behind spacers that preserve scroll geometry', () => {
     const count = seedLargeTree(400)

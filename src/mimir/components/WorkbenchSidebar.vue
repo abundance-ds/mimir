@@ -442,6 +442,7 @@ import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 import { moveActivityId } from '../activityOrdering.js'
 import { usePointerReorder } from '../composables/usePointerReorder.js'
 import IconProviderAnthropic from '../../shared/icons/IconProviderAnthropic.vue'
+import IconProviderGoogle from '../../shared/icons/IconProviderGoogle.vue'
 import IconProviderOpenAI from '../../shared/icons/IconProviderOpenAI.vue'
 
 const props = defineProps({
@@ -554,6 +555,7 @@ const icons = {
   codex: IconProviderOpenAI,
   claude: IconProviderAnthropic,
   pi: IconMathPi,
+  gemini: IconProviderGoogle,
   terminal: IconTerminal2,
   apps: IconApps,
   today: IconFocus2,
@@ -785,6 +787,7 @@ function activityIdentity(activity) {
   if (source.includes('codex')) return 'Codex'
   if (source.includes('claude')) return 'Claude'
   if (source === 'pi' || source.includes('pi-')) return 'Pi'
+  if (source.includes('gemini')) return 'Gemini'
   if (activity.kind === 'terminal') return 'Terminal'
   if (activity.kind === 'app') return 'App'
   if (activity.kind === 'routine') return 'Routine'
@@ -796,6 +799,7 @@ function activityIcon(activity) {
     Codex: IconProviderOpenAI,
     Claude: IconProviderAnthropic,
     Pi: IconMathPi,
+    Gemini: IconProviderGoogle,
     Terminal: IconTerminal2,
     App: IconApps,
     Routine: IconClockPlay,

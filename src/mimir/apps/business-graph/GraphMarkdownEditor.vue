@@ -22,6 +22,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
+import { markdownListKeymap } from '../../../editor/codemirror/markdownLists.js'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -123,6 +124,7 @@ onMounted(() => {
       history(),
       drawSelection(),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+      markdownListKeymap,
       syntaxHighlighting(graphHighlightStyle),
       graphEditorTheme,
       editorPlaceholder(props.placeholder),

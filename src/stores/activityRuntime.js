@@ -108,6 +108,12 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const resumeStrategy = normalizedResumeStrategy(
       activity.host?.resumeStrategy || resolved.resumeStrategy,
     )
+    const agentId = resolved.agentId || resolved.presetId
+    const baseMcpUrl = resolved.env?.MIMIR_MCP_URL || 'http://127.0.0.1:17532/mcp'
+    const mcpUrl = activityContextUrl(baseMcpUrl, {
+      activityId: activity.id,
+      agentId,
+    })
     const record = {
       ...activity,
       status: 'ready',
@@ -124,12 +130,14 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       },
       launch: {
         command: resolved.command,
-        args: resumeArguments(resolved.args, resumeStrategy),
+        args: resumeArguments(resolved.args, resumeStrategy)
+          .map(argument => replaceMcpUrl(argument, baseMcpUrl, mcpUrl)),
         cwd: resolved.cwd,
         env: {
           ...(resolved.env || {}),
           MIMIR_ACTIVITY_ID: activity.id,
-          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp',
+          MIMIR_AGENT_ID: agentId,
+          MIMIR_MCP_URL: mcpUrl,
         },
       },
     }
@@ -299,10 +307,10 @@ export function activityContextUrl(value, context = {}) {
 
 function replaceMcpUrl(argument, original, replacement) {
   if (typeof argument !== 'string' || !replacement) return argument
-  const candidates = [
+  const candidates = [...new Set([
     original,
     'http://127.0.0.1:17532/mcp',
-  ].filter(Boolean)
+  ].filter(Boolean))]
   return candidates.reduce(
     (value, candidate) => value.replaceAll(String(candidate), replacement),
     argument,
@@ -319,11 +327,15 @@ export function resumeArguments(args = [], strategy = 'none') {
     if (current.includes('--continue') || current.includes('-c')) return current
     return ['--continue', ...current]
   }
+  if (strategy === 'gemini') {
+    if (current.includes('--resume') || current.includes('-r')) return current
+    return ['--resume', 'latest', ...current]
+  }
   return current
 }
 
 function normalizedResumeStrategy(value) {
-  return ['codex', 'claude', 'pi'].includes(value) ? value : 'none'
+  return ['codex', 'claude', 'pi', 'gemini'].includes(value) ? value : 'none'
 }
 
 function monotonicNow() {

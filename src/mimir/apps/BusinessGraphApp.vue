@@ -46,7 +46,7 @@
           @keydown.down.prevent="focusSearchResults('first')"
           @keydown.up.prevent="focusSearchResults('last')"
           @keydown.enter.prevent="flushSearch"
-          @keydown.esc.stop.prevent="clearSearch"
+          @keydown.esc="onSearchEscape"
         />
         <span
           v-if="searchPending || graph.searching"
@@ -1080,6 +1080,18 @@ function clearSearch() {
   searchInput.value?.focus()
 }
 
+function onSearchEscape(event) {
+  if (
+    !searchDraft.value
+    && !graph.searchQuery
+    && !searchPending.value
+    && !graph.searching
+  ) return
+  event.preventDefault()
+  event.stopPropagation()
+  clearSearch()
+}
+
 function openCreate(
   kind = defaultKind(),
   status = 'backlog',
@@ -1466,6 +1478,36 @@ function clearFocusOrigin() {
   focusReturnElement = null
   focusReturnNodeId = ''
 }
+
+let entryFocusPending = false
+
+// Workbench entry point, called when the tool is opened from the Sidebar or
+// Quick Open — WebKit leaves focus on <body> after those clicks. Projections
+// render only after the graph loads, so a request during load parks on the
+// root (keeping app shortcuts live) and lands once loading settles.
+function focusEntry() {
+  if (focusWithinGraph()) return
+  if (graph.loading) {
+    entryFocusPending = true
+    root.value?.focus()
+    return
+  }
+  applyEntryFocus()
+}
+
+function applyEntryFocus() {
+  if (focusMode.value) objectInspector.value?.focusEntry?.()
+  else restoreGraphFocus(graph.selectedNode?.id || '')
+}
+
+watch(() => graph.loading, async (loading) => {
+  if (loading || !entryFocusPending) return
+  entryFocusPending = false
+  await nextTick()
+  if (document.activeElement === root.value) applyEntryFocus()
+})
+
+defineExpose({ focusEntry })
 
 function stepTo(index) {
   const step = () => void performStepTo(index)

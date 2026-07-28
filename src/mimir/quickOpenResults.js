@@ -200,6 +200,7 @@ function isGenericProviderTitle(activity) {
     'claude',
     'claude code',
     'pi',
+    'gemini',
     'terminal',
   ].includes(title)
 }
@@ -214,6 +215,7 @@ export function activityProvider(activity) {
   if (source.includes('codex')) return 'Codex'
   if (source.includes('claude')) return 'Claude'
   if (source === 'pi' || source.includes('pi-')) return 'Pi'
+  if (source.includes('gemini')) return 'Gemini'
   if (activity?.kind === 'terminal') return 'Terminal'
   if (activity?.kind === 'routine') return 'Routine'
   if (activity?.kind === 'app') return 'App'
@@ -225,6 +227,7 @@ function providerIcon(provider, kind) {
     Codex: 'codex',
     Claude: 'claude',
     Pi: 'pi',
+    Gemini: 'gemini',
     Terminal: 'terminal',
     Routine: 'routines',
     App: 'apps',

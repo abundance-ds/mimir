@@ -125,9 +125,10 @@ describe('activity runtime store', () => {
   })
 
   it.each([
-    ['codex', ['-c', 'mcp_servers.mimir.url="http://127.0.0.1:17532/mcp"'], ['resume', '--last', '-c', 'mcp_servers.mimir.url="http://127.0.0.1:17532/mcp"']],
+    ['codex', ['-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'], ['resume', '--last', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"']],
     ['claude', ['--mcp-config', '{}'], ['--continue', '--mcp-config', '{}']],
     ['pi', ['--extension', '/tmp/mimir-tools.ts'], ['--continue', '--extension', '/tmp/mimir-tools.ts']],
+    ['gemini', ['--model', 'gemini-2.5-pro'], ['--resume', 'latest', '--model', 'gemini-2.5-pro']],
     ['none', ['--flag'], ['--flag']],
   ])('builds exact %s resume argv', (strategy, args, expected) => {
     expect(resumeArguments(args, strategy)).toEqual(expected)
@@ -141,7 +142,7 @@ describe('activity runtime store', () => {
       agentId: 'codex',
       resumeStrategy: 'codex',
       command: '/bin/codex',
-      args: ['--model', 'gpt-5', '-c', 'mcp_servers.mimir.url="http://127.0.0.1:17532/mcp"'],
+      args: ['--model', 'gpt-5', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'],
       cwd: '/w',
       env: {},
     })
@@ -161,8 +162,19 @@ describe('activity runtime store', () => {
       host: { type: 'pty', resumeStrategy: 'codex' },
       launch: expect.objectContaining({
         command: '/bin/codex',
-        args: ['resume', '--last', '--model', 'gpt-5', '-c', 'mcp_servers.mimir.url="http://127.0.0.1:17532/mcp"'],
-        env: expect.objectContaining({ MIMIR_ACTIVITY_ID: 'agent:one' }),
+        args: [
+          'resume',
+          '--last',
+          '--model',
+          'gpt-5',
+          '-c',
+          'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex"',
+        ],
+        env: expect.objectContaining({
+          MIMIR_ACTIVITY_ID: 'agent:one',
+          MIMIR_AGENT_ID: 'codex',
+          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex',
+        }),
       }),
     }))
     expect(record.session.runId).toBe('run-2')

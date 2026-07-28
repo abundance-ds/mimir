@@ -198,6 +198,7 @@
 <script setup>
 import { IconChevronRight, IconMathPi, IconRobot, IconTerminal2 } from '@tabler/icons-vue'
 import IconProviderAnthropic from '../../../shared/icons/IconProviderAnthropic.vue'
+import IconProviderGoogle from '../../../shared/icons/IconProviderGoogle.vue'
 import IconProviderOpenAI from '../../../shared/icons/IconProviderOpenAI.vue'
 
 const props = defineProps({
@@ -236,6 +237,7 @@ function iconFor(row) {
   if (row.agentId === 'codex') return IconProviderOpenAI
   if (row.agentId === 'claude') return IconProviderAnthropic
   if (row.agentId === 'pi') return IconMathPi
+  if (row.agentId === 'gemini') return IconProviderGoogle
   return IconRobot
 }
 
@@ -244,6 +246,7 @@ function flagsPlaceholder(row) {
     codex: '--model gpt-5 --full-auto',
     claude: '--dangerously-skip-permissions --verbose',
     pi: '--model openai/gpt-5',
+    gemini: '--model gemini-2.5-pro',
   }[row.agentId] || '--flag value'
 }
 

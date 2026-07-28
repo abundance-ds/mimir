@@ -2,57 +2,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { syntaxTree } from '@codemirror/language'
 import {
-  listenForAppTools,
   loadAppData,
-  reconcileAppTools,
-  respondToAppTool,
   saveAppData,
-  unregisterAppTools,
 } from '../../services/appsCatalog.js'
 import TodayApp from './TodayApp.vue'
 
 vi.mock('../../services/appsCatalog.js', () => ({
-  listenForAppTools: vi.fn(),
   loadAppData: vi.fn(),
-  reconcileAppTools: vi.fn(),
-  rejectAppTool: vi.fn(),
-  respondToAppTool: vi.fn(),
   saveAppData: vi.fn(),
-  unregisterAppTools: vi.fn(),
 }))
 
 const app = {
   id: 'scratch',
   title: 'Today',
-  tools: [{
-    name: 'read',
-    description: 'Read the current top priority.',
-    inputSchema: { type: 'object', properties: {} },
-    mcpAlias: 'scratch_read',
-  }],
+  tools: [],
 }
 
 describe('TodayApp', () => {
-  let relay
-  let unlisten
-
   beforeEach(() => {
     vi.useFakeTimers()
-    relay = null
-    unlisten = vi.fn()
     vi.mocked(loadAppData).mockReset().mockResolvedValue(JSON.stringify({
       version: 1,
       text: 'Ship the focused review flow',
       updatedAt: '2026-07-25T10:00:00.000Z',
     }))
     vi.mocked(saveAppData).mockReset().mockResolvedValue()
-    vi.mocked(reconcileAppTools).mockReset().mockResolvedValue({ revision: 4 })
-    vi.mocked(respondToAppTool).mockReset().mockResolvedValue(true)
-    vi.mocked(unregisterAppTools).mockReset().mockResolvedValue(5)
-    vi.mocked(listenForAppTools).mockReset().mockImplementation(async (options) => {
-      relay = options
-      return unlisten
-    })
   })
 
   afterEach(() => {
@@ -85,18 +59,25 @@ describe('TodayApp', () => {
     await wrapper.vm.$nextTick()
   }
 
-  it('restores the previous scratch text and installs its reader after the listener', async () => {
+  it('restores the previous durable priority', async () => {
     const wrapper = render()
     await flushPromises()
 
     expect(view(wrapper).state.doc.toString()).toBe('Ship the focused review flow')
-    expect(reconcileAppTools).toHaveBeenCalledWith({
-      appId: 'scratch',
-      instanceId: 'app:scratch',
-      tools: app.tools,
+  })
+
+  it('exposes the unsaved live priority to mimir_state', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await setEditorText(wrapper, 'Unsaved but current')
+
+    expect(wrapper.vm.todayState()).toEqual({
+      text: 'Unsaved but current',
+      loading: false,
+      dirty: true,
+      live: true,
     })
-    expect(listenForAppTools.mock.invocationCallOrder[0])
-      .toBeLessThan(reconcileAppTools.mock.invocationCallOrder[0])
+    expect(saveAppData).not.toHaveBeenCalled()
   })
 
   it('debounces durable autosave and keeps the save state honest', async () => {
@@ -139,27 +120,6 @@ describe('TodayApp', () => {
     expect(wrapper.find('h1').exists()).toBe(false)
   })
 
-  it('serves the live priority through the retained scratch reader', async () => {
-    const wrapper = render()
-    await flushPromises()
-    await setEditorText(wrapper, 'Tool-visible priority')
-
-    await relay.onCall({
-      id: 'call-9',
-      tool: 'app.scratch.read',
-      input: {},
-    })
-
-    expect(respondToAppTool).toHaveBeenCalledWith('call-9', {
-      value: expect.objectContaining({
-        text: 'Tool-visible priority',
-        characters: 21,
-        lines: 1,
-      }),
-      displayText: 'Tool-visible priority',
-    })
-  })
-
   it('keeps a failed save recoverable without losing the draft', async () => {
     vi.mocked(saveAppData)
       .mockRejectedValueOnce(new Error('disk busy'))
@@ -182,14 +142,12 @@ describe('TodayApp', () => {
     expect(wrapper.get('[data-today-save-state]').text()).toContain('Saved')
   })
 
-  it('retires its reader when the Activity leaves the host', async () => {
+  it('unmounts cleanly', async () => {
     const wrapper = render()
     await flushPromises()
 
     wrapper.unmount()
     await flushPromises()
-
-    expect(unlisten).toHaveBeenCalledTimes(1)
-    expect(unregisterAppTools).toHaveBeenCalledWith('scratch', 'app:scratch')
+    expect(wrapper.exists()).toBe(false)
   })
 })

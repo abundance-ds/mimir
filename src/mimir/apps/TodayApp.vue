@@ -66,14 +66,10 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
 import { taskCheckboxExtension } from '../../editor/codemirror/taskCheckboxes.js'
+import { markdownListKeymap } from '../../editor/codemirror/markdownLists.js'
 import {
-  listenForAppTools,
   loadAppData,
-  reconcileAppTools,
-  rejectAppTool,
-  respondToAppTool,
   saveAppData,
-  unregisterAppTools,
 } from '../../services/appsCatalog.js'
 
 const props = defineProps({
@@ -92,9 +88,7 @@ const savedOnce = ref(false)
 const error = ref('')
 const errorAction = ref('')
 let saveTimer = null
-let unlistenTools = null
 let disposed = false
-let lastUpdatedAt = null
 let editorView = null
 let applyingExternalText = false
 const readOnlyCompartment = new Compartment()
@@ -163,7 +157,6 @@ const todayLabel = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
 }).format(now)
-const lineCount = computed(() => text.value ? text.value.split(/\r?\n/).length : 1)
 const saveStateLabel = computed(() => {
   if (loading.value) return 'Restoring'
   if (saving.value) return 'Saving'
@@ -178,9 +171,7 @@ const saveStateClass = computed(() => {
 
 onMounted(async () => {
   createMarkdownEditor()
-  const tools = installTools()
   await restore()
-  await tools
 })
 
 watch(() => props.active, async (active) => {
@@ -196,7 +187,6 @@ async function restore() {
     if (disposed || raw == null) return
     const saved = JSON.parse(raw)
     text.value = typeof saved === 'string' ? saved : String(saved?.text || '')
-    lastUpdatedAt = typeof saved === 'object' ? saved?.updatedAt || null : null
     syncEditorText()
   } catch (cause) {
     reportError(`Priority could not be restored: ${errorMessage(cause)}`, 'restore')
@@ -223,6 +213,7 @@ function createMarkdownEditor() {
       history(),
       drawSelection(),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+      markdownListKeymap,
       syntaxHighlighting(todayHighlightStyle),
       taskCheckboxExtension(() => true),
       todayEditorTheme,
@@ -283,28 +274,6 @@ function syncEditorText() {
   applyingExternalText = false
 }
 
-async function installTools() {
-  try {
-    unlistenTools = await listenForAppTools({
-      appId: props.app.id,
-      instanceId: props.instanceId,
-      onCall: handleToolCall,
-      onCancel: () => {},
-    })
-    if (disposed) {
-      unlistenTools()
-      return
-    }
-    await reconcileAppTools({
-      appId: props.app.id,
-      instanceId: props.instanceId,
-      tools: props.app.tools || [],
-    })
-  } catch (cause) {
-    emit('diagnostic', `Priority tool unavailable: ${errorMessage(cause)}`)
-  }
-}
-
 function markDirty() {
   dirty.value = true
   savedOnce.value = false
@@ -330,7 +299,6 @@ async function persist() {
       text: snapshot,
       updatedAt,
     }))
-    lastUpdatedAt = updatedAt
     error.value = ''
     errorAction.value = ''
     if (text.value === snapshot) {
@@ -345,27 +313,6 @@ async function persist() {
       clearTimeout(saveTimer)
       saveTimer = setTimeout(() => void persist(), 350)
     }
-  }
-}
-
-async function handleToolCall(request) {
-  if (!request?.id) return
-  if (request.tool !== `app.${props.app.id}.read`) {
-    await rejectAppTool(request.id, `Today does not handle '${request.tool}'.`, 'not_found')
-    return
-  }
-  try {
-    await respondToAppTool(request.id, {
-      value: {
-        text: text.value,
-        characters: text.value.length,
-        lines: lineCount.value,
-        updatedAt: lastUpdatedAt,
-      },
-      displayText: text.value || '(No priority is set.)',
-    })
-  } catch (cause) {
-    reportError(`Priority tool response failed: ${errorMessage(cause)}`)
   }
 }
 
@@ -391,6 +338,12 @@ defineExpose({
   focus: () => editorView?.focus(),
   getContent: () => editorView?.state.doc.toString() || '',
   getEditorView: () => editorView,
+  todayState: () => ({
+    text: editorView?.state.doc.toString() || '',
+    loading: loading.value,
+    dirty: dirty.value,
+    live: true,
+  }),
 })
 
 onUnmounted(() => {
@@ -399,7 +352,5 @@ onUnmounted(() => {
   if (dirty.value && !saving.value) void persist()
   editorView?.destroy()
   editorView = null
-  unlistenTools?.()
-  void unregisterAppTools(props.app.id, props.instanceId).catch(() => {})
 })
 </script>

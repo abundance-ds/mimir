@@ -112,7 +112,9 @@
       aria-label="Workspace files"
       aria-multiselectable="true"
       tabindex="0"
+      :data-files-drop-root="rootDropActive ? '' : undefined"
       class="scrollbar-thin min-h-0 flex-1 overflow-auto bg-surface outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+      :class="{ 'ring-1 ring-inset ring-accent': rootDropActive }"
       @keydown="onListKeydown"
       @contextmenu="openEmptyContextMenu"
       @scroll.passive="onListScroll"
@@ -169,6 +171,7 @@
             :active="isActive(item.row.entry)"
             :ancestry="isActiveAncestry(item.row.entry)"
             :favorite="isFavorite(item.row.entry)"
+            :drop-target="dropTarget?.highlightPath === item.row.entry.path"
             :editing="isEditing(item.row)"
             :edit-kind="nameAction?.kind"
             :edit-draft="nameDraft"
@@ -246,7 +249,8 @@
       class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[8px] text-ink-4"
     >
       <span>{{ selectedPaths.size ? `${selectedPaths.size} selected` : `${visibleRows.length} visible` }}</span>
-      <span v-if="gitChanges.length" class="text-accent">
+      <span v-if="importing" data-files-importing class="text-accent">Adding dropped items…</span>
+      <span v-else-if="gitChanges.length" class="text-accent">
         {{ gitChanges.length }} changed
       </span>
       <button
@@ -261,20 +265,41 @@
     </footer>
 
     <div
-      v-if="operationError"
-      data-files-operation-error
-      role="alert"
-      class="absolute inset-x-2 bottom-9 z-30 flex items-start gap-2 border border-rem/30 bg-surface px-3 py-2 text-[10px] text-rem shadow-lg"
+      v-if="operationError || operationNotice"
+      class="absolute inset-x-2 bottom-9 z-30 flex flex-col gap-1"
     >
-      <span class="min-w-0 flex-1">{{ operationError }}</span>
-      <button
-        type="button"
-        title="Dismiss"
-        class="grid size-5 shrink-0 place-items-center hover:bg-chrome"
-        @click="operationError = ''"
+      <div
+        v-if="operationNotice"
+        data-files-operation-notice
+        role="status"
+        class="flex items-start gap-2 border border-rule bg-surface px-3 py-2 text-[10px] text-ink-2 shadow-lg"
       >
-        <IconX :size="12" :stroke-width="1.8" />
-      </button>
+        <span class="min-w-0 flex-1">{{ operationNotice }}</span>
+        <button
+          type="button"
+          title="Dismiss"
+          class="grid size-5 shrink-0 place-items-center hover:bg-chrome"
+          @click="operationNotice = ''"
+        >
+          <IconX :size="12" :stroke-width="1.8" />
+        </button>
+      </div>
+      <div
+        v-if="operationError"
+        data-files-operation-error
+        role="alert"
+        class="flex items-start gap-2 border border-rem/30 bg-surface px-3 py-2 text-[10px] text-rem shadow-lg"
+      >
+        <span class="min-w-0 flex-1">{{ operationError }}</span>
+        <button
+          type="button"
+          title="Dismiss"
+          class="grid size-5 shrink-0 place-items-center hover:bg-chrome"
+          @click="operationError = ''"
+        >
+          <IconX :size="12" :stroke-width="1.8" />
+        </button>
+      </div>
     </div>
 
     <div
@@ -409,9 +434,11 @@ import {
   parentDirectory,
 } from '../files/filePaths.js'
 import { useFileContextMenu } from '../files/useFileContextMenu.js'
+import { useFileDrop } from '../files/useFileDrop.js'
 import { useFileFavorites } from '../files/useFileFavorites.js'
 import { useFileMutations } from '../files/useFileMutations.js'
 import { useFileSelection } from '../files/useFileSelection.js'
+import { importWorkspaceEntries } from '../../services/workspaceFileOperations.js'
 import { basename } from '../../shared/utils/path.js'
 
 const ContextAction = defineComponent({
@@ -578,11 +605,13 @@ const {
   openContextNative,
   operationBusy,
   operationError,
+  operationNotice,
   promptDelete,
   promptNew,
   promptNewInside,
   promptRename,
   promptRenameContext,
+  reconcileMutationDirectories,
   refresh,
   refreshing,
   revealContext,
@@ -598,6 +627,17 @@ const {
   refreshGit,
   emitOpenFile: payload => emit('openFile', payload),
 })
+
+const { dropTarget, importing } = useFileDrop({
+  listRef,
+  rows: () => renderedRows.value,
+  acceptsDrop: () => Boolean(files.workspacePath),
+  importPaths: importDroppedPaths,
+  springOpen: expandDirectory,
+})
+// Marks the panel itself when the drop lands in the workspace root, where
+// there is no row to highlight.
+const rootDropActive = computed(() => Boolean(dropTarget.value) && !dropTarget.value.highlightPath)
 
 const renderedRows = computed(() => {
   const rows = [...visibleRows.value]
@@ -962,6 +1002,61 @@ function activateRow(row, preview) {
 function activateFocused(preview) {
   const row = visibleRows.value[focusedIndex.value]
   if (row) activateRow(row, preview)
+}
+
+async function expandDirectory(relativePath) {
+  const directory = normalizeRelative(relativePath)
+  if (!directory || files.expandedDirectories.has(directory)) return
+  try {
+    await files.toggleDirectory(directory)
+  } catch (error) {
+    operationError.value = describeError(error, 'Folder could not be opened')
+  }
+}
+
+async function importDroppedPaths(destination, paths) {
+  operationError.value = ''
+  operationNotice.value = ''
+  let report = null
+  try {
+    report = await importWorkspaceEntries(destination, paths)
+  } catch (error) {
+    operationError.value = describeError(error, 'Dropped items could not be added')
+  }
+  // Individual sources can fail after others have already landed, so the tree
+  // is reconciled either way — never leave arrivals invisible behind an error.
+  await files.revealTreePath(destination)
+  await expandDirectory(destination)
+  await reconcileMutationDirectories([destination])
+  if (!report) return
+
+  selectArrivals(report.entries || [])
+  const failures = report.failures || []
+  if (failures.length) {
+    operationError.value = failures.length === 1
+      ? failures[0]
+      : `${failures.length} dropped items could not be added. ${failures[0]}`
+  }
+  const skipped = report.skippedLinks || 0
+  if (skipped) {
+    operationNotice.value = skipped === 1
+      ? 'One symbolic link inside the drop was skipped.'
+      : `${skipped} symbolic links inside the drop were skipped.`
+  }
+}
+
+// Only what the current view actually shows: selecting rows that are not
+// rendered would report a selection the user cannot see or act on.
+function selectArrivals(entries) {
+  if (!entries.length) return
+  const arrived = new Set(entries.map((entry) => entry.path))
+  const rows = visibleRows.value
+  const index = rows.findIndex((row) => arrived.has(row.entry.path))
+  if (index < 0) return
+  selectedPaths.value = new Set(
+    rows.filter((row) => arrived.has(row.entry.path)).map((row) => row.entry.path),
+  )
+  focusedIndex.value = index
 }
 
 async function refreshGit() {

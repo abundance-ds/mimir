@@ -7,7 +7,7 @@
       tabindex="0"
       role="listbox"
       aria-label="Graph items"
-      :aria-activedescendant="nodes[selection] ? `graph-list-option-${nodes[selection].id}` : undefined"
+      :aria-activedescendant="selectedNode ? `graph-list-option-${selectedNode.id}` : undefined"
       @keydown.down.prevent="move(1)"
       @keydown.up.prevent="move(-1)"
       @keydown.enter.prevent="openSelected"
@@ -20,11 +20,13 @@
         :data-graph-node="node.id"
         :data-graph-control="`list-open-${node.id}`"
         role="option"
+        tabindex="-1"
         :aria-selected="index === selection"
         class="entity-row"
         :class="{ 'entity-row-selected': index === selection }"
-        @mouseenter="selection = index"
-        @click="$emit('open', node.id)"
+        @mouseenter="selectIndex(index)"
+        @mousedown.prevent="focusRow(index)"
+        @click="openAt(index)"
       >
         <span class="entity-content">
           <span class="entity-line-1">
@@ -98,40 +100,70 @@ const props = defineProps({
 const emit = defineEmits(['open', 'create'])
 const listbox = ref(null)
 const selection = ref(0)
+const selectedId = ref('')
+const selectedNode = computed(() => props.nodes[selection.value] || null)
 const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
 
-watch(() => props.nodes.length, length => {
-  selection.value = Math.min(selection.value, Math.max(0, length - 1))
-  revealSelection()
-})
+watch(
+  () => props.nodes.map(node => node.id),
+  ids => {
+    const preservedIndex = ids.indexOf(selectedId.value)
+    const index = preservedIndex >= 0
+      ? preservedIndex
+      : Math.min(selection.value, Math.max(0, ids.length - 1))
+    selection.value = index
+    selectedId.value = ids[index] || ''
+  },
+  { immediate: true },
+)
 
 function move(delta) {
   if (!props.nodes.length) return
   const next = Math.max(0, Math.min(props.nodes.length - 1, selection.value + delta))
   if (next === selection.value) return
-  selection.value = next
-  revealSelection()
+  selectIndex(next, { reveal: true })
 }
 
 function openSelected() {
-  const node = props.nodes[selection.value]
+  const node = selectedNode.value
   if (node) emit('open', node.id)
 }
 
 function focusEdge(edge = 'first') {
   if (!props.nodes.length) return
-  selection.value = edge === 'last' ? props.nodes.length - 1 : 0
+  selectIndex(edge === 'last' ? props.nodes.length - 1 : 0, { reveal: true })
   listbox.value?.focus()
-  revealSelection()
 }
 
 function focusNode(id) {
   const index = props.nodes.findIndex(node => node.id === id)
   if (index < 0) return false
-  selection.value = index
+  selectIndex(index, { reveal: true })
   listbox.value?.focus()
-  revealSelection()
   return true
+}
+
+function selectIndex(index, { reveal = false } = {}) {
+  if (!props.nodes.length) {
+    selection.value = 0
+    selectedId.value = ''
+    return
+  }
+  const next = Math.max(0, Math.min(props.nodes.length - 1, index))
+  selection.value = next
+  selectedId.value = props.nodes[next]?.id || ''
+  if (reveal) revealSelection()
+}
+
+function focusRow(index) {
+  selectIndex(index)
+  listbox.value?.focus()
+}
+
+function openAt(index) {
+  selectIndex(index)
+  const node = props.nodes[index]
+  if (node) emit('open', node.id)
 }
 
 function revealSelection() {

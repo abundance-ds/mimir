@@ -105,6 +105,7 @@ vi.mock('../services/workspaceFileOperations.js', () => ({
   createWorkspaceFolder: vi.fn(),
   renameWorkspaceEntry: vi.fn(),
   duplicateWorkspaceEntry: vi.fn(),
+  importWorkspaceEntries: vi.fn(),
   trashWorkspaceEntries: vi.fn(),
   openWorkspaceEntryNative: vi.fn(),
   revealWorkspaceEntry: vi.fn(),
@@ -711,6 +712,38 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
     expect(wrapper.find('[data-sidebar-row="activity:app:ledger"]').exists()).toBe(false)
     expect(wrapper.get('[data-sidebar-row="tool:app:ledger"] button').attributes('aria-current')).toBe('page')
+  })
+
+  it('lands keyboard focus inside the Business graph after its Tool row is clicked', async () => {
+    appsApi.loadAppsCatalog.mockResolvedValue({
+      directory: '/home/me/.mimir/apps',
+      diagnostics: [],
+      apps: [{
+        id: 'business-graph',
+        title: 'Business graph',
+        mode: 'rust-helper',
+        helper: 'business-graph',
+        builtin: true,
+        tools: [],
+      }],
+    })
+    appsApi.resolveAppLaunch.mockResolvedValue({
+      mode: 'rust-helper',
+      appId: 'business-graph',
+      helper: 'business-graph',
+    })
+    const wrapper = await render({ workspace: '/w' })
+
+    // WebKit does not focus Sidebar buttons on click, so the click alone
+    // leaves focus on <body>; selection must move it into the surface.
+    await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    await nextTick()
+
+    expect(useWorkbenchStore().activeActivityId).toBe('app:business-graph')
+    const surface = wrapper.get('[data-activity-surface="app:business-graph"]').element
+    expect(surface.contains(document.activeElement)).toBe(true)
   })
 
   it('launches external Apps as one real PTY Activity from Sidebar, Settings, and MCP', async () => {

@@ -2,6 +2,7 @@
   <div
     :data-file-row="entry.path"
     :data-file-depth="row.depth"
+    :data-file-drop-target="dropTarget ? '' : undefined"
     role="treeitem"
     :aria-level="row.depth + 1"
     :aria-expanded="entry.isDirectory ? String(row.expanded) : undefined"
@@ -10,6 +11,7 @@
     :class="[
       row.secondary ? 'h-9' : 'h-7',
       selected ? 'bg-accent-soft text-ink' : 'text-ink-2 hover:bg-chrome-high',
+      dropTarget ? 'bg-accent-soft ring-1 ring-inset ring-accent' : '',
     ]"
     @contextmenu.prevent="$emit('context', row, $event)"
   >
@@ -160,6 +162,7 @@ const props = defineProps({
   active: { type: Boolean, default: false },
   ancestry: { type: Boolean, default: false },
   favorite: { type: Boolean, default: false },
+  dropTarget: { type: Boolean, default: false },
   editing: { type: Boolean, default: false },
   editKind: { type: String, default: 'file' },
   editDraft: { type: String, default: '' },
