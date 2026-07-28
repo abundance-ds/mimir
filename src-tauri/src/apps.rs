@@ -128,7 +128,7 @@ pub enum ResolvedAppLaunch {
 
 pub fn default_apps_dir() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .map(|home| home.join(".mim").join("apps"))
+        .map(|home| home.join(".mimir").join("apps"))
         .ok_or_else(|| "Could not resolve the home directory for apps.".to_string())
 }
 
@@ -142,7 +142,7 @@ pub fn builtin_apps() -> Vec<InstalledApp> {
                 title: "Today".into(),
                 description: "Keep one top priority in view.".into(),
                 mode: AppMode::Embedded,
-                entry: Some("mim://builtin/scratch".into()),
+                entry: Some("mimir://builtin/scratch".into()),
                 command: None,
                 args: Vec::new(),
                 env: BTreeMap::new(),
@@ -727,7 +727,7 @@ fn starter_html(title: &str) -> String {
     async function save() {{
       clearTimeout(timer)
       state.textContent = 'Saving'
-      await mim.data.save('note', {{ text: note.value, updatedAt: new Date().toISOString() }})
+      await mimir.data.save('note', {{ text: note.value, updatedAt: new Date().toISOString() }})
       state.textContent = 'Saved'
     }}
     note.addEventListener('input', () => {{
@@ -736,11 +736,11 @@ fn starter_html(title: &str) -> String {
       timer = setTimeout(save, 350)
     }})
     document.querySelector('#save').addEventListener('click', save)
-    mim.tools.handle('read', () => ({{
+    mimir.tools.handle('read', () => ({{
       value: {{ text: note.value, characters: note.value.length }},
       displayText: note.value || '(The instrument is empty.)'
     }}))
-    mim.data.load('note').then(saved => {{
+    mimir.data.load('note').then(saved => {{
       note.value = saved?.text || ''
       state.textContent = 'Ready'
       note.focus()
@@ -881,7 +881,9 @@ pub fn resolve_launch(
 }
 
 fn resolve_entry(app: &InstalledApp, entry: &str) -> Result<String, String> {
-    if entry.starts_with("mim://") || entry.starts_with("http://") || entry.starts_with("https://")
+    if entry.starts_with("mimir://")
+        || entry.starts_with("http://")
+        || entry.starts_with("https://")
     {
         return Ok(entry.into());
     }
@@ -892,7 +894,9 @@ fn resolve_entry(app: &InstalledApp, entry: &str) -> Result<String, String> {
 }
 
 fn validate_entry(entry: &str, app_directory: &Path) -> Result<(), String> {
-    if entry.starts_with("mim://") || entry.starts_with("http://") || entry.starts_with("https://")
+    if entry.starts_with("mimir://")
+        || entry.starts_with("http://")
+        || entry.starts_with("https://")
     {
         return Ok(());
     }
@@ -902,7 +906,7 @@ fn validate_entry(entry: &str, app_directory: &Path) -> Result<(), String> {
             .components()
             .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
     {
-        return Err("Entry must be an app-relative path or an http(s)/mim URL.".into());
+        return Err("Entry must be an app-relative path or an http(s)/mimir URL.".into());
     }
     if !app_directory.join(path).is_file() {
         return Err(format!("Entry '{}' does not exist.", entry));
@@ -939,7 +943,7 @@ fn empty_object() -> Value {
 }
 
 fn sdk_js_content() -> &'static str {
-    include_str!("../../src/apps/sdk/mim-sdk.js")
+    include_str!("../../src/apps/sdk/mimir-sdk.js")
 }
 
 fn theme_css_content() -> &'static str {
@@ -948,7 +952,7 @@ fn theme_css_content() -> &'static str {
 
 pub fn serve_app_file(request: tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
     let path = request.uri().path().trim_start_matches('/');
-    if path == "_sdk/mim-sdk.js" || path.ends_with("/_sdk/mim-sdk.js") {
+    if path == "_sdk/mimir-sdk.js" || path.ends_with("/_sdk/mimir-sdk.js") {
         return response(
             200,
             "application/javascript",
@@ -1024,8 +1028,7 @@ fn response(
 }
 
 fn inject_sdk(html: &str) -> String {
-    let sdk =
-        r#"<link rel="stylesheet" href="/_sdk/theme.css"><script src="/_sdk/mim-sdk.js"></script>"#;
+    let sdk = r#"<link rel="stylesheet" href="/_sdk/theme.css"><script src="/_sdk/mimir-sdk.js"></script>"#;
     if let Some(position) = html.find("</head>") {
         format!("{}{}{}", &html[..position], sdk, &html[position..])
     } else {
@@ -1185,7 +1188,7 @@ fn app_data_path(app_id: &str, key: &str) -> Result<PathBuf, String> {
     validate_relative_path(key)?;
     let root = dirs::home_dir()
         .ok_or_else(|| "Could not resolve the home directory for app data.".to_string())?
-        .join(".mim")
+        .join(".mimir")
         .join("app-data")
         .join(app_id);
     Ok(root.join(format!("{key}.json")))
@@ -1527,8 +1530,8 @@ entry = "index.html"
         );
         assert!(directory.path().join("field-notes/index.html").is_file());
         let html = fs::read_to_string(directory.path().join("field-notes/index.html")).unwrap();
-        assert!(html.contains("mim.data.save"));
-        assert!(html.contains("mim.tools.handle('read'"));
+        assert!(html.contains("mimir.data.save"));
+        assert!(html.contains("mimir.tools.handle('read'"));
 
         let numeric = create_local_app(directory.path(), "24-hours", "24 Hours", None).unwrap();
         let numeric = numeric

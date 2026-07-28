@@ -93,7 +93,7 @@ fn check_auth(
     ))
 }
 
-// ── Legacy HTTP API (curl/debugging/mimx) ────────────────────────
+// ── Legacy HTTP API (curl/debugging/mimir) ────────────────────────
 
 async fn handle_call(
     State(state): State<AppState>,
@@ -122,7 +122,7 @@ async fn handle_call(
 
     let context = ToolCallContext {
         request_id: body.request_id,
-        caller: ToolCaller::Mimx,
+        caller: ToolCaller::MimirCli,
         cwd: body.cwd,
         metadata: serde_json::Map::new(),
     };
@@ -262,8 +262,8 @@ fn mcp_tool_list(snapshot: &RegistrySnapshot, include_all: bool) -> serde_json::
     serde_json::json!({
         "tools": tools,
         "_meta": {
-            "mim/registryRevision": snapshot.revision,
-            "mim/disclosure": if include_all { "all" } else { "core" },
+            "mimir/registryRevision": snapshot.revision,
+            "mimir/disclosure": if include_all { "all" } else { "core" },
         }
     })
 }
@@ -283,9 +283,9 @@ fn full_mcp_tool(tool: &ToolDescriptor) -> serde_json::Value {
         "description": description,
         "inputSchema": tool.input_schema,
         "_meta": {
-            "mim/canonicalName": tool.canonical_name,
-            "mim/owner": tool.owner,
-            "mim/source": tool.source,
+            "mimir/canonicalName": tool.canonical_name,
+            "mimir/owner": tool.owner,
+            "mimir/source": tool.source,
         }
     })
 }
@@ -364,7 +364,7 @@ async fn handle_mcp_request(
                 serde_json::json!({
                     "protocolVersion": protocol_version,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "mim", "version": env!("CARGO_PKG_VERSION") }
+                    "serverInfo": { "name": "mimir", "version": env!("CARGO_PKG_VERSION") }
                 }),
             ))
             .into_response()
@@ -434,7 +434,7 @@ async fn handle_mcp_request(
 const DEFAULT_PORT: u16 = 17532;
 
 /// Boot the loopback tool server. Public so integration tests (see
-/// `tests/mimx_contract.rs`) can run the real transport against an
+/// `tests/mimir_contract.rs`) can run the real transport against an
 /// ephemeral port; production code goes through [`tool_server_start`].
 pub async fn start_server(
     registry: ToolRegistry,
@@ -633,27 +633,27 @@ mod tests {
 
         let list = mcp_tool_list(&registry.snapshot(), false);
         assert_eq!(list["tools"].as_array().unwrap().len(), 1);
-        assert_eq!(list["tools"][0]["name"], "mim_state");
+        assert_eq!(list["tools"][0]["name"], "mimir_state");
         assert_eq!(list["tools"][0]["description"], "Get active editor state.");
         assert!(list["tools"][0].get("_meta").is_none());
-        assert_eq!(list["_meta"]["mim/disclosure"], "core");
+        assert_eq!(list["_meta"]["mimir/disclosure"], "core");
 
         let full = mcp_tool_list(&registry.snapshot(), true);
         assert_eq!(full["tools"].as_array().unwrap().len(), 2);
         assert_eq!(
-            full["tools"][0]["_meta"]["mim/canonicalName"],
+            full["tools"][0]["_meta"]["mimir/canonicalName"],
             "editor.selection",
         );
         let projected_state = full["tools"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|tool| tool["_meta"]["mim/canonicalName"] == "editor.state")
+            .find(|tool| tool["_meta"]["mimir/canonicalName"] == "editor.state")
             .unwrap();
-        assert_eq!(projected_state["name"], "mim_state");
+        assert_eq!(projected_state["name"], "mimir_state");
         assert_eq!(projected_state["description"], "Get active editor state.");
-        assert_eq!(full["_meta"]["mim/registryRevision"], 2);
-        assert_eq!(full["_meta"]["mim/disclosure"], "all");
+        assert_eq!(full["_meta"]["mimir/registryRevision"], 2);
+        assert_eq!(full["_meta"]["mimir/disclosure"], "all");
     }
 
     #[test]
@@ -839,7 +839,7 @@ mod tests {
             .await
             .unwrap();
         let list_json: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
-        assert_eq!(list_json["result"]["tools"][0]["name"], "mim_state");
+        assert_eq!(list_json["result"]["tools"][0]["name"], "mimir_state");
 
         let call_response = handle_mcp(
             State(state),
@@ -848,7 +848,7 @@ mod tests {
                 "id": "call-1",
                 "method": "tools/call",
                 "params": {
-                    "name": "mim_state",
+                    "name": "mimir_state",
                     "arguments": { "include_content": true }
                 }
             })),

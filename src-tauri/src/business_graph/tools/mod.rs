@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use support::internal_error;
 use tauri::{Emitter, Manager};
 
-const GRAPH_CHANGED_EVENT: &str = "mim://graph-changed";
+const GRAPH_CHANGED_EVENT: &str = "mimir://graph-changed";
 
 #[derive(Debug)]
 struct NativeExecution {
@@ -152,7 +152,7 @@ fn graph_actor(context: &ToolCallContext) -> GraphActor {
         };
     }
     match &context.caller {
-        ToolCaller::Ui | ToolCaller::Mimx => GraphActor::human(),
+        ToolCaller::Ui | ToolCaller::MimirCli => GraphActor::human(),
         ToolCaller::App(id) => GraphActor {
             kind: GraphActorKind::System,
             id: id.clone(),

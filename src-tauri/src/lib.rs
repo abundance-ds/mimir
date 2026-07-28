@@ -26,7 +26,7 @@ mod git;
 mod ipc_fixtures;
 mod launchers;
 mod local_settings;
-pub mod mimx;
+pub mod mimir_cli;
 mod persistence;
 pub mod routine_runtime;
 pub mod routines;
@@ -348,8 +348,8 @@ fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[SharedProposal]
         .cloned()
         .collect();
     if let Some(main) = app.get_webview_window("main") {
-        let _ = main.emit("mim://proposals-state", proposals);
-        let _ = main.emit("mim://proposals-changed", &pending);
+        let _ = main.emit("mimir://proposals-state", proposals);
+        let _ = main.emit("mimir://proposals-changed", &pending);
     }
 }
 
@@ -366,7 +366,7 @@ fn broadcast_proposal_result(
             "status": status,
             "detail": detail,
         });
-        let _ = main.emit("mim://proposal-result", &result);
+        let _ = main.emit("mimir://proposal-result", &result);
     }
 }
 
@@ -638,7 +638,7 @@ fn proposal_apply(
     if let Some((label, should_delegate)) = owner {
         if should_delegate {
             if let Some(window) = app.get_webview_window(&label) {
-                let _ = window.emit("mim://proposal-apply", &proposal);
+                let _ = window.emit("mimir://proposal-apply", &proposal);
                 return Ok(serde_json::json!({ "status": "delegated", "target": label }));
             }
             let proposals_snapshot = {
@@ -755,7 +755,7 @@ fn proposal_respond(
     };
     broadcast_proposal_state(&app, &proposals_snapshot);
     if let Some(main) = app.get_webview_window("main") {
-        let _ = main.emit("mim://proposal-result", &result);
+        let _ = main.emit("mimir://proposal-result", &result);
     }
     Ok(())
 }
@@ -764,7 +764,7 @@ fn proposal_respond(
 fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
     let payload = serde_json::json!({ "path": path, "content": content });
     if let Some(main) = app.get_webview_window("main") {
-        let _ = main.emit("mim://file-updated", &payload);
+        let _ = main.emit("mimir://file-updated", &payload);
     }
     Ok(())
 }
@@ -772,7 +772,7 @@ fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> 
 fn create_main_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<tauri::WebviewWindow> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(manager, "main", tauri::WebviewUrl::App("/".into()))
-            .title("Mim")
+            .title("Mimir")
             .inner_size(1280.0, 800.0)
             .min_inner_size(520.0, 420.0)
             .decorations(true);
@@ -804,7 +804,7 @@ fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
     let caller = window.label().to_string();
     for (label, w) in window.app_handle().webview_windows() {
         if label != caller {
-            let _ = w.emit("mim://settings-changed", ());
+            let _ = w.emit("mimir://settings-changed", ());
         }
     }
     Ok(())
@@ -848,7 +848,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             enable_macos_spellcheck();
 
-            mimx::install().map_err(std::io::Error::other)?;
+            mimir_cli::install().map_err(std::io::Error::other)?;
             create_main_window(app)?;
             let supervisor = app.state::<activities::ActivitySupervisor>();
             activity_commands::TauriActivitySink::install(app.handle(), &supervisor);
@@ -1007,13 +1007,13 @@ pub fn run() {
             tool_runtime::tool_relay_cancel,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Mim")
+        .expect("error while building Mimir")
         .run(|app_handle, event| match event {
             tauri::RunEvent::ExitRequested { api, code, .. } => {
                 if code.is_none() {
                     if let Some(main) = app_handle.get_webview_window("main") {
                         api.prevent_exit();
-                        let _ = main.emit("mim://quit-requested", ());
+                        let _ = main.emit("mimir://quit-requested", ());
                         let _ = main.set_focus();
                     }
                 }

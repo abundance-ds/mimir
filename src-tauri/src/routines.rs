@@ -33,7 +33,10 @@ pub struct RoutineDefinition {
     pub title: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    pub schedule: String,
+    /// Cron expression; a routine without one is manual-only and never
+    /// enters the planner. It still runs through `run_now`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
     #[serde(default = "default_timezone")]
     pub timezone: String,
     pub preset: String,
@@ -113,7 +116,7 @@ pub struct RoutinePlannerState {
 
 pub fn default_routines_dir() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .map(|home| home.join(".mim").join("routines"))
+        .map(|home| home.join(".mimir").join("routines"))
         .ok_or_else(|| "Could not resolve the home directory for routines.".to_string())
 }
 
@@ -225,7 +228,16 @@ pub fn validate_definition(definition: &RoutineDefinition) -> Result<(), (String
         }
     }
     parse_timezone(&definition.timezone).map_err(|message| ("timezone".into(), message))?;
-    parse_schedule(&definition.schedule).map_err(|message| ("schedule".into(), message))?;
+    if let Some(schedule) = &definition.schedule {
+        if schedule.trim().is_empty() {
+            return Err((
+                "schedule".into(),
+                "Remove the schedule field for a manual routine, or provide a cron expression."
+                    .into(),
+            ));
+        }
+        parse_schedule(schedule).map_err(|message| ("schedule".into(), message))?;
+    }
     Ok(())
 }
 
@@ -234,7 +246,11 @@ pub fn next_fire(
     after: DateTime<Utc>,
 ) -> Result<DateTime<Utc>, String> {
     let timezone = parse_timezone(&definition.timezone)?;
-    let schedule = parse_schedule(&definition.schedule)?;
+    let schedule = definition
+        .schedule
+        .as_deref()
+        .ok_or_else(|| format!("Routine '{}' is manual-only.", definition.id))?;
+    let schedule = parse_schedule(schedule)?;
     schedule
         .after(&after.with_timezone(&timezone))
         .next()
@@ -259,7 +275,7 @@ pub fn reconcile_tick(
         .retain(|routine_id, _| live_ids.contains(routine_id.as_str()));
 
     for routine in &catalog.routines {
-        if !routine.enabled {
+        if !routine.enabled || routine.schedule.is_none() {
             state.next_fires.remove(&routine.id);
             continue;
         }
@@ -441,7 +457,7 @@ mod tests {
             id: "daily-review".into(),
             title: "Daily review".into(),
             enabled: true,
-            schedule: schedule.into(),
+            schedule: Some(schedule.into()),
             timezone: "Europe/Berlin".into(),
             preset: "claude-headless".into(),
             prompt: "Review recent changes and leave comments.".into(),
@@ -614,6 +630,45 @@ prompt = "Review."
             .skips
             .iter()
             .any(|skip| skip.reason == "missed-fire-policy"));
+    }
+
+    #[test]
+    fn manual_routine_without_schedule_is_valid_and_never_planned() {
+        let mut definition = routine("* * * * *");
+        definition.schedule = None;
+        assert!(validate_definition(&definition).is_ok());
+        assert!(next_fire(&definition, Utc::now()).is_err());
+
+        let catalog = RoutineCatalog {
+            routines: vec![definition],
+            ..RoutineCatalog::default()
+        };
+        let mut state = RoutinePlannerState {
+            next_fires: BTreeMap::from([("daily-review".into(), Utc::now().to_rfc3339())]),
+        };
+        let tick = reconcile_tick(&catalog, &mut state, Utc::now(), &HashSet::new());
+        assert!(tick.fires.is_empty());
+        assert!(tick.skips.is_empty());
+        assert!(state.next_fires.is_empty());
+    }
+
+    #[test]
+    fn empty_schedule_string_is_rejected_with_manual_hint() {
+        let mut definition = routine("* * * * *");
+        definition.schedule = Some("   ".into());
+        let (field, message) = validate_definition(&definition).unwrap_err();
+        assert_eq!(field, "schedule");
+        assert!(message.contains("manual"));
+    }
+
+    #[test]
+    fn manual_routine_toml_round_trips_without_schedule_line() {
+        let mut definition = routine("* * * * *");
+        definition.schedule = None;
+        let serialized = toml::to_string_pretty(&definition).unwrap();
+        assert!(!serialized.contains("schedule"));
+        let parsed = toml::from_str::<RoutineDefinition>(&serialized).unwrap();
+        assert_eq!(parsed, definition);
     }
 
     #[test]

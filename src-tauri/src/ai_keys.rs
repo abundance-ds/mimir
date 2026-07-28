@@ -7,7 +7,7 @@ use serde::Serialize;
 #[cfg(debug_assertions)]
 use std::{collections::HashMap, fs, path::PathBuf};
 
-const KEYRING_SERVICE: &str = "com.mim.terminal";
+const KEYRING_SERVICE: &str = "rs.shoulde.mimir";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -388,7 +388,7 @@ DUPLICATE=second
         keys.insert("A_KEY".to_string(), "alpha value".to_string());
         save_file_keys(&keys).unwrap();
 
-        let path = home.path().join(".mim").join("keys.env");
+        let path = home.path().join(".mimir").join("keys.env");
         let written = fs::read_to_string(&path).unwrap();
         // Rows are sorted by key and the file ends with a newline.
         assert_eq!(written, "A_KEY=alpha value\nB_KEY=beta\n");

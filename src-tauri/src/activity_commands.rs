@@ -5,7 +5,7 @@ use crate::activities::{
 use std::sync::Arc;
 use tauri::Emitter;
 
-const ACTIVITY_EVENT: &str = "mim://activity-event";
+const ACTIVITY_EVENT: &str = "mimir://activity-event";
 
 pub struct TauriActivitySink {
     app: tauri::AppHandle,

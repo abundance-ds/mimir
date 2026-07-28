@@ -97,7 +97,7 @@ fn watch_workspace(
         .map_err(|error| error.to_string())?;
 
     std::thread::Builder::new()
-        .name("mim-workspace-watch".into())
+        .name("mimir-workspace-watch".into())
         .spawn(move || {
             while let Ok(first) = receiver.recv() {
                 let mut changed = first;
@@ -133,7 +133,7 @@ fn watch_workspace(
                             replace_all,
                             files,
                         };
-                        let _ = app.emit("mim://workspace-files-changed", payload);
+                        let _ = app.emit("mimir://workspace-files-changed", payload);
                     }
                     Err(error) => log::warn!("Workspace refresh after file change failed: {error}"),
                 }

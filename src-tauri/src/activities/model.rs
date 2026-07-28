@@ -107,7 +107,7 @@ impl ActivityStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ActivityRetention {
-    /// The process and record disappear when the terminal is closed or Mim
+    /// The process and record disappear when the terminal is closed or Mimir
     /// exits. Plain terminals use this policy.
     Ephemeral,
     /// Metadata and bounded scrollback survive restart until explicitly
@@ -348,7 +348,7 @@ mod tests {
                 command: "/opt/bin/codex".into(),
                 args: vec!["--full-auto".into(), "two words".into()],
                 cwd: Some("/work".into()),
-                env: BTreeMap::from([("MIM_ACTIVITY_ID".into(), "agent:one".into())]),
+                env: BTreeMap::from([("MIMIR_ACTIVITY_ID".into(), "agent:one".into())]),
             }),
             session: None,
             error: None,

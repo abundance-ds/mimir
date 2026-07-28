@@ -20,7 +20,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
-const GRAPH_CHANGED_EVENT: &str = "mim://graph-changed";
+const GRAPH_CHANGED_EVENT: &str = "mimir://graph-changed";
 const MAX_GRAPH_EVENTS: usize = 2_000;
 
 #[derive(Default)]
@@ -516,7 +516,7 @@ fn graph_event_path(project_root: &Path) -> Result<PathBuf, String> {
     );
     dirs::home_dir()
         .map(|home| {
-            home.join(".mim")
+            home.join(".mimir")
                 .join("graph")
                 .join("events")
                 .join(format!("{}.json", &digest[..24]))
@@ -971,7 +971,7 @@ fn watch_roots(
     drop(sender);
 
     std::thread::Builder::new()
-        .name("mim-business-graph-watch".into())
+        .name("mimir-business-graph-watch".into())
         .spawn(move || {
             while let Ok(first) = receiver.recv() {
                 let mut changed_paths = first;
@@ -1019,7 +1019,7 @@ fn graph_markdown_path(root: &Path, path: &Path) -> bool {
 
 fn private_root() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .map(|home| home.join(".mim").join("graph").join("private"))
+        .map(|home| home.join(".mimir").join("graph").join("private"))
         .ok_or_else(|| "Could not resolve the private graph root.".into())
 }
 

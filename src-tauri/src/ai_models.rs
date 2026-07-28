@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const CONFIG_DIR_NAME: &str = ".mim";
+const CONFIG_DIR_NAME: &str = ".mimir";
 const DEFAULT_MODELS_JSON: &str = include_str!("../resources/ai-models.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

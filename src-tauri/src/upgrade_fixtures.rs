@@ -1,6 +1,6 @@
-//! Upgrade fixtures: sanitized `~/.mim` data-dir snapshots per released
+//! Upgrade fixtures: sanitized `~/.mimir` data-dir snapshots per released
 //! version, loaded by tests to prove every loader upgrades old data cleanly.
-//! Snapshots live under `src-tauri/tests/fixtures/mim-home/`.
+//! Snapshots live under `src-tauri/tests/fixtures/mimir-home/`.
 //!
 //! # Policy
 //!
@@ -53,7 +53,7 @@ fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join("mim-home")
+        .join("mimir-home")
 }
 
 /// Every checked-in version snapshot, sorted by directory name. Future
@@ -148,21 +148,21 @@ fn every_shipped_snapshot_loads_cleanly_and_is_left_untouched() {
     for (version, source) in versions {
         let temp = tempfile::tempdir().expect("harness tempdir should be creatable");
         let home = temp.path().join("home");
-        let mim = home.join(".mim");
-        copy_tree(&source, &mim);
-        let before = tree_bytes(&mim);
+        let mimir = home.join(".mimir");
+        copy_tree(&source, &mimir);
+        let before = tree_bytes(&mimir);
 
-        check_settings(&version, &mim);
-        check_session(&version, &mim);
-        check_model_registry(&version, &mim);
-        check_launchers(&version, &mim);
-        check_routine_definitions(&version, &mim);
-        check_apps(&version, &mim);
-        check_app_data(&version, &mim);
-        check_graph(&version, &mim);
-        check_activities_and_routine_runtime(&version, &home, &mim);
+        check_settings(&version, &mimir);
+        check_session(&version, &mimir);
+        check_model_registry(&version, &mimir);
+        check_launchers(&version, &mimir);
+        check_routine_definitions(&version, &mimir);
+        check_apps(&version, &mimir);
+        check_app_data(&version, &mimir);
+        check_graph(&version, &mimir);
+        check_activities_and_routine_runtime(&version, &home, &mimir);
 
-        let after = tree_bytes(&mim);
+        let after = tree_bytes(&mimir);
         assert_eq!(
             before.keys().collect::<Vec<_>>(),
             after.keys().collect::<Vec<_>>(),
@@ -177,8 +177,8 @@ fn every_shipped_snapshot_loads_cleanly_and_is_left_untouched() {
     }
 }
 
-fn check_settings(version: &str, mim: &Path) {
-    let settings = load_fixture_json_object(version, &mim.join("settings.json"));
+fn check_settings(version: &str, mimir: &Path) {
+    let settings = load_fixture_json_object(version, &mimir.join("settings.json"));
     assert!(
         !settings.is_empty(),
         "[{version}] settings.json should carry representative settings"
@@ -193,8 +193,8 @@ fn check_settings(version: &str, mim: &Path) {
     }
 }
 
-fn check_session(version: &str, mim: &Path) {
-    let session = load_fixture_json_object(version, &mim.join("session.json"));
+fn check_session(version: &str, mimir: &Path) {
+    let session = load_fixture_json_object(version, &mimir.join("session.json"));
     let open_files = session
         .get("openFiles")
         .and_then(Value::as_array)
@@ -222,16 +222,18 @@ fn check_session(version: &str, mim: &Path) {
     }
 }
 
-fn check_model_registry(version: &str, mim: &Path) {
+fn check_model_registry(version: &str, mimir: &Path) {
     // `ai_models::load_registry` parses with exactly these serde types before
     // deciding whether to migrate; parse compatibility is the durable
     // contract. The full loader is only reachable through $HOME (see module
     // docs for its rewrite-on-migrate contract).
-    let registry = match load_json_optional_quarantining::<ModelRegistry>(&mim.join("models.json"))
-    {
-        Ok(QuarantinedLoad::Loaded(registry)) => registry,
-        other => panic!("[{version}] models.json should parse as a model registry, got {other:?}"),
-    };
+    let registry =
+        match load_json_optional_quarantining::<ModelRegistry>(&mimir.join("models.json")) {
+            Ok(QuarantinedLoad::Loaded(registry)) => registry,
+            other => {
+                panic!("[{version}] models.json should parse as a model registry, got {other:?}")
+            }
+        };
     assert!(registry.version >= 1, "[{version}] registry version");
     assert!(
         !registry.models.is_empty(),
@@ -252,8 +254,8 @@ fn check_model_registry(version: &str, mim: &Path) {
     }
 }
 
-fn check_launchers(version: &str, mim: &Path) {
-    let response = launchers::load_config(&mim.join("launchers.json"))
+fn check_launchers(version: &str, mimir: &Path) {
+    let response = launchers::load_config(&mimir.join("launchers.json"))
         .unwrap_or_else(|error| panic!("[{version}] launchers.json should load: {error}"));
     assert!(
         response.diagnostic.is_none(),
@@ -276,8 +278,8 @@ fn check_launchers(version: &str, mim: &Path) {
     }
 }
 
-fn check_routine_definitions(version: &str, mim: &Path) {
-    let catalog = routines::load_catalog(&mim.join("routines"));
+fn check_routine_definitions(version: &str, mimir: &Path) {
+    let catalog = routines::load_catalog(&mimir.join("routines"));
     assert!(
         catalog.diagnostics.is_empty(),
         "[{version}] routine TOML should load without diagnostics: {:?}",
@@ -290,13 +292,13 @@ fn check_routine_definitions(version: &str, mim: &Path) {
     if version == "v0.1.0" {
         let routine = &catalog.routines[0];
         assert_eq!(routine.id, "daily-review");
-        assert_eq!(routine.schedule, "30 8 * * 1-5");
+        assert_eq!(routine.schedule.as_deref(), Some("30 8 * * 1-5"));
         assert_eq!(routine.preset, "claude-headless");
     }
 }
 
-fn check_apps(version: &str, mim: &Path) {
-    let catalog = crate::apps::load_catalog(&mim.join("apps"));
+fn check_apps(version: &str, mimir: &Path) {
+    let catalog = crate::apps::load_catalog(&mimir.join("apps"));
     assert!(
         catalog.diagnostics.is_empty(),
         "[{version}] app manifests should load without diagnostics: {:?}",
@@ -317,10 +319,10 @@ fn check_apps(version: &str, mim: &Path) {
     }
 }
 
-fn check_app_data(version: &str, mim: &Path) {
+fn check_app_data(version: &str, mimir: &Path) {
     // `app_data_load` is a plain `fs::read_to_string` of
-    // `~/.mim/app-data/<app>/<key>.json` with no injectable path; mirror it.
-    let root = mim.join("app-data");
+    // `~/.mimir/app-data/<app>/<key>.json` with no injectable path; mirror it.
+    let root = mimir.join("app-data");
     let mut loaded = 0usize;
     for app_directory in fs::read_dir(&root)
         .unwrap_or_else(|error| panic!("[{version}] app-data/ should be readable: {error}"))
@@ -356,8 +358,8 @@ fn check_app_data(version: &str, mim: &Path) {
     );
 }
 
-fn check_graph(version: &str, mim: &Path) {
-    let private_root = mim.join("graph").join("private");
+fn check_graph(version: &str, mimir: &Path) {
+    let private_root = mimir.join("graph").join("private");
     let roots = [GraphSourceRoot::new(
         "private:local",
         GraphScopeKind::Private,
@@ -421,9 +423,12 @@ fn check_graph(version: &str, mim: &Path) {
     }
 }
 
-fn check_activities_and_routine_runtime(version: &str, home: &Path, mim: &Path) {
-    let supervisor = ActivitySupervisor::new(ActivitySupervisorConfig::new(mim.join("activities")))
-        .unwrap_or_else(|error| panic!("[{version}] activity hydration should succeed: {error}"));
+fn check_activities_and_routine_runtime(version: &str, home: &Path, mimir: &Path) {
+    let supervisor =
+        ActivitySupervisor::new(ActivitySupervisorConfig::new(mimir.join("activities")))
+            .unwrap_or_else(|error| {
+                panic!("[{version}] activity hydration should succeed: {error}")
+            });
     assert!(
         supervisor.quarantined_files().is_empty(),
         "[{version}] no persisted activity should be quarantined: {:?}",
@@ -475,9 +480,9 @@ fn check_activities_and_routine_runtime(version: &str, home: &Path, mim: &Path) 
     // ticked or started: a tick would legitimately rewrite planner state.
     let runtime = RoutineRuntime::new(
         RoutineRuntimeConfig {
-            routines_dir: mim.join("routines"),
-            planner_state_path: mim.join("routines-state.json"),
-            launcher_config_path: mim.join("launchers.json"),
+            routines_dir: mimir.join("routines"),
+            planner_state_path: mimir.join("routines-state.json"),
+            launcher_config_path: mimir.join("launchers.json"),
             home_path: home.to_path_buf(),
             default_shell: PathBuf::from("/bin/sh"),
             tick_interval: Duration::from_secs(3600),
@@ -535,7 +540,7 @@ fn check_activities_and_routine_runtime(version: &str, home: &Path, mim: &Path) 
 ///
 /// It refuses to overwrite an existing snapshot; shipped snapshots are frozen.
 #[test]
-#[ignore = "writes the current version's snapshot into tests/fixtures/mim-home/"]
+#[ignore = "writes the current version's snapshot into tests/fixtures/mimir-home/"]
 fn generate_current_version_snapshot() {
     use crate::activities::{
         ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin, ActivityRecord,
@@ -566,8 +571,8 @@ fn generate_current_version_snapshot() {
                 "editorWordWrap": true,
                 "editorLineNumbers": false,
                 "editorAutoSave": true,
-                "mimTerminalFontSize": 12,
-                "mimWorkspaceFolder": "/Users/tester/projects/acme",
+                "mimirTerminalFontSize": 12,
+                "mimirWorkspaceFolder": "/Users/tester/projects/acme",
                 "recentWorkspaceFolders": ["/Users/tester/projects/acme"],
                 "workbenchLayout": {
                     "sidebar": { "state": "expanded", "width": 240 },
@@ -624,7 +629,7 @@ fn generate_current_version_snapshot() {
         agent_id: Some("claude".into()),
         binary: Some("claude".into()),
         args: vec!["--output-format".into(), "text".into()],
-        env: BTreeMap::from([("MIM_ROUTINE_RUN".into(), "1".into())]),
+        env: BTreeMap::from([("MIMIR_ROUTINE_RUN".into(), "1".into())]),
         cwd: WorkingDirectory::Home,
     });
     launchers::save_config(&target.join("launchers.json"), presets)
@@ -759,7 +764,7 @@ fn generate_current_version_snapshot() {
             command: "/bin/echo".into(),
             args: vec!["fixture scrollback line".into()],
             cwd: None,
-            env: BTreeMap::from([("MIM_ACTIVITY_ID".into(), "agent-fixture-0001".into())]),
+            env: BTreeMap::from([("MIMIR_ACTIVITY_ID".into(), "agent-fixture-0001".into())]),
         }),
         session: None,
         error: None,
@@ -815,7 +820,7 @@ fn generate_current_version_snapshot() {
             id: "daily-review".into(),
             title: "Daily review".into(),
             enabled: true,
-            schedule: "30 8 * * 1-5".into(),
+            schedule: Some("30 8 * * 1-5".into()),
             timezone: "Europe/Berlin".into(),
             preset: "claude-headless".into(),
             prompt: "Summarise yesterday's work and plan today.".into(),

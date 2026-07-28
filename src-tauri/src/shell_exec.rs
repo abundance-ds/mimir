@@ -280,18 +280,18 @@ mod tests {
 
     #[test]
     fn collect_safe_env_drops_sensitive_keys_and_keeps_benign_ones() {
-        std::env::set_var("MIM_SHELL_EXEC_TEST_SECRET_PROBE", "must-not-leak");
-        std::env::set_var("MIM_SHELL_EXEC_TEST_BENIGN_PROBE", "fine-to-pass");
+        std::env::set_var("MIMIR_SHELL_EXEC_TEST_SECRET_PROBE", "must-not-leak");
+        std::env::set_var("MIMIR_SHELL_EXEC_TEST_BENIGN_PROBE", "fine-to-pass");
 
         let env = collect_safe_env();
         assert!(
             !env.iter()
-                .any(|(k, _)| k == "MIM_SHELL_EXEC_TEST_SECRET_PROBE"),
+                .any(|(k, _)| k == "MIMIR_SHELL_EXEC_TEST_SECRET_PROBE"),
             "sensitive key leaked into safe env"
         );
         assert!(
             env.iter()
-                .any(|(k, v)| k == "MIM_SHELL_EXEC_TEST_BENIGN_PROBE" && v == "fine-to-pass"),
+                .any(|(k, v)| k == "MIMIR_SHELL_EXEC_TEST_BENIGN_PROBE" && v == "fine-to-pass"),
             "benign key missing from safe env"
         );
     }
@@ -440,19 +440,19 @@ mod exec_tests {
 
     #[test]
     fn sensitive_env_vars_are_filtered_from_the_child_environment() {
-        std::env::set_var("MIM_SHELL_EXEC_E2E_SECRET_PROBE", "must-not-leak");
-        std::env::set_var("MIM_SHELL_EXEC_E2E_BENIGN_PROBE", "fine-to-pass");
+        std::env::set_var("MIMIR_SHELL_EXEC_E2E_SECRET_PROBE", "must-not-leak");
+        std::env::set_var("MIMIR_SHELL_EXEC_E2E_BENIGN_PROBE", "fine-to-pass");
 
         let result = run("env", None, None);
         assert_eq!(result.exit_code, Some(0));
         assert!(
             result
                 .stdout
-                .contains("MIM_SHELL_EXEC_E2E_BENIGN_PROBE=fine-to-pass"),
+                .contains("MIMIR_SHELL_EXEC_E2E_BENIGN_PROBE=fine-to-pass"),
             "benign var should reach the child"
         );
         assert!(
-            !result.stdout.contains("MIM_SHELL_EXEC_E2E_SECRET_PROBE"),
+            !result.stdout.contains("MIMIR_SHELL_EXEC_E2E_SECRET_PROBE"),
             "sensitive var name leaked to the child"
         );
         assert!(

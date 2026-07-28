@@ -61,7 +61,7 @@ fn activity_list() -> Vec<ActivityRecord> {
             id: "agent:01HZX3R8KQ".into(),
             kind: ActivityKind::Agent,
             title: "Codex — fix sidebar ordering".into(),
-            workspace_path: Some("/Users/me/work/mim".into()),
+            workspace_path: Some("/Users/me/work/mimir".into()),
             status: ActivityStatus::Working,
             created_at: "2026-07-25T10:00:00.000Z".into(),
             updated_at: "2026-07-25T10:04:12.000Z".into(),
@@ -73,7 +73,7 @@ fn activity_list() -> Vec<ActivityRecord> {
                 launcher_id: Some("codex".into()),
                 preset_id: Some("codex-full".into()),
                 graph_node_id: Some("issue-sidebar-ordering".into()),
-                graph_scope_ids: vec!["project:mim".into()],
+                graph_scope_ids: vec!["project:mimir".into()],
                 graph_revision: Some(17),
                 ..ActivityOrigin::default()
             },
@@ -81,8 +81,8 @@ fn activity_list() -> Vec<ActivityRecord> {
             launch: Some(ActivityLaunchSpec {
                 command: "/opt/homebrew/bin/codex".into(),
                 args: vec!["--full-auto".into()],
-                cwd: Some("/Users/me/work/mim".into()),
-                env: string_map(&[("MIM_ACTIVITY_ID", "agent:01HZX3R8KQ")]),
+                cwd: Some("/Users/me/work/mimir".into()),
+                env: string_map(&[("MIMIR_ACTIVITY_ID", "agent:01HZX3R8KQ")]),
             }),
             session: Some(ActivitySessionRecord {
                 run_id: "run-01HZX3RA".into(),
@@ -144,7 +144,7 @@ fn activity_search_history() -> Vec<ActivityHistorySearchHit> {
         },
         ActivityHistorySearchHit {
             activity_id: "terminal:01HZX40000".into(),
-            snippet: "grep -rn \"sidebar\" src/mim/components".into(),
+            snippet: "grep -rn \"sidebar\" src/mimir/components".into(),
         },
     ]
 }
@@ -200,7 +200,7 @@ fn launcher_detect_agents() -> Vec<DetectedAgent> {
 /// `launcher_load_config` → `LauncherConfigResponse`.
 fn launcher_load_config() -> LauncherConfigResponse {
     LauncherConfigResponse {
-        path: "/home/me/.mim/launchers.json".into(),
+        path: "/home/me/.mimir/launchers.json".into(),
         presets: vec![
             LauncherPreset {
                 id: "review".into(),
@@ -250,7 +250,7 @@ fn launcher_resolve() -> ResolvedLaunch {
         resume_strategy: ResumeStrategy::Codex,
         command: "/opt/homebrew/bin/codex".into(),
         args: vec!["review".into()],
-        cwd: "/Users/me/work/mim".into(),
+        cwd: "/Users/me/work/mimir".into(),
         env: string_map(&[("CODEX_HOME", "/Users/me/.codex")]),
     }
 }
@@ -259,7 +259,7 @@ fn launcher_resolve() -> ResolvedLaunch {
 /// one local launch-only process app, one diagnostic.
 fn app_catalog() -> AppCatalog {
     AppCatalog {
-        directory: "/Users/me/.mim/apps".into(),
+        directory: "/Users/me/.mimir/apps".into(),
         apps: vec![
             InstalledApp {
                 definition: AppDefinition {
@@ -282,8 +282,8 @@ fn app_catalog() -> AppCatalog {
                         mcp_alias: Some("today_read".into()),
                     }],
                 },
-                directory: "/Users/me/.mim/apps/today".into(),
-                manifest_path: "/Users/me/.mim/apps/today/app.toml".into(),
+                directory: "/Users/me/.mimir/apps/today".into(),
+                manifest_path: "/Users/me/.mimir/apps/today/app.toml".into(),
                 builtin: true,
             },
             InstalledApp {
@@ -302,13 +302,13 @@ fn app_catalog() -> AppCatalog {
                     launch_only: true,
                     tools: vec![],
                 },
-                directory: "/Users/me/.mim/apps/ledger-sync".into(),
-                manifest_path: "/Users/me/.mim/apps/ledger-sync/app.toml".into(),
+                directory: "/Users/me/.mimir/apps/ledger-sync".into(),
+                manifest_path: "/Users/me/.mimir/apps/ledger-sync/app.toml".into(),
                 builtin: false,
             },
         ],
         diagnostics: vec![AppDiagnostic {
-            path: "/Users/me/.mim/apps/broken/app.toml".into(),
+            path: "/Users/me/.mimir/apps/broken/app.toml".into(),
             field: Some("entry".into()),
             message: "Missing entry for embedded app.".into(),
         }],
@@ -318,32 +318,32 @@ fn app_catalog() -> AppCatalog {
 /// `routine_catalog` → `RoutineRuntimeCatalog`.
 fn routine_catalog() -> RoutineRuntimeCatalog {
     RoutineRuntimeCatalog {
-        directory: "/Users/me/.mim/routines".into(),
-        state_path: "/Users/me/.mim/routines-state.json".into(),
+        directory: "/Users/me/.mimir/routines".into(),
+        state_path: "/Users/me/.mimir/routines-state.json".into(),
         revision: 4,
         routines: vec![RoutineRuntimeEntry {
             definition: RoutineDefinition {
                 id: "morning-brief".into(),
                 title: "Morning brief".into(),
                 enabled: true,
-                schedule: "0 0 7 * * *".into(),
+                schedule: Some("0 0 7 * * *".into()),
                 timezone: "Europe/Berlin".into(),
                 preset: "codex".into(),
                 prompt: "Summarize overnight repository activity.".into(),
                 overlap: RoutineOverlap::Skip,
                 missed: MissedFirePolicy::RunOnce,
-                workspace: Some("/Users/me/work/mim".into()),
+                workspace: Some("/Users/me/work/mimir".into()),
             },
             available: true,
             next_fire: Some("2026-07-28T05:00:00Z".into()),
             diagnostic: None,
             running_activity_ids: vec!["routine:01HZX5Y2".into()],
             last_error: None,
-            path: "/Users/me/.mim/routines/morning-brief.toml".into(),
+            path: "/Users/me/.mimir/routines/morning-brief.toml".into(),
             source_revision: "9c2f4b1a".into(),
         }],
         diagnostics: vec![RoutineDiagnostic {
-            path: "/Users/me/.mim/routines/broken.toml".into(),
+            path: "/Users/me/.mimir/routines/broken.toml".into(),
             field: Some("schedule".into()),
             message: "Invalid cron expression.".into(),
         }],
@@ -367,12 +367,12 @@ fn graph_open() -> GraphOpenResult {
             GraphScopeDescriptor {
                 id: "private".into(),
                 kind: GraphScopeKind::Private,
-                root: "/Users/me/.mim/graph".into(),
+                root: "/Users/me/.mimir/graph".into(),
             },
             GraphScopeDescriptor {
-                id: "project:mim".into(),
+                id: "project:mimir".into(),
                 kind: GraphScopeKind::Project,
-                root: "/Users/me/work/mim/.graph".into(),
+                root: "/Users/me/work/mimir/.graph".into(),
             },
         ],
         node_count: 42,
@@ -391,11 +391,11 @@ fn graph_query() -> GraphQueryResult {
                 kind: "issue".into(),
                 title: "Sidebar rows lose recency ordering".into(),
                 summary: "Archived rows jump to the top after respawn.".into(),
-                tags: vec!["mim".into(), "ui".into()],
+                tags: vec!["mimir".into(), "ui".into()],
                 status: Some("in-progress".into()),
                 priority: Some("high".into()),
                 due_date: Some("2026-08-01".into()),
-                project_id: Some("project-mim".into()),
+                project_id: Some("project-mimir".into()),
                 assignee_id: Some("person-paul".into()),
                 waiting_for: None,
                 remind_at: None,
@@ -407,7 +407,7 @@ fn graph_query() -> GraphQueryResult {
                 relations: vec![
                     GraphRelation {
                         relation: "part_of".into(),
-                        target: "project-mim".into(),
+                        target: "project-mimir".into(),
                         legacy: false,
                     },
                     GraphRelation {
@@ -417,7 +417,7 @@ fn graph_query() -> GraphQueryResult {
                     },
                 ],
                 updated_at: "2026-07-26T09:15:00Z".into(),
-                scope_id: "project:mim".into(),
+                scope_id: "project:mimir".into(),
                 source_revision: "4f6a2c88".into(),
             },
             GraphNodeSummary {
@@ -464,11 +464,11 @@ fn graph_get() -> Option<GraphNode> {
         title: "Sidebar rows lose recency ordering".into(),
         summary: "Archived rows jump to the top after respawn.".into(),
         body: "Repro:\n\n1. Archive a durable agent.\n2. Respawn it from the sidebar.\n".into(),
-        tags: vec!["mim".into(), "ui".into()],
+        tags: vec!["mimir".into(), "ui".into()],
         relations: vec![
             GraphRelation {
                 relation: "part_of".into(),
-                target: "project-mim".into(),
+                target: "project-mimir".into(),
                 legacy: false,
             },
             GraphRelation {
@@ -481,9 +481,9 @@ fn graph_get() -> Option<GraphNode> {
         created_at: "2026-07-19T12:00:00Z".into(),
         updated_at: "2026-07-26T09:15:00Z".into(),
         provenance: GraphProvenance {
-            scope_id: "project:mim".into(),
+            scope_id: "project:mimir".into(),
             scope_kind: GraphScopeKind::Project,
-            source_path: "/Users/me/work/mim/.graph/issues/sidebar-ordering.md".into(),
+            source_path: "/Users/me/work/mimir/.graph/issues/sidebar-ordering.md".into(),
             source_revision: "4f6a2c88".into(),
             source_format: GraphSourceFormat::Issue,
         },

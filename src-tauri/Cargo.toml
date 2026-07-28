@@ -1,12 +1,12 @@
 [package]
-name = "mim-workbench"
+name = "mimir"
 version = "0.1.0"
 description = "A local AI-native workbench for CLI agents and reviewed files"
-authors = ["Mim"]
+authors = ["Mimir"]
 edition = "2021"
 
 [lib]
-name = "mim_workbench"
+name = "mimir"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [profile.release]

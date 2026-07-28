@@ -1,7 +1,7 @@
 //! Application integration for the canonical tool registry.
 //!
 //! This module owns live UI/app relay providers and exposes command-shaped
-//! functions for Tauri. MCP and `mimx` use the same [`ToolRegistry`] instance.
+//! functions for Tauri. MCP and `mimir` use the same [`ToolRegistry`] instance.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -30,21 +30,21 @@ const DEFAULT_RELAY_TIMEOUT_MS: u64 = 120_000;
 const MIN_RELAY_TIMEOUT_MS: u64 = 100;
 const MAX_RELAY_TIMEOUT_MS: u64 = 600_000;
 pub(crate) const LEAN_AGENT_TOOLS: [(&str, &str, &str); 3] = [
-    ("editor.state", "mim_state", "Get active editor state."),
+    ("editor.state", "mimir_state", "Get active editor state."),
     (
         "editor.reveal",
-        "mim_reveal",
-        "Open a file in Mim, optionally at a line.",
+        "mimir_reveal",
+        "Open a file in Mimir, optionally at a line.",
     ),
     (
         "editor.propose",
-        "mim_propose",
+        "mimir_propose",
         "Propose one exact text replacement for review.",
     ),
 ];
-const TOOL_RELAY_REQUEST_EVENT: &str = "mim://tool-relay-request";
-const TOOL_RELAY_CANCEL_EVENT: &str = "mim://tool-relay-cancel";
-const TOOL_LIST_CHANGED_EVENT: &str = "mim://tools-list-changed";
+const TOOL_RELAY_REQUEST_EVENT: &str = "mimir://tool-relay-request";
+const TOOL_RELAY_CANCEL_EVENT: &str = "mimir://tool-relay-cancel";
+const TOOL_LIST_CHANGED_EVENT: &str = "mimir://tools-list-changed";
 const LEGACY_TOOL_REQUEST_EVENT: &str = "tool-call-request";
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,7 +166,7 @@ impl ToolRuntime {
         }
         let provider = UiToolProvider::new(
             self.registry.clone(),
-            "mim-core",
+            "mimir-core",
             "main",
             Duration::from_millis(DEFAULT_RELAY_TIMEOUT_MS),
             Arc::new(TauriToolEventSink::core(app.clone())),
@@ -899,7 +899,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "apps.list",
             "apps_list",
-            "List discovered hackable Mim apps.",
+            "List discovered hackable Mimir apps.",
             object_schema(json!({}), &[]),
         ),
         definition(
@@ -923,7 +923,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "apps.create",
             "apps_create",
-            "Create a usable local embedded app scaffold under ~/.mim/apps.",
+            "Create a usable local embedded app scaffold under ~/.mimir/apps.",
             object_schema(
                 json!({
                     "id": {
@@ -980,7 +980,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "routines.list",
             "routines_list",
-            "List file-defined scheduled routines and their next run.",
+            "List file-defined routines (scheduled and manual) and their next run.",
             object_schema(json!({}), &[]),
         ),
         definition(
@@ -995,7 +995,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "routines.create",
             "routines_create",
-            "Create one canonical TOML-backed scheduled routine. The stable id also becomes its definition filename.",
+            "Create one canonical TOML-backed routine. Omit schedule for a manual-only routine that runs on demand. The stable id also becomes its definition filename.",
             object_schema(
                 json!({ "definition": routine_definition_schema() }),
                 &["definition"],
@@ -1043,7 +1043,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "settings.get",
             "settings_get",
-            "Read current Mim settings exposed by the renderer.",
+            "Read current Mimir settings exposed by the renderer.",
             object_schema(
                 json!({ "keys": { "type": "array", "items": { "type": "string" } } }),
                 &[],
@@ -1052,7 +1052,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "settings.update",
             "settings_update",
-            "Update Mim settings and notify all windows.",
+            "Update Mimir settings and notify all windows.",
             object_schema(json!({ "values": { "type": "object" } }), &["values"]),
         ),
     ]
@@ -1075,7 +1075,7 @@ fn routine_definition_schema() -> Value {
             "id": routine_id_schema(),
             "title": { "type": "string", "minLength": 1, "maxLength": 200 },
             "enabled": { "type": "boolean" },
-            "schedule": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "schedule": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
             "timezone": { "type": "string", "minLength": 1, "maxLength": 100 },
             "preset": { "type": "string", "minLength": 1, "maxLength": 100 },
             "prompt": { "type": "string", "minLength": 1, "maxLength": 100000 },
@@ -1083,7 +1083,7 @@ fn routine_definition_schema() -> Value {
             "missed": { "enum": ["skip", "run-once"] },
             "workspace": { "type": ["string", "null"], "minLength": 1, "maxLength": 1000 }
         },
-        "required": ["id", "title", "schedule", "timezone", "preset", "prompt"]
+        "required": ["id", "title", "preset", "prompt"]
     })
 }
 

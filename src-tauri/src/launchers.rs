@@ -9,8 +9,8 @@ use std::{
 };
 
 const CONFIG_VERSION: u32 = 1;
-const DEFAULT_MIM_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
-const CODEX_MIM_SERVER_ID: &str = "mim_workbench";
+const DEFAULT_MIMIR_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
+const CODEX_MIMIR_SERVER_ID: &str = "mimir";
 static DETECTED_AGENTS: OnceLock<AgentDetectionCache> = OnceLock::new();
 
 #[derive(Default)]
@@ -202,7 +202,7 @@ fn agent_preset(id: &str, title: &str, agent_id: &str) -> LauncherPreset {
 
 pub fn launcher_config_path() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .map(|home| home.join(".mim").join("launchers.json"))
+        .map(|home| home.join(".mimir").join("launchers.json"))
         .ok_or_else(|| "Could not resolve the home directory for launcher configuration.".into())
 }
 
@@ -390,12 +390,12 @@ pub fn resolve_launch(
         .get("PATH")
         .map(OsStr::new)
         .or(inherited_path.as_deref());
-    let path = crate::mimx::path_with_mimx_at(home_path, current_path)?;
+    let path = crate::mimir_cli::path_with_mimir_at(home_path, current_path)?;
     environment.insert("PATH".into(), path.to_string_lossy().into_owned());
-    environment.insert("MIMX_MCP_URL".into(), mcp_url.to_string());
+    environment.insert("MIMIR_MCP_URL".into(), mcp_url.to_string());
     let mut args = preset.args.clone();
     if let Some(agent_id) = agent_id.as_deref() {
-        append_mim_connection_args(agent_id, home_path, mcp_url, &mut args);
+        append_mimir_connection_args(agent_id, home_path, mcp_url, &mut args);
     }
 
     Ok(ResolvedLaunch {
@@ -441,21 +441,20 @@ fn validate_explicit_binary(binary: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: &mut Vec<String>) {
+fn append_mimir_connection_args(
+    agent_id: &str,
+    home: &Path,
+    mcp_url: &str,
+    args: &mut Vec<String>,
+) {
     match agent_id {
-        "codex"
-            if !args.iter().any(|arg| {
-                arg.contains("mcp_servers.mim.url") || arg.contains("mcp_servers.mim_workbench.url")
-            }) =>
-        {
-            // Use an app-specific table instead of `mcp_servers.mim`. A user
-            // may already have a valid stdio server with that generic name;
-            // overlaying only `url` would merge transports and make Codex
-            // reject its config before the session starts.
+        "codex" if !args.iter().any(|arg| arg.contains("mcp_servers.mimir.url")) => {
+            // Keep Mimir's one-run HTTP entry under one stable, product-owned
+            // server id and avoid injecting the same URL override twice.
             args.extend([
                 "-c".into(),
                 format!(
-                    "mcp_servers.{CODEX_MIM_SERVER_ID}.url={}",
+                    "mcp_servers.{CODEX_MIMIR_SERVER_ID}.url={}",
                     serde_json::to_string(mcp_url)
                         .expect("serializing an MCP URL string cannot fail")
                 ),
@@ -468,7 +467,7 @@ fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: 
         {
             let config = serde_json::json!({
                 "mcpServers": {
-                    "mim": {
+                    "mimir": {
                         "type": "http",
                         "url": mcp_url,
                     }
@@ -477,7 +476,7 @@ fn append_mim_connection_args(agent_id: &str, home: &Path, mcp_url: &str, args: 
             args.extend(["--mcp-config".into(), config.to_string()]);
         }
         "pi" => {
-            let extension = crate::mimx::pi_extension_path_at(home)
+            let extension = crate::mimir_cli::pi_extension_path_at(home)
                 .to_string_lossy()
                 .into_owned();
             if !args.iter().any(|arg| arg == &extension) {
@@ -618,7 +617,7 @@ fn first_version(value: &str) -> Option<String> {
 #[tauri::command]
 pub async fn launcher_detect_agents() -> Result<Vec<DetectedAgent>, String> {
     // Opening/reloading launcher settings is the explicit refresh boundary, so
-    // installing or removing an agent is visible without restarting Mim.
+    // installing or removing an agent is visible without restarting Mimir.
     tauri::async_runtime::spawn_blocking(refresh_detected_agents)
         .await
         .map_err(|error| format!("Agent detection task failed: {error}"))
@@ -650,7 +649,7 @@ pub async fn launcher_resolve(
             workspace_path.as_deref(),
             &home,
             &shell,
-            DEFAULT_MIM_MCP_URL,
+            DEFAULT_MIMIR_MCP_URL,
         )
     })
     .await
@@ -800,7 +799,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let preset = LauncherPreset {
             args: vec!["--model".into(), "gpt 5".into()],
-            env: BTreeMap::from([("MIM_TEST".into(), "hello world".into())]),
+            env: BTreeMap::from([("MIMIR_TEST".into(), "hello world".into())]),
             ..default_config().presets[0].clone()
         };
         let detected = vec![DetectedAgent {
@@ -828,13 +827,13 @@ mod tests {
                 "--model",
                 "gpt 5",
                 "-c",
-                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#,
             ]
         );
         assert_eq!(launch.cwd, directory.path().to_string_lossy());
         assert_eq!(launch.resume_strategy, ResumeStrategy::Codex);
         assert_eq!(
-            launch.env.get("MIMX_MCP_URL").map(String::as_str),
+            launch.env.get("MIMIR_MCP_URL").map(String::as_str),
             Some("http://127.0.0.1:29999/mcp")
         );
     }
@@ -881,7 +880,7 @@ mod tests {
             Some(directory.path().to_str().unwrap()),
             directory.path(),
             Path::new("/bin/sh"),
-            DEFAULT_MIM_MCP_URL,
+            DEFAULT_MIMIR_MCP_URL,
         )
         .unwrap_err();
         assert!(missing.contains("unavailable"));
@@ -893,7 +892,7 @@ mod tests {
             Some(directory.path().to_str().unwrap()),
             directory.path(),
             Path::new("/bin/sh"),
-            DEFAULT_MIM_MCP_URL,
+            DEFAULT_MIMIR_MCP_URL,
         )
         .unwrap_err();
         assert!(not_executable.contains("not executable"));
@@ -907,7 +906,7 @@ mod tests {
             Some(directory.path().to_str().unwrap()),
             directory.path(),
             Path::new("/bin/sh"),
-            DEFAULT_MIM_MCP_URL,
+            DEFAULT_MIMIR_MCP_URL,
         )
         .unwrap();
         assert_eq!(resolved.command, binary.to_string_lossy());
@@ -985,7 +984,7 @@ mod tests {
             None,
             Path::new("/"),
             Path::new("/bin/sh"),
-            DEFAULT_MIM_MCP_URL,
+            DEFAULT_MIMIR_MCP_URL,
         )
         .unwrap_err();
         assert!(error.contains("open workspace"));
@@ -997,44 +996,44 @@ mod tests {
             Some(directory.path().to_str().unwrap()),
             directory.path(),
             Path::new("/bin/sh"),
-            DEFAULT_MIM_MCP_URL,
+            DEFAULT_MIMIR_MCP_URL,
         )
         .unwrap_err();
         assert!(error.contains("no result"));
     }
 
     #[test]
-    fn every_builtin_agent_connects_to_the_mim_capability_spine() {
-        let home = Path::new("/Users/mim");
+    fn every_builtin_agent_connects_to_the_mimir_capability_spine() {
+        let home = Path::new("/Users/mimir");
         let mcp_url = "http://127.0.0.1:29999/mcp";
 
         let mut codex = Vec::new();
-        append_mim_connection_args("codex", home, mcp_url, &mut codex);
+        append_mimir_connection_args("codex", home, mcp_url, &mut codex);
         assert_eq!(
             codex,
             [
                 "-c",
-                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#
+                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#
             ]
         );
 
         let mut claude = Vec::new();
-        append_mim_connection_args("claude", home, mcp_url, &mut claude);
+        append_mimir_connection_args("claude", home, mcp_url, &mut claude);
         assert_eq!(
             claude,
             [
                 "--mcp-config",
-                r#"{"mcpServers":{"mim":{"type":"http","url":"http://127.0.0.1:29999/mcp"}}}"#
+                r#"{"mcpServers":{"mimir":{"type":"http","url":"http://127.0.0.1:29999/mcp"}}}"#
             ]
         );
 
         let mut pi = Vec::new();
-        append_mim_connection_args("pi", home, mcp_url, &mut pi);
-        assert_eq!(pi, ["--extension", "/Users/mim/.mim/pi/mim-tools.ts"]);
+        append_mimir_connection_args("pi", home, mcp_url, &mut pi);
+        assert_eq!(pi, ["--extension", "/Users/mimir/.mimir/pi/mimir-tools.ts"]);
 
-        append_mim_connection_args("codex", home, mcp_url, &mut codex);
-        append_mim_connection_args("claude", home, mcp_url, &mut claude);
-        append_mim_connection_args("pi", home, mcp_url, &mut pi);
+        append_mimir_connection_args("codex", home, mcp_url, &mut codex);
+        append_mimir_connection_args("claude", home, mcp_url, &mut claude);
+        append_mimir_connection_args("pi", home, mcp_url, &mut pi);
         assert_eq!(codex.len(), 2);
         assert_eq!(claude.len(), 2);
         assert_eq!(pi.len(), 2);
@@ -1042,31 +1041,31 @@ mod tests {
 
     #[test]
     fn preconfigured_connection_flags_are_preserved_without_duplicate_injection() {
-        let home = Path::new("/Users/mim");
+        let home = Path::new("/Users/mimir");
         let mcp_url = "http://127.0.0.1:29999/mcp";
 
         let mut codex = vec![
             "--full-auto".into(),
             "-c".into(),
-            r#"mcp_servers.mim.url="http://custom.example/mcp""#.into(),
+            r#"mcp_servers.mimir.url="http://custom.example/mcp""#.into(),
         ];
         let mut claude = vec![
             "--dangerously-skip-permissions".into(),
-            "--mcp-config=/tmp/mim-mcp.json".into(),
+            "--mcp-config=/tmp/mimir-mcp.json".into(),
         ];
         let mut pi = vec![
             "--model".into(),
             "anthropic/claude-sonnet-4".into(),
             "--extension".into(),
-            "/Users/mim/.mim/pi/mim-tools.ts".into(),
+            "/Users/mimir/.mimir/pi/mimir-tools.ts".into(),
         ];
         let expected_codex = codex.clone();
         let expected_claude = claude.clone();
         let expected_pi = pi.clone();
 
-        append_mim_connection_args("codex", home, mcp_url, &mut codex);
-        append_mim_connection_args("claude", home, mcp_url, &mut claude);
-        append_mim_connection_args("pi", home, mcp_url, &mut pi);
+        append_mimir_connection_args("codex", home, mcp_url, &mut codex);
+        append_mimir_connection_args("claude", home, mcp_url, &mut claude);
+        append_mimir_connection_args("pi", home, mcp_url, &mut pi);
 
         assert_eq!(codex, expected_codex);
         assert_eq!(claude, expected_claude);
@@ -1074,15 +1073,15 @@ mod tests {
     }
 
     #[test]
-    fn codex_connection_does_not_merge_with_a_legacy_stdio_mim_server() {
+    fn codex_connection_ignores_unrelated_stdio_servers() {
         let mut args = vec![
             "-c".into(),
-            r#"mcp_servers.mim.command="legacy-mim-server""#.into(),
+            r#"mcp_servers.other.command="other-server""#.into(),
         ];
 
-        append_mim_connection_args(
+        append_mimir_connection_args(
             "codex",
-            Path::new("/Users/mim"),
+            Path::new("/Users/mimir"),
             "http://127.0.0.1:29999/mcp",
             &mut args,
         );
@@ -1091,9 +1090,9 @@ mod tests {
             args,
             [
                 "-c",
-                r#"mcp_servers.mim.command="legacy-mim-server""#,
+                r#"mcp_servers.other.command="other-server""#,
                 "-c",
-                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#,
             ]
         );
     }

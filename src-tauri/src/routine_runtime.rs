@@ -34,7 +34,7 @@ use std::{
 use tauri::Emitter;
 use uuid::Uuid;
 
-pub const ROUTINES_CHANGED_EVENT: &str = "mim://routines-changed";
+pub const ROUTINES_CHANGED_EVENT: &str = "mimir://routines-changed";
 const DEFAULT_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
 const ROUTINE_COLS: u16 = 100;
 const ROUTINE_ROWS: u16 = 30;
@@ -53,15 +53,15 @@ pub struct RoutineRuntimeConfig {
 impl Default for RoutineRuntimeConfig {
     fn default() -> Self {
         let home_path = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
-        let mim_dir = home_path.join(".mim");
+        let mimir_dir = home_path.join(".mimir");
         Self {
-            routines_dir: mim_dir.join("routines"),
-            planner_state_path: mim_dir.join("routines-state.json"),
-            launcher_config_path: mim_dir.join("launchers.json"),
+            routines_dir: mimir_dir.join("routines"),
+            planner_state_path: mimir_dir.join("routines-state.json"),
+            launcher_config_path: mimir_dir.join("launchers.json"),
             home_path,
             default_shell: launchers::default_shell_path(),
             tick_interval: Duration::from_secs(1),
-            mcp_url: std::env::var("MIMX_MCP_URL").unwrap_or_else(|_| DEFAULT_MCP_URL.into()),
+            mcp_url: std::env::var("MIMIR_MCP_URL").unwrap_or_else(|_| DEFAULT_MCP_URL.into()),
         }
     }
 }
@@ -258,7 +258,7 @@ impl RoutineRuntime {
 
         let runtime = self.clone();
         thread::Builder::new()
-            .name("mim-routine-runtime".into())
+            .name("mimir-routine-runtime".into())
             .spawn(move || runtime.worker_loop(stop_rx))
             .map_err(|error| {
                 lock(&self.inner.worker_stop).take();
@@ -645,10 +645,10 @@ impl RoutineRuntime {
         let activity_id = format!("routine:{}:{}", resolved.definition.id, Uuid::new_v4());
         let now = Utc::now().to_rfc3339();
         let mut env = resolved.launch.env.clone();
-        env.insert("MIM_ACTIVITY_ID".into(), activity_id.clone());
-        env.insert("MIMX_MCP_URL".into(), self.inner.config.mcp_url.clone());
-        env.insert("MIM_ROUTINE_ID".into(), resolved.definition.id.clone());
-        env.insert("MIM_ROUTINE_SCHEDULED_FOR".into(), scheduled_for.into());
+        env.insert("MIMIR_ACTIVITY_ID".into(), activity_id.clone());
+        env.insert("MIMIR_MCP_URL".into(), self.inner.config.mcp_url.clone());
+        env.insert("MIMIR_ROUTINE_ID".into(), resolved.definition.id.clone());
+        env.insert("MIMIR_ROUTINE_SCHEDULED_FOR".into(), scheduled_for.into());
 
         let record = ActivityRecord {
             id: activity_id,
@@ -1191,7 +1191,7 @@ pub(crate) fn headless_argv(
 /// mtime and therefore still changes the fingerprint.
 fn input_fingerprint(config: &RoutineRuntimeConfig) -> Result<String, String> {
     let mut hasher = Sha256::new();
-    hasher.update(b"mim-routine-inputs-v2\0");
+    hasher.update(b"mimir-routine-inputs-v2\0");
 
     let mut routine_paths = fs::read_dir(&config.routines_dir)
         .map_err(|error| {
@@ -1369,7 +1369,7 @@ mod tests {
             let binary = root.path().join("fake-agent");
             fs::write(
                 &binary,
-                b"#!/bin/sh\nprintf 'arg=%s\\n' \"$@\"\nprintf 'mcp=%s\\n' \"$MIMX_MCP_URL\"\n",
+                b"#!/bin/sh\nprintf 'arg=%s\\n' \"$@\"\nprintf 'mcp=%s\\n' \"$MIMIR_MCP_URL\"\n",
             )
             .unwrap();
             fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
@@ -1402,7 +1402,7 @@ mod tests {
                 id: "daily-review".into(),
                 title: "Daily review".into(),
                 enabled: true,
-                schedule: "* * * * *".into(),
+                schedule: Some("* * * * *".into()),
                 timezone: "UTC".into(),
                 preset: "review-agent".into(),
                 prompt: "Review the work tree and report sharp findings.".into(),
@@ -1421,7 +1421,7 @@ mod tests {
                 agent_id: Some("codex".into()),
                 binary: Some(self.binary.to_string_lossy().into_owned()),
                 args: vec!["--model".into(), "gpt 5".into()],
-                env: BTreeMap::from([("MIM_TEST_ENV".into(), "kept exactly".into())]),
+                env: BTreeMap::from([("MIMIR_TEST_ENV".into(), "kept exactly".into())]),
                 cwd: WorkingDirectory::Workspace,
             }
         }
@@ -1589,20 +1589,20 @@ mod tests {
                 "--model",
                 "gpt 5",
                 "-c",
-                r#"mcp_servers.mim_workbench.url="http://127.0.0.1:29999/mcp""#,
+                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#,
                 "Review the work tree and report sharp findings."
             ]
         );
         assert_eq!(
-            launch.env.get("MIM_TEST_ENV").map(String::as_str),
+            launch.env.get("MIMIR_TEST_ENV").map(String::as_str),
             Some("kept exactly")
         );
         assert_eq!(
-            launch.env.get("MIMX_MCP_URL").map(String::as_str),
+            launch.env.get("MIMIR_MCP_URL").map(String::as_str),
             Some("http://127.0.0.1:29999/mcp")
         );
         assert_eq!(
-            launch.env.get("MIM_ROUTINE_ID").map(String::as_str),
+            launch.env.get("MIMIR_ROUTINE_ID").map(String::as_str),
             Some("daily-review")
         );
 
@@ -1625,6 +1625,34 @@ mod tests {
         assert!(output.contains("arg=exec"));
         assert!(output.contains("arg=gpt 5"));
         assert!(output.contains("mcp=http://127.0.0.1:29999/mcp"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manual_routine_runs_on_demand_and_never_fires_from_ticks() {
+        let harness = Harness::new();
+        harness.write_presets(vec![harness.preset()]);
+        let mut manual = harness.routine();
+        manual.schedule = None;
+        harness.write_routine(&manual);
+        let runtime = harness.runtime();
+
+        let catalog = runtime.catalog();
+        assert!(catalog.diagnostics.is_empty());
+        assert!(catalog.routines[0].available);
+        assert!(catalog.routines[0].next_fire.is_none());
+
+        let far_future = Utc::now() + chrono::Duration::days(365);
+        let tick = runtime.tick_at(far_future).unwrap();
+        assert!(tick.fires.is_empty());
+        assert!(tick.next_fires.is_empty());
+
+        let result = runtime.run_now("daily-review").unwrap();
+        assert_eq!(result.activity.kind, ActivityKind::Routine);
+        assert_eq!(
+            result.activity.source.routine_id.as_deref(),
+            Some("daily-review")
+        );
     }
 
     #[cfg(unix)]
@@ -1763,7 +1791,7 @@ mod tests {
         let original = runtime.catalog().routines[0].clone();
 
         let mut external = original.definition.clone();
-        external.title = "Edited outside Mim".into();
+        external.title = "Edited outside Mimir".into();
         harness.write_routine(&external);
 
         let mut stale_edit = original.definition.clone();
@@ -1775,7 +1803,7 @@ mod tests {
         assert!(error.contains("changed on disk"));
         let persisted: RoutineDefinition =
             toml::from_str(&fs::read_to_string(&original.path).unwrap()).unwrap();
-        assert_eq!(persisted.title, "Edited outside Mim");
+        assert_eq!(persisted.title, "Edited outside Mimir");
     }
 
     #[cfg(unix)]

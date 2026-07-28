@@ -71,7 +71,7 @@ impl Default for ActivitySupervisorConfig {
     fn default() -> Self {
         let persistence_dir = dirs::home_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join(".mim")
+            .join(".mimir")
             .join("activities");
         Self {
             persistence_dir,
@@ -1045,7 +1045,7 @@ impl ActivitySupervisor {
                     reason: SessionExitReason::Interrupted,
                     code: None,
                     signal: None,
-                    message: Some("Mim exited before this activity completed".into()),
+                    message: Some("Mimir exited before this activity completed".into()),
                 };
                 record.status = ActivityStatus::Interrupted;
                 record.updated_at = now.clone();
@@ -1563,7 +1563,7 @@ fn classify_exit(
             reason: SessionExitReason::Interrupted,
             code: child_result.ok().map(exit_code),
             signal: None,
-            message: Some("Mim quit while this activity was running".into()),
+            message: Some("Mimir quit while this activity was running".into()),
         },
         _ => match child_result {
             Ok(status) if status.success() => SessionExitRecord {
@@ -1990,7 +1990,7 @@ mod tests {
             vec![
                 "-c".into(),
                 "printf '%s' \"$1\"".into(),
-                "mim".into(),
+                "mimir".into(),
                 "two words;still-one-arg".into(),
             ],
         );

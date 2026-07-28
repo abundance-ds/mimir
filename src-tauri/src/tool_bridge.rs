@@ -583,7 +583,7 @@ impl UiToolProvider {
     }
 
     /// Register stable core descriptors whose implementation is hosted by this
-    /// UI relay. Intended for Mim's built-in editor/settings surfaces; dynamic
+    /// UI relay. Intended for Mimir's built-in editor/settings surfaces; dynamic
     /// third-party tools should use [`Self::reconcile`] instead.
     pub fn register_core(
         &self,
@@ -880,14 +880,14 @@ mod tests {
         let mut request = ToolCallRequest::new(
             "editor_context",
             json!({ "value": "hello" }),
-            ToolCaller::Mimx,
+            ToolCaller::MimirCli,
         );
         request.request_id = Some("outer-42".into());
         request.cwd = Some("/workspace".into());
         request.metadata.insert("session".into(), json!("agent-1"));
         let response = call(&registry, request).await;
         let value = response.into_result().unwrap().value;
-        assert_eq!(value["caller"]["kind"], "mimx");
+        assert_eq!(value["caller"]["kind"], "mimir_cli");
         assert_eq!(value["requestId"], "outer-42");
         assert_eq!(value["cwd"], "/workspace");
         assert_eq!(value["metadata"]["session"], "agent-1");

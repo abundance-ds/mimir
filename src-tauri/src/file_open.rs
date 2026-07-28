@@ -85,7 +85,7 @@ pub fn do_open_files_in_editor(app: &tauri::AppHandle, paths: Vec<String>) {
 
     app.state::<PendingFilePaths>().enqueue(paths);
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit("mim://open-files-pending", ());
+        let _ = win.emit("mimir://open-files-pending", ());
         let _ = win.set_focus();
     }
 }
@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn filters_md_and_txt_files() {
         let args = vec![
-            "/usr/bin/mim-terminal".into(),
+            "/usr/bin/mimir".into(),
             "/docs/readme.md".into(),
             "/docs/notes.txt".into(),
             "/docs/image.png".into(),
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn skips_binary_path() {
-        let args = vec!["/usr/bin/mim-terminal".into()];
+        let args = vec!["/usr/bin/mimir".into()];
         assert!(filter_file_args(&args).is_empty());
     }
 
@@ -160,7 +160,7 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         let file = nested.join("hello world.md");
         std::fs::write(&file, "# hello").unwrap();
-        let args = vec!["mim".into(), "notes/hello world.md".into()];
+        let args = vec!["mimir".into(), "notes/hello world.md".into()];
 
         assert_eq!(
             resolve_file_args(&args, root.path()),
@@ -170,10 +170,10 @@ mod tests {
 
     #[test]
     fn decodes_spaces_and_unicode_in_file_urls() {
-        let url = url::Url::parse("file:///tmp/Mim%20Notes/%E2%9C%A8.md").unwrap();
+        let url = url::Url::parse("file:///tmp/Mimir%20Notes/%E2%9C%A8.md").unwrap();
         let paths = file_paths_from_urls(&[url]);
 
-        assert_eq!(paths, vec!["/tmp/Mim Notes/✨.md"]);
+        assert_eq!(paths, vec!["/tmp/Mimir Notes/✨.md"]);
     }
 
     #[test]

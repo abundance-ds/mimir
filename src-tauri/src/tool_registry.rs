@@ -1,9 +1,9 @@
-//! Canonical, provider-agnostic registry for every tool exposed by Mim.
+//! Canonical, provider-agnostic registry for every tool exposed by Mimir.
 //!
 //! The registry deliberately knows nothing about Tauri, HTTP, MCP transport, or
 //! the UI event bridge. Those layers register handlers here and render
 //! [`ToolDescriptor`]s in the shape their protocol expects. Keeping dispatch in
-//! one place ensures `mimx`, MCP clients, apps, routines, and native callers all
+//! one place ensures `mimir`, MCP clients, apps, routines, and native callers all
 //! see the same catalog and validation behavior.
 
 use std::{
@@ -98,7 +98,7 @@ impl ToolDescriptor {
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ToolCaller {
     Mcp,
-    Mimx,
+    MimirCli,
     Ui,
     App(String),
     Routine(String),
@@ -1431,7 +1431,7 @@ mod tests {
         let result = registry
             .call(
                 "files.search",
-                ToolCallContext::new(ToolCaller::Mimx),
+                ToolCallContext::new(ToolCaller::MimirCli),
                 json!({ "text": "needle", "count": 2 }),
             )
             .await
