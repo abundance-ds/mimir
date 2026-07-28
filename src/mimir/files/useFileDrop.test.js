@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { platformKind } from '../../shared/platform.js'
 import {
   EDGE_SCROLL_INTERVAL_MS,
   EDGE_SCROLL_STEP_PX,
   EDGE_SCROLL_ZONE_PX,
   SPRING_OPEN_MS,
+  dropCoordinatesArePhysical,
   dropPoint,
   edgeScrollDirection,
   measureDropScale,
@@ -14,13 +14,15 @@ import {
   useFileDrop,
 } from './useFileDrop.js'
 
-vi.mock('../../shared/platform.js', async (importOriginal) => ({
-  ...(await importOriginal()),
-  platformKind: vi.fn(() => 'macos'),
-}))
-
-function onPlatform(kind) {
-  vi.mocked(platformKind).mockReturnValue(kind)
+// Drives the real platform detection rather than mocking it: the decision that
+// matters is navigator string → coordinate convention, and stubbing the middle
+// of that chain would leave the part that actually runs on a user's machine
+// untested.
+function onPlatform(platform) {
+  Object.defineProperty(navigator, 'userAgentData', {
+    configurable: true,
+    value: platform ? { platform } : undefined,
+  })
 }
 
 function withWindow(size, scaleFactor = 2) {
@@ -117,13 +119,33 @@ describe('dropPoint', () => {
   })
 })
 
+describe('dropCoordinatesArePhysical', () => {
+  afterEach(() => onPlatform('macOS'))
+
+  it('treats only Windows drops as physical pixels', () => {
+    onPlatform('Windows')
+    expect(dropCoordinatesArePhysical()).toBe(true)
+    for (const platform of ['macOS', 'Linux', 'Android']) {
+      onPlatform(platform)
+      expect(dropCoordinatesArePhysical()).toBe(false)
+    }
+  })
+
+  it('does not guess physical for an unrecognized platform', () => {
+    // A wrong guess here misplaces every drop, so anything unknown gets the
+    // conservative pass-through rather than a device-scale division.
+    onPlatform('SomethingNew')
+    expect(dropCoordinatesArePhysical()).toBe(false)
+  })
+})
+
 describe('measureDropScale', () => {
   // Tauri labels the drop position "physical" but passes wry's raw platform
   // coordinates through: logical on macOS/Linux, physical on Windows.
   afterEach(() => {
     delete window.__TAURI_INTERNALS__
     vi.mocked(getCurrentWindow).mockReturnValue({ label: 'main' })
-    onPlatform('macos')
+    onPlatform('macOS')
   })
 
   it('does not rescale macOS points on a Retina display', async () => {
@@ -136,22 +158,22 @@ describe('measureDropScale', () => {
     // 2x display at 125% zoom: 1 CSS pixel is 1.25 AppKit points.
     withWindow({ width: window.innerWidth * 2.5, height: 100 }, 2)
     expect(await measureDropScale()).toBe(1.25)
-    onPlatform('linux')
+    onPlatform('Linux')
     expect(await measureDropScale()).toBe(1.25)
   })
 
   it('keeps the full device scale on Windows, where the coordinates are physical', async () => {
-    onPlatform('windows')
+    onPlatform('Windows')
     withWindow({ width: window.innerWidth * 2.5, height: 100 }, 2)
     expect(await measureDropScale()).toBe(2.5)
   })
 
   it('falls back per platform off Tauri or when the window is unreadable', async () => {
     expect(await measureDropScale()).toBe(1)
-    onPlatform('windows')
+    onPlatform('Windows')
     expect(await measureDropScale()).toBe(window.devicePixelRatio || 1)
 
-    onPlatform('macos')
+    onPlatform('macOS')
     window.__TAURI_INTERNALS__ = {}
     vi.mocked(getCurrentWindow).mockReturnValue({
       innerSize: async () => { throw new Error('no window') },

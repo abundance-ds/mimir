@@ -446,6 +446,51 @@ describe('FilesActivity', () => {
       expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
     })
 
+    it('selects and focuses the arrivals the view actually shows', async () => {
+      const photos = {
+        path: '/w/photos', name: 'photos', relativePath: 'photos',
+        mtime: Date.now(), size: 0, isDirectory: true, textReadable: false,
+      }
+      operations.listWorkspaceDirectory.mockResolvedValue([...browseEntries, photos])
+      operations.importWorkspaceEntries.mockResolvedValue({
+        entries: [{ path: '/w/photos', relativePath: 'photos', name: 'photos' }],
+        skippedLinks: 0,
+        failures: [],
+      })
+      const { wrapper, handler, hover } = await renderWithDrop()
+
+      hover(null)
+      await handler({ payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/photos'] } })
+      await flushPromises()
+
+      expect(wrapper.get('[data-file-row="/w/photos"]').attributes('aria-selected')).toBe('true')
+      expect(wrapper.get('footer').text()).toContain('1 selected')
+    })
+
+    it('leaves selection and focus alone when the arrival is not on screen', async () => {
+      operations.importWorkspaceEntries.mockResolvedValue({
+        entries: [{ path: '/w/docs/brief.md', relativePath: 'docs/brief.md', name: 'brief.md' }],
+        skippedLinks: 0,
+        failures: [],
+      })
+      const { wrapper, handler, hover } = await renderWithDrop()
+
+      // Focus and select the last row, then import into a folder whose new
+      // child the reload does not surface.
+      await wrapper.get('[data-file-row="/w/chart.png"] button').trigger('click')
+      operations.listWorkspaceDirectory.mockResolvedValue([])
+      hover('[data-file-row="/w/docs"]')
+      await handler({ payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/brief.md'] } })
+      await flushPromises()
+
+      expect(wrapper.get('[data-file-row="/w/chart.png"]').attributes('aria-selected')).toBe('true')
+
+      // Focus is still on the last row: stepping up lands on its neighbour,
+      // not on the row a reset-to-zero focus would wrap around to.
+      await wrapper.get('[data-files-list]').trigger('keydown', { key: 'ArrowUp' })
+      expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
+    })
+
     it('surfaces a failed import without leaving the panel highlighted', async () => {
       operations.importWorkspaceEntries.mockRejectedValue(new Error('Disk is full'))
       const { wrapper, handler, hover } = await renderWithDrop()

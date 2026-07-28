@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { EditorSelection } from '@codemirror/state'
+import { EditorSelection, EditorState } from '@codemirror/state'
 import { undo } from '@codemirror/commands'
 import { createEditor } from './core.js'
 
@@ -9,10 +9,10 @@ afterEach(() => {
   while (views.length) views.pop().destroy()
 })
 
-function editorAt(doc, { path = 'note.md', cursor = doc.length } = {}) {
+function editorAt(doc, { path = 'note.md', cursor = doc.length, extensions = [] } = {}) {
   const parent = document.createElement('div')
   document.body.append(parent)
-  const view = createEditor({ parent, doc, path })
+  const view = createEditor({ parent, doc, path, extensions })
   views.push(view)
   view.dispatch({ selection: EditorSelection.cursor(cursor) })
   return view
@@ -65,6 +65,28 @@ describe('markdown list continuation', () => {
     pressEnter(loose)
     expect(caretLine(loose)).toBe(4)
     expect(loose.state.selection.main.head).toBe(loose.state.doc.length)
+  })
+
+  it('hands multi-cursor continuations back to CodeMirror untouched', () => {
+    // Mapping one caret onto rewritten inserts is only unambiguous for a
+    // single cursor, so several carets keep CodeMirror's own transaction —
+    // blank lines and all — rather than a guess.
+    const doc = '- one\n\n- two\n- three'
+    // The shared editor keeps CodeMirror's single-selection default, so this
+    // guard is only reachable with multiple selections switched on.
+    const view = editorAt(doc, { extensions: [EditorState.allowMultipleSelections.of(true)] })
+    view.dispatch({
+      selection: EditorSelection.create([
+        EditorSelection.cursor('- one\n\n- two'.length),
+        EditorSelection.cursor(doc.length),
+      ], 1),
+    })
+    pressEnter(view)
+
+    // Both carets continue, and CodeMirror's loose blank lines are preserved
+    // rather than tightened — the fallback, not the rewrite.
+    expect(view.state.doc.toString()).toBe('- one\n\n- two\n\n- \n- three\n\n- ')
+    expect(view.state.selection.ranges).toHaveLength(2)
   })
 
   it('still continues blockquotes and leaves other markup alone', () => {
