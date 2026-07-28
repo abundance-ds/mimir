@@ -644,11 +644,26 @@ impl RoutineRuntime {
     ) -> Result<ActivityRecord, String> {
         let activity_id = format!("routine:{}:{}", resolved.definition.id, Uuid::new_v4());
         let now = Utc::now().to_rfc3339();
+        let agent_id = resolved.launch.agent_id.as_deref();
+        let mcp_url = activity_mcp_url(
+            &self.inner.config.mcp_url,
+            &activity_id,
+            agent_id.unwrap_or(&resolved.launch.preset_id),
+        );
         let mut env = resolved.launch.env.clone();
         env.insert("MIMIR_ACTIVITY_ID".into(), activity_id.clone());
-        env.insert("MIMIR_MCP_URL".into(), self.inner.config.mcp_url.clone());
+        env.insert(
+            "MIMIR_AGENT_ID".into(),
+            agent_id.unwrap_or(&resolved.launch.preset_id).into(),
+        );
+        env.insert("MIMIR_MCP_URL".into(), mcp_url.clone());
         env.insert("MIMIR_ROUTINE_ID".into(), resolved.definition.id.clone());
         env.insert("MIMIR_ROUTINE_SCHEDULED_FOR".into(), scheduled_for.into());
+        let args = resolved
+            .args
+            .iter()
+            .map(|argument| argument.replace(&self.inner.config.mcp_url, &mcp_url))
+            .collect();
 
         let record = ActivityRecord {
             id: activity_id,
@@ -671,7 +686,7 @@ impl RoutineRuntime {
             host: ActivityHost::pty(resolved.launch.agent_id.clone()),
             launch: Some(ActivityLaunchSpec {
                 command: resolved.launch.command.clone(),
-                args: resolved.args.clone(),
+                args,
                 cwd: Some(resolved.launch.cwd.clone()),
                 env,
             }),
@@ -808,6 +823,22 @@ impl RoutineRuntime {
             }));
         }
     }
+}
+
+fn activity_mcp_url(base: &str, activity_id: &str, agent_id: &str) -> String {
+    let Ok(mut url) = url::Url::parse(base) else {
+        return base.to_string();
+    };
+    let mut pairs = url
+        .query_pairs()
+        .filter(|(key, _)| key != "activityId" && key != "agentId")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    pairs.push(("activityId".into(), activity_id.into()));
+    pairs.push(("agentId".into(), agent_id.into()));
+    url.set_query(None);
+    url.query_pairs_mut().extend_pairs(pairs);
+    url.into()
 }
 
 fn definition_error((field, message): (String, String)) -> String {
@@ -1055,7 +1086,7 @@ fn resolve_routine(
             (
                 "preset".into(),
                 format!(
-                    "Agent '{agent_id}' has no headless routine adapter; use codex, claude, or pi."
+                    "Agent '{agent_id}' has no routine adapter; use codex, claude, pi, or gemini."
                 ),
             )
         })?;
@@ -1074,7 +1105,18 @@ fn resolve_routine(
         &config.mcp_url,
     )
     .map_err(|message| {
-        let field = if message.contains("Working directory") || message.contains("open workspace") {
+        // "Open workspace" is workbench phrasing; a routine has no open
+        // workspace, it carries its own. Reword so the fix is obvious.
+        if message.contains("open workspace") {
+            return (
+                "workspace".into(),
+                format!(
+                    "Set a workspace for this routine — launcher '{}' runs inside one.",
+                    preset.title
+                ),
+            );
+        }
+        let field = if message.contains("Working directory") {
             "workspace"
         } else {
             "binary"
@@ -1083,8 +1125,12 @@ fn resolve_routine(
     })?;
     launch.command = resolve_executable(&launch.command, Path::new(&launch.cwd))
         .map_err(|message| ("binary".into(), message))?;
-    let args = headless_argv(agent_id, &launch.args, &definition.prompt)
-        .map_err(|message| ("preset".into(), message))?;
+    let args = if definition.interactive {
+        interactive_argv(agent_id, &launch.args, &definition.prompt)
+    } else {
+        headless_argv(agent_id, &launch.args, &definition.prompt)
+    }
+    .map_err(|message| ("preset".into(), message))?;
 
     Ok(ResolvedRoutine {
         definition: definition.clone(),
@@ -1176,6 +1222,33 @@ pub(crate) fn headless_argv(
         other => {
             return Err(format!(
                 "Agent '{other}' has no headless routine adapter; use codex, claude, or pi."
+            ))
+        }
+    }
+    args.push(prompt.into());
+    Ok(args)
+}
+
+/// Argv for an interactive routine run: the agent opens its ordinary live
+/// session with the routine prompt as the opening message, so the user can
+/// keep talking to it in the terminal surface.
+pub(crate) fn interactive_argv(
+    agent_id: &str,
+    preset_args: &[String],
+    prompt: &str,
+) -> Result<Vec<String>, String> {
+    let mut args = preset_args.to_vec();
+    match agent_id {
+        // These CLIs treat a positional argument as the opening message of
+        // an interactive session.
+        "codex" | "claude" | "pi" => {}
+        // Gemini one-shots a positional prompt; --prompt-interactive keeps
+        // the session open after answering it. Pushed last so it wins over
+        // any conflicting preset flag.
+        "gemini" => args.push("--prompt-interactive".into()),
+        other => {
+            return Err(format!(
+                "Agent '{other}' has no interactive routine adapter; use codex, claude, pi, or gemini."
             ))
         }
     }
@@ -1409,6 +1482,7 @@ mod tests {
                 overlap: RoutineOverlap::Skip,
                 missed: MissedFirePolicy::RunOnce,
                 workspace: Some(self.workspace.to_string_lossy().into_owned()),
+                interactive: false,
             }
         }
 
@@ -1520,6 +1594,27 @@ mod tests {
             .contains("no headless routine adapter"));
     }
 
+    #[test]
+    fn interactive_adapters_seed_the_live_session_with_one_prompt_argv_item() {
+        let prompt = "Morning briefing; do not split me";
+        assert_eq!(
+            interactive_argv("codex", &["--full-auto".into()], prompt).unwrap(),
+            ["--full-auto", prompt]
+        );
+        assert_eq!(
+            interactive_argv("claude", &["--model".into(), "opus".into()], prompt).unwrap(),
+            ["--model", "opus", prompt]
+        );
+        assert_eq!(interactive_argv("pi", &[], prompt).unwrap(), [prompt]);
+        assert_eq!(
+            interactive_argv("gemini", &[], prompt).unwrap(),
+            ["--prompt-interactive", prompt]
+        );
+        assert!(interactive_argv("unknown", &[], prompt)
+            .unwrap_err()
+            .contains("no interactive routine adapter"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn missing_preset_and_binary_are_visible_and_cannot_run() {
@@ -1557,6 +1652,44 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn interactive_routine_launches_the_live_session_without_headless_flags() {
+        let harness = Harness::new();
+        harness.write_presets(vec![harness.preset()]);
+        let mut routine = harness.routine();
+        routine.interactive = true;
+        harness.write_routine(&routine);
+        let runtime = harness.runtime();
+
+        let result = runtime.run_now("daily-review").unwrap();
+        let launch = result.activity.launch.as_ref().unwrap();
+        assert!(launch
+            .args
+            .iter()
+            .all(|argument| argument != "exec" && argument != "--print" && argument != "-p"));
+        assert_eq!(
+            launch.args.last().map(String::as_str),
+            Some("Review the work tree and report sharp findings.")
+        );
+    }
+
+    #[test]
+    fn workspace_preset_without_routine_workspace_reports_actionable_diagnostic() {
+        let harness = Harness::new();
+        harness.write_presets(vec![harness.preset()]);
+        let mut routine = harness.routine();
+        routine.workspace = None;
+        harness.write_routine(&routine);
+        let runtime = harness.runtime();
+
+        let entry = &runtime.catalog().routines[0];
+        assert!(!entry.available);
+        let diagnostic = entry.diagnostic.as_deref().unwrap();
+        assert!(diagnostic.contains("Set a workspace for this routine"));
+        assert!(diagnostic.contains("Review agent"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn run_now_spawns_a_durable_routine_with_exact_argv_origin_and_mcp_env() {
         let harness = Harness::new();
         harness.write_presets(vec![harness.preset()]);
@@ -1582,16 +1715,19 @@ mod tests {
 
         let launch = result.activity.launch.as_ref().unwrap();
         assert_eq!(launch.command, harness.binary.to_string_lossy());
+        assert_eq!(&launch.args[..4], ["exec", "--model", "gpt 5", "-c"]);
+        let scoped_mcp_url =
+            activity_mcp_url("http://127.0.0.1:29999/mcp", &result.activity.id, "codex");
         assert_eq!(
-            launch.args,
-            [
-                "exec",
-                "--model",
-                "gpt 5",
-                "-c",
-                r#"mcp_servers.mimir.url="http://127.0.0.1:29999/mcp""#,
-                "Review the work tree and report sharp findings."
-            ]
+            launch.args[4],
+            format!(
+                "mcp_servers.mimir_workbench.url={}",
+                serde_json::to_string(&scoped_mcp_url).unwrap()
+            )
+        );
+        assert_eq!(
+            launch.args[5],
+            "Review the work tree and report sharp findings."
         );
         assert_eq!(
             launch.env.get("MIMIR_TEST_ENV").map(String::as_str),
@@ -1599,7 +1735,11 @@ mod tests {
         );
         assert_eq!(
             launch.env.get("MIMIR_MCP_URL").map(String::as_str),
-            Some("http://127.0.0.1:29999/mcp")
+            Some(scoped_mcp_url.as_str())
+        );
+        assert_eq!(
+            launch.env.get("MIMIR_AGENT_ID").map(String::as_str),
+            Some("codex")
         );
         assert_eq!(
             launch.env.get("MIMIR_ROUTINE_ID").map(String::as_str),

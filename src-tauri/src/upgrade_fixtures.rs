@@ -827,6 +827,7 @@ fn generate_current_version_snapshot() {
             overlap: RoutineOverlap::Skip,
             missed: MissedFirePolicy::RunOnce,
             workspace: None,
+            interactive: false,
         })
         .expect("fixture routine should be created");
     runtime

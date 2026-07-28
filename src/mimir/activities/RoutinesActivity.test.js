@@ -13,6 +13,7 @@ import {
   updateRoutineDefinition,
 } from '../../services/routines.js'
 import { stopActivity } from '../../services/activities.js'
+import { detectAgents, loadLauncherConfig } from '../../services/launchers.js'
 import RoutinesActivity from './RoutinesActivity.vue'
 
 vi.mock('../../services/routines.js', () => ({
@@ -27,13 +28,18 @@ vi.mock('../../services/routines.js', () => ({
   updateRoutineDefinition: vi.fn(),
 }))
 vi.mock('../../services/activities.js', () => ({ stopActivity: vi.fn() }))
+vi.mock('../../services/launchers.js', () => ({
+  detectAgents: vi.fn(),
+  loadLauncherConfig: vi.fn(),
+  saveLauncherConfig: vi.fn(),
+}))
 
 function routine(overrides = {}) {
   return {
     id: 'morning',
     title: 'Morning review',
     enabled: true,
-    schedule: '0 0 9 * * Mon-Fri',
+    schedule: '30 9 * * 1-5',
     timezone: 'Europe/Berlin',
     preset: 'codex-review',
     prompt: 'Review recent changes and leave a short summary.',
@@ -62,7 +68,7 @@ function catalog(overrides = {}) {
         id: 'nightly',
         title: 'Nightly check',
         enabled: false,
-        schedule: '0 0 1 * * *',
+        schedule: '0 1 * * *',
         timezone: 'UTC',
         preset: 'claude',
         prompt: 'Check the build.',
@@ -132,6 +138,20 @@ describe('RoutinesActivity', () => {
     }))
     vi.mocked(revealRoutineDefinition).mockReset().mockResolvedValue()
     vi.mocked(stopActivity).mockReset().mockResolvedValue()
+    vi.mocked(detectAgents).mockReset().mockResolvedValue([
+      { id: 'codex', installed: true, binaryPath: '/bin/codex' },
+      { id: 'claude', installed: true, binaryPath: '/bin/claude' },
+      { id: 'pi', installed: false, diagnostic: 'pi is not installed.' },
+    ])
+    vi.mocked(loadLauncherConfig).mockReset().mockResolvedValue({
+      path: '/home/me/.mimir/launchers.json',
+      presets: [
+        { id: 'codex-review', title: 'Codex review', kind: 'agent', agentId: 'codex', enabled: true, cwd: { mode: 'workspace' } },
+        { id: 'claude', title: 'Claude', kind: 'agent', agentId: 'claude', enabled: true, cwd: { mode: 'home' } },
+        { id: 'pi', title: 'Pi', kind: 'agent', agentId: 'pi', enabled: true, cwd: { mode: 'workspace' } },
+        { id: 'terminal', title: 'Terminal', kind: 'terminal', enabled: true, cwd: { mode: 'workspace' } },
+      ],
+    })
   })
 
   function render(props = {}) {
@@ -145,20 +165,22 @@ describe('RoutinesActivity', () => {
     })
   }
 
-  it('renders dense schedule rows, catalog location, and selected detail', async () => {
+  it('renders human schedule rows, catalog location, and selected detail', async () => {
     const wrapper = render()
     await flushPromises()
 
     expect(wrapper.text()).toContain('/home/me/.mimir/routines')
     expect(wrapper.findAll('[data-routine-row]')).toHaveLength(2)
-    expect(wrapper.get('[data-routine-row="morning"]').text()).toContain('Europe/Berlin')
+    expect(wrapper.get('[data-routine-row="morning"]').text()).toContain('Weekdays 09:30')
     expect(wrapper.get('[data-routine-row="morning"]').text()).toContain('codex-review')
+    expect(wrapper.get('[data-routine-row="nightly"]').text()).toContain('Every day 01:00')
     expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('Review recent changes')
+    expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('30 9 * * 1-5')
     expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('Run Once')
     expect(wrapper.get('[data-routines-summary]').text()).toContain('1 armed')
   })
 
-  it('shows paused, running, unavailable, and failed runtime states', async () => {
+  it('shows manual, paused, running, unavailable, and failed runtime states', async () => {
     vi.mocked(loadRoutineCatalog).mockResolvedValue(catalog({
       routines: [
         routine({ id: 'paused', title: 'Paused', enabled: false, nextFire: null }),
@@ -170,6 +192,7 @@ describe('RoutinesActivity', () => {
           diagnostic: "Preset 'pi' was not found.",
         }),
         routine({ id: 'failed', title: 'Failed', lastError: 'Exit status 2.' }),
+        routine({ id: 'sweep', title: 'Sweep', schedule: null, nextFire: null }),
       ],
     }))
     const wrapper = render()
@@ -179,6 +202,13 @@ describe('RoutinesActivity', () => {
     expect(wrapper.get('[data-routine-row="running"]').text()).toContain('Running')
     expect(wrapper.get('[data-routine-row="missing"]').text()).toContain('Unavailable')
     expect(wrapper.get('[data-routine-run="missing"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-routine-row="sweep"]').text()).toContain('Manual')
+    expect(wrapper.get('[data-routine-run="sweep"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-routines-summary]').text()).toContain('1 manual')
+    await wrapper.get('[data-routine-select="sweep"]').trigger('click')
+    expect(wrapper.get('[data-routine-detail="sweep"]').text()).toContain('Manual — runs on demand')
+    expect(wrapper.get('[data-routine-detail="sweep"]').text()).toContain('Launcher default')
+    expect(wrapper.get('[data-routine-detail="sweep"]').text()).not.toContain('/work')
     await wrapper.get('[data-routine-select="failed"]').trigger('click')
     expect(wrapper.get('[data-routine-problem="failed"]').text()).toContain('Exit status 2.')
   })
@@ -263,14 +293,22 @@ describe('RoutinesActivity', () => {
     expect(wrapper.get('[data-routines-empty-create]').text()).toContain('Create routine')
   })
 
-  it('creates and edits complete canonical definitions without hiding the TOML escape hatch', async () => {
+  it('creates a manual routine by default with an auto-derived id and detected agent', async () => {
     const wrapper = render()
     await flushPromises()
 
     await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-routine-id-input]').exists()).toBe(false)
+    expect(wrapper.find('[data-routine-timezone-input]').exists()).toBe(false)
+    expect(wrapper.get('[data-routine-preset-option="codex-review"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-routine-preset-option="pi"]').text()).toContain('not found')
+    expect(wrapper.find('[data-routine-preset-option="terminal"]').exists()).toBe(false)
+
     await wrapper.get('[data-routine-title-input]').setValue('Friday synthesis')
-    expect(wrapper.get('[data-routine-id-input]').element.value).toBe('friday-synthesis')
     await wrapper.get('[data-routine-prompt-input]').setValue('Synthesize the week.')
+    await wrapper.get('[data-routine-preset-option="claude"]').trigger('click')
     await wrapper.get('[data-routine-form]').trigger('submit')
     await flushPromises()
 
@@ -278,11 +316,15 @@ describe('RoutinesActivity', () => {
       id: 'friday-synthesis',
       title: 'Friday synthesis',
       prompt: 'Synthesize the week.',
+      preset: 'claude',
+      schedule: null,
+      enabled: true,
+      interactive: true,
       timezone: expect.any(String),
       overlap: 'skip',
       missed: 'run-once',
     }))
-    expect(wrapper.get('[data-routine-row="friday-synthesis"]').text()).toContain('Armed')
+    expect(wrapper.get('[data-routine-row="friday-synthesis"]').text()).toContain('Manual')
 
     await wrapper.get('[data-routine-edit="friday-synthesis"]').trigger('click')
     await wrapper.get('[data-routine-title-input]').setValue('Friday review')
@@ -291,7 +333,7 @@ describe('RoutinesActivity', () => {
     expect(updateRoutineDefinition).toHaveBeenCalledWith(
       'friday-synthesis',
       'rev-friday-synthesis',
-      expect.objectContaining({ title: 'Friday review' }),
+      expect.objectContaining({ title: 'Friday review', schedule: null }),
     )
 
     await wrapper.get('[data-routine-open-source="friday-synthesis"]').trigger('click')
@@ -300,15 +342,242 @@ describe('RoutinesActivity', () => {
     ])
   })
 
-  it('keeps a hand-picked stable id while the create title is refined', async () => {
+  it('builds cron from the schedule picker without exposing cron syntax', async () => {
     const wrapper = render()
     await flushPromises()
 
     await wrapper.get('[data-routines-new]').trigger('click')
-    await wrapper.get('[data-routine-id-input]').setValue('weekly-focus')
-    await wrapper.get('[data-routine-title-input]').setValue('Weekly focus review')
+    await flushPromises()
+    await wrapper.get('[data-routine-title-input]').setValue('Weekly digest')
+    await wrapper.get('[data-routine-prompt-input]').setValue('Digest the week.')
+    await wrapper.get('[data-routine-trigger-scheduled]').trigger('click')
+    await wrapper.get('[data-routine-frequency="weekly"]').trigger('click')
+    await wrapper.get('[data-routine-day="fri"]').trigger('click')
+    await wrapper.get('[data-routine-time-input]').setValue('18:30')
 
-    expect(wrapper.get('[data-routine-id-input]').element.value).toBe('weekly-focus')
+    expect(wrapper.get('[data-routine-schedule-summary]').text()).toContain('Runs Mon, Fri 18:30')
+    expect(wrapper.get('[data-routine-schedule-summary]').text()).toContain('30 18 * * 1,5')
+
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'weekly-digest',
+      schedule: '30 18 * * 1,5',
+      enabled: true,
+    }))
+  })
+
+  it('requires and prefills a workspace when the agent preset runs in one', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+
+    // codex-review (workspace-mode) is preselected → field appears prefilled
+    // with the workbench workspace.
+    expect(wrapper.get('[data-routine-workspace-input]').element.value).toBe('/work')
+
+    await wrapper.get('[data-routine-title-input]').setValue('Briefing')
+    await wrapper.get('[data-routine-prompt-input]').setValue('Brief me.')
+    await wrapper.get('[data-routine-workspace-input]').setValue('')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-routine-form-error]').text()).toContain('workspace folder')
+
+    await wrapper.get('[data-routine-workspace-input]').setValue('/repos/briefing')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      workspace: '/repos/briefing',
+      preset: 'codex-review',
+    }))
+  })
+
+  it('withdraws an untouched workspace prefill when the agent ignores it, keeps typed ones', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-routine-workspace-input]').element.value).toBe('/work')
+
+    await wrapper.get('[data-routine-preset-option="claude"]').trigger('click')
+    expect(wrapper.find('[data-routine-workspace-input]').exists()).toBe(false)
+
+    await wrapper.get('[data-routine-preset-option="codex-review"]').trigger('click')
+    expect(wrapper.get('[data-routine-workspace-input]').element.value).toBe('/work')
+
+    await wrapper.get('[data-routine-workspace-input]').setValue('/repos/custom')
+    await wrapper.get('[data-routine-preset-option="claude"]').trigger('click')
+    expect(wrapper.get('[data-routine-workspace-input]').element.value).toBe('/repos/custom')
+  })
+
+  it('never hangs deriving a unique id from very long titles', async () => {
+    const longId = 'a'.repeat(64)
+    vi.mocked(loadRoutineCatalog).mockResolvedValue(catalog({
+      routines: [routine({ id: longId, title: 'a'.repeat(70) })],
+    }))
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get(`[data-routine-row="${longId}"]`).trigger('contextmenu', { clientX: 20, clientY: 20 })
+    await wrapper.get('[data-routine-action="duplicate"]').trigger('click')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(duplicateRoutineDefinition).toHaveBeenCalledWith(
+      longId,
+      `rev-${longId}`,
+      `${'a'.repeat(62)}-2`,
+      `${'a'.repeat(70)} copy`,
+    )
+  })
+
+  it('holds the save until launcher detection resolves', async () => {
+    vi.mocked(loadLauncherConfig).mockReturnValue(new Promise(() => {}))
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Detecting installed agents…')
+    expect(wrapper.get('[data-routine-form-submit]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+    expect(createRoutineDefinition).not.toHaveBeenCalled()
+  })
+
+  it('preserves a hand-written enabled flag on manual routines', async () => {
+    vi.mocked(loadRoutineCatalog).mockResolvedValue(catalog({
+      routines: [routine({ id: 'sweep', title: 'Sweep', schedule: null, enabled: false, nextFire: null })],
+    }))
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routine-edit="sweep"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(updateRoutineDefinition).toHaveBeenCalledWith(
+      'sweep',
+      'rev-sweep',
+      expect.objectContaining({ enabled: false, schedule: null, workspace: '/work' }),
+    )
+  })
+
+  it('defaults new routines to an interactive session and saves a one-shot switch', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-routine-session-interactive]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('[data-routine-title-input]').setValue('Briefing')
+    await wrapper.get('[data-routine-prompt-input]').setValue('Brief me on the repo.')
+    await wrapper.get('[data-routine-session-one-shot]').trigger('click')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'briefing',
+      interactive: false,
+    }))
+  })
+
+  it('opens hand-written headless definitions as one-shot and saves an interactive switch', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routine-select="morning"]').trigger('click')
+    expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('One-shot')
+
+    await wrapper.get('[data-routine-edit="morning"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-routine-session-one-shot]').attributes('aria-checked')).toBe('true')
+
+    await wrapper.get('[data-routine-session-interactive]').trigger('click')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(updateRoutineDefinition).toHaveBeenCalledWith(
+      'morning',
+      'rev-morning',
+      expect.objectContaining({ interactive: true }),
+    )
+  })
+
+  it('rejects a one-shot Gemini routine with an actionable session hint', async () => {
+    vi.mocked(detectAgents).mockResolvedValue([
+      { id: 'gemini', installed: true, binaryPath: '/bin/gemini' },
+    ])
+    vi.mocked(loadLauncherConfig).mockResolvedValue({
+      path: '/home/me/.mimir/launchers.json',
+      presets: [
+        { id: 'gemini', title: 'Gemini', kind: 'agent', agentId: 'gemini', enabled: true, cwd: { mode: 'home' } },
+      ],
+    })
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-routine-title-input]').setValue('Ask Gemini')
+    await wrapper.get('[data-routine-prompt-input]').setValue('Summarize the news.')
+    await wrapper.get('[data-routine-session-one-shot]').trigger('click')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-routine-form-error]').text()).toContain('set Session to Interactive')
+
+    await wrapper.get('[data-routine-session-interactive]').trigger('click')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+    expect(createRoutineDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      preset: 'gemini',
+      interactive: true,
+    }))
+  })
+
+  it('warns about skip-overlap holding fires only for scheduled interactive sessions', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-routine-session-note]').exists()).toBe(false)
+    await wrapper.get('[data-routine-trigger-scheduled]').trigger('click')
+    expect(wrapper.get('[data-routine-session-note]').text()).toContain('stay open')
+
+    await wrapper.get('[data-routine-session-one-shot]').trigger('click')
+    expect(wrapper.find('[data-routine-session-note]').exists()).toBe(false)
+  })
+
+  it('surfaces builder validation instead of writing an incomplete schedule', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-routine-title-input]').setValue('Broken')
+    await wrapper.get('[data-routine-prompt-input]').setValue('Try.')
+    await wrapper.get('[data-routine-trigger-scheduled]').trigger('click')
+    await wrapper.get('[data-routine-frequency="weekly"]').trigger('click')
+    await wrapper.get('[data-routine-day="mon"]').trigger('click')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-routine-form-error]').text()).toContain('at least one day')
   })
 
   it('offers row and surface context menus, paused duplication, and recoverable Trash confirmation', async () => {
@@ -322,23 +591,24 @@ describe('RoutinesActivity', () => {
     expect(menu.text()).toContain('Move to Trash')
 
     await menu.get('[data-routine-action="duplicate"]').trigger('click')
+    expect(wrapper.find('[data-routine-id-input]').exists()).toBe(false)
     await wrapper.get('[data-routine-form]').trigger('submit')
     await flushPromises()
     expect(duplicateRoutineDefinition).toHaveBeenCalledWith(
       'morning',
       'rev-morning',
-      'morning-copy',
+      'morning-review-copy',
       'Morning review copy',
     )
-    expect(wrapper.get('[data-routine-row="morning-copy"]').text()).toContain('Paused')
+    expect(wrapper.get('[data-routine-row="morning-review-copy"]').text()).toContain('Paused')
 
-    await wrapper.get('[data-routine-row="morning-copy"]').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await wrapper.get('[data-routine-row="morning-review-copy"]').trigger('contextmenu', { clientX: 30, clientY: 40 })
     await wrapper.get('[data-routine-action="trash"]').trigger('click')
     expect(wrapper.get('[data-routine-trash-dialog]').text()).toContain('system Trash')
     await wrapper.get('[data-routine-confirm-trash]').trigger('click')
     await flushPromises()
-    expect(trashRoutineDefinition).toHaveBeenCalledWith('morning-copy', 'rev-morning-copy')
-    expect(wrapper.find('[data-routine-row="morning-copy"]').exists()).toBe(false)
+    expect(trashRoutineDefinition).toHaveBeenCalledWith('morning-review-copy', 'rev-morning-review-copy')
+    expect(wrapper.find('[data-routine-row="morning-review-copy"]').exists()).toBe(false)
 
     await wrapper.get('[data-routine-list]').trigger('contextmenu', { clientX: 12, clientY: 12 })
     expect(wrapper.get('[data-routines-context-menu]').text()).toContain('New routine')

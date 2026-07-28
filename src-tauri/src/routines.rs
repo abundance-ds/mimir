@@ -47,6 +47,15 @@ pub struct RoutineDefinition {
     pub missed: MissedFirePolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// Interactive runs open the agent's live session seeded with the
+    /// prompt instead of the headless one-shot adapter, so the user can
+    /// send follow-up messages in the terminal.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interactive: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,6 +473,7 @@ mod tests {
             overlap: RoutineOverlap::Skip,
             missed: MissedFirePolicy::RunOnce,
             workspace: None,
+            interactive: false,
         }
     }
 
@@ -669,6 +679,25 @@ prompt = "Review."
         assert!(!serialized.contains("schedule"));
         let parsed = toml::from_str::<RoutineDefinition>(&serialized).unwrap();
         assert_eq!(parsed, definition);
+    }
+
+    #[test]
+    fn interactive_flag_round_trips_and_stays_out_of_headless_toml() {
+        let headless = routine("* * * * *");
+        let serialized = toml::to_string_pretty(&headless).unwrap();
+        assert!(!serialized.contains("interactive"));
+        assert!(!toml::from_str::<RoutineDefinition>(&serialized)
+            .unwrap()
+            .interactive);
+
+        let mut interactive = routine("* * * * *");
+        interactive.interactive = true;
+        let serialized = toml::to_string_pretty(&interactive).unwrap();
+        assert!(serialized.contains("interactive = true"));
+        assert_eq!(
+            toml::from_str::<RoutineDefinition>(&serialized).unwrap(),
+            interactive
+        );
     }
 
     #[test]

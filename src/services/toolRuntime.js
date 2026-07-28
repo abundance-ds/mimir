@@ -272,6 +272,7 @@ function normalizeRoutineDefinition(value = {}) {
     workspace: value.workspace == null || !String(value.workspace).trim()
       ? null
       : String(value.workspace).trim(),
+    interactive: value.interactive === true,
   }
 }
 

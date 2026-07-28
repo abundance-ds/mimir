@@ -127,6 +127,8 @@ See [apps-system.md](apps-system.md).
 - `src/stores/routines.js`: live catalog, source-aware mutations, and run state
 - `src/services/routines.js`: native CRUD/reveal commands and change events
 - `src/mimir/activities/RoutinesActivity.vue`: scheduler control surface
+- `src/mimir/activities/routineSchedule.js`: cron ↔ builder-state mapping and
+  humanized schedule labels
 
 See [routines.md](routines.md).
 

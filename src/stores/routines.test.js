@@ -121,7 +121,26 @@ describe('routines store', () => {
     expect(store.loaded).toBe(true)
     expect(store.selectedRoutine.id).toBe('morning')
     expect(store.enabledCount).toBe(1)
+    expect(store.manualCount).toBe(0)
     expect(store.runningCount).toBe(0)
+  })
+
+  it('counts manual routines separately from armed schedules', async () => {
+    const catalog = structuredClone(baseCatalog)
+    catalog.routines.push({
+      ...catalog.routines[0],
+      id: 'sweep',
+      title: 'Manual sweep',
+      schedule: null,
+      nextFire: null,
+    })
+    vi.mocked(loadRoutineCatalog).mockResolvedValue(catalog)
+    const store = useRoutinesStore()
+
+    await store.initialize()
+
+    expect(store.enabledCount).toBe(1)
+    expect(store.manualCount).toBe(1)
   })
 
   it('reconciles authoritative scheduler events and preserves selection', async () => {

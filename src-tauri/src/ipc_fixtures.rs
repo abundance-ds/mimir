@@ -333,6 +333,7 @@ fn routine_catalog() -> RoutineRuntimeCatalog {
                 overlap: RoutineOverlap::Skip,
                 missed: MissedFirePolicy::RunOnce,
                 workspace: Some("/Users/me/work/mimir".into()),
+                interactive: false,
             },
             available: true,
             next_fire: Some("2026-07-28T05:00:00Z".into()),

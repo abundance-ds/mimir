@@ -995,7 +995,7 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
         definition(
             "routines.create",
             "routines_create",
-            "Create one canonical TOML-backed routine. Omit schedule for a manual-only routine that runs on demand. The stable id also becomes its definition filename.",
+            "Create one canonical TOML-backed routine. Omit schedule for a manual-only routine that runs on demand. Set interactive for a live agent session seeded with the prompt instead of a headless one-shot run. The stable id also becomes its definition filename.",
             object_schema(
                 json!({ "definition": routine_definition_schema() }),
                 &["definition"],
@@ -1081,7 +1081,8 @@ fn routine_definition_schema() -> Value {
             "prompt": { "type": "string", "minLength": 1, "maxLength": 100000 },
             "overlap": { "enum": ["skip", "parallel"] },
             "missed": { "enum": ["skip", "run-once"] },
-            "workspace": { "type": ["string", "null"], "minLength": 1, "maxLength": 1000 }
+            "workspace": { "type": ["string", "null"], "minLength": 1, "maxLength": 1000 },
+            "interactive": { "type": "boolean" }
         },
         "required": ["id", "title", "preset", "prompt"]
     })

@@ -101,6 +101,7 @@ function normalizeRoutine(value) {
     overlap: String(routine.overlap || 'skip'),
     missed: String(routine.missed || 'run-once'),
     workspace: routine.workspace == null ? null : String(routine.workspace),
+    interactive: routine.interactive === true,
     path: String(routine.path || ''),
     sourceRevision: String(routine.sourceRevision || routine.source_revision || ''),
     available: routine.available !== false,
@@ -132,6 +133,7 @@ function serializeDefinition(value) {
     overlap: String(definition.overlap || 'skip'),
     missed: String(definition.missed || 'run-once'),
     workspace: workspace || null,
+    interactive: definition.interactive === true,
   }
 }
 

@@ -88,6 +88,48 @@ describe('routines service', () => {
     expect(catalog.diagnostics[0].field).toBe('schedule')
   })
 
+  it('treats a missing schedule as manual and serializes empty schedules to null', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      routines: [{ id: 'sweep', title: 'Sweep', preset: 'codex', prompt: 'Go.' }],
+    })
+    const catalog = await loadRoutineCatalog()
+    expect(catalog.routines[0].schedule).toBeNull()
+    expect(catalog.routines[0].timezone).toBe('local')
+
+    vi.mocked(invoke).mockClear().mockResolvedValue({ routines: [] })
+    await createRoutineDefinition({
+      id: 'sweep',
+      title: 'Sweep',
+      schedule: '',
+      timezone: '',
+      preset: 'codex',
+      prompt: 'Go.',
+    })
+    expect(invoke).toHaveBeenCalledWith('routine_create', {
+      definition: expect.objectContaining({ schedule: null, timezone: 'local' }),
+    })
+  })
+
+  it('defaults the session to one-shot and passes an explicit interactive flag through', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      routines: [{ id: 'sweep', title: 'Sweep', preset: 'codex', prompt: 'Go.' }],
+    })
+    const catalog = await loadRoutineCatalog()
+    expect(catalog.routines[0].interactive).toBe(false)
+
+    vi.mocked(invoke).mockClear().mockResolvedValue({ routines: [] })
+    await createRoutineDefinition({
+      id: 'brief',
+      title: 'Briefing',
+      preset: 'codex',
+      prompt: 'Brief me.',
+      interactive: true,
+    })
+    expect(invoke).toHaveBeenCalledWith('routine_create', {
+      definition: expect.objectContaining({ interactive: true }),
+    })
+  })
+
   it('supports snake-case DTOs defensively without weakening the Rust contract', () => {
     const catalog = normalizeRoutineCatalog({
       state_path: '/tmp/state.json',
@@ -163,6 +205,7 @@ describe('routines service', () => {
       overlap: 'skip',
       missed: 'run-once',
       workspace: null,
+      interactive: false,
     }
     expect(invoke).toHaveBeenNthCalledWith(1, 'routine_create', { definition: serialized })
     expect(invoke).toHaveBeenNthCalledWith(2, 'routine_update', {

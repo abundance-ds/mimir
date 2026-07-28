@@ -204,6 +204,7 @@ describe('canonical renderer tool runtime', () => {
         overlap: 'skip',
         missed: 'run-once',
         workspace: null,
+        interactive: false,
       },
     })
     expect(invoke).toHaveBeenNthCalledWith(2, 'routine_update', {
