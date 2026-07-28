@@ -8,7 +8,7 @@
   "args": [
     "review"
   ],
-  "cwd": "/Users/me/work/mim",
+  "cwd": "/Users/me/work/mimir",
   "env": {
     "CODEX_HOME": "/Users/me/.codex"
   }

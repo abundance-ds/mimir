@@ -41,7 +41,7 @@
     async function save() {
       clearTimeout(timer)
       state.textContent = 'Saving'
-      await mim.data.save('note', { text: note.value, updatedAt: new Date().toISOString() })
+      await mimir.data.save('note', { text: note.value, updatedAt: new Date().toISOString() })
       state.textContent = 'Saved'
     }
     note.addEventListener('input', () => {
@@ -50,11 +50,11 @@
       timer = setTimeout(save, 350)
     })
     document.querySelector('#save').addEventListener('click', save)
-    mim.tools.handle('read', () => ({
+    mimir.tools.handle('read', () => ({
       value: { text: note.value, characters: note.value.length },
       displayText: note.value || '(The instrument is empty.)'
     }))
-    mim.data.load('note').then(saved => {
+    mimir.data.load('note').then(saved => {
       note.value = saved?.text || ''
       state.textContent = 'Ready'
       note.focus()

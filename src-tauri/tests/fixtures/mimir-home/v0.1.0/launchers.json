@@ -60,7 +60,7 @@
         "text"
       ],
       "env": {
-        "MIM_ROUTINE_RUN": "1"
+        "MIMIR_ROUTINE_RUN": "1"
       },
       "cwd": {
         "mode": "home"

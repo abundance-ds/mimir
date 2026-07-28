@@ -6,13 +6,13 @@
       "title": "Sidebar rows lose recency ordering",
       "summary": "Archived rows jump to the top after respawn.",
       "tags": [
-        "mim",
+        "mimir",
         "ui"
       ],
       "status": "in-progress",
       "priority": "high",
       "dueDate": "2026-08-01",
-      "projectId": "project-mim",
+      "projectId": "project-mimir",
       "assigneeId": "person-paul",
       "rank": 3,
       "slug": "sidebar-ordering",
@@ -20,7 +20,7 @@
       "relations": [
         {
           "relation": "part_of",
-          "target": "project-mim",
+          "target": "project-mimir",
           "legacy": false
         },
         {
@@ -30,7 +30,7 @@
         }
       ],
       "updatedAt": "2026-07-26T09:15:00Z",
-      "scopeId": "project:mim",
+      "scopeId": "project:mimir",
       "sourceRevision": "4f6a2c88"
     },
     {

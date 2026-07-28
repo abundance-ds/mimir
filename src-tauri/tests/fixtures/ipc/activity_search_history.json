@@ -5,6 +5,6 @@
   },
   {
     "activityId": "terminal:01HZX40000",
-    "snippet": "grep -rn \"sidebar\" src/mim/components"
+    "snippet": "grep -rn \"sidebar\" src/mimir/components"
   }
 ]

@@ -5,13 +5,13 @@
   "summary": "Archived rows jump to the top after respawn.",
   "body": "Repro:\n\n1. Archive a durable agent.\n2. Respawn it from the sidebar.\n",
   "tags": [
-    "mim",
+    "mimir",
     "ui"
   ],
   "relations": [
     {
       "relation": "part_of",
-      "target": "project-mim",
+      "target": "project-mimir",
       "legacy": false
     },
     {
@@ -29,9 +29,9 @@
   "createdAt": "2026-07-19T12:00:00Z",
   "updatedAt": "2026-07-26T09:15:00Z",
   "provenance": {
-    "scopeId": "project:mim",
+    "scopeId": "project:mimir",
     "scopeKind": "project",
-    "sourcePath": "/Users/me/work/mim/.graph/issues/sidebar-ordering.md",
+    "sourcePath": "/Users/me/work/mimir/.graph/issues/sidebar-ordering.md",
     "sourceRevision": "4f6a2c88",
     "sourceFormat": "issue"
   }

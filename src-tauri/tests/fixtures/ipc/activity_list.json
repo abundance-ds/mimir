@@ -3,7 +3,7 @@
     "id": "agent:01HZX3R8KQ",
     "kind": "agent",
     "title": "Codex — fix sidebar ordering",
-    "workspacePath": "/Users/me/work/mim",
+    "workspacePath": "/Users/me/work/mimir",
     "status": "working",
     "createdAt": "2026-07-25T10:00:00.000Z",
     "updatedAt": "2026-07-25T10:04:12.000Z",
@@ -15,7 +15,7 @@
       "presetId": "codex-full",
       "graphNodeId": "issue-sidebar-ordering",
       "graphScopeIds": [
-        "project:mim"
+        "project:mimir"
       ],
       "graphRevision": 17
     },
@@ -28,9 +28,9 @@
       "args": [
         "--full-auto"
       ],
-      "cwd": "/Users/me/work/mim",
+      "cwd": "/Users/me/work/mimir",
       "env": {
-        "MIM_ACTIVITY_ID": "agent:01HZX3R8KQ"
+        "MIMIR_ACTIVITY_ID": "agent:01HZX3R8KQ"
       }
     },
     "session": {

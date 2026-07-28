@@ -11,8 +11,8 @@
     "editorLineNumbers": false,
     "editorTheme": "parchment",
     "editorWordWrap": true,
-    "mimTerminalFontSize": 12,
-    "mimWorkspaceFolder": "/Users/tester/projects/acme",
+    "mimirTerminalFontSize": 12,
+    "mimirWorkspaceFolder": "/Users/tester/projects/acme",
     "recentWorkspaceFolders": [
       "/Users/tester/projects/acme"
     ],

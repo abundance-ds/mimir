@@ -24,7 +24,7 @@
         "fixture scrollback line"
       ],
       "env": {
-        "MIM_ACTIVITY_ID": "agent-fixture-0001"
+        "MIMIR_ACTIVITY_ID": "agent-fixture-0001"
       }
     },
     "session": {

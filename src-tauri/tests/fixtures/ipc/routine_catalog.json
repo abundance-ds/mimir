@@ -1,6 +1,6 @@
 {
-  "directory": "/Users/me/.mim/routines",
-  "statePath": "/Users/me/.mim/routines-state.json",
+  "directory": "/Users/me/.mimir/routines",
+  "statePath": "/Users/me/.mimir/routines-state.json",
   "revision": 4,
   "routines": [
     {
@@ -13,19 +13,19 @@
       "prompt": "Summarize overnight repository activity.",
       "overlap": "skip",
       "missed": "run-once",
-      "workspace": "/Users/me/work/mim",
+      "workspace": "/Users/me/work/mimir",
       "available": true,
       "nextFire": "2026-07-28T05:00:00Z",
       "runningActivityIds": [
         "routine:01HZX5Y2"
       ],
-      "path": "/Users/me/.mim/routines/morning-brief.toml",
+      "path": "/Users/me/.mimir/routines/morning-brief.toml",
       "sourceRevision": "9c2f4b1a"
     }
   ],
   "diagnostics": [
     {
-      "path": "/Users/me/.mim/routines/broken.toml",
+      "path": "/Users/me/.mimir/routines/broken.toml",
       "field": "schedule",
       "message": "Invalid cron expression."
     }

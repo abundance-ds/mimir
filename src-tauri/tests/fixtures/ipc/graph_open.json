@@ -3,12 +3,12 @@
     {
       "id": "private",
       "kind": "private",
-      "root": "/Users/me/.mim/graph"
+      "root": "/Users/me/.mimir/graph"
     },
     {
-      "id": "project:mim",
+      "id": "project:mimir",
       "kind": "project",
-      "root": "/Users/me/work/mim/.graph"
+      "root": "/Users/me/work/mimir/.graph"
     }
   ],
   "nodeCount": 42,

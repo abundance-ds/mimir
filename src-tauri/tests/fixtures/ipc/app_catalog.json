@@ -1,5 +1,5 @@
 {
-  "directory": "/Users/me/.mim/apps",
+  "directory": "/Users/me/.mimir/apps",
   "apps": [
     {
       "id": "today",
@@ -21,8 +21,8 @@
           "mcpAlias": "today_read"
         }
       ],
-      "directory": "/Users/me/.mim/apps/today",
-      "manifestPath": "/Users/me/.mim/apps/today/app.toml",
+      "directory": "/Users/me/.mimir/apps/today",
+      "manifestPath": "/Users/me/.mimir/apps/today/app.toml",
       "builtin": true
     },
     {
@@ -39,14 +39,14 @@
       },
       "launchOnly": true,
       "tools": [],
-      "directory": "/Users/me/.mim/apps/ledger-sync",
-      "manifestPath": "/Users/me/.mim/apps/ledger-sync/app.toml",
+      "directory": "/Users/me/.mimir/apps/ledger-sync",
+      "manifestPath": "/Users/me/.mimir/apps/ledger-sync/app.toml",
       "builtin": false
     }
   ],
   "diagnostics": [
     {
-      "path": "/Users/me/.mim/apps/broken/app.toml",
+      "path": "/Users/me/.mimir/apps/broken/app.toml",
       "field": "entry",
       "message": "Missing entry for embedded app."
     }
