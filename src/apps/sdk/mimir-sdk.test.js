@@ -14,11 +14,11 @@ describe('embedded App SDK', () => {
       '/ledger/index.html?instanceId=instance-7&workspacePath=%2Fwork',
     )
     window.__TAURI_INTERNALS__ = { invoke }
-    delete window.mim
+    delete window.mimir
   })
 
   afterEach(() => {
-    delete window.mim
+    delete window.mimir
     delete window.__TAURI_INTERNALS__
     Object.defineProperty(window, 'parent', {
       configurable: true,
@@ -28,8 +28,8 @@ describe('embedded App SDK', () => {
   })
 
   async function loadSdk() {
-    await import('./mim-sdk.js')
-    return window.mim
+    await import('./mimir-sdk.js')
+    return window.mimir
   }
 
   it('exposes immutable identity, data, file, and HTTP contracts', async () => {
@@ -124,18 +124,18 @@ describe('embedded App SDK', () => {
     const sdk = await loadSdk()
 
     expect(parent.postMessage).toHaveBeenCalledWith({
-      type: 'mim:ready',
+      type: 'mimir:ready',
       appId: 'ledger',
     }, '*')
 
     const load = sdk.data.load('embedded')
     const invokeMessage = parent.postMessage.mock.calls
       .map(([message]) => message)
-      .find((message) => message.type === 'mim:invoke')
+      .find((message) => message.type === 'mimir:invoke')
     window.dispatchEvent(new MessageEvent('message', {
       source: parent,
       data: {
-        type: 'mim:result',
+        type: 'mimir:result',
         id: invokeMessage.id,
         result: '{"embedded":true}',
       },
@@ -144,7 +144,7 @@ describe('embedded App SDK', () => {
 
     await sdk.workspace.openFile('/work/notes.md')
     expect(parent.postMessage).toHaveBeenCalledWith({
-      type: 'mim:open-file',
+      type: 'mimir:open-file',
       path: '/work/notes.md',
     }, '*')
 
@@ -156,7 +156,7 @@ describe('embedded App SDK', () => {
     window.dispatchEvent(new MessageEvent('message', {
       source: parent,
       data: {
-        type: 'mim:tool-call',
+        type: 'mimir:tool-call',
         id: 'tool-1',
         tool: 'ledger.wait',
         input: { value: 1 },
@@ -167,21 +167,21 @@ describe('embedded App SDK', () => {
     expect(handlerSignal.aborted).toBe(false)
     window.dispatchEvent(new MessageEvent('message', {
       source: parent,
-      data: { type: 'mim:tool-cancel', id: 'tool-1' },
+      data: { type: 'mimir:tool-cancel', id: 'tool-1' },
     }))
     expect(handlerSignal.aborted).toBe(true)
 
     window.dispatchEvent(new MessageEvent('message', {
       source: parent,
       data: {
-        type: 'mim:tool-call',
+        type: 'mimir:tool-call',
         id: 'tool-2',
         tool: 'ledger.missing',
         input: {},
       },
     }))
     expect(parent.postMessage).toHaveBeenCalledWith({
-      type: 'mim:tool-response',
+      type: 'mimir:tool-response',
       id: 'tool-2',
       result: null,
       error: {

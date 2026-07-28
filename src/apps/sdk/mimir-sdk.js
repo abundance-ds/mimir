@@ -6,7 +6,7 @@
 
   // If we're not in an iframe and there's no Tauri, bail
   if (!isIframe && !T) {
-    console.warn('[mim-sdk] Not running in Tauri or iframe')
+    console.warn('[mimir-sdk] Not running in Tauri or iframe')
     return
   }
 
@@ -23,7 +23,7 @@
       const id = `sdk_${++_msgId}_${Date.now()}`
       _pending.set(id, { resolve, reject })
       window.parent.postMessage({
-        type: 'mim:invoke',
+        type: 'mimir:invoke',
         id,
         command,
         args: args || {},
@@ -35,7 +35,7 @@
     window.addEventListener('message', async (event) => {
       if (event.source !== window.parent) return
       const message = event.data
-      if (message?.type === 'mim:result') {
+      if (message?.type === 'mimir:result') {
         const { id, result, error } = message
         const pending = _pending.get(id)
         if (!pending) return
@@ -44,17 +44,17 @@
         else pending.resolve(result)
         return
       }
-      if (message?.type === 'mim:tool-cancel') {
+      if (message?.type === 'mimir:tool-cancel') {
         _toolCalls.get(message.id)?.abort()
         _toolCalls.delete(message.id)
         return
       }
-      if (message?.type !== 'mim:tool-call') return
+      if (message?.type !== 'mimir:tool-call') return
       const localName = String(message.tool || '').split('.').at(-1)
       const handler = _toolHandlers.get(message.tool) || _toolHandlers.get(localName)
       if (!handler) {
         window.parent.postMessage({
-          type: 'mim:tool-response',
+          type: 'mimir:tool-response',
           id: message.id,
           result: null,
           error: {
@@ -78,7 +78,7 @@
             ? value
             : { value }
           window.parent.postMessage({
-            type: 'mim:tool-response',
+            type: 'mimir:tool-response',
             id: message.id,
             result,
             error: null,
@@ -87,7 +87,7 @@
       } catch (error) {
         if (!controller.signal.aborted) {
           window.parent.postMessage({
-            type: 'mim:tool-response',
+            type: 'mimir:tool-response',
             id: message.id,
             result: null,
             error: {
@@ -117,7 +117,7 @@
   const workspacePath = urlParams.get('workspacePath') || ''
 
   if (!appId) {
-    console.warn('[mim-sdk] Could not parse app identity from URL:', window.location.href)
+    console.warn('[mimir-sdk] Could not parse app identity from URL:', window.location.href)
   }
 
   // ── SDK ───────────────────────────────────────────────────────
@@ -225,7 +225,7 @@
       },
       handle(name, handler) {
         if (!name || typeof handler !== 'function') {
-          throw new TypeError('mim.tools.handle requires a tool name and handler function')
+          throw new TypeError('mimir.tools.handle requires a tool name and handler function')
         }
         _toolHandlers.set(String(name), handler)
         return () => _toolHandlers.delete(String(name))
@@ -234,16 +234,16 @@
     workspace: Object.freeze({
       openFile(path) {
         if (!isIframe) return Promise.reject(new Error('Open-file routing requires an embedded app.'))
-        window.parent.postMessage({ type: 'mim:open-file', path: String(path) }, '*')
+        window.parent.postMessage({ type: 'mimir:open-file', path: String(path) }, '*')
         return Promise.resolve()
       },
     }),
   }
 
   Object.freeze(sdk)
-  window.mim = sdk
+  window.mimir = sdk
   if (isIframe) {
-    window.parent.postMessage({ type: 'mim:ready', appId }, '*')
+    window.parent.postMessage({ type: 'mimir:ready', appId }, '*')
   }
 
   function binaryResultToBytes(result) {
