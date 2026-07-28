@@ -206,6 +206,55 @@ describe('activity runtime store', () => {
     expect(useActivitiesStore().byId('agent:one').status).toBe('working')
   })
 
+  it('does not let a late archive response overwrite a newer restore', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    await runtime.initialize()
+    store.upsert({
+      ...backendRecord,
+      status: 'done',
+      updatedAt: '2026-07-25T11:00:00Z',
+    })
+
+    let resolveArchive
+    let resolveRestore
+    api.setActivityArchived
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveArchive = resolve
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveRestore = resolve
+      }))
+
+    const archive = runtime.setArchived('agent:one', true)
+    eventCallback({
+      type: 'upsert',
+      record: {
+        ...store.byId('agent:one'),
+        archivedAt: '2026-07-25T12:00:00Z',
+        updatedAt: '2026-07-25T12:00:00Z',
+      },
+    })
+    const restore = runtime.setArchived('agent:one', false)
+    const restoredRecord = {
+      ...store.byId('agent:one'),
+      archivedAt: null,
+      updatedAt: '2026-07-25T12:00:01Z',
+    }
+    eventCallback({ type: 'upsert', record: restoredRecord })
+    resolveRestore(restoredRecord)
+    await restore
+
+    resolveArchive({
+      ...restoredRecord,
+      archivedAt: '2026-07-25T12:00:00Z',
+      updatedAt: '2026-07-25T12:00:00Z',
+    })
+    await archive
+
+    expect(store.byId('agent:one').archivedAt).toBeNull()
+  })
+
   it('renames, archives, and deletes renderer-hosted app Activities without fake PTY calls', async () => {
     const runtime = useActivityRuntimeStore()
     const store = useActivitiesStore()

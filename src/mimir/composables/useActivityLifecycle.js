@@ -55,8 +55,9 @@ export function useActivityLifecycle({
 
   async function restoreActivity(id) {
     try {
-      await activityRuntime.setArchived(id, false)
-      selectActivity(id)
+      const restored = await activityRuntime.setArchived(id, false)
+      unmarkClosing(id)
+      selectActivity(restored?.id || id)
     } catch (cause) {
       diagnostic.value = `Activity could not be restored: ${errorMessage(cause)}`
     }

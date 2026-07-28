@@ -21,6 +21,8 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   const error = ref('')
   const lastLaunchMetrics = ref(null)
   let unlisten = null
+  let nextArchiveMutation = 0
+  const archiveMutations = new Map()
 
   async function initialize() {
     if (ready.value) return
@@ -216,12 +218,19 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   }
 
   async function setArchived(id, archived) {
+    const generation = ++nextArchiveMutation
+    archiveMutations.set(id, generation)
     const activity = activities.byId(id)
     if (activity && activity.host?.type !== 'pty') {
-      activities.setArchived(id, archived)
-      return
+      return activities.setArchived(id, archived)
     }
-    activities.upsert(await setActivityArchived(id, archived))
+    const record = await setActivityArchived(id, archived)
+    // The backend also publishes an upsert event. If a user restores a row as
+    // soon as the archive event arrives, the older archive invoke can resolve
+    // after the newer restore and must not overwrite the restored renderer
+    // state with its stale response.
+    if (archiveMutations.get(id) === generation) activities.upsert(record)
+    return activities.byId(id) || record
   }
 
   async function clear(id) {
@@ -252,6 +261,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   async function dispose() {
     if (unlisten) unlisten()
     unlisten = null
+    archiveMutations.clear()
     ready.value = false
   }
 
