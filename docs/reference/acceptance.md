@@ -64,7 +64,7 @@ requirements; they do not replace runtime verification.
 - Cmd/Ctrl+W on a focused Sidebar Activity archives that exact durable row,
   including failed rows that are not currently selected; live rows stop before
   archival.
-- Codex, Claude, and Pi detection reports precise unavailable states.
+- Codex, Claude, Pi, and Gemini detection reports precise unavailable states.
 - Settings > CLI tools uses compact detected-agent rows, launcher-visibility
   switches, shell-like flag editing, progressive cwd/command/environment
   details, and no kind/agent/cwd select maze.
@@ -80,17 +80,25 @@ requirements; they do not replace runtime verification.
 
 - The MCP endpoint binds to loopback and exposes `initialize`, `ping`,
   `tools/list`, and `tools/call`.
-- One canonical registry backs MCP, Tauri callers, apps, and `mimir`.
+- One canonical registry backs the UI and runtimes; MCP and `mimir` use its
+  explicit public projection.
 - Default agent discovery contains only `mimir_state`, `mimir_reveal`, and
-  `mimir_propose`; optional domains require explicit CLI discovery.
-- Tool calls validate object schemas and return structured, stable errors.
-- Core tools cover files, editor, comments, shell, web search, Activities,
-  Apps, Routines, settings, and the native Business graph domains.
-- Live app providers can add, update, remove, execute, and cancel tools without
-  restarting the server.
-- Mimir-launched Codex, Claude, and Pi receive the endpoint automatically.
-- Codex uses the app-specific `mcp_servers.mimir` HTTP entry so an
-  existing stdio server named `mimir` cannot make one-run configuration invalid.
+  `mimir_propose`; the remaining public tools require CLI discovery.
+- Tool calls validate complete object schemas, report all input failures
+  together, and return structured stable errors.
+- The public surface is 14 Workbench/Graph tools plus conditional connection
+  tools; internal UI/runtime domains never leak into agent discovery.
+- Live app providers can add, update, remove, execute, and cancel private
+  registry tools without restarting the server.
+- Mimir-launched Codex, Claude, Pi, and Gemini receive the endpoint
+  automatically with activity and agent provenance.
+- The one-line `mimir tools` / `mimir tool` / `mimir skill` / `mimir doctor`
+  routing contract is delivered once, without client tutorials.
+- Every connection uses the product-owned `mimir_workbench` identity and
+  preserves unrelated client configuration.
+- Catalog and personal skills trigger natively in every client; project skills
+  trigger natively in Claude and Pi and remain one explicit lookup away in
+  Codex and Gemini.
 
 ## Files
 
@@ -130,24 +138,22 @@ requirements; they do not replace runtime verification.
 - It launches and reloads Apps, opens or reveals local definitions, creates a
   runnable starter app, duplicates local packages, updates display titles
   without changing stable ids, and moves exact definitions to Trash.
-- App mutations update Sidebar launch rows immediately and expose the same safe
-  operations through `apps_reload`, `apps_create`, `apps_duplicate`,
-  `apps_update`, and `apps_trash`.
+- App mutations update Sidebar launch rows immediately through the human UI.
 - Invalid TOML, duplicate IDs, missing entries, and invalid modes produce
   visible diagnostics without hiding valid apps.
 - Embedded, terminal, process, window, Rust-helper, and action launch plans
   resolve explicitly.
 - Stable Apps reopen one singleton Tool Activity and do not duplicate
   themselves in Activities. Terminal and process Apps create one real PTY
-  Activity from Sidebar, Settings, or MCP.
+  Activity from Sidebar or Settings.
 - Embedded apps can use the host SDK for app data, files, HTTP, tools, and
   opening a file in the Editor.
 - App-defined tools join the live registry and unregister with their instance.
 - Reloading an already-mounted embedded App replaces its exact tool provider
   and reloads its frame without accumulating listeners.
 - Today is a durable single-priority editor that restores former Scratch text,
-  highlights Markdown source without a preview layer, autosaves, and exposes
-  the live value through `scratch_read`.
+  highlights Markdown source without a preview layer, autosaves, and is
+  included in `mimir_state`.
 - Today and Business graph are functional built-in Tools.
 - Git state remains available through Files decorations and summaries; there
   is no separate Changes built-in.
@@ -189,7 +195,8 @@ requirements; they do not replace runtime verification.
   overwriting them.
 - `graph.context` bounds bodies and node count, preserves provenance and
   selected scopes, filters hidden relations, and redacts `record` or
-  `sensitive: true` content by default.
+  `redactFromContext: true` (`sensitive: true` compatibility) content by
+  default. Direct reads and searches still return it.
 - Start Work first presents an editable objective and explains the selected
   scopes and bounded context. Explicit confirmation creates a durable agent
   Activity with explicitly untrusted graph context and associates that

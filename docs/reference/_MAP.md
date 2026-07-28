@@ -1,7 +1,7 @@
 # Codebase map
 
 This archived map routes Mimir's dense implementation notes. Do not preload it or
-[gotchas.md](gotchas.md); use it only when source and focused `mimir help` are
+[gotchas.md](gotchas.md); use it only when source and focused `mimir tool` help are
 insufficient. Source remains canonical for local syntax and obvious behavior.
 
 ## Product shape
@@ -184,7 +184,7 @@ cross-window behavior are in [settings.md](settings.md).
 - `src-tauri/src/activities/status.rs`: agent working/input/done inference
 - `src-tauri/src/activity_commands.rs`: Tauri lifecycle and PTY commands
 - `src-tauri/src/launchers.rs`: presets, detection, exact argv, MCP injection
-- `src-tauri/src/mimir_cli.rs`: installs `mimir` and the Pi extension
+- `src-tauri/src/mimir_cli.rs`: installs `mimir`, its skill module, and the Pi extension
 
 ### MCP and tools
 
@@ -192,8 +192,10 @@ cross-window behavior are in [settings.md](settings.md).
 - `src-tauri/src/tool_bridge.rs`: UI and app provider bridges
 - `src-tauri/src/tool_runtime.rs`: core definitions and live provider ownership
 - `src-tauri/src/tool_server.rs`: loopback MCP transport and legacy debug routes
+- `src-tauri/src/connections.rs`: conditional Google, Slack, and Granola native tools
 - `src-tauri/src/shell_exec.rs`: bounded shell execution with sensitive-env filtering behind `shell.run`
-- `bin/mimir.mjs`: tool discovery, generic calls, and editor shortcuts
+- `bin/mimir.mjs`: focused tool/skill discovery, doctor, calls, and MCP proxy
+- `bin/mimir-skills.mjs`: scoped canonical skill storage and native projections
 - `bin/pi-mimir-extension.ts`: dynamic Pi registration of current Mimir tools
 
 - `src-tauri/tests/mimir_cli_contract.rs`: end-to-end MCP contract test — boots a
@@ -257,6 +259,9 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 | `~/.mimir/models.json` | inline/ghost AI provider and model registry |
 | `~/.mimir/bin/` | installed `mimir` |
 | `~/.mimir/pi/mimir-tools.ts` | installed Pi extension |
+| `~/.mimir/skills/` | canonical skills, revisions, manifests, and Claude snapshots |
+| `~/.mimir/connections/granola.sqlite` | native Granola cache when no predecessor cache exists |
+| `~/.agents/skills/` | Mimir-managed catalog/personal projection plus unrelated user skills |
 | `~/.mimir/keys.env` | debug-only plaintext key fallback |
 
 ## Documentation
@@ -270,7 +275,7 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 | [runtime-architecture.md](runtime-architecture.md) | native/renderer authority, bootstrap, hydration, shutdown |
 | [ipc.md](ipc.md) | commands/events, relay ordering, queues, proposal coordination |
 | [persistence.md](persistence.md) | write ownership, serialization, quarantine, recovery |
-| [settings.md](settings.md) | mutation, persistence, cross-window and MCP semantics |
+| [settings.md](settings.md) | mutation, persistence, cross-window and private-registry semantics |
 | [security.md](security.md) | trusted-local model and exact capability boundaries |
 | [ai-system.md](ai-system.md) | model registry, credentials, providers, transport |
 | [agent-setup.md](agent-setup.md) | launchers, automatic agent connection, `mimir` |

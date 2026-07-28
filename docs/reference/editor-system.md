@@ -79,6 +79,14 @@ moves to the editor row. It never uses a colored edge or stripe.
 `mousedown.prevent` keeps the selection owned by CodeMirror while a formatting
 command runs.
 
+`markdownLists.js` rebinds Enter above the keymap `markdown()` installs, so
+list continuation is always tight: Enter on an empty item leaves the list
+instead of loosening it, and continuing an item in an already-loose list drops
+the blank line CodeMirror would repeat. The command declines outside Markdown,
+which is what lets it sit in the shared `core.js` keymap; the workbench
+Markdown editors (`TodayApp.vue`, `GraphMarkdownEditor.vue`) build their own
+CodeMirror states and each add the same extension.
+
 The active document remains plain Markdown on disk.
 
 ## Review flow

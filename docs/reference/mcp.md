@@ -1,156 +1,126 @@
-# MCP registry
+# Agent capability boundary
 
-Mimir exposes one canonical capability registry to CLI agents, embedded apps,
-Routines, the renderer, and `mimir`.
+Mimir keeps a broad internal registry for its UI and runtimes, but exposes one
+small public agent API.
 
 ## Transport
 
-The desktop workbench starts a loopback HTTP server at:
+The desktop starts a loopback endpoint at:
 
 ```text
 http://127.0.0.1:17532/mcp
 ```
 
-It implements MCP `initialize`, `ping`, `tools/list`, and `tools/call`.
-Ordinary `tools/list` returns only the three lean agent tools and one registry
-revision. Explicit CLI discovery sends `includeAll: true`; that response
-returns the complete catalog with canonical name, owner, and source metadata.
+It implements `initialize`, `ping`, `tools/list`, and `tools/call`, negotiates
+the supported MCP protocol versions, validates browser Origin, and does not
+issue session IDs. It must not be exposed beyond loopback.
 
-The server negotiates the stable `2025-06-18` and `2025-03-26` protocol
-versions. It is intentionally stateless and therefore does not issue or
-require MCP session ids. Registry changes are observed through the revision in
-`tools/list`; the server does not advertise `listChanged` because this compact
-HTTP transport has no outbound notification channel.
+Initialization contains only:
 
-The endpoint binds only to `127.0.0.1`. The older `/api/tools` routes exist for
-local debugging and require the runtime bearer token; agents and `mimir` use
-`/mcp`. The MCP endpoint is a trusted-local capability surface: it has no
-per-agent tokens or role policy, and must not be exposed beyond loopback.
+```text
+Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
+```
+
+Normal `tools/list` advertises `mimir_state`, `mimir_reveal`, and
+`mimir_propose`. The installed CLI uses `includeAll: true` to obtain every
+currently backed public tool. That wider result is still a public projection,
+not the internal registry.
+
+## Public projection
+
+`src-tauri/src/tool_runtime.rs::AGENT_TOOLS` is the allowlist. It defines each
+public underscore name, concise description, group, effect, and whether it is
+directly advertised. `tools/call` resolves only these public names. Internal
+dotted names and historical aliases are rejected even if a private registry
+handler exists.
+
+The 14 always-available core tools are:
+
+```text
+mimir_state       mimir_reveal      mimir_propose
+comments_list     comments_add      comments_reply     comments_resolve
+graph_find        graph_get         graph_create       graph_update
+graph_delete      graph_restore     graph_context
+```
+
+Up to 13 connection tools register only when enabled and backed:
+
+```text
+gmail_search      gmail_read        gmail_send
+calendar_list     calendar_create
+drive_search      drive_read
+granola_search    granola_get       granola_sync
+slack_search      slack_read        slack_send
+```
+
+`mimir tools` groups these as Workbench, Graph, and Connections. It prints only
+name, effect, and purpose. `mimir tool <name>` retrieves the full schema.
+`mimir tools --json` is the only bulk machine-readable form.
+
+There are no public knowledge, issues, projects, research, Activities, Apps,
+files, routines, settings, shell, or web-search families. Issues are graph
+nodes. Internal handlers for UI/runtime compatibility do not widen the agent
+surface.
 
 ## Registry contract
 
-`src-tauri/src/tool_registry.rs` is transport-neutral. It owns:
-
-- canonical names and unique MCP aliases
-- descriptions and JSON input schemas
-- source and ownership metadata
-- schema validation before execution
-- structured result and error categories
-- cancellation, timeouts, provider reconciliation, and revision observation
-
-`src-tauri/src/tool_runtime.rs` registers core definitions. UI-owned tools
-relay to `src/services/toolRuntime.js`; Business graph tools register direct
-native handlers because `GraphRuntime` owns their data and mutation contract.
-Both paths share the same registry schema validation, errors, discovery, and
-cancellation contract. Apps can reconcile per-instance providers through
-`src/services/appsCatalog.js`; removing an instance also removes its tools and
-cancels outstanding calls.
+`tool_registry.rs` remains transport-neutral and owns schemas, aggregate input
+validation, annotations, structured results/errors, cancellation, provider
+reconciliation, and revisions.
 
 Stable error codes are `not_found`, `invalid_input`, `cancelled`, `timeout`,
-`unavailable`, `handler`, and `internal`. Callers must branch on the code, not
-message prose. Native wrapper failures in `src/services/toolRuntime.js` map
-known workspace/revision/not-found errors into these categories.
+`unavailable`, `handler`, and `internal`. MCP tool failures remain tool results
+with `isError`; malformed protocol requests remain JSON-RPC errors.
 
-Core renderer relays default to 120 seconds; dynamic provider timeouts are
-bounded natively. Timeout/cancel removes the provider's pending request and
-emits a renderer cancellation. A response after completion is rejected as an
-unknown/late id rather than reviving the call.
+Workbench tools relay to the renderer. Graph and connection tools have native
+Rust handlers. Both paths use the same registry validation and result shape.
+MCP responses contain readable `content` plus machine-readable
+`structuredContent`; the CLI prefers the latter.
 
-## Default agent surface
+Today is folded into `mimir_state`. The built-in retains its `scratch` storage
+id for migration but does not register an app tool.
 
-| Tool | Purpose |
-|---|---|
-| `mimir_state` | active document, tabs, selection, visible range, dirty state, and comment counts |
-| `mimir_reveal` | open a file and optionally reveal a line or offset |
-| `mimir_propose` | show one exact replacement as an accept/reject review |
+## Connections
 
-These are transport projections over `editor.state`, `editor.reveal`, and
-`editor.propose`. The descriptions are deliberately one sentence each and the
-schemas carry validation details. Calls to other known canonical names and
-aliases still work; they are simply not placed in every agent's initial
-context.
+Connection handlers live in `connections.rs`.
 
-## Registry domains
+- Google and Slack read credentials from Mimir’s OS-keychain service, then the
+  predecessor service for migration. Credentials never appear in descriptors,
+  results, diagnostics, or settings.
+- Account selection uses `connections.<name>.account`, then the predecessor’s
+  credential-free default, then `default`.
+- Google registration follows granted OAuth scopes.
+- Granola search/get use the local SQLite cache. Sync is the only Granola
+  network operation and uses the Granola desktop token files. A completed
+  `full` sync prunes meetings deleted upstream; a page-limited traversal never
+  prunes.
+- `settings.json` may disable `google`, `slack`, or `granola`; missing backing
+  state keeps those tools out of the projection. Restarting Mimir rebuilds the
+  projection after connection changes.
 
-| Canonical domain | Purpose |
-|---|---|
-| `files.*` | text tools plus workspace-safe browse, folder, rename, duplicate, and Trash operations |
-| `editor.*` | open/reveal/save, tabs, content, selection, editor mutations |
-| `comments.*` | add, reply, resolve, reopen, and delete pseudo-XML threads |
-| `shell.*` | bounded workspace shell execution |
-| `web.*` | OpenAlex, Crossref, and arXiv metadata search |
-| `activities.*` | list, spawn, stop, rename, archive, and clear Activities |
-| `apps.*` | list, launch, reload, create, duplicate, display-rename, and Trash local Apps |
-| `routines.*` | list, run, create, revision-guarded update/duplicate, and Trash |
-| `settings.*` | read and update public workbench/editor settings |
-| `graph.*` | source-aware graph query, search, traversal, context, diagnostics, migration, and mutation |
-| `knowledge.*` | compatibility facade over non-issue graph nodes |
-| `issues.*` | Issue Board compatibility plus semantic movement, assignment, completion, deliverables, and next actions |
-| `projects.*` | link companies/contacts and record durable project decisions |
-| `research.*` | capture source-aware HEOR evidence |
+`mimir doctor` uses a private diagnostic RPC to inspect graph scopes, public
+tool count, registered connection tools, and local credential errors. It does
+not contact remote services and reports `remoteChecked: false` in JSON.
+`graph.status` is not made public just to implement diagnostics.
 
-Optional aliases such as `read`, `comment_resolve`, `activities_list`, and
-`routines_run` remain in the internal registry and explicit `mimir` catalog.
-Canonical names are used inside Mimir and are also accepted by the registry.
+## Client attachment
 
-File-manager aliases are namespaced (`files_browse`, `files_create_folder`,
-`files_rename`, `files_duplicate`, `files_trash`) so the long-standing
-`create` alias remains the text-file tool. Routine mutation aliases are
-`routines_create`, `routines_update`, `routines_duplicate`, and
-`routines_trash`. Routine update/duplicate/Trash calls must pass the
-`sourceRevision` returned by `routines.list` as `expected_revision`; stale
-callers receive a structured `invalid_input` error instead of overwriting
-external edits.
+- Codex and Claude receive a run-scoped HTTP definition.
+- Pi’s installed extension dynamically registers the three direct tools.
+- Gemini uses Mimir’s owned stdio proxy entry.
+- Every launched agent receives the scoped endpoint and `~/.mimir/bin` on
+  `PATH`.
 
-App definition aliases are likewise explicit: `apps_reload`, `apps_create`,
-`apps_duplicate`, `apps_update`, and `apps_trash`. They invoke the same native
-catalog operations as Settings > Apps and return its refreshed catalog.
-`apps.update` changes the display title while keeping the id stable because
-that id owns app data, Activity identity, and generated app-tool names.
+The endpoint URL’s activity/agent query parameters are omitted from ordinary
+help and errors. `--verbose` may show them.
 
-Substantial file edits are routed into the stable Editor as proposals so the
-user can accept or reject a full diff. Direct editor selection/content tools
-are explicit lower-level operations.
+## Change checklist
 
-## Callers
+For a new public capability:
 
-- Codex and Claude receive the MCP URL through launcher flags.
-- Pi receives a generated extension that discovers and registers the aliases.
-- `mimir tools` lists the three default tools without schemas.
-- `mimir tools <topic>` or `mimir tools --all` discloses optional capabilities;
-  `--json` includes their schemas.
-- `mimir call <canonical-or-alias> <json>` performs a generic call.
-- `mimir graph [terms]`, `mimir board [status]`, and `mimir context <id>` expose
-  readable terminal projections over the native graph tools.
-- Embedded apps use `window.mimir.tools.list()`, `.call()`, and `.handle()`.
-- Routine runs use their launcher preset and therefore inherit the same agent
-  connection.
-
-See [agent-setup.md](agent-setup.md) and [apps-system.md](apps-system.md).
-
-MCP results carry both human-readable `content` and machine-readable
-`structuredContent`. `mimir` returns `structuredContent` when present and keeps
-the text form only as a compatibility fallback.
-
-## Lifetime and change map
-
-The registry exists before the HTTP socket. `createToolRuntime.start` installs
-relay listeners, then acquires a client lease on `tool_server_start`; HMR
-instances may overlap. The final lease release closes and awaits the listener
-before another bind can occur. See [ipc.md](ipc.md).
-
-When adding/changing a core tool, update:
-
-- the definition/schema/alias in `src-tauri/src/tool_runtime.rs`, or
-  `business_graph/tools.rs` for a direct native graph tool;
-- the lean projection in `src-tauri/src/tool_server.rs` only if the capability
-  belongs in every agent's initial context;
-- the renderer dispatch in `src/services/toolRuntime.js` or workspace tool
-  implementation under `src/services/ai/tools/`;
-- `CORE_TOOL_ALIASES` if it uses the legacy renderer tool set;
-- Rust registry/runtime/server tests and `toolRuntime.test.js`;
-- `bin/mimir.mjs` only for a new convenience command, not generic call support;
-- this document only for a new domain or non-obvious lifecycle rule.
-
-Do not hand-maintain a second complete tool-schema table here; the definition
-vectors and explicit full-list response are canonical.
+1. Implement/register its internal canonical handler.
+2. Add one `AGENT_TOOLS` projection entry.
+3. Give it a short public description, group, and honest effect.
+4. Add schema, rejection, CLI discovery, and end-to-end contract tests.
+5. Add permanent agent text only if a demonstrated failure cannot be solved by
+   the catalog or focused schema.

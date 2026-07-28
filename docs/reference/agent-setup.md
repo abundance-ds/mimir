@@ -1,14 +1,12 @@
 # Agent setup
 
-Mimir detects Codex, Claude, and Pi from the user's login-shell PATH. Installed
-and enabled presets appear as one-click launchers in the Sidebar. Missing
-binaries remain visible with their diagnostics in Settings > CLI tools instead
-of occupying the launch surface.
+Mimir detects Codex, Claude, Pi, and Gemini from the login-shell `PATH`.
+Installed, enabled presets appear as launchers; unavailable clients keep their
+diagnostic in Settings > CLI tools.
 
-## Launcher presets
+## Presets
 
-Presets live in `~/.mimir/launchers.json`. Mimir writes the default file on first
-load and can edit the same data in Settings > CLI tools.
+Presets live in `~/.mimir/launchers.json`:
 
 ```json
 {
@@ -23,151 +21,110 @@ load and can edit the same data in Settings > CLI tools.
       "args": [],
       "env": {},
       "cwd": { "mode": "workspace" }
-    },
-    {
-      "id": "review",
-      "title": "Claude review",
-      "kind": "agent",
-      "agentId": "claude",
-      "enabled": true,
-      "args": ["--model", "sonnet"],
-      "env": {},
-      "cwd": { "mode": "workspace" }
-    },
-    {
-      "id": "terminal",
-      "title": "Terminal",
-      "kind": "terminal",
-      "enabled": true,
-      "args": [],
-      "env": {},
-      "cwd": { "mode": "workspace" }
     }
   ]
 }
 ```
 
-`kind` is `agent` or `terminal`. Agent presets use `agentId` `codex`, `claude`,
-or `pi`; `binary` may override detection. A terminal may also set `binary`;
-otherwise it uses the platform's default shell.
+`agentId` is `codex`, `claude`, `pi`, or `gemini`. An optional `binary`
+overrides detection. Terminal presets use the platform shell unless `binary` is
+set.
 
-`enabled` controls whether the usable preset appears in the Sidebar. Existing
-version-1 files without the field load as enabled. The ordinary Settings path
-shows detected command/version, a visibility switch, and one shell-like CLI
-flags field. Working directory and command/environment details are progressive
-disclosures. The flags editor parses quotes and escapes into `args`; the saved
-file and native launcher still retain exact argv entries.
+`cwd` is `workspace`, `home`, or an absolute `custom` path. Every `args` value
+is one argv entry; no shell command is reconstructed. `env` is merged into the
+child environment.
 
-`cwd` accepts:
+Existing version-1 files are preserved rather than rewritten when new built-in
+agents appear. Add Gemini once in Settings if an older file does not contain
+its preset.
 
-- `{ "mode": "workspace" }`
-- `{ "mode": "home" }`
-- `{ "mode": "custom", "path": "/absolute/path" }`
+## Connection
 
-Each `args` item is one exact argv entry. No shell string is reconstructed.
-`env` is merged into the child environment.
+Every launched Activity receives:
 
-## Automatic MCP connection
+- an activity-scoped `MIMIR_MCP_URL`;
+- `MIMIR_ACTIVITY_ID` and `MIMIR_AGENT_ID`;
+- `~/.mimir/bin` on `PATH`.
 
-Every Mimir-launched preset receives:
+Mimir adds one product-owned connection unless the preset already supplies it:
 
-- `MIMIR_MCP_URL=http://127.0.0.1:17532/mcp`
-- `~/.mimir/bin` prepended to PATH
+| Client | Connection |
+|---|---|
+| Codex | `mcp_servers.mimir_workbench.url` one-run override |
+| Claude Code | additional inline `mimir_workbench` HTTP definition |
+| Pi | `~/.mimir/pi/mimir-tools.ts` extension |
+| Gemini CLI | owned `mimir_workbench` stdio-proxy settings entry |
 
-Agent-specific connection is added unless the preset already supplies it:
+Unrelated client configuration is preserved. The Gemini entry reads the
+launch's environment variable, so settings never store an activity ID. A
+collision with an unrelated entry using the same product-owned name is an
+error, not an overwrite.
 
-- Codex receives a one-off `mcp_servers.mimir.url` configuration
-  override. The app-specific name cannot merge with a user's unrelated stdio
-  server named `mimir`.
-- Claude receives an inline `--mcp-config` HTTP server definition.
-- Pi receives `--extension ~/.mimir/pi/mimir-tools.ts`.
+Pi performs the MCP handshake, dynamically registers the lean tool set, and
+adds the one-line Mimir instruction once. `/mimir-refresh` rediscovers the
+currently exposed set.
 
-Detection understands both two-argument and `--mcp-config=…` Claude forms, so
-preconfigured flags are kept verbatim and never injected twice. Terminal
-presets and agent presets with an exact binary path resolve without running
-unrelated agent/version probes; the launcher settings screen is the explicit
-detection refresh boundary.
+Continuations reuse the client-specific resume strategy and retain the
+Activity's MCP provenance. Gemini uses `--resume latest`. Routine launches also
+receive scoped provenance.
 
-The Pi extension discovers the lean live catalog at session start and preserves
-its `mimir_` names (legacy names receive the prefix once). `/mimir-refresh`
-discovers newly exposed default tools after the session began.
+## Skills
 
-Ended agent Activities can start a continuation using the CLI's supported
-resume strategy; the continuation respawns inside the same Activity record.
-Plain terminal restart always creates a fresh Activity.
+Before launch, Mimir resolves catalog, personal, and current-project skills
+into retained read-only revisions:
 
-## Detection and resolution boundaries
+- Codex and Gemini discover catalog/personal links in `~/.agents/skills`;
+- Claude receives a generated `.claude/skills` snapshot through `--add-dir`;
+- Pi receives shared links plus repeated `--skill <SKILL.md>` project paths.
 
-Opening/reloading CLI Settings is the explicit detection refresh boundary.
-Rust resolves the login-shell PATH and runs version probes once into a process
-cache; ordinary launches reuse that cache. A preset with an explicit `binary`
-or a terminal preset does not trigger unrelated agent/version probes.
+Codex and Gemini currently have no clean per-launch project-skill root.
+Project skills use `mimir skill <query>` there; Mimir does not modify the repo
+or replace the client's home directory.
 
-Availability shown by `src/stores/launchers.js` is a renderer decoration over
-the last detection result. `launcher_resolve` remains authoritative for a
-launch: it validates the preset, chooses the binary and cwd, injects agent MCP
-arguments only when absent, and returns exact command/argv/env. The renderer
-then appends run-specific resume/prompt args and host-authoritative
-`MIMIR_ACTIVITY_ID`/`MIMIR_MCP_URL` before spawning.
+See [Agent interface](../agent-interface.md) for scope and compatibility
+decisions.
 
-Agent detection and connection injection are separate. A custom binary on an
-agent preset keeps the configured `agentId`/resume strategy and MCP injection
-without requiring the binary to match a detected catalog path.
+## Resolution boundary
+
+Opening/reloading CLI Settings refreshes detection. Ordinary launches reuse the
+cached result. Terminal presets and presets with an exact custom binary do not
+run unrelated client probes.
+
+`launcher_resolve` validates the preset, chooses command/cwd, prepares skills,
+and returns exact argv/env. `activityRuntime` then applies run or resume
+identity before spawn.
 
 Files that must agree:
 
-- `src-tauri/src/launchers.rs`: config, detection cache, resolution/injection
-- `src/stores/launchers.js`: availability projection
-- `src/services/launchers.js`, `activities.js`: invoke boundary
-- `src/stores/activityRuntime.js`: record construction and continuation argv
-- `src/shared/ui/settings/launcherFlags.js`: shell-like UI text to exact argv
-- `bin/mimir.mjs`, `bin/pi-mimir-extension.ts`, `src-tauri/src/mimir_cli.rs`: installed
-  clients
+- `src-tauri/src/launchers.rs`
+- `src/stores/activityRuntime.js`
+- `src/services/launchers.js`
+- `bin/mimir.mjs`
+- `bin/mimir-skills.mjs`
+- `bin/pi-mimir-extension.ts`
+- `src-tauri/src/mimir_cli.rs`
 
-Tests: native `launchers.rs`, launcher store/Settings/flags tests,
-`activityRuntime.test.js`, and `mimirCli.test.js`.
+## CLI
 
-## `mimir`
-
-Mimir installs `mimir` on launch and makes it available inside every Mimir PTY.
-It calls the same MCP registry as the agents.
+The installed CLI's agent-facing surface is:
 
 ```bash
-mimir help
-mimir state
 mimir tools
-mimir tools graph
-mimir call files.search '{"scope":"project","query":"needle"}'
-mimir active
-mimir tabs
-mimir open /absolute/path/to/file.md
-mimir reveal /absolute/path/to/file.md:42
-mimir selection
-mimir comments
-mimir comments-prompt
-mimir replace-selection --stdin
-mimir set-content --file replacement.md
-mimir save
-mimir graph [search terms]
-mimir board [status]
-mimir context <graph-node-id>
+mimir tool <name>
+mimir call <tool> --help
+mimir call <tool> '<json>'
+mimir skill <query>
+mimir doctor
 ```
 
-Bare help stays short. `mimir help <topic>` and `mimir tools <topic>` disclose
-optional commands and registry domains without loading their schemas into every
-agent session. `mimir tools --all --json` remains available for diagnostics.
+`mimir tools --json` and skill refresh remain available for diagnostics and
+client adapters.
 
-The graph shortcuts call the canonical native registry rather than scraping the
-visual app: `graph` prints a compact source-aware catalog or ranked search,
-`board` groups issues by status, and `context` prints the bounded agent context
-pack used by Start Work.
-
-For a shell outside Mimir:
+Outside a Mimir Activity:
 
 ```bash
 export PATH="$HOME/.mimir/bin:$PATH"
 export MIMIR_MCP_URL="http://127.0.0.1:17532/mcp"
 ```
 
-Mimir must be running for `mimir` and automatically connected agents to reach the
-renderer-backed tools.
+Mimir must be running for renderer-backed operations.

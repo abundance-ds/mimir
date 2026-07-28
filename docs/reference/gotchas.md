@@ -41,10 +41,9 @@ native spawn path or execute the field through a shell.
 
 ### Keep Codex's injected MCP name product-owned
 
-Codex config overrides merge with existing tables. Injecting
-`mcp_servers.mimir.url` into a user config where `mimir` is a stdio server creates
-an invalid hybrid transport. The clean Mimir identity owns `mcp_servers.mimir`;
-do not reuse that id for a different transport.
+Codex config overrides merge with existing tables. Mimir therefore owns the
+product-specific `mcp_servers.mimir_workbench` identity. Do not replace it with
+the generic name `mimir` or reuse it for another transport.
 
 ### Durable does not mean a process survives relaunch
 
@@ -105,11 +104,12 @@ the complete session lifecycle. The current direct launcher clients do not
 need sessions. The server negotiates only its explicitly supported stable
 protocol versions instead of echoing arbitrary client input.
 
-### Registry names and aliases are separate
+### Public and internal names are separate
 
-Canonical names such as `files.read` identify capabilities inside Mimir. MCP
-aliases such as `read` are client-facing. Both must remain unique and every
-tool's canonical metadata must survive transport listing.
+Canonical dotted names such as `files.read` identify capabilities inside
+Mimir. The public MCP projection accepts only the underscore names in
+`AGENT_TOOLS`; it does not expose dotted names, historical aliases, or
+canonical metadata.
 
 ### Dynamic app providers are instance-scoped
 
@@ -234,6 +234,18 @@ Startup arguments, Finder/file-association events, and second-instance
 arguments append absolute decoded paths to one native queue. The renderer
 installs `mimir://open-files-pending` before draining `take_pending_files`; do not
 send paths only as an event payload or reintroduce the listen/drain race.
+
+### `PhysicalPosition` on a drag-drop event is not physical
+
+Tauri types the webview drag-drop position as `PhysicalPosition`, but
+`tauri-runtime-wry` passes wry's raw platform coordinates through unconverted,
+and wry uses each platform's own units: AppKit points on macOS and GTK widget
+coordinates on Linux (both logical), `ScreenToClient` device pixels on Windows.
+Dividing by `devicePixelRatio` therefore slides every macOS drop up and to the
+left by the display scale, which lands it on a different row — or a different
+pane — with no error. `useFileDrop.js` scales per platform and measures the
+window against the viewport so interface zoom is included; re-check
+`dropCoordinatesArePhysical()` when wry is upgraded.
 
 ### Guard platform-only window APIs
 

@@ -89,6 +89,53 @@ Do not refresh the UI before the Editor reconciliation methods complete:
 path-based tab ownership and dirty-buffer recovery depend on seeing the old
 paths.
 
+## Dropping files in from outside
+
+Tauri intercepts OS drags before the webview sees them, so Files never receives
+an HTML `drop`. `src/mimir/files/useFileDrop.js` subscribes to the webview
+drag-drop event, which reports real filesystem paths — the reason folders can
+be dropped at all — and a window position instead of a DOM target. The hovered
+row is therefore hit-tested: the position is converted to CSS pixels, passed to
+`elementFromPoint`, then walked up to `[data-file-row]` inside this panel's
+`[data-files-list]`. Keep the main window on `TitleBarStyle::Overlay`; the
+webview filling the whole window is what makes window and viewport coordinates
+line up.
+
+That conversion is platform-dependent and is the one part of this feature that
+fails silently when it is wrong — see
+[gotchas.md](gotchas.md#physicalposition-on-a-drag-drop-event-is-not-physical).
+
+A row for a directory targets that directory, a row for a file targets its
+containing directory, and anywhere else over the tree targets the workspace
+root. A native drag owns the mouse, so the tree cannot be scrolled by wheel or
+scrollbar while one is in progress: a collapsed folder held under the pointer
+springs open, and a pointer held near the top or bottom edge scrolls the tree.
+Without both, any destination below the fold or inside a closed folder is
+unreachable without dropping and starting over. The panel also stops
+highlighting while an import runs, since a drop would be ignored until it
+finishes.
+
+`workspace_file_import` copies rather than moves — a drop must never remove the
+original from the Desktop — and reuses the guards and " copy" naming of the
+other mutations, so an arrival never overwrites an existing entry. A dropped
+alias is canonicalized and its target copied; symbolic links found *inside* a
+dropped folder are skipped rather than recreated, and counted in
+`ImportReport.skippedLinks`.
+
+A drop is a batch, and the contract is per item: each source lands completely
+or not at all. A source that cannot be read is described in
+`ImportReport.failures` instead of failing the call, so one bad item never
+discards the rest, and a copy that dies part-way removes the partial folder or
+file it created — the destination name is always fresh, so that removal can
+only take back what the same call just wrote. Batch-level problems (no sources,
+an unusable destination) remain hard errors.
+
+Because earlier sources can land before a later one fails, `FilesActivity.vue`
+reconciles the destination on *every* outcome, including a rejected invoke;
+skipping it on error would leave real arrivals invisible until a manual
+refresh. Failures surface through `operationError`, skipped links through
+`operationNotice` — a success with a remark must not render as an alert.
+
 ## Index/search concurrency
 
 The index is an in-memory projection and not a permission boundary. Its native
@@ -146,4 +193,5 @@ See [security.md](security.md).
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
 | external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |
 | rename/Trash with open buffers | `mimir/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
+| drag and drop from outside | `mimir/files/useFileDrop.js`, `FilesActivity.vue`, `FileTreeRow.vue`, `workspace_files.rs` | drop-composable, Files Activity, native import tests |
 | MCP mutation surface | `tool_runtime.rs`, renderer file tool handlers, `workspace_files.rs` | tool runtime and native mutation tests |

@@ -85,9 +85,9 @@ relation vocabulary also includes `works_at`, `for_company`, `has_contact`,
 Backlinks provide inverse navigation; writers do not need redundant inverse
 edges.
 
-`record` nodes and nodes with `sensitive: true` remain queryable in explicitly
-selected scopes, but their human content is redacted from default agent context
-packs.
+`redactFromContext: true` writes the compatibility property `sensitive: true`.
+Those nodes and all `record` nodes remain directly readable and searchable, but
+their human content is redacted from automatic graph context packs.
 
 ## Built-in app
 
@@ -133,8 +133,11 @@ is the 30-second standing answer: open/waiting/done strip, Blocked on
 aggregated by target, recent decisions, and deliverables, each row drilling
 to its node or file.
 
-Interaction follows **Scan → Peek → Focus**. Scan projections optimize
-recognition and triage. Peek is a read-first side surface with contact facts
+Interaction follows **Scan → Peek → Focus**. Opening the tool lands keyboard
+focus in the active projection — the selected row or first card — so arrow
+keys work without a mouse click; while the graph is still loading, focus
+parks on the app root and moves in once the projection renders. Scan
+projections optimize recognition and triage. Peek is a read-first side surface with contact facts
 for people (email, phone, role, company — each one-click copyable) at the
 top, quick issue properties, Markdown preview, operational context, and a
 plain-language relationship sentence. Focus is a spacious object workspace
@@ -209,45 +212,30 @@ focus. An agent can then open a deliverable in the Editor and leave durable
 evidence, a decision, an issue update, or a next action instead of losing the
 result in chat history.
 
-HEOR-specific semantic actions include `research.capture_evidence`,
-`projects.record_decision`, `issues.add_deliverable`, and
-`issues.create_next_action`.
-
 ## Tool surface
 
-The native graph tools are registered directly in the canonical registry and
-remain available while the visual app is closed.
-
-| Domain | Important operations |
-|---|---|
-| `graph.*` | status, list/query/get/search/neighbors, diagnostics, context, dry-run migration report, reference resolution, create/update/delete/restore |
-| `knowledge.*` | legacy-compatible list/catalog/get/search/neighbors/graph and create/update/delete |
-| `issues.*` | legacy-compatible list/get/create/update/delete plus move, assign, complete, add deliverable, and create next action |
-| `projects.*` | link company, add contact, record decision |
-| `research.*` | capture evidence |
-
-All 37 definitions use the same schema validation, structured errors, and
-canonical/MCP aliases as other Mimir tools. Generic writes exist for complete
-coverage; semantic commands are preferred because they validate target kinds
-and create the right relations.
-
-Terminal shortcuts use that same registry:
+Agents use one public graph surface:
 
 ```bash
-mimir graph
-mimir graph cost effectiveness evidence
-mimir board
-mimir board in-progress
-mimir context project-alpha
-mimir call projects.record_decision '{"id":"project-alpha","title":"Use matched cohort"}'
+mimir call graph_find '{"query":"cost effectiveness evidence"}'
+mimir call graph_get '{"id":"project-alpha"}'
+mimir call graph_create '{"kind":"issue","title":"Extract evidence"}'
+mimir call graph_update '{"id":"project-alpha","expectedRevision":"...","title":"Atlas"}'
+mimir call graph_delete '{"id":"obsolete-note"}'
+mimir call graph_restore '{"undoToken":"<token returned by graph_delete>"}'
+mimir call graph_context '{"focusId":"project-alpha"}'
 ```
+
+Issues are `kind: "issue"` graph nodes. Internal compatibility and semantic
+handlers may still support the visual app and migration code, but they are not
+public agent tool families.
 
 ## Migration and compatibility
 
 Opening a graph dual-reads existing `<root>/knowledge/*.md` and
-`<root>/issues/*.md` without first rewriting them. `knowledge.*` and `issues.*`
-compatibility calls translate to the shared model and preserve legacy shapes.
-Unknown metadata and stable ids survive read/write round trips.
+`<root>/issues/*.md` without first rewriting them. Internal compatibility
+translation preserves legacy shapes. Unknown metadata and stable ids survive
+read/write round trips.
 
 `graph.migration_report` is a read-only inventory. It reports source and scope
 counts, kinds and aliases, id collisions, diagnostics, and every legacy

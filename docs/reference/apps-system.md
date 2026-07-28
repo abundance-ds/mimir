@@ -37,7 +37,8 @@ fast access surfaces.
 - Search matches title, id, description, host mode, and declared tool metadata.
   Arrow keys move the selected row; Enter launches it.
 - **New** creates a working embedded app rather than an empty folder. Its
-  starter note autosaves through the SDK and implements a live `read` MCP tool.
+  starter note autosaves through the SDK and implements a live private `read`
+  tool.
 - Reload reparses external edits and shows per-definition diagnostics without
   hiding healthy apps.
 - Open definition sends `app.toml` to the right-hand Editor. Reveal opens the
@@ -55,8 +56,8 @@ Built-ins are visible and launchable but never mutated.
 
 Today is a full-pane durable top-priority editor with minimal Markdown source
 highlighting and no preview layer. It retains the former Scratch app's stable
-`scratch` id, `scratch` app-data key, and `scratch_read` MCP alias, so saved
-text and integrations survive the presentation change.
+`scratch` id and `scratch` app-data key so saved text survives the presentation
+change. It has no app tool; the durable priority is included in `mimir_state`.
 
 Business graph is the native first-party graph, Issue Board, portfolio, and CRM
 instrument. Its `rust-helper = "business-graph"` route mounts a Vue Activity
@@ -113,7 +114,7 @@ entries are accepted explicitly.
 Rust libraries. Business graph uses `business-graph`.
 
 `terminal` and `process` launch directly into one PTY-backed Activity from
-Sidebar, Settings, or MCP. There is no intermediate app-plan row. Exact args
+Sidebar or Settings. There is no intermediate app-plan row. Exact args
 and app env are preserved, while the new Activity id and Mimir MCP endpoint
 remain host-authoritative. Window/action plans keep an inspectable renderer
 host for completion, failure, and explicit relaunch feedback.
@@ -142,8 +143,8 @@ App data is namespaced below `~/.mimir/app-data/<app-id>/`.
 
 ## App-contributed tools
 
-Each manifest tool becomes a canonical name `app.<app-id>.<name>` unless its
-name is already qualified. Its default MCP alias is `<app-id>_<name>`.
+Each manifest tool becomes an internal canonical name
+`app.<app-id>.<name>` unless its name is already qualified.
 
 The embedded app attaches the implementation with
 `mimir.tools.handle(name, handler)`. Calls flow through the canonical registry to
@@ -152,12 +153,12 @@ cancels outstanding calls. Reloading a manifest while its stable Activity is
 mounted replaces that exact provider, reconciles the new tool definitions, and
 reloads the frame without stacking message or registry listeners.
 
-## App catalog through MCP
+## Internal app management
 
-App management expands the same canonical registry used by the UI, `mimir`,
-launched agents, routines, and apps:
+App management uses private registry handlers shared by the UI and app
+runtime:
 
-| Canonical name | MCP alias | Effect |
+| Canonical name | Internal alias | Effect |
 |---|---|---|
 | `apps.list` | `apps_list` | return catalog and diagnostics |
 | `apps.launch` | `apps_launch` | launch an installed app |
@@ -167,8 +168,9 @@ launched agents, routines, and apps:
 | `apps.update` | `apps_update` | update its display title, preserving id |
 | `apps.trash` | `apps_trash` | move one exact local definition to Trash |
 
-Reveal/open-folder remain UI-local because they are navigation effects, not
-useful automation capabilities.
+Neither app-contributed tools nor app-management handlers appear in the public
+agent catalog. Agents edit the authored files described by the `mimir-config`
+skill when app configuration is part of their task.
 
 ## Host architecture
 

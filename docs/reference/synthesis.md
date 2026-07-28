@@ -15,8 +15,9 @@ the editor's inline agent and ghost completion.
 
 1. **Activities are the execution UI.** Terminals, agents, apps, and routine
    runs use one lifecycle and one sidebar tray.
-2. **MCP is the capability layer.** Agents, apps, routines, and `mimir` share one
-   discoverable registry.
+2. **One registry, small public projection.** UI runtimes share the internal
+   registry; agents see only the explicit Workbench, Graph, and Connections
+   allowlist.
 3. **The Editor is the review surface.** Activity navigation never replaces the
    document being reviewed.
 4. **Files is workspace navigation.** A lazy project tree, editor-derived
@@ -47,7 +48,7 @@ Cmd/Ctrl+P History.
 
 - **Activity supervisor:** native PTYs, exact argv, durable agent/routine
   records, bounded scrollback, resume strategies, status events, archive/clear.
-- **Tool registry:** canonical names plus MCP aliases, schema validation,
+- **Tool registry:** canonical names plus internal aliases, schema validation,
   cancellation, live revision events, core UI handlers, and app-contributed
   providers.
 - **Files:** native metadata index, lazy guarded tree, bounded search,
@@ -56,7 +57,7 @@ Cmd/Ctrl+P History.
   local TOML instruments that embed UI, launch terminals/processes/windows,
   call tools, or use Rust helpers. Stable instruments live under Tools;
   fresh-run sources live under New activity. Safe definition
-  creation/duplication/title/Trash operations are shared with MCP; package
+  creation/duplication/title/Trash operations stay in the human UI; package
   management, trust, permission, and team ceremony are intentionally absent.
 - **Routines:** TOML cron schedules that resolve launcher presets and create
   ordinary durable agent Activities.

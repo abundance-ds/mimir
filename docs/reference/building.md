@@ -90,10 +90,10 @@ The product name is `Mimir`; the package and crate are `mimir`.
 
 ## Local runtime files
 
-Launching the desktop app installs `mimir` into `~/.mimir/bin/` and the Pi
-extension into `~/.mimir/pi/`. It also creates runtime directories as their
-systems are used. See [agent-setup.md](agent-setup.md) and
-[docs/_MAP.md](_MAP.md#local-data).
+Launching the desktop app installs `mimir` and its skill module into
+`~/.mimir/bin/`, plus the Pi extension under `~/.mimir/pi/`. It creates skill
+storage and native projections only as they are used. See
+[agent-setup.md](agent-setup.md) and [docs/_MAP.md](_MAP.md#local-data).
 
 API keys saved in Settings use the OS keychain. In debug builds only, key
 resolution may also read process environment variables, the repository `.env`,

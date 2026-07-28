@@ -65,7 +65,8 @@ The permanent rail system is the signature:
 - Activity and Editor collapse to 44px rails.
 - Stable destinations retain icons.
 - Dynamic Activities retain order and use source-specific Codex, Claude, Pi,
-  Terminal, App, and Routine icons with status overlays and native tooltips.
+  Gemini, Terminal, App, and Routine icons with status overlays and native
+  tooltips.
 - Row geometry stays aligned between expanded and collapsed Sidebar states.
 - The project mark opens the same teleported current/recent-folder switcher in
   expanded and rail states; switching never requires first expanding Sidebar.
@@ -144,6 +145,10 @@ marks selection, activity, focus, and attention.
 - Failures name the failed object and remain recoverable.
 - Pane state changes are immediate. Local motion may preserve spatial
   continuity and must respect reduced-motion preferences.
+- Selecting an Activity lands keyboard focus inside its surface. Surfaces
+  expose `focusEntry()` for this; WebKit leaves focus on `<body>` after
+  Sidebar clicks, so the workbench calls it explicitly instead of relying on
+  click focus (see gotchas.md).
 - Cmd+Plus/Minus step whole-window interface zoom and Cmd+0 resets it, in
   every focus context including modals, Quick Open, and PTYs. The chords never
   reach a terminal or CodeMirror. Editor content zoom has no keyboard chord;

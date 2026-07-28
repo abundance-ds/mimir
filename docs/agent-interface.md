@@ -1,386 +1,192 @@
 # Mimir agent interface
 
-Status: product decision and implementation direction
+Status: implemented, 2026-07-28
 
-## Principle
+## Design rule
 
-Give agents the smallest amount of information that changes what they do.
+Tell agents only what is Mimir-specific and changes their next action. They
+already understand tools, JSON, files, shells, MCP, and skills.
 
-Agents already understand shells, tools, MCP, JSON, files, and skills. Mimir
-must not explain those concepts. It should expose the few Mimir-specific entry
-points, then provide exact information only when the agent asks for it.
-
-Every word in agent context has a cost. Every extra command has a cost too. The
-goal is not the smallest prompt or the smallest CLI in isolation; it is the
-shortest reliable path from intent to a correct action.
-
-This leads to four rules:
-
-1. Put only routing information in permanent agent context.
-2. Put operation-specific requirements at the operation boundary.
-3. Prefer one shared interface across agents over client-specific tutorials.
-4. Add machinery only after it removes observed failures or round trips.
-
-## Product model
-
-Mimir has three agent-facing entry points:
+Permanent context is one line:
 
 ```text
-Mimir: `mimir tool <query>` · `mimir skill <query>` · `mimir doctor`
+Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
 ```
 
-That is the complete global instruction. Do not add an explanation of MCP, the
-tool registry, skill scopes, aliases, schemas, or client integration.
+No architecture lesson, hidden-tool warning, or client tutorial accompanies it.
 
-The resulting workflow is:
+## Discovery
+
+`mimir tools` prints every currently callable public tool, grouped as
+Workbench, Graph, and Connections. Each row contains only its public name,
+effect, and one short purpose. It never prints schemas.
+
+`mimir tool <name>` prints one complete input schema and a ready
+`mimir call` command. Name/description matching is a convenience when the
+input is not exact; ambiguity returns at most five short matches.
+
+`mimir tools --json` is the machine-readable form. There is no topic list,
+second `--all` registry, or dotted alternative name.
+
+MCP directly advertises only:
 
 ```text
-discover an operation  -> mimir tool <query>
-discover a workflow   -> mimir skill <query>
-diagnose the runtime  -> mimir doctor
+mimir_state
+mimir_reveal
+mimir_propose
 ```
 
-The discovery result provides the next executable command. The agent should
-not need a tutorial or a complete catalog dump.
+The CLI catalog progressively discloses the rest. Calls use the underscore
+name shown by `mimir tools`; internal dotted names are not public aliases.
 
-## CLI
+## Public tools
 
-### `mimir tool <query>`
-
-This is the single discovery command for Mimir operations.
-
-An exact canonical name or alias prints:
-
-- one-sentence purpose;
-- required inputs;
-- optional inputs;
-- constraints that cannot be inferred from the type;
-- one ready-to-run `mimir call`;
-- an example only when the schema is not enough.
-
-Accept dotted and underscore names, but display one public name. Names are an
-input compatibility concern, not something agents should have to reason about.
-
-Example:
+Workbench:
 
 ```text
-knowledge_create — Create a knowledge record
-
-Required:
-  title: string
-
-Optional:
-  body: string
-  scopeId: string
-  redactFromContext: boolean
-    Excluded from automatic context; direct reads still return it.
-
-mimir call knowledge_create '{"title":"..."}'
+mimir_state       active editor, selection, comments, and Today priority
+mimir_reveal      open a file or line
+mimir_propose     propose an exact reviewed replacement
+comments_list     read document comments
+comments_add      add an anchored comment
+comments_reply    reply to a comment
+comments_resolve  resolve a comment
 ```
 
-A non-exact query returns at most five ranked names with one-line
-descriptions. A single strong result expands immediately to the focused view
-above. Do not make the agent search and then read when one command can safely
-do both.
-
-`mimir call <tool> --help` returns the same focused view. Help is parsed before
-network access, and flags are never treated as tool names or search text.
-
-Bulk catalog output remains available for development and diagnostics, but is
-not advertised in agent context.
-
-### `mimir call`
-
-`mimir call` executes the operation returned by `mimir tool`.
-
-Before a mutation, it validates the complete input and returns all validation
-errors together. Invalid input must never produce a partial mutation.
-
-Schemas should contain real constraints and defaults. Descriptions should
-explain only non-obvious semantics. Do not add examples to obvious string or
-boolean fields, generic output schemas that repeat readable output, or a
-generic dry-run system.
-
-Errors should preserve the useful cause. A connection refusal, timeout,
-permission error, invalid URL, unknown tool, and invalid input are different
-problems and must not collapse into one message.
-
-### `mimir doctor`
-
-`mimir doctor` is a small recovery command, not a tutorial:
+Graph:
 
 ```text
-Mimir OK
-Endpoint   reachable
-Context    attached
-Scopes     private, project
-Tools      89
+graph_find     find nodes by text, type, status, relation, or date
+graph_get      read one complete node
+graph_create   create a validated node
+graph_update   update with revision checks
+graph_delete   move a node to graph Trash
+graph_restore  restore a deleted node
+graph_context  build bounded context around a node
 ```
 
-On failure it shows the actual cause and one useful remedy. Normal output does
-not expose activity IDs, agent IDs, tokens, or full endpoint query strings.
-Verbose diagnostics may include them explicitly.
+Connections appear only when enabled and backed by credentials or a local
+cache:
 
-The command checks only what helps isolate a failure:
+```text
+gmail_search     gmail_read       gmail_send
+calendar_list    calendar_create
+drive_search     drive_read
+granola_search   granola_get      granola_sync
+slack_search     slack_read       slack_send
+```
 
-- endpoint and protocol handshake;
-- attached activity context;
-- available graph scopes;
-- registry availability.
+The maximum surface is 27 tools; without connections it is 14. `mimir doctor`
+reports this public count, registered connection tools, and local credential
+errors—not remote service health.
 
-## MCP
+Issues are graph nodes. Knowledge, issues, projects, and research are not
+separate agent APIs. Activities, apps, files, routines, settings, shell, and
+web search are not public agent tool families. Internal UI/runtime operations
+may still use private registry handlers.
 
-MCP is the transport and capability registry behind the CLI and direct editor
-tools. It is not the agent documentation surface.
+Today retains its historical `scratch` storage identity so existing text
+survives upgrades. It has no standalone tool; `mimir_state` includes its
+durable top priority.
 
-Frequent editor operations remain directly exposed to connected agents. The
-larger registry remains available through `mimir tool` and `mimir call`.
-Codex, Claude, Pi, and Gemini should receive the same Mimir contract; they
-should not receive separate prose explaining how Mimir works.
+## Connections
 
-The permanent instruction must not say that Mimir initially exposes only
-editor tools. That is an implementation detail and does not help complete a
-task.
+Google and Slack credentials stay in the OS keychain. Mimir reads its own
+entries and predecessor service entries, so existing connections migrate
+without exposing or copying secrets into agent context. Google tools are
+further limited by granted OAuth scopes.
 
-The server and launcher still need to be correct even when those details are
-invisible to the agent:
+Granola is deliberately narrow: search/get read the local meeting cache;
+sync is the only network operation. It can reuse the predecessor cache and
+Granola desktop token files. This remains a private, undocumented-API
+integration rather than a claimed public Granola API contract.
 
-- use a Mimir-specific server ID that cannot merge with a user's unrelated
-  configuration;
-- add Mimir without suppressing unrelated client configuration;
-- preserve activity and agent provenance when a session resumes;
-- validate HTTP `Origin` on the loopback endpoint;
-- use bounded timeouts and preserve network causes;
-- avoid printing sensitive endpoint metadata by default;
-- perform a valid protocol handshake;
-- keep aliases, validation, structured errors, and revisions canonical in one
-  registry.
+Connection setup is not part of the agent API. This build reuses existing
+keychain credentials and Granola state; agents receive data tools, never token,
+OAuth, status, or connect/disconnect tools. A connection can be disabled in
+`~/.mimir/settings.json`:
+
+```json
+{
+  "connections": {
+    "google": { "enabled": false },
+    "slack": { "enabled": false },
+    "granola": { "enabled": false }
+  }
+}
+```
+
+Absent settings default to enabled; missing credentials/cache still keep the
+tools out of the catalog. Restart Mimir after changing connection enablement or
+credentials so the public projection is rebuilt.
 
 ## Skills
 
-### What Mimir owns
+Mimir stores and discovers standard skill packages. It does not execute them;
+the agent reads the Markdown and runs any included scripts.
 
-A skill is a standard skill package:
+There are three writable scopes:
 
-```text
-release-review/
-├── SKILL.md
-├── scripts/
-└── assets/
-```
+| Scope | Visibility | Purpose |
+|---|---|---|
+| Catalog | every project; teammates when backed by a shared root | shared workflows |
+| Personal | every project for one user | private reusable workflows |
+| Project | one repository | repo-specific workflows |
 
-Mimir discovers, stores, matches, and materializes skills. It does not
-interpret the workflow or execute its scripts. The agent reads the skill and
-performs the work using its normal tools and permissions.
-
-Do not invent a Mimir-specific skill format. `SKILL.md` and its relative files
-must remain usable outside Mimir.
-
-### Skill scopes
-
-Mimir has three writable skill scopes:
-
-| Scope | Owner | Availability | Intended use |
-|---|---|---|---|
-| Catalog | Team | Every project | Shared reusable workflows |
-| Personal | User | Every project | Private or experimental workflows |
-| Project | Repository | That repository | Repo-specific workflows |
-
-The catalog is the primary shared library for a 2–10 person team. It is not a
-read-only marketplace. Team members can create and update catalog skills.
-
-Opening a new project immediately provides:
+The catalog is writable, not a marketplace or read-only install source.
+Cross-project skills belong in catalog or personal, so they are never cloned
+into every repo.
 
 ```text
-catalog + personal + current project
+~/.mimir/skills/catalog/
+~/.mimir/skills/personal/
+~/.mimir/skills/projects/<repo-key>/
 ```
 
-No skill is copied from one project to another. Mimir stores the canonical
-packages and materializes a local revision snapshot when an agent needs them.
-Scripts and assets therefore exist at stable relative paths without making
-the cache the source of truth.
-
-Unqualified resolution is:
-
-```text
-project -> personal -> catalog
-```
-
-The selected source is visible:
-
-```text
-release-review [catalog]
-deploy-api     [project]
-my-writing     [personal]
-```
-
-Scope is explicit when writing:
-
-```bash
-mimir skill add ./release-review --catalog
-mimir skill add ./deploy-api --project
-mimir skill add ./my-writing --personal
-```
-
-An explicit scope can resolve a collision:
-
-```bash
-mimir skill personal:release-review
-```
-
-### Skill CLI
-
-Avoid separate match and read steps.
-
-```bash
-mimir skill <query>
-```
-
-- An exact name prints the skill.
-- A task description returns the strongest matching skill.
-- An ambiguous query returns at most five matches.
-- A selected remote skill is materialized before its `SKILL.md` is printed, so
-  referenced files are usable.
-
-Additional commands are operational:
+The catalog defaults to the local path above. An absolute
+`settings.skills.catalogRoot` points it at a team-synced directory.
 
 ```bash
 mimir skills
-mimir skills refresh
+mimir skill release-review
+mimir skill add ./release-review --catalog
 ```
 
-`mimir skills` lists the visible merged set. `mimir skills refresh` updates the
-local snapshot. Neither is a required preliminary call.
+Writes retain content-addressed revisions. Native projections link to immutable
+revisions and never overwrite unrelated client skills.
 
-### Native discovery
+Mimir installs `mimir-config` into the writable catalog. Untouched packaged
+versions upgrade automatically; user edits are preserved. It contains only
+non-obvious file ownership and manifest rules.
 
-Native skill discovery is the primary path. Agents should not have to remember
-to query Mimir before a relevant skill can trigger.
+Native discovery verified for Codex CLI 0.145.0, Claude Code 2.1.220, Pi 0.82.1,
+and Gemini CLI 0.49.0:
 
-At launch Mimir:
+| Client | Catalog + personal | Current project |
+|---|---|---|
+| Codex | native | `mimir skill` fallback |
+| Claude Code | native | native |
+| Pi | native | native |
+| Gemini CLI | native | `mimir skill` fallback |
 
-1. resolves catalog, personal, and current-project skills;
-2. applies scope resolution;
-3. materializes a read-only local snapshot of standard skill packages;
-4. makes that snapshot available through the client's native skill mechanism.
+Codex and Gemini currently lack a clean per-launch skill-root option. Mimir
+does not copy project skills into repos or inject all skill bodies to work
+around that.
 
-The intended disclosure model is:
+## Client attachment
 
-```text
-Mimir skill store
-        |
-        v
-visible revision snapshot
-        |
-        v
-client-native name/description discovery
-        |
-        v
-full SKILL.md loaded only when selected
-```
+Mimir-launched Codex, Claude, Pi, and Gemini receive the scoped endpoint and CLI
+on `PATH`. Codex and Claude use their run-scoped MCP configuration, Pi uses the
+installed dynamic extension, and Gemini uses Mimir’s owned stdio proxy entry.
+Unrelated client configuration is preserved.
 
-`mimir skill <query>` remains the explicit fallback for native matching misses,
-large catalogs, debugging, and direct user requests. Mimir remains the source
-of truth; native directories are projections, not independent installations.
+## Acceptance bar
 
-Client integration must follow verified client behavior. Do not assume that a
-directory or refresh mechanism supported by one agent exists in another.
+For an unfamiliar operation:
 
-## Client compatibility
+1. `mimir tools` identifies the exact public name.
+2. `mimir tool <name>` supplies all inputs.
+3. `mimir call <name> ...` succeeds without schema probing.
 
-This section records verified behavior for the supported CLI agents. It must be
-updated when an agent changes its discovery contract.
-
-| Client | Native standard skills | Arbitrary session directory | Live refresh | Mimir integration |
-|---|---|---|---|---|
-| Codex | Verification pending | Verification pending | Verification pending | Verification pending |
-| Claude Code | Verification pending | Verification pending | Verification pending | Verification pending |
-| Pi | Verification pending | Verification pending | Verification pending | Verification pending |
-| Gemini CLI | Verification pending | Verification pending | Verification pending | Verification pending |
-
-If a client cannot consume a generated native skill snapshot without modifying
-the repository or permanent user configuration, use the smallest supported
-adapter. The fallback is always `mimir skill <query>`; do not fake native
-support by injecting every skill body into the prompt.
-
-## Documentation policy
-
-The CLI should teach its own operations at the moment they are needed.
-
-Agent context contains only the three routing commands. Human documentation
-should cover installation, connection troubleshooting, trust, skill ownership,
-and privacy behavior. It should not duplicate every tool schema or teach
-agents generic shell and MCP concepts.
-
-Sensitive behavior must be named precisely. A field called `sensitive` implies
-more protection than context redaction provides. Prefer:
-
-```text
-redactFromContext
-```
-
-Its complete useful description is:
-
-```text
-Excluded from automatic context; direct reads still return it.
-```
-
-If `sensitive` already exists, accept it as a compatibility alias without
-continuing the ambiguity in new output.
-
-## What this replaces
-
-The current experience encourages probing:
-
-- exact lookup by public alias can fail;
-- command-level `--help` can be interpreted as data;
-- useful discovery flags are hidden;
-- bulk JSON output is too large;
-- validation errors arrive incrementally;
-- network failures lose their cause;
-- two visible naming forms make agents reason about implementation details;
-- privacy behavior must be inferred from a free-form property;
-- client launch and resume paths do not preserve one reliable contract.
-
-The answer is not more global instruction. It is focused discovery, correct
-parsing, complete validation, truthful errors, and just-in-time semantics.
-
-## Acceptance test
-
-Test the same unfamiliar task in Codex, Claude, Pi, and Gemini:
-
-1. discover the required Mimir operation or skill;
-2. execute it with valid input;
-3. verify the result.
-
-Success means:
-
-- two useful calls for an exact or strong query;
-- at most three calls for an ambiguous query;
-- zero failed or partial mutations;
-- no complete catalog dump;
-- no client-specific tutorial;
-- a relevant native skill can trigger without a preliminary Mimir CLI call;
-- scripts and assets resolve from the materialized skill revision.
-
-Measure tool calls and failures. Do not add new prompts, commands, indexes, or
-client adapters unless the evaluation shows what they remove.
-
-## Implementation order
-
-1. Implement focused `mimir tool <query>` and route
-   `mimir call <tool> --help` to it.
-2. Fix help parsing, alias matching, complete validation, timeouts, and useful
-   connection errors.
-3. Add lean `mimir doctor`.
-4. Replace current agent prose with the single routing line.
-5. Implement canonical skill storage, the three scopes, and
-   `mimir skill <query>`.
-6. Materialize merged skill revisions and connect them to each verified native
-   discovery mechanism.
-7. Remove repeated Pi prompt snippets and any duplicate client tutorials.
-8. Fix launcher identity, configuration merging, resume provenance, and HTTP
-   origin handling.
-9. Run the four-client acceptance test before adding further discovery
-   machinery.
-
+Do not add instructions, facades, indexes, tool families, or commands unless an
+observed failure shows which call or mistake they remove.

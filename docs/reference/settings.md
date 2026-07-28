@@ -20,7 +20,7 @@ persistence stores the complete snapshot under the top-level `editor` key in
 | Controls | `src/shared/ui/SettingsDialog.vue`, `settings/*.vue` | UI validation and calls to `settings.set` |
 | Workbench projection | `src/mimir/WorkbenchApp.vue` | workspace, layout, Activity ordering |
 | Editor projection | `src/editor/App.vue` | editor/AI behavior and cross-window sync lease |
-| MCP projection | `src/services/toolRuntime.js` | filtered public keys and shape-compatible updates |
+| Private registry projection | `src/services/toolRuntime.js` | filtered keys and shape-compatible updates |
 
 ## Mutation invariant
 
@@ -88,36 +88,56 @@ Business graph settings follow the same mutation invariant:
 Changing the team root remounts GraphRuntime against the current workspace;
 changing view state must use `settings.set` with a newly constructed object.
 
-## MCP settings surface
+## File-first top-level namespaces
+
+The CLI also reads two intentionally file-first top-level namespaces that the
+renderer store preserves:
+
+```json
+{
+  "connections": {
+    "google": { "enabled": true, "account": "default" },
+    "slack": { "enabled": true, "account": "default" },
+    "granola": { "enabled": true }
+  },
+  "skills": {
+    "catalogRoot": "/absolute/shared/catalog"
+  }
+}
+```
+
+The catalog root must be absolute. Missing connection accounts fall back to
+the predecessor’s credential-free defaults and then `default`.
+
+## Internal settings handler
 
 `settings.get` and `settings.update` are implemented in
-`src/services/toolRuntime.js`, not Rust. Public keys match the prefixes
+`src/services/toolRuntime.js`, not Rust. They are private UI/runtime registry
+handlers, not public agent tools. Their allowed keys match the prefixes
 `editor`, `ai`, `comment`, `mimirWorkspace`, or `workbench`.
 
 Updates enforce only:
 
 - the key exists in the current store;
-- the prefix is public;
+- the prefix is eligible for this private handler;
 - the top-level value shape matches the current value.
 
-They do not enforce component ranges or enum membership. New public settings
-whose values need semantic validation must add it at the tool boundary rather
-than relying on a UI control. `settings.update` calls `set` for each key and
-then awaits an immediate complete save.
+They do not enforce component ranges or enum membership. `settings.update`
+calls `set` for each key and then awaits an immediate complete save.
 
 `activityNavigator`, `sidebarToolOrder`, `sidebarNewActivityOrder`,
-`recentAppIds`, and `recentWorkspaceFolders` are currently not MCP-public
-because their prefixes do not match the filter.
+`recentAppIds`, and `recentWorkspaceFolders` are excluded because their
+prefixes do not match the filter.
 
 ## Change map
 
 | Change | Required files/checks |
 |---|---|
-| Add setting | add default; use `set`; decide MCP visibility; add persistence test; add control only if needed |
+| Add setting | add default; use `set`; decide private-registry visibility; add persistence test; add control only if needed |
 | Change object shape | migration/normalization at load site; update responsive/workbench consumers; test old stored shape |
 | Add settings window | acquire/release sync lease and handle async installation after disposal |
 | Change persistence namespace | `local_settings.rs`, `dataDir.js`, store hydration, recovery tests |
-| Change public MCP setting | `toolRuntime.js` validation and `toolRuntime.test.js` |
+| Change private settings handler | `toolRuntime.js` validation and `toolRuntime.test.js` |
 | Change theme | `AppearanceSection.vue`, `themes.css`, `DARK_THEMES`, terminal/app observers |
 | Change Business graph settings | `stores/settings.js`, `GraphSettingsSection.vue`, graph app/Workbench mount watchers; settings and graph app tests |
 

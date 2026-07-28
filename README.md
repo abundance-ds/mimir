@@ -66,9 +66,8 @@ Project sources remain in the workspace, private sources stay local under
 graph context; decisions, evidence, deliverables, and next actions remain
 linked to the project instead of disappearing into chat history.
 
-The same system is continuously available through `graph.*`, `knowledge.*`,
-`issues.*`, `projects.*`, and `research.*` tools, plus `mimir graph`,
-`mimir board`, and `mimir context`. See
+Agents use one graph API: find, get, create, update, delete, restore, and
+context. Issues are graph nodes rather than a parallel tool family. See
 [Business graph](docs/reference/business-graph.md) for ontology, scopes,
 projections, interaction design, migration, recovery, and architecture.
 
@@ -78,13 +77,20 @@ Mimir starts a loopback MCP endpoint at `http://127.0.0.1:17532/mcp`. One
 discoverable registry serves launched agents, apps, routines, and the installed
 `mimir` CLI.
 
-Mimir-launched Codex, Claude, and Pi sessions receive the connection
-automatically. Agents see only three concise tools by default: editor state,
-file reveal, and reviewable proposals. The full files, comments, graph,
-Activities, Apps, Routines, settings, and metadata-search capabilities remain
-available on demand through `mimir help` and `mimir tools <topic>`. Embedded apps
-may add tools to the same live registry without expanding default agent
-context.
+Mimir-launched Codex, Claude, Pi, and Gemini sessions connect automatically.
+Their complete Mimir instruction is:
+
+```text
+Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
+```
+
+Three frequent editor tools remain directly available. `mimir tools` prints
+one concise Workbench/Graph/Connections catalog; `mimir tool <name>` expands
+one schema. The public surface is 14 core tools plus up to 13 conditional
+Gmail, Calendar, Drive, Granola, and Slack tools.
+Catalog and personal skills use native client discovery. Project skills are
+also native in Claude and Pi and remain available through `mimir skill` in
+Codex and Gemini. See [Agent interface](docs/agent-interface.md).
 
 There is no general built-in chat surface. CLI agents are the primary
 intelligence; native model calls are reserved for the editor's Cmd+K inline
@@ -122,9 +128,19 @@ Mimir creates and uses:
 - `~/.mimir/models.json` for inline and ghost AI model configuration
 - `~/.mimir/bin/mimir` for the installed CLI
 - `~/.mimir/pi/mimir-tools.ts` for Pi's dynamic Mimir tool extension
+- `~/.mimir/skills/` for canonical catalog/personal/project skills and revisions
+- `~/.agents/skills/` for Mimir-managed catalog/personal native projections
+
+The writable catalog defaults to `~/.mimir/skills/catalog/`. Set the absolute
+`skills.catalogRoot` in `settings.json` (or
+`MIMIR_SKILLS_CATALOG_ROOT`) to share it across teammates. A Gemini launch adds
+only Mimir's owned `mimir_workbench` entry to the existing Gemini settings.
 
 API keys entered in Settings are stored in the OS keychain. Debug builds may
 also read environment variables, `.env`, and `~/.mimir/keys.env`.
+Existing Google and Slack credentials under the predecessor keychain service
+are reused without exposing them to agents. Granola can reuse its previous
+local cache and desktop token files.
 
 ## Documentation
 

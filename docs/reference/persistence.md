@@ -14,9 +14,9 @@ crash.
 | `~/.mimir/models.json` | `ai_models.rs` | embedded product defaults replace known model/provider metadata on version migration; unknown user models survive |
 | `~/.mimir/launchers.json` | `launchers.rs` | versioned whole-file config; malformed/unsupported input recovers to defaults with diagnostics |
 | `~/.mimir/activities/*.activity.json` | Activity persistence worker | only durable records; scrollback chunks and sequence state share the same snapshot |
-| `~/.mimir/routines/*.toml` | user, Routine UI/MCP | source files are the database; mutation is revision-guarded |
+| `~/.mimir/routines/*.toml` | user, Routine UI | source files are the database; mutation is revision-guarded |
 | `~/.mimir/routines-state.json` | `routine_runtime.rs` | planner cursor only; definitions remain TOML authority |
-| `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI/MCP | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
+| `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
 | `~/.mimir/app-data/<app-id>/<key>.json` | app SDK through `apps.rs` | namespaced by validated app id/key; value bytes are opaque to Rust |
 | private/project/team `knowledge/*.md`, `issues/*.md` | user, GraphRuntime UI/tools | Markdown is canonical; every node retains physical scope/path/revision; the in-memory GraphStore is disposable |
 | `~/.mimir/keys.env` | `ai_keys.rs`, debug only | owner-only atomic plaintext fallback when keychain storage fails |
