@@ -1,72 +1,352 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from 'node:url'
+import {
+  addSkill,
+  findSkill,
+  formatSkill,
+  formatSkillMatches,
+  listSkills,
+  prepareSkills,
+  refreshNativeSkills,
+} from './mimir-skills.mjs'
 
-const DEFAULT_URL = process.env.MIMIR_MCP_URL || 'http://127.0.0.1:17532/mcp'
+const FALLBACK_URL = 'http://127.0.0.1:17532/mcp'
+const REQUEST_TIMEOUT_MS = 10_000
 
-const commands = {
-  state: {
-    tool: 'editor.state',
-    args: parts => ({ include_content: parts.includes('--content') }),
-  },
-  open: { tool: 'editor_open', args: ([path]) => ({ path }) },
-  active: { tool: 'editor_active', args: () => ({}) },
-  tabs: { tool: 'editor_tabs', args: () => ({}) },
-  content: { tool: 'editor_content', args: () => ({}) },
-  selection: { tool: 'editor_selection', args: () => ({}) },
-  comments: { tool: 'editor_comments', args: () => ({}) },
-  'comments-prompt': { tool: 'editor_comments', args: () => ({}), output: 'prompt' },
-  'replace-selection': { tool: 'editor_replace_selection', args: async (parts) => ({ text: await readText(parts) }) },
-  'set-content': { tool: 'editor_set_content', args: async (parts) => ({ content: await readText(parts) }) },
-  reveal: { tool: 'editor_reveal', args: ([target]) => parseRevealTarget(target) },
-  save: { tool: 'editor_save', args: () => ({}) },
-}
-
-async function main() {
+export async function main() {
   const [command, ...args] = process.argv.slice(2)
   if (!command || command === 'help' || command === '--help' || command === '-h') {
     console.log(helpText(command === 'help' ? args[0] : ''))
     return
   }
 
+  if (command === 'tool') {
+    if (wantsHelp(args) || !positional(args).length) {
+      console.log(toolCommandHelp())
+      return
+    }
+    assertKnownFlags(args, ['--json'])
+    const query = positional(args).join(' ')
+    const result = await findTools(query)
+    console.log(args.includes('--json')
+      ? JSON.stringify(result.tool || result.matches || [], null, 2)
+      : result.tool
+        ? formatToolHelp(result.tool)
+        : result.matches?.length
+          ? formatToolCatalog(result.matches)
+          : `No Mimir tool matches '${query}'.`)
+    return
+  }
   if (command === 'tools') {
+    if (wantsHelp(args)) {
+      console.log(HELP_TOPICS.tools)
+      return
+    }
+    assertKnownFlags(args, ['--json'])
+    const extra = positional(args)
+    if (extra.length) throw new Error('Usage: mimir tools [--json]')
     const json = args.includes('--json')
-    const topic = args.find(arg => !arg.startsWith('-')) || ''
-    const includeAll = args.includes('--all') || Boolean(topic)
-    const result = await request('tools/list', { includeAll })
-    console.log(formatToolCatalog(result?.tools || [], { json, topic }))
+    const result = await request('tools/list', { includeAll: true })
+    console.log(json
+      ? JSON.stringify(result?.tools || [], null, 2)
+      : formatPublicTools(result?.tools || []))
     return
   }
   if (command === 'call') {
     const [name, ...inputParts] = args
-    if (!name) throw new Error('Usage: mimir call <tool> [json | --stdin]')
+    if (!name || name === '--help' || name === '-h') {
+      console.log(callCommandHelp())
+      return
+    }
+    if (wantsHelp(inputParts)) {
+      console.log(formatToolHelp(await discoverTool(name)))
+      return
+    }
+    assertKnownFlags(inputParts, ['--stdin', '--file'])
     const input = await readJson(inputParts)
     printResult(await callTool(name, input))
     return
   }
-  if (['graph', 'board', 'context'].includes(command)) {
-    console.log(await terminalGraphCommand(command, args))
+  if (command === 'skill') {
+    await skillCommand(args)
     return
   }
-
-  const spec = commands[command]
-  if (!spec) {
-    console.error(`Unknown command: ${command}`)
-    console.error(helpText())
-    process.exit(2)
-  }
-
-  const input = await spec.args(args)
-  const result = await callTool(spec.tool, input)
-  if (spec.output === 'prompt') {
-    console.log(result?.prompt || '')
+  if (command === 'skills') {
+    await skillsCommand(args)
     return
   }
-  printResult(result)
+  if (command === 'doctor') {
+    if (wantsHelp(args)) {
+      console.log(doctorCommandHelp())
+      return
+    }
+    assertKnownFlags(args, ['--json', '--verbose'])
+    const report = await runDoctor({ verbose: args.includes('--verbose') })
+    console.log(args.includes('--json')
+      ? JSON.stringify(report, null, 2)
+      : formatDoctor(report))
+    if (!report.ok) process.exitCode = 1
+    return
+  }
+  if (command === 'mcp-proxy') {
+    await runMcpProxy()
+    return
+  }
+  console.error(`Unknown command: ${command}`)
+  console.error(helpText())
+  process.exit(2)
 }
 
-export async function callTool(name, args) {
-  const body = await request('tools/call', { name, arguments: args })
+async function skillCommand(args) {
+  if (wantsHelp(args) || !args.length) {
+    console.log(skillCommandHelp())
+    return
+  }
+  if (args[0] === 'add') {
+    const source = args[1]
+    if (!source) throw new Error('Usage: mimir skill add <directory> <--catalog|--personal|--project>')
+    assertKnownFlags(args.slice(2), ['--catalog', '--personal', '--project'])
+    const scopes = ['catalog', 'personal', 'project'].filter(scope => args.includes(`--${scope}`))
+    if (scopes.length !== 1) {
+      throw new Error('Choose one skill scope: --catalog, --personal, or --project.')
+    }
+    const added = await addSkill(source, scopes[0])
+    console.log(`${added.name} [${added.scope}]\nPath: ${added.path}`)
+    return
+  }
+  assertKnownFlags(args, ['--json'])
+  const query = positional(args).join(' ')
+  if (!query) throw new Error('Usage: mimir skill <query>')
+  const result = await findSkill(query)
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(result.skill || result.matches || [], null, 2))
+    return
+  }
+  console.log(result.skill
+    ? formatSkill(result.skill)
+    : formatSkillMatches(result.matches || []))
+}
+
+export async function skillsCommand(args) {
+  if (wantsHelp(args)) {
+    console.log(skillsCommandHelp())
+    return
+  }
+  if (args[0] === 'refresh') {
+    assertKnownFlags(args.slice(1), [])
+    const result = await refreshNativeSkills()
+    console.log(`Skills ready: ${result.count}\nPath: ${result.root}`)
+    return
+  }
+  if (args[0] === 'prepare') {
+    const client = args[1]
+    assertKnownFlags(args.slice(2), ['--json'])
+    if (!client) throw new Error('Missing skill client.')
+    const result = await prepareSkills(client)
+    console.log(JSON.stringify(result))
+    return
+  }
+  const listArgs = args[0] === 'list' ? args.slice(1) : args
+  assertKnownFlags(listArgs, ['--json'])
+  if (positional(listArgs).length) {
+    throw new Error('Usage: mimir skills [list] [--json]')
+  }
+  const skills = await listSkills()
+  console.log(listArgs.includes('--json')
+    ? JSON.stringify(skills, null, 2)
+    : formatSkillMatches(skills, { limit: Number.POSITIVE_INFINITY }))
+}
+
+export async function findTools(query, tools) {
+  const catalog = tools || (await request('tools/list', { includeAll: true }))?.tools || []
+  const normalized = normalizeToolQuery(query)
+  const exact = catalog.find(tool => toolIdentifiers(tool).some(identifier => (
+    normalizeToolQuery(identifier) === normalized
+  )))
+  if (exact) return { tool: exact }
+
+  const terms = normalized.split(/[._\s-]+/).filter(Boolean)
+  const ranked = catalog
+    .map(tool => ({ tool, score: scoreTool(tool, normalized, terms) }))
+    .filter(entry => entry.score > 0)
+    .sort((left, right) => right.score - left.score
+      || left.tool.name.localeCompare(right.tool.name))
+  if (ranked.length === 1 || (
+    ranked.length > 1 && ranked[0].score >= ranked[1].score + 40
+  )) {
+    return { tool: ranked[0].tool }
+  }
+  return { matches: ranked.slice(0, 5).map(entry => entry.tool) }
+}
+
+export async function discoverTool(query, tools) {
+  const result = await findTools(query, tools)
+  if (result.tool) return result.tool
+  if (!result.matches?.length) throw new Error(`No Mimir tool matches '${query}'.`)
+  const choices = result.matches
+    .map(tool => `${tool.name}\t${tool.description || ''}`)
+    .join('\n')
+  throw new Error(`Multiple Mimir tools match '${query}':\n${choices}`)
+}
+
+export function formatToolHelp(tool) {
+  const schema = tool?.inputSchema || {}
+  const properties = schema.properties && typeof schema.properties === 'object'
+    ? schema.properties
+    : {}
+  const required = new Set(Array.isArray(schema.required) ? schema.required : [])
+  const requiredRows = []
+  const optionalRows = []
+  for (const [name, property] of Object.entries(properties)) {
+    const row = formatSchemaProperty(name, property, '  ')
+    ;(required.has(name) ? requiredRows : optionalRows).push(row)
+  }
+
+  const sections = [
+    `${tool.name} — ${tool.description || 'Mimir capability'}`,
+  ]
+  if (requiredRows.length) sections.push(`Required:\n${requiredRows.join('\n')}`)
+  if (optionalRows.length) sections.push(`Optional:\n${optionalRows.join('\n')}`)
+  const annotations = formatAnnotations(tool.annotations)
+  if (annotations) sections.push(annotations)
+  const skeleton = Object.fromEntries(
+    [...required].map(name => [name, schemaPlaceholder(properties[name])]),
+  )
+  sections.push(`mimir call ${tool.name} '${JSON.stringify(skeleton)}'`)
+  return sections.join('\n\n')
+}
+
+function formatSchemaProperty(name, property = {}, indent = '', nestedRequired = false) {
+  const type = renderSchemaType(property)
+  const suffix = [
+    nestedRequired ? 'required' : '',
+    property.default !== undefined ? `default ${JSON.stringify(property.default)}` : '',
+    Array.isArray(property.enum) ? `one of ${property.enum.map(value => JSON.stringify(value)).join(', ')}` : '',
+    property.const !== undefined ? `must equal ${JSON.stringify(property.const)}` : '',
+    Number.isInteger(property.minLength) ? `min ${property.minLength} chars` : '',
+    Number.isInteger(property.maxLength) ? `max ${property.maxLength} chars` : '',
+    Number.isInteger(property.minItems) ? `min ${property.minItems} items` : '',
+    Number.isInteger(property.maxItems) ? `max ${property.maxItems} items` : '',
+    Number.isFinite(property.minimum) ? `>= ${property.minimum}` : '',
+    Number.isFinite(property.maximum) ? `<= ${property.maximum}` : '',
+    Number.isFinite(property.exclusiveMinimum) ? `> ${property.exclusiveMinimum}` : '',
+    Number.isFinite(property.exclusiveMaximum) ? `< ${property.exclusiveMaximum}` : '',
+    typeof property.pattern === 'string' ? `pattern ${JSON.stringify(property.pattern)}` : '',
+  ].filter(Boolean).join('; ')
+  const first = `${indent}${name}: ${type}${suffix ? ` (${suffix})` : ''}`
+  const description = String(property.description || '').trim()
+  const lines = [first]
+  if (description) lines.push(`${indent}  ${description}`)
+  lines.push(...nestedSchemaLines(property, `${indent}  `))
+  return lines.join('\n')
+}
+
+function renderSchemaType(schema = {}) {
+  if (Array.isArray(schema.type)) return schema.type.join(' | ')
+  if (schema.type === 'array') {
+    return `array<${renderSchemaType(schema.items || {})}>`
+  }
+  if (schema.type) return schema.type
+  if (schema.properties) return 'object'
+  if (Array.isArray(schema.enum) && schema.enum.length) {
+    return [...new Set(schema.enum.map(value => typeof value))].join(' | ')
+  }
+  const variants = schema.oneOf || schema.anyOf
+  if (Array.isArray(variants) && variants.length) {
+    return [...new Set(variants.map(renderSchemaType))].join(' | ')
+  }
+  return 'value'
+}
+
+function schemaPlaceholder(schema = {}) {
+  if (schema.default !== undefined) return schema.default
+  if (schema.const !== undefined) return schema.const
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0]
+  const type = Array.isArray(schema.type) ? schema.type.find(value => value !== 'null') : schema.type
+  if (type === 'boolean') return false
+  if (type === 'number' || type === 'integer') {
+    if (Number.isFinite(schema.minimum)) return schema.minimum
+    if (Number.isFinite(schema.exclusiveMinimum)) {
+      return schema.exclusiveMinimum + (type === 'integer' ? 1 : 0.1)
+    }
+    if (Number.isFinite(schema.maximum) && schema.maximum < 0) return schema.maximum
+    return 0
+  }
+  if (type === 'array') {
+    const count = Math.max(0, Number(schema.minItems) || 0)
+    return Array.from({ length: count }, () => schemaPlaceholder(schema.items || {}))
+  }
+  if (type === 'object' || schema.properties) {
+    const properties = schema.properties || {}
+    return Object.fromEntries(
+      (schema.required || []).map(name => [name, schemaPlaceholder(properties[name] || {})]),
+    )
+  }
+  if (type === 'string') {
+    const minimum = Math.max(0, Number(schema.minLength) || 0)
+    const maximum = Number.isInteger(schema.maxLength)
+      ? schema.maxLength
+      : Number.POSITIVE_INFINITY
+    return '.'.repeat(Math.min(maximum, Math.max(minimum, 3)))
+  }
+  return '...'
+}
+
+function nestedSchemaLines(schema, indent) {
+  const lines = []
+  const objectSchema = schema.type === 'array' ? schema.items : schema
+  if (
+    !objectSchema
+    || typeof objectSchema !== 'object'
+    || !objectSchema.properties
+    || typeof objectSchema.properties !== 'object'
+  ) {
+    return lines
+  }
+  if (schema.type === 'array') lines.push(`${indent}Items:`)
+  const required = new Set(objectSchema.required || [])
+  const childIndent = schema.type === 'array' ? `${indent}  ` : indent
+  for (const [name, property] of Object.entries(objectSchema.properties)) {
+    lines.push(formatSchemaProperty(name, property, childIndent, required.has(name)))
+  }
+  return lines
+}
+
+function formatAnnotations(annotations = {}) {
+  const labels = []
+  if (annotations.readOnlyHint === true) labels.push('read-only')
+  else if (annotations.readOnlyHint === false) labels.push('mutating')
+  if (annotations.destructiveHint === true) labels.push('destructive')
+  if (annotations.idempotentHint === true) labels.push('idempotent')
+  return labels.length ? `Behavior: ${labels.join(', ')}` : ''
+}
+
+function toolIdentifiers(tool) {
+  return [tool?.name].filter(Boolean)
+}
+
+function normalizeToolQuery(value) {
+  return String(value || '').trim().toLowerCase().replaceAll(' ', '_')
+}
+
+function scoreTool(tool, query, terms) {
+  const identifiers = toolIdentifiers(tool).map(normalizeToolQuery)
+  const description = String(tool?.description || '').toLowerCase()
+  let score = identifiers.some(identifier => identifier.includes(query)) ? 80 : 0
+  for (const term of terms) {
+    for (const identifier of identifiers) {
+      if (identifier === term) score += 50
+      else if (identifier.startsWith(term)) score += 30
+      else if (identifier.includes(term)) score += 20
+    }
+    if (description.includes(term)) score += 6
+  }
+  return score
+}
+
+export async function callTool(name, args, options = {}) {
+  const body = await request('tools/call', { name, arguments: args }, options)
   const text = body?.content?.[0]?.text ?? ''
   if (body?.isError) {
     const error = new Error(body?.structuredContent?.message || text || 'Tool call failed.')
@@ -84,90 +364,289 @@ export async function callTool(name, args) {
   }
 }
 
-export async function terminalGraphCommand(command, args = [], call = callTool) {
-  if (command === 'context') {
-    const id = String(args[0] || '').trim()
-    if (!id) throw new Error('Usage: mimir context <graph-node-id>')
-    const context = await call('graph.context', { focusId: id, maxNodes: 16 })
-    return context?.markdown || 'No graph context returned.'
-  }
-  if (command === 'board') {
-    const status = String(args[0] || '').trim()
-    const result = await call('graph.query', {
-      kinds: ['issue'],
-      ...(status ? { status } : {}),
-      limit: 500,
+export async function request(method, params, options = {}) {
+  if (
+    !options.protocolVersion
+    && method !== 'initialize'
+    && method !== 'notifications/initialized'
+  ) {
+    const initialized = await rpcRequest('initialize', {
+      protocolVersion: '2025-11-25',
+      capabilities: {},
+      clientInfo: { name: 'mimir-cli', version: '0.1.0' },
+    }, { ...options, notification: false })
+    const protocolVersion = initialized?.protocolVersion
+    await rpcRequest('notifications/initialized', {}, {
+      ...options,
+      protocolVersion,
+      notification: true,
     })
-    return formatBoard(result?.items || [])
+    return await rpcRequest(method, params, {
+      ...options,
+      protocolVersion,
+      notification: false,
+    })
   }
-  if (command === 'graph') {
-    const query = args.join(' ').trim()
-    const result = query
-      ? await call('graph.search', { query, limit: 100 })
-      : await call('graph.list', { limit: 100 })
-    const items = query
-      ? (result || []).map(item => item.node || item)
-      : result?.items || []
-    return formatGraph(items, query ? items.length : result?.total)
-  }
-  throw new Error(`Unknown graph projection: ${command}`)
+  return await rpcRequest(method, params, { ...options, notification: false })
 }
 
-export function formatGraph(items, total = items.length) {
-  const rows = items.map(item => [
-    String(item.kind || 'node').toUpperCase().padEnd(18),
-    truncateCell(item.title || item.id, 48).padEnd(48),
-    scopeCell(item.scopeId),
-    item.id,
-  ].join('  '))
-  return [
-    `BUSINESS GRAPH · ${items.length}${Number.isFinite(total) ? ` of ${total}` : ''}`,
-    'KIND                TITLE                                             SCOPE    ID',
-    ...rows,
-  ].join('\n')
+async function notify(method, params, options = {}) {
+  await rpcRequest(method, params, { ...options, notification: true })
 }
 
-export function formatBoard(items) {
-  const statuses = ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done', 'cancelled']
-  const sections = []
-  for (const status of statuses) {
-    const issues = items.filter(item => (item.status || 'backlog') === status)
-    if (!issues.length) continue
-    sections.push(`\n${status.replaceAll('-', ' ').toUpperCase()} · ${issues.length}`)
-    for (const issue of issues) {
-      const marker = { urgent: '!!', high: ' !', normal: ' ·', low: '  ' }[issue.priority] || ' ·'
-      const project = issue.projectId ? `  → ${issue.projectId}` : ''
-      sections.push(`${marker} ${truncateCell(issue.title || issue.id, 64)}  [${issue.id}]${project}`)
-    }
-  }
-  return `WORK BOARD · ${items.length}${sections.join('\n') || '\n\nNo issues in this projection.'}`
-}
-
-async function request(method, params) {
+async function rpcRequest(method, params, options) {
+  const endpoint = options.endpoint || mcpEndpoint()
+  const safeEndpoint = displayEndpoint(endpoint, options.verbose)
+  const id = options.notification ? undefined : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const timeout = Number.isFinite(options.timeout) ? options.timeout : REQUEST_TIMEOUT_MS
   let response
   try {
-    response = await fetch(DEFAULT_URL, {
+    response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        ...(options.protocolVersion
+          ? { 'mcp-protocol-version': options.protocolVersion }
+          : {}),
+      },
       body: JSON.stringify({
         jsonrpc: '2.0',
-        id: Date.now(),
+        ...(id === undefined ? {} : { id }),
         method,
         params,
       }),
+      signal: AbortSignal.timeout(timeout),
     })
-  } catch {
-    throw new Error(`mimir could not reach ${DEFAULT_URL} — start the Mimir workbench or set MIMIR_MCP_URL`)
+  } catch (error) {
+    const detail = networkErrorDetail(error, timeout)
+    const remedy = options.doctor
+      ? 'Open or restart Mimir, then retry.'
+      : 'Run `mimir doctor`.'
+    throw new Error(
+      `mimir could not reach ${safeEndpoint}: ${detail}. ${remedy}`,
+      { cause: error },
+    )
   }
 
   if (!response.ok) {
-    throw new Error(`mimir server returned HTTP ${response.status}`)
+    const detail = await response.text().catch(() => '')
+    throw new Error(
+      `mimir server at ${safeEndpoint} returned HTTP ${response.status}${detail ? `: ${truncateCell(detail, 240)}` : ''}`,
+    )
   }
 
-  const body = await response.json()
-  if (body.error) throw new Error(body.error.message || JSON.stringify(body.error))
+  if (options.notification) return undefined
+  const body = await response.json().catch(error => {
+    throw new Error(`mimir server at ${safeEndpoint} returned invalid JSON: ${error.message}`)
+  })
+  if (body.error) {
+    const message = body.error.message === 'Unknown tool' && body.error.data?.name
+      ? `Unknown tool '${body.error.data.name}'.`
+      : body.error.message || JSON.stringify(body.error)
+    const error = new Error(message)
+    error.code = body.error.code
+    error.data = body.error.data
+    throw error
+  }
 
   return body.result
+}
+
+export async function runMcpProxy({
+  input = process.stdin,
+  output = process.stdout,
+  endpoint = mcpEndpoint(),
+  fetchImpl = fetch,
+} = {}) {
+  const { createInterface } = await import('node:readline')
+  let protocolVersion
+  let initialization = Promise.resolve()
+  const pending = new Set()
+  const lines = createInterface({ input, crlfDelay: Infinity })
+  async function forward(message) {
+    try {
+      const response = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...(protocolVersion ? { 'mcp-protocol-version': protocolVersion } : {}),
+        },
+        body: JSON.stringify(message),
+        signal: AbortSignal.timeout(120_000),
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${truncateCell(await response.text(), 240)}`)
+      }
+      if (message.id === undefined) return
+      const payload = await parseMcpResponse(response)
+      if (message.method === 'initialize') {
+        protocolVersion = payload?.result?.protocolVersion || protocolVersion
+      }
+      output.write(`${JSON.stringify(payload)}\n`)
+    } catch (error) {
+      if (message.id === undefined) {
+        console.error(`mimir MCP proxy: ${networkErrorDetail(error, 120_000)}`)
+        return
+      }
+      output.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: {
+          code: -32000,
+          message: `Mimir unavailable: ${networkErrorDetail(error, 120_000)}`,
+        },
+      })}\n`)
+    }
+  }
+
+  for await (const line of lines) {
+    if (!line.trim()) continue
+    let message
+    try {
+      message = JSON.parse(line)
+    } catch (error) {
+      output.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: `Parse error: ${error.message}` },
+      })}\n`)
+      continue
+    }
+
+    const prerequisite = message.method === 'initialize'
+      ? Promise.resolve()
+      : initialization
+    const task = prerequisite.then(() => forward(message))
+    if (message.method === 'initialize') initialization = task
+    pending.add(task)
+    task.then(
+      () => pending.delete(task),
+      () => pending.delete(task),
+    )
+  }
+  await Promise.all([...pending])
+}
+
+async function parseMcpResponse(response) {
+  const contentType = response.headers?.get?.('content-type') || ''
+  if (!contentType.includes('text/event-stream')) return await response.json()
+  const text = await response.text()
+  const data = text
+    .split(/\r?\n/)
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trim())
+    .filter(Boolean)
+    .at(-1)
+  if (!data) throw new Error('Mimir returned an empty event stream.')
+  return JSON.parse(data)
+}
+
+export async function runDoctor({ verbose = false } = {}) {
+  const endpoint = mcpEndpoint()
+  const initialized = await request('initialize', {
+    protocolVersion: '2025-11-25',
+    capabilities: {},
+    clientInfo: { name: 'mimir-cli', version: '0.1.0' },
+  }, { endpoint, verbose, doctor: true })
+  const protocolVersion = initialized?.protocolVersion
+  await notify('notifications/initialized', {}, {
+    endpoint,
+    verbose,
+    protocolVersion,
+    doctor: true,
+  })
+  await request('ping', {}, { endpoint, verbose, protocolVersion, doctor: true })
+  const diagnostics = await request('mimir/doctor', {}, {
+    endpoint,
+    verbose,
+    protocolVersion,
+    doctor: true,
+  })
+  const scopes = Array.isArray(diagnostics?.scopes)
+    ? [...new Set(diagnostics.scopes
+        .map(scope => scope.id || scope.scopeId)
+        .filter(Boolean)
+        .map(scope => verbose ? scope : String(scope).split(':')[0]))]
+    : []
+  const connectionDiagnostics = diagnostics?.connectionDiagnostics || {}
+  const connectionErrors = Object.values(connectionDiagnostics)
+    .filter(value => value && typeof value === 'object' && value.status === 'error')
+  return {
+    ok: diagnostics?.graphOk !== false && connectionErrors.length === 0,
+    verbose,
+    endpoint: displayEndpoint(endpoint, verbose),
+    protocolVersion,
+    server: initialized?.serverInfo || {},
+    context: activityContext(endpoint),
+    scopes,
+    tools: diagnostics?.tools || 0,
+    registryRevision: diagnostics?.registryRevision,
+    connections: diagnostics?.connections || {},
+    connectionDiagnostics,
+    ...(diagnostics?.graphError ? { graphError: diagnostics.graphError } : {}),
+  }
+}
+
+export function formatDoctor(report) {
+  const connectionTools = Object.entries(report.connections || {})
+    .filter(([, available]) => available)
+    .map(([name]) => name)
+  const connectionErrors = Object.entries(report.connectionDiagnostics || {})
+    .filter(([, value]) => (
+      value
+      && typeof value === 'object'
+      && value.status === 'error'
+    ))
+    .map(([name, value]) => `${name}: ${value.detail}`)
+  const lines = [
+    report.ok ? 'Mimir OK' : 'Mimir degraded',
+    `Endpoint   reachable${report.verbose ? ` (${report.endpoint})` : ''}`,
+    `Context    ${report.context}`,
+    `Scopes     ${report.scopes.length ? report.scopes.join(', ') : 'unavailable'}`,
+    `Connection tools ${connectionTools.length ? connectionTools.join(', ') : 'none'}`,
+    `Tools      ${report.tools}`,
+  ]
+  if (report.graphError) lines.push(`Graph      ${report.graphError}`)
+  if (connectionErrors.length) lines.push(`Connection errors ${connectionErrors.join('; ')}`)
+  return lines.join('\n')
+}
+
+function mcpEndpoint() {
+  return process.env.MIMIR_MCP_URL || FALLBACK_URL
+}
+
+function displayEndpoint(value, verbose = false) {
+  if (verbose) return String(value)
+  try {
+    const url = new URL(String(value))
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return '<invalid MIMIR_MCP_URL>'
+  }
+}
+
+function activityContext(value) {
+  try {
+    const url = new URL(String(value))
+    return url.searchParams.get('activityId') ? 'attached' : 'not attached'
+  } catch {
+    return 'invalid endpoint'
+  }
+}
+
+function networkErrorDetail(error, timeout = REQUEST_TIMEOUT_MS) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    return `timed out after ${timeout}ms`
+  }
+  const code = error?.cause?.code || error?.code
+  if (code === 'ECONNREFUSED') return 'connection refused'
+  if (code === 'ENOTFOUND') return 'host not found'
+  if (code) return String(code)
+  return error?.message || 'network request failed'
 }
 
 async function readText(parts) {
@@ -181,6 +660,7 @@ async function readText(parts) {
     })
   }
   if (parts[0] === '--file') {
+    if (!parts[1]) throw new Error('Missing path after --file.')
     const fs = await import('node:fs/promises')
     return await fs.readFile(parts[1], 'utf8')
   }
@@ -188,6 +668,7 @@ async function readText(parts) {
 }
 
 async function readJson(parts) {
+  if (!parts.length) return {}
   const text = await readText(parts)
   if (!text.trim()) return {}
   try {
@@ -207,12 +688,9 @@ function printResult(result) {
   else console.log(JSON.stringify(result, null, 2))
 }
 
-function parseRevealTarget(target = '') {
-  if (!target) return {}
-  const match = target.match(/^(.*?):(\d+)$/)
-  if (match) return { path: match[1] || undefined, line: Number(match[2]) }
-  if (/^\d+$/.test(target)) return { line: Number(target) }
-  return { path: target }
+function truncateCell(value, limit) {
+  const text = String(value || '').replaceAll(/\s+/g, ' ').trim()
+  return text.length <= limit ? text : `${text.slice(0, Math.max(1, limit - 1))}…`
 }
 
 export function helpText(topic = '') {
@@ -221,20 +699,13 @@ export function helpText(topic = '') {
   if (normalized) {
     return `Unknown help topic: ${topic}\n\n${helpText()}`
   }
-  return `mimir — optional access to the attached Mimir workbench
+  return `mimir — attached Mimir workbench
 
-Use normal file and shell tools for ordinary coding.
-
-  mimir state [--content]          active editor context
-  mimir reveal <path:line>         show a location in Mimir
-  mimir tools [topic]              discover optional capabilities
-  mimir call <tool> [json|--stdin] call one capability
-  mimir help <topic>               focused help
-
-Topics: core, editor, review, comments, graph, files, activities, apps,
-        routines, settings, web, docs
-
-MIMIR_MCP_URL defaults to ${DEFAULT_URL}`
+  mimir tools            list available capabilities
+  mimir tool <name>      show one capability and its inputs
+  mimir skill <query>    find a workflow
+  mimir doctor           diagnose the connection
+  mimir call <tool> ...  call a capability`
 }
 
 const HELP_TOPICS = Object.freeze({
@@ -245,53 +716,53 @@ const HELP_TOPICS = Object.freeze({
   mimir_propose  Propose one exact text replacement for review.
 
 Use: mimir call <tool> '<json>'`,
-  editor: `Editor shortcuts
-
-  mimir state [--content]
-  mimir open <path>
-  mimir reveal <path:line|line|path>
-  mimir active | tabs | content | selection
-  mimir replace-selection <text|--stdin|--file path>
-  mimir set-content <--stdin|--file path>
-  mimir save`,
   review: `Reviewable changes
 
   mimir call mimir_propose '{"path":"/workspace/README.md","old_text":"before","new_text":"after","rationale":"Why"}'
 
 The path is optional. Mimir opens the target and shows the exact replacement as
 a diff for acceptance or rejection; it does not apply the proposal directly.`,
-  comments: `Comments
-
-  mimir comments
-  mimir comments-prompt
-  mimir tools comments`,
-  graph: `Business graph
-
-  mimir graph [search terms]
-  mimir board [status]
-  mimir context <graph-node-id>
-  mimir tools graph`,
-  files: 'Optional file capabilities: mimir tools files',
-  activities: 'Activity capabilities: mimir tools activities',
-  apps: 'App capabilities: mimir tools apps',
-  routines: 'Routine capabilities: mimir tools routines',
-  settings: 'Settings capabilities: mimir tools settings',
-  web: 'Academic metadata search: mimir tools web',
   docs: `Mimir keeps dense implementation notes and old tutorials out of agent context.
 
 In the source tree, browse docs/reference/ only when a focused help topic is
 insufficient.`,
   tools: `Tool discovery
 
-  mimir tools              three default agent tools
-  mimir tools <topic>      names and descriptions for one domain
-  mimir tools --all        every registered capability, without schemas
-  mimir tools --json       default schemas
-  mimir tools --all --json full raw registry`,
+  mimir tools            concise available catalog
+  mimir tools --json     machine-readable available catalog
+  mimir tool <name>      complete inputs and ready call`,
 })
 
+function toolCommandHelp() {
+  return `Usage: mimir tool <name-or-query> [--json]
+
+Find one Mimir capability and show only the inputs needed to call it.`
+}
+
+function callCommandHelp() {
+  return `Usage: mimir call <tool> [json | --stdin | --file path]
+       mimir call <tool> --help`
+}
+
+function skillCommandHelp() {
+  return `Usage: mimir skill <name-or-query> [--json]
+       mimir skill add <directory> <--catalog|--personal|--project>`
+}
+
+function skillsCommandHelp() {
+  return `Usage: mimir skills [list] [--json]
+       mimir skills refresh`
+}
+
+function doctorCommandHelp() {
+  return `Usage: mimir doctor [--json] [--verbose]`
+}
+
 export function formatToolCatalog(tools, { json = false, topic = '' } = {}) {
-  const filtered = filterToolsByTopic(tools, topic)
+  const normalized = normalizeToolQuery(topic)
+  const filtered = normalized
+    ? tools.filter(tool => normalizeToolQuery(tool?.name).includes(normalized))
+    : tools
   if (json) return JSON.stringify(filtered, null, 2)
   if (!filtered.length) return topic
     ? `No tools found for topic '${topic}'.`
@@ -301,31 +772,49 @@ export function formatToolCatalog(tools, { json = false, topic = '' } = {}) {
     .join('\n')
 }
 
-function filterToolsByTopic(tools, topic) {
-  const normalized = String(topic || '').trim().toLowerCase()
-  if (!normalized) return tools
-  const domains = TOOL_TOPIC_DOMAINS[normalized] || [normalized]
-  return tools.filter((tool) => {
-    const canonical = String(tool?._meta?.['mimir/canonicalName'] || tool?.name || '')
-    return domains.some(domain => canonical === domain || canonical.startsWith(`${domain}.`))
-  })
+export function formatPublicTools(tools) {
+  if (!tools.length) return 'No Mimir tools are currently available.'
+  const order = ['workbench', 'graph', 'connections']
+  const groups = new Map()
+  for (const tool of tools) {
+    const group = tool?._meta?.['mimir/group'] || 'other'
+    if (!groups.has(group)) groups.set(group, [])
+    groups.get(group).push(tool)
+  }
+  const sections = [...groups]
+    .sort(([left], [right]) => {
+      const leftIndex = order.indexOf(left)
+      const rightIndex = order.indexOf(right)
+      return (leftIndex < 0 ? order.length : leftIndex)
+        - (rightIndex < 0 ? order.length : rightIndex)
+        || left.localeCompare(right)
+    })
+    .map(([group, entries]) => {
+      const rows = entries.map((tool) => {
+        const effect = tool?._meta?.['mimir/effect'] || annotationEffect(tool.annotations)
+        return `${String(tool.name).padEnd(24)} [${effect}]  ${tool.description || ''}`.trimEnd()
+      })
+      return `${group.toUpperCase()}\n\n${rows.join('\n')}`
+    })
+  return sections.join('\n\n')
 }
 
-const TOOL_TOPIC_DOMAINS = Object.freeze({
-  core: ['editor.state', 'editor.reveal', 'editor.propose'],
-  review: ['editor.propose', 'files.edit'],
-  comments: ['comments', 'editor.comments'],
-  graph: ['graph', 'knowledge', 'issues', 'projects', 'research'],
-  business: ['graph', 'knowledge', 'issues', 'projects', 'research'],
-})
-
-function scopeCell(scopeId = '') {
-  return String(scopeId).split(':')[0].slice(0, 7).padEnd(7)
+function annotationEffect(annotations = {}) {
+  if (annotations.destructiveHint === true) return 'destructive'
+  return annotations.readOnlyHint === true ? 'read' : 'write'
 }
 
-function truncateCell(value, limit) {
-  const text = String(value || '').replaceAll(/\s+/g, ' ').trim()
-  return text.length <= limit ? text : `${text.slice(0, Math.max(1, limit - 1))}…`
+function wantsHelp(args) {
+  return args.includes('--help') || args.includes('-h')
+}
+
+function positional(args) {
+  return args.filter(arg => !arg.startsWith('-'))
+}
+
+function assertKnownFlags(args, allowed) {
+  const unknown = args.find(arg => arg.startsWith('-') && !allowed.includes(arg))
+  if (unknown) throw new Error(`Unknown option: ${unknown}`)
 }
 
 const invokedAsScript = process.argv[1]

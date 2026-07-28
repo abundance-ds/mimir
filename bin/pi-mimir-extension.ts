@@ -2,20 +2,35 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 const endpoint = process.env.MIMIR_MCP_URL || "http://127.0.0.1:17532/mcp";
+const instruction = "Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`";
+let protocolVersion: string | undefined;
 
-async function request(method: string, params: Record<string, unknown>, signal?: AbortSignal) {
+async function request(
+  method: string,
+  params: Record<string, unknown>,
+  signal?: AbortSignal,
+  notification = false,
+) {
+  const timeout = AbortSignal.timeout(10_000);
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...(protocolVersion ? { "mcp-protocol-version": protocolVersion } : {}),
+    },
     body: JSON.stringify({
       jsonrpc: "2.0",
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ...(notification ? {} : {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      }),
       method,
       params,
     }),
-    signal,
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   if (!response.ok) throw new Error(`Mimir returned HTTP ${response.status}.`);
+  if (notification) return undefined;
   const payload = await response.json();
   if (payload.error) throw new Error(payload.error.message || "Mimir tool request failed.");
   return payload.result;
@@ -23,6 +38,12 @@ async function request(method: string, params: Record<string, unknown>, signal?:
 
 export default function mimirTools(pi: ExtensionAPI) {
   const registered = new Set<string>();
+
+  pi.on("before_agent_start", async (event) => ({
+    systemPrompt: event.systemPrompt.includes(instruction)
+      ? event.systemPrompt
+      : `${event.systemPrompt}\n\n${instruction}`,
+  }));
 
   async function discover() {
     const result = await request("tools/list", {});
@@ -42,7 +63,6 @@ export default function mimirTools(pi: ExtensionAPI) {
           properties: {},
           additionalProperties: true,
         }),
-        promptSnippet: `Use ${toolName} to work through the attached Mimir workbench.`,
         async execute(_toolCallId, params, signal) {
           const response = await request("tools/call", {
             name: definition.name,
@@ -60,13 +80,27 @@ export default function mimirTools(pi: ExtensionAPI) {
     }
   }
 
+  async function connect() {
+    if (!protocolVersion) {
+      const initialized = await request("initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "mimir-pi", version: "0.1.0" },
+      });
+      protocolVersion = initialized?.protocolVersion;
+      await request("notifications/initialized", {}, undefined, true);
+    }
+  }
+
   pi.on("session_start", async () => {
+    await connect();
     await discover();
   });
 
   pi.registerCommand("mimir-refresh", {
     description: "Discover tools currently exposed by the attached Mimir workbench.",
     async handler(_args, ctx) {
+      await connect();
       await discover();
       if (ctx.hasUI) ctx.ui.notify(`Mimir tools ready (${registered.size})`, "info");
     },
