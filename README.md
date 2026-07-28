@@ -1,15 +1,15 @@
-# Mim
+# Mimir
 
-Mim 0.1.0 is a local AI-native workbench for CLI agents and reviewed files.
+Mimir 0.1.0 is a local AI-native workbench for CLI agents and reviewed files.
 It is built for one person and a small team: fast, direct, and hackable without
 administration UI.
 
-The package name is `mim-workbench`. The desktop app uses Tauri v2, Vue 3,
+The package name is `mimir`. The desktop app uses Tauri v2, Vue 3,
 CodeMirror 6, xterm.js, and a Rust backend.
 
 ## Workbench
 
-Mim has one three-pane window:
+Mimir has one three-pane window:
 
 ```text
 +----------------+---------------------------+---------------------------+
@@ -30,7 +30,7 @@ Mim has one three-pane window:
   has one stable Activity identity, while singleton Tools stay out of run
   history.
 - **Editor** remains mounted while Activities change. Agents can inspect and
-  edit it through Mim's MCP tools, while substantial edits open as reviewable
+  edit it through Mimir's MCP tools, while substantial edits open as reviewable
   diffs.
 
 All panes resize. Editor is visible on startup. The Sidebar collapses to a 52px
@@ -50,38 +50,39 @@ projections over the same private, project, and team knowledge. Markdown
 stays canonical while a rebuildable Rust GraphStore provides fast search,
 traversal, validation, conflict-safe writes, and agent context.
 
-The interface follows a fast **Scan → Peek → Focus** rhythm behind a single
-dispatch bar: type to look anything up, Enter to dispatch a line to a
-background agent, `!` or `work <target>` to delegate with a visible context
-pack, `/` for deterministic commands. AI work is trusted — it lands in Now as
-filed events with provenance, never behind accept/reject gates. Board rows
-show full titles with visible controls for priority, status, and due date;
-every active filter is named and one-click dismissible; hover never reveals
-content or moves a surface.
+The interface follows a fast **Scan → Peek → Focus** rhythm with persistent,
+debounced graph search and a single dispatch bar: search filters the current
+projection across indexed titles, tags, summaries, and body text; the dispatch
+bar opens graph objects, files new lines through a background agent,
+delegates `!` or `work <target>` with a visible context pack, and exposes `/`
+commands. AI work is trusted — it lands in Now as filed events with provenance,
+never behind accept/reject gates. Board rows show full titles with visible
+controls for priority, status, and due date; every active filter is named and
+one-click dismissible; hover never reveals content or moves a surface.
 
 Project sources remain in the workspace, private sources stay local under
-`~/.mim/graph/private/`, and an optional shared root is configured in Settings
+`~/.mimir/graph/private/`, and an optional shared root is configured in Settings
 > Graph. Delegated work launches durable CLI-agent Activities with bounded
 graph context; decisions, evidence, deliverables, and next actions remain
 linked to the project instead of disappearing into chat history.
 
 The same system is continuously available through `graph.*`, `knowledge.*`,
-`issues.*`, `projects.*`, and `research.*` tools, plus `mimx graph`,
-`mimx board`, and `mimx context`. See
+`issues.*`, `projects.*`, and `research.*` tools, plus `mimir graph`,
+`mimir board`, and `mimir context`. See
 [Business graph](docs/reference/business-graph.md) for ontology, scopes,
 projections, interaction design, migration, recovery, and architecture.
 
 ## Capability layer
 
-Mim starts a loopback MCP endpoint at `http://127.0.0.1:17532/mcp`. One
+Mimir starts a loopback MCP endpoint at `http://127.0.0.1:17532/mcp`. One
 discoverable registry serves launched agents, apps, routines, and the installed
-`mimx` CLI.
+`mimir` CLI.
 
-Mim-launched Codex, Claude, and Pi sessions receive the connection
+Mimir-launched Codex, Claude, and Pi sessions receive the connection
 automatically. Agents see only three concise tools by default: editor state,
 file reveal, and reviewable proposals. The full files, comments, graph,
 Activities, Apps, Routines, settings, and metadata-search capabilities remain
-available on demand through `mimx help` and `mimx tools <topic>`. Embedded apps
+available on demand through `mimir help` and `mimir tools <topic>`. Embedded apps
 may add tools to the same live registry without expanding default agent
 context.
 
@@ -107,23 +108,23 @@ checks.
 
 ## Local configuration
 
-Mim creates and uses:
+Mimir creates and uses:
 
-- `~/.mim/launchers.json` for exact-argv launcher presets
-- `~/.mim/activities/` for durable Activity metadata and bounded scrollback
-- `~/.mim/apps/` for local app definitions
-- `~/.mim/app-data/` for app-owned JSON data
-- `~/.mim/graph/private/` for private local knowledge and work
-- `~/.mim/routines/` for routine TOML files
-- `~/.mim/routines-state.json` for scheduler state
-- `~/.mim/settings.json` for workbench, editor, model, and workspace settings
-- `~/.mim/session.json` for open tabs, unsaved drafts, recents, and zoom
-- `~/.mim/models.json` for inline and ghost AI model configuration
-- `~/.mim/bin/mimx` for the installed CLI
-- `~/.mim/pi/mim-tools.ts` for Pi's dynamic Mim tool extension
+- `~/.mimir/launchers.json` for exact-argv launcher presets
+- `~/.mimir/activities/` for durable Activity metadata and bounded scrollback
+- `~/.mimir/apps/` for local app definitions
+- `~/.mimir/app-data/` for app-owned JSON data
+- `~/.mimir/graph/private/` for private local knowledge and work
+- `~/.mimir/routines/` for routine TOML files
+- `~/.mimir/routines-state.json` for scheduler state
+- `~/.mimir/settings.json` for workbench, editor, model, and workspace settings
+- `~/.mimir/session.json` for open tabs, unsaved drafts, recents, and zoom
+- `~/.mimir/models.json` for inline and ghost AI model configuration
+- `~/.mimir/bin/mimir` for the installed CLI
+- `~/.mimir/pi/mimir-tools.ts` for Pi's dynamic Mimir tool extension
 
 API keys entered in Settings are stored in the OS keychain. Debug builds may
-also read environment variables, `.env`, and `~/.mim/keys.env`.
+also read environment variables, `.env`, and `~/.mimir/keys.env`.
 
 ## Documentation
 
