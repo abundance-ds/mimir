@@ -1,6 +1,10 @@
 # Chats
 
-Status: implemented and production-verified, 2026-07-29
+Status: implemented, 2026-07-29. Review fixes landed the same day (multiline
+ingestion, relay fallback, windowed history, read-anchor monotonicity,
+file-service hardening); re-verify in production after deploying the updated
+`file_service.py` and rerunning the protocol tests before calling this
+production-verified again.
 
 ## Product model
 
@@ -239,7 +243,9 @@ sudo mimir-chat-user remove anna --confirm anna
 ```
 
 Removal immediately unregisters the login while reserving the account name so
-old messages cannot be mistaken for a future person. Ergo also unregisters any
+old messages cannot be mistaken for a future person. One caveat: the attachment
+service caches successful credentials for up to five minutes, so a removed
+account can keep attachment access for that window. Ergo also unregisters any
 channels that account founded, so transfer important channel ownership before
 offboarding its founder. This command does not erase cached or server history.
 
