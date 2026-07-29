@@ -29,6 +29,13 @@ from urllib.parse import quote, urlsplit
 FILE_ID = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 MAX_FILENAME_BYTES = 240
 AUTH_CACHE_SECONDS = 300
+AUTH_FAILURE_CACHE_SECONDS = 30
+AUTH_MAX_CONCURRENT = 4
+REQUEST_SOCKET_TIMEOUT = 30
+
+
+class UploadTruncated(ValueError):
+    """The client closed or stalled the upload before Content-Length bytes."""
 
 
 def initialize_database(path: Path) -> None:
@@ -55,7 +62,11 @@ class SaslAuthenticator:
         self.host = host
         self.port = port
         self.cache: dict[str, float] = {}
+        self.failures: dict[str, float] = {}
         self.lock = threading.Lock()
+        # Every uncached check opens a loopback IRC session against Ergo, so
+        # bound how many an anonymous internet caller can hold open at once.
+        self.checks = threading.BoundedSemaphore(AUTH_MAX_CONCURRENT)
 
     def authenticate(self, account: str, password: str) -> bool:
         digest = hashlib.sha256(f"{account}\0{password}".encode()).hexdigest()
@@ -63,16 +74,33 @@ class SaslAuthenticator:
         with self.lock:
             if self.cache.get(digest, 0) > now:
                 return True
-        accepted = self._authenticate_uncached(account, password)
-        if accepted:
-            with self.lock:
+            if self.failures.get(digest, 0) > now:
+                return False
+        if not self.checks.acquire(timeout=5):
+            return False
+        try:
+            accepted = self._authenticate_uncached(account, password)
+        finally:
+            self.checks.release()
+        with self.lock:
+            if accepted:
                 self.cache[digest] = now + AUTH_CACHE_SECONDS
-                if len(self.cache) > 100:
-                    self.cache = {
-                        key: expiry
-                        for key, expiry in self.cache.items()
-                        if expiry > now
-                    }
+            else:
+                # A short negative cache keeps repeated wrong credentials from
+                # flooding Ergo and tripping its per-account login throttling.
+                self.failures[digest] = now + AUTH_FAILURE_CACHE_SECONDS
+            if len(self.cache) > 100:
+                self.cache = {
+                    key: expiry
+                    for key, expiry in self.cache.items()
+                    if expiry > now
+                }
+            if len(self.failures) > 1000:
+                self.failures = {
+                    key: expiry
+                    for key, expiry in self.failures.items()
+                    if expiry > now
+                }
         return accepted
 
     def _authenticate_uncached(self, account: str, password: str) -> bool:
@@ -164,7 +192,7 @@ class FileStore:
                 while remaining:
                     chunk = source.read(min(1024 * 1024, remaining))
                     if not chunk:
-                        raise ValueError("upload ended before Content-Length")
+                        raise UploadTruncated("upload ended before Content-Length")
                     temporary.write(chunk)
                     digest.update(chunk)
                     remaining -= len(chunk)
@@ -255,6 +283,9 @@ class AttachmentServer(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     server: AttachmentServer
+    # Closes connections that stall mid-headers or mid-body instead of
+    # pinning a thread forever.
+    timeout = REQUEST_SOCKET_TIMEOUT
 
     def do_GET(self) -> None:
         if urlsplit(self.path).path == "/healthz":
@@ -315,6 +346,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.rfile,
                 length,
             )
+        except UploadTruncated as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         except ValueError as error:
             self.send_json(HTTPStatus.INSUFFICIENT_STORAGE, {"error": str(error)})
             return

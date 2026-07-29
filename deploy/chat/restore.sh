@@ -79,6 +79,33 @@ previous="${backup_root}/prerestore-${stamp}"
 failed="${backup_root}/failed-restore-${stamp}"
 install -d -m 0700 "$previous/etc" "$previous/var" "$previous/opt/mimir-chat"
 
+# The rollback trap must be armed before any live state moves: a failure in
+# the middle of the swap (disk full, cross-device copy error) would otherwise
+# leave the services stopped with state half-moved and nothing restoring it.
+# Each step is guarded so rollback only reverses the pieces that were swapped.
+rollback() {
+	local status=$?
+	trap - ERR
+	systemctl stop mimir-chat-admin.service mimir-chat-files.service mimir-chat.service || true
+	install -d -m 0700 "$failed/etc" "$failed/var" "$failed/opt/mimir-chat"
+	if [[ -e "$previous/etc/mimir-chat" ]]; then
+		{ [[ -e /etc/mimir-chat ]] && mv /etc/mimir-chat "$failed/etc/"; } || true
+		mv "$previous/etc/mimir-chat" /etc/
+	fi
+	if [[ -e "$previous/var/lib-mimir-chat" ]]; then
+		{ [[ -e /var/lib/mimir-chat ]] && mv /var/lib/mimir-chat "$failed/var/lib-mimir-chat"; } || true
+		mv "$previous/var/lib-mimir-chat" /var/lib/mimir-chat
+	fi
+	if [[ -e "$previous/opt/mimir-chat/current" ]]; then
+		{ [[ -e /opt/mimir-chat/current ]] && mv /opt/mimir-chat/current "$failed/opt/mimir-chat/"; } || true
+		mv "$previous/opt/mimir-chat/current" /opt/mimir-chat/
+	fi
+	systemctl start mimir-chat.service mimir-chat-files.service mimir-chat-admin.service || true
+	echo "restore failed; prior state was restored from $previous" >&2
+	exit "$status"
+}
+trap rollback ERR
+
 systemctl stop mimir-chat-admin.service mimir-chat-files.service mimir-chat.service
 mv /etc/mimir-chat "$previous/etc/"
 mv /var/lib/mimir-chat "$previous/var/lib-mimir-chat"
@@ -86,23 +113,6 @@ mv /opt/mimir-chat/current "$previous/opt/mimir-chat/"
 mv "$staging/etc/mimir-chat" /etc/
 mv "$staging/var/lib/mimir-chat" /var/lib/
 mv "$staging/opt/mimir-chat/current" /opt/mimir-chat/
-
-rollback() {
-	local status=$?
-	trap - ERR
-	systemctl stop mimir-chat-admin.service mimir-chat-files.service mimir-chat.service || true
-	install -d -m 0700 "$failed/etc" "$failed/var" "$failed/opt/mimir-chat"
-	mv /etc/mimir-chat "$failed/etc/" || true
-	mv /var/lib/mimir-chat "$failed/var/lib-mimir-chat" || true
-	mv /opt/mimir-chat/current "$failed/opt/mimir-chat/" || true
-	mv "$previous/etc/mimir-chat" /etc/
-	mv "$previous/var/lib-mimir-chat" /var/lib/mimir-chat
-	mv "$previous/opt/mimir-chat/current" /opt/mimir-chat/
-	systemctl start mimir-chat.service mimir-chat-files.service mimir-chat-admin.service
-	echo "restore failed; prior state was restored from $previous" >&2
-	exit "$status"
-}
-trap rollback ERR
 
 systemctl start mimir-chat.service mimir-chat-files.service mimir-chat-admin.service
 /usr/local/sbin/mimir-chat-health
