@@ -16,11 +16,12 @@ directories, applies native workspace/symlink guards, and classifies each entry
 for opening. Do not derive the tree from the index: ignored or unindexed
 directory structure would disappear and expansion would require a full scan.
 
-Files contributes the eight most recently modified indexed files to the empty
-Go to view. Typing `/` restricts results to file paths and exposes up to 100
-keyboard-selectable results; choosing one opens it in the mounted Editor.
-[Workbench design](workbench-design.md#go-to) owns the global Go to hierarchy,
-scopes, and non-file entry behavior.
+Cmd/Ctrl+P keeps the eight most recently modified indexed files in its empty
+Go to view, after Start new activity and Tools. Entering Start new activity
+replaces the root results instead of pushing files downward. Typing `/`
+restricts the launcher to file paths and exposes up to 100 keyboard-selectable
+results. Choosing one opens it in the mounted Editor. Closed History uses `@`;
+it does not displace the recent-file route.
 
 ## View composition
 

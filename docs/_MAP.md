@@ -3,19 +3,6 @@
 Use this map to find a subsystem's canonical owners, documentation, and tests.
 Source remains canonical for implementation details.
 
-## Documentation ownership
-
-Every behavior has one detailed documentation owner. In the change-routing
-table, only the **Canonical document** is an automatic documentation edit
-target. **Read for constraints** documents provide boundaries and context; do
-not copy the behavior into them. If a change crosses rows, choose the document
-closest to the user-visible behavior and link to it where navigation is
-necessary.
-
-`acceptance.md` summarizes release-level outcomes. Edit it only when a release
-outcome or verification gate changes, not as a routine feature-doc mirror. The
-root README remains product orientation and minimal setup.
-
 ## Product shape
 
 Mimir is one Tauri window with three mounted panes:
@@ -48,23 +35,21 @@ listeners are installed. See
 
 ## Change routing
 
-| Change | Canonical document | Read for constraints | Canonical code owners | Focused tests |
-|---|---|---|---|---|
-| Tauri bootstrap/window/quit | [runtime architecture](runtime-architecture.md) | [IPC](ipc.md), [persistence](persistence.md) | `src-tauri/src/lib.rs`, `src/editor/windowCloseGuard.js`, `appQuit.js` | close/quit/session tests; relevant Rust module |
-| Workbench panes, focus, shortcuts, and Go to | [workbench design](workbench-design.md) | [design system](design-system.md) | `WorkbenchApp.vue`, `WorkbenchShell.vue`, `stores/workbench.js`, Quick Open, responsive/resize/key modules | Workbench/Shell/Quick Open/resize/responsive/key tests |
-| Activity/PTY/agent lifecycle | [activities](activities.md) | [agent setup](agent-setup.md), [persistence](persistence.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores/surfaces | native supervisor/model/status/scrollback; Activity stores/components |
-| Team chat and chat-linked agents | [Chats](chat.md) | [security](security.md), [MCP](mcp.md) | native `chat/`; chat service/store; Chat Activity/sidebar/header/settings; `deploy/chat/` | native chat/db; chat service/store/components; production protocol smoke |
-| MCP/tool/provider | [MCP](mcp.md) | [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
-| Files/tree/search/preview/mutation | [files](files.md) | [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, Files store/service/activity/row, Editor typed-preview path | native file modules; workspace/file stores; Files Activity; Editor preview tests |
-| Apps/SDK/local tools | [Apps](apps-system.md) | [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
-| Business graph/Issue Board/CRM | [Business graph](business-graph.md) | [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
-| Routines/scheduler | [Routines](routines.md) | [persistence](persistence.md) | `routines.rs`, `routine_runtime.rs`, Routine store/service/activity | native schema/runtime; Routine store/service/activity |
-| Editor/tabs/diffs/proposals | [Editor](editor-system.md) | [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
-| AI provider/model infrastructure | [AI system](ai-system.md) | [security](security.md), [IPC](ipc.md) | native `ai*` modules/resources; renderer `services/ai/` | native AI tests; AI service/model tests |
-| Inline and ghost Editor behavior | [inline AI](inline-ai.md) | [AI system](ai-system.md), [Editor](editor-system.md) | `InlineAI.vue`, ghost extension, renderer AI services | InlineAI/ghost/editor interaction tests |
-| Settings/theme/layout persistence | [settings](settings.md) | [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings UI/store/workbench tests |
-| Build and release | [building](building.md) | [testing](testing.md) | package/build scripts, Tauri config, CI workflow | build/signing checks; relevant Rust checks |
-| Test topology and verification policy | [testing](testing.md) | [building](building.md) | Vitest config, `src/test/setup.js`, test helpers, command/fixture checks | test-runner and contract smoke |
+| Change | Read | Canonical owners | Focused tests |
+|---|---|---|---|
+| Tauri bootstrap/window/quit | [runtime architecture](runtime-architecture.md), [IPC](ipc.md), [persistence](persistence.md) | `src-tauri/src/lib.rs`, `src/editor/windowCloseGuard.js`, `appQuit.js` | close/quit/session tests; relevant Rust module |
+| Workbench panes/navigation | [workbench design](workbench-design.md) | `WorkbenchApp.vue`, `WorkbenchShell.vue`, `stores/workbench.js`, responsive/resize/key modules | Workbench/Shell/resize/responsive/key tests |
+| Activity/PTY/agent lifecycle | [activities](activities.md), [agent setup](agent-setup.md), [persistence](persistence.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores/surfaces | native supervisor/model/status/scrollback; Activity stores/components |
+| Team chat and chat-linked agents | [Chats](chat.md), [security](security.md), [MCP](mcp.md) | native `chat/`; chat service/store; Chat Activity/sidebar/header/settings; `deploy/chat/` | native chat/db; chat service/store/components; production protocol smoke |
+| MCP/tool/provider | [MCP](mcp.md), [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
+| Files/tree/search/preview/mutation | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, Files store/service/activity/row, Editor typed-preview path | native file modules; workspace/file stores; Files Activity; Editor preview tests |
+| Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
+| Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
+| Routines/scheduler | [Routines](routines.md), [persistence](persistence.md) | `routines.rs`, `routine_runtime.rs`, Routine store/service/activity | native schema/runtime; Routine store/service/activity |
+| Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
+| Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
+| Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
+| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, `scripts/check-tauri-commands.mjs` | full verification set; `src-tauri/tests/mimir_cli_contract.rs` |
 
 ## Frontend map
 
@@ -297,7 +282,7 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 |---|---|
 | [agent-interface.md](agent-interface.md) | public agent tools and discovery contract |
 | [synthesis.md](synthesis.md) | product thesis and boundaries |
-| [acceptance.md](acceptance.md) | release-level outcome summary; not a feature-detail owner |
+| [acceptance.md](acceptance.md) | release behavior contract |
 | [building.md](building.md) | development, verification, packaging |
 | [testing.md](testing.md) | test topology, environment limits, change-to-test routing |
 | [runtime-architecture.md](runtime-architecture.md) | native/renderer authority, bootstrap, hydration, shutdown |
@@ -307,17 +292,17 @@ See [persistence.md](persistence.md), [ai-system.md](ai-system.md), and
 | [security.md](security.md) | trusted-local model and exact capability boundaries |
 | [ai-system.md](ai-system.md) | model registry, credentials, providers, transport |
 | [agent-setup.md](agent-setup.md) | launchers, automatic agent connection, `mimir` |
-| [activities.md](activities.md) | Activity records, execution lifecycle, PTY behavior, and Activity-specific operations |
+| [activities.md](activities.md) | universal execution lifecycle |
 | [chat.md](chat.md) | team chat, deployment, and room-linked agents |
 | [mcp.md](mcp.md) | registry, transport, domains, dynamic providers |
 | [business-graph.md](business-graph.md) | GraphStore, ontology, physical scopes, projections, tools, migration, and recovery |
-| [files.md](files.md) | file index, workspace operations, and file results contributed to Go to |
+| [files.md](files.md) | file index, search, quick-open |
 | [apps-system.md](apps-system.md) | local app formats and SDK |
 | [routines.md](routines.md) | scheduler and routine TOML |
 | [editor-system.md](editor-system.md) | Markdown editor and review flow |
 | [inline-ai.md](inline-ai.md) | Cmd+K and ghost completion |
 | [comments.md](comments.md) | canonical pseudo-XML comments and inline UI |
-| [workbench-design.md](workbench-design.md) | shell layout, focus routing, global shortcuts, Go to, and visual direction |
+| [workbench-design.md](workbench-design.md) | shell interaction and visual direction |
 | [design-system.md](design-system.md) | styling tokens and UI rules |
 | [gotchas.md](gotchas.md) | non-obvious implementation constraints |
 | [issues.md](issues.md) | current known issues |
