@@ -105,7 +105,6 @@ pub fn write_bytes_atomic(path: impl AsRef<Path>, contents: &[u8]) -> Result<(),
 
 /// Atomically replace a secret file and enforce owner-only permissions on
 /// Unix before any secret bytes are written to its temporary file.
-#[cfg(debug_assertions)]
 pub fn write_secret_bytes_atomic(
     path: impl AsRef<Path>,
     contents: &[u8],

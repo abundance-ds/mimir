@@ -67,6 +67,7 @@ fn activity_list() -> Vec<ActivityRecord> {
             updated_at: "2026-07-25T10:04:12.000Z".into(),
             last_viewed_at: Some("2026-07-25T10:03:00.000Z".into()),
             archived_at: None,
+            close_requested_at: None,
             retention: ActivityRetention::Durable,
             source: ActivityOrigin {
                 source_type: Some("launcher".into()),
@@ -106,6 +107,7 @@ fn activity_list() -> Vec<ActivityRecord> {
             updated_at: "2026-07-24T19:02:45.000Z".into(),
             last_viewed_at: None,
             archived_at: Some("2026-07-25T08:00:00.000Z".into()),
+            close_requested_at: None,
             retention: ActivityRetention::Durable,
             source: ActivityOrigin::default(),
             host: ActivityHost::pty(None),
@@ -248,6 +250,7 @@ fn launcher_resolve() -> ResolvedLaunch {
         kind: LauncherKind::Agent,
         agent_id: Some("codex".into()),
         resume_strategy: ResumeStrategy::Codex,
+        cli_session_id: None,
         command: "/opt/homebrew/bin/codex".into(),
         args: vec!["review".into()],
         cwd: "/Users/me/work/mimir".into(),

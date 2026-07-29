@@ -9,6 +9,7 @@ use std::{
     process::Command,
     sync::{Mutex, OnceLock},
 };
+use uuid::Uuid;
 
 const CONFIG_VERSION: u32 = 1;
 const DEFAULT_MIMIR_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
@@ -138,6 +139,8 @@ pub struct ResolvedLaunch {
     pub kind: LauncherKind,
     pub agent_id: Option<String>,
     pub resume_strategy: ResumeStrategy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_session_id: Option<String>,
     pub command: String,
     pub args: Vec<String>,
     pub cwd: String,
@@ -151,6 +154,11 @@ struct PreparedSkills {
     claude_root: Option<String>,
     #[serde(default)]
     project_skill_files: Vec<String>,
+}
+
+#[derive(Default, Deserialize)]
+struct CodexNotifyConfig {
+    notify: Option<Vec<String>>,
 }
 
 pub fn agent_catalog() -> Vec<AgentDefinition> {
@@ -413,6 +421,11 @@ pub fn resolve_launch(
     environment.insert("PATH".into(), path.to_string_lossy().into_owned());
     environment.insert("MIMIR_MCP_URL".into(), mcp_url.to_string());
     let mut args = preset.args.clone();
+    let cli_session_id = agent_id
+        .as_deref()
+        .map(|agent_id| prepare_cli_session_id(agent_id, &mut args))
+        .transpose()?
+        .flatten();
     if let Some(agent_id) = agent_id.as_deref() {
         let skills = prepare_agent_skills(agent_id, home_path, Path::new(&cwd), &environment)?;
         append_mimir_connection_args(
@@ -431,11 +444,69 @@ pub fn resolve_launch(
         kind: preset.kind,
         agent_id,
         resume_strategy,
+        cli_session_id,
         command,
         args,
         cwd,
         env: environment,
     })
+}
+
+fn prepare_cli_session_id(
+    agent_id: &str,
+    args: &mut Vec<String>,
+) -> Result<Option<String>, String> {
+    if agent_id == "codex" {
+        // Codex does not accept a caller-selected id for a new interactive
+        // thread. Its notify callback records the exact thread id instead.
+        return Ok(None);
+    }
+    if !matches!(agent_id, "claude" | "pi" | "gemini") {
+        return Ok(None);
+    }
+
+    let existing_values = option_values(args, "--session-id")?;
+    if existing_values.len() > 1 {
+        return Err(format!(
+            "Launcher for {agent_id} must define --session-id at most once."
+        ));
+    }
+    let existing = existing_values.into_iter().next();
+    let session_id = existing
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    Uuid::parse_str(&session_id).map_err(|_| {
+        format!("Launcher session id for {agent_id} must be a UUID, got '{session_id}'.")
+    })?;
+    if existing.is_none() {
+        args.extend(["--session-id".into(), session_id.clone()]);
+    }
+    Ok(Some(session_id))
+}
+
+fn option_values(args: &[String], option: &str) -> Result<Vec<String>, String> {
+    let prefix = format!("{option}=");
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == option {
+            let value = args
+                .get(index + 1)
+                .filter(|value| !value.starts_with('-'))
+                .ok_or_else(|| format!("{option} requires a UUID value."))?;
+            values.push(value.clone());
+            index += 2;
+            continue;
+        }
+        if let Some(value) = args[index].strip_prefix(&prefix) {
+            if value.is_empty() {
+                return Err(format!("{option} requires a UUID value."));
+            }
+            values.push(value.to_string());
+        }
+        index += 1;
+    }
+    Ok(values)
 }
 
 fn validate_explicit_binary(binary: &str) -> Result<(), String> {
@@ -476,11 +547,10 @@ fn append_mimir_connection_args(
     skills: &PreparedSkills,
     args: &mut Vec<String>,
 ) -> Result<(), String> {
-    match agent_id {
-        "codex"
-            if !args
-                .iter()
-                .any(|arg| arg.contains(&format!("mcp_servers.{MIMIR_SERVER_ID}.url"))) =>
+    if agent_id == "codex" {
+        if !args
+            .iter()
+            .any(|arg| arg.contains(&format!("mcp_servers.{MIMIR_SERVER_ID}.url")))
         {
             // Keep Mimir's one-run HTTP entry under one stable, product-owned
             // server id and avoid injecting the same URL override twice.
@@ -493,6 +563,11 @@ fn append_mimir_connection_args(
                 ),
             ]);
         }
+        append_codex_notify_capture(home, environment, args);
+    }
+
+    match agent_id {
+        "codex" => {}
         "claude" if !args.iter().any(|arg| arg.contains(MIMIR_SERVER_ID)) => {
             let config = serde_json::json!({
                 "mcpServers": {
@@ -531,6 +606,93 @@ fn append_mimir_connection_args(
         }
     }
     Ok(())
+}
+
+fn append_codex_notify_capture(
+    home: &Path,
+    environment: &BTreeMap<String, String>,
+    args: &mut Vec<String>,
+) {
+    let codex_home = environment
+        .get("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    let previous = codex_notify_command(&codex_home, args);
+    if previous
+        .as_ref()
+        .is_some_and(|value| is_mimir_codex_notify(value))
+    {
+        return;
+    }
+    let mut command = vec![
+        mimir_cli_command(home),
+        "internal".to_string(),
+        "codex-notify".to_string(),
+    ];
+    if let Some(previous) = previous {
+        command.extend([
+            "--forward-json".into(),
+            serde_json::to_string(&previous)
+                .expect("serializing a Codex notify command cannot fail"),
+        ]);
+    }
+    args.extend([
+        "-c".into(),
+        format!(
+            "notify={}",
+            serde_json::to_string(&command)
+                .expect("serializing Mimir's Codex notify command cannot fail")
+        ),
+    ]);
+}
+
+fn codex_notify_command(codex_home: &Path, args: &[String]) -> Option<Vec<String>> {
+    let mut command = fs::read_to_string(codex_home.join("config.toml"))
+        .ok()
+        .and_then(|source| toml::from_str::<CodexNotifyConfig>(&source).ok())
+        .and_then(|config| config.notify);
+
+    for pair in args.windows(2) {
+        if matches!(pair[0].as_str(), "-c" | "--config") {
+            if let Some(value) = pair[1].strip_prefix("notify=") {
+                command = parse_toml_string_array(value);
+            }
+        }
+    }
+    command
+}
+
+fn parse_toml_string_array(value: &str) -> Option<Vec<String>> {
+    toml::from_str::<CodexNotifyConfig>(&format!("notify={value}"))
+        .ok()
+        .and_then(|config| config.notify)
+        .filter(|values| !values.is_empty())
+}
+
+fn is_mimir_codex_notify(command: &[String]) -> bool {
+    command.len() >= 3
+        && Path::new(&command[0])
+            .file_stem()
+            .and_then(|value| value.to_str())
+            == Some("mimir")
+        && command[1..3] == ["internal", "codex-notify"]
+}
+
+fn mimir_cli_command(home: &Path) -> String {
+    #[cfg(windows)]
+    {
+        return home
+            .join(".mimir")
+            .join("bin")
+            .join("mimir.cmd")
+            .to_string_lossy()
+            .into_owned();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
+        "mimir".into()
+    }
 }
 
 fn prepare_agent_skills(
@@ -1027,6 +1189,8 @@ mod tests {
                 "gpt 5",
                 "-c",
                 r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
+                "-c",
+                r#"notify=["mimir","internal","codex-notify"]"#,
             ]
         );
         assert_eq!(launch.cwd, directory.path().to_string_lossy());
@@ -1035,6 +1199,96 @@ mod tests {
             launch.env.get("MIMIR_MCP_URL").map(String::as_str),
             Some("http://127.0.0.1:29999/mcp")
         );
+    }
+
+    #[test]
+    fn supported_agents_create_exact_session_identity_without_latest_fallbacks() {
+        let directory = tempdir().unwrap();
+        for agent_id in ["claude", "pi", "gemini"] {
+            let preset = LauncherPreset {
+                id: format!("{agent_id}-exact"),
+                title: agent_id.into(),
+                kind: LauncherKind::Agent,
+                enabled: true,
+                agent_id: Some(agent_id.into()),
+                binary: Some("/bin/sh".into()),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                cwd: WorkingDirectory::Workspace,
+            };
+            let launch = resolve_launch(
+                &preset,
+                &[],
+                Some(directory.path().to_str().unwrap()),
+                directory.path(),
+                Path::new("/bin/sh"),
+                DEFAULT_MIMIR_MCP_URL,
+            )
+            .unwrap();
+            let session_id = launch.cli_session_id.as_deref().unwrap();
+            assert!(Uuid::parse_str(session_id).is_ok());
+            assert!(launch
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--session-id", session_id]));
+            assert!(!launch
+                .args
+                .iter()
+                .any(|arg| { matches!(arg.as_str(), "latest" | "--last" | "--continue") }));
+        }
+    }
+
+    #[test]
+    fn explicit_session_identity_is_validated_and_never_ambiguous() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let mut exact = vec![format!("--session-id={id}")];
+        assert_eq!(
+            prepare_cli_session_id("claude", &mut exact)
+                .unwrap()
+                .as_deref(),
+            Some(id)
+        );
+        assert_eq!(exact, [format!("--session-id={id}")]);
+
+        assert!(
+            prepare_cli_session_id("pi", &mut vec!["--session-id".into()])
+                .unwrap_err()
+                .contains("requires")
+        );
+        assert!(prepare_cli_session_id(
+            "gemini",
+            &mut vec![
+                "--session-id".into(),
+                id.into(),
+                format!("--session-id={id}")
+            ],
+        )
+        .unwrap_err()
+        .contains("at most once"));
+    }
+
+    #[test]
+    fn codex_capture_forwards_the_users_existing_notify_command() {
+        let home = tempdir().unwrap();
+        let config_dir = home.path().join(".codex");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            r#"notify = ["/opt/user-notify", "turn-ended"]"#,
+        )
+        .unwrap();
+        let mut args = Vec::new();
+
+        append_test_args("codex", home.path(), DEFAULT_MIMIR_MCP_URL, &mut args);
+
+        let notify = args
+            .windows(2)
+            .find(|pair| pair[0] == "-c" && pair[1].starts_with("notify="))
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+        assert!(notify.contains("codex-notify"));
+        assert!(notify.contains("--forward-json"));
+        assert!(notify.contains("/opt/user-notify"));
     }
 
     #[test]
@@ -1212,7 +1466,9 @@ mod tests {
             codex,
             [
                 "-c",
-                r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#
+                r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
+                "-c",
+                r#"notify=["mimir","internal","codex-notify"]"#
             ]
         );
 
@@ -1247,7 +1503,7 @@ mod tests {
         append_test_args("claude", home, mcp_url, &mut claude);
         append_test_args("pi", home, mcp_url, &mut pi);
         append_test_args("gemini", gemini_home.path(), mcp_url, &mut gemini);
-        assert_eq!(codex.len(), 2);
+        assert_eq!(codex.len(), 4);
         assert_eq!(claude.len(), 2);
         assert_eq!(pi.len(), 2);
     }
@@ -1282,7 +1538,6 @@ mod tests {
             "--extension".into(),
             "/Users/mimir/.mimir/pi/mimir-tools.ts".into(),
         ];
-        let expected_codex = codex.clone();
         let expected_claude = claude.clone();
         let expected_pi = pi.clone();
 
@@ -1290,7 +1545,16 @@ mod tests {
         append_test_args("claude", home, mcp_url, &mut claude);
         append_test_args("pi", home, mcp_url, &mut pi);
 
-        assert_eq!(codex, expected_codex);
+        assert_eq!(
+            codex,
+            [
+                "--full-auto",
+                "-c",
+                r#"mcp_servers.mimir_workbench.url="http://custom.example/mcp""#,
+                "-c",
+                r#"notify=["mimir","internal","codex-notify"]"#,
+            ]
+        );
         assert_eq!(claude, expected_claude);
         assert_eq!(pi, expected_pi);
     }
@@ -1332,6 +1596,8 @@ mod tests {
                 r#"mcp_servers.other.command="other-server""#,
                 "-c",
                 r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
+                "-c",
+                r#"notify=["mimir","internal","codex-notify"]"#,
             ]
         );
     }

@@ -22,10 +22,12 @@ use mimir::{
 
 const TEST_TOKEN: &str = "contract-test-token";
 
-/// A minimal registry with three synthetic core tools:
+/// A minimal registry with four synthetic core tools:
 ///
 /// * `graph.get` (`graph_get`) — returns input plus caller metadata, so tests
 ///   can assert on public-tool round-trips and transport-assigned context.
+/// * `graph.events` (`graph_events`) — proves graph history survives the public
+///   allowlist and CLI transport rather than existing only as a private handler.
 /// * `editor.state` (`editor_state`) — backs the direct `mimir_state` tool.
 /// * `graph.status` (`graph_status`) — supplies scopes for `mimir doctor`.
 fn test_registry() -> ToolRegistry {
@@ -51,6 +53,40 @@ fn test_registry() -> ToolRegistry {
         },
     )
     .expect("register graph.get");
+    register_core_tool(
+        &registry,
+        "graph.events",
+        "graph_events",
+        "List recent graph events.",
+        json!({
+            "type": "object",
+            "properties": {
+                "scopeIds": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                },
+                "since": { "type": "string" },
+                "offset": { "type": "integer", "minimum": 0 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+            },
+            "additionalProperties": false
+        }),
+        ToolSource::Native,
+        |context: ToolCallContext, input: Value| async move {
+            Ok(ToolResult::new(json!({
+                "items": [{
+                    "id": "event-contract",
+                    "action": "graph.update",
+                    "scopeId": input["scopeIds"][0],
+                    "since": input["since"],
+                }],
+                "offset": input["offset"],
+                "limit": input["limit"],
+                "caller": serde_json::to_value(&context.caller).expect("caller serializes"),
+            })))
+        },
+    )
+    .expect("register graph.events");
     register_core_tool(
         &registry,
         "editor.state",
@@ -204,6 +240,36 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
             && lean_stdout.contains("GRAPH"),
         "listing should group every public tool, got: {lean_stdout}",
     );
+    assert!(
+        lean_stdout.contains("mimir tools workbench") && lean_stdout.contains("mimir tools graph"),
+        "the global catalog should advertise focused drawers, got: {lean_stdout}",
+    );
+
+    let graph_drawer = run_mimir(&url, &["tools", "graph"]).await.unwrap();
+    assert_success(&graph_drawer, "mimir tools graph");
+    let graph_stdout = stdout_of(&graph_drawer);
+    assert!(graph_stdout.starts_with("GRAPH\n\n"));
+    assert!(graph_stdout.contains("graph_get id  [read]"));
+    assert!(graph_stdout.contains("graph_events"));
+    assert!(graph_stdout.contains("graph_get.sourceRevision"));
+    assert!(!graph_stdout.contains("mimir_state"));
+
+    let graph_json = run_mimir(&url, &["tools", "graph", "--json"])
+        .await
+        .unwrap();
+    assert_success(&graph_json, "mimir tools graph --json");
+    let graph_catalog: Value =
+        serde_json::from_str(stdout_of(&graph_json).trim()).expect("drawer JSON");
+    assert!(graph_catalog
+        .as_array()
+        .is_some_and(|tools| !tools.is_empty()
+            && tools
+                .iter()
+                .all(|tool| tool["_meta"]["mimir/group"] == "graph")));
+
+    let unknown_drawer = run_mimir(&url, &["tools", "unknown"]).await.unwrap();
+    assert_eq!(unknown_drawer.status.code(), Some(1));
+    assert!(stderr_of(&unknown_drawer).contains("Unknown tool group 'unknown'"));
 
     // There is no second, hidden "all" catalog.
     let old_all = run_mimir(&url, &["tools", "--all"]).await.unwrap();
@@ -252,6 +318,24 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
             .is_some_and(|id| !id.is_empty()),
         "server should derive request_id from the JSON-RPC id, got: {payload}",
     );
+
+    let events = run_mimir(
+        &url,
+        &[
+            "call",
+            "graph_events",
+            r#"{"scopeIds":["project:contract"],"since":"2026-07-01T00:00:00Z","offset":0,"limit":50}"#,
+        ],
+    )
+    .await
+    .unwrap();
+    assert_success(&events, "mimir call graph_events");
+    let event_payload: Value =
+        serde_json::from_str(stdout_of(&events).trim()).expect("graph_events prints JSON");
+    assert_eq!(event_payload["items"][0]["id"], "event-contract");
+    assert_eq!(event_payload["items"][0]["scopeId"], "project:contract");
+    assert_eq!(event_payload["items"][0]["since"], "2026-07-01T00:00:00Z");
+    assert_eq!(event_payload["limit"], 50);
 
     // Schema violations surface as CLI errors (exit 1, message on stderr).
     let invalid = run_mimir(&url, &["call", "graph_get", "{}"]).await.unwrap();
@@ -308,7 +392,7 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
     assert_eq!(init["result"]["capabilities"]["tools"], json!({}));
     assert_eq!(
         init["result"]["instructions"],
-        "Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`"
+        "Mimir: `mimir tools` (all) · `mimir tools <workbench|graph|chat|connections>` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`"
     );
 
     // notifications (no id) are accepted with 202 and an empty body.
@@ -497,7 +581,7 @@ async fn mimir_doctor_reports_connection_context_scopes_and_catalog() {
     assert_success(&output, "mimir doctor");
     assert_eq!(
         stdout_of(&output),
-        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      2\n"
+        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      3\n"
     );
     assert!(!stdout_of(&output).contains("agent:contract"));
     assert!(!stdout_of(&output).contains("codex"));
@@ -817,8 +901,8 @@ async fn mimir_cli_loop_discovers_the_lean_alias_and_round_trips_a_call() {
     let tools = catalog.as_array().expect("catalog is an array");
     assert_eq!(
         tools.len(),
-        2,
-        "public projection should include state and graph get: {catalog}",
+        3,
+        "public projection should include state, graph get, and graph events: {catalog}",
     );
     let state = tools
         .iter()

@@ -48,11 +48,14 @@ pub async fn activity_spawn(
     record: ActivityRecord,
     cols: u16,
     rows: u16,
+    cli_session_id: Option<String>,
 ) -> Result<ActivitySnapshot, String> {
     let supervisor = supervisor.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         supervisor
-            .spawn(SpawnActivityRequest::new(record, cols, rows))
+            .spawn(
+                SpawnActivityRequest::new(record, cols, rows).with_cli_session_id(cli_session_id),
+            )
             .map_err(|error| error.to_string())
     })
     .await
@@ -65,11 +68,14 @@ pub async fn activity_respawn(
     record: ActivityRecord,
     cols: u16,
     rows: u16,
+    cli_session_id: Option<String>,
 ) -> Result<ActivitySnapshot, String> {
     let supervisor = supervisor.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         supervisor
-            .respawn(SpawnActivityRequest::new(record, cols, rows))
+            .respawn(
+                SpawnActivityRequest::new(record, cols, rows).with_cli_session_id(cli_session_id),
+            )
             .map_err(|error| error.to_string())
     })
     .await
@@ -133,6 +139,21 @@ pub async fn activity_stop(
     })
     .await
     .map_err(|error| format!("Activity stop task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn activity_close(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+) -> Result<ActivityRecord, String> {
+    let supervisor = supervisor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        supervisor
+            .request_close(&activity_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Activity close task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -212,6 +233,7 @@ mod tests {
             updated_at: "2026-07-25T00:00:00Z".into(),
             last_viewed_at: None,
             archived_at: None,
+            close_requested_at: None,
             retention: ActivityRetention::Durable,
             source: ActivityOrigin::default(),
             host: ActivityHost::pty(None),

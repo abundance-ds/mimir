@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+import { spawn } from 'node:child_process'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   addSkill,
@@ -13,6 +17,7 @@ import {
 
 const FALLBACK_URL = 'http://127.0.0.1:17532/mcp'
 const REQUEST_TIMEOUT_MS = 10_000
+const TOOL_GROUPS = Object.freeze(['workbench', 'graph', 'chat', 'connections'])
 
 export async function main() {
   const [command, ...args] = process.argv.slice(2)
@@ -45,12 +50,22 @@ export async function main() {
     }
     assertKnownFlags(args, ['--json'])
     const extra = positional(args)
-    if (extra.length) throw new Error('Usage: mimir tools [--json]')
+    if (extra.length > 1) throw new Error('Usage: mimir tools [group] [--json]')
+    const group = String(extra[0] || '').toLowerCase()
+    if (group && !TOOL_GROUPS.includes(group)) {
+      throw new Error(`Unknown tool group '${extra[0]}'. Use ${TOOL_GROUPS.join(', ')}.`)
+    }
     const json = args.includes('--json')
     const result = await request('tools/list', { includeAll: true })
+    const tools = result?.tools || []
+    const selected = group
+      ? tools.filter(tool => tool?._meta?.['mimir/group'] === group)
+      : tools
     console.log(json
-      ? JSON.stringify(result?.tools || [], null, 2)
-      : formatPublicTools(result?.tools || []))
+      ? JSON.stringify(selected, null, 2)
+      : group
+        ? formatToolGroup(selected, group)
+        : formatPublicTools(tools))
     return
   }
   if (command === 'call') {
@@ -93,9 +108,70 @@ export async function main() {
     await runMcpProxy()
     return
   }
+  if (command === 'internal' && args[0] === 'codex-notify') {
+    await recordCodexSessionBinding(args.slice(1))
+    return
+  }
   console.error(`Unknown command: ${command}`)
   console.error(helpText())
   process.exit(2)
+}
+
+export async function recordCodexSessionBinding(args, env = process.env) {
+  const payloadText = args.at(-1)
+  const payload = JSON.parse(String(payloadText || '{}'))
+  const activityId = String(env.MIMIR_ACTIVITY_ID || '').trim()
+  const runId = String(env.MIMIR_ACTIVITY_RUN_ID || '').trim()
+  const cliSessionId = String(payload['thread-id'] || '').trim()
+  if (!activityId) throw new Error('Codex notify is missing MIMIR_ACTIVITY_ID.')
+  if (!isUuid(runId)) throw new Error('Codex notify has an invalid MIMIR_ACTIVITY_RUN_ID.')
+  if (!isUuid(cliSessionId)) throw new Error('Codex notify payload has no valid thread-id.')
+
+  const directory = String(
+    env.MIMIR_SESSION_BINDINGS_DIR
+      || join(homedir(), '.mimir', 'session-bindings'),
+  )
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const path = join(directory, `${runId}.json`)
+  const temporary = join(directory, `.${runId}.${process.pid}.tmp`)
+  const binding = `${JSON.stringify({ activityId, runId, cliSessionId })}\n`
+  await writeFile(temporary, binding, { encoding: 'utf8', mode: 0o600 })
+  try {
+    await rename(temporary, path)
+  } catch (error) {
+    const existing = await readFile(path, 'utf8')
+      .then(JSON.parse)
+      .catch(() => null)
+    if (
+      existing?.activityId !== activityId
+      || existing?.runId !== runId
+      || existing?.cliSessionId !== cliSessionId
+    ) {
+      await rm(temporary, { force: true })
+      throw error
+    }
+    await rm(temporary, { force: true })
+  }
+
+  const forwardIndex = args.indexOf('--forward-json')
+  if (forwardIndex >= 0 && forwardIndex + 1 < args.length - 1) {
+    const command = JSON.parse(args[forwardIndex + 1])
+    if (Array.isArray(command) && command.length && command.every(part => (
+      typeof part === 'string' && part.length > 0
+    ))) {
+      const child = spawn(command[0], [...command.slice(1), payloadText], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.on('error', () => {})
+      child.unref()
+    }
+  }
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(value)
 }
 
 async function skillCommand(args) {
@@ -701,7 +777,8 @@ export function helpText(topic = '') {
   }
   return `mimir — attached Mimir workbench
 
-  mimir tools            list available capabilities
+  mimir tools            list all available capabilities
+  mimir tools <group>    list one focused drawer
   mimir tool <name>      show one capability and its inputs
   mimir skill <query>    find a workflow
   mimir doctor           diagnose the connection
@@ -729,6 +806,7 @@ insufficient.`,
   tools: `Tool discovery
 
   mimir tools            concise available catalog
+  mimir tools <group>    compact signatures for workbench, graph, chat, or connections
   mimir tools --json     machine-readable available catalog
   mimir tool <name>      complete inputs and ready call`,
 })
@@ -774,7 +852,6 @@ export function formatToolCatalog(tools, { json = false, topic = '' } = {}) {
 
 export function formatPublicTools(tools) {
   if (!tools.length) return 'No Mimir tools are currently available.'
-  const order = ['workbench', 'graph', 'connections']
   const groups = new Map()
   for (const tool of tools) {
     const group = tool?._meta?.['mimir/group'] || 'other'
@@ -783,10 +860,10 @@ export function formatPublicTools(tools) {
   }
   const sections = [...groups]
     .sort(([left], [right]) => {
-      const leftIndex = order.indexOf(left)
-      const rightIndex = order.indexOf(right)
-      return (leftIndex < 0 ? order.length : leftIndex)
-        - (rightIndex < 0 ? order.length : rightIndex)
+      const leftIndex = TOOL_GROUPS.indexOf(left)
+      const rightIndex = TOOL_GROUPS.indexOf(right)
+      return (leftIndex < 0 ? TOOL_GROUPS.length : leftIndex)
+        - (rightIndex < 0 ? TOOL_GROUPS.length : rightIndex)
         || left.localeCompare(right)
     })
     .map(([group, entries]) => {
@@ -794,9 +871,39 @@ export function formatPublicTools(tools) {
         const effect = tool?._meta?.['mimir/effect'] || annotationEffect(tool.annotations)
         return `${String(tool.name).padEnd(24)} [${effect}]  ${tool.description || ''}`.trimEnd()
       })
-      return `${group.toUpperCase()}\n\n${rows.join('\n')}`
+      const drawer = TOOL_GROUPS.includes(group) ? `  (mimir tools ${group})` : ''
+      return `${group.toUpperCase()}${drawer}\n\n${rows.join('\n')}`
     })
   return sections.join('\n\n')
+}
+
+const TOOL_GROUP_NOTES = Object.freeze({
+  workbench: 'mimir_propose opens a review; it does not change the file.',
+  graph: 'Use graph_get.sourceRevision as graph_update/graph_delete expectedRevision; graph_delete returns graph_restore.undoToken.',
+  chat: 'A linked Activity may omit target; it cannot target another room.',
+  connections: 'Only configured tools appear. external-write sends or creates remote data.',
+})
+
+export function formatToolGroup(tools, group) {
+  const normalized = String(group || '').toLowerCase()
+  const header = normalized.toUpperCase()
+  if (!tools.length) return `${header}\n\nNo ${normalized} tools are currently available.`
+  const rows = tools.map((tool) => {
+    const schema = tool?.inputSchema || {}
+    const properties = Object.keys(schema.properties || {})
+    const required = Array.isArray(schema.required) ? schema.required : []
+    const requiredSet = new Set(required)
+    const optional = properties.filter(name => !requiredSet.has(name))
+    const signature = [
+      tool.name,
+      required.length ? required.join(', ') : '',
+      optional.length ? `[${optional.join(', ')}]` : '',
+    ].filter(Boolean).join(' ')
+    const effect = tool?._meta?.['mimir/effect'] || annotationEffect(tool.annotations)
+    return `${signature}  [${effect}] ${tool.description || ''}`.trimEnd()
+  })
+  const note = TOOL_GROUP_NOTES[normalized]
+  return `${header}\n\n${rows.join('\n')}${note ? `\n\n${note}` : ''}`
 }
 
 function annotationEffect(annotations = {}) {

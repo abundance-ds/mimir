@@ -40,7 +40,7 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 27] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 32] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -168,6 +168,15 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 27] = [
         connection: None,
     },
     AgentToolSpec {
+        canonical_name: "graph.events",
+        public_name: "graph_events",
+        description: "Read recent authored changes in the mounted graph.",
+        group: "graph",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
         canonical_name: "gmail.search",
         public_name: "gmail_search",
         description: "Search Gmail messages.",
@@ -283,6 +292,42 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 27] = [
         effect: "external-write",
         direct: false,
         connection: Some("slack"),
+    },
+    AgentToolSpec {
+        canonical_name: "chat.read",
+        public_name: "chat_read",
+        description: "Read messages in a linked Mimir chat room.",
+        group: "chat",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "chat.search",
+        public_name: "chat_search",
+        description: "Search messages in a linked Mimir chat room.",
+        group: "chat",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "chat.send",
+        public_name: "chat_send",
+        description: "Send a visible agent message to a linked Mimir chat room.",
+        group: "chat",
+        effect: "external-write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "chat.download",
+        public_name: "chat_download",
+        description: "Download a chat attachment to a verified local path.",
+        group: "chat",
+        effect: "read",
+        direct: false,
+        connection: None,
     },
 ];
 const TOOL_RELAY_REQUEST_EVENT: &str = "mimir://tool-relay-request";
@@ -1388,7 +1433,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 27);
+        assert_eq!(AGENT_TOOLS.len(), 32);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
@@ -1405,7 +1450,10 @@ mod tests {
 
         for spec in AGENT_TOOLS {
             assert!(!spec.public_name.contains('.'));
-            assert!(matches!(spec.group, "workbench" | "graph" | "connections"));
+            assert!(matches!(
+                spec.group,
+                "workbench" | "graph" | "chat" | "connections"
+            ));
             assert_eq!(spec.connection.is_some(), spec.group == "connections");
         }
     }

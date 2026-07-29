@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Local, Utc};
 use portable_pty::{
     native_pty_system, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtySize,
 };
@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{self, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering},
@@ -52,6 +52,7 @@ const OUTPUT_FLUSH_BUFFER_BYTES: usize = 256 * 1024;
 #[derive(Debug, Clone)]
 pub struct ActivitySupervisorConfig {
     pub persistence_dir: PathBuf,
+    pub codex_sessions_dir: Option<PathBuf>,
     pub terminal_scrollback_bytes: usize,
     pub durable_scrollback_bytes: usize,
     pub read_chunk_bytes: usize,
@@ -75,6 +76,7 @@ impl Default for ActivitySupervisorConfig {
             .join("activities");
         Self {
             persistence_dir,
+            codex_sessions_dir: dirs::home_dir().map(|home| home.join(".codex").join("sessions")),
             terminal_scrollback_bytes: DEFAULT_TERMINAL_SCROLLBACK_BYTES,
             durable_scrollback_bytes: DEFAULT_DURABLE_SCROLLBACK_BYTES,
             read_chunk_bytes: 16 * 1024,
@@ -88,6 +90,9 @@ pub struct SpawnActivityRequest {
     pub record: ActivityRecord,
     pub cols: u16,
     pub rows: u16,
+    /// Exact provider-owned session id. Codex supplies this asynchronously
+    /// through its notify callback; other supported CLIs accept it at launch.
+    pub cli_session_id: Option<String>,
     /// Per-launch override for specialist terminal surfaces.
     pub scrollback_byte_cap: Option<usize>,
 }
@@ -98,8 +103,14 @@ impl SpawnActivityRequest {
             record,
             cols,
             rows,
+            cli_session_id: None,
             scrollback_byte_cap: None,
         }
+    }
+
+    pub fn with_cli_session_id(mut self, cli_session_id: Option<String>) -> Self {
+        self.cli_session_id = cli_session_id;
+        self
     }
 }
 
@@ -365,6 +376,28 @@ struct PersistedScrollback {
     truncated: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CliSessionBinding {
+    activity_id: String,
+    run_id: String,
+    cli_session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexSessionMetaEnvelope {
+    #[serde(rename = "type")]
+    event_type: String,
+    payload: CodexSessionMeta,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexSessionMeta {
+    id: String,
+    timestamp: String,
+    cwd: String,
+}
+
 #[derive(Clone)]
 struct PersistenceQueue {
     tx: mpsc::Sender<PersistenceCommand>,
@@ -433,6 +466,7 @@ impl ActivitySupervisor {
         request: SpawnActivityRequest,
         replace_ended: bool,
     ) -> Result<ActivitySnapshot, SupervisorError> {
+        let mut cli_session_id = request.cli_session_id.clone();
         let mut record = request.record;
         if record.id.trim().is_empty() {
             return Err(SupervisorError::EmptyActivityId);
@@ -461,6 +495,13 @@ impl ActivitySupervisor {
                 }
                 record.created_at = existing_record.created_at.clone();
                 record.archived_at = None;
+                record.close_requested_at = None;
+                if cli_session_id.is_none() {
+                    cli_session_id = existing_record
+                        .session
+                        .as_ref()
+                        .and_then(|session| session.cli_session_id.clone());
+                }
             } else if activities.contains_key(&record.id) {
                 return Err(SupervisorError::AlreadyExists(record.id));
             }
@@ -499,6 +540,7 @@ impl ActivitySupervisor {
                 message: format!("could not take PTY writer: {error}"),
             })?;
 
+        let run_id = Uuid::new_v4().to_string();
         let mut command = CommandBuilder::new(&launch.command);
         command.args(&launch.args);
         if let Some(cwd) = &launch.cwd {
@@ -508,6 +550,12 @@ impl ActivitySupervisor {
         for (key, value) in &launch.env {
             command.env(key, value);
         }
+        command.env("MIMIR_ACTIVITY_ID", &record.id);
+        command.env("MIMIR_ACTIVITY_RUN_ID", &run_id);
+        command.env(
+            "MIMIR_SESSION_BINDINGS_DIR",
+            session_bindings_dir(&self.inner.config.persistence_dir),
+        );
 
         let mut child =
             pair.slave
@@ -530,15 +578,15 @@ impl ActivitySupervisor {
         record.updated_at = now.clone();
         record.error = None;
         record.session = Some(ActivitySessionRecord {
-            run_id: Uuid::new_v4().to_string(),
+            run_id,
             started_at: now,
             ended_at: None,
-            agent_id: if record.kind == ActivityKind::Agent {
+            agent_id: if matches!(record.kind, ActivityKind::Agent | ActivityKind::Routine) {
                 record.source.launcher_id.clone()
             } else {
                 None
             },
-            cli_session_id: None,
+            cli_session_id,
             exit: None,
             last_output_sequence: 0,
             scrollback_bytes: 0,
@@ -847,6 +895,7 @@ impl ActivitySupervisor {
             }
             let now = timestamp();
             record.archived_at = archived.then(|| now.clone());
+            record.close_requested_at = None;
             record.updated_at = now;
             let snapshot = record.clone();
             let persisted = persisted_snapshot(&record, &scrollback);
@@ -856,6 +905,7 @@ impl ActivitySupervisor {
             let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
             (snapshot, sinks)
         };
+        self.inner.persistence.flush()?;
         publish_to_sinks(
             &sinks,
             &ActivityEvent::Upsert {
@@ -863,6 +913,95 @@ impl ActivitySupervisor {
             },
         );
         Ok(record)
+    }
+
+    /// Persist the user's close intent before terminating a durable PTY.
+    /// Completion atomically turns that intent into an archive timestamp, and
+    /// hydration does the same if the app exits before completion is observed.
+    pub fn request_close(&self, activity_id: &str) -> Result<ActivityRecord, SupervisorError> {
+        let activity = self.activity(activity_id)?;
+        let live = lock(&activity.command_tx).is_some();
+        if lock(&activity.record).retention != ActivityRetention::Durable {
+            if live {
+                self.kill_with_intent(activity_id, &activity, USER_STOP_INTENT)?;
+            }
+            return Ok(lock(&activity.record).clone());
+        }
+
+        let (record, sinks) = {
+            let dispatch = lock(&self.inner.dispatch);
+            let mut record = lock(&activity.record);
+            let scrollback = lock(&activity.scrollback);
+            if record.is_archived() {
+                return Ok(record.clone());
+            }
+            let now = timestamp();
+            if live {
+                record.close_requested_at = Some(now.clone());
+            } else {
+                record.archived_at = Some(now.clone());
+                record.close_requested_at = None;
+            }
+            record.updated_at = now;
+            let snapshot = record.clone();
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
+                self.inner.persistence.save(path, value);
+            }
+            let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
+            (snapshot, sinks)
+        };
+
+        // A successful close acknowledgement means the intent survives a
+        // process restart. Do not terminate or hide the row before this fence.
+        self.inner.persistence.flush()?;
+        publish_to_sinks(
+            &sinks,
+            &ActivityEvent::Upsert {
+                record: record.clone(),
+            },
+        );
+        if live {
+            if let Err(error) = self.kill_with_intent(activity_id, &activity, USER_STOP_INTENT) {
+                self.rollback_close_intent(&activity)?;
+                return Err(error);
+            }
+        }
+        Ok(record)
+    }
+
+    fn rollback_close_intent(
+        &self,
+        activity: &Arc<ManagedActivity>,
+    ) -> Result<(), SupervisorError> {
+        let rollback = {
+            let dispatch = lock(&self.inner.dispatch);
+            let mut record = lock(&activity.record);
+            if record.close_requested_at.is_none() {
+                None
+            } else {
+                let scrollback = lock(&activity.scrollback);
+                record.close_requested_at = None;
+                record.updated_at = timestamp();
+                let snapshot = record.clone();
+                if let Some((path, value)) = self
+                    .inner
+                    .persistence_path_and_value(persisted_snapshot(&record, &scrollback))
+                {
+                    self.inner.persistence.save(path, value);
+                }
+                Some((
+                    snapshot,
+                    dispatch.sinks.values().cloned().collect::<Vec<_>>(),
+                ))
+            }
+        };
+        let Some((record, sinks)) = rollback else {
+            return Ok(());
+        };
+        self.inner.persistence.flush()?;
+        publish_to_sinks(&sinks, &ActivityEvent::Upsert { record });
+        Ok(())
     }
 
     /// Permanently clear an ended activity and its persisted scrollback.
@@ -1011,6 +1150,7 @@ impl ActivitySupervisor {
                 source,
             }
         })?;
+        let mut corrected_records = false;
 
         for entry in entries {
             let entry = entry.map_err(|source| PersistenceError::Io {
@@ -1043,6 +1183,12 @@ impl ActivitySupervisor {
 
             let mut record = persisted.record;
             let mut corrected = false;
+            if capture_cli_session_id(&self.inner.config.persistence_dir, &mut record) {
+                corrected = true;
+            }
+            if recover_legacy_codex_session_id(&self.inner.config, &mut record) {
+                corrected = true;
+            }
             if record.status.is_live() {
                 corrected = true;
                 let now = timestamp();
@@ -1059,6 +1205,10 @@ impl ActivitySupervisor {
                     session.ended_at = Some(now);
                     session.exit = Some(exit);
                 }
+            }
+            if let Some(close_requested_at) = record.close_requested_at.take() {
+                corrected = true;
+                record.archived_at = Some(close_requested_at);
             }
 
             let byte_cap = if matches!(record.kind, ActivityKind::Agent | ActivityKind::Routine) {
@@ -1088,7 +1238,11 @@ impl ActivitySupervisor {
             lock(&self.inner.activities).insert(activity_id, activity.clone());
             if corrected {
                 self.inner.persist_if_durable(&activity);
+                corrected_records = true;
             }
+        }
+        if corrected_records {
+            self.inner.persistence.flush()?;
         }
         Ok(())
     }
@@ -1234,6 +1388,11 @@ impl SupervisorInner {
             } else {
                 None
             };
+            if let Some(close_requested_at) = record.close_requested_at.take() {
+                record.archived_at = Some(close_requested_at);
+            }
+            capture_cli_session_id_after_exit(&self.config.persistence_dir, &mut record);
+            recover_legacy_codex_session_id(&self.config, &mut record);
             if let Some(session) = record.session.as_mut() {
                 session.ended_at = Some(now);
                 session.exit = Some(exit.clone());
@@ -1635,6 +1794,145 @@ fn activity_persistence_path(directory: &Path, activity_id: &str) -> PathBuf {
     directory.join(format!("{digest:x}.activity.json"))
 }
 
+fn session_bindings_dir(persistence_dir: &Path) -> PathBuf {
+    persistence_dir.join(".session-bindings")
+}
+
+fn capture_cli_session_id(persistence_dir: &Path, record: &mut ActivityRecord) -> bool {
+    let Some(session) = record.session.as_ref() else {
+        return false;
+    };
+    let path = session_bindings_dir(persistence_dir).join(format!("{}.json", session.run_id));
+    let binding = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<CliSessionBinding>(&bytes).ok());
+    let _ = fs::remove_file(&path);
+    let Some(binding) = binding else {
+        return false;
+    };
+    if binding.activity_id != record.id
+        || binding.run_id != session.run_id
+        || Uuid::parse_str(&binding.cli_session_id).is_err()
+    {
+        return false;
+    }
+    let Some(session) = record.session.as_mut() else {
+        return false;
+    };
+    if session.cli_session_id.as_deref() == Some(&binding.cli_session_id) {
+        return false;
+    }
+    session.cli_session_id = Some(binding.cli_session_id);
+    true
+}
+
+fn capture_cli_session_id_after_exit(persistence_dir: &Path, record: &mut ActivityRecord) {
+    let awaits_codex_binding = record.session.as_ref().is_some_and(|session| {
+        (session.agent_id.as_deref() == Some("codex")
+            || record.source.launcher_id.as_deref() == Some("codex"))
+            && session.cli_session_id.is_none()
+    });
+    if !awaits_codex_binding || capture_cli_session_id(persistence_dir, record) {
+        return;
+    }
+    // Codex starts notify at turn completion. Normally its atomic binding is
+    // already present when the PTY exits; allow a short scheduling grace
+    // period so a fast Ctrl-D cannot leave a safely resumable thread unbound.
+    for _ in 0..20 {
+        thread::sleep(Duration::from_millis(5));
+        if capture_cli_session_id(persistence_dir, record) {
+            break;
+        }
+    }
+}
+
+fn recover_legacy_codex_session_id(
+    config: &ActivitySupervisorConfig,
+    record: &mut ActivityRecord,
+) -> bool {
+    let needs_recovery = record.session.as_ref().is_some_and(|session| {
+        (session.agent_id.as_deref() == Some("codex")
+            || record.source.launcher_id.as_deref() == Some("codex"))
+            && session.cli_session_id.is_none()
+    });
+    if !needs_recovery {
+        return false;
+    }
+    let launch_sessions_dir = record
+        .launch
+        .as_ref()
+        .and_then(|launch| launch.env.get("CODEX_HOME"))
+        .map(|codex_home| PathBuf::from(codex_home).join("sessions"));
+    let Some(root) = launch_sessions_dir
+        .as_deref()
+        .or(config.codex_sessions_dir.as_deref())
+    else {
+        return false;
+    };
+    let Ok(created_at) = DateTime::parse_from_rfc3339(&record.created_at) else {
+        return false;
+    };
+    let workspace = record.workspace_path.as_deref().or_else(|| {
+        record
+            .launch
+            .as_ref()
+            .and_then(|launch| launch.cwd.as_deref())
+    });
+    let Some(workspace) = workspace else {
+        return false;
+    };
+
+    let local_date = created_at.with_timezone(&Local).date_naive();
+    let mut candidates = HashSet::new();
+    for day_offset in -1..=1 {
+        let date = local_date + chrono::Duration::days(day_offset);
+        let directory = root
+            .join(date.format("%Y").to_string())
+            .join(date.format("%m").to_string())
+            .join(date.format("%d").to_string());
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(file) = fs::File::open(path) else {
+                continue;
+            };
+            let mut first_line = String::new();
+            if BufReader::new(file).read_line(&mut first_line).is_err() {
+                continue;
+            }
+            let Ok(meta) = serde_json::from_str::<CodexSessionMetaEnvelope>(&first_line) else {
+                continue;
+            };
+            if meta.event_type != "session_meta" || meta.payload.cwd != workspace {
+                continue;
+            }
+            let Ok(session_at) = DateTime::parse_from_rfc3339(&meta.payload.timestamp) else {
+                continue;
+            };
+            let delta_ms = session_at
+                .signed_duration_since(created_at)
+                .num_milliseconds();
+            if (-1_000..=15_000).contains(&delta_ms) && Uuid::parse_str(&meta.payload.id).is_ok() {
+                candidates.insert(meta.payload.id);
+            }
+        }
+    }
+    if candidates.len() != 1 {
+        return false;
+    }
+    let cli_session_id = candidates.into_iter().next().expect("one candidate");
+    let Some(session) = record.session.as_mut() else {
+        return false;
+    };
+    session.cli_session_id = Some(cli_session_id);
+    true
+}
+
 fn is_activity_persistence_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -1796,6 +2094,7 @@ mod tests {
             updated_at: now,
             last_viewed_at: None,
             archived_at: None,
+            close_requested_at: None,
             retention: ActivityRetention::Durable,
             source: ActivityOrigin {
                 launcher_id: Some("test-agent".into()),
@@ -2227,12 +2526,21 @@ mod tests {
             "/bin/sh",
             vec!["-c".into(), "printf first".into()],
         );
+        let exact_session_id = "11111111-1111-4111-8111-111111111111".to_string();
         supervisor
-            .spawn(SpawnActivityRequest::new(first, 80, 24))
+            .spawn(
+                SpawnActivityRequest::new(first, 80, 24)
+                    .with_cli_session_id(Some(exact_session_id.clone())),
+            )
             .unwrap();
         let ended = wait_for_end(&supervisor, "resume");
         assert!(String::from_utf8_lossy(&replay_bytes(&ended)).contains("first"));
-        let first_run_id = ended.record.session.unwrap().run_id;
+        let first_session = ended.record.session.unwrap();
+        assert_eq!(
+            first_session.cli_session_id.as_deref(),
+            Some(exact_session_id.as_str())
+        );
+        let first_run_id = first_session.run_id;
 
         let mut again = durable_record(
             "resume",
@@ -2245,7 +2553,12 @@ mod tests {
             .unwrap();
         assert_eq!(resumed.record.created_at, "2026-07-25T00:00:00Z");
         assert!(resumed.record.archived_at.is_none());
-        assert_ne!(resumed.record.session.unwrap().run_id, first_run_id);
+        let resumed_session = resumed.record.session.unwrap();
+        assert_ne!(resumed_session.run_id, first_run_id);
+        assert_eq!(
+            resumed_session.cli_session_id.as_deref(),
+            Some(exact_session_id.as_str())
+        );
 
         let finished = wait_for_end(&supervisor, "resume");
         let replay = String::from_utf8_lossy(&replay_bytes(&finished)).to_string();
@@ -2334,6 +2647,145 @@ mod tests {
             snapshot.record.session.unwrap().exit.unwrap().reason,
             SessionExitReason::Interrupted
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn durable_close_intent_survives_restart_and_becomes_archived() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let record = durable_record(
+            "close-intent",
+            "/bin/sh",
+            vec!["-c".into(), "while :; do sleep 1; done".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(record, 80, 24))
+            .unwrap();
+        let (event_tx, event_rx) = mpsc::channel();
+        supervisor.subscribe(Arc::new(event_tx));
+
+        let requested = supervisor.request_close("close-intent").unwrap();
+        assert!(requested.close_requested_at.is_some());
+        assert!(requested.archived_at.is_none());
+        assert!(matches!(
+            event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ActivityEvent::Upsert { record }
+                if record.close_requested_at.is_some() && record.archived_at.is_none()
+        ));
+
+        let ended = wait_for_end(&supervisor, "close-intent");
+        assert!(ended.record.close_requested_at.is_none());
+        assert!(ended.record.archived_at.is_some());
+        supervisor.flush_persistence().unwrap();
+
+        let path = activity_persistence_path(temp.path(), "close-intent");
+        let mut persisted: PersistedActivity = crate::persistence::load_json_optional(&path)
+            .unwrap()
+            .unwrap();
+        persisted.record.status = ActivityStatus::Working;
+        persisted.record.archived_at = None;
+        persisted.record.close_requested_at = Some("2026-07-25T12:00:00Z".into());
+        if let Some(session) = persisted.record.session.as_mut() {
+            session.ended_at = None;
+            session.exit = None;
+        }
+        write_json_atomic(&path, &persisted).unwrap();
+        drop(supervisor);
+
+        let restarted = create_supervisor(&temp);
+        let recovered = restarted.snapshot("close-intent", None).unwrap();
+        assert_eq!(
+            recovered.record.archived_at.as_deref(),
+            Some("2026-07-25T12:00:00Z")
+        );
+        assert!(recovered.record.close_requested_at.is_none());
+        assert_eq!(recovered.record.status, ActivityStatus::Interrupted);
+    }
+
+    #[test]
+    fn legacy_codex_recovery_requires_one_timestamp_and_workspace_match() {
+        let temp = TempDir::new().unwrap();
+        let sessions = temp.path().join("codex-sessions");
+        let created_at = "2026-07-25T12:00:00Z";
+        let created = DateTime::parse_from_rfc3339(created_at).unwrap();
+        let date = created.with_timezone(&Local).date_naive();
+        let directory = sessions
+            .join(date.format("%Y").to_string())
+            .join(date.format("%m").to_string())
+            .join(date.format("%d").to_string());
+        fs::create_dir_all(&directory).unwrap();
+        let first_id = "11111111-1111-4111-8111-111111111111";
+        fs::write(
+            directory.join("rollout-one.jsonl"),
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": first_id,
+                        "timestamp": "2026-07-25T12:00:01Z",
+                        "cwd": "/work",
+                    }
+                })
+            ),
+        )
+        .unwrap();
+
+        let mut config = ActivitySupervisorConfig::new(temp.path().join("activities"));
+        config.codex_sessions_dir = Some(sessions);
+        let mut record = durable_record("legacy", "/bin/sh", vec![]);
+        record.created_at = created_at.into();
+        record.workspace_path = Some("/work".into());
+        record.source.launcher_id = Some("codex".into());
+        record.session = Some(ActivitySessionRecord {
+            run_id: "run-one".into(),
+            started_at: created_at.into(),
+            ended_at: Some(created_at.into()),
+            agent_id: None,
+            cli_session_id: None,
+            exit: None,
+            last_output_sequence: 0,
+            scrollback_bytes: 0,
+        });
+
+        assert!(recover_legacy_codex_session_id(&config, &mut record));
+        assert_eq!(
+            record.session.unwrap().cli_session_id.as_deref(),
+            Some(first_id)
+        );
+
+        fs::write(
+            directory.join("rollout-two.jsonl"),
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "22222222-2222-4222-8222-222222222222",
+                        "timestamp": "2026-07-25T12:00:02Z",
+                        "cwd": "/work",
+                    }
+                })
+            ),
+        )
+        .unwrap();
+        let mut ambiguous = durable_record("ambiguous", "/bin/sh", vec![]);
+        ambiguous.created_at = created_at.into();
+        ambiguous.workspace_path = Some("/work".into());
+        ambiguous.source.launcher_id = Some("codex".into());
+        ambiguous.session = Some(ActivitySessionRecord {
+            run_id: "run-two".into(),
+            started_at: created_at.into(),
+            ended_at: Some(created_at.into()),
+            agent_id: None,
+            cli_session_id: None,
+            exit: None,
+            last_output_sequence: 0,
+            scrollback_bytes: 0,
+        });
+        assert!(!recover_legacy_codex_session_id(&config, &mut ambiguous));
+        assert!(ambiguous.session.unwrap().cli_session_id.is_none());
     }
 
     #[cfg(unix)]

@@ -675,6 +675,7 @@ impl RoutineRuntime {
             updated_at: now,
             last_viewed_at: None,
             archived_at: None,
+            close_requested_at: None,
             retention: ActivityRetention::Durable,
             source: ActivityOrigin {
                 launcher_id: resolved.launch.agent_id.clone(),
@@ -695,11 +696,10 @@ impl RoutineRuntime {
         };
         self.inner
             .supervisor
-            .spawn(SpawnActivityRequest::new(
-                record,
-                ROUTINE_COLS,
-                ROUTINE_ROWS,
-            ))
+            .spawn(
+                SpawnActivityRequest::new(record, ROUTINE_COLS, ROUTINE_ROWS)
+                    .with_cli_session_id(resolved.launch.cli_session_id.clone()),
+            )
             .map(|snapshot| snapshot.record)
             .map_err(|error| {
                 format!(
@@ -1727,7 +1727,11 @@ mod tests {
             )
         );
         assert_eq!(
-            launch.args[5],
+            &launch.args[5..7],
+            ["-c", r#"notify=["mimir","internal","codex-notify"]"#]
+        );
+        assert_eq!(
+            launch.args[7],
             "Review the work tree and report sharp findings."
         );
         assert_eq!(

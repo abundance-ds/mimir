@@ -752,6 +752,7 @@ fn generate_current_version_snapshot() {
         updated_at: "2026-07-27T09:00:00Z".into(),
         last_viewed_at: None,
         archived_at: None,
+        close_requested_at: None,
         retention: ActivityRetention::Durable,
         source: ActivityOrigin {
             source_type: Some("launcher".into()),

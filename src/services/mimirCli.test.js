@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 
 import {
@@ -6,11 +9,13 @@ import {
   discoverTool,
   formatDoctor,
   formatToolCatalog,
+  formatToolGroup,
   formatPublicTools,
   formatToolHelp,
   findTools,
   helpText,
   request,
+  recordCodexSessionBinding,
   runMcpProxy,
   skillsCommand,
 } from '../../bin/mimir.mjs'
@@ -99,12 +104,45 @@ describe('mimir MCP client', () => {
   })
 
   it('keeps default help short and progressively discloses focused topics', () => {
+    expect(helpText()).toContain('mimir tools            list all available capabilities')
+    expect(helpText()).toContain('mimir tools <group>    list one focused drawer')
     expect(helpText()).toContain('mimir tool <name>')
     expect(helpText()).toContain('mimir skill <query>')
     expect(helpText()).toContain('mimir doctor')
     expect(helpText()).not.toContain('replace-selection')
     expect(helpText('review')).toContain('mimir_propose')
     expect(helpText('docs')).toContain('docs/reference/')
+  })
+
+  it('atomically records Codex thread identity for the exact Mimir run', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mimir-session-binding-'))
+    const runId = '11111111-1111-4111-8111-111111111111'
+    const cliSessionId = '22222222-2222-4222-8222-222222222222'
+    try {
+      await recordCodexSessionBinding([
+        JSON.stringify({ type: 'agent-turn-complete', 'thread-id': cliSessionId }),
+      ], {
+        MIMIR_ACTIVITY_ID: 'agent:one',
+        MIMIR_ACTIVITY_RUN_ID: runId,
+        MIMIR_SESSION_BINDINGS_DIR: directory,
+      })
+      await recordCodexSessionBinding([
+        JSON.stringify({ type: 'agent-turn-complete', 'thread-id': cliSessionId }),
+      ], {
+        MIMIR_ACTIVITY_ID: 'agent:one',
+        MIMIR_ACTIVITY_RUN_ID: runId,
+        MIMIR_SESSION_BINDINGS_DIR: directory,
+      })
+
+      await expect(readFile(join(directory, `${runId}.json`), 'utf8'))
+        .resolves.toBe(`${JSON.stringify({
+          activityId: 'agent:one',
+          runId,
+          cliSessionId,
+        })}\n`)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it('rejects unknown skills subcommands instead of silently listing', async () => {
@@ -129,9 +167,46 @@ describe('mimir MCP client', () => {
     ]
 
     const output = formatPublicTools(tools)
-    expect(output).toContain('WORKBENCH\n\nmimir_state')
+    expect(output).toContain('WORKBENCH  (mimir tools workbench)\n\nmimir_state')
     expect(output).toContain('[read]  Read workbench state.')
-    expect(output).toContain('GRAPH\n\ngraph_find')
+    expect(output).toContain('GRAPH  (mimir tools graph)\n\ngraph_find')
+    expect(output).not.toContain('inputSchema')
+  })
+
+  it('renders one drawer as compact callable signatures with shared rules once', () => {
+    const output = formatToolGroup([
+      {
+        name: 'graph_find',
+        description: 'Find graph nodes.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            kinds: { type: 'array' },
+            limit: { type: 'integer' },
+          },
+          required: [],
+        },
+        _meta: { 'mimir/group': 'graph', 'mimir/effect': 'read' },
+      },
+      {
+        name: 'graph_get',
+        description: 'Read one complete graph node.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+          },
+          required: ['id'],
+        },
+        _meta: { 'mimir/group': 'graph', 'mimir/effect': 'read' },
+      },
+    ], 'graph')
+
+    expect(output).toContain('GRAPH\n\ngraph_find [query, kinds, limit]  [read] Find graph nodes.')
+    expect(output).toContain('graph_get id  [read] Read one complete graph node.')
+    expect(output).toContain('graph_get.sourceRevision')
+    expect(output.match(/expectedRevision/g)).toHaveLength(1)
     expect(output).not.toContain('inputSchema')
   })
 

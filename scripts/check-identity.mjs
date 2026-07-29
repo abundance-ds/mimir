@@ -13,7 +13,7 @@ const forbidden = [
   ['previous CLI', new RegExp(`${escapedPrior}x`, 'i')],
   ['previous package name', new RegExp(`${escapedPrior}[-_]workbench`, 'i')],
   ['previous repository name', new RegExp(`${escapedPrior}-panel`, 'i')],
-  ['previous data directory', new RegExp(`\\.${escapedPrior}(?!ir)`, 'i')],
+  ['previous data directory', new RegExp(`\\.${escapedPrior}(?=$|[/\\\\'"\\s])`, 'i')],
   ['previous environment prefix', new RegExp(`${escapedPrior.toUpperCase()}_`)],
   ['previous bundle/keychain namespace', new RegExp(`(?:rs\\.shoulde|com)\\.${escapedPrior}(?:\\.|\\b)`, 'i')],
 ]

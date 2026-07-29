@@ -152,6 +152,12 @@ pub struct ActivityOrigin {
     pub graph_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_section: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_message_id: Option<String>,
 }
 
 /// Runtime surface selected by the Activity pane.
@@ -275,6 +281,8 @@ pub struct ActivityRecord {
     pub last_viewed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub close_requested_at: Option<String>,
     pub retention: ActivityRetention,
     #[serde(default)]
     pub source: ActivityOrigin,
@@ -333,6 +341,7 @@ mod tests {
             updated_at: "2026-07-25T10:00:00Z".into(),
             last_viewed_at: None,
             archived_at: None,
+            close_requested_at: None,
             retention: ActivityRetention::Durable,
             source: ActivityOrigin {
                 launcher_id: Some("codex".into()),

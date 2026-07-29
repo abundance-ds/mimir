@@ -18,6 +18,7 @@ mod ai_transport;
 mod ai_usage;
 mod apps;
 pub mod business_graph;
+pub mod chat;
 mod connections;
 pub mod file_index;
 mod file_index_commands;
@@ -819,6 +820,7 @@ fn app_quit_confirmed(app: tauri::AppHandle) {
 pub fn run() {
     let tool_registry = tool_registry::ToolRegistry::default();
     let tool_runtime = tool_runtime::ToolRuntime::new(tool_registry.clone());
+    let chat_runtime = chat::ChatRuntime::new().expect("chat runtime must initialize");
     let activity_supervisor =
         activities::ActivitySupervisor::new(activities::ActivitySupervisorConfig::default())
             .expect("activity supervisor must initialize");
@@ -830,6 +832,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .register_uri_scheme_protocol("app", |_app, request| apps::serve_app_file(request))
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             let paths = file_open::resolve_file_args(&args, std::path::Path::new(&cwd));
@@ -845,6 +848,7 @@ pub fn run() {
         .manage(tool_server::ToolServerState::default())
         .manage(tool_registry)
         .manage(tool_runtime)
+        .manage(chat_runtime)
         .setup(|app| {
             #[cfg(target_os = "macos")]
             enable_macos_spellcheck();
@@ -858,6 +862,12 @@ pub fn run() {
             routines.start().map_err(std::io::Error::other)?;
             app.state::<tool_runtime::ToolRuntime>()
                 .initialize(app.handle())
+                .map_err(std::io::Error::other)?;
+            app.state::<chat::ChatRuntime>()
+                .install(
+                    app.handle(),
+                    app.state::<tool_registry::ToolRegistry>().inner(),
+                )
                 .map_err(std::io::Error::other)?;
 
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -945,6 +955,7 @@ pub fn run() {
             activity_commands::activity_write,
             activity_commands::activity_resize,
             activity_commands::activity_stop,
+            activity_commands::activity_close,
             activity_commands::activity_rename,
             activity_commands::activity_set_archived,
             activity_commands::activity_clear,
@@ -1007,6 +1018,38 @@ pub fn run() {
             tool_runtime::tool_app_provider_unregister,
             tool_runtime::tool_relay_response,
             tool_runtime::tool_relay_cancel,
+            chat::chat_status,
+            chat::chat_config,
+            chat::chat_configure,
+            chat::chat_update_config,
+            chat::chat_reconnect,
+            chat::chat_disconnect,
+            chat::chat_set_enabled,
+            chat::chat_targets,
+            chat::chat_messages,
+            chat::chat_messages_around,
+            chat::chat_members,
+            chat::chat_search,
+            chat::chat_send,
+            chat::chat_typing,
+            chat::chat_react,
+            chat::chat_edit,
+            chat::chat_delete,
+            chat::chat_upload_path,
+            chat::chat_upload_base64,
+            chat::chat_download_attachment,
+            chat::chat_open_attachment,
+            chat::chat_attachment_preview,
+            chat::chat_create_channel,
+            chat::chat_set_topic,
+            chat::chat_join,
+            chat::chat_leave,
+            chat::chat_open_direct,
+            chat::chat_close_direct,
+            chat::chat_mark_read,
+            chat::chat_set_muted,
+            chat::chat_set_active,
+            chat::chat_link_activity,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mimir")
@@ -1021,6 +1064,7 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Exit => {
+                app_handle.state::<chat::ChatRuntime>().disconnect();
                 app_handle
                     .state::<routine_runtime::RoutineRuntime>()
                     .stop_background();

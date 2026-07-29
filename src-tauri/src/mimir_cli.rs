@@ -104,7 +104,7 @@ fn install_managed_builtin_skill(
         None => true,
         Some(contents) if contents == packaged => false,
         Some(contents) if managed_hash.as_deref() == Some(&content_hash(contents)) => true,
-        Some(contents) => recognized_legacy.iter().any(|legacy| contents == *legacy),
+        Some(contents) => recognized_legacy.contains(&contents),
     };
     if existing.is_some() && !replace && existing.as_deref() != Some(packaged) {
         return Ok(());
