@@ -57,17 +57,6 @@
       </div>
     </Teleport>
 
-    <div
-      v-if="mode === 'agent' && status === 'needs-input'"
-      data-terminal-attention
-      role="status"
-      class="flex h-8 shrink-0 items-center gap-2 border-b border-accent/25 bg-accent-soft px-3 text-[10px]"
-    >
-      <span class="size-1.5 shrink-0 bg-accent" aria-hidden="true" />
-      <strong class="font-semibold text-accent">Input requested</strong>
-      <span class="truncate text-ink-3">Focus the session to continue</span>
-    </div>
-
     <div class="relative min-h-0 flex-1 bg-surface">
       <div
         ref="surface"

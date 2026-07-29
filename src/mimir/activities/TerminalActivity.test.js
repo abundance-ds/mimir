@@ -302,7 +302,7 @@ describe('TerminalActivity', () => {
     expect(xterm.terminals[0].write).toHaveBeenCalledTimes(3)
   })
 
-  it('renders agent attention and authoritative exit state', async () => {
+  it('reports agent attention without obscuring the terminal and renders authoritative exit state', async () => {
     const wrapper = await initialize()
     api.callback({
       type: 'status',
@@ -321,7 +321,7 @@ describe('TerminalActivity', () => {
     })
     await nextTick()
 
-    expect(wrapper.get('[data-terminal-attention]').exists()).toBe(true)
+    expect(wrapper.find('[data-terminal-attention]').exists()).toBe(false)
     expect(wrapper.emitted('status').at(-1)[0]).toMatchObject({
       status: 'needs-input',
       needsInputIsBlocking: true,
