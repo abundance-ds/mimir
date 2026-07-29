@@ -26,14 +26,8 @@ Important limitations:
 - global event mocks resolve listener installation immediately unless a test
   overrides them, so async mount/unmount races require explicit deferred mocks.
 
-Component tests should assert behavior/contracts, focus ownership, emitted
-events, and cleanup. Do not use happy-dom layout values as evidence for desktop
-geometry.
-
-`bun run test:coverage` enforces the global floor in `vitest.config.js`.
-Coverage is a regression tripwire rather than a quality score: high-risk
-bridges and editor engines still need direct contract tests even when broad
-component mounts raise the aggregate.
+`bun run test:coverage` enforces the global floor in `vitest.config.js`
+(lines 65 / statements 62 / functions 57 / branches 53).
 
 ## Rust tests
 
@@ -144,9 +138,5 @@ streams, or trivial scalars do not need one.
 
 ## Release behavior
 
-`docs/acceptance.md` is the runtime behavior contract. Unit coverage supports
-it but cannot replace the desktop checks involving native focus, file
-association, process lifetime, system Trash, keychain, and macOS titlebar.
-
-Update this document when the runner, mocks, CI workflow, command registration
-seam, or verification expectations change.
+`docs/acceptance.md` is the runtime behavior contract covering native focus,
+file association, process lifetime, Trash, keychain, and macOS titlebar.

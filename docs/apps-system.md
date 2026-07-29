@@ -30,28 +30,18 @@ filesystem, HTTP, or registry calls. See [security.md](security.md).
 
 ## Settings workflow
 
-`Settings > Apps` is the management surface; Tools, the Activities `+`, and
-Cmd/Ctrl+P are the fast access surfaces.
+`Settings > Apps` is the management surface.
 
-- Search matches title, id, description, host mode, and declared tool metadata.
-  Arrow keys move the selected row; Enter launches it.
-- **New** creates a working embedded app rather than an empty folder. Its
-  starter note autosaves through the SDK and implements a live private `read`
-  tool.
-- Reload reparses external edits and shows per-definition diagnostics without
-  hiding healthy apps.
-- Open definition sends `app.toml` to the right-hand Editor. Reveal opens the
-  local definition in Finder/file manager.
-- Duplicate copies a directory app and its assets under a new stable id.
-  Symlinks and packages above 512 entries/32MB are rejected rather than followed
-  blindly.
-- Rename changes only the human display title. The id is intentionally stable:
-  it owns app data, Activity identity, and generated tool names.
-- Trash moves one exact local manifest or package to the operating-system
-  Trash. Namespaced app data is retained.
-
-Mutations return the fresh catalog, so Sidebar launch rows update immediately.
-Built-ins are visible and launchable but never mutated.
+- **New** creates a working embedded app (starter note with SDK autosave and a
+  live `read` tool).
+- Duplicate copies a directory app under a new stable id. Symlinks and packages
+  above 512 entries/32 MB are rejected.
+- Rename changes only the display title. The id is stable: it owns app data,
+  Activity identity, and generated tool names.
+- Trash moves one exact local definition to the OS Trash. Namespaced app data
+  is retained.
+- Mutations return the fresh catalog. Built-ins are visible and launchable but
+  never mutated.
 
 Today is a full-pane durable top-priority editor with minimal Markdown source
 highlighting and no preview layer. It retains the former Scratch app's stable
@@ -169,7 +159,7 @@ runtime:
 
 Neither app-contributed tools nor app-management handlers appear in the public
 agent catalog. Agents edit the authored files described by the `mimir-config`
-skill when app configuration is part of their task.
+skill (`skills/mimir-config`) when app configuration is part of their task.
 
 ## Host architecture
 

@@ -26,27 +26,12 @@ is `rs.shoulde.mimir`, keyed by the provider environment-variable name.
 
 ## Atomic writer
 
-`src-tauri/src/persistence.rs` is the shared replacement primitive:
-
-1. validate the destination has a filename;
-2. serialize before touching the destination;
-3. create a unique temporary sibling;
-4. write, flush, and `sync_all` the temporary file;
-5. preserve existing permissions for ordinary replacement;
-6. close before rename for Windows compatibility;
-7. atomically rename on the same filesystem;
-8. sync the parent directory where supported, debounced to at most one fsync
-   per directory per ~2s window — a crash inside the window can lose the
-   rename (the directory may still reference the previous file), never a
-   synced file's contents.
-
-Document writes use the same byte writer, so an existing file's permissions
-survive replacement and a read-only destination is rejected. Secret fallback
-writes apply owner-only permissions before secret bytes enter the temporary
-file.
-
-Do not replace this with a temporary directory or generic `fs::write`; both
-lose guarantees relied on by session recovery and runtime state.
+All durable writes go through `src-tauri/src/persistence.rs` helpers -- never
+raw `fs::write`. The primitive serializes first, writes to a temp sibling,
+flushes+syncs, then atomically renames. Existing file permissions survive
+replacement; secret fallback writes apply owner-only permissions before bytes
+enter the temp file. Parent-directory fsync is debounced (~2s); a crash inside
+the window can lose the rename but never a synced file's contents.
 
 ## Corrupt-state quarantine
 
@@ -56,7 +41,8 @@ valid, and malformed state. Malformed bytes are renamed untouched to a unique
 Filesystem errors still fail the operation.
 
 Quarantine currently applies to settings, session, model registry, launchers,
-Activity snapshots, and Routine planner state. User-authored App/Routine TOML
+Activity snapshots, Routine planner state, and business-graph event logs
+(`business_graph/runtime.rs`). User-authored App/Routine TOML
 is not quarantined: each invalid definition remains in place and becomes a
 catalog diagnostic so the user can repair its source.
 
@@ -74,10 +60,8 @@ process/PTY handles are intentionally not persisted.
 Atomic replacement prevents partial files; it does not prevent an older
 snapshot from winning. Each high-frequency owner adds ordering:
 
-- `src/stores/settings.js` captures complete immutable snapshots and chains
-  saves; `flush()` includes a pending debounce and every earlier queued save.
-- `src-tauri/src/local_settings.rs` serializes settings load/read-modify-write
-  operations with `SETTINGS_IO`, preserving non-editor top-level namespaces.
+- Settings: snapshot+chain semantics in renderer, `SETTINGS_IO` lock in Rust;
+  see [settings.md](settings.md) and [ipc.md](ipc.md) for cross-window sync.
 - `src/editor/sessionPersist.js` chains saves after a one-second debounce.
   Cleanup returns the current chain; explicit close flush appends the final
   snapshot.
@@ -118,21 +102,8 @@ starting the persistence watcher. See `sessionRestore.js`, `sessionPersist.js`,
 
 ## Shutdown durability
 
-Application Quit is renderer-authorized so dirty-document decisions can affect
-the final session. The order is:
-
-```text
-flush CodeMirror
-  -> confirm dirty files
-  -> flush final session snapshot
-  -> flush settings snapshot
-  -> confirm native exit
-  -> interrupt Activities and persist final exit/scrollback
-  -> flush Activity worker
-```
-
-Workbench unmount also snapshots layout and settings for HMR/window teardown,
-but it is not a substitute for the guarded Quit path.
+Activity worker flush must complete before native exit returns. Full shutdown
+sequence is owned by [runtime-architecture.md](runtime-architecture.md).
 
 ## Change map
 

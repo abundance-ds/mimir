@@ -1,72 +1,33 @@
 # Business graph
 
-The Business graph is Mimir's built-in operating system for a small AI-native
-HEOR consultancy. Issues, clients, people, projects, evidence, decisions, and
-deliverables are one source-aware graph. The Work board, Changes history,
-portfolio ledger, timeline, and the All directory are purpose-built
-projections over that graph rather than separate applications or databases.
+Issues, clients, people, projects, evidence, decisions, and deliverables live
+in one source-aware graph. Work board, Changes, portfolio, timeline, and All
+are projections over that graph. The interface is a **dispatch desk**: agents
+file work; the human monitors, contributes, and corrects. No chat surface.
 
-The interface is a **dispatch desk**. Agents file work around the clock; the
-human keeps overview, contributes, monitors, and corrects. AI work is
-trusted: it lands as filed events with provenance, open to drill-down
-correction, never gated behind accept/reject review. There is no chat
-surface; CLI agents are the workhorse intelligence and the graph is the
-blackboard both sides write to.
+## GraphStore contract
 
-## Why GraphStore exists
-
-Markdown remains the durable, reviewable source of truth. `GraphStore` is a
-rebuildable Rust read model that makes those files behave like an application:
-
-- one normalized model spans legacy Knowledge and Issue files;
-- indexes make kind, scope, tag, status, priority, search, and adjacency queries
-  fast without reparsing every file for every projection;
-- incoming and outgoing relations support backlinks and traversal;
-- source paths and revisions remain attached to every result;
-- revision-aware atomic writes prevent a stale inspector or agent from silently
-  overwriting an external edit;
-- diagnostics expose malformed sources, duplicate ids, dangling links, and
-  migration ambiguity;
-- filesystem watchers rebuild the disposable index and emit
-  `mimir://graph-changed`.
-
-This gives Mimir graph-database interaction speed without introducing another
-canonical store, synchronization protocol, or opaque export format.
+Markdown is the durable source of truth. `GraphStore` is a rebuildable Rust
+read model: normalized indexes over `knowledge/*.md` and `issues/*.md`,
+revision-aware atomic writes, backlinks, diagnostics, and filesystem watchers
+that emit `mimir://graph-changed`.
 
 ## Physical scopes
 
-Scope is deliberately simple and concrete for a five-to-ten-person team:
-
 | Scope | Root | Intended use |
 |---|---|---|
-| Private | `~/.mimir/graph/private/` | local notes, reminders, annotations, drafts, sensitive records |
-| Project | current workspace | engagement issues, decisions, evidence, analyses, and deliverables |
-| Team | Settings > Graph configured folder | shared companies, people, projects, methods, and reusable knowledge |
+| Private | `~/.mimir/graph/private/` | local notes, drafts, sensitive records |
+| Project | current workspace | engagement issues, decisions, evidence, deliverables |
+| Team | Settings > Graph configured folder | shared companies, people, projects, methods, knowledge |
 
-Each root contains flat `knowledge/*.md` and `issues/*.md` source directories.
-Private data is not copied into a project or team root. A private relationship
-to a shared node is stored in the private source. Queries, search, neighbors,
-counts, context packs, and UI projections accept physical scope ids, so a
-team-only projection cannot include a private node.
+Each root contains flat `knowledge/*.md` and `issues/*.md` directories.
+Scope ids filter queries, context packs, and projections; private nodes never
+leak into team-only views. This is a storage boundary, not a permission
+system. External collaborators share the project root without the team root.
 
-This is a storage boundary, not an enterprise permission system. Sharing a
-project or team root uses the repository, synced folder, or filesystem access
-the team already trusts. Mimir binds its agent capability endpoint to loopback
-and does not add roles or policy administration.
-
-For an external collaborator, the practical boundary is the project root:
-give the collaborator that workspace and do not configure the internal team
-root on their machine. They will compose their own private local graph with the
-shared project, but they will not see the team's separate root. Mimir cannot
-grant access to only a subgraph within one project root. Finer boundaries
-therefore require splitting the sensitive material into a separate
-folder/repository/root; role-based node or edge policies would require an
-authenticated policy layer that the local shared-folder architecture does not
-currently have.
-
-The workbench mounts `private:local`, the current `project:<root-hash>`, and
-optional `team:main` roots. Node provenance carries the exact `scopeId`,
-`scopeKind`, `sourcePath`, `sourceRevision`, and legacy source format.
+The workbench mounts `private:local`, `project:<root-hash>`, and optional
+`team:main`. Provenance carries `scopeId`, `scopeKind`, `sourcePath`,
+`sourceRevision`, and legacy format.
 
 ## Bounded ontology
 
@@ -101,124 +62,44 @@ their human content is redacted from automatic graph context packs.
 
 ## Built-in app
 
-Business graph is a stable built-in Rust-helper App Activity implemented by
-`src/mimir/apps/BusinessGraphApp.vue`. It keeps the graph context open in the
-Activity pane while files and deliverables open in the persistent Editor.
-
-Its primary sections and projections are:
+`src/mimir/apps/BusinessGraphApp.vue` — a Rust-helper App Activity. Graph
+stays in the Activity pane; files open in the persistent Editor.
 
 | Section | Projections |
 |---|---|
 | Work | Board, List, Attention |
 | Projects | Portfolio, List, Timeline |
 | Knowledge | List, Timeline |
-| All | List, Timeline, with a kind filter (issue, project, person, company, decision, knowledge) |
+| All | List, Timeline (kind filter) |
 | Changes | History |
 
-**Work** is the startup surface and the first section — it is where the day
-happens. **Changes** is the final section, a catch-up wire rather than part of
-the object hierarchy: a time-ordered history of
-graph events — filings, status flips, decisions, evidence, deliverables,
-overdue crossings, waiting cleared — with a spelled action, object type and
-title, compact field change, human-readable actor, and project context. It
-loads 50-event pages rather than an unbounded stream. FYI by default: one
-compact row per event; click the row to expand field changes and provenance,
-then open the affected object to inspect or correct it.
-**Waiting on you** pins at top as information, not a gate. A seen cursor
-(“since 08:40”) and Mark caught up replace any unread-count obligation.
+Work is the startup surface. Changes is a paginated (50-event pages)
+time-ordered history of graph events with action, type, title, field changes,
+actor, and project context. Waiting-on-you pins at top; seen cursor +
+Mark caught up replaces unread counts.
 
-**Summarise** opens an on-demand launcher: choose one available CLI agent, a
-**Since** date, and optional instructions. Before launch, Mimir fetches every
-retained event on or after that local date from the selected physical scopes.
-The graph runtime ignores a filesystem notification only when its source
-revision exactly matches the revision Mimir just wrote; a later external edit
-is retained even when it happens immediately. The launcher attaches a compact,
-human-readable ledger rather than raw event JSON. Event, node, actor, activity,
-scope, and graph-revision identifiers stay out of the agent context; each line
-retains only time, human actor, action, object kind and title, and meaningful
-field changes.
+**Summarise** launcher: select CLI agent, Since date, optional instructions.
+Mimir fetches retained events from selected scopes, attaches a compact
+human-readable ledger (time, actor, action, kind, title, field changes —
+no raw ids). Prompt hard-capped at 80 KB. Starts a durable interactive
+Activity. Routines can call `graph_events` directly but read only the
+currently mounted workspace.
 
-The initial summary therefore requires no discovery or tool call. The complete
-prompt is hard-capped at 80 KB, safely below the 100,000-token ceiling; when
-long values are abbreviated or older events are omitted, the prompt contains
-an explicit shortening note. Mimir then starts a durable interactive Activity.
-This is intentionally an Activity rather than a Routine because the date and
-instructions vary per review and the user may continue with follow-up questions.
+### Change history
 
-A Routine can also call the public `graph_events` tool; routines receive the same Mimir tool
-catalog as other launched agents. That is appropriate for a fixed manual or
-scheduled digest, but the event tool reads the graph currently mounted in the
-running Mimir instance rather than a renderer view. A scheduled digest is
-therefore reliable only when its intended graph workspace is mounted. A future
-workspace-bound graph mount would be needed before treating unattended
-cross-workspace digests as dependable.
+Events: creates, updates, deletes, restores, due-date crossings, external
+file changes. Paginated via `graph.events` with RFC 3339 `since` bound;
+runtime retains 2,000 events at
+`~/.mimir/graph/events/<project-hash>.json`. Local per installation — not
+a distributed audit log.
 
-### Change history boundary
+### Interaction modes
 
-Graph creates, updates, deletes, restores, due-date crossings, and observed
-external file changes produce structured events. Each event records a compact
-summary, timestamp, node and scope, actor, action, graph revision, and changed
-fields. The renderer requests those events through the paginated `graph.events`
-contract, which accepts an inclusive RFC 3339 `since` bound; the runtime retains
-the most recent 2,000 events.
-
-The journal is durable but currently local to each Mimir installation at
-`~/.mimir/graph/events/<project-hash>.json`. It is a useful review trail, not
-yet an authoritative distributed team audit log: journals are not synchronized
-between machines, an external filesystem edit may be attributed only as
-“External edit,” and changes made while another machine is not observing the
-root may not appear as individual events there. A true team-wide ledger would
-need shared append-only event storage, stable user identity, and conflict-safe
-ingestion; the Markdown files and repository history remain the durable shared
-record until that layer exists.
-
-The **Work board** is the operate surface. Rows are two lines at fixed
-geometry: priority icon control (antenna bars; urgent is a red `!`) opening a
-menu with all four priorities spelled out, then the full title; metadata
-below in Mono — project slug, spelled status (a control when grouped by
-project), due date as `DD.MM` with the word `overdue` paired in `rem`,
-`waiting` spelled, and a compact actor marker (`you`/`external` spelled out,
-agent initials retained). Status or project grouping,
-drag-and-drop with drop-before reorder, keyboard-equivalent movement, column
-visibility, priority filter, sorting, and settings-backed view state stay.
-Every chord maps to a visible control. Any active filter renders as a named,
-dismissible strip above the board — hidden issues are always explainable at
-a glance.
-
-**Portfolio** is a strict ledger: sticky header, right-aligned tabular
-numerals for open/waiting/done/completion, spelled knowledge counts, and
-health as marker + word (`! needs attention`), never hue alone. Project Focus
-is the 30-second standing answer: open/waiting/done strip, Blocked on
-aggregated by target, recent decisions, and deliverables, each row drilling
-to its node or file.
-
-Interaction follows **Scan → Peek → Focus**. Opening the tool lands keyboard
-focus in the active projection — the selected row or first card — so arrow
-keys work without a mouse click; while the graph is still loading, focus
-parks on the app root and moves in once the projection renders. Scan
-projections optimize recognition and triage. Peek is a read-first side surface with contact facts
-for people (email, phone, role, company — each one-click copyable) at the
-top, quick issue properties, Markdown preview, operational context, and a
-plain-language relationship sentence. Focus is a spacious object workspace
-with one owning scroll, auto-growing text fields, syntax-aware CodeMirror
-Markdown, planning properties, connected work, and provenance.
-
-Focus can author the deliberately bounded relation vocabulary through a
-two-step connection composer. Known relationships such as project/company,
-project/contact, person/company, dependencies, references, and general
-business connections remain purposeful options rather than a generic
-node-edge schema form. Issue Project and Owner stay first-class controls.
-
-The inspector uses expected source revisions, commits a dirty draft before
-scope refreshes or replacing navigation, and reports conflicts instead of
-overwriting. It exposes project, assignee, reminders, waiting, snooze, labels,
-deliverables, related entities, and graph-associated Activities. All selects,
-dates, datetimes, and confirmations are custom keyboard-accessible Vue
-surfaces. Delete moves the source to operating-system Trash through an
-in-product confirmation and offers an in-session undo.
-
-The context trail preserves the path from the originating projection through
-inspected issues, projects, people, companies, decisions, and evidence.
+- **Board**: two-line rows (priority control, title, metadata in mono). Drag reorder, keyboard movement, grouping, filter strip, settings-backed view state.
+- **Portfolio**: tabular ledger (open/waiting/done/completion, health as marker + word). Project Focus: standing summary with blocked-on, decisions, deliverables.
+- **Scan / Peek / Focus**: keyboard focus lands in projection on open. Peek: read-first side surface with contact facts, properties, Markdown preview, relationships. Focus: full object workspace with CodeMirror Markdown, planning properties, connected work, provenance.
+- **Inspector**: revision-aware; commits dirty draft before navigation; conflict reporting. Bounded relation vocabulary via two-step connection composer. Delete to OS Trash with in-session undo.
+- **Context trail**: preserves navigation path from projection through inspected nodes.
 
 ## Search
 
@@ -230,26 +111,14 @@ clear control restores the projection immediately.
 
 ## Dispatch bar
 
-A permanent single-line bar at the bottom of the app is the spine for capture,
-lookup, delegation, and deterministic commands:
+Permanent bottom bar (`DispatchBar.vue`). Four modes:
 
-- **Lookup.** Typing shows live results above the bar, Spotlight-style;
-  Tab or click opens Peek. Find a fact, gone in three seconds.
-- **Dispatch.** Enter hands the line to a background CLI-agent Activity with
-  the user's context (section, view, scopes, focused node). Capture never
-  blocks and never opens a dialog: input clears immediately, jobs queue
-  behind one runner, and results land in Changes as filed events. Unresolvable
-  references arrive flagged `needsDetail` instead of guessed.
-- **Delegate.** `!` or `work <target>` arms a node, shows the assembled
-  context pack (“what the agent will see”) above the bar, and launches a
-  durable work Activity on the second Enter. This replaces the retired
-  Start Work dialog; no sparkle, no suggestion chips.
-- **Power lane.** A leading `/` runs a deterministic command — `/board
-  [attention]`, `/open <id>`, `/section <name>`, `/find <terms>`, `/clear`,
-  `/help` — with plain unix-style errors in the scrollback.
-- **Echo.** GUI mutations print their `mimir call` equivalent into the
-  scrollback, dimmed. The UI teaches the CLI grammar as a side effect of
-  use.
+- **Lookup**: live Spotlight-style results; Tab/click opens Peek.
+- **Dispatch**: Enter queues a background CLI-agent Activity with user context; results land as filed events. Unresolvable refs flagged `needsDetail`.
+- **Delegate**: `!` or `work <target>` shows assembled context pack, second Enter launches durable work Activity.
+- **Power lane**: `/` prefix runs deterministic commands (`/board`, `/open <id>`, `/section`, `/find`, `/clear`, `/help`).
+
+GUI mutations echo their `mimir call` equivalent in scrollback.
 
 ## AI-native workflow
 
@@ -273,7 +142,7 @@ result in chat history.
 
 ## Tool surface
 
-Agents use one public graph surface:
+Public graph tools — registry and transport details in [mcp.md](mcp.md):
 
 ```bash
 mimir call graph_find '{"query":"cost effectiveness evidence"}'
@@ -287,8 +156,7 @@ mimir call graph_events '{"scopeIds":["project:alpha"],"since":"2026-07-20T00:00
 ```
 
 Issues are `kind: "issue"` graph nodes. Internal compatibility and semantic
-handlers may still support the visual app and migration code, but they are not
-public agent tool families.
+handlers are not public tool families.
 
 ## Migration and compatibility
 
@@ -327,7 +195,8 @@ Native ownership is under `src-tauri/src/business_graph/`:
 | `runtime.rs` | mounted roots, watchers, change events, Trash/restore |
 | `context.rs` | bounded source-aware agent context and redaction |
 | `migration.rs` | read-only inventory and identity-resolution report |
-| `tools.rs` | native registry definitions, compatibility, semantic commands |
+| `performance.rs` | debug-build performance tests and regression budgets |
+| `tools/` | native registry definitions, compatibility, semantic commands (mod.rs, support.rs, graph.rs, knowledge.rs, issues.rs, projects.rs, research.rs, tests.rs) |
 
 Renderer ownership is split between `src/services/businessGraph.js`,
 `src/stores/businessGraph.js`, the built-in app, and its components under
@@ -351,19 +220,17 @@ redaction, and a realistic HEOR workflow. Frontend tests cover services,
 store, shell, board, dispatch bar, inspector, projections, Activity handoff,
 and `mimir`.
 
-Debug-test performance budgets and the latest measured run are:
+Debug-build regression budgets:
 
-| Operation | Budget | Measured |
-|---|---:|---:|
-| build 5,000-node index | 2,000 ms | 48.7 ms |
-| bounded query | 100 ms | 5.7 ms |
-| ranked search | 500 ms | 12.3 ms |
-| one-hop traversal | 100 ms | 0.08 ms |
-| load 600 Markdown sources | 3,000 ms | 43.3 ms |
-| revision-aware board mutation | 250 ms | 17.2 ms |
-| refresh 600 sources | 3,000 ms | 42.4 ms |
+| Operation | Budget |
+|---|---:|
+| build 5,000-node index | 2,000 ms |
+| bounded query | 100 ms |
+| ranked search | 500 ms |
+| one-hop traversal | 100 ms |
+| load 600 Markdown sources | 3,000 ms |
+| revision-aware board mutation | 250 ms |
+| refresh 600 sources | 3,000 ms |
 
-These measurements are debug-build regression guards, not production
-benchmarks. Run `cargo test --manifest-path src-tauri/Cargo.toml
-business_graph` after native changes and follow the full release matrix in
-[testing.md](testing.md).
+Run `cargo test --manifest-path src-tauri/Cargo.toml business_graph` after
+native changes. Full release matrix in [testing.md](testing.md).

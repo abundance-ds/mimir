@@ -1,8 +1,7 @@
 # Inline AI
 
 Mimir has two native model interactions inside the Editor: the Cmd/Ctrl+K inline
-agent and `++` ghost completion. CLI agents remain the primary general-purpose
-intelligence.
+agent and `++` ghost completion.
 
 ## Cmd/Ctrl+K inline agent
 
@@ -27,7 +26,8 @@ instruction
 Accept applies the selected-range replacement and closes the inline surface.
 Reject closes the diff but keeps the surface open for refinement. Escape
 cancels a live request or closes the interaction. Cmd/Ctrl+Enter accepts a
-pending edit.
+pending edit. The diff and proposal lifecycle are in
+[editor-system.md](editor-system.md).
 
 Primary files:
 
@@ -60,14 +60,5 @@ Primary files:
 
 ## Models and keys
 
-Settings > Models stores keys for Anthropic, OpenAI, and Google through the OS
-keychain and selects the ghost model. The inline surface owns its model picker;
-both choices persist in the settings store. Provider SDKs prepare model
-requests; Rust owns credential resolution, upstream transport, host validation,
-cancellation, and response handling.
-
-Debug-only fallback sources are process environment variables, repository
-`.env`, and `~/.mimir/keys.env`.
-
-See [ai-system.md](ai-system.md) for registry migration, model resolution,
-credential precedence, provider normalization, and the two transport paths.
+See [ai-system.md](ai-system.md) for registry, credentials, providers, and
+transport.

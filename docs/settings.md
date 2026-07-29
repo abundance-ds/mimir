@@ -41,7 +41,8 @@ persisting API.
 
 Each mounted Workbench/standalone Editor acquires a settings sync lease.
 After a successful native write, the caller invokes `settings_changed`; Rust
-emits `mimir://settings-changed` to every other window.
+emits `mimir://settings-changed` to every other window
+(see [ipc.md](ipc.md)).
 
 On receipt, a window:
 
@@ -69,13 +70,12 @@ on unmount and guarded Quit. On startup the saved layout is restored, then
 Editor is forcibly expanded and responsive constraints are reapplied. Persisted
 desktop width is retained across narrow responsive zones.
 
-`workbenchZoom` is whole-window interface zoom as a percent, normalized to
-50–200 in the store on both `set` and load, and applied as native webview zoom
-by a store watcher (`src/shared/workbenchZoom.js`). Window creation also reads
-it natively (`local_settings::initial_workbench_zoom_factor`) so startup
-paints at the saved zoom instead of flashing 100%. It is a third scaling layer
-above `editorFontSize` and the editor's session-persisted content zoom, which
-scale only editor text.
+`workbenchZoom` is whole-window interface zoom (50-200%), applied as native
+webview zoom by `src/shared/workbenchZoom.js`. Window creation reads it
+natively (`local_settings::initial_workbench_zoom_factor`) so startup paints
+at the saved zoom (see [runtime-architecture.md](runtime-architecture.md)).
+It is a third scaling layer above `editorFontSize` and session-persisted
+content zoom.
 
 Business graph settings follow the same mutation invariant:
 
@@ -88,50 +88,23 @@ Business graph settings follow the same mutation invariant:
 Changing the team root remounts GraphRuntime against the current workspace;
 changing view state must use `settings.set` with a newly constructed object.
 
-`sidebarChatsCollapsed` is local presentation state for the Chats disclosure.
-The header toggles it through `settings.set`, so the choice survives restarts
-without becoming chat-server state.
-
-`chatNotifications` is the local on/off preference for focused DM and @mention
-alerts. System notification permission remains owned by the OS. Turning the
-preference off does not alter server delivery, unread counts, or the dock
-badge.
-
-The Show Chats switch is not an ordinary renderer setting. It updates the
-native `chat.json` `enabled` field because it must take effect before renderer
-startup and atomically control the connection plus native tool registration.
-Disabling preserves credentials and cached history.
+`sidebarChatsCollapsed` and `chatNotifications` are local presentation/preference
+state; they do not affect chat-server behavior. The Show Chats switch updates
+native `chat.json` `enabled`, controlling the connection and native tool
+registration before renderer startup; disabling preserves credentials.
 
 ## Chat connection settings
 
-Chat connection identity is intentionally outside the renderer settings
-snapshot. `src/shared/ui/settings/ChatSettingsSection.vue` calls the native
-chat runtime, which owns `~/.mimir/chat.json`, the platform credential store,
-connection status, and reconnect. The same surface changes the ordinary local
-`chatNotifications` preference and requests OS permission deliberately.
-Changing only display name reuses the saved credential; changing endpoint or
-account requires a passphrase. See [chat.md](chat.md).
+Chat identity is outside the renderer settings snapshot; the native chat runtime
+owns `~/.mimir/chat.json` and credentials. See [security.md](security.md) and
+[chat.md](chat.md).
 
 ## File-first top-level namespaces
 
-The CLI also reads two intentionally file-first top-level namespaces that the
-renderer store preserves:
-
-```json
-{
-  "connections": {
-    "google": { "enabled": true, "account": "default" },
-    "slack": { "enabled": true, "account": "default" },
-    "granola": { "enabled": true }
-  },
-  "skills": {
-    "catalogRoot": "/absolute/shared/catalog"
-  }
-}
-```
-
-The catalog root must be absolute. Missing connection accounts fall back to
-the predecessor’s credential-free defaults and then `default`.
+The CLI reads two file-first top-level namespaces that the renderer store
+preserves: `connections` (per-service `enabled`/`account`) and `skills`
+(`catalogRoot`, must be absolute). Missing connection accounts fall back to
+`default`.
 
 ## Internal settings handler
 

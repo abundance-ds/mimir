@@ -1,14 +1,46 @@
 # Gotchas
 
 Non-obvious constraints that are still current in Mimir 0.1.0.
+Known defects: [issues.md](issues.md).
+
+## Terminal
+
+### WebGL fallback lifecycle
+
+The WebGL renderer is loaded after `terminal.open()`. If WebGL setup fails or
+its context is lost, the addon disposes itself and xterm's built-in DOM renderer
+keeps the session usable. Do not treat context loss as a terminal error.
+
+### Unicode 11 addon requires `allowProposedApi`
+
+The Unicode 11 addon supplies correct emoji/wide-character cell widths and
+requires `allowProposedApi: true`. Without it xterm throws at load and the
+surface shows an attach error instead of a terminal.
+
+### Font readiness and pixel snap
+
+Terminal initialization selects the native system monospace stack and waits for
+the document font set before xterm measures cells. Do not open xterm while
+another face can still change layout. `scheduleFit` snaps the WebGL screen onto
+the device pixel grid; without it fractional pane-split offsets soften every
+glyph. The transform must be cleared before measuring so the offset never
+compounds.
+
+### zsh spawn-size `%` artifact
+
+The shell prints its first prompt before the terminal surface mounts. zsh pads
+its partial-line mark to the PTY width: spawning wider than the eventual pane
+strands a wrapped `%` line at the top of scrollback. Undershoot is corrected
+invisibly by the first fit resize. `src/services/activities.js` remembers the
+last pane-fitted size for spawn/respawn — do not reintroduce a generous
+hardcoded default.
 
 ## CSS and input
 
 ### Keep the button reset in `@layer base`
 
-Tailwind v4 utilities are layered. An unlayered `button` reset outranks them and
-silently removes utility backgrounds and borders. The reset in
-`src/shared/styles/base.css` must remain inside `@layer base`.
+The `button` reset in `src/shared/styles/base.css` must remain inside
+`@layer base`; an unlayered reset outranks Tailwind v4 utilities.
 
 ### Preserve CodeMirror focus on toolbar actions
 
@@ -64,25 +96,8 @@ not enforcement.
 normal case for a macOS GUI launch. `local` is therefore usually UTC, not the
 system timezone; write an explicit IANA name for local-time schedules.
 
-### Never spawn a PTY wider than its eventual pane
-
-The shell prints its first prompt before the terminal surface mounts, and zsh
-pads its partial-line mark to the PTY width. Overshoot strands a wrapped `%`
-line at the top of scrollback; undershoot is corrected invisibly by the first
-fit. `src/services/activities.js` remembers the last pane-fitted size for
-spawn/respawn — do not reintroduce a generous hardcoded default.
-
-### Terminal font readiness and pixel snap are load-bearing
-
-Terminal initialization selects the native system monospace stack and waits
-for the document font set before xterm measures cells. Do not open xterm while
-another face can still change layout. `scheduleFit` then snaps the rendered
-WebGL screen onto the device pixel grid; without it fractional pane-split
-offsets soften every glyph. The transform must be cleared before measuring so
-the offset never compounds. WebGL initialization and context loss deliberately
-fall back to xterm's DOM renderer rather than ending the session. Likewise
-`allowProposedApi: true` stays as long as the Unicode 11 addon loads — without
-it xterm throws and the surface shows an attach error instead of a terminal.
+See also [Terminal](#terminal) for spawn-size, WebGL fallback, pixel snap, and
+Unicode 11 constraints.
 
 ## MCP and apps
 

@@ -1,8 +1,7 @@
 # Workbench design
 
-Mimir is a local instrument for directing capable CLI agents and reviewing the
-files they change. The visual posture is dense, quiet, tactile, and precise.
-It should remain comfortable for hours of terminal and document work.
+Shell-specific layout for Mimir's three-pane workbench. For visual and
+interaction rules see [design-system.md](design-system.md).
 
 ## Three-pane grammar
 
@@ -94,79 +93,14 @@ recreate an overflowing two-pane split.
 
 ## Go to
 
-Cmd/Ctrl+P opens a compact launcher at a fixed near-window-top offset rather
-than a tall centered palette. The empty view starts with Start new activity,
-then Tools, recent files, and Reopen last closed. Entering Start new activity
-replaces those root results with launch sources; Back, empty-query Backspace,
-or Escape returns without closing Go to. Current Activities are deliberately
-absent because
-Option/Alt+Cmd/Ctrl+Left/Right already cycles them.
+Cmd/Ctrl+P opens a compact launcher near window top.
 
-Typing searches Tools, launch sources, closed History, and indexed files.
-`/` restricts results to files, `@` to History, and `+` to New activity.
-History transcript search is lazy and native; recent files remain visible in
-the empty state because Go to is the fastest keyboard route back to files.
-When a CLI agent or terminal owns Activity-pane focus, Cmd/Ctrl+N opens Go to
-directly in New activity with the current launcher selected. Pressing Enter
-there starts another instance; moving the selection chooses a different
-source. Editor, Files, and Routines keep their local Cmd/Ctrl+N meanings, and
-the macOS native New accelerator follows the same focus-aware route.
-The document root disables autocorrect and autocapitalization; focused search
-fields also disable autocomplete and spellcheck so operating-system suggestion
-UI does not cover launcher results.
+- Empty view: Start new activity, Tools, recent files, Reopen last closed. Entering Start new activity drills into launch sources; Back/Backspace/Escape returns.
+- Current Activities excluded (Option/Alt+Cmd/Ctrl+Left/Right cycles them).
+- Search: Tools, launch sources, closed History, indexed files. Prefix filters: `/` files, `@` History, `+` New activity.
+- Cmd/Ctrl+N in CLI agent or terminal focus opens Go to in New activity with current launcher selected. Editor, Files, Routines keep local Cmd/Ctrl+N meanings.
+- Autocorrect, autocapitalize, autocomplete, and spellcheck disabled on search fields.
 
-Layout and Activity-order preferences remain debounced during interaction, but
-Workbench teardown explicitly snapshots and flushes them. Native quit confirms
-dirty documents first, then awaits the ordered settings queue before allowing
-the Rust host to exit, so a final resize or reorder cannot disappear.
+Workbench teardown snapshots layout and Activity-order preferences before
+exit. Native quit confirms dirty documents, then flushes the settings queue.
 
-## Palette and typography
-
-Parchment is the reference theme:
-
-| Role | Reference |
-|---|---|
-| outer chrome | `#ebe9e3` |
-| high chrome | `#f9f8f5` |
-| work surface | `#ffffff` |
-| primary ink | `#1a1a18` |
-| signal accent | `#c05d3c` |
-| structural rule | `#d8d7d2` |
-
-The native system UI stack carries controls, readable status, and prose. The
-native system monospace stack carries paths, flags, terminal text, timestamps,
-metadata, and Activity monograms. No product surface uses serif.
-
-Color communicates state rather than product category. Agent, app, routine,
-and terminal kinds do not receive separate brand palettes. The theme accent
-marks selection, activity, focus, and attention.
-
-## Interaction
-
-- Hover feedback is immediate and uses a nearby chrome level.
-- Focus uses `:focus-visible`.
-- Primary copy uses direct verbs: Open, Stop, Resume, Archive, Clear, Run now.
-- Status copy is short and factual: Working, Input, Done, Stopped, Error.
-- Empty states identify the next useful action.
-- Failures name the failed object and remain recoverable.
-- Pane state changes are immediate. Local motion may preserve spatial
-  continuity and must respect reduced-motion preferences.
-- Selecting an Activity lands keyboard focus inside its surface. Surfaces
-  expose `focusEntry()` for this; WebKit leaves focus on `<body>` after
-  Sidebar clicks, so the workbench calls it explicitly instead of relying on
-  click focus (see gotchas.md).
-- Cmd+Plus/Minus step whole-window interface zoom and Cmd+0 resets it, in
-  every focus context including modals, Quick Open, and PTYs. The chords never
-  reach a terminal or CodeMirror. Editor content zoom has no keyboard chord;
-  it lives on the editor footer.
-
-## Implementation rules
-
-- Use Tailwind utilities backed by tokens in `src/shared/styles/app.css`.
-- Use component CSS for CodeMirror/xterm internals, native chrome,
-  layout mechanics, and animation keyframes.
-- Keep shell panes square and flush. Rounding belongs to local controls,
-  popovers, tabs, and dialogs.
-- Keep one accent per theme and use add/remove colors only for diffs and status.
-- Test shell changes with all panes expanded, each rail state, and a narrow
-  window.

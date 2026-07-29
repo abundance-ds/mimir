@@ -109,29 +109,9 @@ reasoning, total, and estimated cost. `cachedInputTokens` is a compatibility
 alias synchronized to cache-read input. Pricing is registry metadata; fallback
 cache multipliers exist for migrated entries.
 
-## Inline tool loop
+## Inline tool loop and ghost lifecycle
 
-`InlineAI.vue` creates a new `Chat` transport when model/context changes. Its
-system prompt contains escaped selection context and exposes a small renderer
-tool set. `suggest_edit` produces a pending replacement; the Editor opens a
-full-document diff and keeps the inline surface alive across rejection/follow-
-up.
-
-Inline selection is snapshotted at interaction start. Accept applies against
-that range through the Editor; any change to proposal/diff ownership must be
-reviewed with `useDiffReview.js` and the native proposal lifecycle.
-
-## Ghost lifecycle
-
-The CodeMirror extension, not the service, owns request validity. A suggestion
-is bound to document position and request serial. Any unrelated edit or pointer
-movement cancels/dismisses it. Authentication failures stay visible; other
-provider failures may fall back to local suggestions.
-
-Trigger parsing protects identifier-adjacent increment/C++ syntax. Key priority
-matters: Alt+Right partial acceptance is evaluated before whole-suggestion
-Right Arrow, and Enter dismissal must leave the normal editor command
-available.
+See [inline-ai.md](inline-ai.md).
 
 ## Change map
 

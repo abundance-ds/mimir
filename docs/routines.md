@@ -34,25 +34,22 @@ Fields:
 | `prompt` | final CLI prompt argument |
 | `overlap` | `skip` or `parallel` |
 | `missed` | `skip` or `run-once` |
-| `workspace` | folder the run starts in; required when the preset's working directory is "workspace" (routines have no open workspace to inherit), ignored for home/custom presets |
-| `interactive` | defaults to `false` (headless one-shot run); `true` opens the agent's live session seeded with the prompt, so follow-up messages can be typed in the terminal |
+| `workspace` | folder the run starts in; required when the preset's working directory is "workspace", ignored for home/custom presets |
+| `interactive` | defaults to `false` (headless one-shot run); `true` opens the agent's live session seeded with the prompt |
 
 Five-field cron uses conventional minute/hour/day/month/week-day numbering.
 The runtime normalizes it into the seconds-aware scheduler format.
 
 A routine without a `schedule` is manual-only: the planner never arms it and
-`enabled` has no effect on it, but Run now in the UI launches it exactly like a
-scheduled fire. An empty `schedule = ""` string is
-rejected — omit the key instead, so a typo never silently disarms a schedule.
+`enabled` has no effect on it, but Run now launches it exactly like a scheduled
+fire. An empty `schedule = ""` is rejected — omit the key instead.
 
-`interactive` picks the argv adapter, not the launch path. Headless runs force
-the agent's one-shot mode (`codex exec …`, `claude --print …`, `pi --print …`;
-Gemini has no headless adapter and is rejected). Interactive runs pass the
-prompt as the CLI's ordinary opening message — positional for Codex, Claude,
-and Pi, `--prompt-interactive` for Gemini — so the spawned PTY is the agent's
-normal live session with all preset flags intact. An interactive session stays
-open until the user closes it; with `overlap = "skip"` the next scheduled fire
-is skipped while it is.
+`interactive` picks the argv adapter. Headless runs force one-shot mode
+(`codex exec …`, `claude --print …`, `pi --print …`; Gemini has no headless
+adapter and is rejected). Interactive runs pass the prompt as the CLI's
+ordinary opening message. An interactive session stays open until the user
+closes it; with `overlap = "skip"` the next scheduled fire is skipped while it
+is.
 
 ## Runtime
 
@@ -80,11 +77,8 @@ At fire time the runtime:
 5. records the scheduled time and routine origin on the Activity.
 
 Run now uses the same launch path with the current time as its scheduled time.
-The returned process-backed `routine` record opens in the terminal surface;
-only the stable `routines` core Activity renders the manager. “Run again” on
-an ended run resolves the current TOML definition, so updated prompt, flags,
-workspace, overlap, and launcher policy are not silently replaced by stale
-PTY argv.
+"Run again" on an ended run resolves the current TOML definition, so updated
+prompt, flags, workspace, overlap, and launcher policy take effect.
 
 Planner cursor is committed atomically before scheduled fires are spawned. This
 prevents a crash during spawn from repeatedly treating the same instant as
@@ -96,58 +90,19 @@ overlap eligibility and the new Activity becoming visible to the supervisor.
 path, but its timestamp is the current instant rather than advancing the cron
 planner.
 
-## UI and tools
+## UI contract
 
-The Routines Activity shows enabled/running state, a humanized schedule
-("Weekdays 09:30", "Every 15 min", or "Manual"), preset, next fire, prompt,
-policy, workspace, and per-definition diagnostics. It is a complete control
-surface over the same TOML files:
+- Id is derived from title (slugged, uniquified, fixed after creation); timezone
+  is stamped from the system. Explicit values in hand-written TOML are preserved
+  on edit.
+- Trigger defaults to manual-only; scheduled mode exposes a builder that compiles
+  to five-field cron. Cron/builder mapping: `src/mimir/activities/routineSchedule.js`.
+  Definitions whose cron the builder cannot express open in raw cron mode.
+- Agent is picked from launcher presets configured under Settings. Missing
+  binaries and vanished presets stay selectable but flagged.
+- When the preset runs in "the workspace", the form requires a Workspace field.
 
-- New and Edit expose the lean routine definition rather than a separate
-  database model. The form never asks for an id or timezone: the id is
-  derived from the title (slugged and uniquified, fixed after creation) and
-  the timezone is stamped from the system so wall-clock times mean what the
-  user expects. Explicit values in hand-written TOML are preserved on edit.
-- The session is a two-way choice, defaulting to **Interactive** for new
-  routines: the run opens the agent's live session with the prompt as the
-  first message, and follow-ups are typed straight into the terminal.
-  **One-shot** keeps the classic headless report run. Hand-written TOML
-  without the flag stays one-shot. Picking one-shot with a Gemini preset is
-  rejected in the form, since Gemini has no headless adapter; and when an
-  interactive session is combined with a schedule and skip-overlap, the form
-  notes that fires are skipped until the previous session is closed.
-- The trigger is a two-way choice, defaulting to **On demand** (manual-only).
-  **On a schedule** opens a builder — every day / weekdays / weekly with day
-  chips / hourly / minute interval — that compiles to five-field cron and
-  previews the result ("Runs Mon, Fri 18:30 — 30 18 * * 1,5 · Europe/Berlin").
-  A raw cron mode remains the escape hatch, and definitions whose cron the
-  builder cannot express open in that mode with the text intact.
-- The agent is picked from the launcher presets configured under Settings →
-  Coding agents, decorated with live detection state. Missing binaries and
-  vanished presets stay selectable but flagged, so editing never silently
-  drops a routine's agent.
-- When the picked preset runs in "the workspace", the form shows a required
-  Workspace field prefilled from the workbench; for other presets the field
-  is hidden because the runtime ignores it. The runtime diagnostic for a
-  missing workspace says to set one on the routine rather than repeating the
-  workbench's "requires an open workspace" phrasing.
-- Overlap and missed-fire policies live in an Advanced disclosure as
-  two-option segments; the missed policy only appears for scheduled routines.
-- Open TOML and double-click keep direct source editing first-class.
-- Duplicate creates a paused copy so a copied schedule cannot double-fire.
-- Trash moves the exact definition to the operating-system Trash.
-- Row and empty-surface context menus expose run, stop, edit, open, duplicate,
-  reveal, copy path, reload, and Trash actions.
-- Live runs stop through the ordinary Activity lifecycle.
-
-Arrow keys, Home/End, and Enter navigate and run the selected routine.
-Cmd/Ctrl+N creates, Cmd/Ctrl+R reloads, Cmd/Ctrl+O opens the TOML, F2 edits,
-Cmd/Ctrl+. stops live runs, Cmd/Ctrl+Backspace/Delete confirms Trash, and
-Shift+F10 opens the accessible row menu.
-
-The UI does not poll. The native scheduler publishes changes when definitions,
-launcher availability, planner state, or runs change; reopening the surface
-also performs one explicit refresh.
+For launcher presets see [agent-setup.md](agent-setup.md).
 
 Every catalog entry carries its exact source path and a SHA-256
 `sourceRevision`. Update, duplicate, and Trash require that revision, so the UI
@@ -164,12 +119,9 @@ Private registry handlers:
 | `routines.duplicate` | `routines_duplicate` | new id, always initially paused |
 | `routines.trash` | `routines_trash` | revision-guarded system Trash |
 
-Reveal stays UI-local because it controls Finder/Explorer rather than routine
-state.
-
 These handlers support the Routine UI and runtime; they are not in the public
 agent catalog. Agents edit the authoritative TOML using the `mimir-config`
-skill.
+skill (`skills/mimir-config`).
 
 ## Relevant code
 

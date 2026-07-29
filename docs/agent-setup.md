@@ -106,27 +106,5 @@ Files that must agree:
 
 ## CLI
 
-The installed CLI's agent-facing surface is:
-
-```bash
-mimir tools
-mimir tools <workbench|graph|chat|connections>
-mimir tool <name>
-mimir call <tool> --help
-mimir call <tool> '<json>'
-mimir skill <query>
-mimir doctor
-```
-
-The focused drawer is sufficient for ordinary calls; use `mimir tool <name>`
-only for full nested schemas or enums. `--json` and skill refresh remain
-available for diagnostics and client adapters.
-
-Outside a Mimir Activity:
-
-```bash
-export PATH="$HOME/.mimir/bin:$PATH"
-export MIMIR_MCP_URL="http://127.0.0.1:17532/mcp"
-```
-
-Mimir must be running for renderer-backed operations.
+See [agent-interface.md](agent-interface.md) for the full CLI discovery
+surface and tool catalog.

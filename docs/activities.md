@@ -76,125 +76,15 @@ acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
 ## Terminal surface
 
 `src/mimir/activities/TerminalActivity.vue` hosts xterm.js for terminal and
-agent Activities. Its non-defaults are deliberate:
-
-- xterm 6's WebGL renderer is loaded after `terminal.open()` for GPU-backed
-  scrolling and full-screen TUI output. `customGlyphs` keeps box-drawing and
-  powerline characters exact. If WebGL setup fails or its context is lost, the
-  addon disposes itself and xterm's built-in DOM renderer keeps the session
-  usable.
-- The native system monospace stack is selected before xterm measures cells.
-  Terminal initialization still waits for the document font set before opening
-  so unrelated in-flight faces cannot change layout after the first paint.
-- The Unicode 11 addon supplies correct emoji/wide-character cell widths and
-  requires `allowProposedApi: true`; without the flag the addon throws at load
-  and the surface shows an attach error instead of a terminal.
-- Shift+Enter sends LF (`\n`, Ctrl+J) instead of CR. Claude and Codex document
-  Ctrl+J as insert-newline; shells bind LF to accept-line, identical to Enter,
-  so plain terminals lose nothing.
-- Each fit pass clears and re-applies a sub-pixel `translate()` on the surface
-  so the WebGL screen lands on whole device pixels. Pane splits produce
-  fractional positions, and a glyph canvas composited at a fractional offset
-  is resampled into uniform blur.
-
-Spawn size comes from `src/services/activities.js`, which remembers the last
-pane-fitted cols/rows and applies them to `spawnActivity`/`respawnActivity`
-(fallback 64×20 before any fit). The first prompt is printed before the
-surface mounts and reports its real size, and zsh pads its partial-line mark
-to the PTY width: spawning wider than the eventual pane strands that padding
-as a wrapped `%` line at the top of scrollback, while spawning narrower is
-corrected invisibly by the first fit resize. Undershoot is safe; overshoot is
-visible.
-
-## Sidebar operations
-
-- The Activities header `+` exposes every enabled, available source that
-  creates a dynamic row: CLI agent presets, Terminal, and terminal/process
-  Apps. Stable Tools and Chat are intentionally absent. The same compact
-  control replaces the section marker in the collapsed rail.
-- The creation menu uses source icons, separates CLI and App targets with one
-  quiet rule, flips inside the viewport, and supports Arrow Up/Down, Home, End,
-  Escape, Tab, and focus restoration.
-- Every visible dynamic row can be renamed from double-click, F2, right-click,
-  or its always-discoverable actions button.
-- Source metadata selects recognizable Codex/OpenAI, Claude/Anthropic, Pi,
-  Terminal, App, and Routine marks in expanded and rail layouts.
-- A process-backed live Activity can be stopped. A renderer-hosted app is not
-  presented as a process merely because its stable status is `ready`.
-- Durable non-running Activities can be archived. Cmd/Ctrl+P History searches
-  closed task/workspace metadata and lazily searches ANSI-stripped bounded
-  scrollback. Selecting an agent or routine with an exact recorded provider
-  session id respawns that session in the same Activity identity and atomically
-  clears its archive marker. A row without an exact id restores its transcript
-  only; it never guesses from the latest session in a workspace. **Run again**
-  is a separate new-session action. Delete permanently removes a restored
-  non-running record and its persisted scrollback.
-- Manual pointer drag, Shift+Alt+Up/Down, and Move Up/Down actions update a
-  stable-id order without rewriting record identity or status. New Activities
-  appear above an established manual order.
-- Manual, most-recent, needs-attention, and name sorts are available and the
-  chosen mode/order persist in editor settings.
-
-Option/Alt+Cmd/Ctrl+Left/Right switches the adjacent vertical Activity row when
-the Activity pane or Sidebar owns focus. Sidebar focus moves with the selected
-row. The same chord stays horizontal inside Editor tabs. Cmd/Ctrl+W on a
-Sidebar Activity row targets that exact row, even when another Activity is
-selected or the focused run ended in error. Durable rows archive (after a live
-process stops); before termination the native supervisor persists and flushes
-a close-intent marker. Completion turns it into the archive timestamp, while
-startup hydration does the same if Mimir restarted mid-close. Ephemeral
-terminal rows are cleared. The Activity pane rails when its last closable row
-is gone. Editor focus closes its tab instead;
-closing the last embedded tab rails Editor and never closes Mimir. The macOS
-native menu accelerator delegates through the same focus-aware path. Open
-Settings, confirmation dialogs, and Quick Open consume close first. Collapsing
-and restoring panes also hands focus to visible rail/header controls, so later
-shortcuts never target aria-hidden content.
-
-Cmd/Ctrl+W on a stable Tool rails the Activity pane rather than archiving or
-deleting the singleton.
+agent Activities. Non-obvious constraints are in
+[gotchas.md](gotchas.md#terminal).
 
 ## Resume
 
-Launcher detection associates Codex, Claude, Pi, and Gemini with an exact
-continuation adapter. Claude, Pi, and Gemini receive a generated UUID at
-creation. Codex reports its thread id through a process-local completion
-callback; the callback forwards any existing user notification command.
-Legacy Codex records are backfilled only when one rollout metadata record
-matches both workspace and a tight creation-time window. Missing or ambiguous
-identity fails closed.
-
-Resume always supplies the recorded id (`codex resume <id>`, Claude
-`--resume <id>`, Pi `--session <id>`, or Gemini `--resume <id>`); `--last`,
-`latest`, and implicit continue flags are forbidden. It resolves the current
-preset, verifies that it still targets the same provider, strips creation-only
-session flags and launch subcommands, and respawns inside the same Activity
-record. Id, creation time, and manual sidebar position survive while the run
-id, launch spec, and scrollback restart. The supervisor's `activity_respawn`
-only replaces ended PTY records—live sessions and unknown ids are rejected—and
-the terminal surface watches `runId` to reset replay to the new session's first
-byte. Concurrent Resume clicks coalesce into one respawn. A spawn failure
-leaves the History record archived.
-
-Ended routine runs restart through the current routine definition. Ended plain
-terminal, process-App, and terminal-App Activities rerun their exact stored
-command, argv, cwd, environment, retention, kind, and source into a fresh
-Activity; host-required Activity/MCP environment keys are regenerated once.
-
-Terminal resolution performs no agent detection. Launcher Settings explicitly
-refreshes the installed-agent catalog; repeated agent launches reuse that
-refreshable cache, preserving exact command/argv/MCP flags without the former
-login-shell and `--version` work on every click. Each launch records separate
-resolve, supervisor-spawn, and total timing in
-`activityRuntime.lastLaunchMetrics` and the `mimir.activity.launch` performance
-measure.
-
-Inactive optional surfaces are split at the Activity boundary: terminal/agent
-and App hosts load on first use, then `ActivityHost` retains them for instant
-subsequent switching. Native durable output remains byte-bounded and persists
-the first output, status transitions, and final exit immediately; noisy output
-snapshots are capped at four per second so a PTY read cannot repeatedly clone
-the complete retained scrollback.
+Launcher detection, session identity, continuation adapters, and the respawn
+contract are owned by [agent-setup.md](agent-setup.md). The supervisor's
+`activity_respawn` replaces only ended PTY records; the terminal surface watches
+`runId` to reset replay to the new session's first byte.
 
 ## Relevant code
 

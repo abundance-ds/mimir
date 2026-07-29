@@ -1,8 +1,6 @@
 # Runtime architecture
 
-This document records ownership and ordering that are expensive to reconstruct
-from individual components. Read it before changing bootstrap, window lifetime,
-native state, cross-pane coordination, or shutdown.
+Bootstrap order, hydration constraints, and shutdown sequence.
 
 ## Authority map
 
@@ -16,7 +14,7 @@ native state, cross-pane coordination, or shutdown.
 | Workspace index and safe manager mutations | `src-tauri/src/file_index.rs`, `workspace_files.rs` | `src/stores/workspaceFiles.js` |
 | Business graph Markdown, indexes, scopes, revisions | physical graph roots through `business_graph::GraphRuntime` | `src/stores/businessGraph.js`, built-in Business graph app |
 | Open buffers, dirty state, editor review state | renderer Pinia stores and `src/editor/App.vue` | native session/proposal coordination only where required |
-| Settings snapshot | `~/.mimir/settings.json` through `local_settings.rs` | `src/stores/settings.js` |
+| Settings snapshot | `~/.mimir/settings.json` through `local_settings.rs` ([settings.md](settings.md)) | `src/stores/settings.js` |
 | Unsaved editor recovery | `~/.mimir/session.json` through `session.rs` | `sessionPersist.js`, `sessionRestore.js` |
 | AI credentials and upstream transport | Rust keychain/transport modules | renderer builds requests and consumes streams |
 
@@ -30,13 +28,15 @@ Routine, proposal, and registry results.
 supervisor, Routine runtime, and managed Business graph runtime before building
 Tauri. Setup then performs this order:
 
-1. install `mimir` and the Pi extension;
+1. install `mimir` CLI and the Pi extension;
 2. create the `main` window;
 3. attach Activity and Routine event sinks;
 4. start the Routine runtime;
-5. register renderer-backed core definitions and direct native Business graph
-   tools, then begin registry revision observation;
-6. queue startup file arguments.
+5. register renderer-backed core definitions, native Business graph tools,
+   and native connection tools (`crate::connections::register_native_tools`),
+   then begin registry revision observation;
+6. install ChatRuntime with app handle and tool registry;
+7. queue startup file arguments.
 
 The MCP HTTP listener is intentionally absent from this list. Core definitions
 exist before the renderer, but `src/services/toolRuntime.js` starts the socket
@@ -81,25 +81,17 @@ rebuild the disposable index after an external Markdown change and emit
 does not change the physical meaning of the private or project source.
 
 `useEditorSessionLifecycle.js` owns a second hydration transaction inside the
-mounted Editor:
+mounted Editor. Ordering constraints: session restore must complete before
+the blank draft is created; persistence must start before listener
+installation. See [editor-system.md](editor-system.md) for detail.
 
-1. load and normalize session entries;
-2. read path-backed entries with bounded concurrency;
-3. recover missing dirty files as drafts;
-4. create a blank draft only after restore completes;
-5. install debounced session persistence;
-6. then install file-open, native-menu, quit, and editor-bridge listeners.
-
-Vue does not cancel async `onMounted`. `App.vue` keeps ordering guards after
-awaited steps, while every extracted lifecycle controller independently
-rejects or tears down late listener registration after disposal.
+Async lifecycle controllers independently reject or tear down late listener
+registration after disposal; `App.vue` keeps ordering guards after awaited
+steps.
 
 ## Renderer/native boundary
 
-Use service modules under `src/services/` for Tauri invokes and event
-normalization. Components may own user interaction, but command naming,
-camelCase/snake_case translation, and response normalization belong in the
-service boundary.
+Service boundary convention: see [ipc.md](ipc.md).
 
 Core singleton Activities are renderer records; process-backed Activities are
 native records. `activityRuntime.js` therefore treats non-PTY rename/archive/

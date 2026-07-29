@@ -24,6 +24,7 @@ subsystems:
 | public Mimir/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
 | tab close/reorder/new behavior | `useTabManagement.js` |
 | CodeMirror/store/document synchronization | `useContentSync.js` |
+| debounced document context bridge (localStorage + Tauri IPC) | `useDocumentBridge.js` |
 
 These controllers own their timers, watchers, and native listener cleanup.
 `App.vue` owns their ordering because hydration must finish before native
@@ -33,28 +34,16 @@ surfaces are installed.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
 the attached document bridge synchronized.
 
-The Editor also consumes the debounced native workspace watcher. A changed
-open text file is read by path and replaced only if its buffer is still clean
-when that asynchronous read completes. Unchanged content is ignored and dirty
-buffers retain ownership. CodeMirror applies accepted disk content as one
-minimal changed range, preserving the surrounding editor state without a
-polling loop or full-workspace reload.
+External file sync: the debounced workspace watcher replaces a changed open
+file only if its buffer is clean when the async read completes. Dirty buffers
+retain ownership. CodeMirror applies disk content as one minimal changed range.
 
-Tabs are typed as `text`, `pdf`, or `external`. Files passes native
-`WorkspaceEntry.openBehavior`; other `mimirOpen` callers are classified through
-`workspace_file_inspect` before any read. Only text enters CodeMirror and the
-UTF-8 read/save path. `FilePreviewPage.vue` owns non-text routing;
-`PdfPreview.vue` dynamically loads PDF.js, reads bytes through
-`read_binary_file`, caps render pixel ratio, and cancels/destroys stale render
-tasks on path change or unmount.
-
-Files single-click creates a clean preview tab. `stores/files.js` reuses the
-first clean preview for later preview opens; a pinned open or text mutation
-clears preview status. Resource previews cannot become dirty or save, and do
-not mount inline AI, formatting, the footer, or CodeMirror. Preserve
-`kind`/`preview`/`meta` in tab transfer paths; session restoration currently
-excludes non-text tabs entirely, so resource previews never enter the startup
-UTF-8 hydration path.
+Tabs are typed `text`, `pdf`, or `external` (classified via
+`workspace_file_inspect`). Only text enters CodeMirror / UTF-8 read/save.
+`FilePreviewPage.vue` owns non-text routing; `PdfPreview.vue` loads PDF.js
+dynamically. Preview tabs: single-click opens clean preview; pinned open or
+mutation clears preview. Preserve `kind`/`preview`/`meta` in tab transfer;
+session restore excludes non-text tabs.
 
 Session hydration is one transaction shared by the embedded and standalone
 Editor. It completes before the fallback draft, persistence watcher, file-open

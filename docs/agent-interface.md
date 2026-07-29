@@ -2,19 +2,6 @@
 
 Status: implemented, 2026-07-29
 
-## Design rule
-
-Tell agents only what is Mimir-specific and changes their next action. They
-already understand tools, JSON, files, shells, MCP, and skills.
-
-Permanent context is one line:
-
-```text
-Mimir: `mimir tools` (all) · `mimir tools <workbench|graph|chat|connections>` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
-```
-
-No architecture lesson, hidden-tool warning, or client tutorial accompanies it.
-
 ## Discovery
 
 `mimir tools` prints every currently callable public tool, grouped as
@@ -87,16 +74,8 @@ chat_send    send a chat message
 chat_download download a chat attachment
 ```
 
-An agent Activity started from chat is linked to that channel or direct
-message before its process spawns. The link is a default: omitting `target`
-uses it, and an explicit `target` reaches any room the user sees. Ordinary
-Activities use an explicit target or the room currently open in Mimir;
-`chat_search` with no resolvable room searches all rooms. Agent messages carry visible
-provenance and open their originating Activity when that Activity identity is
-available. Reads and searches return current materialized state, including
-edits, deletion markers, mentions, reactions, and attachment metadata.
-`chat_download` verifies the attachment size and SHA-256 before returning its
-local path.
+- A chat-linked Activity's default `target` is its originating room; explicit `target` reaches any room the user sees. `chat_search` with no resolvable room searches all.
+- Agent messages carry visible provenance and open their originating Activity when available.
 
 Connections appear only when enabled and backed by credentials or a local
 cache:
@@ -109,10 +88,9 @@ granola_search   granola_get      granola_sync
 slack_search     slack_read       slack_send
 ```
 
-The maximum surface is 31 tools; without connections it is 18 while Chats is
-enabled and 15 while Chats is off. `mimir doctor` reports this public count,
-registered connection tools, and local credential errors—not remote service
-health.
+The maximum surface is 33 tools; without connections it is 20, without chat
+and connections it is 15. `mimir doctor` reports the public count, registered
+connection tools, and local credential errors -- not remote service health.
 
 Issues are graph nodes. Knowledge, issues, projects, and research are not
 separate agent APIs. Activities, apps, files, routines, settings, shell, and
@@ -210,44 +188,5 @@ around that.
 
 ## Client attachment
 
-Mimir-launched Codex, Claude, Pi, and Gemini receive the scoped endpoint and CLI
-on `PATH`. Codex and Claude use their run-scoped MCP configuration, Pi uses the
-installed dynamic extension, and Gemini uses Mimir’s owned stdio proxy entry.
-Unrelated client configuration is preserved.
-
-Starting an agent from a chat room seeds a short, editable task prompt naming
-the room and its four bounded chat tools. Mimir does not submit it: the user
-can append or revise the assignment before pressing Enter. The link is durable
-and created before the PTY starts, so the agent cannot race ahead of its room
-boundary.
-
-## Chat administration
-
-The complete server and client runbook is
-[`chat.md`](chat.md). For routine account operations on the
-chat host, use the installed helper instead of anonymous IRC or hand-editing
-Ergo state:
-
-```bash
-sudo mimir-chat-user add anna
-sudo mimir-chat-user remove anna --confirm anna
-sudo mimir-chat-health
-```
-
-Creation prints a generated teammate passphrase once. Removal unregisters the
-login, permanently reserves its historical account name, and unregisters
-channels that account founded; transfer important channel ownership first.
-The helper reads the root-only owner secret and authenticates through SASL.
-Neither that secret nor teammate passphrases belong in agent output, logs, or
-repository files.
-
-## Acceptance bar
-
-For an unfamiliar operation:
-
-1. `mimir tools <group>` supplies ordinary callable signatures.
-2. `mimir tool <name>` supplies nested details only when needed.
-3. `mimir call <name> ...` succeeds without schema probing.
-
-Do not add instructions, facades, indexes, tool families, or commands unless an
-observed failure shows which call or mistake they remove.
+See [agent-setup.md](agent-setup.md) for launcher presets, client connection
+table, and resume semantics.

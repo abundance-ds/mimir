@@ -1,7 +1,7 @@
-# Agent capability boundary
+# MCP registry, transport, and projection
 
 Mimir keeps a broad internal registry for its UI and runtimes, but exposes one
-small public agent API.
+small public agent API through MCP.
 
 ## Transport
 
@@ -34,34 +34,10 @@ directly advertised. `tools/call` resolves only these public names. Internal
 dotted names and historical aliases are rejected even if a private registry
 handler exists.
 
-The 15 always-available core tools are:
-
-```text
-mimir_state       mimir_reveal      mimir_propose
-comments_list     comments_add      comments_reply     comments_resolve
-graph_find        graph_get         graph_create       graph_update
-graph_delete      graph_restore     graph_context      graph_events
-```
-
-Up to 13 connection tools register only when enabled and backed:
-
-```text
-gmail_search      gmail_read        gmail_send
-calendar_list     calendar_create
-drive_search      drive_read
-granola_search    granola_get       granola_sync
-slack_search      slack_read        slack_send
-```
-
-`mimir tools` prints the concise grouped catalog. `mimir tools <group>` prints
-compact callable signatures plus shared family rules. `mimir tool <name>`
-retrieves one full schema. `--json` returns the selected machine-readable
-catalog.
-
-There are no public knowledge, issues, projects, research, Activities, Apps,
-files, routines, settings, shell, or web-search families. Issues are graph
-nodes. Internal handlers for UI/runtime compatibility do not widen the agent
-surface.
+The projection includes the 5 chat tools (`chat_rooms`, `chat_read`,
+`chat_search`, `chat_send`, `chat_download`) and up to 13 connection tools.
+See [agent-interface.md](agent-interface.md) for the full canonical tool
+listing and counts.
 
 ## Registry contract
 
@@ -81,23 +57,7 @@ MCP responses contain readable `content` plus machine-readable
 Today is folded into `mimir_state`. The built-in retains its `scratch` storage
 id for migration but does not register an app tool.
 
-## Connections
-
-Connection handlers live in `connections.rs`.
-
-- Google and Slack read credentials from Mimir’s OS-keychain service, then the
-  predecessor service for migration. Credentials never appear in descriptors,
-  results, diagnostics, or settings.
-- Account selection uses `connections.<name>.account`, then the predecessor’s
-  credential-free default, then `default`.
-- Google registration follows granted OAuth scopes.
-- Granola search/get use the local SQLite cache. Sync is the only Granola
-  network operation and uses the Granola desktop token files. A completed
-  `full` sync prunes meetings deleted upstream; a page-limited traversal never
-  prunes.
-- `settings.json` may disable `google`, `slack`, or `granola`; missing backing
-  state keeps those tools out of the projection. Restarting Mimir rebuilds the
-  projection after connection changes.
+## Dynamic providers
 
 `mimir doctor` uses a private diagnostic RPC to inspect graph scopes, public
 tool count, registered connection tools, and local credential errors. It does
@@ -106,14 +66,8 @@ not contact remote services and reports `remoteChecked: false` in JSON.
 
 ## Client attachment
 
-- Codex and Claude receive a run-scoped HTTP definition.
-- Pi’s installed extension dynamically registers the three direct tools.
-- Gemini uses Mimir’s owned stdio proxy entry.
-- Every launched agent receives the scoped endpoint and `~/.mimir/bin` on
-  `PATH`.
-
-The endpoint URL’s activity/agent query parameters are omitted from ordinary
-help and errors. `--verbose` may show them.
+See [agent-setup.md](agent-setup.md) for launcher presets, client connection
+table, and resume semantics.
 
 ## Change checklist
 

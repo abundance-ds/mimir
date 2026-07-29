@@ -16,13 +16,6 @@ directories, applies native workspace/symlink guards, and classifies each entry
 for opening. Do not derive the tree from the index: ignored or unindexed
 directory structure would disappear and expansion would require a full scan.
 
-Cmd/Ctrl+P keeps the eight most recently modified indexed files in its empty
-Go to view, after Start new activity and Tools. Entering Start new activity
-replaces the root results instead of pushing files downward. Typing `/`
-restricts the launcher to file paths and exposes up to 100 keyboard-selectable
-results. Choosing one opens it in the mounted Editor. Closed History uses `@`;
-it does not displace the recent-file route.
-
 ## View composition
 
 - Project flattens `treeChildren` according to `expandedDirectories`. Expanding
@@ -66,11 +59,12 @@ the row creates per-row authorities and breaks keyboard/multi-select behavior.
 `workspace_file_inspect`. Keep that inspection on any new open path so binary
 files are not sent through the UTF-8 command.
 
-A single-click Files activation requests `preview: true`; an existing clean
-preview tab is reused. Enter/double-click requests a pinned tab. Editing a text
-preview or reopening it pinned clears its preview status. Resource previews
-are non-editable/non-saveable and bypass CodeMirror, inline AI, the formatting
-toolbar, and the editor footer.
+Single-click requests `preview: true` (reuses an existing clean preview tab).
+Enter/double-click pins. Editing a preview or reopening it pinned clears
+preview status. Resource previews bypass CodeMirror and inline AI.
+
+For Editor reconciliation, preview lifecycle, and save semantics see
+[editor-system.md](editor-system.md).
 
 Files mutations reconcile open Editor state before refreshing projections:
 
@@ -79,8 +73,7 @@ Files mutations reconcile open Editor state before refreshing projections:
 - Trash waits for pending writes, uses the OS Trash, then lets the Editor close
   clean tabs or preserve dirty text as drafts;
 - successful mutations immediately force-reload only their affected parent
-  directories; the native watcher reconciles the metadata index, avoiding a
-  second whole-workspace scan;
+  directories; the native watcher reconciles the metadata index;
 - explicit user refresh rebuilds the metadata index and force-reloads every
   directory that has already entered `treeChildren`; unopened subtrees remain
   lazy.
@@ -91,50 +84,26 @@ paths.
 
 ## Dropping files in from outside
 
-Tauri intercepts OS drags before the webview sees them, so Files never receives
-an HTML `drop`. `src/mimir/files/useFileDrop.js` subscribes to the webview
-drag-drop event, which reports real filesystem paths — the reason folders can
-be dropped at all — and a window position instead of a DOM target. The hovered
-row is therefore hit-tested: the position is converted to CSS pixels, passed to
-`elementFromPoint`, then walked up to `[data-file-row]` inside this panel's
-`[data-files-list]`. Keep the main window on `TitleBarStyle::Overlay`; the
-webview filling the whole window is what makes window and viewport coordinates
-line up.
+Tauri intercepts OS drags before the webview sees them.
+`src/mimir/files/useFileDrop.js` subscribes to the webview drag-drop event
+(real filesystem paths, not HTML `drop`). Hit-testing converts position to CSS
+pixels and walks up to `[data-file-row]` inside `[data-files-list]`.
 
-That conversion is platform-dependent and is the one part of this feature that
-fails silently when it is wrong — see
+Platform coordinate conversion is the silent failure point -- see
 [gotchas.md](gotchas.md#physicalposition-on-a-drag-drop-event-is-not-physical).
 
-A row for a directory targets that directory, a row for a file targets its
-containing directory, and anywhere else over the tree targets the workspace
-root. A native drag owns the mouse, so the tree cannot be scrolled by wheel or
-scrollbar while one is in progress: a collapsed folder held under the pointer
-springs open, and a pointer held near the top or bottom edge scrolls the tree.
-Without both, any destination below the fold or inside a closed folder is
-unreachable without dropping and starting over. The panel also stops
-highlighting while an import runs, since a drop would be ignored until it
-finishes.
+Import contract:
 
-`workspace_file_import` copies rather than moves — a drop must never remove the
-original from the Desktop — and reuses the guards and " copy" naming of the
-other mutations, so an arrival never overwrites an existing entry. A dropped
-alias is canonicalized and its target copied; symbolic links found *inside* a
-dropped folder are skipped rather than recreated, and counted in
-`ImportReport.skippedLinks`.
-
-A drop is a batch, and the contract is per item: each source lands completely
-or not at all. A source that cannot be read is described in
-`ImportReport.failures` instead of failing the call, so one bad item never
-discards the rest, and a copy that dies part-way removes the partial folder or
-file it created — the destination name is always fresh, so that removal can
-only take back what the same call just wrote. Batch-level problems (no sources,
-an unusable destination) remain hard errors.
-
-Because earlier sources can land before a later one fails, `FilesActivity.vue`
-reconciles the destination on *every* outcome, including a rejected invoke;
-skipping it on error would leave real arrivals invisible until a manual
-refresh. Failures surface through `operationError`, skipped links through
-`operationNotice` — a success with a remark must not render as an alert.
+- `workspace_file_import` copies, never moves (drop must not remove the
+  original).
+- Dropped aliases are canonicalized; symlinks inside dropped folders are
+  skipped (`ImportReport.skippedLinks`).
+- Per-item atomicity: each source lands completely or not at all. Failures
+  recorded in `ImportReport.failures`; one bad item never discards the rest.
+  Partial copies are cleaned up (destination name is always fresh).
+- Batch-level problems (no sources, unusable destination) are hard errors.
+- `FilesActivity.vue` reconciles the destination on every outcome including
+  rejected invokes; skipping it on error would leave arrivals invisible.
 
 ## Index/search concurrency
 

@@ -231,9 +231,8 @@ requirements; they do not replace runtime verification.
 - Issue Board behavior includes status/project grouping, drag-and-drop and
   keyboard-equivalent movement, visible columns, filters, sorting, due and
   attention states, revision-aware updates, and Trash/undo.
-- Kanban cards keep fixed geometry and persistent priority/status/due controls.
-  No Business Graph surface uses colored left edges, content-revealing hover,
-  hover transforms, scaling, filters, or shadows.
+- Kanban cards keep fixed geometry and persistent priority/status/due
+  controls; visual constraints per [design-system.md](design-system.md).
 - Projects, People, Companies, Knowledge, and All expose useful Portfolio,
   CRM, directory, timeline, list, and relationship graph projections over the
   same nodes. Portfolio is an operational table rather than presentation
@@ -326,6 +325,4 @@ requirements; they do not replace runtime verification.
 
 - `bun run test`, `bun run build`, `bun run docs:check`, Rust formatting, Rust
   tests, and Rust check pass.
-- Product version is `0.1.0` in `package.json`, `src-tauri/Cargo.toml`, and
-  `src-tauri/tauri.conf.json`; the package name is `mimir`.
 - Documentation references only current files and current local data paths.

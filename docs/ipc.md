@@ -1,9 +1,6 @@
 # IPC and event topology
 
-This document maps non-obvious communication paths across Rust, the main
-renderer, standalone/app windows, and embedded app frames. Command signatures
-remain canonical in `src-tauri/src/lib.rs::generate_handler!` and their
-defining functions; do not duplicate that list here.
+Command signatures are canonical in `src-tauri/src/lib.rs::generate_handler!`.
 
 ## Boundary rules
 
@@ -12,7 +9,7 @@ defining functions; do not duplicate that list here.
 - Rust command arguments serialize from JavaScript camelCase into Rust
   snake_case. Service wrappers own the translation and response normalization.
 - Tauri events are notifications, not durable queues. State that must not be
-  lost is stored natively and drained/snapshotted after the listener exists.
+  lost is stored natively ([persistence.md](persistence.md)) and drained/snapshotted after the listener exists.
 - Install listeners before starting producers. Remove them only after the
   producer has stopped or the owning window/provider has disconnected.
 - Every request/response relay carries a stable request or correlation id.
@@ -39,7 +36,7 @@ reject a real command or conceal a removed one.
 | `mimir://proposal-result` | proposal coordinator | main Editor | terminal lifecycle result; failed/conflict/stale stays reviewable |
 | `mimir://file-updated` | native proposal or renderer comment tools | Editor | refresh open clean content without replacing unsaved ownership |
 | `mimir://workspace-files-changed` | native file-index watcher | Files store and Editor | debounced metadata delta; Editor reads only matching open clean text paths |
-| `mimir://settings-changed` | `settings_changed` command | other windows | notification excludes caller; receiver flushes its local snapshot before reload |
+| `mimir://settings-changed` | `settings_changed` command | other windows | notification excludes caller; receiver flushes its local snapshot before reload; see [settings.md](settings.md) |
 | `mimir://theme-changed` | settings store | terminal/app observers | renderer event used for live theme projection, not persistence |
 | `mimir://quit-requested` | Rust `ExitRequested` handler | Editor | begins guarded asynchronous Quit; native exit remains prevented |
 
