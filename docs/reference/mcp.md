@@ -18,7 +18,7 @@ issue session IDs. It must not be exposed beyond loopback.
 Initialization contains only:
 
 ```text
-Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
+Mimir: `mimir tools` (all) · `mimir tools <workbench|graph|chat|connections>` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
 ```
 
 Normal `tools/list` advertises `mimir_state`, `mimir_reveal`, and
@@ -34,13 +34,13 @@ directly advertised. `tools/call` resolves only these public names. Internal
 dotted names and historical aliases are rejected even if a private registry
 handler exists.
 
-The 14 always-available core tools are:
+The 15 always-available core tools are:
 
 ```text
 mimir_state       mimir_reveal      mimir_propose
 comments_list     comments_add      comments_reply     comments_resolve
 graph_find        graph_get         graph_create       graph_update
-graph_delete      graph_restore     graph_context
+graph_delete      graph_restore     graph_context      graph_events
 ```
 
 Up to 13 connection tools register only when enabled and backed:
@@ -53,9 +53,10 @@ granola_search    granola_get       granola_sync
 slack_search      slack_read        slack_send
 ```
 
-`mimir tools` groups these as Workbench, Graph, and Connections. It prints only
-name, effect, and purpose. `mimir tool <name>` retrieves the full schema.
-`mimir tools --json` is the only bulk machine-readable form.
+`mimir tools` prints the concise grouped catalog. `mimir tools <group>` prints
+compact callable signatures plus shared family rules. `mimir tool <name>`
+retrieves one full schema. `--json` returns the selected machine-readable
+catalog.
 
 There are no public knowledge, issues, projects, research, Activities, Apps,
 files, routines, settings, shell, or web-search families. Issues are graph

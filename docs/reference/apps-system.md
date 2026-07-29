@@ -4,15 +4,14 @@ Apps are local instruments. Mimir ships Today and Business graph as built-ins;
 additional definitions live under `~/.mimir/apps/`.
 
 There is no generic Apps Activity or launcher row. The Sidebar places stable
-Apps under Tools and terminal/process Apps under New activity beside configured
-CLI launchers. Settings > Apps is the catalog: inspect, reload, diagnose,
-search, launch, open or reveal definitions, duplicate them, rename their
-display title, or move them to the operating-system Trash.
+Apps under Tools; the Activities `+` and Cmd/Ctrl+P expose terminal/process
+Apps beside configured CLI launchers. Settings > Apps is the catalog: inspect,
+reload, diagnose, search, launch, open or reveal definitions, duplicate them,
+rename their display title, or move them to the operating-system Trash.
 
 Sidebar order is local presentation state, not catalog order. Pointer drag or
-Shift+Alt+Up/Down updates `sidebarToolOrder` for Tools and
-`sidebarNewActivityOrder` for fresh-run sources. Newly discovered entries
-follow the established order until placed manually.
+Shift+Alt+Up/Down updates `sidebarToolOrder` for Tools. Fresh-run sources use
+the shared compact-menu order; newly discovered entries follow it.
 
 “App” describes a packaging and capability boundary, not a Sidebar group.
 Embedded, Rust-helper, window, and action Apps reopen one stable `app:<id>`
@@ -31,8 +30,8 @@ filesystem, HTTP, or registry calls. See [security.md](security.md).
 
 ## Settings workflow
 
-`Settings > Apps` is the management surface; Tools and New activity are the
-fast access surfaces.
+`Settings > Apps` is the management surface; Tools, the Activities `+`, and
+Cmd/Ctrl+P are the fast access surfaces.
 
 - Search matches title, id, description, host mode, and declared tool metadata.
   Arrow keys move the selected row; Enter launches it.

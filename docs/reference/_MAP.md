@@ -10,8 +10,8 @@ Mimir is one Tauri window with three mounted panes:
 
 | Pane | Owner | Contents |
 |---|---|---|
-| Sidebar | `src/mimir/components/WorkbenchSidebar.vue` | stable Tools, fresh-run sources, active Activities, Settings |
-| Activity | `src/mimir/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, and launched app instances |
+| Sidebar | `src/mimir/components/WorkbenchSidebar.vue` | stable Tools, Chats/rooms, fresh-run sources, active Activities, Settings |
+| Activity | `src/mimir/components/ActivityHost.vue` | terminal/agent PTYs, Files, Routines, Chats, and launched app instances |
 | Editor | `src/editor/App.vue` | Markdown tabs, inline AI, ghost completion, diff review, comments |
 
 `src/mimir/WorkbenchApp.vue` composes the panes and connects them to the Rust
@@ -41,6 +41,7 @@ listeners are installed. See
 | Tauri bootstrap/window/quit | [runtime architecture](runtime-architecture.md), [IPC](ipc.md), [persistence](persistence.md) | `src-tauri/src/lib.rs`, `src/editor/windowCloseGuard.js`, `appQuit.js` | close/quit/session tests; relevant Rust module |
 | Workbench panes/navigation | [workbench design](workbench-design.md), [acceptance](acceptance.md) | `WorkbenchApp.vue`, `WorkbenchShell.vue`, `stores/workbench.js`, responsive/resize/key modules | Workbench/Shell/resize/responsive/key tests |
 | Activity/PTY/agent lifecycle | [activities](activities.md), [agent setup](agent-setup.md), [persistence](persistence.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores/surfaces | native supervisor/model/status/scrollback; Activity stores/components |
+| Team chat and chat-linked agents | [Chats](chat.md), [security](security.md), [MCP](mcp.md) | native `chat/`; chat service/store; Chat Activity/sidebar/header/settings; `deploy/chat/` | native chat/db; chat service/store/components; production protocol smoke |
 | MCP/tool/provider | [MCP](mcp.md), [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
 | Files/tree/search/preview/mutation | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, Files store/service/activity/row, Editor typed-preview path | native file modules; workspace/file stores; Files Activity; Editor preview tests |
 | Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
@@ -75,13 +76,24 @@ listeners are installed. See
 - `src/mimir/activities/AppActivity.vue`: app-instance host selection
 - `src/mimir/activities/RoutinesActivity.vue`: complete file-backed routine CRUD,
   run/stop state, diagnostics, context menus, and keyboard control
+- `src/mimir/activities/ChatActivity.vue`: cached channel/DM transcript,
+  composer, replies/actions, attachments, typing, search, unread/scroll
+  behavior, and focused creation flows
+- `src/mimir/components/ChatSidebarSection.vue`,
+  `ChatPaneActions.vue`: room navigation, unread state, agent launch, topic and
+  member details
 - `src/stores/activities.js`: renderer Activity records
 - `src/stores/activityRuntime.js`: native lifecycle, PTY I/O, resume, events
 - `src/stores/launchers.js`: agent detection and launcher presets
 - `src/services/activities.js`: Tauri Activity command wrappers
 - `src/services/launchers.js`: Tauri launcher command wrappers
+- `src/stores/chat.js`, `src/services/chat.js`: chat renderer state and native
+  command/event boundary
+- `src/services/chatNotifications.js`: opt-in focused desktop alerts and dock
+  unread badge boundary
 
-See [activities.md](activities.md) and [agent-setup.md](agent-setup.md).
+See [activities.md](activities.md), [agent-setup.md](agent-setup.md), and
+[chat.md](chat.md).
 
 ### Files
 
@@ -193,6 +205,8 @@ cross-window behavior are in [settings.md](settings.md).
 - `src-tauri/src/tool_runtime.rs`: core definitions and live provider ownership
 - `src-tauri/src/tool_server.rs`: loopback MCP transport and legacy debug routes
 - `src-tauri/src/connections.rs`: conditional Google, Slack, and Granola native tools
+- `src-tauri/src/chat/`: Ergo WebSocket session, local SQLite/FTS cache,
+  membership/unread state, and room-bound agent tools
 - `src-tauri/src/shell_exec.rs`: bounded shell execution with sensitive-env filtering behind `shell.run`
 - `bin/mimir.mjs`: focused tool/skill discovery, doctor, calls, and MCP proxy
 - `bin/mimir-skills.mjs`: scoped canonical skill storage and native projections
@@ -202,7 +216,7 @@ cross-window behavior are in [settings.md](settings.md).
   real tool server on an ephemeral port and drives it via `bin/mimir.mjs` CLI
   invocations and raw JSON-RPC HTTP
 
-See [mcp.md](mcp.md).
+See [mcp.md](mcp.md) and [chat.md](chat.md).
 
 Provider relays, request cancellation, file-open queuing, proposal events, and
 server lease ordering are mapped in [ipc.md](ipc.md).

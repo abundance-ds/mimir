@@ -83,10 +83,9 @@ agent Activities. Its non-defaults are deliberate:
   powerline characters exact. If WebGL setup fails or its context is lost, the
   addon disposes itself and xterm's built-in DOM renderer keeps the session
   usable.
-- The bundled IBM Plex Mono regular and semibold faces, upright and italic,
-  load before xterm measures cells. This prevents fallback metrics or glyphs
-  from entering the texture atlas and gives bold terminal spans a real `600`
-  face in both styles.
+- The native system monospace stack is selected before xterm measures cells.
+  Terminal initialization still waits for the document font set before opening
+  so unrelated in-flight faces cannot change layout after the first paint.
 - The Unicode 11 addon supplies correct emoji/wide-character cell widths and
   requires `allowProposedApi: true`; without the flag the addon throws at load
   and the surface shows an attach error instead of a terminal.
@@ -109,10 +108,10 @@ visible.
 
 ## Sidebar operations
 
-- New activity and the Activities header `+` expose every enabled, available
-  source that creates a dynamic row: CLI agent presets, Terminal, and
-  terminal/process Apps. Stable Tools and Chat are intentionally absent. The
-  same compact control replaces the section marker in the collapsed rail.
+- The Activities header `+` exposes every enabled, available source that
+  creates a dynamic row: CLI agent presets, Terminal, and terminal/process
+  Apps. Stable Tools and Chat are intentionally absent. The same compact
+  control replaces the section marker in the collapsed rail.
 - The creation menu uses source icons, separates CLI and App targets with one
   quiet rule, flips inside the viewport, and supports Arrow Up/Down, Home, End,
   Escape, Tab, and focus restoration.
@@ -124,9 +123,12 @@ visible.
   presented as a process merely because its stable status is `ready`.
 - Durable non-running Activities can be archived. Cmd/Ctrl+P History searches
   closed task/workspace metadata and lazily searches ANSI-stripped bounded
-  scrollback; selecting a result restores and opens that Activity. Delete
-  permanently removes a restored non-running record and its persisted
-  scrollback.
+  scrollback. Selecting an agent or routine with an exact recorded provider
+  session id respawns that session in the same Activity identity and atomically
+  clears its archive marker. A row without an exact id restores its transcript
+  only; it never guesses from the latest session in a workspace. **Run again**
+  is a separate new-session action. Delete permanently removes a restored
+  non-running record and its persisted scrollback.
 - Manual pointer drag, Shift+Alt+Up/Down, and Move Up/Down actions update a
   stable-id order without rewriting record identity or status. New Activities
   appear above an established manual order.
@@ -138,8 +140,11 @@ the Activity pane or Sidebar owns focus. Sidebar focus moves with the selected
 row. The same chord stays horizontal inside Editor tabs. Cmd/Ctrl+W on a
 Sidebar Activity row targets that exact row, even when another Activity is
 selected or the focused run ended in error. Durable rows archive (after a live
-process stops); ephemeral terminal rows are cleared. The Activity pane rails
-when its last closable row is gone. Editor focus closes its tab instead;
+process stops); before termination the native supervisor persists and flushes
+a close-intent marker. Completion turns it into the archive timestamp, while
+startup hydration does the same if Mimir restarted mid-close. Ephemeral
+terminal rows are cleared. The Activity pane rails when its last closable row
+is gone. Editor focus closes its tab instead;
 closing the last embedded tab rails Editor and never closes Mimir. The macOS
 native menu accelerator delegates through the same focus-aware path. Open
 Settings, confirmation dialogs, and Quick Open consume close first. Collapsing
@@ -151,17 +156,25 @@ deleting the singleton.
 
 ## Resume
 
-Launcher detection associates Codex, Claude, Pi, and Gemini with a continuation
-strategy. Resuming an ended agent Activity resolves its current preset,
-preserves exact argv, and adds the CLI-specific continuation flag, then
-respawns the new session inside the same Activity record: id, creation time,
-and manual sidebar position survive while the session, launch spec, and
-scrollback restart. The supervisor's `activity_respawn` only replaces ended
-PTY records — live sessions and unknown ids are rejected — and the terminal
-surface watches the session `runId` to reset its replay watermark to the new
-session's first byte. The respawned process receives the same Activity identity
-in its MCP URL and environment. Agents without a continuation strategy start
-over as a fresh Activity.
+Launcher detection associates Codex, Claude, Pi, and Gemini with an exact
+continuation adapter. Claude, Pi, and Gemini receive a generated UUID at
+creation. Codex reports its thread id through a process-local completion
+callback; the callback forwards any existing user notification command.
+Legacy Codex records are backfilled only when one rollout metadata record
+matches both workspace and a tight creation-time window. Missing or ambiguous
+identity fails closed.
+
+Resume always supplies the recorded id (`codex resume <id>`, Claude
+`--resume <id>`, Pi `--session <id>`, or Gemini `--resume <id>`); `--last`,
+`latest`, and implicit continue flags are forbidden. It resolves the current
+preset, verifies that it still targets the same provider, strips creation-only
+session flags and launch subcommands, and respawns inside the same Activity
+record. Id, creation time, and manual sidebar position survive while the run
+id, launch spec, and scrollback restart. The supervisor's `activity_respawn`
+only replaces ended PTY records—live sessions and unknown ids are rejected—and
+the terminal surface watches `runId` to reset replay to the new session's first
+byte. Concurrent Resume clicks coalesce into one respawn. A spawn failure
+leaves the History record archived.
 
 Ended routine runs restart through the current routine definition. Ended plain
 terminal, process-App, and terminal-App Activities rerun their exact stored

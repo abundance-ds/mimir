@@ -2,7 +2,7 @@
 
 Mimir 0.1.0 is a local AI-native workbench for CLI agents and reviewed files.
 It is built for one person and a small team: fast, direct, and hackable without
-administration UI.
+enterprise administration ceremony.
 
 The package name is `mimir`. The desktop app uses Tauri v2, Vue 3,
 CodeMirror 6, xterm.js, and a Rust backend.
@@ -15,20 +15,25 @@ Mimir has one three-pane window:
 +----------------+---------------------------+---------------------------+
 | Sidebar        | Activity                  | Editor                    |
 | Tools          | terminal, agent, tool,    | Markdown tabs, inline AI, |
-| New activity   | Files, or Routines        | diffs, live preview,      |
-| Activities     |                           | and inline comments       |
+| Chats          | Files, Routines, or team  | diffs, live preview,      |
+| Activities     |                           |                           |
 +----------------+---------------------------+---------------------------+
 ```
 
 - **Sidebar** follows one lifecycle rule. **Tools** reopen stable surfaces such
-  as Files, Routines, Today, and Business graph. **New activity** starts a fresh
-  CLI, terminal, or process run. **Activities** contains the active working set;
-  closed runs live in Cmd/Ctrl+P History. Tools and launch sources each support
-  local manual ordering. The Activities `+` menu mirrors New activity; Apps are
-  managed in Settings.
+  as Files, Routines, Today, and Business graph. **Chats** is one stable team
+  workspace with channel and direct-message rows; changing rooms does not
+  create Activities. The Activities **`+`** starts a fresh CLI, terminal, or
+  process run. **Activities** contains the active working set; closed runs live
+  in Cmd/Ctrl+P History. Tools support local manual ordering; launch sources
+  stay in the compact `+` menu and Cmd/Ctrl+P. Apps are managed in Settings.
 - **Activity** is the universal execution surface. Each run and full-pane tool
   has one stable Activity identity, while singleton Tools stay out of run
   history.
+- **Closed sessions** live under Cmd/Ctrl+P → History (`@`). Selecting a row
+  resumes that exact provider session when Mimir has its session id; older or
+  non-resumable rows restore their transcript only. **Run again** always means
+  a new session.
 - **Editor** remains mounted while Activities change. Agents can inspect and
   edit it through Mimir's MCP tools, while substantial edits open as reviewable
   diffs.
@@ -39,26 +44,42 @@ state, and either content pane can expand into focus and restore the split.
 
 **Interface rule: NEVER USE border left coloured as a style element!**
 
+### Typography
+
+Mimir currently uses the native system UI stack for interface and prose, and
+the native system monospace stack for paths, metadata, code, terminals, and the
+Markdown editor by default. There is no serif face in the product. Settings >
+Editor switches between System Sans and System Mono without changing the
+surrounding chrome. The unused IBM Plex Sans/Mono assets remain bundled so this
+system-font experiment is easy to reverse; the IBM Plex Serif assets were
+removed.
+
 ## Business graph
 
 The built-in Business graph combines the former Knowledge Graph and Issue
 Board into one source-aware operating surface — a dispatch desk where agents
 file work around the clock and the human keeps overview, contributes,
-monitors, and corrects. Issues are typed graph nodes; the Now stream, Work
-board, Portfolio ledger, Timeline, and the All directory are purpose-built
+monitors, and corrects. Issues are typed graph nodes; the Work board, Changes
+history, Portfolio ledger, Timeline, and the All directory are purpose-built
 projections over the same private, project, and team knowledge. Markdown
 stays canonical while a rebuildable Rust GraphStore provides fast search,
 traversal, validation, conflict-safe writes, and agent context.
+
+Changes is the compact activity history: it pages through recent filings and
+edits, keeps each event to one line by default, and expands in place to show
+field changes, actor, action, and graph revision before opening the affected
+object.
 
 The interface follows a fast **Scan → Peek → Focus** rhythm with persistent,
 debounced graph search and a single dispatch bar: search filters the current
 projection across indexed titles, tags, summaries, and body text; the dispatch
 bar opens graph objects, files new lines through a background agent,
 delegates `!` or `work <target>` with a visible context pack, and exposes `/`
-commands. AI work is trusted — it lands in Now as filed events with provenance,
-never behind accept/reject gates. Board rows show full titles with visible
-controls for priority, status, and due date; every active filter is named and
-one-click dismissible; hover never reveals content or moves a surface.
+commands. AI work is trusted — it lands in Changes as filed events with
+provenance, never behind accept/reject gates. Board rows show full titles with
+visible controls for priority, status, and due date; every active filter is
+named and one-click dismissible; hover never reveals content or moves a
+surface.
 
 Project sources remain in the workspace, private sources stay local under
 `~/.mimir/graph/private/`, and an optional shared root is configured in Settings
@@ -81,20 +102,27 @@ Mimir-launched Codex, Claude, Pi, and Gemini sessions connect automatically.
 Their complete Mimir instruction is:
 
 ```text
-Mimir: `mimir tools` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
+Mimir: `mimir tools` (all) · `mimir tools <workbench|graph|chat|connections>` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`
 ```
 
 Three frequent editor tools remain directly available. `mimir tools` prints
-one concise Workbench/Graph/Connections catalog; `mimir tool <name>` expands
-one schema. The public surface is 14 core tools plus up to 13 conditional
-Gmail, Calendar, Drive, Granola, and Slack tools.
+one concise catalog; `mimir tools graph` and the other drawers add compact
+callable signatures; `mimir tool <name>` expands one schema. The public surface
+is 15 permanent core tools, four more while
+Chats is enabled, plus up to 13 conditional Gmail, Calendar, Drive, Granola,
+and Slack tools.
 Catalog and personal skills use native client discovery. Project skills are
 also native in Claude and Pi and remain available through `mimir skill` in
 Codex and Gemini. See [Agent interface](docs/agent-interface.md).
 
-There is no general built-in chat surface. CLI agents are the primary
-intelligence; native model calls are reserved for the editor's Cmd+K inline
-agent and `++` ghost completions.
+Chats is human team communication, not an AI-agent transcript. A room can
+start a bounded CLI-agent Activity; that agent can read, search, and visibly
+reply only in its linked room. The human surface includes synced replies,
+reactions, edits/deletion, authenticated file sharing, local search, meaningful
+away state, ephemeral typing, and focused DM/@mention notifications. See
+[Chats](docs/reference/chat.md).
+CLI agents remain the primary intelligence; native model calls are reserved
+for the editor's Cmd+K inline agent and `++` ghost completions.
 
 ## Start developing
 
@@ -126,6 +154,8 @@ Mimir creates and uses:
 - `~/.mimir/settings.json` for workbench, editor, model, and workspace settings
 - `~/.mimir/session.json` for open tabs, unsaved drafts, recents, and zoom
 - `~/.mimir/models.json` for inline and ghost AI model configuration
+- `~/.mimir/chat.json` for the non-secret chat endpoint, account, and display name
+- `~/.mimir/chat.sqlite3` for the local searchable chat cache and unread state
 - `~/.mimir/bin/mimir` for the installed CLI
 - `~/.mimir/pi/mimir-tools.ts` for Pi's dynamic Mimir tool extension
 - `~/.mimir/skills/` for canonical catalog/personal/project skills and revisions
@@ -141,6 +171,11 @@ also read environment variables, `.env`, and `~/.mimir/keys.env`.
 Existing Google and Slack credentials under the predecessor keychain service
 are reused without exposing them to agents. Granola can reuse its previous
 local cache and desktop token files.
+
+Chat passphrases use macOS Keychain in release builds. Debug builds and other
+platforms use an atomically replaced, owner-only
+`~/.mimir/chat.credential` fallback; the passphrase is never written to
+`chat.json` or exposed to agents.
 
 ## Documentation
 

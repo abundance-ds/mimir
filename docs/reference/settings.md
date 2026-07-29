@@ -88,6 +88,30 @@ Business graph settings follow the same mutation invariant:
 Changing the team root remounts GraphRuntime against the current workspace;
 changing view state must use `settings.set` with a newly constructed object.
 
+`sidebarChatsCollapsed` is local presentation state for the Chats disclosure.
+The header toggles it through `settings.set`, so the choice survives restarts
+without becoming chat-server state.
+
+`chatNotifications` is the local on/off preference for focused DM and @mention
+alerts. System notification permission remains owned by the OS. Turning the
+preference off does not alter server delivery, unread counts, or the dock
+badge.
+
+The Show Chats switch is not an ordinary renderer setting. It updates the
+native `chat.json` `enabled` field because it must take effect before renderer
+startup and atomically control the connection plus native tool registration.
+Disabling preserves credentials and cached history.
+
+## Chat connection settings
+
+Chat connection identity is intentionally outside the renderer settings
+snapshot. `src/shared/ui/settings/ChatSettingsSection.vue` calls the native
+chat runtime, which owns `~/.mimir/chat.json`, the platform credential store,
+connection status, and reconnect. The same surface changes the ordinary local
+`chatNotifications` preference and requests OS permission deliberately.
+Changing only display name reuses the saved credential; changing endpoint or
+account requires a passphrase. See [chat.md](chat.md).
+
 ## File-first top-level namespaces
 
 The CLI also reads two intentionally file-first top-level namespaces that the
@@ -140,6 +164,7 @@ prefixes do not match the filter.
 | Change private settings handler | `toolRuntime.js` validation and `toolRuntime.test.js` |
 | Change theme | `AppearanceSection.vue`, `themes.css`, `DARK_THEMES`, terminal/app observers |
 | Change Business graph settings | `stores/settings.js`, `GraphSettingsSection.vue`, graph app/Workbench mount watchers; settings and graph app tests |
+| Change Chat connection settings | `ChatSettingsSection.vue`, `services/chat.js`, native `chat/`; credential/reconnect and UI tests |
 
 See [persistence.md](persistence.md), [workbench-design.md](workbench-design.md),
 and [gotchas.md](gotchas.md).

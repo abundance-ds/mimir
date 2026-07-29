@@ -70,10 +70,11 @@ The permanent rail system is the signature:
 - Row geometry stays aligned between expanded and collapsed Sidebar states.
 - The project mark opens the same teleported current/recent-folder switcher in
   expanded and rail states; switching never requires first expanding Sidebar.
-- Tools remain directly available. New activity and Activities have independent
-  disclosure controls in the expanded Sidebar; rail mode exposes both icon
-  lists so collapsing a section cannot strand navigation. Tools and New
-  activity each keep a persistent manual order via pointer drag or
+- Tools remain directly available. Chats and Activities have independent
+  disclosure controls in the expanded Sidebar; rail mode keeps stable
+  destinations and live Activities available. The Activities `+` and
+  Cmd/Ctrl+P expose fresh-run sources without duplicating them as permanent
+  rows. Tools keep a persistent manual order via pointer drag or
   Shift+Alt+Up/Down. App management lives in Settings.
 - Closed Activities do not form a Sidebar list. Cmd/Ctrl+P History searches
   useful task/workspace metadata and bounded transcript text, then restores the
@@ -127,9 +128,9 @@ Parchment is the reference theme:
 | signal accent | `#c05d3c` |
 | structural rule | `#d8d7d2` |
 
-IBM Plex Sans carries controls and readable status. IBM Plex Mono carries
-paths, flags, terminal text, timestamps, metadata, and Activity monograms. IBM
-Plex Serif is available for authored prose.
+The native system UI stack carries controls, readable status, and prose. The
+native system monospace stack carries paths, flags, terminal text, timestamps,
+metadata, and Activity monograms. No product surface uses serif.
 
 Color communicates state rather than product category. Agent, app, routine,
 and terminal kinds do not receive separate brand palettes. The theme accent

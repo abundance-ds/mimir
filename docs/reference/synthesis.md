@@ -16,8 +16,8 @@ the editor's inline agent and ghost completion.
 1. **Activities are the execution UI.** Terminals, agents, apps, and routine
    runs use one lifecycle and one sidebar tray.
 2. **One registry, small public projection.** UI runtimes share the internal
-   registry; agents see only the explicit Workbench, Graph, and Connections
-   allowlist.
+   registry; agents see only the explicit Workbench, Graph, Chat, and
+   Connections allowlist.
 3. **The Editor is the review surface.** Activity navigation never replaces the
    document being reviewed.
 4. **Files is workspace navigation.** A lazy project tree, editor-derived
@@ -56,7 +56,7 @@ Cmd/Ctrl+P History.
 - **Apps:** built-in Today and Business graph plus a searchable catalog of
   local TOML instruments that embed UI, launch terminals/processes/windows,
   call tools, or use Rust helpers. Stable instruments live under Tools;
-  fresh-run sources live under New activity. Safe definition
+  fresh-run sources live in the Activities `+` and Cmd/Ctrl+P. Safe definition
   creation/duplication/title/Trash operations stay in the human UI; package
   management, trust, permission, and team ceremony are intentionally absent.
 - **Routines:** TOML cron schedules that resolve launcher presets and create

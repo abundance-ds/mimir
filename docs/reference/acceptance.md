@@ -9,10 +9,9 @@ requirements; they do not replace runtime verification.
 - Editor is mounted and visibly expanded on startup.
 - The Sidebar starts expanded and can collapse to a 52px live rail without
   reordering rows or losing status.
-- New activity and Activities disclose independently in the expanded Sidebar;
-  the live rail continues to expose both lists regardless of disclosure state.
-- Tools contains stable singleton surfaces, New activity contains sources that
-  create a fresh run, and Activities contains the active working set.
+- Tools contains stable singleton surfaces. The Activities `+` and
+  Cmd/Ctrl+P expose sources that create a fresh run; Activities contains only
+  the active working set.
 - The project switcher shows the current folder, recent folders, and an
   explicit native folder-picker action in both Sidebar states.
 - The Sidebar has no Archived list. Closed durable work is searchable and
@@ -35,7 +34,8 @@ requirements; they do not replace runtime verification.
   Reopen last closed. Entering Start new activity replaces the root results
   with only launch sources; Back, empty-query Backspace, or Escape returns.
   `/` scopes files, `@` scopes closed History, and `+` scopes fresh-run
-  sources; live Activities stay on the cycle shortcut.
+  sources; a typed query can find chat rooms without adding them to the empty
+  default view; live Activities stay on the cycle shortcut.
 - Go to traps and restores focus, ignores stale async results, and contains
   workbench shortcuts; Escape or Cmd/Ctrl+W closes it first from the root. Its
   top edge stays at a fixed near-window-top offset while subviews replace
@@ -49,8 +49,8 @@ requirements; they do not replace runtime verification.
 
 - Every terminal, agent, app instance, and routine run has a stable Activity.
 - The Activities `+` menu launches every enabled dynamic Activity type,
-  including Terminal, without offering a built-in Chat; it remains available
-  in the collapsed Sidebar and is fully keyboard-operable.
+  including Terminal, without duplicating the stable Chats workspace; it
+  remains available in the collapsed Sidebar and is fully keyboard-operable.
 - Native PTY launches preserve exact argv boundaries, cwd, and environment.
 - Plain terminals are ephemeral. Agent and routine Activities persist bounded
   scrollback and final state across relaunch.
@@ -58,20 +58,25 @@ requirements; they do not replace runtime verification.
   is idempotent.
 - Terminal and agent surfaces use xterm 6 WebGL when available and remain
   interactive through the DOM fallback after initialization or context loss.
-- IBM Plex Mono `400` and `600`, upright and italic, are ready before cell
-  measurement; text remains sharp at 100%, 125%, and 150% workbench zoom.
+- The native system monospace stack is fixed before xterm cell measurement;
+  text remains sharp at 100%, 125%, and 150% workbench zoom.
 - Durable ended Activities can be renamed, archived/restored, and cleared.
 - Cmd/Ctrl+W on a focused Sidebar Activity archives that exact durable row,
   including failed rows that are not currently selected; live rows stop before
-  archival.
+  archival. Durable close intent is flushed before termination and survives an
+  app or renderer restart.
 - Codex, Claude, Pi, and Gemini detection reports precise unavailable states.
 - Settings > CLI tools uses compact detected-agent rows, launcher-visibility
   switches, shell-like flag editing, progressive cwd/command/environment
   details, and no kind/agent/cwd select maze.
 - Disabled or unavailable CLI presets do not clutter the Sidebar; they remain
   diagnosable and configurable in Settings.
-- Supported agents resume through their CLI-specific continuation command
-  inside the same Activity row; resume never creates a second record.
+- Supported agents resume only with the exact recorded provider session id
+  inside the same Activity row; resume never uses latest/last/implicit continue
+  and never creates a second record.
+- History rows without an exact id restore the transcript only. Run again is a
+  distinct new-session action, ambiguous legacy identity fails closed, and
+  failed or duplicate Resume attempts cannot unarchive or respawn twice.
 - Routine reruns resolve the current routine definition. Plain terminal and
   app-process reruns preserve their exact stored command, argv, cwd, and env.
 - `mimir` is on PATH in every Mimir-launched PTY.
@@ -86,19 +91,73 @@ requirements; they do not replace runtime verification.
   `mimir_propose`; the remaining public tools require CLI discovery.
 - Tool calls validate complete object schemas, report all input failures
   together, and return structured stable errors.
-- The public surface is 14 Workbench/Graph tools plus conditional connection
-  tools; internal UI/runtime domains never leak into agent discovery.
+- The public surface is 15 permanent Workbench/Graph tools, Chat tools
+  while Chats is enabled, plus conditional
+  connection tools; internal UI/runtime domains never leak into agent
+  discovery.
 - Live app providers can add, update, remove, execute, and cancel private
   registry tools without restarting the server.
 - Mimir-launched Codex, Claude, Pi, and Gemini receive the endpoint
   automatically with activity and agent provenance.
-- The one-line `mimir tools` / `mimir tool` / `mimir skill` / `mimir doctor`
-  routing contract is delivered once, without client tutorials.
+- The one-line `mimir tools` (all) / `mimir tools <group>` / `mimir tool` /
+  `mimir skill` / `mimir doctor` routing contract is delivered once, without
+  client tutorials.
 - Every connection uses the product-owned `mimir_workbench` identity and
   preserves unrelated client configuration.
 - Catalog and personal skills trigger natively in every client; project skills
   trigger natively in Claude and Pi and remain one explicit lookup away in
   Codex and Gemini.
+
+## Chats
+
+- Chats is one stable Activity with separate channel/direct-message state;
+  changing rooms never creates or reorders an Activity.
+- Settings > Chat can disable the complete local chat surface: the Sidebar
+  section disappears, the transport disconnects, chat tools unregister, and
+  cached history remains available for re-enabling later.
+- The expanded Sidebar places one flat channel/direct list below Tools, uses
+  per-place and aggregate unread dots, persists its disclosure state, and
+  preserves room order when messages arrive. Its whole-Sidebar collapsed form
+  is one Chats hub.
+- The existing pane header owns room identity, topic/member summary, search,
+  Start agent, and one details popover; there is no nested chat header.
+- The transcript is dense, same-sided, and grouped by sender/time with day and
+  first-unread markers, links/code, timestamps, visible agent provenance, and
+  one-level inline replies.
+- Replies, small reaction sets, own-message edits, deliberate own-message
+  deletion, mentions, and exact copied message links sync through the server
+  and materialize into the cached transcript.
+- Authenticated file cards support picker, native drag/drop, clipboard paste,
+  verified download, image preview, and native open. A changing room cannot
+  redirect an upload already started.
+- Member lists distinguish available from away without exposing activity
+  surveillance. Typing state is ephemeral, expires defensively, and never
+  enters history.
+- Desktop alerts are opt-in and limited to DMs and explicit @mentions; muting
+  suppresses alerts but not unread state. No room, Chats-header, or dock badge
+  indicator is shown below one unread message.
+- Each room retains its draft and scroll position. Loading earlier history
+  preserves the viewport; incoming messages follow only at the bottom and
+  otherwise expose a new-messages control.
+- Offline mode keeps cached history and search available, blocks sending with
+  a clear explanation, and preserves the draft.
+- Search covers the local cache, scopes to one/all rooms, jumps with context,
+  and lets Escape return to results.
+- Create channel, Join channel, and Direct message are short keyboard-safe
+  flows with validation and known-person selection.
+- A channel details view shows current members and supports topic edit, mute,
+  and leave. A direct message can be muted or hidden.
+- Start agent links the target before process spawn. Linked agents can use
+  `chat_read`, `chat_search`, `chat_send`, and verified `chat_download` in that
+  target; their visible provenance opens the originating Activity and the
+  Activity can return to chat. The bounded room prompt is seeded as editable
+  PTY input and is never submitted until the user presses Enter.
+- A clean restart retrieves the passphrase from macOS Keychain in release (or
+  the owner-only fallback in debug and elsewhere), reconnects to the public
+  WebSocket, and restores the local cache without putting a secret in chat
+  configuration.
+- Production health monitoring, nightly checksummed backups, and no-write
+  restore verification are installed without controlling unrelated services.
 
 ## Files
 
@@ -128,9 +187,9 @@ requirements; they do not replace runtime verification.
 ## Apps
 
 - Stable Apps appear under Tools; terminal/process Apps and configured CLI
-  presets appear under New activity. There is no generic Apps destination.
-- Tools and New activity each support persistent manual ordering by pointer or
-  Shift+Alt+Up/Down.
+  presets appear in the Activities `+` menu and Cmd/Ctrl+P. There is no generic
+  Apps destination.
+- Tools support persistent manual ordering by pointer or Shift+Alt+Up/Down.
 - The bottom Settings control remains visible in both Sidebar states; Settings
   > Apps is the catalog and management surface.
 - Settings > Apps is a searchable, keyboard-operable local instrument manager

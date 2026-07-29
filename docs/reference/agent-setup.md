@@ -64,9 +64,9 @@ Pi performs the MCP handshake, dynamically registers the lean tool set, and
 adds the one-line Mimir instruction once. `/mimir-refresh` rediscovers the
 currently exposed set.
 
-Continuations reuse the client-specific resume strategy and retain the
-Activity's MCP provenance. Gemini uses `--resume latest`. Routine launches also
-receive scoped provenance.
+Continuations retain the Activity's MCP provenance and pass its exact recorded
+provider session id. Mimir never uses latest/last/implicit continue for
+History resume. Routine launches also receive scoped provenance.
 
 ## Skills
 
@@ -110,6 +110,7 @@ The installed CLI's agent-facing surface is:
 
 ```bash
 mimir tools
+mimir tools <workbench|graph|chat|connections>
 mimir tool <name>
 mimir call <tool> --help
 mimir call <tool> '<json>'
@@ -117,8 +118,9 @@ mimir skill <query>
 mimir doctor
 ```
 
-`mimir tools --json` and skill refresh remain available for diagnostics and
-client adapters.
+The focused drawer is sufficient for ordinary calls; use `mimir tool <name>`
+only for full nested schemas or enums. `--json` and skill refresh remain
+available for diagnostics and client adapters.
 
 Outside a Mimir Activity:
 

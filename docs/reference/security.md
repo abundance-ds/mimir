@@ -34,6 +34,10 @@ naming the exact boundary it enforces.
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
 | Launcher/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment |
 | API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
+| Chat transport | public WSS, mandatory SASL, loopback Ergo listeners behind Caddy | one small-team server; no per-room authorization UI or enterprise tenancy |
+| Chat administration | bearer token checked by a loopback Node service; server stores only its digest; dedicated narrow Ergo OPER | possession of the raw token grants full teammate/channel lifecycle administration |
+| Linked chat agent | Activity-to-room link rejects target changes | an unlinked trusted-local MCP caller may pass a room explicitly |
+| Chat credential | macOS login Keychain in release; owner-only atomic file in debug and elsewhere | local user/process authority remains the product trust boundary |
 
 ## MCP endpoint
 
@@ -124,6 +128,77 @@ debug builds additionally permit localhost/127.0.0.1. Provider errors pass
 through best-effort key-prefix redaction, so new credential formats require
 updating redaction.
 
+## Team chat
+
+Chats uses a separate public WSS endpoint. The reference Ergo process listens
+only on loopback; Caddy owns TLS and the public `/webirc` upgrade. SASL is
+mandatory on every listener with no loopback exemption, account
+self-registration is off, and owner-run provisioning creates the 2–10
+expected accounts. This is proportionate small-team authentication, not a
+multi-tenant authorization model.
+
+`mimir-chat-user` authenticates the root-only owner account over loopback
+before adding or removing a teammate. A first installation has a narrower
+bootstrap exception: the public WebSocket listener is absent while localhost
+is temporarily exempted to create the first owner account, after which the
+installer restores the no-exemption configuration. Its exit cleanup also
+restores that secure configuration after a failed bootstrap.
+
+The public `/admin/` HTML is inert without its bearer token. Caddy strips the
+prefix and proxies only to the loopback Node 22 service. API requests use a
+constant-time comparison against `/etc/mimir-chat/admin.token.sha256`; the raw
+token remains only in the repository's ignored, owner-only `.env` unless a
+short-lived protected export is being staged for deployment. The browser keeps
+it in tab-scoped `sessionStorage`, never a cookie or URL.
+
+Each operation authenticates the hidden, dedicated `mimir-admin` account over
+loopback SASL and obtains an OPER role limited to account registration,
+suspension, channel registration/purge, mode repair, and rate-limit exemption.
+It lacks history, rehash, shell, and filesystem authority. Operations are
+serialized, request bodies are capped at 16 KiB, and service logs exclude
+authorization and request bodies. `waqr`, `mimir-admin`, and `#general` are
+protected from destructive UI actions. This is proportionate token
+administration for the trusted small team, not multi-admin RBAC.
+
+The non-secret endpoint/account/display name lives in `~/.mimir/chat.json`.
+In a macOS release build the passphrase lives in Keychain under service
+`rs.shoulde.mimir`. Debug builds avoid code-signature prompts after each
+recompile, and other platforms lack that integration, so both use
+`write_secret_bytes_atomic` for `~/.mimir/chat.credential`, including
+owner-only mode on Unix. The SQLite cache contains readable team history by
+design and is not encrypted separately from the user's filesystem.
+
+`chat.read`, `chat.search`, and `chat.send` are public local tools. When an
+Activity was started from a room, its durable Activity link wins and any
+different requested target is rejected. That prevents accidental room drift;
+it does not create cryptographic agent identity or protect against another
+trusted process using the loopback MCP endpoint.
+
+Agent messages carry client-only provenance tags and use Ergo `RELAYMSG` only
+through the narrowly scoped owner capability. Transport parameters, tags, room
+names, message IDs, lengths, and WSS schemes are validated before queueing.
+Messages are server-echo canonical; cached history and search remain readable
+offline.
+
+Attachments use a separate loopback-only service behind Caddy `/files`. Every
+upload, download, metadata read, and delete authenticates by delegating the
+same Basic credential to Ergo SASL; the service does not maintain a second
+password database. IDs are opaque, uploads are capped at 25 MiB, total storage
+at 5 GiB, and client downloads are size/SHA-256 verified before native open.
+Any authenticated teammate can read a shared file; only its uploader can
+delete it. This matches the trusted 2–10-person team model, not per-channel
+file authorization.
+
+Focused desktop notifications contain only a bounded sender/title and message
+preview for a DM or direct @mention. They require explicit OS permission.
+Muting is a local attention control, not access control.
+
+Root-owned backups contain the server credentials, admin token digest, chat
+history, file metadata, and blobs by design; they do not contain the raw
+browser admin token. Archives and checksums are mode 0600 under
+`/var/backups/mimir-chat`; restore validates checksums, paths, installed release,
+and SQLite integrity before any state change.
+
 ## Change map
 
 | Change | Required review |
@@ -137,4 +212,4 @@ updating redaction.
 | Tauri window/capability | `capabilities/default.json`, window labels, invoke/event reachability |
 
 See [mcp.md](mcp.md), [apps-system.md](apps-system.md),
-[files.md](files.md), and [ai-system.md](ai-system.md).
+[files.md](files.md), [ai-system.md](ai-system.md), and [chat.md](chat.md).
