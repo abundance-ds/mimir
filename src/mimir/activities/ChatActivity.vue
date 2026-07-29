@@ -1104,13 +1104,23 @@ watch(
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalKeydown, true)
   document.addEventListener('pointerdown', onDocumentPointerdown, true)
+  window.addEventListener('focus', onWindowFocus)
   await chat.initialize()
   chat.setViewActive(props.active)
-  if (chat.activeTarget && !chat.activeMessages.length) {
+  const record = chat.targets.find(candidate => candidate.id === chat.activeTarget)
+  if (record?.firstUnreadId) {
+    // Mounting already-active: anchor the initial view at the first unread
+    // message instead of the cached bottom.
+    newMarkerId.value = record.firstUnreadId
+    await chat.selectTarget(chat.activeTarget, { messageId: record.firstUnreadId })
+  } else if (chat.activeTarget && !chat.activeMessages.length) {
     await chat.selectTarget(chat.activeTarget)
+    await nextTick()
+    restoreTimeline(chat.activeTarget)
+  } else {
+    await nextTick()
+    restoreTimeline(chat.activeTarget)
   }
-  await nextTick()
-  restoreTimeline(chat.activeTarget)
   await setupAttachmentDrop()
   void ensureImagePreviews()
 })
@@ -1118,6 +1128,7 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalKeydown, true)
   document.removeEventListener('pointerdown', onDocumentPointerdown, true)
+  window.removeEventListener('focus', onWindowFocus)
   clearTimeout(searchTimer)
   clearTimeout(highlightTimer)
   clearTimeout(copiedTimer)
