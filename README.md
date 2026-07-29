@@ -9,31 +9,34 @@ inspect their work, and keep project context in one application.
 
 ## What it provides
 
-- [Activities](docs/reference/activities.md) run CLI agents and terminals,
+- [Activities](docs/activities.md) run CLI agents and terminals,
   retain scrollback, and reopen or resume recorded sessions.
-- [Files](docs/reference/files.md) navigates the current project; the
-  [Editor](docs/reference/editor-system.md) edits Markdown and presents agent
+- [Files](docs/files.md) navigates the current project; the
+  [Editor](docs/editor-system.md) edits Markdown and presents agent
   changes as reviewable diffs.
-- [Business graph](docs/reference/business-graph.md) stores linked projects,
+- [Business graph](docs/business-graph.md) stores linked projects,
   issues, decisions, and knowledge as Markdown.
-- [Chats](docs/reference/chat.md) provides team channels and direct messages.
+- [Chats](docs/chat.md) provides team channels and direct messages.
   An agent launched from a room reads and replies there by default and can
   address any room the user sees.
-- [Apps](docs/reference/apps-system.md) add local tools, and
-  [Routines](docs/reference/routines.md) schedule agent or command runs.
+- [Apps](docs/apps-system.md) add local tools, and
+  [Routines](docs/routines.md) schedule agent or command runs.
 
 ## Develop
 
 ```bash
-npm ci
-npm run tauri -- dev
+bun install
+bun tauri dev
 ```
 
-See [Building Mimir](docs/reference/building.md) for prerequisites, tests, and
+See [Building Mimir](docs/building.md) for prerequisites, tests, and
 packaging.
+
+Release packaging currently targets macOS arm64 only. Linux and Windows are
+parked as recoverable recipes rather than active distribution targets.
 
 ## Documentation
 
 - [Documentation index](docs/README.md)
 - [Agent integration](docs/agent-interface.md)
-- [Codebase map](docs/reference/_MAP.md)
+- [Codebase map](docs/_MAP.md)
