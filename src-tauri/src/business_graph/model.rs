@@ -338,6 +338,8 @@ pub struct GraphEvent {
 pub struct GraphEventQuery {
     #[serde(default)]
     pub scope_ids: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
     #[serde(default)]
     pub offset: usize,
     #[serde(default = "default_event_limit")]

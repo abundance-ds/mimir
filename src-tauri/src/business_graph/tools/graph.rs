@@ -308,6 +308,7 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
             merge(
                 scopes.clone(),
                 json!({
+                    "since": string_schema("Inclusive RFC 3339 timestamp lower bound."),
                     "offset": integer_schema(0, 1000000),
                     "limit": integer_schema(1, 500),
                 }),

@@ -194,6 +194,10 @@ impl GraphStore {
                 source_format,
             },
         };
+        if node.kind == "issue" {
+            let preferred_tags = (!node.tags.is_empty()).then(|| node.tags.clone());
+            canonicalize_issue_labels(&mut node, preferred_tags);
+        }
         validate_mutation(&node)?;
         let serialized =
             serialize_graph_markdown(&node).map_err(|error| GraphMutationError::Serialize {
@@ -274,6 +278,12 @@ impl GraphStore {
     }
 
     pub fn update_node(&mut self, patch: GraphNodePatch) -> Result<GraphNode, GraphMutationError> {
+        let tags_changed = patch.tags.is_some();
+        let labels_changed = patch.set_properties.contains_key("labels")
+            || patch
+                .remove_properties
+                .iter()
+                .any(|property| property == "labels");
         let mut node = self
             .nodes
             .get(&patch.id)
@@ -338,6 +348,10 @@ impl GraphStore {
             node.properties.remove(&key);
         }
         node.properties.extend(patch.set_properties);
+        if node.kind == "issue" && (tags_changed || labels_changed) {
+            let preferred_tags = tags_changed.then(|| node.tags.clone());
+            canonicalize_issue_labels(&mut node, preferred_tags);
+        }
         validate_mutation(&node)?;
         node.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
@@ -562,6 +576,74 @@ impl GraphStore {
                 }
             }
         }
+    }
+}
+
+fn canonicalize_issue_labels(node: &mut GraphNode, preferred_tags: Option<Vec<String>>) {
+    let existing = node
+        .properties
+        .get("labels")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut labels_by_name = HashMap::new();
+    let mut label_names = Vec::new();
+    for label in existing {
+        let (name, normalized) = match label {
+            Value::Object(mut value) => {
+                let Some(name) = value
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                value.insert("name".into(), Value::String(name.clone()));
+                value
+                    .entry("color")
+                    .or_insert_with(|| Value::String("gray".into()));
+                (name, Value::Object(value))
+            }
+            Value::String(name) if !name.trim().is_empty() => {
+                let name = name.trim().to_string();
+                (
+                    name.clone(),
+                    serde_json::json!({ "name": name, "color": "gray" }),
+                )
+            }
+            _ => continue,
+        };
+        label_names.push(name.clone());
+        labels_by_name.insert(name.to_lowercase(), normalized);
+    }
+
+    let tags = preferred_tags
+        .unwrap_or(label_names)
+        .into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect::<Vec<_>>();
+    let labels = tags
+        .iter()
+        .map(|tag| {
+            let mut label = labels_by_name
+                .remove(&tag.to_lowercase())
+                .unwrap_or_else(|| serde_json::json!({ "name": tag, "color": "gray" }));
+            if let Value::Object(value) = &mut label {
+                value.insert("name".into(), Value::String(tag.clone()));
+            }
+            label
+        })
+        .collect::<Vec<_>>();
+
+    node.tags = tags;
+    if labels.is_empty() {
+        node.properties.remove("labels");
+    } else {
+        node.properties
+            .insert("labels".into(), Value::Array(labels));
     }
 }
 
@@ -1005,6 +1087,44 @@ mod tests {
         let disk = fs::read_to_string(&updated.provenance.source_path).unwrap();
         assert!(disk.contains("status: active"));
         assert!(disk.contains("Updated body."));
+    }
+
+    #[test]
+    fn issue_tag_updates_keep_labels_and_markdown_in_sync() {
+        let (root, mut store) = fixture();
+        let before = store.get("issue-1784943918-d4c5").unwrap().clone();
+        let updated = store
+            .update_node(GraphNodePatch {
+                id: before.id.clone(),
+                expected_revision: Some(before.provenance.source_revision),
+                tags: Some(vec!["funding".into(), "research".into()]),
+                ..GraphNodePatch::default()
+            })
+            .unwrap();
+
+        assert_eq!(updated.tags, ["funding", "research"]);
+        assert_eq!(
+            updated
+                .properties
+                .get("labels")
+                .and_then(Value::as_array)
+                .unwrap()
+                .iter()
+                .filter_map(|label| label.get("name").and_then(Value::as_str))
+                .collect::<Vec<_>>(),
+            ["funding", "research"]
+        );
+        let reloaded = GraphStore::load(&[GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            root.path(),
+        )]);
+        let reparsed = reloaded.get(&before.id).unwrap();
+        assert_eq!(reparsed.tags, updated.tags);
+        assert_eq!(
+            reparsed.properties.get("labels"),
+            updated.properties.get("labels")
+        );
     }
 
     #[test]

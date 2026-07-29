@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   createGraphNode,
   graphContext,
+  graphEvents,
   graphMigrationReport,
   graphNeighbors,
   openBusinessGraph,
@@ -43,6 +44,23 @@ describe('business graph service', () => {
         scopeIds: ['private:local'],
         kinds: ['issue'],
         tags: ['heor'],
+        offset: 0,
+        limit: 500,
+      },
+    })
+  })
+
+  it('normalizes bounded change-history pagination', async () => {
+    await graphEvents({
+      scopeIds: ['project:test', 'project:test'],
+      since: '2026-07-20T00:00:00Z',
+      offset: -20,
+      limit: 5000,
+    })
+    expect(invoke).toHaveBeenCalledWith('graph_events', {
+      query: {
+        scopeIds: ['project:test'],
+        since: '2026-07-20T00:00:00Z',
         offset: 0,
         limit: 500,
       },

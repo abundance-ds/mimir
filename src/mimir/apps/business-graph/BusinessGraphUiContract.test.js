@@ -51,6 +51,8 @@ describe('Business Graph UI contract', () => {
 
   it('keeps the operational workbench visually stable and non-decorative', () => {
     expect(source).not.toMatch(/border-left|border-inline-start/)
+    expect(appSource).not.toContain('border-bottom-color')
+    expect(appSource).not.toContain('graph-section-count')
     expect(source).not.toContain('board-card-accent')
     expect(source).not.toContain('.board-card:hover .board-card-actions')
     expect(source).not.toMatch(/max-height:\s*0/)
@@ -70,6 +72,10 @@ describe('Business Graph UI contract', () => {
     expect(workBoardSource).not.toMatch(/priorityGlyph|statusCode|meta-flag/)
     expect(portfolioSource).toContain('class="portfolio-table"')
     expect(portfolioSource).not.toContain('project-progress')
+    const sectionActive = appSource.match(/\.graph-section-active\s*\{[^}]*\}/s)?.[0] || ''
+    const viewActive = appSource.match(/\.graph-view-active\s*\{[^}]*\}/s)?.[0] || ''
+    expect(sectionActive).not.toMatch(/border|box-shadow/)
+    expect(viewActive).not.toMatch(/border|box-shadow/)
   })
 
   it('identifies every native interactive element for audit and automation', () => {
@@ -102,10 +108,11 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(20)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(21)
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphMarkdownEditor.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphRelationshipLine.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphSummaryDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('NowView.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('DispatchBar.vue')
   })

@@ -129,11 +129,11 @@
               <span v-if="overdue(issue.dueDate)" class="meta-overdue">overdue</span>
               <span v-if="issue.waitingFor" class="meta-waiting">waiting</span>
               <span
-                v-if="actorFor(issue.id)?.initials"
+                v-if="actorDisplay(actorFor(issue.id))"
                 class="meta-author"
-                :title="actorFor(issue.id).label"
+                :title="actorFor(issue.id)?.label"
               >
-                {{ actorFor(issue.id).initials }}
+                {{ actorDisplay(actorFor(issue.id)) }}
               </span>
             </span>
           </article>
@@ -423,6 +423,15 @@ function projectLabel(issue) {
 
 function actorFor(id) {
   return props.actors?.[id] || null
+}
+
+function actorDisplay(actor) {
+  if (!actor) return ''
+  if (actor.id === 'local-human' || actor.label === 'You' || actor.initials === 'ME') return 'you'
+  if (actor.kind === 'external' || actor.id === 'external' || actor.initials === 'EX') {
+    return 'external'
+  }
+  return actor.initials || actor.label || ''
 }
 
 function overdue(value) {

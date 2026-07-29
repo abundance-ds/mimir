@@ -2,7 +2,7 @@
 
 The Business graph is Mimir's built-in operating system for a small AI-native
 HEOR consultancy. Issues, clients, people, projects, evidence, decisions, and
-deliverables are one source-aware graph. The Now stream, Work board,
+deliverables are one source-aware graph. The Work board, Changes history,
 portfolio ledger, timeline, and the All directory are purpose-built
 projections over that graph rather than separate applications or databases.
 
@@ -54,6 +54,16 @@ project or team root uses the repository, synced folder, or filesystem access
 the team already trusts. Mimir binds its agent capability endpoint to loopback
 and does not add roles or policy administration.
 
+For an external collaborator, the practical boundary is the project root:
+give the collaborator that workspace and do not configure the internal team
+root on their machine. They will compose their own private local graph with the
+shared project, but they will not see the team's separate root. Mimir cannot
+grant access to only a subgraph within one project root. Finer boundaries
+therefore require splitting the sensitive material into a separate
+folder/repository/root; role-based node or edge policies would require an
+authenticated policy layer that the local shared-folder architecture does not
+currently have.
+
 The workbench mounts `private:local`, the current `project:<root-hash>`, and
 optional `team:main` roots. Node provenance carries the exact `scopeId`,
 `scopeKind`, `sourcePath`, `sourceRevision`, and legacy source format.
@@ -99,27 +109,76 @@ Its primary sections and projections are:
 
 | Section | Projections |
 |---|---|
-| Now | Stream |
 | Work | Board, List, Attention |
 | Projects | Portfolio, List, Timeline |
 | Knowledge | List, Timeline |
 | All | List, Timeline, with a kind filter (issue, project, person, company, decision, knowledge) |
+| Changes | History |
 
-**Work** is the startup surface — it is where the day happens. **Now** is
-the catch-up wire one key away: a time-ordered stream of graph events —
-filings, status flips, decisions, evidence, deliverables, overdue crossings,
-waiting cleared — with author initials (human and agent) and project context
-on every line. FYI by default: one line per event, expand for field changes
-and provenance, drill to correct. **Waiting on you** pins at top as
-information, not a gate. A seen cursor (“since 08:40”) and Mark caught up
-replace any unread-count obligation.
+**Work** is the startup surface and the first section — it is where the day
+happens. **Changes** is the final section, a catch-up wire rather than part of
+the object hierarchy: a time-ordered history of
+graph events — filings, status flips, decisions, evidence, deliverables,
+overdue crossings, waiting cleared — with a spelled action, object type and
+title, compact field change, human-readable actor, and project context. It
+loads 50-event pages rather than an unbounded stream. FYI by default: one
+compact row per event; click the row to expand field changes and provenance,
+then open the affected object to inspect or correct it.
+**Waiting on you** pins at top as information, not a gate. A seen cursor
+(“since 08:40”) and Mark caught up replace any unread-count obligation.
+
+**Summarise** opens an on-demand launcher: choose one available CLI agent, a
+**Since** date, and optional instructions. Before launch, Mimir fetches every
+retained event on or after that local date from the selected physical scopes.
+The graph runtime ignores a filesystem notification only when its source
+revision exactly matches the revision Mimir just wrote; a later external edit
+is retained even when it happens immediately. The launcher attaches a compact,
+human-readable ledger rather than raw event JSON. Event, node, actor, activity,
+scope, and graph-revision identifiers stay out of the agent context; each line
+retains only time, human actor, action, object kind and title, and meaningful
+field changes.
+
+The initial summary therefore requires no discovery or tool call. The complete
+prompt is hard-capped at 80 KB, safely below the 100,000-token ceiling; when
+long values are abbreviated or older events are omitted, the prompt contains
+an explicit shortening note. Mimir then starts a durable interactive Activity.
+This is intentionally an Activity rather than a Routine because the date and
+instructions vary per review and the user may continue with follow-up questions.
+
+A Routine can also call the public `graph_events` tool; routines receive the same Mimir tool
+catalog as other launched agents. That is appropriate for a fixed manual or
+scheduled digest, but the event tool reads the graph currently mounted in the
+running Mimir instance rather than a renderer view. A scheduled digest is
+therefore reliable only when its intended graph workspace is mounted. A future
+workspace-bound graph mount would be needed before treating unattended
+cross-workspace digests as dependable.
+
+### Change history boundary
+
+Graph creates, updates, deletes, restores, due-date crossings, and observed
+external file changes produce structured events. Each event records a compact
+summary, timestamp, node and scope, actor, action, graph revision, and changed
+fields. The renderer requests those events through the paginated `graph.events`
+contract, which accepts an inclusive RFC 3339 `since` bound; the runtime retains
+the most recent 2,000 events.
+
+The journal is durable but currently local to each Mimir installation at
+`~/.mimir/graph/events/<project-hash>.json`. It is a useful review trail, not
+yet an authoritative distributed team audit log: journals are not synchronized
+between machines, an external filesystem edit may be attributed only as
+“External edit,” and changes made while another machine is not observing the
+root may not appear as individual events there. A true team-wide ledger would
+need shared append-only event storage, stable user identity, and conflict-safe
+ingestion; the Markdown files and repository history remain the durable shared
+record until that layer exists.
 
 The **Work board** is the operate surface. Rows are two lines at fixed
 geometry: priority icon control (antenna bars; urgent is a red `!`) opening a
 menu with all four priorities spelled out, then the full title; metadata
 below in Mono — project slug, spelled status (a control when grouped by
 project), due date as `DD.MM` with the word `overdue` paired in `rem`,
-`waiting` spelled, author initials. Status or project grouping,
+`waiting` spelled, and a compact actor marker (`you`/`external` spelled out,
+agent initials retained). Status or project grouping,
 drag-and-drop with drop-before reorder, keyboard-equivalent movement, column
 visibility, priority filter, sorting, and settings-backed view state stay.
 Every chord maps to a visible control. Any active filter renders as a named,
@@ -179,7 +238,7 @@ lookup, delegation, and deterministic commands:
 - **Dispatch.** Enter hands the line to a background CLI-agent Activity with
   the user's context (section, view, scopes, focused node). Capture never
   blocks and never opens a dialog: input clears immediately, jobs queue
-  behind one runner, and results land in Now as filed events. Unresolvable
+  behind one runner, and results land in Changes as filed events. Unresolvable
   references arrive flagged `needsDetail` instead of guessed.
 - **Delegate.** `!` or `work <target>` arms a node, shows the assembled
   context pack (“what the agent will see”) above the bar, and launches a
@@ -224,6 +283,7 @@ mimir call graph_update '{"id":"project-alpha","expectedRevision":"...","title":
 mimir call graph_delete '{"id":"obsolete-note"}'
 mimir call graph_restore '{"undoToken":"<token returned by graph_delete>"}'
 mimir call graph_context '{"focusId":"project-alpha"}'
+mimir call graph_events '{"scopeIds":["project:alpha"],"since":"2026-07-20T00:00:00Z","offset":0,"limit":50}'
 ```
 
 Issues are `kind: "issue"` graph nodes. Internal compatibility and semantic

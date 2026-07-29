@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import EntityList from './EntityList.vue'
+import NowView from './NowView.vue'
 import PortfolioView from './PortfolioView.vue'
 
 describe('business graph projections', () => {
@@ -99,5 +100,51 @@ describe('business graph projections', () => {
 
     expect(wrapper.get('[data-project-card="project-atlas"]').text()).toContain('1 evidence')
     expect(wrapper.get('[data-project-card="project-atlas"]').text()).toContain('1 decision')
+  })
+
+  it('expands change snippets in place and pages through history', async () => {
+    const event = {
+      id: 'event-1',
+      timestamp: '2026-07-29T08:40:00.000Z',
+      nodeId: 'issue-1',
+      nodeKind: 'issue',
+      title: 'Extract evidence',
+      summary: 'Changed status · Extract evidence',
+      action: 'graph.update',
+      eventType: 'status-changed',
+      graphRevision: 8,
+      actor: { id: 'local-human', label: 'You', initials: 'ME' },
+      changes: [{ field: 'status', before: 'plan', after: 'in-progress' }],
+      data: {},
+    }
+    const wrapper = mount(NowView, {
+      props: {
+        events: [event],
+        total: 80,
+        offset: 0,
+        limit: 50,
+        canSummarise: true,
+      },
+    })
+
+    expect(wrapper.get('.now-event-type').text()).toBe('Status')
+    expect(wrapper.get('.now-event-change').text()).toBe('Plan → In Progress')
+    expect(wrapper.get('.now-event-actor').text()).toBe('You')
+    expect(wrapper.text()).not.toContain('ME')
+
+    await wrapper.get('[data-graph-event="event-1"]').trigger('click')
+    expect(wrapper.get('.now-event-detail').text()).toContain('plan')
+    expect(wrapper.get('.now-event-detail').text()).toContain('in-progress')
+    expect(wrapper.emitted('open')).toBeUndefined()
+
+    await wrapper.get('[data-now-event-open="issue-1"]').trigger('click')
+    expect(wrapper.emitted('open')).toEqual([['issue-1']])
+
+    expect(wrapper.get('.now-pagination').text()).toContain('1–1 of 80')
+    await wrapper.get('[data-now-page-next]').trigger('click')
+    expect(wrapper.emitted('page')).toEqual([[50]])
+
+    await wrapper.get('[data-graph-control="changes-summarise"]').trigger('click')
+    expect(wrapper.emitted('summarise')).toEqual([[]])
   })
 })

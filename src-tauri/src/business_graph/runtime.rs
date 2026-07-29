@@ -1,3 +1,4 @@
+use super::markdown::source_revision;
 use super::model::{
     GraphActor, GraphActorKind, GraphChanged, GraphDeleteResult, GraphDiagnostic, GraphEvent,
     GraphEventPage, GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode, GraphNodeCreate,
@@ -31,6 +32,7 @@ pub struct GraphRuntime {
     deleted: Mutex<VecDeque<DeletedGraphSource>>,
     events: Mutex<VecDeque<GraphEvent>>,
     event_path: RwLock<Option<PathBuf>>,
+    pending_source_revisions: Mutex<BTreeMap<String, Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,7 @@ impl GraphRuntime {
             deleted: Mutex::new(VecDeque::new()),
             events: Mutex::new(VecDeque::new()),
             event_path: RwLock::new(None),
+            pending_source_revisions: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -94,6 +97,10 @@ impl GraphRuntime {
         *self.watchers.lock().map_err(|error| error.to_string())? = watchers;
         *self.events.lock().map_err(|error| error.to_string())? = events;
         *self.event_path.write().map_err(|error| error.to_string())? = Some(event_path);
+        self.pending_source_revisions
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clear();
         Ok(result)
     }
 
@@ -175,10 +182,22 @@ impl GraphRuntime {
 
     pub fn events(&self, query: &GraphEventQuery) -> Result<GraphEventPage, String> {
         self.record_temporal_events()?;
+        let since = query
+            .since
+            .as_deref()
+            .map(chrono::DateTime::parse_from_rfc3339)
+            .transpose()
+            .map_err(|error| format!("Invalid graph event 'since' timestamp: {error}"))?;
         let events = self.events.lock().map_err(|error| error.to_string())?;
         let visible = events
             .iter()
             .filter(|event| query.scope_ids.is_empty() || query.scope_ids.contains(&event.scope_id))
+            .filter(|event| {
+                since.as_ref().is_none_or(|since| {
+                    chrono::DateTime::parse_from_rfc3339(&event.timestamp)
+                        .is_ok_and(|timestamp| timestamp >= *since)
+                })
+            })
             .cloned()
             .collect::<Vec<_>>();
         let total = visible.len();
@@ -251,10 +270,16 @@ impl GraphRuntime {
     }
 
     pub fn update(&self, patch: GraphNodePatch) -> Result<GraphNode, GraphMutationError> {
-        self.store
+        let updated = self
+            .store
             .write()
             .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
-            .update_node(patch)
+            .update_node(patch)?;
+        self.remember_source_revision(
+            updated.provenance.source_path.clone(),
+            Some(updated.provenance.source_revision.clone()),
+        )?;
+        Ok(updated)
     }
 
     pub fn create(&self, create: GraphNodeCreate) -> Result<GraphNode, GraphMutationError> {
@@ -285,10 +310,16 @@ impl GraphRuntime {
                     })?,
             }
         };
-        self.store
+        let created = self
+            .store
             .write()
             .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
-            .create_node(&root, create)
+            .create_node(&root, create)?;
+        self.remember_source_revision(
+            created.provenance.source_path.clone(),
+            Some(created.provenance.source_revision.clone()),
+        )?;
+        Ok(created)
     }
 
     pub fn delete(
@@ -327,6 +358,7 @@ impl GraphRuntime {
             queue.pop_front();
         }
         deleted.undo_token = Some(undo_token);
+        self.remember_source_revision(deleted.source_path.clone(), None)?;
         Ok(deleted)
     }
 
@@ -353,7 +385,9 @@ impl GraphRuntime {
                 message: error.to_string(),
             }
         })?;
-        self.refresh(vec![backup.path.to_string_lossy().into_owned()])
+        let source_path = backup.path.to_string_lossy().into_owned();
+        self.remember_source_revision(source_path.clone(), Some(source_revision(&backup.raw)))?;
+        self.refresh(vec![source_path])
             .map_err(GraphMutationError::Invalid)?;
         let restored = self
             .get(&backup.id)
@@ -365,6 +399,34 @@ impl GraphRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         queue.retain(|item| item.undo_token != request.undo_token);
         Ok(restored)
+    }
+
+    fn remember_source_revision(
+        &self,
+        source_path: String,
+        revision: Option<String>,
+    ) -> Result<(), GraphMutationError> {
+        self.pending_source_revisions
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .insert(source_path, revision);
+        Ok(())
+    }
+
+    fn consume_matching_source_revision(
+        &self,
+        source_path: &str,
+        next: Option<&GraphNode>,
+    ) -> Result<bool, String> {
+        let actual = next.map(|node| node.provenance.source_revision.clone());
+        let mut pending = self
+            .pending_source_revisions
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let Some(expected) = pending.remove(source_path) else {
+            return Ok(false);
+        };
+        Ok(expected == actual)
     }
 
     fn record_external_changes(
@@ -393,7 +455,8 @@ impl GraphRuntime {
         for path in changed_paths {
             let previous = before.get(&path).cloned();
             let next = after.get(&path).cloned();
-            if previous == next {
+            let authored_revision = self.consume_matching_source_revision(&path, next.as_ref())?;
+            if previous == next || authored_revision {
                 continue;
             }
             self.record_mutation(
@@ -1178,6 +1241,7 @@ mod tests {
             deleted: Mutex::new(VecDeque::new()),
             events: Mutex::new(VecDeque::new()),
             event_path: RwLock::new(None),
+            pending_source_revisions: Mutex::new(BTreeMap::new()),
         };
         let project_result = runtime
             .query(&GraphQuery {
@@ -1424,6 +1488,118 @@ mod tests {
             "Rewritten during refresh"
         );
         assert_eq!(runtime.open_result().unwrap().node_count, 1);
+    }
+
+    #[test]
+    fn authored_source_revisions_do_not_hide_a_later_external_edit() {
+        let project = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join("knowledge")).unwrap();
+        fs::create_dir_all(project.path().join("issues")).unwrap();
+        let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+            "project:test",
+            GraphScopeKind::Project,
+            project.path(),
+        )]);
+
+        let created = runtime
+            .create(GraphNodeCreate {
+                kind: "issue".into(),
+                title: "Check grant".into(),
+                tags: vec!["funding".into()],
+                ..GraphNodeCreate::default()
+            })
+            .unwrap();
+        runtime
+            .record_mutation(
+                "graph.create",
+                GraphActor::human(),
+                None,
+                Some(created.clone()),
+                created.provenance.source_path.clone(),
+            )
+            .unwrap();
+        runtime
+            .refresh(vec![created.provenance.source_path.clone()])
+            .unwrap();
+
+        assert_eq!(runtime.get(&created.id).unwrap().unwrap().tags, ["funding"]);
+        assert!(runtime.pending_source_revisions.lock().unwrap().is_empty());
+        let events = runtime.events(&GraphEventQuery::default()).unwrap();
+        assert_eq!(events.items.len(), 1);
+        assert_eq!(events.items[0].action, "graph.create");
+
+        let external = fs::read_to_string(&created.provenance.source_path)
+            .unwrap()
+            .replace("funding", "research");
+        fs::write(&created.provenance.source_path, external).unwrap();
+        runtime
+            .refresh(vec![created.provenance.source_path.clone()])
+            .unwrap();
+
+        assert_eq!(
+            runtime.get(&created.id).unwrap().unwrap().tags,
+            ["research"]
+        );
+        let events = runtime.events(&GraphEventQuery::default()).unwrap();
+        assert_eq!(events.total, 2);
+        assert_eq!(events.items[0].action, "external.file-change");
+        let earlier = runtime
+            .events(&GraphEventQuery {
+                offset: 1,
+                ..GraphEventQuery::default()
+            })
+            .unwrap();
+        assert_eq!(earlier.items[0].action, "graph.create");
+    }
+
+    #[test]
+    fn event_history_filters_from_an_inclusive_timestamp() {
+        let runtime = GraphRuntime::default();
+        let event = |id: &str, timestamp: &str| GraphEvent {
+            id: id.into(),
+            event_type: "updated".into(),
+            action: "graph.update".into(),
+            timestamp: timestamp.into(),
+            graph_revision: 1,
+            node_id: "issue-1".into(),
+            node_kind: "issue".into(),
+            title: "Review evidence".into(),
+            scope_id: "project:test".into(),
+            source_path: "/project/issues/issue-1.md".into(),
+            summary: "Updated Review evidence".into(),
+            actor: GraphActor::human(),
+            changes: Vec::new(),
+            data: Map::new(),
+        };
+        {
+            let mut events = runtime.events.lock().unwrap();
+            events.push_back(event("newer", "2026-07-29T10:00:00Z"));
+            events.push_back(event("boundary", "2026-07-20T00:00:00Z"));
+            events.push_back(event("older", "2026-07-19T23:59:59Z"));
+        }
+
+        let page = runtime
+            .events(&GraphEventQuery {
+                since: Some("2026-07-20T00:00:00Z".into()),
+                limit: 500,
+                ..GraphEventQuery::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            page.items
+                .iter()
+                .map(|event| event.id.as_str())
+                .collect::<Vec<_>>(),
+            ["newer", "boundary"]
+        );
+        assert!(runtime
+            .events(&GraphEventQuery {
+                since: Some("not-a-date".into()),
+                ..GraphEventQuery::default()
+            })
+            .unwrap_err()
+            .contains("Invalid graph event 'since' timestamp"));
     }
 
     #[test]

@@ -35,7 +35,7 @@
       data-graph-select-menu
       role="listbox"
       :aria-label="ariaLabel"
-      class="graph-select-menu fixed z-[180] text-ink"
+      class="graph-select-menu fixed z-[260] text-ink"
       :style="menuStyle"
       @keydown="onMenuKeydown"
     >

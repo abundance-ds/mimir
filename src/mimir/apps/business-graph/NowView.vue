@@ -1,5 +1,19 @@
 <template>
-  <section data-graph-now class="now-view" aria-label="Now">
+  <section ref="root" data-graph-now class="now-view" aria-label="Changes">
+    <div class="now-toolbar">
+      <span>Newest first</span>
+      <button
+        type="button"
+        data-graph-control="changes-summarise"
+        :disabled="!total || !canSummarise"
+        :title="summariseTitle"
+        @click="$emit('summarise')"
+      >
+        <IconNotes :size="13" />
+        Summarise
+      </button>
+    </div>
+
     <section v-if="waiting.length" class="now-waiting">
       <h2>Waiting on you · {{ waiting.length }}</h2>
       <button
@@ -17,7 +31,7 @@
     </section>
 
     <div v-if="unseenCount" class="now-caught-up">
-      <span>{{ unseenCount }} since {{ compactTime(seenAt) }}</span>
+      <span>Changes since {{ compactTime(seenAt) }}</span>
       <button
         type="button"
         data-graph-control="now-mark-seen"
@@ -42,14 +56,24 @@
               type="button"
               class="now-event-main"
               :data-graph-event="item.event.id"
-              @click="$emit('open', item.event.nodeId)"
+              :aria-expanded="hasDetail(item.event) ? expanded.includes(item.event.id) : undefined"
+              @click="activate(item.event)"
             >
               <time>{{ compactTime(item.event.timestamp) }}</time>
-              <span class="now-author" :title="item.event.actor?.label || 'External edit'">
-                {{ item.event.actor?.initials || 'EX' }}
+              <span
+                class="now-event-type"
+                :data-event-tone="eventTone(item.event)"
+              >
+                {{ eventLabel(item.event) }}
               </span>
-              <strong>{{ item.event.summary }}</strong>
-              <span class="now-row-context">{{ sourceLabel(item.event) }}</span>
+              <span class="now-event-object">
+                <strong>{{ item.event.title || item.event.nodeId }}</strong>
+                <small>{{ objectMeta(item.event) }}</small>
+              </span>
+              <span class="now-event-change">{{ changeLabel(item.event) }}</span>
+              <span class="now-event-actor" :title="item.event.actor?.label || 'External edit'">
+                {{ actorLabel(item.event) }}
+              </span>
             </button>
             <button
               v-if="hasDetail(item.event)"
@@ -78,10 +102,19 @@
                 {{ item.event.data.deliverable.label || item.event.data.deliverable.path }}
               </p>
               <p class="now-event-provenance">
-                {{ item.event.actor?.label || 'External edit' }}
-                · {{ item.event.action }}
-                · revision {{ item.event.graphRevision }}
+                {{ actorLabel(item.event) }}
+                · {{ humanAction(item.event.action) }}
+                · graph revision {{ item.event.graphRevision }}
               </p>
+              <button
+                type="button"
+                class="now-event-open"
+                :data-now-event-open="item.event.nodeId"
+                :aria-label="`Open ${item.event.title || item.event.nodeId}`"
+                @click="$emit('open', item.event.nodeId)"
+              >
+                Open {{ human(item.event.nodeKind) }}
+              </button>
             </div>
           </article>
         </template>
@@ -92,23 +125,69 @@
       <strong>No graph events yet</strong>
       <p>Filings, status changes, decisions, evidence, and overdue work appear here.</p>
     </div>
+
+    <nav
+      v-if="total > limit"
+      class="now-pagination"
+      aria-label="Change history pages"
+    >
+      <button
+        type="button"
+        data-now-page-previous
+        :disabled="loading || offset <= 0"
+        @click="goTo(Math.max(0, offset - limit))"
+      >
+        <IconChevronLeft :size="13" />
+        <span>Previous</span>
+      </button>
+      <span aria-live="polite">
+        {{ pageStart }}–{{ pageEnd }} of {{ total }}
+      </span>
+      <button
+        type="button"
+        data-now-page-next
+        :disabled="loading || offset + limit >= total"
+        @click="goTo(offset + limit)"
+      >
+        <span>Next</span>
+        <IconChevronRight :size="13" />
+      </button>
+    </nav>
   </section>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
-import { IconChevronDown } from '@tabler/icons-vue'
+import {
+  IconChevronDown,
+  IconChevronLeft,
+  IconChevronRight,
+  IconNotes,
+} from '@tabler/icons-vue'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
   waiting: { type: Array, default: () => [] },
   nodes: { type: Array, default: () => [] },
   seenAt: { type: String, default: '' },
+  total: { type: Number, default: 0 },
+  offset: { type: Number, default: 0 },
+  limit: { type: Number, default: 50 },
+  loading: { type: Boolean, default: false },
+  canSummarise: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['open', 'seen'])
+const emit = defineEmits(['open', 'page', 'seen', 'summarise'])
+const root = ref(null)
 const expanded = ref([])
 const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
+const pageStart = computed(() => props.total ? props.offset + 1 : 0)
+const pageEnd = computed(() => Math.min(props.total, props.offset + props.events.length))
+const summariseTitle = computed(() => {
+  if (!props.total) return 'There are no changes to summarise'
+  if (!props.canSummarise) return 'Configure an available CLI agent in Settings'
+  return 'Summarise recent changes with a CLI agent'
+})
 
 const unseenCount = computed(() => {
   if (!props.seenAt) return 0
@@ -147,7 +226,17 @@ function toggle(id) {
 }
 
 function hasDetail(event) {
-  return Boolean(event.changes?.length || event.data?.deliverable)
+  return Boolean(event)
+}
+
+function activate(event) {
+  if (hasDetail(event)) toggle(event.id)
+  else emit('open', event.nodeId)
+}
+
+function goTo(offset) {
+  root.value?.scrollTo?.({ top: 0, behavior: 'auto' })
+  emit('page', offset)
 }
 
 function dayLabel(value) {
@@ -196,6 +285,90 @@ function sourceLabel(event) {
   return human(event.nodeKind)
 }
 
+function eventLabel(event) {
+  if (event.action === 'external.file-change') return 'External edit'
+  return {
+    created: 'Created',
+    restored: 'Restored',
+    deleted: 'Deleted',
+    'decision-recorded': 'Decision',
+    'evidence-captured': 'Evidence',
+    'next-action-created': 'Next action',
+    'status-changed': 'Status',
+    'waiting-cleared': 'Waiting cleared',
+    'deliverable-added': 'Deliverable',
+    'became-overdue': 'Overdue',
+    updated: 'Updated',
+  }[event.eventType] || titleCase(human(event.eventType || 'updated'))
+}
+
+function eventTone(event) {
+  if (['deleted', 'became-overdue'].includes(event.eventType)) return 'attention'
+  if (['created', 'restored', 'decision-recorded', 'evidence-captured'].includes(event.eventType)) {
+    return 'added'
+  }
+  if (event.action === 'external.file-change') return 'external'
+  return 'changed'
+}
+
+function actorLabel(event) {
+  const actor = event.actor || {}
+  if (actor.id === 'local-human' || actor.label === 'You' || actor.initials === 'ME') return 'You'
+  if (actor.kind === 'external' || actor.id === 'external' || actor.initials === 'EX') {
+    return 'External'
+  }
+  return actor.label || titleCase(human(actor.kind || 'Unknown'))
+}
+
+function objectMeta(event) {
+  const kind = titleCase(human(event.nodeKind))
+  const source = sourceLabel(event)
+  if (!source || source.toLowerCase() === kind.toLowerCase()) return kind
+  return `${kind} · ${source}`
+}
+
+function changeLabel(event) {
+  if (event.data?.deliverable) {
+    return event.data.deliverable.label || event.data.deliverable.path || 'New deliverable'
+  }
+  const changes = Array.isArray(event.changes) ? event.changes : []
+  const primary = changes.find(change => (
+    ['status', 'priority', 'dueDate', 'waitingFor'].includes(change.field)
+  ))
+  if (primary) {
+    const format = value => (
+      ['status', 'priority'].includes(primary.field)
+        ? titleCase(human(compactValue(value)))
+        : compactValue(value)
+    )
+    const before = format(primary.before)
+    const after = format(primary.after)
+    return before === '—'
+      ? `${titleCase(human(primary.field))}: ${after}`
+      : `${before} → ${after}`
+  }
+  if (changes.length === 1) return `${titleCase(human(changes[0].field))} changed`
+  if (changes.length > 1) {
+    const fields = changes.slice(0, 2).map(change => human(change.field)).join(', ')
+    return `${titleCase(fields)}${changes.length > 2 ? ` +${changes.length - 2}` : ''}`
+  }
+  if (event.action === 'external.file-change') return 'Source file changed'
+  return {
+    created: 'New graph item',
+    restored: 'Returned to graph',
+    deleted: 'Moved to Trash',
+    'decision-recorded': 'Decision recorded',
+    'evidence-captured': 'Evidence captured',
+    'next-action-created': 'Follow-up filed',
+    'waiting-cleared': 'Waiting field removed',
+    'became-overdue': event.data?.dueDate ? `Due ${event.data.dueDate}` : 'Due date passed',
+  }[event.eventType] || 'Metadata updated'
+}
+
+function humanAction(value) {
+  return String(value || 'unknown action').replaceAll(/[.-]/g, ' ')
+}
+
 function compactValue(value) {
   if (value === undefined || value === null || value === '') return '—'
   if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 77)}…` : value
@@ -210,6 +383,10 @@ function compactValue(value) {
 function human(value) {
   return String(value || '').replaceAll('-', ' ')
 }
+
+function titleCase(value) {
+  return String(value || '').replace(/\b\w/g, character => character.toUpperCase())
+}
 </script>
 
 <style scoped>
@@ -218,6 +395,44 @@ function human(value) {
   flex: 1 1 auto;
   overflow-y: auto;
   background: var(--color-surface);
+}
+
+.now-toolbar {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-rule-light);
+  background: var(--color-chrome-high);
+  padding: 4px 10px 4px 13px;
+}
+
+.now-toolbar > span {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.now-toolbar button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  border-radius: 3px;
+  padding: 0 7px;
+  color: var(--color-ink-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.now-toolbar button:hover:not(:disabled),
+.now-toolbar button:focus-visible {
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.now-toolbar button:disabled {
+  opacity: 0.38;
 }
 
 .now-waiting {
@@ -335,8 +550,8 @@ function human(value) {
 .now-event-main {
   display: grid;
   width: 100%;
-  min-height: 30px;
-  grid-template-columns: 44px 26px minmax(240px, 1fr) minmax(80px, 0.25fr) 24px;
+  min-height: 38px;
+  grid-template-columns: 44px 78px minmax(220px, 1fr) minmax(140px, 0.55fr) 80px 24px;
   align-items: center;
   gap: 9px;
   padding: 3px 8px 3px 13px;
@@ -350,24 +565,69 @@ function human(value) {
   font-variant-numeric: tabular-nums;
 }
 
-.now-author {
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 650;
-}
-
-.now-event-main strong {
+.now-event-type {
   overflow: hidden;
   color: var(--color-ink-2);
-  font-size: 11px;
-  font-weight: 520;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.now-event-main:hover strong {
+.now-event-type[data-event-tone='added'] {
+  color: var(--color-add);
+}
+
+.now-event-type[data-event-tone='attention'] {
+  color: var(--color-rem);
+}
+
+.now-event-type[data-event-tone='external'] {
+  color: var(--color-ink-3);
+}
+
+.now-event-object {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.now-event-object strong {
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-event-object small {
+  overflow: hidden;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-event-main:hover .now-event-object strong {
   color: var(--color-ink);
+}
+
+.now-event-change,
+.now-event-actor {
+  overflow: hidden;
+  color: var(--color-ink-3);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-event-actor {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
 }
 
 .now-event-expand {
@@ -449,6 +709,25 @@ function human(value) {
   color: var(--color-ink-4) !important;
 }
 
+.now-event-open {
+  min-height: 22px;
+  margin-top: 7px;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: var(--color-surface);
+  padding: 0 8px;
+  color: var(--color-ink-2);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.now-event-open:hover,
+.now-event-open:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
 .now-seen {
   display: flex;
   min-height: 24px;
@@ -490,14 +769,62 @@ function human(value) {
   line-height: 1.5;
 }
 
+.now-pagination {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  border-top: 1px solid var(--color-rule);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  padding: 4px 10px;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.now-pagination button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 3px;
+  border-radius: 3px;
+  padding: 0 6px;
+  color: var(--color-ink-3);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+
+.now-pagination button:first-child {
+  justify-self: start;
+}
+
+.now-pagination button:last-child {
+  justify-self: end;
+}
+
+.now-pagination button:hover:not(:disabled),
+.now-pagination button:focus-visible {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.now-pagination button:disabled {
+  opacity: 0.38;
+}
+
 @container business-graph (max-width: 700px) {
   .now-row-context,
-  .now-waiting-reason {
+  .now-waiting-reason,
+  .now-event-change,
+  .now-event-actor {
     display: none;
   }
 
   .now-event-main {
-    grid-template-columns: 42px 24px minmax(150px, 1fr) 24px;
+    grid-template-columns: 42px 72px minmax(150px, 1fr) 24px;
   }
 
   .now-waiting-row {

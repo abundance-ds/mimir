@@ -16,7 +16,6 @@ import {
 } from '../services/businessGraph.js'
 
 export const BUSINESS_SECTIONS = Object.freeze([
-  { id: 'now', label: 'Now', kinds: [] },
   { id: 'work', label: 'Work', kinds: ['issue'] },
   { id: 'projects', label: 'Projects', kinds: ['project'] },
   {
@@ -29,7 +28,11 @@ export const BUSINESS_SECTIONS = Object.freeze([
     ],
   },
   { id: 'all', label: 'All', kinds: [] },
+  { id: 'now', label: 'Changes', kinds: [] },
 ])
+
+const EVENT_PAGE_SIZE = 50
+const MAX_SUMMARY_EVENTS = 2_000
 
 export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const status = ref(null)
@@ -37,6 +40,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const diagnostics = ref([])
   const events = ref([])
   const eventTotal = ref(0)
+  const eventOffset = ref(0)
+  const eventLimit = ref(EVENT_PAGE_SIZE)
+  const eventsLoading = ref(false)
   const loading = ref(false)
   const refreshing = ref(false)
   const error = ref('')
@@ -63,6 +69,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   let unlisten = null
   let refreshTimer = null
   let searchGeneration = 0
+  let eventLoadGeneration = 0
   let deletionTimer = null
 
   const scopes = computed(() => status.value?.scopes || [])
@@ -115,6 +122,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       projectRoot.value = nextProject
       teamRoot.value = nextTeam
       applyStatus(mounted)
+      eventOffset.value = 0
       await refresh()
       await startListening()
     } catch (cause) {
@@ -130,15 +138,13 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (!quiet) refreshing.value = true
     try {
       const scopeIds = activeScopeIds.value
-      const [result, nextDiagnostics, eventPage] = await Promise.all([
+      const [result, nextDiagnostics] = await Promise.all([
         queryGraph({ scopeIds, limit: 500 }),
         graphDiagnostics(),
-        graphEvents({ scopeIds, limit: 500 }),
+        loadEventPage(eventOffset.value),
       ])
       nodes.value = Array.isArray(result?.items) ? result.items : []
       diagnostics.value = Array.isArray(nextDiagnostics) ? nextDiagnostics : []
-      events.value = Array.isArray(eventPage?.items) ? eventPage.items : []
-      eventTotal.value = Number(eventPage?.total) || events.value.length
       status.value = {
         ...status.value,
         nodeCount: result?.total ?? nodes.value.length,
@@ -153,6 +159,62 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       if (!quiet) throw cause
     } finally {
       refreshing.value = false
+    }
+  }
+
+  async function loadEventPage(offset = 0) {
+    const requestedOffset = Math.max(0, Math.floor(Number(offset) || 0))
+    const generation = ++eventLoadGeneration
+    eventsLoading.value = true
+    try {
+      let page = await graphEvents({
+        scopeIds: activeScopeIds.value,
+        offset: requestedOffset,
+        limit: eventLimit.value,
+      })
+      if (generation !== eventLoadGeneration) return page
+      let total = Math.max(0, Number(page?.total) || 0)
+      if (total > 0 && requestedOffset >= total) {
+        const lastOffset = Math.floor((total - 1) / eventLimit.value) * eventLimit.value
+        page = await graphEvents({
+          scopeIds: activeScopeIds.value,
+          offset: lastOffset,
+          limit: eventLimit.value,
+        })
+        if (generation !== eventLoadGeneration) return page
+        total = Math.max(0, Number(page?.total) || 0)
+      }
+      events.value = Array.isArray(page?.items) ? page.items : []
+      eventTotal.value = total || events.value.length
+      eventOffset.value = Math.max(0, Number(page?.offset) || 0)
+      return page
+    } finally {
+      if (generation === eventLoadGeneration) eventsLoading.value = false
+    }
+  }
+
+  async function fetchEventsSince(since) {
+    const scopeIds = [...activeScopeIds.value]
+    const items = []
+    let total = 0
+    while (items.length < MAX_SUMMARY_EVENTS) {
+      const page = await graphEvents({
+        scopeIds,
+        since: String(since || ''),
+        offset: items.length,
+        limit: 500,
+      })
+      const pageItems = Array.isArray(page?.items) ? page.items : []
+      total = Math.max(0, Number(page?.total) || pageItems.length)
+      items.push(...pageItems.slice(0, MAX_SUMMARY_EVENTS - items.length))
+      if (!pageItems.length || items.length >= total) break
+    }
+    return {
+      items,
+      total,
+      offset: 0,
+      limit: items.length,
+      since: String(since || ''),
     }
   }
 
@@ -320,6 +382,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     const mounted = new Set(scopes.value.map(scope => scope.id))
     const next = [...new Set((ids || []).filter(id => mounted.has(id)))]
     activeScopeIds.value = next.length ? next : scopes.value.map(scope => scope.id)
+    eventOffset.value = 0
     await refresh()
   }
 
@@ -357,7 +420,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     unlisten?.()
     unlisten = null
     searchGeneration += 1
+    eventLoadGeneration += 1
     searching.value = false
+    eventsLoading.value = false
   }
 
   function reset() {
@@ -367,6 +432,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     diagnostics.value = []
     events.value = []
     eventTotal.value = 0
+    eventOffset.value = 0
+    eventsLoading.value = false
     activeScopeIds.value = []
     selectedNode.value = null
     selectedNeighbors.value = []
@@ -456,6 +523,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     diagnostics,
     events,
     eventTotal,
+    eventOffset,
+    eventLimit,
+    eventsLoading,
     loading,
     refreshing,
     error,
@@ -485,6 +555,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     latestActors,
     start,
     refresh,
+    loadEventPage,
+    fetchEventsSince,
     search,
     prepareSearch,
     clearSearch,

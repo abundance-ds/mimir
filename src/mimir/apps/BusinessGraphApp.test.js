@@ -32,7 +32,9 @@ import {
   searchGraph,
   updateGraphNode,
 } from '../../services/businessGraph.js'
+import { useLaunchersStore } from '../../stores/launchers.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
+import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 
 const scopeRows = [
   { id: 'private:local', kind: 'private', root: '/private' },
@@ -170,7 +172,13 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-business-graph-app]').exists()).toBe(true)
     expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
     expect(wrapper.get('[data-board-card="issue-1"]').text()).toContain('Extract evidence')
-    expect(wrapper.findAll('[data-graph-section]')).toHaveLength(5)
+    expect(wrapper.findAll('[data-graph-section]').map(tab => tab.text())).toEqual([
+      'Work',
+      'Projects',
+      'Knowledge',
+      'All',
+      'Changes',
+    ])
 
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()
@@ -186,6 +194,110 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-graph-context-trail]').text()).toContain('Extract evidence')
     expect(wrapper.findAll('[data-context-node]')).toHaveLength(2)
     expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
+    wrapper.unmount()
+  })
+
+  it('launches a selected interactive agent to summarise scoped change history', async () => {
+    useLaunchersStore().presets = [{
+      id: 'review',
+      title: 'Review with Codex',
+      kind: 'agent',
+      agentId: 'codex',
+      binary: '/bin/codex',
+      enabled: true,
+    }]
+    const wrapper = render()
+    await flushPromises()
+    vi.mocked(graphEvents).mockResolvedValueOnce({
+      items: [{
+        id: 'event-summary',
+        eventType: 'status-changed',
+        action: 'graph.update',
+        timestamp: '2026-07-29T12:00:00Z',
+        graphRevision: 7,
+        nodeId: 'issue-1',
+        nodeKind: 'issue',
+        title: 'Extract evidence',
+        scopeId: 'project:alpha',
+        summary: 'Status changed from plan to in-progress',
+        actor: { kind: 'human', id: 'local', label: 'You' },
+        changes: [{ field: 'status', before: 'plan', after: 'in-progress' }],
+        data: {},
+      }],
+      total: 1,
+      offset: 0,
+      limit: 1,
+    })
+
+    wrapper.findComponent(GraphSummaryDialog).vm.$emit('launch', {
+      presetId: 'review',
+      since: '2026-07-20',
+      instructions: 'Focus on decisions.',
+    })
+    await flushPromises()
+
+    expect(wrapper.emitted('startWork')).toHaveLength(1)
+    expect(wrapper.emitted('startWork')[0][0]).toMatchObject({
+      presetId: 'review',
+      sourceType: 'business-graph-summary',
+      nodeId: 'changes',
+      nodeKind: 'history',
+      title: expect.stringMatching(/^Changes since /),
+      scopeIds: scopeRows.map(scope => scope.id),
+      graphEventSince: expect.stringMatching(/^2026-07-19T22:00:00\.000Z$|^2026-07-20T/),
+      graphEventCount: 1,
+      graphContextShortened: false,
+    })
+    expect(graphEvents).toHaveBeenLastCalledWith({
+      scopeIds: scopeRows.map(scope => scope.id),
+      since: expect.stringMatching(/^2026-07-19T22:00:00\.000Z$|^2026-07-20T/),
+      offset: 0,
+      limit: 500,
+    })
+    expect(wrapper.emitted('startWork')[0][0].prompt)
+      .toContain('Mimir fetched the history before launching you.')
+    expect(wrapper.emitted('startWork')[0][0].prompt).toContain('You updated issue “Extract evidence”')
+    expect(wrapper.emitted('startWork')[0][0].prompt).not.toContain('event-summary')
+    expect(wrapper.emitted('startWork')[0][0].prompt).not.toContain('issue-1')
+    expect(wrapper.emitted('startWork')[0][0].prompt).toContain('Do not call graph_events')
+    expect(wrapper.emitted('startWork')[0][0].prompt).toContain('Focus on decisions.')
+    wrapper.unmount()
+  })
+
+  it('does not launch an agent when the summary dialog closes during preparation', async () => {
+    let resolveEvents
+    vi.mocked(graphEvents).mockImplementationOnce(() => new Promise(resolve => {
+      resolveEvents = resolve
+    }))
+    const wrapper = render()
+    await flushPromises()
+    const dialog = wrapper.findComponent(GraphSummaryDialog)
+
+    dialog.vm.$emit('launch', {
+      presetId: 'review',
+      since: '2026-07-20',
+      instructions: '',
+    })
+    await Promise.resolve()
+    expect(dialog.props('busy')).toBe(true)
+
+    dialog.vm.$emit('close')
+    resolveEvents({
+      items: [{
+        timestamp: '2026-07-29T12:00:00Z',
+        eventType: 'updated',
+        action: 'graph.update',
+        nodeKind: 'issue',
+        title: 'Should not launch',
+        actor: { kind: 'human', id: 'local-human', label: 'You' },
+        changes: [],
+      }],
+      total: 1,
+    })
+    await flushPromises()
+
+    expect(wrapper.emitted('startWork')).toBeUndefined()
+    expect(dialog.props('busy')).toBe(false)
     wrapper.unmount()
   })
 

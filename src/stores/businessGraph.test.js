@@ -97,9 +97,69 @@ describe('business graph store', () => {
       scopeIds: scopes.map(scope => scope.id),
       limit: 500,
     })
+    expect(graphEvents).toHaveBeenCalledWith({
+      scopeIds: scopes.map(scope => scope.id),
+      offset: 0,
+      limit: 50,
+    })
     expect(store.issues).toHaveLength(1)
     expect(store.projects).toHaveLength(1)
     expect(store.scopeCounts['project:alpha']).toBe(1)
+  })
+
+  it('loads change history in bounded pages', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    const pageEvent = {
+      id: 'event-51',
+      nodeId: 'issue-1',
+      actor: { label: 'Agent', initials: 'AG' },
+    }
+    vi.mocked(graphEvents).mockResolvedValueOnce({
+      items: [pageEvent],
+      total: 80,
+      offset: 50,
+      limit: 50,
+    })
+
+    await store.loadEventPage(50)
+
+    expect(graphEvents).toHaveBeenLastCalledWith({
+      scopeIds: scopes.map(scope => scope.id),
+      offset: 50,
+      limit: 50,
+    })
+    expect(store.events).toEqual([pageEvent])
+    expect(store.eventOffset).toBe(50)
+    expect(store.eventTotal).toBe(80)
+  })
+
+  it('fetches every event since a date without changing the visible history page', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.eventOffset = 50
+    const firstPage = Array.from({ length: 500 }, (_, index) => ({ id: `event-${index}` }))
+    const secondPage = Array.from({ length: 120 }, (_, index) => ({ id: `event-${index + 500}` }))
+    vi.mocked(graphEvents)
+      .mockResolvedValueOnce({ items: firstPage, total: 620, offset: 0, limit: 500 })
+      .mockResolvedValueOnce({ items: secondPage, total: 620, offset: 500, limit: 500 })
+
+    const page = await store.fetchEventsSince('2026-07-20T00:00:00Z')
+
+    expect(graphEvents).toHaveBeenNthCalledWith(2, {
+      scopeIds: scopes.map(scope => scope.id),
+      since: '2026-07-20T00:00:00Z',
+      offset: 0,
+      limit: 500,
+    })
+    expect(graphEvents).toHaveBeenNthCalledWith(3, {
+      scopeIds: scopes.map(scope => scope.id),
+      since: '2026-07-20T00:00:00Z',
+      offset: 500,
+      limit: 500,
+    })
+    expect(page.items).toHaveLength(620)
+    expect(store.eventOffset).toBe(50)
   })
 
   it('keeps an inspectable context trail while preserving projection origin', async () => {

@@ -43,6 +43,7 @@ export function graphEvents(query = {}) {
   return invoke('graph_events', {
     query: {
       scopeIds: normalizeStrings(query.scopeIds),
+      ...(query.since ? { since: String(query.since) } : {}),
       offset: Math.max(0, Number(query.offset) || 0),
       limit: Math.min(500, Math.max(1, Number(query.limit) || 200)),
     },

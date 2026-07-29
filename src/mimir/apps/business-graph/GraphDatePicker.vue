@@ -359,7 +359,7 @@ onUnmounted(close)
 
 .graph-date-popover {
   position: fixed;
-  z-index: 190;
+  z-index: 260;
   width: 286px;
   min-height: 338px;
   border: 1px solid var(--color-rule);

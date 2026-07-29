@@ -92,6 +92,15 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   dispatch: [
     'dispatch',
   ],
+  summary: [
+    'changes-summarise',
+    'summary-close',
+    'summary-agent',
+    'summary-since',
+    'summary-instructions',
+    'summary-cancel',
+    'summary-start',
+  ],
 })
 
 export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
@@ -132,6 +141,7 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphMarkdownPreview.vue',
   'GraphRelationshipLine.vue',
   'GraphSelect.vue',
+  'GraphSummaryDialog.vue',
   'NowView.vue',
   'PortfolioView.vue',
   'ProjectStanding.vue',

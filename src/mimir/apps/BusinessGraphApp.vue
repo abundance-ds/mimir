@@ -9,7 +9,9 @@
   >
     <header class="graph-topbar">
       <div class="graph-brand" aria-label="Business graph">
-        <span class="graph-mark" aria-hidden="true">G</span>
+        <span class="graph-mark" aria-hidden="true">
+          <IconTopologyStar3 :size="16" :stroke-width="1.8" />
+        </span>
         <span class="graph-brand-name">Business graph</span>
       </div>
 
@@ -26,7 +28,6 @@
           @click="setSection(item.id)"
         >
           <span>{{ item.label }}</span>
-          <span v-if="countFor(item.id)" class="graph-section-count">{{ countFor(item.id) }}</span>
         </button>
       </nav>
 
@@ -228,12 +229,7 @@
 
       <template v-else>
         <main class="flex min-w-0 flex-1 flex-col">
-          <div class="graph-viewbar">
-            <div class="graph-view-identity">
-              <span>{{ currentSection?.label }}</span>
-              <span>{{ projectionNodes.length }} {{ projectionNodes.length === 1 ? 'item' : 'items' }}</span>
-            </div>
-
+          <div v-if="graph.section !== 'now'" class="graph-viewbar">
             <nav class="graph-views" :aria-label="`${currentSection?.label} views`">
               <button
                 v-for="option in viewOptions"
@@ -388,8 +384,15 @@
             :waiting="waitingOnYouIssues"
             :nodes="graph.nodes"
             :seen-at="nowSeenAt"
+            :total="graph.eventTotal"
+            :offset="graph.eventOffset"
+            :limit="graph.eventLimit"
+            :loading="graph.eventsLoading"
+            :can-summarise="summaryAgents.length > 0"
             @open="openNode"
+            @page="loadNowPage"
             @seen="markNowSeen"
+            @summarise="summaryOpen = true"
           />
           <WorkBoard
             v-else-if="graph.section === 'work' && graph.view === 'board'"
@@ -496,6 +499,13 @@
       @close="createOpen = false"
       @create="createNode"
     />
+    <GraphSummaryDialog
+      :open="summaryOpen"
+      :agents="summaryAgents"
+      :busy="summaryPreparing"
+      @close="closeSummary"
+      @launch="launchSummary"
+    />
     <GraphConfirmDialog
       :open="deleteOpen"
       :title="deleteTitle"
@@ -519,10 +529,12 @@ import {
   IconPlus,
   IconRefresh,
   IconSearch,
+  IconTopologyStar3,
   IconX,
 } from '@tabler/icons-vue'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useActivitiesStore } from '../../stores/activities.js'
+import { useLaunchersStore } from '../../stores/launchers.js'
 import { graphContext } from '../../services/businessGraph.js'
 import {
   BUSINESS_SECTIONS,
@@ -536,10 +548,12 @@ import GraphFilterBanner from './business-graph/GraphFilterBanner.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSelect from './business-graph/GraphSelect.vue'
+import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 import NowView from './business-graph/NowView.vue'
 import PortfolioView from './business-graph/PortfolioView.vue'
 import TimelineView from './business-graph/TimelineView.vue'
 import WorkBoard from './business-graph/WorkBoard.vue'
+import { buildGraphSummaryPrompt } from './business-graph/graphSummaryContext.js'
 import { waitingOnHuman } from './business-graph/predicates.js'
 
 const props = defineProps({
@@ -556,6 +570,7 @@ const emit = defineEmits([
 ])
 const settings = useSettingsStore()
 const activities = useActivitiesStore()
+const launchers = useLaunchersStore()
 const graph = useBusinessGraphStore()
 const root = ref(null)
 const objectInspector = ref(null)
@@ -569,6 +584,8 @@ const scopeTrigger = ref(null)
 const scopeMenuRoot = ref(null)
 const focusMode = ref(false)
 const createOpen = ref(false)
+const summaryOpen = ref(false)
+const summaryPreparing = ref(false)
 const deleteOpen = ref(false)
 const deleteRequest = ref(null)
 const deleting = ref(false)
@@ -626,6 +643,7 @@ const visibleBoardStatuses = ref(boardStatuses.map(status => status.id))
 let viewStateHydrated = false
 let searchTimer = null
 let searchDraftGeneration = 0
+let summaryLaunchGeneration = 0
 
 const sections = BUSINESS_SECTIONS
 const viewsBySection = {
@@ -661,6 +679,9 @@ const allKindOptions = [
   { value: 'knowledge', label: 'Knowledge' },
 ]
 const currentSection = computed(() => sections.find(item => item.id === graph.section))
+const summaryAgents = computed(() => launchers.availablePresets.filter(
+  preset => preset.kind === 'agent',
+))
 const viewOptions = computed(() => viewsBySection[graph.section] || viewsBySection.all)
 const scopeSummary = computed(() => {
   if (!graph.scopes.length) return 'No scopes'
@@ -716,6 +737,89 @@ const nowSeenAt = ref(settings.businessGraphNowSeenAt || '')
 function markNowSeen(timestamp) {
   nowSeenAt.value = timestamp
   settings.set('businessGraphNowSeenAt', timestamp)
+}
+
+function loadNowPage(offset) {
+  void graph.loadEventPage(offset).catch(cause => {
+    emit('diagnostic', errorMessage(cause))
+  })
+}
+
+function closeSummary() {
+  summaryLaunchGeneration += 1
+  summaryOpen.value = false
+  summaryPreparing.value = false
+}
+
+async function launchSummary({ presetId, since, instructions }) {
+  if (summaryPreparing.value) return
+  const sinceTimestamp = startOfLocalDate(since)
+  if (!sinceTimestamp) {
+    emit('diagnostic', 'Choose a valid start date for the change summary.')
+    return
+  }
+  const scopeIds = [...graph.activeScopeIds]
+  const generation = ++summaryLaunchGeneration
+  summaryPreparing.value = true
+  try {
+    const page = await graph.fetchEventsSince(sinceTimestamp)
+    if (generation !== summaryLaunchGeneration) return
+    const history = buildGraphSummaryPrompt({
+      events: page?.items,
+      since,
+      total: page?.total,
+      instructions,
+    })
+    if (!history.includedCount) {
+      throw new Error('No change events are available in the selected scopes.')
+    }
+    emit('startWork', {
+      presetId,
+      sourceType: 'business-graph-summary',
+      nodeId: 'changes',
+      nodeKind: 'history',
+      title: `Changes since ${shortDate(since)}`,
+      scopeIds,
+      graphRevision: graph.status?.graphRevision || 0,
+      graphEventSince: sinceTimestamp,
+      graphEventCount: history.includedCount,
+      graphContextShortened: history.shortened,
+      graphContextBytes: history.bytes,
+      prompt: history.prompt,
+    })
+    summaryOpen.value = false
+  } catch (cause) {
+    if (generation === summaryLaunchGeneration) {
+      emit('diagnostic', `Could not prepare change summary: ${errorMessage(cause)}`)
+    }
+  } finally {
+    if (generation === summaryLaunchGeneration) summaryPreparing.value = false
+  }
+}
+
+function startOfLocalDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''))
+  if (!match) return ''
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    0,
+    0,
+    0,
+    0,
+  )
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString()
+}
+
+function shortDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''))
+  if (!match) return String(value || '')
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12))
 }
 const DISPATCH_LIVE_STATUSES = ['ready', 'starting', 'working', 'needs-input']
 const dispatchRunningCount = computed(() => activities.activities.filter(activity => (
@@ -1650,13 +1754,6 @@ function buildWorkPrompt(node, contextMarkdown, intent = '') {
   ].join('\n')
 }
 
-function countFor(section) {
-  const definition = sections.find(item => item.id === section)
-  if (!definition?.kinds?.length) return graph.nodes.length
-  const kinds = new Set(definition.kinds)
-  return graph.nodes.filter(node => kinds.has(node.kind)).length
-}
-
 async function toggleColumnsMenu() {
   if (columnsMenu.value) {
     closeColumnsMenu()
@@ -1848,13 +1945,13 @@ onUnmounted(() => {
   display: grid;
   z-index: 20;
   grid-template-columns: auto minmax(310px, 1fr) minmax(190px, 320px) auto;
-  min-height: 44px;
+  min-height: 40px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   border-bottom: 1px solid var(--color-rule);
   background: color-mix(in srgb, var(--graph-raised) 97%, transparent);
-  padding: 5px 10px;
+  padding: 4px 10px;
 }
 
 .graph-workspace {
@@ -1875,17 +1972,11 @@ onUnmounted(() => {
 
 .graph-mark {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--color-accent);
-  border-radius: 2px;
-  background: var(--graph-raised);
   color: var(--color-accent);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .graph-brand-name {
@@ -1911,14 +2002,14 @@ onUnmounted(() => {
 
 .graph-section {
   display: inline-flex;
-  min-height: 32px;
+  min-height: 26px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
-  border-radius: 5px;
-  padding: 0 9px;
+  gap: 5px;
+  border-radius: 3px;
+  padding: 0 7px;
   color: var(--color-ink-3);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 540;
   transition:
     background-color 120ms ease,
@@ -1940,20 +2031,15 @@ onUnmounted(() => {
 }
 
 .graph-section-active {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-.graph-section-count {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
+  background: transparent;
+  color: var(--color-ink);
+  font-weight: 700;
 }
 
 .graph-search {
   position: relative;
   display: flex;
-  height: 32px;
+  height: 30px;
   min-width: 0;
   align-items: center;
   gap: 7px;
@@ -2053,8 +2139,8 @@ onUnmounted(() => {
 
 .graph-icon-button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 5px;
@@ -2081,7 +2167,7 @@ onUnmounted(() => {
 .graph-primary-button,
 .graph-secondary-button {
   display: inline-flex;
-  min-height: 32px;
+  min-height: 30px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -2113,7 +2199,7 @@ onUnmounted(() => {
 
 .graph-scope-trigger {
   display: inline-flex;
-  height: 32px;
+  height: 30px;
   align-items: center;
   gap: 7px;
   border-radius: 5px;
@@ -2334,14 +2420,14 @@ onUnmounted(() => {
 
 .graph-viewbar {
   display: flex;
-  min-height: 40px;
+  min-height: 34px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   overflow-x: auto;
   border-bottom: 1px solid var(--color-rule-light);
   background: color-mix(in srgb, var(--graph-canvas) 82%, var(--graph-raised));
-  padding: 5px 10px;
+  padding: 3px 10px;
   scrollbar-width: none;
 }
 
@@ -2349,44 +2435,24 @@ onUnmounted(() => {
   display: none;
 }
 
-.graph-view-identity {
-  display: flex;
-  min-width: 0;
-  flex: 0 0 auto;
-  align-items: baseline;
-  gap: 7px;
-}
-
-.graph-view-identity span:first-child {
-  color: var(--color-ink);
-  font-size: 12px;
-  font-weight: 670;
-}
-
-.graph-view-identity span:last-child {
-  color: var(--color-ink-4);
-  font-size: 10px;
-}
-
 .graph-views {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 0;
-  border-bottom: 1px solid var(--color-rule);
+  gap: 2px;
 }
 
 .graph-view {
-  height: 28px;
-  margin-bottom: -1px;
-  border-bottom: 1px solid transparent;
-  padding: 0 10px;
+  height: 25px;
+  border-radius: 3px;
+  padding: 0 8px;
   color: var(--color-ink-3);
   font-size: 10px;
   font-weight: 540;
 }
 
 .graph-view:hover {
+  background: var(--graph-hover);
   color: var(--color-ink);
 }
 
@@ -2396,8 +2462,9 @@ onUnmounted(() => {
 }
 
 .graph-view-active {
-  border-bottom-color: var(--color-accent);
+  background: transparent;
   color: var(--color-ink);
+  font-weight: 700;
 }
 
 .graph-work-controls {
@@ -2534,10 +2601,6 @@ onUnmounted(() => {
     gap: 8px;
   }
 
-  .graph-view-identity {
-    display: none;
-  }
-
   .graph-work-controls {
     margin-left: 0;
   }
@@ -2557,9 +2620,6 @@ onUnmounted(() => {
     padding-inline: 8px;
   }
 
-  .graph-section-count {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

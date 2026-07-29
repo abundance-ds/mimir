@@ -53,8 +53,8 @@
               </span>
               <span v-if="overdue(node.dueDate)" class="entity-overdue">overdue</span>
               <span v-if="node.waitingFor" class="entity-waiting">waiting</span>
-              <span v-if="actorInitials(node)" class="entity-author" :title="actorLabel(node)">
-                {{ actorInitials(node) }}
+              <span v-if="actorDisplay(node)" class="entity-author" :title="actorLabel(node)">
+                {{ actorDisplay(node) }}
               </span>
             </template>
             <template v-else>
@@ -188,8 +188,14 @@ function projectLabel(node) {
   return project?.slug || project?.properties?.slug || project?.title || ''
 }
 
-function actorInitials(node) {
-  return props.actors?.[node.id]?.initials || ''
+function actorDisplay(node) {
+  const actor = props.actors?.[node.id]
+  if (!actor) return ''
+  if (actor.id === 'local-human' || actor.label === 'You' || actor.initials === 'ME') return 'you'
+  if (actor.kind === 'external' || actor.id === 'external' || actor.initials === 'EX') {
+    return 'external'
+  }
+  return actor.initials || actor.label || ''
 }
 
 function actorLabel(node) {
