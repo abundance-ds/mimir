@@ -1,0 +1,24 @@
+[Unit]
+Description=Mimir Chat (Ergo)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=mimir-chat
+Group=mimir-chat
+WorkingDirectory=/var/lib/mimir-chat
+ExecStart=/opt/mimir-chat/current/ergo run --conf /etc/mimir-chat/ircd.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=65536
+NotifyAccess=main
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mimir-chat
+
+[Install]
+WantedBy=multi-user.target

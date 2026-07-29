@@ -1,0 +1,29 @@
+[Unit]
+Description=Mimir Chat administration
+After=network-online.target mimir-chat.service
+Wants=network-online.target
+Requires=mimir-chat.service
+
+[Service]
+Type=simple
+User=mimir-chat
+Group=mimir-chat
+WorkingDirectory=/var/lib/mimir-chat
+ExecStart=/usr/bin/node /opt/mimir-chat/current/admin_service.mjs \
+    --token-hash-file /etc/mimir-chat/admin.token.sha256 \
+    --irc-password-file /etc/mimir-chat/admin-irc.pass \
+    --page /opt/mimir-chat/current/admin.html
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+[Unit]
+Description=Mimir Chat attachments
+After=network-online.target mimir-chat.service
+Wants=network-online.target
+Requires=mimir-chat.service
+
+[Service]
+Type=simple
+User=mimir-chat
+Group=mimir-chat
+WorkingDirectory=/var/lib/mimir-chat
+ExecStart=/usr/bin/python3 /opt/mimir-chat/current/file_service.py \
+    --data-dir /var/lib/mimir-chat/files \
+    --database /var/lib/mimir-chat/files.sqlite3 \
+    --public-base-url https://chat.shoulde.rs/files
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mimir-chat
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

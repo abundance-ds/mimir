@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mimir Chat administration</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1d2939;
+      background: #f2f4f7;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    button, input { font: inherit; }
+    button {
+      min-height: 32px; border: 1px solid #d0d5dd; border-radius: 5px;
+      background: #fff; color: #344054; padding: 5px 10px; cursor: pointer;
+    }
+    button:hover { background: #f9fafb; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #1570ef; outline-offset: 2px; }
+    button:disabled { cursor: default; opacity: .45; }
+    button.primary { background: #175cd3; border-color: #175cd3; color: #fff; }
+    button.danger { color: #b42318; }
+    input {
+      min-height: 34px; min-width: 0; border: 1px solid #d0d5dd; border-radius: 5px;
+      background: #fff; color: #101828; padding: 6px 9px;
+    }
+    code { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+    .shell { width: min(1180px, 100%); margin: 0 auto; padding: 24px; }
+    .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .topbar h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    .topbar p { margin: 2px 0 0; color: #667085; font-size: 12px; }
+    .topbar .logout { margin-left: auto; }
+    .status { width: 7px; height: 7px; border-radius: 50%; background: #12b76a; }
+    .login {
+      width: min(420px, calc(100% - 32px)); margin: 15vh auto 0; border: 1px solid #d0d5dd;
+      border-radius: 8px; background: #fff; padding: 22px;
+    }
+    .login h1 { margin: 0 0 5px; font-size: 18px; }
+    .login p { margin: 0 0 18px; color: #667085; font-size: 13px; line-height: 1.45; }
+    .login form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 16px; }
+    .panel { min-width: 0; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; overflow: hidden; }
+    .panel-header { display: flex; align-items: center; gap: 8px; padding: 13px 14px; border-bottom: 1px solid #eaecf0; }
+    .panel-header h2 { margin: 0; font-size: 14px; }
+    .count { color: #667085; font-size: 12px; }
+    .create {
+      display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) auto;
+      gap: 7px; padding: 10px 12px; border-bottom: 1px solid #eaecf0; background: #fcfcfd;
+    }
+    .create.users { grid-template-columns: 1fr auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 12px; border-bottom: 1px solid #f2f4f7; text-align: left; vertical-align: middle; }
+    th { color: #667085; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+    td { font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+    .actions button { min-height: 27px; padding: 3px 7px; font-size: 11px; }
+    .state { color: #027a48; }
+    .state.inactive { color: #b42318; }
+    .empty { padding: 22px 12px; color: #667085; text-align: center; font-size: 12px; }
+    .receipt {
+      position: sticky; bottom: 14px; display: flex; align-items: center; gap: 10px;
+      margin-top: 16px; border: 1px solid #84adff; border-radius: 7px; background: #eff4ff;
+      padding: 11px 12px; box-shadow: 0 6px 22px rgb(16 24 40 / 14%);
+    }
+    .receipt.error { border-color: #fda29b; background: #fef3f2; }
+    .receipt div { min-width: 0; flex: 1; }
+    .receipt strong { display: block; font-size: 12px; }
+    .receipt code { display: block; margin-top: 3px; overflow-wrap: anywhere; font-size: 12px; user-select: all; }
+    .loading { padding: 26px; color: #667085; text-align: center; font-size: 12px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 860px) {
+      .shell { padding: 14px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .create { grid-template-columns: 1fr; }
+      .create.users { grid-template-columns: 1fr; }
+      th:nth-child(2), td:nth-child(2) { display: none; }
+      .actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <section id="login" class="login">
+    <h1>Mimir Chat administration</h1>
+    <p>Enter the administration token. It stays in this browser tab and is cleared when you log out.</p>
+    <form id="login-form">
+      <input id="token" type="password" autocomplete="current-password" required aria-label="Administration token">
+      <button class="primary" type="submit">Log in</button>
+    </form>
+    <p id="login-error" class="state inactive" hidden></p>
+  </section>
+
+  <main id="app" class="shell" hidden aria-busy="false">
+    <header class="topbar">
+      <span class="status" aria-hidden="true"></span>
+      <div>
+        <h1>Mimir Chat</h1>
+        <p>Accounts, access and channel lifecycle</p>
+      </div>
+      <button id="refresh" type="button">Refresh</button>
+      <button id="logout" class="logout" type="button">Log out</button>
+    </header>
+
+    <div id="loading" class="loading">Reading chat administration state…</div>
+    <div id="content" class="grid" hidden>
+      <section class="panel" aria-labelledby="users-title">
+        <header class="panel-header">
+          <h2 id="users-title">Users</h2>
+          <span id="user-count" class="count"></span>
+        </header>
+        <form id="add-user" class="create users">
+          <input name="account" autocomplete="off" required placeholder="account name" aria-label="New account name">
+          <button class="primary" type="submit">Add user</button>
+        </form>
+        <div id="users"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="channels-title">
+        <header class="panel-header">
+          <h2 id="channels-title">Channels</h2>
+          <span id="channel-count" class="count"></span>
+        </header>
+        <form id="add-channel" class="create">
+          <input name="name" autocomplete="off" required placeholder="#channel" aria-label="New channel name">
+          <input name="topic" autocomplete="off" placeholder="topic (optional)" aria-label="New channel topic">
+          <button class="primary" type="submit">Create</button>
+        </form>
+        <div id="channels"></div>
+      </section>
+    </div>
+
+    <aside id="receipt" class="receipt" hidden aria-live="polite">
+      <div>
+        <strong id="receipt-title"></strong>
+        <code id="receipt-secret" hidden></code>
+      </div>
+      <button id="copy-secret" type="button" hidden>Copy passphrase</button>
+      <button id="dismiss-receipt" type="button" aria-label="Dismiss">Close</button>
+    </aside>
+  </main>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector)
+    let token = sessionStorage.getItem('mimir-chat-admin-token') || ''
+    let state = { users: [], channels: [], retiredChannels: [] }
+    let busy = false
+
+    const api = async (path, options = {}) => {
+      const response = await fetch(`api/${path}`, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      })
+      const body = response.status === 401 ? null : await response.json().catch(() => null)
+      if (response.status === 401) {
+        logout()
+        throw new Error('The administration token was not accepted.')
+      }
+      if (!response.ok || !body?.ok) throw new Error(body?.error || `Request failed (${response.status}).`)
+      return body.result
+    }
+
+    const post = (path, body = {}) => api(path, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+
+    function node(tag, text, className = '') {
+      const element = document.createElement(tag)
+      if (text !== undefined) element.textContent = text
+      if (className) element.className = className
+      return element
+    }
+
+    function action(label, handler, { danger = false, disabled = false } = {}) {
+      const button = node('button', label, danger ? 'danger' : '')
+      button.type = 'button'
+      button.disabled = disabled
+      button.addEventListener('click', handler)
+      return button
+    }
+
+    function showReceipt(title, { secret = '', error = false } = {}) {
+      const receipt = $('#receipt')
+      receipt.classList.toggle('error', error)
+      $('#receipt-title').textContent = title
+      $('#receipt-secret').textContent = secret
+      $('#receipt-secret').hidden = !secret
+      $('#copy-secret').hidden = !secret
+      receipt.hidden = false
+    }
+
+    function setBusy(value) {
+      busy = value
+      $('#app').setAttribute('aria-busy', String(value))
+      $('#app').querySelectorAll('button, input').forEach(control => {
+        control.disabled = value
+      })
+    }
+
+    async function mutate(label, operation) {
+      if (busy) return false
+      setBusy(true)
+      try {
+        const result = await operation()
+        if (result?.passphrase) {
+          showReceipt(`${label}. Copy this passphrase now.`, { secret: result.passphrase })
+        } else {
+          showReceipt(`${label}.`)
+        }
+        await load()
+        return true
+      } catch (error) {
+        showReceipt(error.message, { error: true })
+        return false
+      } finally {
+        setBusy(false)
+        render()
+      }
+    }
+
+    async function load() {
+      $('#loading').hidden = false
+      $('#content').hidden = true
+      try {
+        state = await api('state')
+        render()
+        $('#loading').hidden = true
+        $('#content').hidden = false
+      } catch (error) {
+        $('#loading').textContent = error.message
+      }
+    }
+
+    function render() {
+      renderUsers()
+      renderChannels()
+    }
+
+    function renderUsers() {
+      const root = $('#users')
+      root.replaceChildren()
+      $('#user-count').textContent = String(state.users.length)
+      if (!state.users.length) {
+        root.append(node('div', 'No teammate accounts.', 'empty'))
+        return
+      }
+      const table = node('table')
+      const head = node('tr')
+      ;['Account', 'Access', ''].forEach(label => head.append(node('th', label)))
+      const thead = node('thead'); thead.append(head); table.append(thead)
+      const tbody = node('tbody')
+      state.users.forEach(user => {
+        const row = node('tr')
+        const account = node('td'); account.append(node('code', user.account)); row.append(account)
+        row.append(node('td', user.active ? 'Active' : 'Inactive', `state${user.active ? '' : ' inactive'}`))
+        const controls = node('td', undefined, 'actions')
+        controls.append(action('Reset passphrase', () => {
+          if (confirm(`Generate a new passphrase for ${user.account}? Their current passphrase will stop working.`)) {
+            mutate('Passphrase reset', () => post(`users/${encodeURIComponent(user.account)}/password`))
+          }
+        }, { disabled: user.protected }))
+        if (user.active) {
+          controls.append(action('Remove access', () => {
+            if (confirm(`Remove ${user.account}'s access and disconnect their sessions?`)) {
+              mutate('Access removed', () => post(`users/${encodeURIComponent(user.account)}/deactivate`))
+            }
+          }, { danger: true, disabled: user.protected }))
+        } else {
+          controls.append(action('Restore access', () => {
+            mutate('Access restored', () => post(`users/${encodeURIComponent(user.account)}/reactivate`))
+          }))
+        }
+        controls.append(action('Delete account', () => {
+          if (confirm(`Permanently unregister ${user.account}? Their name stays reserved and channels they founded lose registration.`)) {
+            mutate('Account deleted', () => post(`users/${encodeURIComponent(user.account)}/delete`))
+          }
+        }, { danger: true, disabled: user.protected }))
+        row.append(controls)
+        tbody.append(row)
+      })
+      table.append(tbody)
+      root.append(table)
+    }
+
+    function renderChannels() {
+      const root = $('#channels')
+      root.replaceChildren()
+      const count = state.channels.length + state.retiredChannels.length
+      $('#channel-count').textContent = String(count)
+      if (!count) {
+        root.append(node('div', 'No channels.', 'empty'))
+        return
+      }
+      const table = node('table')
+      const head = node('tr')
+      ;['Channel', 'Founder', ''].forEach(label => head.append(node('th', label)))
+      const thead = node('thead'); thead.append(head); table.append(thead)
+      const tbody = node('tbody')
+      state.channels.forEach(channel => {
+        const row = node('tr')
+        const name = node('td'); name.append(node('code', channel.name)); row.append(name)
+        row.append(node('td', channel.founder || '—'))
+        const controls = node('td', undefined, 'actions')
+        controls.append(action('Topic', () => {
+          const topic = prompt(`Set the topic for ${channel.name}. Leave empty to clear it.`)
+          if (topic !== null) mutate('Topic updated', () => post(`channels/${encodeURIComponent(channel.name)}/topic`, { topic }))
+        }))
+        controls.append(action('Transfer', () => {
+          const founder = prompt(`Transfer ${channel.name} to account:`, channel.founder || '')
+          if (founder) mutate('Ownership transferred', () => post(`channels/${encodeURIComponent(channel.name)}/transfer`, { founder }))
+        }))
+        controls.append(action('Retire', () => {
+          if (confirm(`Retire ${channel.name}? Everyone will be removed and the channel cannot be joined until allowed again.`)) {
+            mutate('Channel retired', () => post(`channels/${encodeURIComponent(channel.name)}/retire`))
+          }
+        }, { danger: true, disabled: channel.protected }))
+        row.append(controls)
+        tbody.append(row)
+      })
+      state.retiredChannels.forEach(channel => {
+        const row = node('tr')
+        const name = node('td'); name.append(node('code', channel)); row.append(name)
+        row.append(node('td', 'Retired', 'state inactive'))
+        const controls = node('td', undefined, 'actions')
+        controls.append(action('Allow name again', () => {
+          if (confirm(`Allow ${channel} to be created and joined again?`)) {
+            mutate('Channel name allowed', () => post(`channels/${encodeURIComponent(channel)}/allow`))
+          }
+        }))
+        row.append(controls)
+        tbody.append(row)
+      })
+      table.append(tbody)
+      root.append(table)
+    }
+
+    function logout() {
+      token = ''
+      sessionStorage.removeItem('mimir-chat-admin-token')
+      $('#app').hidden = true
+      $('#login').hidden = false
+      $('#token').value = ''
+      $('#token').focus()
+    }
+
+    $('#login-form').addEventListener('submit', async event => {
+      event.preventDefault()
+      token = $('#token').value.trim()
+      $('#login-error').hidden = true
+      try {
+        state = await api('state')
+        sessionStorage.setItem('mimir-chat-admin-token', token)
+        $('#login').hidden = true
+        $('#app').hidden = false
+        $('#loading').hidden = true
+        $('#content').hidden = false
+        render()
+      } catch (error) {
+        $('#login-error').textContent = error.message
+        $('#login-error').hidden = false
+      }
+    })
+
+    $('#add-user').addEventListener('submit', async event => {
+      event.preventDefault()
+      const form = new FormData(event.currentTarget)
+      if (await mutate('User added', () => post('users', { account: form.get('account') }))) {
+        event.currentTarget.reset()
+      }
+    })
+
+    $('#add-channel').addEventListener('submit', async event => {
+      event.preventDefault()
+      const form = new FormData(event.currentTarget)
+      if (await mutate('Channel created', () => post('channels', {
+        name: form.get('name'),
+        topic: form.get('topic'),
+        founder: 'waqr',
+      }))) {
+        event.currentTarget.reset()
+      }
+    })
+
+    $('#refresh').addEventListener('click', load)
+    $('#logout').addEventListener('click', logout)
+    $('#dismiss-receipt').addEventListener('click', () => { $('#receipt').hidden = true })
+    $('#copy-secret').addEventListener('click', async () => {
+      await navigator.clipboard.writeText($('#receipt-secret').textContent)
+      $('#copy-secret').textContent = 'Copied'
+      setTimeout(() => { $('#copy-secret').textContent = 'Copy passphrase' }, 1200)
+    })
+
+    if (token) {
+      $('#login').hidden = true
+      $('#app').hidden = false
+      load()
+    }
+  </script>
+</body>
+</html>

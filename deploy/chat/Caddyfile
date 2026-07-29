@@ -1,0 +1,21 @@
+chat.shoulde.rs {
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	handle_path /webirc {
+		reverse_proxy 127.0.0.1:8067
+	}
+
+	handle /files* {
+		reverse_proxy 127.0.0.1:8069
+	}
+
+	redir /admin /admin/ 308
+
+	handle_path /admin/* {
+		reverse_proxy 127.0.0.1:8070
+	}
+
+	respond "Mimir Chat" 200
+}

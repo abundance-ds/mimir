@@ -1,0 +1,7 @@
+[Unit]
+Description=Verify Mimir Chat health
+After=network-online.target mimir-chat.service mimir-chat-files.service caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mimir-chat-health

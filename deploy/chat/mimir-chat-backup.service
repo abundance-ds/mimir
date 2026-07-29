@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up Mimir Chat state
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mimir-chat-backup
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectHome=true
+UMask=0077

@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Mimir Chat backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=mimir-chat-backup.service
+
+[Install]
+WantedBy=timers.target
