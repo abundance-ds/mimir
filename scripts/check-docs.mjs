@@ -90,38 +90,28 @@ function checkRepositoryPaths(file, source) {
 }
 
 function isRepositoryPath(value) {
-  return /^(?:src\/|src-tauri\/|scripts\/|bin\/|public\/|\.github\/|package\.json$|vite\.config\.js$|vitest\.config\.js$|README\.md$)/.test(value)
+  return /^(?:docs\/|src\/|src-tauri\/|scripts\/|bin\/|public\/|\.github\/|package\.json$|vite\.config\.js$|vitest\.config\.js$|README\.md$)/.test(value)
 }
 
 function checkDocumentationRouting() {
   const indexPath = path.join(docsDir, 'README.md')
-  const referenceDir = path.join(docsDir, 'reference')
-  const referenceIndexPath = path.join(referenceDir, 'README.md')
-  const mapPath = path.join(referenceDir, '_MAP.md')
-  if (!fs.existsSync(indexPath)) {
-    failures.push('docs/README.md: missing active documentation entry point')
-    return
-  }
-  if (!fs.existsSync(referenceIndexPath) || !fs.existsSync(mapPath)) {
-    failures.push('docs/reference/: missing README.md or _MAP.md')
+  const mapPath = path.join(docsDir, '_MAP.md')
+  if (!fs.existsSync(indexPath) || !fs.existsSync(mapPath)) {
+    failures.push('docs/: missing README.md or _MAP.md')
     return
   }
   const indexSource = fs.readFileSync(indexPath, 'utf8')
-  if (!indexSource.includes('(reference/README.md)')) {
-    fail(indexPath, 'does not route the reference archive')
-  }
-  const referenceIndexSource = fs.readFileSync(referenceIndexPath, 'utf8')
-  if (!referenceIndexSource.includes('(_MAP.md)')) {
-    fail(referenceIndexPath, 'does not route the archived codebase map')
+  if (!indexSource.includes('(_MAP.md)')) {
+    fail(indexPath, 'does not route the codebase map')
   }
   const mapSource = fs.readFileSync(mapPath, 'utf8')
   for (const file of markdownFiles) {
     if (
-      !file.startsWith(`${referenceDir}${path.sep}`)
+      !file.startsWith(`${docsDir}${path.sep}`)
       || file === mapPath
-      || file === referenceIndexPath
+      || file === indexPath
     ) continue
-    const target = path.relative(referenceDir, file).split(path.sep).join('/')
+    const target = path.relative(docsDir, file).split(path.sep).join('/')
     if (!mapSource.includes(`(${target})`) && !mapSource.includes(`](${target}#`)) {
       fail(mapPath, `does not route '${target}'`)
     }
