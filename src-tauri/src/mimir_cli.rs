@@ -68,7 +68,7 @@ fn install_builtin_skills() -> Result<(), String> {
 
 fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
     let skills_root = home.join(".mimir").join("skills");
-    let catalog = skills_root.join("catalog");
+    let catalog = configured_catalog_root(home).unwrap_or_else(|| skills_root.join("catalog"));
     let config_destination = catalog.join("mimir-config").join("SKILL.md");
     let config_marker = skills_root
         .join(".builtin-sources")
@@ -97,6 +97,14 @@ fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
         MIMIR_GRAPH_REFERENCE.as_bytes(),
         &[],
     )
+}
+
+fn configured_catalog_root(home: &Path) -> Option<PathBuf> {
+    let settings = fs::read_to_string(home.join(".mimir").join("settings.json")).ok()?;
+    let settings = serde_json::from_str::<serde_json::Value>(&settings).ok()?;
+    let configured = settings.get("skills")?.get("catalogRoot")?.as_str()?.trim();
+    let path = PathBuf::from(configured);
+    (!configured.is_empty() && path.is_absolute()).then_some(path)
 }
 
 fn install_managed_builtin_skill(
@@ -262,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_skills_use_the_catalog_path() {
+    fn builtin_skills_use_the_default_catalog_path() {
         let home = tempfile::tempdir().unwrap();
         install_builtin_skills_at(home.path()).unwrap();
         let config = home
@@ -280,6 +288,40 @@ mod tests {
             fs::read_to_string(reference).unwrap(),
             MIMIR_GRAPH_REFERENCE
         );
+    }
+
+    #[test]
+    fn builtin_skills_use_the_configured_catalog_root() {
+        let home = tempfile::tempdir().unwrap();
+        let catalog = home.path().join("shared-team-catalog");
+        fs::create_dir_all(home.path().join(".mimir")).unwrap();
+        fs::write(
+            home.path().join(".mimir/settings.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "skills": { "catalogRoot": catalog }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        install_builtin_skills_at(home.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(catalog.join("mimir-config/SKILL.md")).unwrap(),
+            MIMIR_CONFIG_SKILL
+        );
+        assert_eq!(
+            fs::read_to_string(catalog.join("mimir-graph/SKILL.md")).unwrap(),
+            MIMIR_GRAPH_SKILL
+        );
+        assert_eq!(
+            fs::read_to_string(catalog.join("mimir-graph/references/graph.md")).unwrap(),
+            MIMIR_GRAPH_REFERENCE
+        );
+        assert!(!home
+            .path()
+            .join(".mimir/skills/catalog/mimir-graph")
+            .exists());
     }
 
     #[cfg(unix)]
