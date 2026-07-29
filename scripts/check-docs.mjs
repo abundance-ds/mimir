@@ -94,22 +94,20 @@ function isRepositoryPath(value) {
 }
 
 function checkDocumentationRouting() {
-  const indexPath = path.join(docsDir, 'README.md')
   const mapPath = path.join(docsDir, '_MAP.md')
-  if (!fs.existsSync(indexPath) || !fs.existsSync(mapPath)) {
-    failures.push('docs/: missing README.md or _MAP.md')
+  if (!fs.existsSync(mapPath)) {
+    failures.push('docs/: missing _MAP.md')
     return
   }
-  const indexSource = fs.readFileSync(indexPath, 'utf8')
-  if (!indexSource.includes('(_MAP.md)')) {
-    fail(indexPath, 'does not route the codebase map')
+  const readmeSource = fs.readFileSync(path.join(root, 'README.md'), 'utf8')
+  if (!readmeSource.includes('(docs/_MAP.md)')) {
+    fail(path.join(root, 'README.md'), 'does not route the codebase map')
   }
   const mapSource = fs.readFileSync(mapPath, 'utf8')
   for (const file of markdownFiles) {
     if (
       !file.startsWith(`${docsDir}${path.sep}`)
       || file === mapPath
-      || file === indexPath
     ) continue
     const target = path.relative(docsDir, file).split(path.sep).join('/')
     if (!mapSource.includes(`(${target})`) && !mapSource.includes(`](${target}#`)) {
