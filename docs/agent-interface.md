@@ -187,9 +187,10 @@ mimir skill add ./release-review --catalog
 Writes retain content-addressed revisions. Native projections link to immutable
 revisions and never overwrite unrelated client skills.
 
-Mimir installs `mimir-config` into the writable catalog. Untouched packaged
-versions upgrade automatically; user edits are preserved. It contains only
-non-obvious file ownership and manifest rules.
+Mimir installs two minimal skills into the writable catalog:
+`mimir-config` for non-obvious file ownership and manifest rules, and
+`mimir-graph` for graph usage, examples, and ontology. Untouched packaged
+versions upgrade automatically; user edits are preserved.
 
 Native discovery verified for Codex CLI 0.145.0, Claude Code 2.1.220, Pi 0.82.1,
 and Gemini CLI 0.49.0:

@@ -11,6 +11,8 @@ const MIMIR_CLI_SOURCE: &str = include_str!("../../bin/mimir.mjs");
 const MIMIR_SKILLS_SOURCE: &str = include_str!("../../bin/mimir-skills.mjs");
 const PI_EXTENSION_SOURCE: &str = include_str!("../../bin/pi-mimir-extension.ts");
 const MIMIR_CONFIG_SKILL: &str = include_str!("../../skills/mimir-config/SKILL.md");
+const MIMIR_GRAPH_SKILL: &str = include_str!("../../skills/mimir-graph/SKILL.md");
+const MIMIR_GRAPH_REFERENCE: &str = include_str!("../../skills/mimir-graph/references/graph.md");
 const LEGACY_MIMIR_CONFIG_SKILL_V1: &str = r#"---
 name: mimir-config
 description: Locate and safely edit Mimir settings, launchers, routines, apps, and skills.
@@ -66,20 +68,34 @@ fn install_builtin_skills() -> Result<(), String> {
 
 fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
     let skills_root = home.join(".mimir").join("skills");
-    let destination = home
-        .join(".mimir")
-        .join("skills")
-        .join("catalog")
-        .join("mimir-config")
-        .join("SKILL.md");
-    let marker = skills_root
+    let catalog = skills_root.join("catalog");
+    let config_destination = catalog.join("mimir-config").join("SKILL.md");
+    let config_marker = skills_root
         .join(".builtin-sources")
         .join("mimir-config.json");
     install_managed_builtin_skill(
-        &destination,
-        &marker,
+        &config_destination,
+        &config_marker,
         MIMIR_CONFIG_SKILL.as_bytes(),
         &[LEGACY_MIMIR_CONFIG_SKILL_V1.as_bytes()],
+    )?;
+
+    let graph = catalog.join("mimir-graph");
+    install_managed_builtin_skill(
+        &graph.join("SKILL.md"),
+        &skills_root
+            .join(".builtin-sources")
+            .join("mimir-graph-skill.json"),
+        MIMIR_GRAPH_SKILL.as_bytes(),
+        &[],
+    )?;
+    install_managed_builtin_skill(
+        &graph.join("references").join("graph.md"),
+        &skills_root
+            .join(".builtin-sources")
+            .join("mimir-graph-reference.json"),
+        MIMIR_GRAPH_REFERENCE.as_bytes(),
+        &[],
     )
 }
 
@@ -111,7 +127,7 @@ fn install_managed_builtin_skill(
     }
     let parent = destination
         .parent()
-        .expect("Mimir config skill has a parent");
+        .expect("Mimir builtin skill source has a parent");
     fs::create_dir_all(parent)
         .map_err(|error| format!("Could not create Mimir skill directory: {error}"))?;
     if replace {
@@ -246,13 +262,24 @@ mod tests {
     }
 
     #[test]
-    fn builtin_config_uses_the_catalog_path() {
+    fn builtin_skills_use_the_catalog_path() {
         let home = tempfile::tempdir().unwrap();
         install_builtin_skills_at(home.path()).unwrap();
-        let installed = home
+        let config = home
             .path()
             .join(".mimir/skills/catalog/mimir-config/SKILL.md");
-        assert_eq!(fs::read_to_string(installed).unwrap(), MIMIR_CONFIG_SKILL);
+        let graph = home
+            .path()
+            .join(".mimir/skills/catalog/mimir-graph/SKILL.md");
+        let reference = home
+            .path()
+            .join(".mimir/skills/catalog/mimir-graph/references/graph.md");
+        assert_eq!(fs::read_to_string(config).unwrap(), MIMIR_CONFIG_SKILL);
+        assert_eq!(fs::read_to_string(graph).unwrap(), MIMIR_GRAPH_SKILL);
+        assert_eq!(
+            fs::read_to_string(reference).unwrap(),
+            MIMIR_GRAPH_REFERENCE
+        );
     }
 
     #[cfg(unix)]
@@ -290,6 +317,16 @@ mod tests {
         assert!(MIMIR_SKILLS_SOURCE.contains("export async function findSkill"));
         assert!(MIMIR_SKILLS_SOURCE.contains("export async function prepareSkills"));
         assert!(MIMIR_CONFIG_SKILL.contains("name: mimir-config"));
+        assert!(MIMIR_GRAPH_SKILL.contains("name: mimir-graph"));
+        for kind in crate::business_graph::ENTITY_KINDS {
+            assert!(MIMIR_GRAPH_REFERENCE.contains(kind));
+        }
+        for status in crate::business_graph::ISSUE_STATUSES {
+            assert!(MIMIR_GRAPH_REFERENCE.contains(status));
+        }
+        for priority in crate::business_graph::ISSUE_PRIORITIES {
+            assert!(MIMIR_GRAPH_REFERENCE.contains(priority));
+        }
         assert!(MIMIR_CLI_SOURCE.starts_with("#!/usr/bin/env node"));
     }
 
