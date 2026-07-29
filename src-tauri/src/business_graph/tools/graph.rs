@@ -242,6 +242,7 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
                     "targetId": string_schema("Required outgoing relation target id."),
                     "updatedAfter": string_schema("Inclusive ISO-8601 lower update bound."),
                     "updatedBefore": string_schema("Inclusive ISO-8601 upper update bound."),
+                    "limit": integer_schema(1, 100),
                 }),
             ),
             &[],

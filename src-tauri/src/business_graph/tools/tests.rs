@@ -62,6 +62,15 @@ fn definitions_are_accepted_by_the_canonical_registry() {
 }
 
 #[test]
+fn graph_find_schema_matches_its_bounded_search_limit() {
+    let (_, _, _, schema) = native_tool_definitions()
+        .into_iter()
+        .find(|(name, _, _, _)| *name == "graph.find")
+        .unwrap();
+    assert_eq!(schema["properties"]["limit"]["maximum"], 100);
+}
+
+#[test]
 fn legacy_facades_and_generic_queries_share_one_store() {
     let (_root, runtime) = fixture();
     let graph = execute_native_tool(
