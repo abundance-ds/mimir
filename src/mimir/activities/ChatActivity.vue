@@ -876,6 +876,7 @@ let dropScale = 1
 let loadingOlder = false
 let lastMarkedReadId = ''
 let newFlowReturnFocus = null
+let pendingRestoreTarget = ''
 
 const messages = computed(() => chat.activeMessages)
 const focusableMessageId = computed(() => (
@@ -965,10 +966,32 @@ watch(
     composerError.value = ''
     newBelow.value = 0
     lastMarkedReadId = ''
-    newMarkerId.value = chat.targets.find(candidate => candidate.id === target)?.firstUnreadId || ''
+    const record = chat.targets.find(candidate => candidate.id === target)
+    newMarkerId.value = record?.firstUnreadId || ''
     await nextTick()
-    restoreTimeline(target)
+    if (record?.firstUnreadId) {
+      // The anchored load positions the viewport at the first unread
+      // message; scrolling to the cached bottom here would mark it read.
+      pendingRestoreTarget = ''
+    } else if (chat.loadingByTarget[target] || !chat.activeMessages.length) {
+      // History is still loading: restoring now would land at the top of an
+      // empty timeline. Restore once the messages arrive.
+      pendingRestoreTarget = target
+    } else {
+      restoreTimeline(target)
+    }
     resizeComposer()
+  },
+)
+
+watch(
+  () => chat.activeMessages,
+  async () => {
+    if (!pendingRestoreTarget || pendingRestoreTarget !== chat.activeTarget) return
+    pendingRestoreTarget = ''
+    await nextTick()
+    if (chat.focusMessageId || chat.windowedByTarget[chat.activeTarget]) return
+    restoreTimeline(chat.activeTarget)
   },
 )
 
@@ -1016,7 +1039,9 @@ watch(
         : latest.body || (latest.attachments?.length ? 'Shared a file' : 'New message')
       announcement.value = `${senderName(latest)}: ${singleLine(body)}`
     }
-    const shouldFollow = isAtBottom()
+    // A windowed room shows history with a gap below; never auto-follow out
+    // of it, just offer the jump control.
+    const shouldFollow = !chat.windowedByTarget[chat.activeTarget] && isAtBottom()
     await nextTick()
     if (shouldFollow) {
       scrollToBottom()
@@ -1631,6 +1656,27 @@ function isAtBottom() {
 }
 
 function scrollToBottom() {
+  if (chat.windowedByTarget[chat.activeTarget]) {
+    void jumpToLatest()
+    return
+  }
+  if (!timeline.value) return
+  timeline.value.scrollTop = timeline.value.scrollHeight
+  newBelow.value = 0
+  void markVisibleRead()
+}
+
+async function jumpToLatest() {
+  // Leave the historical window by reloading the newest page, then follow.
+  const target = chat.activeTarget
+  if (!target) return
+  try {
+    await chat.loadLatest(target)
+  } catch {
+    return
+  }
+  if (chat.activeTarget !== target) return
+  await nextTick()
   if (!timeline.value) return
   timeline.value.scrollTop = timeline.value.scrollHeight
   newBelow.value = 0
