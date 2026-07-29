@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   markChatRead: vi.fn(),
   setChatEnabled: vi.fn(),
   searchChat: vi.fn(),
+  sendChatMessage: vi.fn(),
 }))
 
 vi.mock('../services/chat.js', async importOriginal => ({
@@ -130,6 +131,110 @@ describe('chat store', () => {
 
     expect(chat.members.map(member => member.account)).toEqual(['anna', 'ben'])
     expect(chat.membersByTarget['#general'].map(member => member.account)).toEqual(['anna'])
+  })
+
+  it('treats edit and reaction materializations as updates, not live arrivals', async () => {
+    api.listChatTargets.mockResolvedValue([{
+      id: '#general', kind: 'channel', joined: true, unreadCount: 0, muted: false,
+    }])
+    api.listChatMessages.mockResolvedValue([{
+      id: 'm1', target: '#general', serverTime: '2026-01-01T00:00:00.000Z', body: 'hello',
+    }])
+    const chat = useChatStore()
+    await chat.initialize()
+    await chat.selectTarget('#general')
+    const onEvent = api.listenToChatEvents.mock.calls[0][0]
+
+    onEvent({
+      type: 'message',
+      notify: false,
+      message: {
+        id: 'm1', target: '#general', serverTime: '2026-01-01T00:00:00.000Z', body: 'edited',
+      },
+    })
+    expect(chat.latestLiveMessage).toBeNull()
+    expect(chat.activeMessages[0].body).toBe('edited')
+
+    onEvent({
+      type: 'message',
+      notify: false,
+      message: {
+        id: 'm2', target: '#general', serverTime: '2026-01-01T00:00:01.000Z', body: 'fresh',
+      },
+    })
+    expect(chat.latestLiveMessage?.id).toBe('m2')
+    expect(chat.activeMessages.map(message => message.id)).toEqual(['m1', 'm2'])
+  })
+
+  it('keeps never-loaded rooms unloaded when live messages arrive', async () => {
+    const chat = useChatStore()
+    await chat.initialize()
+    const onEvent = api.listenToChatEvents.mock.calls[0][0]
+
+    onEvent({
+      type: 'message',
+      notify: false,
+      message: {
+        id: 'd1', target: 'anna', serverTime: '2026-01-01T00:00:00.000Z', body: 'hi',
+      },
+    })
+
+    expect(chat.messagesByTarget.anna).toBeUndefined()
+    expect(chat.latestLiveMessage?.id).toBe('d1')
+  })
+
+  it('keeps live arrivals out of a windowed room until the latest page reloads', async () => {
+    const chat = useChatStore()
+    await chat.initialize()
+    await chat.selectTarget('#general')
+    expect(chat.windowedByTarget['#general']).toBe(true)
+    const onEvent = api.listenToChatEvents.mock.calls[0][0]
+
+    onEvent({
+      type: 'message',
+      notify: false,
+      message: {
+        id: 'm9', target: '#general', serverTime: '2026-01-01T00:00:09.000Z', body: 'below the gap',
+      },
+    })
+    expect(chat.activeMessages.map(message => message.id)).toEqual(['m1'])
+    expect(chat.latestLiveMessage?.id).toBe('m9')
+
+    api.listChatMessages.mockResolvedValue([
+      { id: 'm1', target: '#general', serverTime: '2026-01-01T00:00:00.000Z', body: 'hello' },
+      { id: 'm9', target: '#general', serverTime: '2026-01-01T00:00:09.000Z', body: 'below the gap' },
+    ])
+    await chat.loadLatest('#general')
+    expect(chat.windowedByTarget['#general']).toBeUndefined()
+    expect(chat.activeMessages.map(message => message.id)).toEqual(['m1', 'm9'])
+  })
+
+  it('releases the event listener when initialization fails so a retry cannot double-subscribe', async () => {
+    const firstUnlisten = vi.fn()
+    const secondUnlisten = vi.fn()
+    api.listenToChatEvents
+      .mockResolvedValueOnce(firstUnlisten)
+      .mockResolvedValueOnce(secondUnlisten)
+    api.chatStatus.mockRejectedValueOnce(new Error('backend not ready'))
+    const chat = useChatStore()
+
+    await expect(chat.initialize()).rejects.toThrow('backend not ready')
+    expect(firstUnlisten).toHaveBeenCalledTimes(1)
+
+    await chat.initialize()
+    expect(api.listenToChatEvents).toHaveBeenCalledTimes(2)
+    expect(secondUnlisten).not.toHaveBeenCalled()
+  })
+
+  it('sends to the room captured at submit time, not the room active at completion', async () => {
+    api.sendChatMessage.mockResolvedValue()
+    const chat = useChatStore()
+    await chat.initialize()
+    await chat.selectTarget('#general')
+
+    await chat.send('hello there', null, '#product')
+
+    expect(api.sendChatMessage).toHaveBeenCalledWith('#product', 'hello there', null)
   })
 
   it('keeps the newest search results when an older request finishes last', async () => {
