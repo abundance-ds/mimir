@@ -10,7 +10,7 @@
     <button
       type="button"
       class="flex h-full min-w-0 flex-1 items-center text-left"
-      :aria-label="collapsed ? label : undefined"
+      :aria-label="ariaLabel || (collapsed ? label : undefined)"
       :aria-current="active ? 'page' : undefined"
       :aria-disabled="$attrs['aria-disabled']"
       :title="$attrs.title"
@@ -51,6 +51,7 @@
 <script setup>
 defineProps({
   label: { type: String, required: true },
+  ariaLabel: { type: String, default: '' },
   meta: { type: String, default: '' },
   collapsed: { type: Boolean, default: false },
   active: { type: Boolean, default: false },

@@ -54,10 +54,45 @@ export function useActivityLifecycle({
   }
 
   async function restoreActivity(id) {
+    const activity = activities.byId(id)
+    if (!activity) {
+      diagnostic.value = `Activity could not be resumed: '${id}' is no longer available.`
+      return
+    }
+
+    const preset = continuationPreset(activity, launchers)
+    if (preset) {
+      try {
+        // Native respawn replaces only ended PTY sessions and clears
+        // archivedAt as part of the same durable record update. If resolution
+        // or spawning fails, the original History entry remains archived.
+        const resumed = await activityRuntime.resumePreset(preset, {
+          ...activity,
+          workspacePath: activity.workspacePath || workspacePath.value,
+        })
+        unmarkClosing(id)
+        selectActivity(resumed?.id || id)
+      } catch (cause) {
+        diagnostic.value = `${activity.title || 'Activity'} could not resume: ${errorMessage(cause)}`
+      }
+      return
+    }
+
     try {
       const restored = await activityRuntime.setArchived(id, false)
       unmarkClosing(id)
       selectActivity(restored?.id || id)
+      if (
+        ['agent', 'routine'].includes(activity.kind)
+        && !activity.source?.appId
+        && activity.host?.type === 'pty'
+        && activity.host?.resumeStrategy
+        && activity.host.resumeStrategy !== 'none'
+      ) {
+        diagnostic.value = activity.session?.cliSessionId
+          ? 'Transcript restored. Resume is unavailable because its launcher preset is missing.'
+          : 'Transcript restored. Resume is unavailable because this legacy Activity has no exact provider session id; Run again starts a new session.'
+      }
     } catch (cause) {
       diagnostic.value = `Activity could not be restored: ${errorMessage(cause)}`
     }
@@ -93,7 +128,7 @@ export function useActivityLifecycle({
     }
 
     try {
-      await activityRuntime.stop(activity.id)
+      await activityRuntime.close(activity.id)
       return true
     } catch (cause) {
       unmarkClosing(activity.id)
@@ -213,6 +248,21 @@ export function useActivityLifecycle({
 export function isLiveActivity(activity) {
   return activity?.host?.type === 'pty'
     && ['ready', 'starting', 'working', 'needs-input', 'idle'].includes(activity?.status)
+}
+
+function continuationPreset(activity, launchers) {
+  if (
+    !['agent', 'routine'].includes(activity?.kind)
+    || activity?.source?.appId
+    || activity?.host?.type !== 'pty'
+    || !activity?.host?.resumeStrategy
+    || activity.host.resumeStrategy === 'none'
+    || !activity.session?.cliSessionId
+  ) {
+    return null
+  }
+  const presetId = activity.source?.presetId || activity.source?.launcherId
+  return presetId ? launchers.byId(presetId) : null
 }
 
 function errorMessage(error) {

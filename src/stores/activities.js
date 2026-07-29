@@ -7,6 +7,7 @@ export const ACTIVITY_KINDS = Object.freeze([
   'files',
   'app',
   'routine',
+  'chat',
 ])
 
 export const ACTIVITY_STATUSES = Object.freeze([
@@ -33,6 +34,7 @@ const KNOWN_FIELDS = new Set([
   'updatedAt',
   'lastViewedAt',
   'archivedAt',
+  'closeRequestedAt',
   'retention',
   'source',
   'host',
@@ -62,7 +64,9 @@ export const useActivitiesStore = defineStore('activities', () => {
   const records = shallowRef([])
 
   const activities = computed(() => sorted(records.value))
-  const visibleActivities = computed(() => activities.value.filter((item) => !item.archivedAt))
+  const visibleActivities = computed(() => activities.value.filter((item) => (
+    !item.archivedAt && !item.closeRequestedAt
+  )))
   const archivedActivities = computed(() => activities.value.filter((item) => Boolean(item.archivedAt)))
 
   function byId(id) {
@@ -110,6 +114,7 @@ export const useActivitiesStore = defineStore('activities', () => {
     }
     return replaceRecord(activity, {
       archivedAt: archived ? at : null,
+      closeRequestedAt: null,
       updatedAt: at,
     })
   }
@@ -137,6 +142,10 @@ export const useActivitiesStore = defineStore('activities', () => {
       if (record.retention !== 'durable') continue
       if (LIVE_STATUSES.has(record.status)) {
         record.status = 'interrupted'
+      }
+      if (record.closeRequestedAt) {
+        record.archivedAt = record.closeRequestedAt
+        record.closeRequestedAt = null
       }
       hydrated.push(record)
     }
@@ -200,6 +209,7 @@ function normalizeRecord(value) {
     updatedAt,
     lastViewedAt: nullableString(value.lastViewedAt),
     archivedAt: nullableString(value.archivedAt),
+    closeRequestedAt: nullableString(value.closeRequestedAt),
     retention,
     source: plainRecord(value.source),
     host: plainRecord(value.host),

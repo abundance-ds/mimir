@@ -44,9 +44,18 @@ const VALID_TAURI_COMMANDS = new Set([
   'shell_exec',
   // Activities and launcher presets
   'activity_list', 'activity_search_history', 'activity_spawn', 'activity_respawn', 'activity_snapshot', 'activity_write',
-  'activity_resize', 'activity_stop', 'activity_interrupt_all', 'activity_flush',
+  'activity_resize', 'activity_stop', 'activity_close', 'activity_interrupt_all', 'activity_flush',
   'activity_rename', 'activity_set_archived', 'activity_clear',
   'launcher_detect_agents', 'launcher_load_config', 'launcher_save_config', 'launcher_resolve',
+  // team chat
+  'chat_status', 'chat_config', 'chat_configure', 'chat_update_config', 'chat_reconnect',
+  'chat_disconnect', 'chat_set_enabled', 'chat_targets', 'chat_members', 'chat_messages', 'chat_messages_around',
+  'chat_search', 'chat_send', 'chat_typing', 'chat_react', 'chat_edit', 'chat_delete',
+  'chat_upload_path', 'chat_upload_base64', 'chat_download_attachment', 'chat_open_attachment',
+  'chat_attachment_preview',
+  'chat_create_channel', 'chat_set_topic', 'chat_join', 'chat_leave',
+  'chat_open_direct', 'chat_close_direct', 'chat_mark_read', 'chat_set_muted',
+  'chat_set_active', 'chat_link_activity',
   // file_open
   'take_pending_files', 'open_files_in_editor',
   // apps
@@ -102,6 +111,7 @@ vi.mock('@tauri-apps/api/window', () => ({
     listen: vi.fn(() => Promise.resolve(vi.fn())),
     emit: vi.fn(),
     onCloseRequested: vi.fn(() => Promise.resolve(vi.fn())),
+    setBadgeCount: vi.fn(() => Promise.resolve()),
   })),
   WebviewWindow: vi.fn(),
 }))
@@ -109,4 +119,10 @@ vi.mock('@tauri-apps/api/window', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
   save: vi.fn(),
+}))
+
+vi.mock('@tauri-apps/plugin-notification', () => ({
+  isPermissionGranted: vi.fn(() => Promise.resolve(false)),
+  requestPermission: vi.fn(() => Promise.resolve('denied')),
+  sendNotification: vi.fn(),
 }))

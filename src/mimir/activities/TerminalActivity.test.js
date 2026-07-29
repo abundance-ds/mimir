@@ -94,6 +94,7 @@ const agent = {
   status: 'working',
   host: { type: 'pty', resumeStrategy: 'codex' },
   launch: { cwd: '/workspace' },
+  session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
 }
 
 let resizeObservers

@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 let eventCallback = null
 vi.mock('../services/activities.js', () => ({
   clearActivity: vi.fn(),
+  closeActivity: vi.fn(),
   listActivities: vi.fn(),
   renameActivity: vi.fn(),
   resolveLauncher: vi.fn(),
@@ -11,6 +12,7 @@ vi.mock('../services/activities.js', () => ({
   setActivityArchived: vi.fn(),
   spawnActivity: vi.fn(),
   stopActivity: vi.fn(),
+  writeActivity: vi.fn(),
   listenToActivityEvents: vi.fn(async (callback) => {
     eventCallback = callback
     return vi.fn()
@@ -19,7 +21,7 @@ vi.mock('../services/activities.js', () => ({
 
 import * as api from '../services/activities.js'
 import { useActivitiesStore } from './activities.js'
-import { resumeArguments, useActivityRuntimeStore } from './activityRuntime.js'
+import { exactResumeArguments, useActivityRuntimeStore } from './activityRuntime.js'
 import { useWorkbenchStore } from './workbench.js'
 
 const backendRecord = {
@@ -53,9 +55,17 @@ describe('activity runtime store', () => {
       cwd: '/w',
       env: {},
     })
-    api.spawnActivity.mockImplementation(async (record) => ({ record: { ...record, status: 'idle' }, scrollback: { chunks: [] }, live: true }))
-    api.respawnActivity.mockImplementation(async (record) => ({
-      record: { ...record, status: 'idle', session: { runId: 'run-2' } },
+    api.spawnActivity.mockImplementation(async (record, _size, cliSessionId) => ({
+      record: {
+        ...record,
+        status: 'idle',
+        ...(cliSessionId ? { session: { runId: 'run-1', cliSessionId } } : {}),
+      },
+      scrollback: { chunks: [] },
+      live: true,
+    }))
+    api.respawnActivity.mockImplementation(async (record, _size, cliSessionId) => ({
+      record: { ...record, status: 'idle', session: { runId: 'run-2', cliSessionId } },
       scrollback: { chunks: [] },
       live: true,
     }))
@@ -99,9 +109,27 @@ describe('activity runtime store', () => {
           MIMIR_ACTIVITY_ID: 'agent:new-id',
         }),
       }),
-    }))
+    }), {}, null)
     expect(record.status).toBe('idle')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:new-id')
+  })
+
+  it('seeds editable agent input without appending Enter or argv instructions', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce('seeded-id')
+    const runtime = useActivityRuntimeStore()
+
+    await runtime.launchPreset({ id: 'review' }, '/w', {
+      seedInput: 'Read #general.\nTask: ',
+    })
+
+    expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'agent:seeded-id',
+      launch: expect.objectContaining({ args: ['review'] }),
+    }), {}, null)
+    expect(api.writeActivity).toHaveBeenCalledWith(
+      'agent:seeded-id',
+      'Read #general. Task: ',
+    )
   })
 
   it('instruments native resolve and spawn latency as separate launch stages', async () => {
@@ -125,13 +153,28 @@ describe('activity runtime store', () => {
   })
 
   it.each([
-    ['codex', ['-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'], ['resume', '--last', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"']],
-    ['claude', ['--mcp-config', '{}'], ['--continue', '--mcp-config', '{}']],
-    ['pi', ['--extension', '/tmp/mimir-tools.ts'], ['--continue', '--extension', '/tmp/mimir-tools.ts']],
-    ['gemini', ['--model', 'gemini-2.5-pro'], ['--resume', 'latest', '--model', 'gemini-2.5-pro']],
-    ['none', ['--flag'], ['--flag']],
+    ['codex', ['review', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'], ['resume', '11111111-1111-4111-8111-111111111111', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"']],
+    ['claude', ['--session-id', '22222222-2222-4222-8222-222222222222', '--mcp-config', '{}'], ['--resume', '11111111-1111-4111-8111-111111111111', '--mcp-config', '{}']],
+    ['pi', ['--session-id=22222222-2222-4222-8222-222222222222', '--extension', '/tmp/mimir-tools.ts'], ['--session', '11111111-1111-4111-8111-111111111111', '--extension', '/tmp/mimir-tools.ts']],
+    ['gemini', ['--session-id', '22222222-2222-4222-8222-222222222222', '--model', 'gemini-2.5-pro'], ['--resume', '11111111-1111-4111-8111-111111111111', '--model', 'gemini-2.5-pro']],
   ])('builds exact %s resume argv', (strategy, args, expected) => {
-    expect(resumeArguments(args, strategy)).toEqual(expected)
+    expect(exactResumeArguments(
+      args,
+      strategy,
+      '11111111-1111-4111-8111-111111111111',
+    )).toEqual(expected)
+  })
+
+  it('never falls back to an implicit or latest provider session', () => {
+    expect(() => exactResumeArguments([], 'codex')).toThrow(/exact provider session id/i)
+    expect(() => exactResumeArguments([], 'none', 'session-a')).toThrow(/does not support/i)
+    for (const strategy of ['codex', 'claude', 'pi', 'gemini']) {
+      const args = exactResumeArguments([], strategy, 'session-a')
+      expect(args).toContain('session-a')
+      expect(args).not.toContain('latest')
+      expect(args).not.toContain('--last')
+      expect(args).not.toContain('--continue')
+    }
   })
 
   it('resumes an ended agent inside its existing Activity identity', async () => {
@@ -150,7 +193,11 @@ describe('activity runtime store', () => {
     const ended = {
       ...backendRecord,
       status: 'interrupted',
-      session: { runId: 'run-1', exit: { reason: 'interrupted' } },
+      session: {
+        runId: 'run-1',
+        cliSessionId: '11111111-1111-4111-8111-111111111111',
+        exit: { reason: 'interrupted' },
+      },
     }
 
     const record = await runtime.resumePreset({ id: 'codex' }, ended)
@@ -164,7 +211,7 @@ describe('activity runtime store', () => {
         command: '/bin/codex',
         args: [
           'resume',
-          '--last',
+          '11111111-1111-4111-8111-111111111111',
           '--model',
           'gpt-5',
           '-c',
@@ -176,10 +223,78 @@ describe('activity runtime store', () => {
           MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex',
         }),
       }),
-    }))
+    }), {}, '11111111-1111-4111-8111-111111111111')
     expect(record.session.runId).toBe('run-2')
     expect(useActivitiesStore().byId('agent:one')).toMatchObject({ status: 'idle' })
     expect(useWorkbenchStore().activeActivityId).toBe('agent:one')
+  })
+
+  it('refuses an exact id when the launcher now points at another provider', async () => {
+    api.resolveLauncher.mockResolvedValueOnce({
+      presetId: 'review',
+      title: 'Review',
+      kind: 'agent',
+      agentId: 'claude',
+      resumeStrategy: 'claude',
+      command: '/bin/claude',
+      args: [],
+      cwd: '/w',
+      env: {},
+    })
+    const runtime = useActivityRuntimeStore()
+    const ended = {
+      ...backendRecord,
+      status: 'interrupted',
+      session: {
+        agentId: 'codex',
+        cliSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+    }
+
+    await expect(runtime.resumePreset({ id: 'review' }, ended))
+      .rejects.toThrow(/belongs to codex.*resolves to claude/i)
+    expect(api.respawnActivity).not.toHaveBeenCalled()
+  })
+
+  it('coalesces duplicate Resume clicks for the same Activity', async () => {
+    const runtime = useActivityRuntimeStore()
+    const ended = {
+      ...backendRecord,
+      status: 'interrupted',
+      session: {
+        cliSessionId: '11111111-1111-4111-8111-111111111111',
+      },
+    }
+
+    const first = runtime.resumePreset({ id: 'review' }, ended)
+    const second = runtime.resumePreset({ id: 'review' }, ended)
+
+    await Promise.all([first, second])
+    expect(api.respawnActivity).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes the selected exact session when two Activities share a workspace', async () => {
+    const runtime = useActivityRuntimeStore()
+    const makeEnded = (id, cliSessionId) => ({
+      ...backendRecord,
+      id,
+      status: 'interrupted',
+      session: { cliSessionId },
+    })
+    const firstId = '11111111-1111-4111-8111-111111111111'
+    const secondId = '22222222-2222-4222-8222-222222222222'
+
+    await runtime.resumePreset({ id: 'review' }, makeEnded('agent:first', firstId))
+    await runtime.resumePreset({ id: 'review' }, makeEnded('agent:second', secondId))
+
+    expect(api.respawnActivity.mock.calls.map(([record, , cliSessionId]) => ({
+      activityId: record.id,
+      argv: record.launch.args.slice(0, 2),
+      cliSessionId,
+    }))).toEqual([
+      { activityId: 'agent:first', argv: ['resume', firstId], cliSessionId: firstId },
+      { activityId: 'agent:second', argv: ['resume', secondId], cliSessionId: secondId },
+    ])
   })
 
   it('reconciles status and exit events from process truth', async () => {
@@ -253,6 +368,29 @@ describe('activity runtime store', () => {
     await archive
 
     expect(store.byId('agent:one').archivedAt).toBeNull()
+  })
+
+  it('treats an omitted archivedAt in an authoritative restore as null', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    await runtime.initialize()
+    store.upsert({
+      ...backendRecord,
+      status: 'done',
+      archivedAt: '2026-07-25T12:00:00Z',
+      updatedAt: '2026-07-25T12:00:00Z',
+    })
+    const { archivedAt: _archivedAt, ...restoredRecord } = store.byId('agent:one')
+    api.setActivityArchived.mockResolvedValueOnce({
+      ...restoredRecord,
+      updatedAt: '2026-07-25T12:00:01Z',
+    })
+
+    const restored = await runtime.setArchived('agent:one', false)
+
+    expect(restored.archivedAt).toBeNull()
+    expect(store.byId('agent:one').archivedAt).toBeNull()
+    expect(store.visibleActivities.map(activity => activity.id)).toContain('agent:one')
   })
 
   it('renames, archives, and deletes renderer-hosted app Activities without fake PTY calls', async () => {

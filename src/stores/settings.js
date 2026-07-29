@@ -32,6 +32,8 @@ const DEFAULTS = {
   },
   sidebarToolOrder: [],
   sidebarNewActivityOrder: [],
+  sidebarChatsCollapsed: false,
+  chatNotifications: true,
   workbenchFileFavorites: {},
   commentGateSkip: false,
   mimirWorkspaceFolder: '',

@@ -128,6 +128,7 @@ import {
   readTerminalTheme,
   terminalBytes,
 } from './terminalActivity.js'
+import { SYSTEM_MONO_FONT_STACK } from '../../shared/fonts.js'
 
 const props = defineProps({
   activity: { type: Object, required: true },
@@ -161,11 +162,12 @@ const canResume = computed(() => (
   mode.value === 'agent'
   && Boolean(props.activity.host?.resumeStrategy)
   && props.activity.host?.resumeStrategy !== 'none'
+  && Boolean(props.activity.session?.cliSessionId)
 ))
 const restartLabel = computed(() => canResume.value ? 'Resume' : 'Run again')
 const restartTitle = computed(() => (
   canResume.value
-    ? `Resume the latest ${props.activity.title} session in this workspace`
+    ? `Resume this exact ${props.activity.title} session`
     : 'Start this Activity again'
 ))
 let terminal = null
@@ -193,7 +195,7 @@ async function initialize() {
     if (disposed || !surface.value) return
     terminal = new Terminal({
       theme: readTerminalTheme(),
-      fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+      fontFamily: SYSTEM_MONO_FONT_STACK,
       fontSize,
       fontWeight: '400',
       fontWeightBold: '600',

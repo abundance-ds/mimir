@@ -61,6 +61,7 @@ vi.mock('./activities/TerminalActivity.vue', async () => {
 })
 
 vi.mock('../services/activities.js', () => ({
+  closeActivity: vi.fn(),
   listActivities: vi.fn(),
   listenToActivityEvents: vi.fn(),
   resolveLauncher: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock('../services/activities.js', () => ({
   spawnActivity: vi.fn(),
   stopActivity: vi.fn(),
   clearActivity: vi.fn(),
+  writeActivity: vi.fn(),
 }))
 
 vi.mock('../services/launchers.js', () => ({
@@ -242,12 +244,16 @@ describe('WorkbenchApp', () => {
       scrollback: { chunks: [] },
       live: true,
     }))
-    activityApi.respawnActivity.mockImplementation(async (record) => ({
-      record: { ...record, status: 'idle', session: { runId: 'run-2' } },
+    activityApi.respawnActivity.mockImplementation(async (record, _size, cliSessionId) => ({
+      record: { ...record, status: 'idle', session: { runId: 'run-2', cliSessionId } },
       scrollback: { chunks: [] },
       live: true,
     }))
     activityApi.stopActivity.mockResolvedValue()
+    activityApi.closeActivity.mockImplementation(async (id) => ({
+      ...useActivitiesStore().byId(id),
+      closeRequestedAt: '2026-07-25T12:00:00Z',
+    }))
     activityApi.searchActivityHistory.mockResolvedValue([])
     activityApi.renameActivity.mockImplementation(async (id, title) => ({
       ...useActivitiesStore().byId(id),
@@ -316,7 +322,17 @@ describe('WorkbenchApp', () => {
     return wrapper
   }
 
-  it('composes the lean three-pane shell and complete stable launch tray', async () => {
+  async function chooseActivitySource(wrapper, label) {
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    const menu = document.body.querySelector('[data-activity-create-menu]')
+    const option = [...menu.querySelectorAll('[data-activity-create-option]')]
+      .find(candidate => candidate.textContent.includes(label))
+    expect(option, `${label} activity source`).toBeTruthy()
+    option.click()
+    await flushPromises()
+  }
+
+  it('composes the lean three-pane shell and compact launch menu', async () => {
     const wrapper = await render()
     const rows = wrapper.findAll('[data-sidebar-row]').map((row) => row.attributes('data-sidebar-row'))
 
@@ -329,13 +345,17 @@ describe('WorkbenchApp', () => {
       'tool:core:files',
       'tool:core:routines',
       'tool:app:ledger',
-      'launcher:preset:review',
     ])
     expect(wrapper.get('[data-activity-surface="files"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-row="launcher:preset:review"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    const review = document.body.querySelector(
+      '[data-activity-create-id="preset:review"]',
+    )
+    expect(review).toBeTruthy()
+    expect(review.querySelector('svg').getAttribute('viewBox')).toBe('0 0 256 260')
   })
 
-  it('places singleton apps in Tools and process apps in New activity without Changes', async () => {
+  it('places singleton apps in Tools and process apps in the compact plus menu', async () => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps',
       diagnostics: [],
@@ -369,7 +389,11 @@ describe('WorkbenchApp', () => {
 
     expect(wrapper.get('[data-sidebar-row="tool:app:scratch"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="tool:app:business-graph"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-row="launcher:app:review-runner"]').exists()).toBe(true)
+    expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    expect(document.body.querySelector(
+      '[data-activity-create-id="app:review-runner"]',
+    )).toBeTruthy()
     expect(wrapper.text()).not.toContain('Changes')
   })
 
@@ -461,7 +485,10 @@ describe('WorkbenchApp', () => {
   it('keeps unavailable CLI tools out of the launch surface', async () => {
     const wrapper = await render()
 
-    expect(wrapper.find('[data-sidebar-row="launcher:preset:claude"]').exists()).toBe(false)
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    expect(document.body.querySelector(
+      '[data-activity-create-id="preset:claude"]',
+    )).toBeNull()
     expect(activityApi.resolveLauncher).not.toHaveBeenCalled()
   })
 
@@ -487,22 +514,25 @@ describe('WorkbenchApp', () => {
 
   it('launches an available preset in the selected workspace', async () => {
     const wrapper = await render({ workspace: '/w' })
-    await wrapper.get('[data-sidebar-row="launcher:preset:review"]').trigger('click')
-    await flushPromises()
+    await chooseActivitySource(wrapper, 'Review')
 
     expect(fileApi.openWorkspaceIndex).toHaveBeenCalledWith('/w')
     expect(activityApi.resolveLauncher).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'review', args: ['review'] }),
       '/w',
     )
-    expect(activityApi.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'agent',
-      launch: expect.objectContaining({
-        command: '/bin/codex',
-        args: ['review'],
-        cwd: '/w',
+    expect(activityApi.spawnActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'agent',
+        launch: expect.objectContaining({
+          command: '/bin/codex',
+          args: ['review'],
+          cwd: '/w',
+        }),
       }),
-    }))
+      {},
+      null,
+    )
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
   })
 
@@ -551,21 +581,69 @@ describe('WorkbenchApp', () => {
     })
     await flushPromises()
 
-    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(expect.objectContaining({
-      kind: 'agent',
-      title: 'Work · Extract evidence',
-      retention: 'durable',
-      source: expect.objectContaining({
-        type: 'business-graph-work',
-        graphNodeId: 'issue-1',
-        graphScopeIds: ['project:alpha'],
-        graphRevision: 9,
+    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: 'agent',
+        title: 'Work · Extract evidence',
+        retention: 'durable',
+        source: expect.objectContaining({
+          type: 'business-graph-work',
+          graphNodeId: 'issue-1',
+          graphScopeIds: ['project:alpha'],
+          graphRevision: 9,
+        }),
+        launch: expect.objectContaining({
+          args: ['review', 'Graph-grounded prompt'],
+        }),
       }),
-      launch: expect.objectContaining({
-        args: ['review', 'Graph-grounded prompt'],
-      }),
-    }))
+      {},
+      null,
+    )
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
+
+    useLaunchersStore().presets.push({
+      id: 'summary-agent',
+      title: 'Summary agent',
+      kind: 'agent',
+      binary: '/bin/summary-agent',
+      args: [],
+      cwd: { mode: 'workspace' },
+    })
+    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('startWork', {
+      presetId: 'summary-agent',
+      sourceType: 'business-graph-summary',
+      nodeId: 'changes',
+      nodeKind: 'history',
+      title: 'Summary · 50 changes',
+      scopeIds: ['project:alpha'],
+      graphRevision: 9,
+      graphEventSince: '2026-07-20T00:00:00Z',
+      graphEventCount: 37,
+      graphContextShortened: true,
+      graphContextBytes: 79_500,
+      prompt: 'Summarise attached graph history',
+    })
+    await flushPromises()
+
+    expect(activityApi.resolveLauncher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'summary-agent' }),
+      '/w',
+    )
+    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: 'Summary · 50 changes',
+        source: expect.objectContaining({
+          type: 'business-graph-summary',
+          graphNodeId: 'changes',
+          graphEventSince: '2026-07-20T00:00:00Z',
+          graphEventCount: 37,
+          graphContextShortened: true,
+          graphContextBytes: 79_500,
+        }),
+      }),
+      {},
+      null,
+    )
   })
 
   it('resumes an interrupted agent into the same Activity row instead of spawning a new one', async () => {
@@ -583,7 +661,11 @@ describe('WorkbenchApp', () => {
       source: { launcherId: 'codex', presetId: 'review' },
       host: { type: 'pty', resumeStrategy: 'codex' },
       launch: { command: '/bin/codex', args: ['review'], cwd: '/w', env: {} },
-      session: { runId: 'run-1', exit: { reason: 'interrupted' } },
+      session: {
+        runId: 'run-1',
+        cliSessionId: '11111111-1111-4111-8111-111111111111',
+        exit: { reason: 'interrupted' },
+      },
     })
     useWorkbenchStore().openActivity('agent:resume-me')
     await flushPromises()
@@ -597,7 +679,10 @@ describe('WorkbenchApp', () => {
     expect(activityApi.respawnActivity).toHaveBeenCalledTimes(1)
     const respawned = activityApi.respawnActivity.mock.calls[0][0]
     expect(respawned.id).toBe('agent:resume-me')
-    expect(respawned.launch.args).toEqual(['resume', '--last', 'review'])
+    expect(respawned.launch.args).toEqual([
+      'resume',
+      '11111111-1111-4111-8111-111111111111',
+    ])
     expect(respawned.launch.env.MIMIR_ACTIVITY_ID).toBe('agent:resume-me')
     expect(store.activities.filter((activity) => activity.kind === 'agent')).toHaveLength(1)
     expect(useWorkbenchStore().activeActivityId).toBe('agent:resume-me')
@@ -643,14 +728,18 @@ describe('WorkbenchApp', () => {
       expect.objectContaining({ id: 'terminal', kind: 'terminal' }),
       '/w',
     )
-    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(expect.objectContaining({
-      kind: 'terminal',
-      title: 'Terminal',
-      launch: expect.objectContaining({
-        command: '/bin/zsh',
-        cwd: '/w',
+    expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: 'terminal',
+        title: 'Terminal',
+        launch: expect.objectContaining({
+          command: '/bin/zsh',
+          cwd: '/w',
+        }),
       }),
-    }))
+      {},
+      null,
+    )
     expect(useWorkbenchStore().activeActivityId).toMatch(/^terminal:/)
     expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
   })
@@ -746,7 +835,7 @@ describe('WorkbenchApp', () => {
     expect(surface.contains(document.activeElement)).toBe(true)
   })
 
-  it('launches external Apps as one real PTY Activity from Sidebar, Settings, and MCP', async () => {
+  it('launches external Apps as one real PTY Activity from the plus menu, Settings, and MCP', async () => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps',
       diagnostics: [],
@@ -784,8 +873,7 @@ describe('WorkbenchApp', () => {
     const store = useActivitiesStore()
 
     useWorkbenchStore().setPaneState('activity', 'rail')
-    await wrapper.get('[data-sidebar-row="launcher:app:review-runner"]').trigger('click')
-    await flushPromises()
+    await chooseActivitySource(wrapper, 'Review runner')
     const sidebarRun = store.activities.find((activity) => activity.source?.appId === 'review-runner')
     expect(sidebarRun.id).toMatch(/^agent:/)
     expect(sidebarRun.launch.args).toContain('--app-flag')
@@ -988,13 +1076,20 @@ describe('WorkbenchApp', () => {
     expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
   })
 
-  it('keeps closed work out of the Sidebar and restores it through @ History', async () => {
+  it('keeps closed work out of the Sidebar and resumes it through @ History', async () => {
     const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
     store.upsert({
       ...activityRecord('agent:closed', 'Review sidebar order', '2026-07-25T12:00:00Z'),
       status: 'done',
       archivedAt: '2026-07-25T13:00:00Z',
+      source: { presetId: 'review' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: {
+        runId: 'run-1',
+        cliSessionId: '11111111-1111-4111-8111-111111111111',
+        exit: { reason: 'completed', code: 0 },
+      },
     })
     await nextTick()
 
@@ -1015,10 +1110,73 @@ describe('WorkbenchApp', () => {
     await input.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    expect(activityApi.setActivityArchived).toHaveBeenCalledWith('agent:closed', false)
+    expect(activityApi.setActivityArchived).not.toHaveBeenCalledWith('agent:closed', false)
+    expect(activityApi.respawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'agent:closed',
+      launch: expect.objectContaining({
+        args: ['resume', '11111111-1111-4111-8111-111111111111'],
+      }),
+    }), {}, '11111111-1111-4111-8111-111111111111')
     expect(store.byId('agent:closed').archivedAt).toBeNull()
+    expect(store.byId('agent:closed').session.runId).toBe('run-2')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:closed')
     expect(wrapper.get('[data-sidebar-row="activity:agent:closed"]').exists()).toBe(true)
+  })
+
+  it('resumes an archived PTY routine when Rust omits its null archivedAt field', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    const routineId = 'routine:briefing:one'
+    store.upsert({
+      ...activityRecord(routineId, 'Briefing', '2026-07-25T12:00:00Z'),
+      kind: 'routine',
+      status: 'done',
+      archivedAt: '2026-07-25T13:00:00Z',
+      source: { routineId: 'briefing', presetId: 'review' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: {
+        runId: 'run-1',
+        cliSessionId: '11111111-1111-4111-8111-111111111111',
+        exit: { reason: 'completed', code: 0 },
+      },
+    })
+    activityApi.respawnActivity.mockImplementationOnce(async (request, _size, cliSessionId) => {
+      const { archivedAt: _archivedAt, ...record } = request
+      return {
+        record: {
+          ...record,
+          status: 'idle',
+          updatedAt: '2026-07-25T13:00:01Z',
+          session: { runId: 'run-2', cliSessionId },
+        },
+        scrollback: { chunks: [] },
+        live: true,
+      }
+    })
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+    const input = wrapper.get('[data-quick-open-input]')
+    await input.setValue('@')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(activityApi.setActivityArchived).not.toHaveBeenCalledWith(routineId, false)
+    expect(activityApi.respawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: routineId,
+      launch: expect.objectContaining({
+        args: ['resume', '11111111-1111-4111-8111-111111111111'],
+      }),
+    }), {}, '11111111-1111-4111-8111-111111111111')
+    expect(store.byId(routineId).archivedAt).toBeNull()
+    expect(store.byId(routineId).session.runId).toBe('run-2')
+    expect(useWorkbenchStore().activeActivityId).toBe(routineId)
+    expect(wrapper.find('[data-activity-missing]').exists()).toBe(false)
+    expect(wrapper.get(`[data-terminal-stub="${routineId}"]`).exists()).toBe(true)
   })
 
   it('steps interface zoom with modifier chords and resets with 0, even behind a modal', async () => {

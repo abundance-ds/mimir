@@ -19,6 +19,7 @@ export function parseQuickOpenQuery(value) {
 export function buildQuickOpenResults({
   query = '',
   tools = [],
+  chats = [],
   newActivity = [],
   history = [],
   files = [],
@@ -42,6 +43,7 @@ export function buildQuickOpenResults({
   }
   if (scope === 'all') {
     results.push(...matchingRows(tools.map(toolResult), normalized))
+    if (searching) results.push(...matchingRows(chats.map(chatResult), normalized))
   }
   if (scope === 'all' || scope === 'files') {
     const limit = scope === 'files'
@@ -88,6 +90,21 @@ function toolResult(tool) {
   })
 }
 
+function chatResult(chat) {
+  const direct = chat.kind === 'direct'
+  return result({
+    key: `chat:${chat.id}`,
+    type: 'chat',
+    group: 'Chats',
+    title: direct ? (chat.title || chat.id) : chat.id,
+    meta: direct ? 'Direct message' : (chat.topic || 'Channel'),
+    verb: 'Open',
+    icon: direct ? 'chat-direct' : 'chat-channel',
+    target: chat.id,
+    search: [chat.id, chat.title, chat.topic],
+  })
+}
+
 function newActivityResult(launcher) {
   return result({
     key: `new:${launcher.id}`,
@@ -124,7 +141,7 @@ function reopenLastResult(activity) {
     group: 'History',
     title: 'Reopen last closed activity',
     meta: joinMeta(historyDisplayTitle(activity), provider, workspace),
-    verb: 'Restore & open',
+    verb: historyVerb(activity),
     icon: providerIcon(provider, activity.kind),
     activityId: activity.id,
     search: [],
@@ -151,7 +168,7 @@ function historyResults(history, term, snippets) {
         ),
         detail: workspacePath,
         snippet,
-        verb: 'Restore & open',
+        verb: historyVerb(activity),
         icon: providerIcon(provider, activity.kind),
         activityId: activity.id,
         search: [
@@ -169,6 +186,12 @@ function historyResults(history, term, snippets) {
       return candidate
     })
     .filter(candidate => !term || candidate.searchText.includes(term))
+}
+
+function historyVerb(activity) {
+  const available = activity?.resumeAvailable
+    ?? Boolean(activity?.session?.cliSessionId)
+  return available ? 'Resume' : 'Restore transcript'
 }
 
 function fileResult(file) {

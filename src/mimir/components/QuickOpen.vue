@@ -203,6 +203,7 @@ import {
   IconFile,
   IconFileStack,
   IconFocus2,
+  IconHash,
   IconMathPi,
   IconPlus,
   IconRobot,
@@ -210,6 +211,7 @@ import {
   IconSparkles,
   IconTerminal2,
   IconTopologyStar3,
+  IconUser,
 } from '@tabler/icons-vue'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import { searchActivityHistory } from '../../services/activities.js'
@@ -225,6 +227,7 @@ const SEARCH_DEBOUNCE_MS = 130
 const props = defineProps({
   open: { type: Boolean, default: false },
   tools: { type: Array, default: () => [] },
+  chats: { type: Array, default: () => [] },
   newActivity: { type: Array, default: () => [] },
   history: { type: Array, default: () => [] },
 })
@@ -270,6 +273,7 @@ const scopeLabel = computed(() => ({
 const results = computed(() => buildQuickOpenResults({
   query: query.value,
   tools: props.tools,
+  chats: props.chats,
   newActivity: props.newActivity,
   history: props.history,
   files: files.visibleFiles,
@@ -492,6 +496,8 @@ const icons = {
   today: IconFocus2,
   graph: IconTopologyStar3,
   routines: IconClockPlay,
+  'chat-channel': IconHash,
+  'chat-direct': IconUser,
   'new-activity': IconPlus,
   default: IconSparkles,
 }

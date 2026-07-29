@@ -82,6 +82,7 @@ describe('Workbench controllers', () => {
       workspacePath: '',
       source: { presetId: 'codex' },
       host: { type: 'pty', resumeStrategy: 'codex' },
+      session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
     })
     const activityRuntime = {
       resumePreset: vi.fn(async () => interrupted),
@@ -122,6 +123,148 @@ describe('Workbench controllers', () => {
       title: 'agent:two',
     })
     expect(diagnostic.value).toBe('')
+    controller.dispose()
+  })
+
+  it.each(['done', 'interrupted'])(
+    'atomically resumes an archived %s routine instead of only reopening its transcript',
+    async (status) => {
+      const preset = { id: 'review', title: 'Review', kind: 'agent' }
+      const archived = activity('routine:briefing:one', {
+        kind: 'routine',
+        title: 'Briefing',
+        status,
+        archivedAt: '2026-07-25T13:00:00Z',
+        source: { routineId: 'briefing', presetId: 'review' },
+        host: { type: 'pty', resumeStrategy: 'codex' },
+        session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
+      })
+      const resumed = {
+        ...archived,
+        status: 'idle',
+        archivedAt: null,
+        session: { runId: 'run-2' },
+      }
+      const activityRuntime = {
+        resumePreset: vi.fn(async () => resumed),
+        setArchived: vi.fn(),
+      }
+      const diagnostic = ref('')
+      const selectActivity = vi.fn()
+      const controller = useActivityLifecycle({
+        activities: { records: reactive([archived]), byId: () => archived },
+        activityRuntime,
+        launchers: { byId: id => (id === 'review' ? preset : null) },
+        workbench: reactive({
+          activeActivityId: '',
+          paneLayout: { activity: { state: 'normal' } },
+        }),
+        workspacePath: ref('/fallback'),
+        diagnostic,
+        coreActivityIds: new Set(),
+        getSidebarActivities: () => [],
+        openCoreActivity: vi.fn(),
+        selectActivity,
+        openActivityRecord: vi.fn(),
+      })
+
+      await controller.restoreActivity(archived.id)
+
+      expect(activityRuntime.resumePreset).toHaveBeenCalledWith(
+        preset,
+        expect.objectContaining({
+          id: archived.id,
+          workspacePath: '/w',
+          archivedAt: expect.any(String),
+        }),
+      )
+      expect(activityRuntime.setArchived).not.toHaveBeenCalled()
+      expect(selectActivity).toHaveBeenCalledWith(archived.id)
+      expect(diagnostic.value).toBe('')
+      controller.dispose()
+    },
+  )
+
+  it('restores only the transcript when an archived Activity has no exact session id', async () => {
+    const archived = activity('agent:legacy', {
+      kind: 'agent',
+      status: 'done',
+      archivedAt: '2026-07-25T13:00:00Z',
+      source: { presetId: 'codex' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+    })
+    const restored = { ...archived, archivedAt: null }
+    const activityRuntime = {
+      resumePreset: vi.fn(),
+      setArchived: vi.fn(async () => restored),
+    }
+    const selectActivity = vi.fn()
+    const controller = useActivityLifecycle({
+      activities: { records: reactive([archived]), byId: () => archived },
+      activityRuntime,
+      launchers: { byId: () => ({ id: 'codex' }) },
+      workbench: reactive({
+        activeActivityId: '',
+        paneLayout: { activity: { state: 'normal' } },
+      }),
+      workspacePath: ref('/w'),
+      diagnostic: ref(''),
+      coreActivityIds: new Set(),
+      getSidebarActivities: () => [],
+      openCoreActivity: vi.fn(),
+      selectActivity,
+      openActivityRecord: vi.fn(),
+    })
+
+    await controller.restoreActivity(archived.id)
+
+    expect(activityRuntime.resumePreset).not.toHaveBeenCalled()
+    expect(activityRuntime.setArchived).toHaveBeenCalledWith(archived.id, false)
+    expect(selectActivity).toHaveBeenCalledWith(archived.id)
+    controller.dispose()
+  })
+
+  it('leaves a resumable History entry archived when its respawn fails', async () => {
+    const archived = activity('agent:closed', {
+      kind: 'agent',
+      title: 'Closed review',
+      status: 'done',
+      archivedAt: '2026-07-25T13:00:00Z',
+      source: { presetId: 'review' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
+    })
+    const activityRuntime = {
+      resumePreset: vi.fn(async () => {
+        throw new Error('launcher unavailable')
+      }),
+      setArchived: vi.fn(),
+    }
+    const diagnostic = ref('')
+    const selectActivity = vi.fn()
+    const controller = useActivityLifecycle({
+      activities: { records: reactive([archived]), byId: () => archived },
+      activityRuntime,
+      launchers: { byId: () => ({ id: 'review' }) },
+      workbench: reactive({
+        activeActivityId: '',
+        paneLayout: { activity: { state: 'normal' } },
+      }),
+      workspacePath: ref('/w'),
+      diagnostic,
+      coreActivityIds: new Set(),
+      getSidebarActivities: () => [],
+      openCoreActivity: vi.fn(),
+      selectActivity,
+      openActivityRecord: vi.fn(),
+    })
+
+    await controller.restoreActivity(archived.id)
+
+    expect(activityRuntime.setArchived).not.toHaveBeenCalled()
+    expect(selectActivity).not.toHaveBeenCalled()
+    expect(archived.archivedAt).toBe('2026-07-25T13:00:00Z')
+    expect(diagnostic.value).toContain('Closed review could not resume: launcher unavailable')
     controller.dispose()
   })
 

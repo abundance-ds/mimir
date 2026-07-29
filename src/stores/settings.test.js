@@ -45,6 +45,7 @@ describe('settings store', () => {
     expect(store.mimirTeamGraphFolder).toBe('')
     expect(store.sidebarToolOrder).toEqual([])
     expect(store.sidebarNewActivityOrder).toEqual([])
+    expect(store.sidebarChatsCollapsed).toBe(false)
     expect(store.businessGraphViewState).toEqual({
       section: 'work',
       sectionViews: {

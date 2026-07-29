@@ -17,6 +17,7 @@ const base = {
   updatedAt: '2026-07-25T10:00:00.000Z',
   lastViewedAt: null,
   archivedAt: null,
+  closeRequestedAt: null,
   retention: 'durable',
   source: { launcherId: 'codex', presetId: 'codex' },
   host: { type: 'pty', resumeStrategy: 'codex' },
@@ -34,7 +35,7 @@ describe('activities store', () => {
   })
 
   it('publishes the complete kind and status vocabularies', () => {
-    expect(ACTIVITY_KINDS).toEqual(['terminal', 'agent', 'files', 'app', 'routine'])
+    expect(ACTIVITY_KINDS).toEqual(['terminal', 'agent', 'files', 'app', 'routine', 'chat'])
     expect(ACTIVITY_STATUSES).toEqual([
       'ready',
       'starting',
@@ -180,6 +181,21 @@ describe('activities store', () => {
     expect(store.visibleActivities.map((item) => item.id)).toEqual(['agent:one'])
   })
 
+  it('hides a durable close intent and finalizes it during hydration', () => {
+    const store = useActivitiesStore()
+    const requestedAt = '2026-07-25T12:00:00.000Z'
+    store.upsert({ ...base, closeRequestedAt: requestedAt })
+    expect(store.visibleActivities).toEqual([])
+    expect(store.archivedActivities).toEqual([])
+
+    store.hydrate([{ ...base, closeRequestedAt: requestedAt }])
+    expect(store.byId('agent:one')).toMatchObject({
+      archivedAt: requestedAt,
+      closeRequestedAt: null,
+      status: 'interrupted',
+    })
+  })
+
   it('creates a durable snapshot that excludes ephemeral terminals', () => {
     const store = useActivitiesStore()
     store.upsert(base)
@@ -226,7 +242,7 @@ describe('activities store', () => {
     const store = useActivitiesStore()
 
     expect(() => store.upsert({ ...base, id: '' })).toThrow(/id/i)
-    expect(() => store.upsert({ ...base, kind: 'chat' })).toThrow(/kind/i)
+    expect(() => store.upsert({ ...base, kind: 'chatty' })).toThrow(/kind/i)
     expect(() => store.upsert({ ...base, status: 'paused' })).toThrow(/status/i)
     expect(() => store.upsert({ ...base, retention: 'forever' })).toThrow(/retention/i)
   })

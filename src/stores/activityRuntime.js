@@ -9,7 +9,9 @@ import {
   setActivityArchived,
   spawnActivity,
   stopActivity,
+  writeActivity,
   clearActivity,
+  closeActivity,
 } from '../services/activities.js'
 import { useActivitiesStore } from './activities.js'
 import { useWorkbenchStore } from './workbench.js'
@@ -23,13 +25,18 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   let unlisten = null
   let nextArchiveMutation = 0
   const archiveMutations = new Map()
+  const resumePromises = new Map()
+
+  function upsertBackendRecord(record) {
+    return activities.upsert(canonicalBackendRecord(record))
+  }
 
   async function initialize() {
     if (ready.value) return
     error.value = ''
     try {
       unlisten = await listenToActivityEvents(onEvent)
-      for (const record of await listActivities()) activities.upsert(record)
+      for (const record of await listActivities()) upsertBackendRecord(record)
       ready.value = true
     } catch (cause) {
       error.value = message(cause)
@@ -86,9 +93,14 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         },
       },
     }
-    const snapshot = await spawnActivity(record)
+    if (typeof options.beforeSpawn === 'function') {
+      await options.beforeSpawn(record)
+    }
+    const snapshot = await spawnActivity(record, {}, resolved.cliSessionId || null)
+    const seedInput = String(options.seedInput || '').replace(/[\r\n]+/g, ' ')
+    if (seedInput) await writeActivity(snapshot.record.id, seedInput)
     const spawnedAt = monotonicNow()
-    activities.upsert(snapshot.record)
+    upsertBackendRecord(snapshot.record)
     if (options.open !== false) workbench.openActivity(id)
     recordLaunchMetrics({
       presetId: resolved.presetId,
@@ -103,13 +115,41 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   // Resume continues the interrupted agent inside its existing Activity row.
   // The backend respawn preserves the record id and creation time; only the
   // launch spec, session, and scrollback restart.
-  async function resumePreset(preset, activity) {
+  function resumePreset(preset, activity) {
+    const existing = resumePromises.get(activity.id)
+    if (existing) return existing
+    const promise = resumePresetExact(preset, activity)
+      .finally(() => resumePromises.delete(activity.id))
+    resumePromises.set(activity.id, promise)
+    return promise
+  }
+
+  async function resumePresetExact(preset, activity) {
     const startedAt = monotonicNow()
     const resolved = await resolveLauncher(preset, activity.workspacePath)
     const resolvedAt = monotonicNow()
     const resumeStrategy = normalizedResumeStrategy(
       activity.host?.resumeStrategy || resolved.resumeStrategy,
     )
+    const cliSessionId = String(activity.session?.cliSessionId || '').trim()
+    if (!cliSessionId) {
+      throw new Error(
+        'This Activity has no exact provider session id. Its transcript can be restored, but it cannot be resumed safely.',
+      )
+    }
+    const recordedAgentId = String(
+      activity.session?.agentId || activity.source?.launcherId || '',
+    ).trim()
+    const resolvedAgentId = String(resolved.agentId || resolved.presetId || '').trim()
+    const resolvedStrategy = normalizedResumeStrategy(resolved.resumeStrategy)
+    if (
+      (recordedAgentId && resolvedAgentId && recordedAgentId !== resolvedAgentId)
+      || (resolvedStrategy !== 'none' && resumeStrategy !== resolvedStrategy)
+    ) {
+      throw new Error(
+        `This Activity belongs to ${recordedAgentId || resumeStrategy}, but its launcher now resolves to ${resolvedAgentId || resolvedStrategy}.`,
+      )
+    }
     const agentId = resolved.agentId || resolved.presetId
     const baseMcpUrl = resolved.env?.MIMIR_MCP_URL || 'http://127.0.0.1:17532/mcp'
     const mcpUrl = activityContextUrl(baseMcpUrl, {
@@ -132,10 +172,11 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       },
       launch: {
         command: resolved.command,
-        args: resumeArguments(resolved.args, resumeStrategy)
+        args: exactResumeArguments(resolved.args, resumeStrategy, cliSessionId)
           .map(argument => replaceMcpUrl(argument, baseMcpUrl, mcpUrl)),
         cwd: resolved.cwd,
         env: {
+          ...(activity.launch?.env || {}),
           ...(resolved.env || {}),
           MIMIR_ACTIVITY_ID: activity.id,
           MIMIR_AGENT_ID: agentId,
@@ -143,9 +184,9 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         },
       },
     }
-    const snapshot = await respawnActivity(record)
+    const snapshot = await respawnActivity(record, {}, cliSessionId)
     const spawnedAt = monotonicNow()
-    activities.upsert(snapshot.record)
+    upsertBackendRecord(snapshot.record)
     workbench.openActivity(activity.id)
     recordLaunchMetrics({
       presetId: resolved.presetId,
@@ -195,13 +236,22 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       },
     }
     const snapshot = await spawnActivity(record)
-    activities.upsert(snapshot.record)
+    upsertBackendRecord(snapshot.record)
     if (open) workbench.openActivity(id)
     return snapshot.record
   }
 
   async function stop(id) {
     await stopActivity(id)
+  }
+
+  async function close(id) {
+    const activity = activities.byId(id)
+    if (activity && activity.host?.type !== 'pty') {
+      return activities.setArchived(id, true)
+    }
+    const record = await closeActivity(id)
+    return upsertBackendRecord(record)
   }
 
   async function rename(id, title) {
@@ -214,7 +264,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       })
       return
     }
-    activities.upsert(await renameActivity(id, title))
+    upsertBackendRecord(await renameActivity(id, title))
   }
 
   async function setArchived(id, archived) {
@@ -229,8 +279,9 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     // soon as the archive event arrives, the older archive invoke can resolve
     // after the newer restore and must not overwrite the restored renderer
     // state with its stale response.
-    if (archiveMutations.get(id) === generation) activities.upsert(record)
-    return activities.byId(id) || record
+    const canonical = canonicalBackendRecord(record)
+    if (archiveMutations.get(id) === generation) activities.upsert(canonical)
+    return activities.byId(id) || canonical
   }
 
   async function clear(id) {
@@ -246,7 +297,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   function onEvent(event) {
     if (!event || typeof event !== 'object') return
     if (event.type === 'upsert' && event.record) {
-      activities.upsert(event.record)
+      upsertBackendRecord(event.record)
       return
     }
     if (event.type === 'status' && activities.byId(event.activityId)) {
@@ -254,7 +305,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       return
     }
     if (event.type === 'exit' && event.record) {
-      activities.upsert(event.record)
+      upsertBackendRecord(event.record)
     }
   }
 
@@ -274,6 +325,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     resumePreset,
     launchCommand,
     stop,
+    close,
     rename,
     setArchived,
     clear,
@@ -297,6 +349,18 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     }
   }
 })
+
+function canonicalBackendRecord(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return record
+  // Rust omits Option::None fields. Activity records are otherwise merged with
+  // existing renderer state, so an omitted archivedAt must be made explicit or
+  // a restored Activity retains its previous archive timestamp forever.
+  return {
+    ...record,
+    archivedAt: record.archivedAt ?? null,
+    closeRequestedAt: record.closeRequestedAt ?? null,
+  }
+}
 
 function message(error) {
   return error instanceof Error ? error.message : String(error || 'Activity runtime failed.')
@@ -327,21 +391,102 @@ function replaceMcpUrl(argument, original, replacement) {
   )
 }
 
-export function resumeArguments(args = [], strategy = 'none') {
-  const current = [...args]
+export function exactResumeArguments(args = [], strategy = 'none', cliSessionId = '') {
+  const sessionId = String(cliSessionId || '').trim()
+  if (!sessionId) throw new Error('An exact provider session id is required to resume.')
+
+  let current = [...args]
   if (strategy === 'codex') {
-    if (current[0] === 'resume') return current
-    return ['resume', '--last', ...current]
+    if (current[0] === 'resume') {
+      current.shift()
+      if (current[0] === '--last' || (current[0] && !current[0].startsWith('-'))) {
+        current.shift()
+      }
+    }
+    current = current.filter(argument => argument !== '--last')
+    return ['resume', sessionId, ...codexGlobalArguments(current)]
   }
-  if (strategy === 'claude' || strategy === 'pi') {
-    if (current.includes('--continue') || current.includes('-c')) return current
-    return ['--continue', ...current]
+  if (strategy === 'claude') {
+    current = withoutOptions(current, ['--session-id', '--resume'])
+      .filter(argument => !['--continue', '-c'].includes(argument))
+    return ['--resume', sessionId, ...current]
+  }
+  if (strategy === 'pi') {
+    current = withoutOptions(current, ['--session-id', '--session'])
+      .filter(argument => !['--continue', '-c'].includes(argument))
+    return ['--session', sessionId, ...current]
   }
   if (strategy === 'gemini') {
-    if (current.includes('--resume') || current.includes('-r')) return current
-    return ['--resume', 'latest', ...current]
+    current = withoutOptions(current, ['--session-id', '--resume', '-r'])
+    return ['--resume', sessionId, ...current]
   }
-  return current
+  throw new Error('This launcher does not support exact session resume.')
+}
+
+function codexGlobalArguments(args) {
+  const flags = new Set([
+    '--full-auto',
+    '--dangerously-bypass-approvals-and-sandbox',
+    '--dangerously-bypass-hook-trust',
+    '--search',
+    '--oss',
+    '--no-alt-screen',
+    '--strict-config',
+  ])
+  const valued = new Set([
+    '-c',
+    '--config',
+    '-m',
+    '--model',
+    '-s',
+    '--sandbox',
+    '-a',
+    '--ask-for-approval',
+    '-C',
+    '--cd',
+    '--add-dir',
+    '--enable',
+    '--disable',
+    '--remote',
+    '--remote-auth-token-env',
+    '--local-provider',
+    '-p',
+    '--profile',
+  ])
+  const result = []
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (flags.has(argument)) {
+      result.push(argument)
+      continue
+    }
+    const inline = [...valued].find(option => argument.startsWith(`${option}=`))
+    if (inline) {
+      result.push(argument)
+      continue
+    }
+    if (valued.has(argument) && index + 1 < args.length) {
+      result.push(argument, args[index + 1])
+      index += 1
+    }
+  }
+  return result
+}
+
+function withoutOptions(args, options) {
+  const result = []
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    const option = options.find(candidate => (
+      argument === candidate || argument.startsWith(`${candidate}=`)
+    ))
+    if (!option) {
+      result.push(argument)
+      continue
+    }
+    if (argument === option) index += 1
+  }
+  return result
 }
 
 function normalizedResumeStrategy(value) {

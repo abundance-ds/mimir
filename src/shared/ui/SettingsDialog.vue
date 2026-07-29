@@ -57,6 +57,7 @@
               <EditorSection v-else-if="activeSection === 'editor'" />
               <AISection v-else-if="activeSection === 'ai'" />
               <GraphSettingsSection v-else-if="activeSection === 'graph'" />
+              <ChatSettingsSection v-else-if="activeSection === 'chat'" />
               <LaunchersSection v-else-if="activeSection === 'launchers'" />
               <AppsSettingsSection
                 v-else-if="activeSection === 'apps'"
@@ -81,6 +82,7 @@ import AppearanceSection from './settings/AppearanceSection.vue'
 import EditorSection from './settings/EditorSection.vue'
 import AISection from './settings/AISection.vue'
 import GraphSettingsSection from './settings/GraphSettingsSection.vue'
+import ChatSettingsSection from './settings/ChatSettingsSection.vue'
 import LaunchersSection from './settings/LaunchersSection.vue'
 import AppsSettingsSection from './settings/AppsSettingsSection.vue'
 import ShortcutsSection from './settings/ShortcutsSection.vue'
@@ -95,6 +97,7 @@ import {
   IconTerminal2,
   IconApps,
   IconTopologyStar3,
+  IconMessages,
 } from '@tabler/icons-vue'
 
 const props = defineProps({
@@ -109,6 +112,7 @@ const navGroups = [
     { id: 'editor',     label: 'Editor',     icon: IconPencil },
     { id: 'ai',         label: 'Models',     icon: IconSparkles },
     { id: 'graph',      label: 'Graph',      icon: IconTopologyStar3 },
+    { id: 'chat',       label: 'Chat',       icon: IconMessages },
     { id: 'launchers',  label: 'CLI tools',  icon: IconTerminal2 },
     { id: 'apps',       label: 'Apps',       icon: IconApps },
   ],
@@ -148,6 +152,7 @@ function mapSection(section) {
   if (['appearance', 'general'].includes(section)) return 'appearance'
   if (['models', 'ai'].includes(section)) return 'ai'
   if (['graph', 'knowledge', 'scopes'].includes(section)) return 'graph'
+  if (['chat', 'chats'].includes(section)) return 'chat'
   if (['launchers', 'agents'].includes(section)) return 'launchers'
   if (['apps', 'applications'].includes(section)) return 'apps'
   if (['shortcuts'].includes(section)) return 'shortcuts'

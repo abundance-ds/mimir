@@ -27,6 +27,7 @@ describe('activity spawn sizing', () => {
       record: { id: 'terminal:one' },
       cols: 64,
       rows: 20,
+      cliSessionId: null,
     })
   })
 
@@ -41,11 +42,13 @@ describe('activity spawn sizing', () => {
       record: { id: 'terminal:two' },
       cols: 87,
       rows: 38,
+      cliSessionId: null,
     })
     expect(invoke).toHaveBeenCalledWith('activity_respawn', {
       record: { id: 'terminal:one' },
       cols: 87,
       rows: 38,
+      cliSessionId: null,
     })
   })
 
@@ -61,11 +64,13 @@ describe('activity spawn sizing', () => {
       record: { id: 'terminal:two' },
       cols: 120,
       rows: 50,
+      cliSessionId: null,
     })
     expect(invoke).toHaveBeenCalledWith('activity_spawn', {
       record: { id: 'terminal:three' },
       cols: 90,
       rows: 40,
+      cliSessionId: null,
     })
   })
 

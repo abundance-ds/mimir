@@ -32,7 +32,7 @@
       @open-workspace="$emit('openWorkspace', $event)"
     />
 
-    <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Tools, new activities, and activity history">
+    <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Tools, chats, and activity history">
       <div
         class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3"
         :class="{ invisible: collapsed }"
@@ -68,56 +68,19 @@
         </span>
       </SidebarRow>
 
-      <div class="mx-3 my-2 h-px bg-rule" />
-
-      <div data-sidebar-new-activity-header class="flex h-7 items-center px-3">
-        <template v-if="!collapsed">
-          <button
-            type="button"
-            data-sidebar-new-activity-toggle
-            :aria-expanded="!newActivityCollapsed"
-            title="Toggle New activity"
-            class="flex h-6 min-w-0 flex-1 items-center gap-1 text-left font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3 hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-            @click="newActivityCollapsed = !newActivityCollapsed"
-            @keydown.right.prevent="newActivityCollapsed = false"
-            @keydown.left.prevent="newActivityCollapsed = true"
-          >
-            <IconChevronRight v-if="newActivityCollapsed" :size="12" :stroke-width="2" />
-            <IconChevronDown v-else :size="12" :stroke-width="2" />
-            <span>New activity</span>
-          </button>
-        </template>
-        <span v-else class="h-px w-7 bg-rule-light" aria-hidden="true" />
-      </div>
-      <template v-if="collapsed || !newActivityCollapsed">
-        <SidebarRow
-          v-for="launcher in newActivity"
-          :key="`launcher:${launcher.id}`"
-          :data-sidebar-row="`launcher:${launcher.id}`"
-          :data-new-activity-key="launcher.id"
-          :data-drop-position="launcherDropPosition(launcher.id)"
-          :data-launcher-available="launcher.available === false ? 'false' : 'true'"
-          :aria-disabled="launcher.available === false ? 'true' : undefined"
-          :title="launcherTitle(launcher)"
-          :label="launcher.title"
-          :meta="launcher.available === false ? 'missing' : launcher.shortcut"
-          :collapsed="collapsed"
-          :active="false"
-          :muted="launcher.available === false"
-          @pointerdown="onLauncherPointerDown($event, launcher.id)"
-          @keydown="onLauncherKeydown($event, launcher)"
-          @click="launchNewActivity(launcher.id)"
-        >
-          <span :data-launcher-identity="launcher.icon" class="grid size-7 place-items-center">
-            <component
-              :is="iconFor(launcher.icon)"
-              :size="16"
-              :stroke-width="1.7"
-              :monochrome="true"
-            />
-          </span>
-        </SidebarRow>
-      </template>
+      <ChatSidebarSection
+        v-if="chatEnabled"
+        :collapsed="collapsed"
+        :targets="chatTargets"
+        :members="chatMembers"
+        :selected-target="activeChatTarget"
+        :active="activeActivityId === 'chats'"
+        :unread-total="chatUnreadTotal"
+        :section-collapsed="chatSectionCollapsed"
+        @select-chat="$emit('selectChat', $event)"
+        @new-chat="$emit('newChat')"
+        @toggle-collapsed="$emit('toggleChatCollapse')"
+      />
 
       <div class="mx-3 my-2 h-px bg-rule" />
 
@@ -438,6 +401,7 @@ import {
   IconTrash,
 } from '@tabler/icons-vue'
 import SidebarRow from './SidebarRow.vue'
+import ChatSidebarSection from './ChatSidebarSection.vue'
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 import { moveActivityId } from '../activityOrdering.js'
 import { usePointerReorder } from '../composables/usePointerReorder.js'
@@ -453,6 +417,12 @@ const props = defineProps({
   tools: { type: Array, default: () => [] },
   newActivity: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
+  chatTargets: { type: Array, default: () => [] },
+  chatEnabled: { type: Boolean, default: true },
+  chatMembers: { type: Array, default: () => [] },
+  activeChatTarget: { type: String, default: '' },
+  chatUnreadTotal: { type: Number, default: 0 },
+  chatSectionCollapsed: { type: Boolean, default: false },
   activeActivityId: { type: String, default: '' },
   activitySort: { type: String, default: 'manual' },
 })
@@ -460,6 +430,8 @@ const props = defineProps({
 const emit = defineEmits([
   'launch',
   'selectActivity',
+  'selectChat',
+  'newChat',
   'chooseWorkspace',
   'openWorkspace',
   'toggleCollapse',
@@ -468,14 +440,13 @@ const emit = defineEmits([
   'archiveActivity',
   'clearActivity',
   'reorderTools',
-  'reorderLaunchers',
   'reorderActivities',
   'sortActivities',
+  'toggleChatCollapse',
   'settings',
 ])
 const activityMenuId = ref('')
 const sortMenuOpen = ref(false)
-const newActivityCollapsed = ref(false)
 const activitiesCollapsed = ref(false)
 const renamingId = ref('')
 const renameDraft = ref('')
@@ -537,18 +508,6 @@ const {
   onReorder: (ids) => emit('reorderTools', ids),
 })
 
-const {
-  dropIndicator: launcherDropIndicator,
-  suppressClick: suppressLauncherClick,
-  onPointerDown: onLauncherPointerDown,
-} = usePointerReorder({
-  root: sidebarRoot,
-  rowSelector: '[data-new-activity-key]',
-  keyAttribute: 'data-new-activity-key',
-  keys: () => props.newActivity.map((launcher) => launcher.id),
-  onReorder: (ids) => emit('reorderLaunchers', ids),
-})
-
 const icons = {
   files: IconFileStack,
   agent: IconRobot,
@@ -579,10 +538,6 @@ function openTool(id) {
 
 function toolIsActive(tool) {
   return props.activeActivityId === (tool.activityId || tool.id)
-}
-
-function launchNewActivity(id) {
-  if (!suppressLauncherClick.value) emit('launch', id)
 }
 
 function activityTitle(activity) {
@@ -844,26 +799,6 @@ function onToolKeydown(event, tool) {
   }
 }
 
-function moveLauncher(id, direction) {
-  emit('reorderLaunchers', moveActivityId(
-    props.newActivity.map((launcher) => launcher.id),
-    id,
-    direction,
-  ))
-}
-
-function onLauncherKeydown(event, launcher) {
-  if (navigateSidebarRows(event)) return
-  if (
-    event.altKey
-    && event.shiftKey
-    && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
-  ) {
-    event.preventDefault()
-    moveLauncher(launcher.id, event.key === 'ArrowUp' ? -1 : 1)
-  }
-}
-
 function onActivityKeydown(event, activity) {
   if (event.target?.tagName === 'INPUT') return
   if (navigateSidebarRows(event)) return
@@ -967,12 +902,6 @@ function dropPosition(id) {
 function toolDropPosition(id) {
   if (toolDropIndicator.value?.beforeId === id) return 'before'
   if (toolDropIndicator.value?.afterId === id) return 'after'
-  return undefined
-}
-
-function launcherDropPosition(id) {
-  if (launcherDropIndicator.value?.beforeId === id) return 'before'
-  if (launcherDropIndicator.value?.afterId === id) return 'after'
   return undefined
 }
 

@@ -72,8 +72,21 @@ describe('quick open results', () => {
     expect(result).toMatchObject({
       detail: '/work/mimir',
       snippet: 'Finished the sidebar ordering review.',
+      verb: 'Restore transcript',
     })
     expect(result.searchText).toContain('agent:closed')
+  })
+
+  it('offers Resume only when History has an exact provider session id', () => {
+    const exact = {
+      ...archived,
+      session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
+    }
+    expect(buildQuickOpenResults({ query: '@', history: [exact] })[0].verb).toBe('Resume')
+    expect(buildQuickOpenResults({
+      query: '@',
+      history: [{ ...exact, resumeAvailable: false }],
+    })[0].verb).toBe('Restore transcript')
   })
 
   it('limits symbol scopes to the requested result family', () => {
@@ -89,5 +102,29 @@ describe('quick open results', () => {
       .toEqual(['file'])
     expect(buildQuickOpenResults({ ...common, query: '@ mimir' }).map(result => result.type))
       .toEqual(['history'])
+  })
+
+  it('finds channels and direct messages without crowding the default view', () => {
+    const chats = [
+      { id: '#product', kind: 'channel', title: 'product', topic: 'Product decisions' },
+      { id: 'anna', kind: 'direct', title: 'Anna Example', topic: '' },
+    ]
+
+    expect(buildQuickOpenResults({ chats }).some(result => result.type === 'chat')).toBe(false)
+    expect(buildQuickOpenResults({ query: 'product', chats })).toContainEqual(
+      expect.objectContaining({
+        type: 'chat',
+        target: '#product',
+        group: 'Chats',
+        verb: 'Open',
+      }),
+    )
+    expect(buildQuickOpenResults({ query: 'anna', chats })[0]).toEqual(
+      expect.objectContaining({
+        type: 'chat',
+        target: 'anna',
+        title: 'Anna Example',
+      }),
+    )
   })
 })

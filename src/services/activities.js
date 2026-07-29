@@ -25,12 +25,12 @@ export function resolveLauncher(preset, workspacePath) {
 // on the prompt line, and the first fit corrects any undershoot invisibly.
 let fittedSize = null
 
-export function spawnActivity(record, size = {}) {
-  return invoke('activity_spawn', { record, ...spawnSize(size) })
+export function spawnActivity(record, size = {}, cliSessionId = null) {
+  return invoke('activity_spawn', { record, ...spawnSize(size), cliSessionId })
 }
 
-export function respawnActivity(record, size = {}) {
-  return invoke('activity_respawn', { record, ...spawnSize(size) })
+export function respawnActivity(record, size = {}, cliSessionId = null) {
+  return invoke('activity_respawn', { record, ...spawnSize(size), cliSessionId })
 }
 
 function spawnSize({ cols, rows } = {}) {
@@ -56,6 +56,10 @@ export function resizeActivity(activityId, cols, rows) {
 
 export function stopActivity(activityId) {
   return invoke('activity_stop', { activityId })
+}
+
+export function closeActivity(activityId) {
+  return invoke('activity_close', { activityId })
 }
 
 export function renameActivity(activityId, title) {

@@ -1,7 +1,7 @@
 <template>
   <WorkbenchShell
     :dragging="resize.dragging.value"
-    :activity-title="activeActivity?.title || 'Activity'"
+    :activity-title="activityTitle"
     :activity-meta="activityMeta"
     :editor-title="editorTitle"
     :editor-meta="editorMeta"
@@ -17,10 +17,18 @@
         :tools="toolRows"
         :new-activity="newActivityRows"
         :activities="sidebarActivities"
+        :chat-targets="chat.targets"
+        :chat-enabled="chat.config.enabled"
+        :chat-members="chat.members"
+        :active-chat-target="chat.activeTarget"
+        :chat-unread-total="chat.unreadTotal"
+        :chat-section-collapsed="settings.sidebarChatsCollapsed"
         :active-activity-id="workbench.activeActivityId || ''"
         :activity-sort="activityNavigator.mode"
         @launch="onLaunch"
         @select-activity="selectActivity"
+        @select-chat="openChatTarget"
+        @new-chat="openNewChat"
         @choose-workspace="chooseWorkspace"
         @open-workspace="openWorkspace"
         @toggle-collapse="toggleSidebar"
@@ -29,9 +37,9 @@
         @archive-activity="archiveActivity"
         @clear-activity="clearActivity"
         @reorder-tools="reorderTools"
-        @reorder-launchers="reorderLaunchers"
         @reorder-activities="reorderActivities"
         @sort-activities="sortActivities"
+        @toggle-chat-collapse="settings.set('sidebarChatsCollapsed', !settings.sidebarChatsCollapsed)"
         @settings="openSettings"
       />
     </template>
@@ -39,9 +47,27 @@
     <template #activity>
       <PaneFrame
         pane="activity"
-        :title="activeActivity?.title || 'Activity'"
+        :title="activityTitle"
         :meta="activityMeta"
       >
+        <template #actions>
+          <ChatPaneActions
+            v-if="chat.config.enabled && activeActivity?.id === 'chats'"
+            :agents="chatAgentRows"
+            @start-agent="startChatAgent"
+          />
+          <button
+            v-else-if="activeActivity?.source?.chatTarget"
+            type="button"
+            data-chat-return
+            :title="`Return to ${activeActivity.source.chatTarget}`"
+            class="no-drag flex h-7 items-center gap-1 px-2 text-[9px] font-medium text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            @click="openChatTarget(activeActivity.source.chatTarget)"
+          >
+            <IconMessages :size="14" :stroke-width="1.8" />
+            <span>Return to chat</span>
+          </button>
+        </template>
         <div class="relative h-full min-h-0">
           <ActivityHost
             :activities="hostActivities"
@@ -110,6 +136,7 @@
   <QuickOpen
     :open="quickOpen"
     :tools="toolRows"
+    :chats="chat.config.enabled ? chat.targets : []"
     :new-activity="newActivityRows"
     :history="historyActivities"
     @close="quickOpen = false"
@@ -128,10 +155,12 @@ import {
   watch,
 } from 'vue'
 import { IconAlertTriangle, IconX } from '@tabler/icons-vue'
+import { IconMessages } from '@tabler/icons-vue'
 import EditorApp from '../editor/App.vue'
 import { useActivitiesStore } from '../stores/activities.js'
 import { useActivityRuntimeStore } from '../stores/activityRuntime.js'
 import { useAppsCatalogStore } from '../stores/appsCatalog.js'
+import { useChatStore } from '../stores/chat.js'
 import { useFileStore } from '../stores/files.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useSettingsStore } from '../stores/settings.js'
@@ -141,12 +170,14 @@ import { createToolRuntime } from '../services/toolRuntime.js'
 import { callAppAction, loadAppData, openAppWindow } from '../services/appsCatalog.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
+import ChatActivity from './activities/ChatActivity.vue'
 import UnavailableActivity from './activities/UnavailableActivity.vue'
 import ActivityHost from './components/ActivityHost.vue'
 import PaneFrame from './components/PaneFrame.vue'
 import QuickOpen from './components/QuickOpen.vue'
 import WorkbenchShell from './components/WorkbenchShell.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
+import ChatPaneActions from './components/ChatPaneActions.vue'
 import { useActivityLifecycle } from './composables/useActivityLifecycle.js'
 import { useWorkbenchKeyboardRouting } from './composables/useWorkbenchKeyboardRouting.js'
 import { useWorkbenchResize } from './composables/useWorkbenchResize.js'
@@ -163,11 +194,13 @@ const optionalSurfaces = {
   terminal: TerminalActivity,
   agent: TerminalActivity,
   routine: RoutinesActivity,
+  chat: ChatActivity,
 }
 
 const CORE_ACTIVITIES = Object.freeze([
   { id: 'files', kind: 'files', title: 'Files' },
   { id: 'routines', kind: 'routine', title: 'Routines' },
+  { id: 'chats', kind: 'chat', title: 'Chats' },
 ])
 const CORE_ACTIVITY_IDS = new Set(CORE_ACTIVITIES.map((activity) => activity.id))
 
@@ -175,6 +208,7 @@ const workbench = useWorkbenchStore()
 const activities = useActivitiesStore()
 const activityRuntime = useActivityRuntimeStore()
 const appsCatalog = useAppsCatalogStore()
+const chat = useChatStore()
 const launchers = useLaunchersStore()
 const workspaceFiles = useWorkspaceFilesStore()
 const settings = useSettingsStore()
@@ -314,14 +348,50 @@ const sidebarActivities = computed(() => (
   )
 ))
 const historyActivities = computed(() => (
-  activities.archivedActivities.filter(activity => !isToolActivity(activity))
+  activities.archivedActivities
+    .filter(activity => !isToolActivity(activity))
+    .map(activity => ({
+      ...activity,
+      resumeAvailable: Boolean(
+        ['agent', 'routine'].includes(activity.kind)
+        && !activity.source?.appId
+        && activity.session?.cliSessionId
+        && activity.host?.type === 'pty'
+        && activity.host?.resumeStrategy
+        && activity.host.resumeStrategy !== 'none'
+        && launchers.byId(activity.source?.presetId || activity.source?.launcherId),
+      ),
+    }))
 ))
 const activeActivity = computed(() => (
   activities.byId(workbench.activeActivityId) || null
 ))
+const activityTitle = computed(() => {
+  if (activeActivity.value?.id !== 'chats') return activeActivity.value?.title || 'Activity'
+  const target = chat.activeRecord
+  if (!target) return 'Chats'
+  return target.kind === 'channel'
+    ? target.id
+    : target.title || target.id
+})
 const activityMeta = computed(() => {
   const activity = activeActivity.value
   if (!activity) return 'Unavailable'
+  if (activity.id === 'chats') {
+    if (chat.status.state !== 'connected') {
+      return chat.status.state.replace('_', ' ')
+    }
+    const target = chat.activeRecord
+    if (!target) return 'No chats'
+    const topic = String(target.topic || '').trim()
+    const members = target.kind === 'channel'
+      ? `${target.memberCount} ${target.memberCount === 1 ? 'member' : 'members'}`
+      : ''
+    return [topic, members].filter(Boolean).join(' · ')
+  }
+  if (activity.source?.chatTarget) {
+    return `${humanStatus(activity.status)} · ${activity.source.chatTarget}`
+  }
   return humanStatus(activity.status)
 })
 const workspaceName = computed(() => basename(workspaceFiles.workspacePath))
@@ -378,6 +448,9 @@ const newActivityRows = computed(() => orderSidebarRows([
   })),
   ...freshActivityApps.value.map(appRow),
 ], settings.sidebarNewActivityOrder))
+const chatAgentRows = computed(() => launchers.decoratedPresets.filter(
+  preset => preset.kind === 'agent',
+))
 
 function appRow(app) {
   return {
@@ -458,6 +531,15 @@ watch(
   () => persistWorkbench(),
 )
 
+watch(
+  () => chat.config.enabled,
+  enabled => {
+    if (!enabled && workbench.activeActivityId === 'chats') {
+      openCoreActivity('files')
+    }
+  },
+)
+
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown, true)
   document.addEventListener('focusin', rememberWorkbenchFocus, true)
@@ -466,7 +548,12 @@ onMounted(async () => {
   document.addEventListener('pointerdown', rememberWorkbenchFocus, true)
   window.addEventListener('resize', syncResponsiveLayout)
   window.__mimir_activityPaste = pasteToActiveTerminal
-  await workspaceBootstrap.start()
+  await Promise.all([
+    workspaceBootstrap.start(),
+    chat.initialize().catch((cause) => {
+      if (!diagnostic.value) diagnostic.value = `Chat could not initialize: ${errorMessage(cause)}`
+    }),
+  ])
 })
 
 onUnmounted(() => {
@@ -483,6 +570,7 @@ onUnmounted(() => {
   workspaceFiles.dispose()
   activityRuntime.dispose()
   toolRuntime.stop()
+  chat.dispose()
   if (window.__mimir_activityPaste === pasteToActiveTerminal) {
     delete window.__mimir_activityPaste
   }
@@ -532,10 +620,85 @@ async function onLaunch(id) {
   }
 }
 
+async function openChatTarget(target = '') {
+  if (!chat.config.enabled) return
+  ensureCoreActivities()
+  if (target) {
+    try {
+      await chat.selectTarget(target)
+    } catch (cause) {
+      diagnostic.value = `Could not open ${target}: ${errorMessage(cause)}`
+    }
+  }
+  workbench.openActivity('chats')
+  focusNarrowPane('activity')
+  workbench.setPaneState('activity', 'expanded')
+  requestEntryFocus('chats')
+}
+
+async function openNewChat() {
+  await openChatTarget(chat.activeTarget)
+  chat.requestNewChat('menu')
+}
+
+async function startChatAgent(presetId) {
+  const preset = launchers.byId(presetId)
+    || launchers.availablePresets.find(candidate => candidate.kind === 'agent')
+  const target = chat.activeTarget
+  if (!target || !preset) {
+    diagnostic.value = preset
+      ? 'Open a chat before starting an agent.'
+      : 'No agent launcher is configured. Add Codex, Claude, Pi, or Gemini in Settings.'
+    return
+  }
+  if (!preset.available) {
+    diagnostic.value = `${preset.title} is unavailable: ${preset.unavailableReason || 'binary not found'}.`
+    return
+  }
+  if (!workspaceFiles.workspacePath && preset.cwd?.mode === 'workspace') {
+    diagnostic.value = `Open a workspace before starting ${preset.title}.`
+    return
+  }
+  const agentLabel = String(preset.agentId || preset.id || 'agent')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 16) || 'agent'
+  const prompt = [
+    `You are joining the Mimir team chat ${target}.`,
+    'This Activity is bound to that chat, so chat_read, chat_search, chat_send, and chat_download stay in this conversation.',
+    'Begin by using chat_read to understand the recent transcript.',
+    'Use chat_search when older context is needed and chat_send for messages the team should see.',
+    'Be explicit about what you know, what you changed, and what you need from the team.',
+  ].join(' ')
+  try {
+    diagnostic.value = ''
+    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
+      title: `${preset.title} · ${target}`,
+      seedInput: `${prompt} Task: `,
+      retention: 'durable',
+      source: {
+        type: 'chat-agent',
+        chatServerId: 'chat.shoulde.rs',
+        chatTarget: target,
+      },
+      beforeSpawn: record => chat.linkActivity(record.id, target, agentLabel),
+    })
+    workbench.setPaneState('activity', 'expanded')
+  } catch (cause) {
+    diagnostic.value = `Could not start ${preset.title} in ${target}: ${errorMessage(cause)}`
+  }
+}
+
 async function startGraphWork(request) {
-  const preset = launchers.availablePresets.find(candidate => candidate.kind === 'agent')
+  const requestedPresetId = String(request?.presetId || '')
+  const preset = launchers.availablePresets.find(candidate => (
+    candidate.kind === 'agent'
+    && (!requestedPresetId || candidate.id === requestedPresetId)
+  ))
   if (!preset) {
-    diagnostic.value = 'Start work needs one available agent launcher. Configure Codex, Claude, Pi, or Gemini in Launchers.'
+    diagnostic.value = requestedPresetId
+      ? `The selected agent preset '${requestedPresetId}' is not available. Choose another agent or update Settings.`
+      : 'Start work needs one available agent launcher. Configure Codex, Claude, Pi, or Gemini in Launchers.'
     return
   }
   if (!workspaceFiles.workspacePath) {
@@ -544,19 +707,31 @@ async function startGraphWork(request) {
   }
   try {
     diagnostic.value = ''
-    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
-      title: request.background
+    const title = request.sourceType === 'business-graph-summary'
+      ? request.title || 'Change summary'
+      : request.background
         ? request.title || 'Dispatch'
-        : `Work · ${request.title || request.nodeId}`,
+        : `Work · ${request.title || request.nodeId}`
+    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
+      title,
       args: [String(request.prompt || '')],
       retention: 'durable',
       open: !request.background,
       source: {
-        type: request.background ? 'business-graph-dispatch' : 'business-graph-work',
+        type: request.sourceType
+          || (request.background ? 'business-graph-dispatch' : 'business-graph-work'),
         graphNodeId: request.nodeId,
         graphNodeKind: request.nodeKind,
         graphScopeIds: request.scopeIds || [],
         graphRevision: request.graphRevision,
+        ...(request.sourceType === 'business-graph-summary'
+          ? {
+              graphEventSince: request.graphEventSince,
+              graphEventCount: request.graphEventCount,
+              graphContextShortened: Boolean(request.graphContextShortened),
+              graphContextBytes: request.graphContextBytes,
+            }
+          : {}),
       },
     })
     if (!request.background) workbench.setPaneState('activity', 'expanded')
@@ -637,15 +812,6 @@ function reorderTools(ids) {
   settings.set('sidebarToolOrder', [...ids, ...retained])
 }
 
-function reorderLaunchers(ids) {
-  const visible = new Set(newActivityRows.value.map((row) => row.id))
-  const retained = (Array.isArray(settings.sidebarNewActivityOrder)
-    ? settings.sidebarNewActivityOrder
-    : []
-  ).filter((id) => !visible.has(id))
-  settings.set('sidebarNewActivityOrder', [...ids, ...retained])
-}
-
 function sortActivities(mode) {
   settings.set('activityNavigator', {
     mode: ACTIVITY_SORT_MODES.includes(mode) ? mode : 'manual',
@@ -661,6 +827,10 @@ function activateQuickOpenResult(result) {
   if (!result?.type) return
   if (result.type === 'file') {
     void openFileInEditor(result.path)
+    return
+  }
+  if (result.type === 'chat') {
+    void openChatTarget(result.target)
     return
   }
   if (result.type === 'tool' || result.type === 'new-activity') {
@@ -736,6 +906,11 @@ async function dispatchAppPayload(payload, { throwOnError = false } = {}) {
 }
 
 function openActivityRecord(activity) {
+  if (typeof activity === 'string') {
+    if (activities.byId(activity)) selectActivity(activity)
+    else diagnostic.value = `Activity '${activity}' is no longer available.`
+    return
+  }
   if (!activity?.id) {
     diagnostic.value = 'The runtime did not return a valid Activity.'
     return

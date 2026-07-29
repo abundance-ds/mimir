@@ -53,32 +53,44 @@ function render(collapsed = false, attach = false) {
       tools,
       newActivity: launchers,
       activities,
+      chatTargets: [
+        { id: '#general', kind: 'channel', title: 'general', unreadCount: 2 },
+        { id: 'anna', kind: 'direct', title: 'Anna', unreadCount: 0 },
+      ],
+      chatUnreadTotal: 2,
       activeActivityId: 'agent:one',
     },
   })
 }
 
 describe('WorkbenchSidebar', () => {
-  it('renders Tools, New activity sources, and live Activities in that order', () => {
+  it('renders Tools, one flat Chats list, and live Activities without launcher rows', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-sidebar-row]').map((row) => row.attributes('data-sidebar-row'))
 
     expect(rows).toEqual([
       'tool:files',
       'tool:app:scratch',
-      'launcher:codex',
-      'launcher:terminal',
+      'chat:#general',
+      'chat:anna',
       'activity:agent:one',
       'activity:terminal:two',
     ])
     expect(wrapper.text()).toContain('mimir')
     expect(wrapper.text()).toContain('Tools')
-    expect(wrapper.text()).toContain('New activity')
+    expect(wrapper.text()).not.toContain('New activity')
     expect(wrapper.get('[data-activity-status="working"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-row="launcher:codex"] [data-launcher-identity]').attributes('data-launcher-identity')).toBe('codex')
-    expect(wrapper.get('[data-sidebar-row="launcher:codex"] svg').attributes('viewBox')).toBe('0 0 256 260')
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"] svg').attributes('viewBox')).toBe('0 0 256 260')
     expect(wrapper.find('[data-sidebar-row="tool:files"] [data-sidebar-meta]').exists()).toBe(false)
+  })
+
+  it('removes the entire Chats section when chat is disabled', async () => {
+    const wrapper = render()
+    await wrapper.setProps({ chatEnabled: false })
+
+    expect(wrapper.find('[data-sidebar-chats]').exists()).toBe(false)
+    expect(wrapper.find('[data-sidebar-row^="chat:"]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-row="tool:files"]').exists()).toBe(true)
   })
 
   it('keeps the same rows and exposes source identity in rail mode', async () => {
@@ -91,21 +103,19 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-monogram="agent:one"]').attributes('data-activity-identity')).toBe('Codex')
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').attributes('title')).toContain('Review API')
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button').attributes('aria-label')).toBe('Review API')
-    expect(wrapper.get('[data-sidebar-row="launcher:codex"]').find('button').attributes('aria-label')).toBe('Codex')
+    expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
     expect(wrapper.get('[data-sidebar-copy="activity:agent:one"]').attributes('aria-hidden')).toBe('true')
   })
 
   it('emits explicit launcher, activity, workspace, and collapse intents', async () => {
     const wrapper = render()
 
-    await wrapper.get('[data-sidebar-row="launcher:codex"]').trigger('click')
     await wrapper.get('[data-sidebar-row="activity:terminal:two"]').trigger('click')
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
     document.body.querySelector('[data-project-open-folder]')?.click()
     await wrapper.get('[data-sidebar-collapse]').trigger('click')
     await wrapper.get('[data-sidebar-settings]').trigger('click')
 
-    expect(wrapper.emitted('launch')[0]).toEqual(['codex'])
     expect(wrapper.emitted('selectActivity')[0]).toEqual(['terminal:two'])
     expect(wrapper.emitted('chooseWorkspace')).toHaveLength(1)
     expect(wrapper.emitted('toggleCollapse')).toHaveLength(1)
@@ -121,30 +131,27 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-settings]').text()).toContain('Settings')
   })
 
-  it('discloses New activity and Activities independently while Tools remain stable', async () => {
+  it('discloses Chats and Activities independently while Tools remain stable', async () => {
     const wrapper = render()
 
-    const newActivityToggle = wrapper.get('[data-sidebar-new-activity-toggle]')
+    const chatsToggle = wrapper.get('[data-chat-section-toggle]')
     const activitiesToggle = wrapper.get('[data-sidebar-activities-toggle]')
-    expect(newActivityToggle.attributes('aria-expanded')).toBe('true')
+    expect(chatsToggle.attributes('aria-expanded')).toBe('true')
     expect(activitiesToggle.attributes('aria-expanded')).toBe('true')
     expect(wrapper.text()).not.toContain('Archived')
 
-    await newActivityToggle.trigger('click')
-    expect(wrapper.find('[data-sidebar-row="launcher:codex"]').exists()).toBe(false)
+    await chatsToggle.trigger('click')
+    expect(wrapper.emitted('toggleChatCollapse')).toHaveLength(1)
+    await wrapper.setProps({ chatSectionCollapsed: true })
+    expect(wrapper.find('[data-sidebar-row="chat:#general"]').exists()).toBe(false)
     expect(wrapper.get('[data-sidebar-row="tool:app:scratch"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
-
-    await newActivityToggle.trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.get('[data-sidebar-row="launcher:codex"]').exists()).toBe(true)
-    await newActivityToggle.trigger('keydown', { key: 'ArrowLeft' })
-    expect(wrapper.find('[data-sidebar-row="launcher:codex"]').exists()).toBe(false)
 
     await activitiesToggle.trigger('click')
     expect(wrapper.find('[data-sidebar-row="activity:agent:one"]').exists()).toBe(false)
 
     await wrapper.setProps({ collapsed: true })
-    expect(wrapper.get('[data-sidebar-row="launcher:codex"]').exists()).toBe(true)
+    expect(wrapper.get('[data-sidebar-row="chat:hub"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
   })
 
@@ -156,16 +163,15 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-activity-unread="agent:one"]').exists()).toBe(true)
   })
 
-  it('keeps unavailable launchers actionable with an exact native diagnostic', () => {
-    const wrapper = render()
-    const terminal = wrapper.get('[data-sidebar-row="launcher:terminal"]')
+  it('keeps unavailable launchers out of the compact creation menu', async () => {
+    const wrapper = render(false, true)
 
-    expect(terminal.attributes('data-launcher-available')).toBe('false')
-    expect(terminal.attributes('aria-disabled')).toBe('true')
-    expect(terminal.find('button').attributes('aria-disabled')).toBe('true')
-    expect(terminal.find('button').attributes('title')).toBe('Terminal — shell unavailable')
-    expect(terminal.attributes('title')).toBe('Terminal — shell unavailable')
-    expect(terminal.text()).toContain('missing')
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    const menu = document.body.querySelector('[data-activity-create-menu]')
+    expect(menu.textContent).toContain('Codex')
+    expect(menu.textContent).not.toContain('Terminal')
+    expect(wrapper.find('[data-sidebar-row="launcher:terminal"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('moves contextual row focus with arrows and Home/End without activating', async () => {
@@ -351,11 +357,9 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.emitted('sortActivities').at(-1)).toEqual(['recent'])
   })
 
-  it('manually reorders Tools and New activity sources by keyboard and pointer drag', async () => {
+  it('manually reorders Tools without exposing duplicate activity launcher rows', async () => {
     const wrapper = render()
     const today = wrapper.get('[data-sidebar-row="tool:app:scratch"]')
-    const codex = wrapper.get('[data-sidebar-row="launcher:codex"]')
-    const terminal = wrapper.get('[data-sidebar-row="launcher:terminal"]')
 
     await today.find('button').trigger('keydown', {
       key: 'ArrowUp',
@@ -365,37 +369,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.emitted('reorderTools').at(-1)).toEqual([
       ['app:scratch', 'files'],
     ])
-
-    await codex.find('button').trigger('keydown', {
-      key: 'ArrowDown',
-      altKey: true,
-      shiftKey: true,
-    })
-    expect(wrapper.emitted('reorderLaunchers').at(-1)).toEqual([
-      ['terminal', 'codex'],
-    ])
-
-    vi.spyOn(codex.element, 'getBoundingClientRect').mockReturnValue({
-      top: 0,
-      height: 36,
-    })
-    vi.spyOn(terminal.element, 'getBoundingClientRect').mockReturnValue({
-      top: 36,
-      height: 36,
-    })
-    await codex.trigger('pointerdown', { button: 0, clientX: 4, clientY: 10 })
-    document.dispatchEvent(new PointerEvent('pointermove', {
-      clientX: 6,
-      clientY: 80,
-    }))
-    document.dispatchEvent(new PointerEvent('pointerup', {
-      clientX: 6,
-      clientY: 80,
-    }))
-
-    expect(wrapper.emitted('reorderLaunchers').at(-1)).toEqual([
-      ['terminal', 'codex'],
-    ])
+    expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
   })
 
   it('commits pointer drag reorder only after crossing the movement threshold', async () => {
@@ -443,8 +417,10 @@ describe('WorkbenchSidebar', () => {
       },
     })
 
-    expect(wrapper.get('[data-sidebar-row="launcher:preset:claude"] svg').attributes('viewBox'))
-      .toBe('110 145 292 222')
+    await wrapper.get('[data-activity-create-button]').trigger('click')
+    expect(document.body.querySelector(
+      '[data-activity-create-id="preset:claude"] svg',
+    ).getAttribute('viewBox')).toBe('110 145 292 222')
     await wrapper.get('[data-activity-menu-button="app:ledger"]').trigger('click')
     const menu = wrapper.get('[data-activity-menu="app:ledger"]')
     expect(menu.text()).not.toContain('Stop / kill')
@@ -454,5 +430,6 @@ describe('WorkbenchSidebar', () => {
     expect(archive.attributes('disabled')).toBeUndefined()
     await archive.trigger('click')
     expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['app:ledger'])
+    wrapper.unmount()
   })
 })
