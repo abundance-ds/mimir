@@ -248,7 +248,13 @@ impl ChatRuntime {
         } else {
             self.disconnect();
             *write_lock(&self.inner.active_target) = None;
-            for name in ["chat.read", "chat.search", "chat.send", "chat.download"] {
+            for name in [
+                "chat.rooms",
+                "chat.read",
+                "chat.search",
+                "chat.send",
+                "chat.download",
+            ] {
                 let _ = registry.unregister(name, &ToolOwner::Core);
             }
         }
@@ -743,24 +749,18 @@ impl ChatRuntime {
         context: &ToolCallContext,
         requested: Option<&str>,
     ) -> Result<String, String> {
+        // The Activity link is a default aim, not a fence: an explicit target
+        // always wins, then the linked room, then the room open in the UI.
+        if let Some(requested) = requested {
+            return normalize_target(requested);
+        }
         let activity_id = context.metadata.get("activityId").and_then(Value::as_str);
         let linked = activity_id
             .map(|activity_id| self.inner.database.activity_link(activity_id))
             .transpose()?
             .flatten();
         if let Some((linked_target, _)) = linked {
-            if let Some(requested) = requested {
-                let requested = normalize_target(requested)?;
-                if requested != linked_target {
-                    return Err(format!(
-                        "This agent Activity is linked to {linked_target}, not {requested}."
-                    ));
-                }
-            }
             return Ok(linked_target);
-        }
-        if let Some(requested) = requested {
-            return normalize_target(requested);
         }
         read_lock(&self.inner.active_target)
             .clone()
@@ -2397,6 +2397,7 @@ pub fn chat_link_activity(
 
 fn reserve_native_tool_names(registry: &ToolRegistry) -> Result<(), String> {
     for (canonical, alias) in [
+        ("chat.rooms", "chat_rooms"),
         ("chat.read", "chat_read"),
         ("chat.search", "chat_search"),
         ("chat.send", "chat_send"),
@@ -2413,13 +2414,22 @@ pub fn register_native_tools(registry: &ToolRegistry, runtime: &ChatRuntime) -> 
     register_tool(
         registry,
         runtime,
+        "chat.rooms",
+        "chat_rooms",
+        "List chat rooms.",
+        object_schema(json!({}), &[]),
+        true,
+    )?;
+    register_tool(
+        registry,
+        runtime,
         "chat.read",
         "chat_read",
-        "Read recent messages from the chat room linked to this Activity.",
+        "Read chat messages.",
         object_schema(
             json!({
-                "target": { "type": "string", "description": "Channel or direct-message target. Omit for a linked agent Activity." },
-                "before": { "type": "string", "description": "Return messages before this message ID." },
+                "target": { "type": "string", "description": "Channel or account; default linked/open room." },
+                "before": { "type": "string", "description": "Page before this message ID." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
             }),
             &[],
@@ -2431,11 +2441,11 @@ pub fn register_native_tools(registry: &ToolRegistry, runtime: &ChatRuntime) -> 
         runtime,
         "chat.search",
         "chat_search",
-        "Search locally cached team chat.",
+        "Search chat messages.",
         object_schema(
             json!({
                 "query": { "type": "string" },
-                "target": { "type": "string", "description": "Optional room scope; linked Activities cannot escape their room." },
+                "target": { "type": "string", "description": "Room filter; default linked/open room, else all." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
             }),
             &["query"],
@@ -2447,12 +2457,12 @@ pub fn register_native_tools(registry: &ToolRegistry, runtime: &ChatRuntime) -> 
         runtime,
         "chat.send",
         "chat_send",
-        "Send a visible agent message to the chat room linked to this Activity.",
+        "Send a chat message.",
         object_schema(
             json!({
-                "target": { "type": "string", "description": "Channel or direct-message target. Omit for a linked agent Activity." },
+                "target": { "type": "string", "description": "Channel or account; default linked/open room." },
                 "text": { "type": "string" },
-                "reply_to": { "type": "string", "description": "Optional message ID to reply to." }
+                "reply_to": { "type": "string", "description": "Message ID to reply to." }
             }),
             &["text"],
         ),
@@ -2463,10 +2473,10 @@ pub fn register_native_tools(registry: &ToolRegistry, runtime: &ChatRuntime) -> 
         runtime,
         "chat.download",
         "chat_download",
-        "Download a chat attachment into Mimir's local cache and return its verified local path.",
+        "Download a chat attachment; returns its verified local path.",
         object_schema(
             json!({
-                "file_id": { "type": "string", "description": "Attachment ID returned by chat.read or chat.search." }
+                "file_id": { "type": "string", "description": "Attachment ID from chat_read." }
             }),
             &["file_id"],
         ),
@@ -2510,26 +2520,6 @@ fn register_tool(
                             .ok_or_else(|| {
                                 ToolError::new(ToolErrorCode::Handler, "file_id is required")
                             })?;
-                    let target = runtime
-                        .resolve_tool_target(&context, None)
-                        .map_err(|message| ToolError::new(ToolErrorCode::Handler, message))?;
-                    let attachment_target = runtime
-                        .inner
-                        .database
-                        .attachment_target(file_id)
-                        .map_err(|message| ToolError::new(ToolErrorCode::Handler, message))?
-                        .ok_or_else(|| {
-                            ToolError::new(
-                                ToolErrorCode::Handler,
-                                "That attachment is not in the local chat cache.",
-                            )
-                        })?;
-                    if !attachment_target.eq_ignore_ascii_case(&target) {
-                        return Err(ToolError::new(
-                            ToolErrorCode::Handler,
-                            "That attachment belongs to a different chat.",
-                        ));
-                    }
                     return runtime
                         .download_attachment(file_id)
                         .await
@@ -2554,18 +2544,35 @@ fn register_tool(
                                 "messages": messages,
                             })
                         }
+                        "chat.rooms" => {
+                            let rooms = runtime
+                                .targets()?
+                                .into_iter()
+                                .map(|room| {
+                                    json!({
+                                        "id": room.id,
+                                        "kind": room.kind.as_str(),
+                                        "topic": room.topic,
+                                        "unread": room.unread_count,
+                                    })
+                                })
+                                .collect::<Vec<_>>();
+                            json!({ "rooms": rooms })
+                        }
                         "chat.search" => {
-                            let target = runtime.resolve_tool_target(
-                                &context,
-                                input.get("target").and_then(Value::as_str),
-                            )?;
+                            // Explicit or linked/active room scopes the search;
+                            // with neither, search every room.
+                            let target = match input.get("target").and_then(Value::as_str) {
+                                Some(requested) => Some(normalize_target(requested)?),
+                                None => runtime.resolve_tool_target(&context, None).ok(),
+                            };
                             let query = input
                                 .get("query")
                                 .and_then(Value::as_str)
                                 .ok_or_else(|| "query is required".to_string())?;
                             let messages = runtime.search(
                                 query,
-                                Some(&target),
+                                target.as_deref(),
                                 input.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize,
                             )?;
                             json!({ "target": target, "messages": messages })
@@ -2983,6 +2990,33 @@ mod tests {
     }
 
     #[test]
+    fn activity_link_is_a_default_target_not_a_fence() {
+        let (_directory, runtime) = test_runtime();
+        runtime
+            .inner
+            .database
+            .link_activity("agent:one", "#general", Some("codex"))
+            .unwrap();
+        let mut context = ToolCallContext::new(crate::tool_registry::ToolCaller::MimirCli);
+        context
+            .metadata
+            .insert("activityId".into(), Value::String("agent:one".into()));
+
+        assert_eq!(
+            runtime.resolve_tool_target(&context, None).unwrap(),
+            "#general"
+        );
+        assert_eq!(
+            runtime.resolve_tool_target(&context, Some("#product")).unwrap(),
+            "#product"
+        );
+        assert_eq!(
+            runtime.resolve_tool_target(&context, Some("anna")).unwrap(),
+            "anna"
+        );
+    }
+
+    #[test]
     fn disabling_chat_disconnects_and_removes_its_public_tools() {
         let (_directory, runtime) = test_runtime();
         let registry = ToolRegistry::default();
@@ -2994,7 +3028,7 @@ mod tests {
                 .iter()
                 .filter(|tool| tool.canonical_name.starts_with("chat."))
                 .count(),
-            4
+            5
         );
 
         let status = runtime.set_enabled(false, &registry).unwrap();
@@ -3015,7 +3049,7 @@ mod tests {
                 .iter()
                 .filter(|tool| tool.canonical_name.starts_with("chat."))
                 .count(),
-            4
+            5
         );
     }
 }

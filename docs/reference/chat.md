@@ -87,10 +87,11 @@ can still be entered.
 ## Agent participation
 
 Start agent in the pane header chooses an enabled CLI-agent launcher. Mimir
-creates and links the Activity before spawning the process, gives it a bounded
-room prompt, and exposes:
+creates and links the Activity before spawning the process, gives it a room
+prompt, and exposes:
 
 ```text
+chat_rooms
 chat_read
 chat_search
 chat_send
@@ -102,8 +103,10 @@ The user can append the actual assignment, revise any wording, and press Enter
 when ready. Starting an agent therefore never sends instructions on the user's
 behalf.
 
-For a linked Activity, an explicit target cannot escape the linked room.
-Agent sends are visible as `account/agent` when Ergo relay identity is
+The Activity link is a default, not a fence: tools with no `target` operate on
+the linked room (or the room open in the UI), and an explicit `target` reaches
+any room the user sees. `chat_search` without any resolvable room searches all
+rooms. Agent sends are visible as `account/agent` when Ergo relay identity is
 available, with a visible-label fallback otherwise. Messages keep the
 originating Activity ID when the protocol carries it, so the provenance badge
 opens that Activity. An agent Activity header offers Return to chat.
@@ -111,9 +114,10 @@ opens that Activity. An agent Activity header offers Return to chat.
 Examples:
 
 ```bash
-mimir call chat_read '{"target":"#general","limit":20}'
-mimir call chat_search '{"target":"#general","query":"launch decision","limit":10}'
-mimir call chat_send '{"target":"#general","text":"Review complete."}'
+mimir call chat_rooms '{}'
+mimir call chat_read '{"limit":20}'
+mimir call chat_search '{"query":"launch decision","limit":10}'
+mimir call chat_send '{"target":"#product","text":"Review complete."}'
 mimir call chat_download '{"file_id":"<attachment id from chat_read>"}'
 ```
 
@@ -343,6 +347,7 @@ protocol test. Do not restart or rewrite unrelated services.
 - Reactions, unreactions, edits, deletion, attachment metadata, and
   authenticated file bytes round-trip; cleanup leaves no protocol test
   transcript or file.
-- Room-bound agents cannot read, search, or send to a different target.
+- Room-linked agents default to their room; explicit targets reach any room
+  the user sees.
 - Production listeners remain loopback-only behind Caddy, anonymous sessions
   are rejected even on loopback, and existing host services remain healthy.

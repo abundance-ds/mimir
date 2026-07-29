@@ -80,16 +80,18 @@ graph_events   read recent authored graph changes
 Chat:
 
 ```text
-chat_read    read recent messages in the linked room
-chat_search  search the local cache for the linked room
-chat_send    send a visible agent message to the linked room
-chat_download download one authenticated attachment to a verified local path
+chat_rooms   list chat rooms
+chat_read    read chat messages
+chat_search  search chat messages
+chat_send    send a chat message
+chat_download download a chat attachment
 ```
 
-An agent Activity started from chat is linked to that exact channel or direct
-message before its process spawns. Omitting `target` uses the link; passing a
-different target is rejected. Ordinary Activities may pass a target explicitly
-or use the room currently open in Mimir. Agent messages carry visible
+An agent Activity started from chat is linked to that channel or direct
+message before its process spawns. The link is a default: omitting `target`
+uses it, and an explicit `target` reaches any room the user sees. Ordinary
+Activities use an explicit target or the room currently open in Mimir;
+`chat_search` with no resolvable room searches all rooms. Agent messages carry visible
 provenance and open their originating Activity when that Activity identity is
 available. Reads and searches return current materialized state, including
 edits, deletion markers, mentions, reactions, and attachment metadata.

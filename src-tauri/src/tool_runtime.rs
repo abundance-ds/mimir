@@ -40,7 +40,7 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 32] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 33] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -294,9 +294,18 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 32] = [
         connection: Some("slack"),
     },
     AgentToolSpec {
+        canonical_name: "chat.rooms",
+        public_name: "chat_rooms",
+        description: "List chat rooms.",
+        group: "chat",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
         canonical_name: "chat.read",
         public_name: "chat_read",
-        description: "Read messages in a linked Mimir chat room.",
+        description: "Read chat messages.",
         group: "chat",
         effect: "read",
         direct: false,
@@ -305,7 +314,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 32] = [
     AgentToolSpec {
         canonical_name: "chat.search",
         public_name: "chat_search",
-        description: "Search messages in a linked Mimir chat room.",
+        description: "Search chat messages.",
         group: "chat",
         effect: "read",
         direct: false,
@@ -314,7 +323,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 32] = [
     AgentToolSpec {
         canonical_name: "chat.send",
         public_name: "chat_send",
-        description: "Send a visible agent message to a linked Mimir chat room.",
+        description: "Send a chat message.",
         group: "chat",
         effect: "external-write",
         direct: false,
@@ -323,7 +332,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 32] = [
     AgentToolSpec {
         canonical_name: "chat.download",
         public_name: "chat_download",
-        description: "Download a chat attachment to a verified local path.",
+        description: "Download a chat attachment.",
         group: "chat",
         effect: "read",
         direct: false,
@@ -1433,7 +1442,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 32);
+        assert_eq!(AGENT_TOOLS.len(), 33);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();

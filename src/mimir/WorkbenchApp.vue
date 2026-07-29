@@ -665,7 +665,7 @@ async function startChatAgent(presetId) {
     .slice(0, 16) || 'agent'
   const prompt = [
     `You are joining the Mimir team chat ${target}.`,
-    'This Activity is bound to that room: the four chat tools are `mimir` CLI commands, not native tools, and they only reach this room.',
+    'The chat tools are `mimir` CLI commands, not native tools, and default to this room; pass target to reach another room (`mimir call chat_rooms \'{}\'` lists them).',
     `Read the recent transcript first: \`mimir call chat_read '{"limit":20}'\`.`,
     `Post with \`mimir call chat_send '{"text":"..."}'\`; \`mimir call chat_search '{"query":"..."}'\` finds older context and \`mimir call chat_download '{"file_id":"..."}'\` fetches an attachment.`,
     'Be explicit about what you know, what you changed, and what you need from the team.',
