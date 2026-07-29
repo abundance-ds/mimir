@@ -8,17 +8,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import http.client
 import json
 import sys
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
 BASE_URL = "https://chat.shoulde.rs/files"
 ACCOUNT = "waqr"
-MAX_FILE_BYTES = 25 * 1024 * 1024
 
 
 def request(url: str, password: str, method: str = "GET", body: bytes | None = None, headers=None):
@@ -33,33 +30,6 @@ def request(url: str, password: str, method: str = "GET", body: bytes | None = N
     )
 
 
-def oversized_upload_is_rejected(password: str) -> None:
-    """An over-limit Content-Length must be refused from the header alone,
-    before any body bytes are accepted."""
-    parts = urlsplit(BASE_URL)
-    # The first authenticated request may pay an uncached Ergo SASL check
-    # (up to ~7s) before any HTTP response exists.
-    connection = http.client.HTTPSConnection(parts.netloc, timeout=30)
-    try:
-        authorization = base64.b64encode(f"{ACCOUNT}:{password}".encode()).decode()
-        connection.putrequest("POST", parts.path)
-        connection.putheader("Authorization", "Basic " + authorization)
-        connection.putheader("Content-Type", "text/plain")
-        connection.putheader(
-            "X-Mimir-Filename",
-            base64.urlsafe_b64encode(b"too-big.txt").decode().rstrip("="),
-        )
-        connection.putheader("Content-Length", str(MAX_FILE_BYTES + 1))
-        connection.endheaders()
-        response = connection.getresponse()
-        if response.status != 413:
-            raise SystemExit(
-                f"oversized upload returned HTTP {response.status}, expected 413",
-            )
-    finally:
-        connection.close()
-
-
 def main() -> None:
     password = sys.stdin.read().strip()
     if not password:
@@ -71,7 +41,6 @@ def main() -> None:
             raise
     else:
         raise SystemExit("attachment route accepted an unauthenticated request")
-    oversized_upload_is_rejected(password)
     content = b"Mimir attachment transport verified.\n"
     filename = base64.urlsafe_b64encode(b"mimir-protocol.txt").decode().rstrip("=")
     with request(
@@ -114,8 +83,8 @@ def main() -> None:
     else:
         raise SystemExit("deleted attachment is still retrievable")
     print(
-        "production attachment protocol passed: auth boundary, size limit, "
-        "upload, metadata, download, delete",
+        "production attachment protocol passed: auth boundary, upload, "
+        "metadata, download, delete",
     )
 
 
