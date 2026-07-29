@@ -424,8 +424,8 @@ Native:
   `runtime.rs` — see §6 Now for salvage guidance.
 - Golden fixtures: `src-tauri/tests/fixtures/business-graph/`.
 
-Docs to reconcile when this lands: `docs/reference/business-graph.md`
-(interaction sections), `docs/reference/design-system.md` (the "calm
+Docs to reconcile when this lands: `docs/business-graph.md`
+(interaction sections), `docs/design-system.md` (the "calm
 instrument" language that primed failure 1 — revise to this plan's
 principles).
 
@@ -435,7 +435,7 @@ principles).
    leave the app fully working and each surface *complete* in the new
    material — no half-styled grafts onto old chrome.
 2. **Before calling a step done:** run it, look at it, apply the feel test
-   (§4) on light and dark themes at minimum; run `npm test` and, if native
+   (§4) on light and dark themes at minimum; run `bun run test` and, if native
    code changed, `cargo test --manifest-path src-tauri/Cargo.toml`.
 3. **Commit early, commit per step.** Never deliver a stash blob.
 4. Build order:

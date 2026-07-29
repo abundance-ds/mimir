@@ -106,6 +106,11 @@ Typing searches Tools, launch sources, closed History, and indexed files.
 `/` restricts results to files, `@` to History, and `+` to New activity.
 History transcript search is lazy and native; recent files remain visible in
 the empty state because Go to is the fastest keyboard route back to files.
+When a CLI agent or terminal owns Activity-pane focus, Cmd/Ctrl+N opens Go to
+directly in New activity with the current launcher selected. Pressing Enter
+there starts another instance; moving the selection chooses a different
+source. Editor, Files, and Routines keep their local Cmd/Ctrl+N meanings, and
+the macOS native New accelerator follows the same focus-aware route.
 The document root disables autocorrect and autocapitalization; focused search
 fields also disable autocomplete and spellcheck so operating-system suggestion
 UI does not cover launcher results.

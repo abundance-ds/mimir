@@ -111,7 +111,7 @@ describe('mimir MCP client', () => {
     expect(helpText()).toContain('mimir doctor')
     expect(helpText()).not.toContain('replace-selection')
     expect(helpText('review')).toContain('mimir_propose')
-    expect(helpText('docs')).toContain('docs/reference/')
+    expect(helpText('docs')).toContain('docs/_MAP.md')
   })
 
   it('atomically records Codex thread identity for the exact Mimir run', async () => {

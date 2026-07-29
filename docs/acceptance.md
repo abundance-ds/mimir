@@ -324,7 +324,7 @@ requirements; they do not replace runtime verification.
 
 ## Release checks
 
-- `npm test`, `npm run build`, `npm run docs:check`, Rust formatting, Rust
+- `bun run test`, `bun run build`, `bun run docs:check`, Rust formatting, Rust
   tests, and Rust check pass.
 - Product version is `0.1.0` in `package.json`, `src-tauri/Cargo.toml`, and
   `src-tauri/tauri.conf.json`; the package name is `mimir`.

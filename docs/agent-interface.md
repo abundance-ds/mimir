@@ -224,7 +224,7 @@ boundary.
 ## Chat administration
 
 The complete server and client runbook is
-[`reference/chat.md`](reference/chat.md). For routine account operations on the
+[`chat.md`](chat.md). For routine account operations on the
 chat host, use the installed helper instead of anonymous IRC or hand-editing
 Ergo state:
 

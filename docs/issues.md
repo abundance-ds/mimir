@@ -17,7 +17,7 @@ Known issues and gaps. Every agent should check this file and add to it when the
   the invoke fails silently at runtime (swallowed by a catch). The mock
   allowlist entry stays so editor tests do not trip the unknown-command guard;
   it is carried as the sole tracked exception in
-  `scripts/check-tauri-commands.mjs` (`npm run check:commands`). The real fix
+  `scripts/check-tauri-commands.mjs` (`bun run check:commands`). The real fix
   — registering the command or removing the invoke — belongs to the editor
   bridge owner. (Resolved 2026-07-26: ghost entries `comments_submit`,
   `focus_main_window`, `search_file_content` removed from the allowlist;

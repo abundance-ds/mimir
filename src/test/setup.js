@@ -35,7 +35,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // document_context_send has no Rust command but is still invoked by
   // useDocumentBridge.js behind a silent catch; keeping it mocked stops
   // editor tests from tripping the unknown-command guard. Tracked debt —
-  // see scripts/check-tauri-commands.mjs and docs/reference/issues.md.
+  // see scripts/check-tauri-commands.mjs and docs/issues.md.
   'document_context_send', 'settings_changed',
   'app_quit_confirmed',
   // spell

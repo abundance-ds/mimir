@@ -1,7 +1,7 @@
 # Mimir Chat deployment
 
 These files install the isolated Ergo service used by Mimir Chats. Read
-[`docs/reference/chat.md`](../../docs/reference/chat.md) before production
+[`docs/chat.md`](../../docs/chat.md) before production
 changes.
 
 - `install.sh` pins and checksum-verifies Ergo, creates the dedicated service

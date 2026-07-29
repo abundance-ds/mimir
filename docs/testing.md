@@ -5,7 +5,7 @@ environment differs materially from the desktop runtime.
 
 ## Frontend harness
 
-`npm test` runs `scripts/test.mjs`, which invokes Vitest with
+`bun run test` runs `scripts/test.mjs`, which invokes Vitest with
 `--no-experimental-webstorage`. Use the wrapper: calling Vitest directly can
 exercise a different Node environment.
 
@@ -30,7 +30,7 @@ Component tests should assert behavior/contracts, focus ownership, emitted
 events, and cleanup. Do not use happy-dom layout values as evidence for desktop
 geometry.
 
-`npm run test:coverage` enforces the global floor in `vitest.config.js`.
+`bun run test:coverage` enforces the global floor in `vitest.config.js`.
 Coverage is a regression tripwire rather than a quality score: high-risk
 bridges and editor engines still need direct contract tests even when broad
 component mounts raise the aggregate.
@@ -59,20 +59,22 @@ helper/runtime must carry the behavior test.
 
 | Layer | Command | Proves | Does not prove |
 |---|---|---|---|
-| Renderer unit/component | `npm test` | JS/Vue state, DOM contracts, mocked IPC | desktop integration or Rust |
-| Renderer production build | `npm run build` | module graph, Vue/Tailwind/Rollup output | native behavior |
-| Documentation integrity | `npm run docs:check` | local links/paths, `_MAP` coverage, version agreement | semantic accuracy |
+| Renderer unit/component | `bun run test` | JS/Vue state, DOM contracts, mocked IPC | desktop integration or Rust |
+| Renderer production build | `bun run build` | module graph, Vue/Tailwind/Rollup output | native behavior |
+| Documentation integrity | `bun run docs:check` | local links/paths, `_MAP` coverage, version agreement | semantic accuracy |
 | Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | formatting only | compilation |
 | Rust unit/integration | `cargo test --manifest-path src-tauri/Cargo.toml` | native helpers/runtimes | real packaged webview |
 | Rust compile | `cargo check --manifest-path src-tauri/Cargo.toml` | Linux-compilable command graph | macOS-only execution |
-| Optional lint | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | lint-clean Rust | currently not run by CI |
-| Desktop runtime | `npm run tauri -- dev` | actual IPC, PTY, window, keychain, dialogs | packaged bundle |
-| Package | `npm run tauri -- build` | platform bundle | signing/notarization unless configured externally |
+| Rust lint | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | lint-clean Rust | runtime behavior |
+| Desktop runtime | `bun tauri dev` | actual IPC, PTY, window, keychain, dialogs | packaged bundle |
+| Signing inputs | `bun run check:signing` | local `.env` completeness, aliases, permissions, Apple keychain identity | remote signing services |
+| Release package | `bun tauri build` | macOS signed/notarized DMG | behavior on another machine |
 
-`.github/workflows/build.yml` runs frontend test/build, Rust format/test/check
-on Ubuntu. Its macOS arm64 package job is manual. Keep `docs/reference/building.md`
-wording aligned with the workflow; Clippy is a recommended local check, not
-currently a CI check.
+`.github/workflows/build.yml` runs frontend test/build and Rust
+format/test/check/clippy on Ubuntu. Its manual packaging job produces the
+signed, notarized macOS arm64 DMG. Linux packaging remains present but
+explicitly parked. Keep [building.md](building.md) aligned with the workflow
+and signing launcher.
 
 ## Change-to-test routing
 

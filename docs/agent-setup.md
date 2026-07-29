@@ -81,7 +81,7 @@ Codex and Gemini currently have no clean per-launch project-skill root.
 Project skills use `mimir skill <query>` there; Mimir does not modify the repo
 or replace the client's home directory.
 
-See [Agent interface](../agent-interface.md) for scope and compatibility
+See [Agent interface](agent-interface.md) for scope and compatibility
 decisions.
 
 ## Resolution boundary

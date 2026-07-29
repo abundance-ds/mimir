@@ -799,10 +799,9 @@ Use: mimir call <tool> '<json>'`,
 
 The path is optional. Mimir opens the target and shows the exact replacement as
 a diff for acceptance or rejection; it does not apply the proposal directly.`,
-  docs: `Mimir keeps dense implementation notes and old tutorials out of agent context.
+  docs: `Repository documentation
 
-In the source tree, browse docs/reference/ only when a focused help topic is
-insufficient.`,
+Use docs/_MAP.md to locate the owning document for a subsystem.`,
   tools: `Tool discovery
 
   mimir tools            concise available catalog
