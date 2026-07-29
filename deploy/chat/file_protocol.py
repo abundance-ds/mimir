@@ -37,7 +37,9 @@ def oversized_upload_is_rejected(password: str) -> None:
     """An over-limit Content-Length must be refused from the header alone,
     before any body bytes are accepted."""
     parts = urlsplit(BASE_URL)
-    connection = http.client.HTTPSConnection(parts.netloc, timeout=10)
+    # The first authenticated request may pay an uncached Ergo SASL check
+    # (up to ~7s) before any HTTP response exists.
+    connection = http.client.HTTPSConnection(parts.netloc, timeout=30)
     try:
         authorization = base64.b64encode(f"{ACCOUNT}:{password}".encode()).decode()
         connection.putrequest("POST", parts.path)
