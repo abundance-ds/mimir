@@ -108,6 +108,58 @@ describe('mimir skills', () => {
     })
   })
 
+  it('matches the packaged graph skill for knowledge tasks', async () => {
+    const options = {
+      home,
+      cwd: project,
+      nativeRoot,
+      catalogRoot: path.resolve('skills'),
+    }
+
+    const found = await findSkill('knowledge', options)
+
+    expect(found).toMatchObject({
+      skill: {
+        name: 'mimir-graph',
+        description: 'Mimir knowledge graph.',
+      },
+    })
+    await expect(fs.readFile(
+      path.join(found.skill.path, 'references', 'graph.md'),
+      'utf8',
+    )).resolves.toContain('## Fast path')
+  })
+
+  it('preserves packaged graph references in native and Claude projections', async () => {
+    const options = {
+      home,
+      cwd: project,
+      nativeRoot,
+      catalogRoot: path.resolve('skills'),
+    }
+
+    const prepared = await prepareSkills('claude', options)
+    const nativeReference = path.join(
+      nativeRoot,
+      'mimir-graph',
+      'references',
+      'graph.md',
+    )
+    const claudeReference = path.join(
+      prepared.claudeRoot,
+      '.claude',
+      'skills',
+      'mimir-graph',
+      'references',
+      'graph.md',
+    )
+
+    await expect(fs.readFile(nativeReference, 'utf8'))
+      .resolves.toContain('## Ontology')
+    await expect(fs.readFile(claudeReference, 'utf8'))
+      .resolves.toContain('## Ontology')
+  })
+
   it('rejects duplicate names across visible scopes', async () => {
     const first = await sourceSkill(path.join(root, 'one'), 'release-review', 'Team release review.')
     const second = await sourceSkill(path.join(root, 'two'), 'release-review', 'Private release review.')
