@@ -37,8 +37,8 @@ the human keeps overview, contributes, monitors, and intervenes. AI work is
 trusted — it lands in the Now stream as filed events for awareness and
 drill-down correction, never behind accept/reject gates.
 
-- Titles: IBM Plex Sans ~12px. Metadata: IBM Plex Mono 10–11px, tabular
-  numerals. Micro labels: uppercase letterspaced Mono ≥ 9px.
+- Titles: system UI ~12px. Metadata: system mono 10–11px, tabular numerals.
+  Micro labels: uppercase letterspaced mono ≥ 9px.
 - Rows sit directly on the projection canvas separated by 1px hairlines — no
   wells, no raised plates — so a row can never merge into its column.
 - Radius 0–2px; no shadows except functional overlays; no gradients.
@@ -85,17 +85,20 @@ Every theme must preserve token roles and contrast relationships.
 
 ## Type
 
-Fonts are bundled in `src/shared/styles/fonts.css`:
+Active stacks are defined in `src/shared/styles/app.css` and
+`src/shared/fonts.js`:
 
 | Role | Family |
 |---|---|
-| UI and status | IBM Plex Sans |
-| paths, code, terminal, flags, metadata | IBM Plex Mono |
-| authored prose option | IBM Plex Serif |
+| UI, status, and prose | native system UI |
+| paths, code, terminal, flags, metadata | native system monospace |
 
-Editor font choices are the single source in `src/shared/fonts.js`. UI type is
-usually 9–13px. Metadata may be uppercase only when short; sentences remain
-normal case.
+There is no serif choice. Editor font choices are the single source in
+`src/shared/fonts.js`; an old saved `serif` preference migrates to system Sans.
+Unused IBM Plex Sans and Mono faces remain in `fonts.css` only as reversible
+experiment assets and are not selected by active tokens. UI type is usually
+9–13px. Metadata may be uppercase only when short; sentences remain normal
+case.
 
 ## Components
 

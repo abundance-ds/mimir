@@ -693,7 +693,7 @@ fn starter_html(title: &str) -> String {
     header {{ border-bottom: 1px solid var(--color-rule); }}
     footer {{ border-top: 1px solid var(--color-rule); color: var(--color-ink-3); font-size: 11px; }}
     header div {{ flex: 1; }}
-    h1 {{ margin: 2px 0 0; font-family: var(--font-serif); font-size: 19px; }}
+    h1 {{ margin: 2px 0 0; font-family: var(--font-sans); font-size: 19px; }}
     small, #state {{ color: var(--color-ink-3); font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; }}
     textarea {{ min-height: 0; flex: 1; resize: none; border: 0; border-radius: 0; padding: 18px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; }}
     footer span {{ min-width: 0; flex: 1; }}

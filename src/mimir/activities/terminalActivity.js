@@ -43,17 +43,13 @@ export function orderedReplayChunks(snapshot) {
 }
 
 export async function prepareTerminalFonts(
-  fontSize,
+  _fontSize,
   fonts = typeof document === 'undefined' ? null : document.fonts,
 ) {
-  if (!fonts?.load) return
-  const size = Math.max(9, Math.min(24, Number(fontSize) || 12))
-  await Promise.allSettled([
-    fonts.load(`400 ${size}px "IBM Plex Mono"`, 'MW'),
-    fonts.load(`italic 400 ${size}px "IBM Plex Mono"`, 'MW'),
-    fonts.load(`600 ${size}px "IBM Plex Mono"`, 'MW'),
-    fonts.load(`italic 600 ${size}px "IBM Plex Mono"`, 'MW'),
-  ])
+  // Native system font stacks need no webfont load. Waiting for the document
+  // font set still prevents an unrelated in-flight face from changing layout
+  // between xterm's initial measurement and its first paint.
+  if (fonts?.ready) await Promise.resolve(fonts.ready)
 }
 
 export function readTerminalTheme(root = document.documentElement) {

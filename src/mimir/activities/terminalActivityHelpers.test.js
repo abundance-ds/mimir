@@ -37,16 +37,11 @@ describe('terminal activity byte and lifecycle helpers', () => {
     expect(snapshot.scrollback.chunks[0].sequence).toBe(2)
   })
 
-  it('loads upright and italic regular and semibold faces before xterm measures', async () => {
+  it('waits for the document font set without loading a bundled terminal face', async () => {
     const load = vi.fn().mockResolvedValue([])
-    await prepareTerminalFonts(13, { load })
+    await prepareTerminalFonts(13, { load, ready: Promise.resolve() })
 
-    expect(load.mock.calls).toEqual([
-      ['400 13px "IBM Plex Mono"', 'MW'],
-      ['italic 400 13px "IBM Plex Mono"', 'MW'],
-      ['600 13px "IBM Plex Mono"', 'MW'],
-      ['italic 600 13px "IBM Plex Mono"', 'MW'],
-    ])
+    expect(load).not.toHaveBeenCalled()
   })
 
   it('uses strong default ink and keeps ANSI black dark on dark themes', () => {

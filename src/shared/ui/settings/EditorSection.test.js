@@ -89,12 +89,12 @@ describe('EditorSection', () => {
 
     await trigger.trigger('click')
     const items = wrapper.findAll('.dropdown-item')
-    expect(items.map((item) => item.text())).toEqual(['Sans', 'Serif', 'Mono'])
+    expect(items.map((item) => item.text())).toEqual(['Sans', 'Mono'])
 
-    await items[1].trigger('click')
-    expect(store.editorFontFamily).toBe('serif')
+    await items[0].trigger('click')
+    expect(store.editorFontFamily).toBe('sans')
     expect(wrapper.find('.dropdown-menu').exists()).toBe(false)
-    expect(trigger.text()).toContain('Serif')
+    expect(trigger.text()).toContain('Sans')
   })
 
   it('closes the font dropdown on an outside pointerdown', async () => {
