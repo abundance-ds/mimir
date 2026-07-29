@@ -3,7 +3,10 @@ export async function completeNativeQuit({
   flushSettings,
   confirmQuit,
 }) {
-  const guarded = await requestClose({ closeNative: false })
+  const guarded = await requestClose({
+    closeNative: false,
+    revealBeforeConfirm: true,
+  })
   if (!guarded) return false
 
   const settingsSaved = await flushSettings()

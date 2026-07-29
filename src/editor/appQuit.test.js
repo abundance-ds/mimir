@@ -22,7 +22,10 @@ describe('completeNativeQuit', () => {
     const h = harness()
     await expect(completeNativeQuit(h)).resolves.toBe(true)
     expect(h.order).toEqual(['documents', 'settings', 'quit'])
-    expect(h.requestClose).toHaveBeenCalledWith({ closeNative: false })
+    expect(h.requestClose).toHaveBeenCalledWith({
+      closeNative: false,
+      revealBeforeConfirm: true,
+    })
   })
 
   it('does nothing after a cancelled dirty-document guard', async () => {

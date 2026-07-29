@@ -609,7 +609,9 @@ const windowCloseGuard = createWindowCloseGuard({
   awaitReady: editorSession.awaitReady,
   onError: reportSessionError,
   beforeNativeClose: () => editorSettings.flush(),
+  beforeNativeHide: () => editorSettings.flush(),
   flushSession: editorSession.flush,
+  hideOnClose: isTauriRuntime() && platformKind() === 'macos',
 })
 
 async function requestEditorWindowClose(options) {

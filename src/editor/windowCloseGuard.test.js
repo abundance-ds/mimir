@@ -6,11 +6,16 @@ function harness({
   confirm = 'saved',
   awaitReady,
   beforeNativeClose,
+  beforeNativeHide,
+  hideOnClose = false,
 } = {}) {
   let closeHandler = null
   const stop = vi.fn()
   const nativeWindow = {
     close: vi.fn(async () => {}),
+    hide: vi.fn(async () => {}),
+    show: vi.fn(async () => {}),
+    setFocus: vi.fn(async () => {}),
     onCloseRequested: vi.fn(async handler => {
       closeHandler = handler
       return stop
@@ -27,6 +32,8 @@ function harness({
     flushSession,
     awaitReady,
     beforeNativeClose,
+    beforeNativeHide,
+    hideOnClose,
   })
   return {
     guard,
@@ -63,6 +70,48 @@ describe('native Editor close guard', () => {
       .toBeLessThan(h.flushSession.mock.invocationCallOrder[0])
     expect(h.flushSession.mock.invocationCallOrder[0])
       .toBeLessThan(h.nativeWindow.close.mock.invocationCallOrder[0])
+  })
+
+  it('hides on a macOS-style close request without closing or discarding dirty files', async () => {
+    const h = harness({
+      dirtyFiles: [{ path: '/draft.md', dirty: true }],
+      hideOnClose: true,
+    })
+    await h.guard.setup()
+
+    const prevented = h.closeEvent()
+    expect(prevented).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(h.nativeWindow.hide).toHaveBeenCalledTimes(1))
+
+    expect(h.flushContent).toHaveBeenCalledTimes(1)
+    expect(h.flushSession).toHaveBeenCalledWith([])
+    expect(h.confirmFile).not.toHaveBeenCalled()
+    expect(h.nativeWindow.close).not.toHaveBeenCalled()
+  })
+
+  it('persists settings before hiding and leaves the window visible when that fails', async () => {
+    const beforeNativeHide = vi.fn(async () => false)
+    const h = harness({ hideOnClose: true, beforeNativeHide })
+    await h.guard.setup()
+
+    h.closeEvent()
+    await vi.waitFor(() => expect(beforeNativeHide).toHaveBeenCalledTimes(1))
+
+    expect(h.nativeWindow.hide).not.toHaveBeenCalled()
+  })
+
+  it('reveals a hidden window before asking about dirty files during app quit', async () => {
+    const h = harness({ dirtyFiles: [{ path: '/draft.md', dirty: true }] })
+
+    await h.guard.requestClose({
+      closeNative: false,
+      revealBeforeConfirm: true,
+    })
+
+    expect(h.nativeWindow.show).toHaveBeenCalledTimes(1)
+    expect(h.nativeWindow.setFocus).toHaveBeenCalledTimes(1)
+    expect(h.nativeWindow.show.mock.invocationCallOrder[0])
+      .toBeLessThan(h.confirmFile.mock.invocationCallOrder[0])
   })
 
   it('leaves the window open when any dirty-file confirmation is cancelled', async () => {
