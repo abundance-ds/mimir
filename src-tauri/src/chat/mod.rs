@@ -1809,8 +1809,7 @@ fn split_utf8(value: &str, max_bytes: usize) -> Vec<String> {
         if end < value.len() {
             let whitespace = value[start..end]
                 .char_indices()
-                .filter(|(_, character)| character.is_whitespace())
-                .next_back();
+                .rfind(|(_, character)| character.is_whitespace());
             if let Some((index, character)) = whitespace {
                 let candidate = start + index + character.len_utf8();
                 if candidate > start + max_bytes / 2 {
@@ -3007,7 +3006,9 @@ mod tests {
             "#general"
         );
         assert_eq!(
-            runtime.resolve_tool_target(&context, Some("#product")).unwrap(),
+            runtime
+                .resolve_tool_target(&context, Some("#product"))
+                .unwrap(),
             "#product"
         );
         assert_eq!(

@@ -672,6 +672,7 @@ impl ChatDatabase {
             .map_err(|error| error.to_string())
     }
 
+    #[cfg(test)]
     pub fn attachment_target(&self, file_id: &str) -> Result<Option<String>, String> {
         self.connection()?
             .query_row(
