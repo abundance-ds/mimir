@@ -4,6 +4,9 @@ import { routeWorkbenchKey } from '../workbenchKeyboard.js'
 
 export function useWorkbenchKeyboardRouting({
   quickOpen,
+  quickOpenInitialView = ref('root'),
+  quickOpenPreferredTargetId = ref(''),
+  activityNewTargetId = ref(null),
   settings,
   editorRef,
   editorFiles,
@@ -53,12 +56,15 @@ export function useWorkbenchKeyboardRouting({
       shift: event.shiftKey,
       focusOwner: focus.owner,
       sidebarActivityId: focus.activityId,
+      activityNewTargetId: activityNewTargetId.value,
     })
     if (!result) return
 
     consume(event)
     if (result.action === 'quick-open') {
-      quickOpen.value = true
+      openQuickOpen()
+    } else if (result.action === 'quick-open-new-activity') {
+      openQuickOpen('new-activity', result.targetId)
     } else if (result.action === 'toggle-sidebar') {
       void toggleSidebar()
     } else if (result.action === 'cycle-editor') {
@@ -114,6 +120,23 @@ export function useWorkbenchKeyboardRouting({
     closeForFocus(current.owner === 'none' ? lastFocus.value : current)
   }
 
+  function newNativeFocusedSurface() {
+    if (quickOpen.value || document.querySelector('[aria-modal="true"]')) return
+    const current = keyboardFocus(document.activeElement)
+    const focus = current.owner === 'none' ? lastFocus.value : current
+    if (focus.owner === 'activity' && activityNewTargetId.value !== null) {
+      openQuickOpen('new-activity', activityNewTargetId.value)
+      return
+    }
+    editorRef.value?.mimirNewFile?.()
+  }
+
+  function openQuickOpen(view = 'root', preferredTargetId = '') {
+    quickOpenInitialView.value = view
+    quickOpenPreferredTargetId.value = preferredTargetId || ''
+    quickOpen.value = true
+  }
+
   function closeForFocus(focus) {
     if (focus.owner === 'editor') {
       if (!editorFiles.openFiles.length) collapseEmptyEditor()
@@ -156,6 +179,7 @@ export function useWorkbenchKeyboardRouting({
     cycleActivity,
     keyboardFocus,
     lastFocus,
+    newNativeFocusedSurface,
     onKeydown,
     rememberWorkbenchFocus,
   }

@@ -301,6 +301,53 @@ describe('Workbench controllers', () => {
     expect(closeActivity).toHaveBeenCalledWith('run:a')
   })
 
+  it('routes native New through the focused CLI Activity and falls back to Editor New File', () => {
+    const quickOpen = ref(false)
+    const quickOpenInitialView = ref('root')
+    const quickOpenPreferredTargetId = ref('')
+    const activityNewTargetId = ref('preset:review')
+    const newFile = vi.fn()
+    const controller = useWorkbenchKeyboardRouting({
+      quickOpen,
+      quickOpenInitialView,
+      quickOpenPreferredTargetId,
+      activityNewTargetId,
+      settings: { workbenchZoom: 1, set: vi.fn() },
+      editorRef: ref({ mimirNewFile: newFile }),
+      editorFiles: { openFiles: [] },
+      workbench: { activeActivityId: 'run:a' },
+      sidebarActivities: computed(() => [{ id: 'run:a' }]),
+      toggleSidebar: vi.fn(),
+      selectActivity: vi.fn(),
+      closeActivity: vi.fn(),
+      collapseEmptyEditor: vi.fn(),
+    })
+    const activityPane = document.createElement('section')
+    activityPane.dataset.pane = 'activity'
+    activityPane.tabIndex = 0
+    document.body.appendChild(activityPane)
+
+    activityPane.focus()
+    controller.newNativeFocusedSurface()
+
+    expect(quickOpen.value).toBe(true)
+    expect(quickOpenInitialView.value).toBe('new-activity')
+    expect(quickOpenPreferredTargetId.value).toBe('preset:review')
+    expect(newFile).not.toHaveBeenCalled()
+
+    quickOpen.value = false
+    const editorPane = document.createElement('section')
+    editorPane.dataset.pane = 'editor'
+    editorPane.tabIndex = 0
+    document.body.appendChild(editorPane)
+    editorPane.focus()
+    controller.newNativeFocusedSurface()
+
+    expect(newFile).toHaveBeenCalledTimes(1)
+    activityPane.remove()
+    editorPane.remove()
+  })
+
   it('owns startup hydration, core Activities, and responsive Editor visibility', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()

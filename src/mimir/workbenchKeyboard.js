@@ -5,12 +5,25 @@ export function routeWorkbenchKey({
   shift = false,
   focusOwner = 'none',
   sidebarActivityId = '',
+  activityNewTargetId = null,
 }) {
   if (!primary) return null
   const normalized = String(key || '').toLowerCase()
 
   if (!alt && !shift && normalized === 'p') return { action: 'quick-open' }
   if (!alt && !shift && normalized === 'b') return { action: 'toggle-sidebar' }
+  if (
+    !alt
+    && !shift
+    && normalized === 'n'
+    && focusOwner === 'activity'
+    && activityNewTargetId !== null
+  ) {
+    return {
+      action: 'quick-open-new-activity',
+      targetId: activityNewTargetId,
+    }
+  }
 
   if (alt && !shift && (key === 'ArrowLeft' || key === 'ArrowRight')) {
     const direction = key === 'ArrowLeft' ? -1 : 1

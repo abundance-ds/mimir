@@ -226,6 +226,8 @@ const SEARCH_DEBOUNCE_MS = 130
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  initialView: { type: String, default: 'root' },
+  preferredTargetId: { type: String, default: '' },
   tools: { type: Array, default: () => [] },
   chats: { type: Array, default: () => [] },
   newActivity: { type: Array, default: () => [] },
@@ -300,10 +302,10 @@ watch(
     previousFocus = document.activeElement
     cancelPendingSearch()
     query.value = ''
-    selectedIndex.value = 0
     searchError.value = ''
     historySnippets.value = new Map()
-    view.value = 'root'
+    view.value = props.initialView === 'new-activity' ? 'new-activity' : 'root'
+    selectedIndex.value = preferredResultIndex()
     await files.setQuery('')
     if (!props.open) return
     await nextTick()
@@ -371,6 +373,14 @@ function onInput() {
 
 function confirm() {
   if (selectedResult.value) activate(selectedResult.value)
+}
+
+function preferredResultIndex() {
+  if (!inNewActivityView.value || !props.preferredTargetId) return 0
+  const index = results.value.findIndex(
+    result => result.targetId === props.preferredTargetId,
+  )
+  return index < 0 ? 0 : index
 }
 
 function activate(result) {

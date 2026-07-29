@@ -126,6 +126,7 @@
         hide-sidebar
         embedded
         @close-request="closeNativeFocusedSurface"
+        @new-request="newNativeFocusedSurface"
         @empty="collapseEmptyEditor"
         @navigate-editor="onEditorNavigate"
         @launch-app="dispatchAppPayload"
@@ -135,6 +136,8 @@
 
   <QuickOpen
     :open="quickOpen"
+    :initial-view="quickOpenInitialView"
+    :preferred-target-id="quickOpenPreferredTargetId"
     :tools="toolRows"
     :chats="chat.config.enabled ? chat.targets : []"
     :new-activity="newActivityRows"
@@ -216,6 +219,8 @@ const releaseSettingsSync = settings.startSync()
 const editorFiles = useFileStore()
 const editorRef = ref(null)
 const quickOpen = ref(false)
+const quickOpenInitialView = ref('root')
+const quickOpenPreferredTargetId = ref('')
 const diagnostic = ref('')
 const activitySurfaces = new Map()
 
@@ -448,6 +453,18 @@ const newActivityRows = computed(() => orderSidebarRows([
   })),
   ...freshActivityApps.value.map(appRow),
 ], settings.sidebarNewActivityOrder))
+const activityNewTargetId = computed(() => {
+  const activity = activeActivity.value
+  if (
+    !activity
+    || !['agent', 'terminal'].includes(activity.kind)
+    || activity.host?.type !== 'pty'
+  ) {
+    return null
+  }
+  const presetId = activity.source?.presetId || activity.source?.launcherId
+  return presetId ? `preset:${presetId}` : ''
+})
 const chatAgentRows = computed(() => launchers.decoratedPresets.filter(
   preset => preset.kind === 'agent',
 ))
@@ -478,10 +495,14 @@ function isToolActivity(activity) {
 const {
   closeNativeFocusedSurface,
   lastFocus: lastWorkbenchFocus,
+  newNativeFocusedSurface,
   onKeydown,
   rememberWorkbenchFocus,
 } = useWorkbenchKeyboardRouting({
   quickOpen,
+  quickOpenInitialView,
+  quickOpenPreferredTargetId,
+  activityNewTargetId,
   settings,
   editorRef,
   editorFiles,

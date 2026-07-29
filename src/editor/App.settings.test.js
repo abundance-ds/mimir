@@ -8,11 +8,14 @@ const { readFile, loadSession, saveSession } = vi.hoisted(() => ({
   loadSession: vi.fn(),
   saveSession: vi.fn(),
 }))
+const nativeMenu = vi.hoisted(() => ({
+  install: vi.fn(async () => true),
+}))
 
 vi.mock('../services/fileSystem.js', () => ({ readFile }))
 vi.mock('../services/session.js', () => ({ loadSession, saveSession }))
 vi.mock('./nativeMenu.js', () => ({
-  installNativeEditorMenu: vi.fn(async () => () => {}),
+  installNativeEditorMenu: nativeMenu.install,
   shouldInstallNativeEditorMenu: vi.fn(() => false),
 }))
 vi.mock('./sessionPersist.js', () => ({
@@ -65,6 +68,7 @@ describe('Editor Apps Settings bridge', () => {
     readFile.mockReset().mockResolvedValue('id = "ledger"')
     loadSession.mockReset().mockResolvedValue(null)
     saveSession.mockReset().mockResolvedValue()
+    nativeMenu.install.mockClear()
   })
 
   it('closes Settings and opens a local app definition in the right-hand Editor', async () => {
@@ -138,6 +142,39 @@ describe('Editor Apps Settings bridge', () => {
     expect(wrapper.find('[data-settings-stub]').exists()).toBe(false)
     expect(wrapper.emitted('closeRequest')).toBeFalsy()
     expect(useFileStore().openFiles).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('hands native New to the Workbench when the Editor is embedded', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(App, {
+      props: { embedded: true },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppHeader: true,
+          AppFooter: true,
+          SettingsDialog: SettingsDialogStub,
+          EditorSurface: EditorSurfaceStub,
+          InlineAI: true,
+          DiffBar: true,
+          DiffView: true,
+          BatchDiffView: true,
+          NewTabPage: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    const actions = nativeMenu.install.mock.calls.at(-1)[0].actions
+    const initialFiles = useFileStore().openFiles.length
+
+    actions.newFile()
+
+    expect(wrapper.emitted('newRequest')).toHaveLength(1)
+    expect(useFileStore().openFiles).toHaveLength(initialFiles)
     wrapper.unmount()
   })
 

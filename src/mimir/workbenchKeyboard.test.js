@@ -42,6 +42,38 @@ describe('Workbench focus-aware keyboard routing', () => {
     })).toEqual({ action: 'close-activity', activityId: 'agent:review' })
   })
 
+  it('routes New to the CLI Activity chooser without stealing Editor New File', () => {
+    expect(routeWorkbenchKey({
+      key: 'n',
+      primary: true,
+      focusOwner: 'activity',
+      activityNewTargetId: 'preset:review',
+    })).toEqual({
+      action: 'quick-open-new-activity',
+      targetId: 'preset:review',
+    })
+    expect(routeWorkbenchKey({
+      key: 'n',
+      primary: true,
+      focusOwner: 'activity',
+      activityNewTargetId: '',
+    })).toEqual({
+      action: 'quick-open-new-activity',
+      targetId: '',
+    })
+    expect(routeWorkbenchKey({
+      key: 'n',
+      primary: true,
+      focusOwner: 'editor',
+      activityNewTargetId: 'preset:review',
+    })).toBeNull()
+    expect(routeWorkbenchKey({
+      key: 'n',
+      primary: true,
+      focusOwner: 'activity',
+    })).toBeNull()
+  })
+
   it('does not steal close or tab switching without a focus owner', () => {
     expect(routeWorkbenchKey({ key: 'w', primary: true })).toBeNull()
     expect(routeWorkbenchKey({

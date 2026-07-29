@@ -271,7 +271,13 @@ const props = defineProps({
   hideSidebar: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
 })
-const emit = defineEmits(['closeRequest', 'empty', 'launchApp', 'navigateEditor'])
+const emit = defineEmits([
+  'closeRequest',
+  'empty',
+  'launchApp',
+  'navigateEditor',
+  'newRequest',
+])
 const editorShellRef = ref(null)
 
 const editorUI = useEditorUIStore()
@@ -687,6 +693,10 @@ async function requestEmbeddedClose() {
   return false
 }
 
+function requestEmbeddedNew() {
+  emit('newRequest')
+}
+
 function focusModal(container) {
   if (!container) return
   if (!modalReturnFocus || !modalReturnFocus.isConnected) {
@@ -851,7 +861,7 @@ const { requestAppQuit } = nativeLifecycle
 
 function nativeMenuActions() {
   return {
-    newFile: createBlankFile,
+    newFile: props.embedded ? requestEmbeddedNew : createBlankFile,
     openFile: onOpenDialog,
     openRecent: onOpenRecent,
     clearRecent: onClearRecent,
@@ -1159,6 +1169,7 @@ defineExpose({
   mimirReviewProposal,
   mimirReveal,
   mimirSave,
+  mimirNewFile: createBlankFile,
   mimirOwnsFocus,
   mimirCycleTab,
   mimirCloseActiveTab,

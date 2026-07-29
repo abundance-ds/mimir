@@ -7,6 +7,7 @@ const editorOpen = vi.hoisted(() => vi.fn())
 const editorOpenSettings = vi.hoisted(() => vi.fn())
 const editorClose = vi.hoisted(() => vi.fn())
 const editorCycle = vi.hoisted(() => vi.fn())
+const editorNew = vi.hoisted(() => vi.fn())
 const terminalPaste = vi.hoisted(() => vi.fn())
 const toolRuntimeStart = vi.hoisted(() => vi.fn())
 const toolRuntimeStop = vi.hoisted(() => vi.fn())
@@ -28,13 +29,14 @@ vi.mock('../editor/App.vue', async () => {
         hideSidebar: Boolean,
         embedded: Boolean,
       },
-      emits: ['closeRequest', 'empty', 'navigateEditor'],
+      emits: ['closeRequest', 'empty', 'navigateEditor', 'newRequest'],
       setup(_props, { expose }) {
         expose({
           mimirOpen: editorOpen,
           mimirOpenSettings: editorOpenSettings,
           mimirCloseActiveTab: editorClose,
           mimirCycleTab: editorCycle,
+          mimirNewFile: editorNew,
         })
         return () => h('div', { 'data-editor-stub': '', tabindex: '0' }, 'Editor')
       },
@@ -185,6 +187,7 @@ describe('WorkbenchApp', () => {
     editorOpenSettings.mockReset()
     editorClose.mockReset()
     editorCycle.mockReset()
+    editorNew.mockReset()
     terminalPaste.mockReset()
     terminalPaste.mockResolvedValue(true)
     toolRuntimeStart.mockReset()
@@ -1051,6 +1054,73 @@ describe('WorkbenchApp', () => {
     }))
     await nextTick()
     expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
+  })
+
+  it('opens New activity on Cmd+N in a CLI panel with its launcher selected', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const record = {
+      ...activityRecord('agent:review', 'Review with Codex', '2026-07-29T10:00:00Z'),
+      source: { presetId: 'review', launcherId: 'codex' },
+    }
+    useActivitiesStore().upsert(record)
+    useWorkbenchStore().openActivity(record.id)
+    await vi.dynamicImportSettled()
+    await nextTick()
+
+    const terminal = wrapper.get('[data-terminal-stub="agent:review"]')
+    terminal.element.setAttribute('tabindex', '0')
+    terminal.element.focus()
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'n',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }))
+    await nextTick()
+
+    expect(wrapper.get('[data-quick-open-type="new-activity"]').exists()).toBe(true)
+    expect(wrapper.find('[data-quick-open-type="new-activity-enter"]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(false)
+    expect(wrapper.get('[data-quick-open-key="new:preset:review"]').attributes('aria-selected'))
+      .toBe('true')
+    expect(editorNew).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(activityApi.resolveLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'review' }),
+      '/w',
+    )
+  })
+
+  it('routes the embedded native New action through the last focused pane', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const record = {
+      ...activityRecord('agent:review', 'Review with Codex', '2026-07-29T10:00:00Z'),
+      source: { presetId: 'review', launcherId: 'codex' },
+    }
+    useActivitiesStore().upsert(record)
+    useWorkbenchStore().openActivity(record.id)
+    await vi.dynamicImportSettled()
+    await nextTick()
+
+    const terminal = wrapper.get('[data-terminal-stub="agent:review"]')
+    terminal.element.setAttribute('tabindex', '0')
+    terminal.element.focus()
+    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('newRequest')
+    await nextTick()
+
+    expect(wrapper.get('[data-quick-open-type="new-activity"]').exists()).toBe(true)
+    expect(wrapper.get('[data-quick-open-key="new:preset:review"]').attributes('aria-selected'))
+      .toBe('true')
+    expect(editorNew).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-quick-open-backdrop]').trigger('click')
+    wrapper.get('[data-editor-stub]').element.focus()
+    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('newRequest')
+
+    expect(editorNew).toHaveBeenCalledTimes(1)
   })
 
   it('routes Escape through the Go to hierarchy before closing the root', async () => {

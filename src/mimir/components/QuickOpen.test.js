@@ -124,6 +124,32 @@ describe('QuickOpen', () => {
     expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(true)
   })
 
+  it('opens directly in New activity with the current CLI selected', async () => {
+    const wrapper = render(true, {
+      props: {
+        initialView: 'new-activity',
+        preferredTargetId: 'preset:codex',
+        newActivity: [
+          { id: 'preset:terminal', title: 'Terminal', icon: 'terminal' },
+          ...launchers,
+        ],
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-quick-open-type="new-activity-enter"]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(false)
+    expect(wrapper.get('[data-quick-open-key="new:preset:codex"]').attributes('aria-selected'))
+      .toBe('true')
+
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({
+      type: 'new-activity',
+      targetId: 'preset:codex',
+    })
+  })
+
   it('uses Escape as Back inside New activity, then closes from the root', async () => {
     const wrapper = render()
     await wrapper.get('[data-quick-open-type="new-activity-enter"]').trigger('click')
