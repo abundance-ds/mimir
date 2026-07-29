@@ -16,7 +16,7 @@
         {{ monogram }}
       </span>
       <span v-if="!collapsed" class="ml-2 min-w-0 flex-1">
-        <span class="block truncate text-[11px] font-semibold text-ink">
+        <span class="block truncate text-[12px] font-semibold text-ink">
           {{ workspaceName || 'Open project' }}
         </span>
         <span class="block truncate font-mono text-[9px] text-ink-3">

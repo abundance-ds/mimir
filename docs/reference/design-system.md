@@ -112,7 +112,8 @@ hairline and lift to accent on hover.
 
 Sidebar, Files, Apps, and Routines rows use full-width hover backgrounds.
 Selection uses `accent-soft`, not an accent-filled card. Primary labels use
-Sans; paths, time, schedule, and status detail use Mono.
+Sans at 12px; paths, time, schedule, and status detail use Mono at 9px or
+larger. Sidebar rows are 32px high; denser Files rows are 28px high.
 
 ### Buttons and inputs
 

@@ -13,7 +13,7 @@
           type="button"
           :data-files-mode="option.id"
           :aria-current="viewMode === option.id ? 'page' : undefined"
-          class="relative flex h-full items-center gap-1.5 px-2 text-[10px] font-medium text-ink-3 outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+          class="relative flex h-full items-center gap-1.5 px-2 text-[11px] font-medium text-ink-3 outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
           :class="{ 'text-ink': viewMode === option.id }"
           @click="setViewMode(option.id)"
         >
@@ -21,7 +21,7 @@
           <span>{{ option.label }}</span>
           <span
             v-if="option.id === 'favorites' && favorites.length"
-            class="font-mono text-[8px] tabular-nums text-ink-4"
+            class="font-mono text-[9px] tabular-nums text-ink-4"
           >
             {{ favorites.length }}
           </span>
@@ -85,13 +85,13 @@
         autocorrect="off"
         spellcheck="false"
         :placeholder="searchPlaceholder"
-        class="h-full min-w-0 flex-1 bg-transparent font-mono text-[10px] text-ink outline-none placeholder:text-ink-4"
+        class="h-full min-w-0 flex-1 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-4"
         @input="onQueryInput"
         @keydown.down.prevent="focusList(1)"
         @keydown.up.prevent="focusList(-1)"
         @keydown.esc.prevent="clearQuery"
       />
-      <kbd v-if="!query" class="font-mono text-[8px] text-ink-4">⌘F</kbd>
+      <kbd v-if="!query" class="font-mono text-[9px] text-ink-4">⌘F</kbd>
       <button
         v-else
         type="button"
@@ -246,7 +246,7 @@
 
     <footer
       v-if="files.workspacePath"
-      class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[8px] text-ink-4"
+      class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[9px] text-ink-4"
     >
       <span>{{ selectedPaths.size ? `${selectedPaths.size} selected` : `${visibleRows.length} visible` }}</span>
       <span v-if="importing" data-files-importing class="text-accent">Adding dropped items…</span>

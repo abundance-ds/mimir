@@ -256,7 +256,7 @@
             v-if="renamingId === activity.id"
             :data-activity-rename="activity.id"
             v-model="renameDraft"
-            class="h-6 w-full min-w-0 border border-accent bg-surface px-1.5 text-[11px] text-ink outline-none"
+            class="h-6 w-full min-w-0 border border-accent bg-surface px-1.5 text-[12px] text-ink outline-none"
             aria-label="Activity name"
             @click.stop
             @keydown.enter.prevent="commitRename(activity)"
@@ -361,7 +361,7 @@
         data-sidebar-settings
         title="Settings"
         aria-label="Settings"
-        class="group flex h-8 w-full items-center text-left text-[11px] text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class="group flex h-8 w-full items-center text-left text-[12px] text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         @click="$emit('settings')"
       >
         <span class="grid size-7 shrink-0 place-items-center text-ink-3 group-hover:text-ink">

@@ -1,6 +1,6 @@
 <template>
   <div
-    class="group relative flex h-9 w-full items-center text-left text-ink-2 hover:bg-chrome-mid hover:text-ink"
+    class="group relative flex h-8 w-full items-center text-left text-ink-2 hover:bg-chrome-mid hover:text-ink"
     :class="{
       'bg-accent-soft text-ink': active,
       'text-ink-4': muted && !active,
@@ -27,7 +27,7 @@
         ]"
         :aria-hidden="collapsed"
       >
-        <span class="min-w-0 flex-1 truncate text-[11px] font-medium">
+        <span class="min-w-0 flex-1 truncate text-[12px] font-medium">
           <slot name="label">{{ label }}</slot>
         </span>
         <span

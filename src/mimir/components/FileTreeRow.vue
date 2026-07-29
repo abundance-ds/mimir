@@ -43,7 +43,7 @@
         data-files-inline-name
         :value="editDraft"
         :placeholder="editKind === 'folder' ? 'folder-name' : 'file-name.md'"
-        class="mr-2 h-6 min-w-28 flex-1 border border-accent bg-surface px-1.5 font-mono text-[11px] text-ink outline-none"
+        class="mr-2 h-6 min-w-28 flex-1 border border-accent bg-surface px-1.5 font-mono text-[12px] text-ink outline-none"
         autocomplete="off"
         spellcheck="false"
         @input="$emit('update:editDraft', $event.target.value)"
@@ -88,7 +88,7 @@
       />
       <span class="min-w-0 flex-1">
         <span
-          class="block truncate text-[11px]"
+          class="block truncate text-[12px]"
           :class="[
             entry.isDirectory ? 'font-medium' : '',
             active ? 'font-semibold text-ink' : '',
@@ -98,20 +98,20 @@
         </span>
         <span
           v-if="row.secondary"
-          class="block truncate font-mono text-[8px] leading-3 text-ink-4"
+          class="block truncate font-mono text-[9px] leading-3 text-ink-4"
         >
           {{ secondaryPath }}
         </span>
       </span>
       <span
         v-if="row.missing"
-        class="ml-2 shrink-0 font-mono text-[8px] uppercase tracking-[0.08em] text-rem"
+        class="ml-2 shrink-0 font-mono text-[9px] uppercase tracking-[0.08em] text-rem"
       >
         Missing
       </span>
       <span
         v-else-if="row.gitStatus"
-        class="ml-2 shrink-0 font-mono text-[8px] font-semibold uppercase"
+        class="ml-2 shrink-0 font-mono text-[9px] font-semibold uppercase"
         :class="gitClass"
       >
         {{ gitMark }}
