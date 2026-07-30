@@ -103,6 +103,48 @@ describe('mimir MCP client', () => {
     await expect(callTool('legacy', {})).resolves.toEqual({ legacy: true })
   })
 
+  it('returns an explicit null when structuredContent is null', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          content: [{ type: 'text', text: '' }],
+          structuredContent: null,
+        },
+      }),
+    })))
+
+    await expect(callTool('example', {})).resolves.toBeNull()
+  })
+
+  it('rejects a response without a result instead of returning silence', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ jsonrpc: '2.0', id: 1 }),
+    })))
+
+    await expect(callTool('example', {})).rejects.toThrow(
+      "mimir server returned no result for 'example'",
+    )
+  })
+
+  it('rejects an empty result instead of returning silence', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { content: [{ type: 'text', text: '' }] },
+      }),
+    })))
+
+    await expect(callTool('example', {})).rejects.toThrow(
+      "mimir server returned an empty result for 'example'",
+    )
+  })
+
   it('keeps default help short and progressively discloses focused topics', () => {
     expect(helpText()).toContain('mimir tools            list all available capabilities')
     expect(helpText()).toContain('mimir tools <group>    list one focused drawer')

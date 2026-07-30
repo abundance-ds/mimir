@@ -423,15 +423,21 @@ function scoreTool(tool, query, terms) {
 
 export async function callTool(name, args, options = {}) {
   const body = await request('tools/call', { name, arguments: args }, options)
-  const text = body?.content?.[0]?.text ?? ''
-  if (body?.isError) {
-    const error = new Error(body?.structuredContent?.message || text || 'Tool call failed.')
-    error.code = body?.structuredContent?.error
-    error.data = body?.structuredContent?.data
+  if (!body || typeof body !== 'object') {
+    throw new Error(`mimir server returned no result for '${name}'. Run \`mimir doctor\`.`)
+  }
+  const text = body.content?.[0]?.text ?? ''
+  if (body.isError) {
+    const error = new Error(body.structuredContent?.message || text || 'Tool call failed.')
+    error.code = body.structuredContent?.error
+    error.data = body.structuredContent?.data
     throw error
   }
-  if (body && Object.prototype.hasOwnProperty.call(body, 'structuredContent')) {
+  if (Object.prototype.hasOwnProperty.call(body, 'structuredContent')) {
     return body.structuredContent
+  }
+  if (!text) {
+    throw new Error(`mimir server returned an empty result for '${name}'. Run \`mimir doctor\`.`)
   }
   try {
     return JSON.parse(text)
@@ -759,7 +765,6 @@ async function readJson(parts) {
 }
 
 function printResult(result) {
-  if (result === undefined || result === null || result === '') return
   if (typeof result === 'string') console.log(result)
   else console.log(JSON.stringify(result, null, 2))
 }
