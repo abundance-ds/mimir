@@ -1,4 +1,5 @@
-// Validate the canonical RED Gherkin contract under features/meetings.
+// Validate the canonical, implementation-phase Gherkin contract and evidence
+// traceability under features/meetings.
 //
 // This checker is intentionally dependency-free. It validates the repository's
 // constrained feature-file shape; it is not a general Gherkin interpreter.
@@ -36,19 +37,14 @@ export function checkMeetingSpecs({
   if (!manifest) return result(failures, 0, 0)
 
   const manifestRelative = relative(root, manifestPath)
-  if (manifest.schemaVersion !== 1) {
-    failures.push(`${manifestRelative}: schemaVersion must be 1`)
+  if (manifest.schemaVersion !== 2) {
+    failures.push(`${manifestRelative}: schemaVersion must be 2`)
   }
-  if (manifest.phase !== 'red') {
-    failures.push(`${manifestRelative}: phase must remain 'red' for the specification foundation`)
+  if (manifest.phase !== 'implementation') {
+    failures.push(`${manifestRelative}: phase must be 'implementation'`)
   }
 
   const idPattern = compilePattern(manifest.idPattern, manifestRelative, failures)
-  const requiredTags = stringSet(
-    manifest.requiredScenarioTags,
-    `${manifestRelative}: requiredScenarioTags`,
-    failures,
-  )
   const evidenceTags = stringSet(
     manifest.evidenceTags,
     `${manifestRelative}: evidenceTags`,
@@ -92,11 +88,11 @@ export function checkMeetingSpecs({
       failures.push(`${label}.owner must name one evidence owner`)
     }
     if (
-      !Array.isArray(suite.plannedEvidence)
-      || suite.plannedEvidence.length === 0
-      || suite.plannedEvidence.some((entry) => typeof entry !== 'string' || !entry.trim())
+      !Array.isArray(suite.verificationScope)
+      || suite.verificationScope.length === 0
+      || suite.verificationScope.some((entry) => typeof entry !== 'string' || !entry.trim())
     ) {
-      failures.push(`${label}.plannedEvidence must contain non-empty RED evidence descriptions`)
+      failures.push(`${label}.verificationScope must contain non-empty implementation evidence areas`)
     }
 
     const expectedIds = expandIdRange(suite.idRange, label, idPattern, failures)
@@ -118,6 +114,19 @@ export function checkMeetingSpecs({
     const actualIds = []
     for (const scenario of parsed.scenarios) {
       const location = `${feature}:${scenario.line}`
+      if (scenario.tags.includes('red')) {
+        failures.push(`${location}: obsolete @red tag is forbidden in implementation phase`)
+      }
+      const executionTags = scenario.tags.filter((tag) => tag === 'automated' || tag === 'manual')
+      if (executionTags.length !== 1) {
+        failures.push(`${location}: scenario must have exactly one @automated or @manual tag`)
+      }
+      if (
+        (scenario.tags.includes('hardware') || scenario.tags.includes('release'))
+        && !scenario.tags.includes('manual')
+      ) {
+        failures.push(`${location}: @hardware and @release scenarios must be explicitly @manual`)
+      }
       const matchingIds = scenario.tags.filter((tag) => idPattern?.test(tag))
       if (matchingIds.length !== 1) {
         failures.push(`${location}: scenario must have exactly one stable MTG ID tag`)
@@ -131,11 +140,6 @@ export function checkMeetingSpecs({
         }
       }
 
-      for (const tag of requiredTags) {
-        if (!scenario.tags.includes(tag)) {
-          failures.push(`${location}: missing required @${tag} tag`)
-        }
-      }
       if (!scenario.tags.some((tag) => evidenceTags.has(tag))) {
         failures.push(`${location}: must carry at least one manifest evidence tag`)
       }
@@ -165,8 +169,200 @@ export function checkMeetingSpecs({
   )
 
   validatePerformanceBudgets(manifest.performanceBudgets, manifestRelative, failures)
+  validateTraceability(manifest, root, manifestRelative, globalIds, failures)
 
   return result(failures, manifestFeatures.length, scenarioCount)
+}
+
+function validateTraceability(manifest, root, manifestRelative, scenarios, failures) {
+  const traced = new Map()
+  const evidence = Array.isArray(manifest.automatedEvidence) ? manifest.automatedEvidence : []
+  if (!Array.isArray(manifest.automatedEvidence)) {
+    failures.push(`${manifestRelative}: automatedEvidence must be an array`)
+  }
+
+  for (const [index, entry] of evidence.entries()) {
+    const label = `${manifestRelative}: automatedEvidence[${index}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      failures.push(`${label} must be an object`)
+      continue
+    }
+    if (!['rust-test', 'js-test', 'static-gate'].includes(entry.kind)) {
+      failures.push(`${label}.kind must be rust-test, js-test, or static-gate`)
+      continue
+    }
+    const evidencePath = safeRepositoryPath(root, entry.path)
+    if (!evidencePath || !fs.existsSync(evidencePath)) {
+      failures.push(`${label}.path must identify an existing repository file`)
+      continue
+    }
+    if (typeof entry.selector !== 'string' || !entry.selector.trim()) {
+      failures.push(`${label}.selector must be non-empty`)
+      continue
+    }
+    rejectPlaceholder(entry.selector, `${label}.selector`, failures)
+    const source = fs.readFileSync(evidencePath, 'utf8')
+    if (entry.kind === 'rust-test') {
+      validateRustSelector(source, entry.selector, label, failures)
+    } else if (entry.kind === 'js-test') {
+      validateJsSelector(source, entry.selector, label, failures)
+    } else {
+      validateStaticGate(source, entry, label, failures)
+    }
+
+    if (!Array.isArray(entry.scenarios) || entry.scenarios.length === 0) {
+      failures.push(`${label}.scenarios must contain at least one MTG ID`)
+      continue
+    }
+    for (const id of entry.scenarios) {
+      if (!scenarios.has(id)) {
+        failures.push(`${label}.scenarios references unknown ${JSON.stringify(id)}`)
+        continue
+      }
+      if (!traced.has(id)) traced.set(id, [])
+      traced.get(id).push(label)
+    }
+  }
+
+  const manualEvidence = manifest.manualEvidence
+  if (!manualEvidence || typeof manualEvidence !== 'object' || Array.isArray(manualEvidence)) {
+    failures.push(`${manifestRelative}: manualEvidence must be an object keyed by MTG ID`)
+  } else {
+    for (const [id, record] of Object.entries(manualEvidence)) {
+      if (!scenarios.has(id)) {
+        failures.push(`${manifestRelative}: manualEvidence references unknown ${id}`)
+        continue
+      }
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        failures.push(`${manifestRelative}: manualEvidence.${id} must be an object`)
+        continue
+      }
+      if (typeof record.procedure !== 'string' || !record.procedure.trim()) {
+        failures.push(`${manifestRelative}: manualEvidence.${id}.procedure must be non-empty`)
+      } else {
+        rejectPlaceholder(record.procedure, `${manifestRelative}: manualEvidence.${id}.procedure`, failures)
+      }
+      if (
+        !Array.isArray(record.requiredArtifacts)
+        || record.requiredArtifacts.length === 0
+        || record.requiredArtifacts.some((value) => typeof value !== 'string' || !value.trim())
+      ) {
+        failures.push(`${manifestRelative}: manualEvidence.${id}.requiredArtifacts must be non-empty`)
+      }
+      if (!Array.isArray(record.records)) {
+        failures.push(`${manifestRelative}: manualEvidence.${id}.records must be an array`)
+      } else {
+        validateManualRecords(record.records, root, `${manifestRelative}: manualEvidence.${id}`, failures)
+      }
+      if ('status' in record || 'passed' in record) {
+        failures.push(`${manifestRelative}: manualEvidence.${id} cannot claim pass status without an evidence record`)
+      }
+      if (!traced.has(id)) traced.set(id, [])
+      traced.get(id).push(`${manifestRelative}: manualEvidence.${id}`)
+    }
+  }
+
+  for (const [id, location] of scenarios) {
+    const tags = featureScenarioTags(root, location)
+    const references = traced.get(id) || []
+    if (references.length === 0) {
+      failures.push(`${location}: ${id} has no implementation evidence mapping`)
+    }
+    if (tags.includes('manual')) {
+      if (!manualEvidence || !(id in manualEvidence)) {
+        failures.push(`${location}: manual ${id} needs a structured manualEvidence record`)
+      }
+      if (evidence.some((entry) => entry?.scenarios?.includes(id))) {
+        failures.push(`${location}: manual ${id} cannot claim automated evidence`)
+      }
+    } else if (manualEvidence && id in manualEvidence) {
+      failures.push(`${location}: automated ${id} cannot use manual evidence`)
+    }
+  }
+}
+
+function safeRepositoryPath(root, value) {
+  if (typeof value !== 'string' || !value || path.isAbsolute(value)) return null
+  const normalized = path.normalize(value)
+  if (normalized.split(path.sep).includes('..')) return null
+  const absolute = path.join(root, normalized)
+  return absolute.startsWith(`${path.resolve(root)}${path.sep}`) ? absolute : null
+}
+
+function validateRustSelector(source, selector, label, failures) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = new RegExp(`(?:async\\s+)?fn\\s+${escaped}\\s*\\(`).exec(source)
+  if (!match) {
+    failures.push(`${label}: Rust test selector '${selector}' is stale`)
+    return
+  }
+  const prefix = source.slice(Math.max(0, match.index - 500), match.index)
+  const separator = prefix.lastIndexOf('\n\n')
+  const attributeBlock = separator < 0 ? prefix : prefix.slice(separator + 2)
+  if (!/#\[(?:tokio::)?test(?:\([^\]]*\))?\]/.test(attributeBlock)) {
+    failures.push(`${label}: Rust selector '${selector}' is not an executable test`)
+  }
+  if (/#\[ignore(?:\([^\]]*\))?\]/.test(attributeBlock)) {
+    failures.push(`${label}: Rust selector '${selector}' is ignored and cannot count as passed evidence`)
+  }
+}
+
+function validateJsSelector(source, selector, label, failures) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const expression = new RegExp(`(?:it|test)\\s*\\(\\s*(['"\`])${escaped}\\1`)
+  if (!expression.test(source)) {
+    failures.push(`${label}: JavaScript test selector '${selector}' is stale`)
+  }
+  if (new RegExp(`(?:it|test)\\.(?:skip|todo)\\s*\\([^\\n]*${escaped}`).test(source)) {
+    failures.push(`${label}: JavaScript selector '${selector}' is skipped or pending`)
+  }
+}
+
+function validateStaticGate(source, entry, label, failures) {
+  if (!source.includes(entry.selector)) {
+    failures.push(`${label}: static gate selector '${entry.selector}' is stale`)
+  }
+  if (typeof entry.command !== 'string' || !entry.command.trim()) {
+    failures.push(`${label}.command must identify the executable gate`)
+  } else {
+    rejectPlaceholder(entry.command, `${label}.command`, failures)
+  }
+}
+
+function validateManualRecords(records, root, label, failures) {
+  for (const [index, record] of records.entries()) {
+    const recordLabel = `${label}.records[${index}]`
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      failures.push(`${recordLabel} must be an object`)
+      continue
+    }
+    for (const field of ['recordedAt', 'outcome', 'artifact', 'environment', 'operator']) {
+      if (typeof record[field] !== 'string' || !record[field].trim()) {
+        failures.push(`${recordLabel}.${field} must be non-empty`)
+      }
+    }
+    if (!['pass', 'fail'].includes(record.outcome)) {
+      failures.push(`${recordLabel}.outcome must be pass or fail`)
+    }
+    const artifact = safeRepositoryPath(root, record.artifact)
+    if (!artifact || !fs.existsSync(artifact)) {
+      failures.push(`${recordLabel}.artifact must identify a committed evidence artifact`)
+    }
+  }
+}
+
+function rejectPlaceholder(value, label, failures) {
+  if (/\b(?:todo|tbd|pending|placeholder|implement me)\b/i.test(value)) {
+    failures.push(`${label} contains placeholder or pending language`)
+  }
+}
+
+function featureScenarioTags(root, location) {
+  const match = location.match(/^(.*):(\d+)$/)
+  if (!match) return []
+  const lines = fs.readFileSync(path.join(root, match[1]), 'utf8').split(/\r?\n/)
+  const line = Number(match[2]) - 2
+  return (lines[line] || '').trim().split(/\s+/).map((tag) => tag.replace(/^@/, ''))
 }
 
 function parseFeature(file, root, failures) {
@@ -377,7 +573,7 @@ if (directInvocation) {
   } else {
     console.log(
       `Meeting specification check passed: ${checked.featureCount} features, `
-      + `${checked.scenarioCount} RED scenarios.`,
+      + `${checked.scenarioCount} implementation scenarios with traceable evidence.`,
     )
   }
 }
