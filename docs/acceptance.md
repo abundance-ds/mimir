@@ -73,7 +73,8 @@ requirements; they do not replace runtime verification.
   diagnosable and configurable in Settings.
 - Supported agents resume only with the exact recorded provider session id
   inside the same Activity row; resume never uses latest/last/implicit continue
-  and never creates a second record.
+  and never creates a second record. Resume preserves that Activity's recorded
+  model, permission, and tool flags while refreshing Mimir's scoped connection.
 - History rows without an exact id restore the transcript only. Run again is a
   distinct new-session action, ambiguous legacy identity fails closed, and
   failed or duplicate Resume attempts cannot unarchive or respawn twice.
@@ -87,11 +88,12 @@ requirements; they do not replace runtime verification.
   `tools/list`, and `tools/call`.
 - One canonical registry backs the UI and runtimes; MCP and `mimir` use its
   explicit public projection.
-- Default agent discovery contains only `mimir_state`, `mimir_reveal`, and
-  `mimir_propose`; the remaining public tools require CLI discovery.
+- Default agent discovery contains only `mimir_state`, `mimir_title`,
+  `mimir_reveal`, and `mimir_propose`; the remaining public tools require CLI
+  discovery.
 - Tool calls validate complete object schemas, report all input failures
   together, and return structured stable errors.
-- The public surface is 15 permanent Workbench/Graph tools, Chat tools
+- The public surface is 16 permanent Workbench/Graph tools, Chat tools
   while Chats is enabled, plus conditional
   connection tools; internal UI/runtime domains never leak into agent
   discovery.

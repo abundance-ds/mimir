@@ -10,6 +10,8 @@ pane without duplicating themselves in Activities.
 The shared Rust/renderer record in `src-tauri/src/activities/model.rs` contains:
 
 - stable `id`, `kind`, title, workspace, timestamps, and status
+- an automatic-title eligibility bit consumed by the first generated or
+  explicit rename
 - `retention` (`ephemeral` or `durable`)
 - origin metadata for a launcher, app, routine, schedule, or parent Activity
 - a host description such as PTY, embedded app, process, window, or Rust helper
@@ -38,6 +40,14 @@ This distinction controls mutations:
   also has `kind=routine` but is renderer-only.
 
 Do not infer authority from `kind`; inspect `host.type` and the record origin.
+
+New launcher-backed agent Activities begin with the launcher title and expose
+the scoped `mimir_title` tool to Codex, Claude, Pi, and Gemini. The connected
+agent calls it once on the first substantive user turn with a concise task
+title. Native compare-and-set semantics accept it only while the launcher title
+is still eligible; an explicit launch title or manual rename wins atomically.
+The accepted rename is persisted and projected through the ordinary Activity
+upsert path.
 
 ## Lifecycle
 

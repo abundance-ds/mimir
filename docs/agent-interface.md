@@ -29,10 +29,15 @@ input is not exact; ambiguity returns at most five short matches.
 MCP directly advertises only:
 
 ```text
+mimir_title
 mimir_state
 mimir_reveal
 mimir_propose
 ```
+
+`mimir_title` is Activity-scoped. Connected CLI agents call it once on the
+first substantive turn; it cannot replace an explicit or previously generated
+title.
 
 The CLI catalog progressively discloses the rest. Calls use the underscore
 name shown by `mimir tools`; internal dotted names are not public aliases.
@@ -42,6 +47,7 @@ name shown by `mimir tools`; internal dotted names are not public aliases.
 Workbench:
 
 ```text
+mimir_title       set the current Activity's first automatic title
 mimir_state       active editor, selection, comments, and Today priority
 mimir_reveal      open a file or line
 mimir_propose     propose an exact reviewed replacement

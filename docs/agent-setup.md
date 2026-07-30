@@ -61,12 +61,15 @@ collision with an unrelated entry using the same product-owned name is an
 error, not an overwrite.
 
 Pi performs the MCP handshake, dynamically registers the lean tool set, and
-adds the one-line Mimir instruction once. `/mimir-refresh` rediscovers the
-currently exposed set.
+adds the one-line Mimir instruction once. The shared instruction asks every
+supported CLI agent to call the scoped `mimir_title` tool on its first
+substantive turn. `/mimir-refresh` rediscovers the currently exposed set.
 
-Continuations retain the Activity's MCP provenance and pass its exact recorded
-provider session id. Mimir never uses latest/last/implicit continue for
-History resume. Routine launches also receive scoped provenance.
+Continuations retain the Activity's recorded launch policy, including model,
+permission, and tool flags, while refreshing the launcher executable and
+activity-scoped MCP provenance. They pass the exact recorded provider session
+id; Mimir never uses latest/last/implicit continue for History resume. Routine
+launches also receive scoped provenance.
 
 ## Skills
 

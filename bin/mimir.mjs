@@ -883,7 +883,7 @@ export function formatPublicTools(tools) {
 
 const TOOL_GROUP_NOTES = Object.freeze({
   workbench: 'mimir_propose opens a review; it does not change the file.',
-  graph: 'Use graph_get.sourceRevision as graph_update/graph_delete expectedRevision; graph_delete returns graph_restore.undoToken.',
+  graph: 'Omitting scopeIds searches every mounted scope, including private. Use graph_get.sourceRevision as graph_update/graph_delete expectedRevision; graph_delete returns graph_restore.undoToken.',
   chat: 'target defaults to the linked or open room.',
   connections: 'Only configured tools appear. external-write sends or creates remote data.',
 })
