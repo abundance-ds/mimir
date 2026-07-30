@@ -495,12 +495,7 @@ impl MeetingRuntime {
             || !recovery.requeued_job_ids.is_empty()
             || !recovery.failed_job_ids.is_empty()
             || !recovery.staged_audio_chunks.is_empty();
-        let diagnostic = capture
-            .recover(&recovery)
-            .err()
-            .map(|error| format!("Meeting audio recovery needs attention: {error}"));
-
-        Ok(Self {
+        let runtime = Self {
             inner: Arc::new(MeetingRuntimeInner {
                 store,
                 capture,
@@ -511,9 +506,21 @@ impl MeetingRuntime {
                 operation: Mutex::new(()),
                 active: Mutex::new(None),
                 revision: AtomicU64::new(u64::from(recovered)),
-                diagnostic: Mutex::new(diagnostic),
+                diagnostic: Mutex::new(None),
             }),
-        })
+        };
+        for meeting_id in &recovery.interrupted_meeting_ids {
+            let meeting = runtime.inner.store.get_meeting(meeting_id)?;
+            runtime.enqueue_transcription_retry(
+                meeting_id,
+                meeting.transcript_revision,
+                "application restarted before transcript finalization",
+            )?;
+        }
+        if let Err(error) = runtime.inner.capture.recover(&recovery) {
+            runtime.set_diagnostic(format!("Meeting audio recovery needs attention: {error}"))?;
+        }
+        Ok(runtime)
     }
 
     pub fn snapshot(&self) -> Result<MeetingSnapshot, MeetingRuntimeError> {
@@ -897,6 +904,65 @@ impl MeetingRuntime {
             Some(active.meeting_id),
             Some(active.run_id),
         )
+    }
+
+    /// Complete an interrupted meeting from a durable transcription retry.
+    ///
+    /// The job worker calls this before marking its transcription job
+    /// succeeded. Repeating the call with an already completed meeting returns
+    /// the current snapshot, which makes worker redelivery safe.
+    pub fn complete_transcription_retry(
+        &self,
+        meeting_id: &str,
+        batch: TranscriptBatch,
+    ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let meeting = self.inner.store.get_meeting(meeting_id)?;
+        if meeting.status == MeetingStatus::Completed && self.transcript_is_final(&meeting)? {
+            return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
+        }
+        let finalizing = match meeting.status {
+            MeetingStatus::Interrupted => self.inner.store.transition_meeting(
+                meeting_id,
+                meeting.revision,
+                MeetingStatus::Finalizing,
+                &self.inner.clock.now(),
+                None,
+            )?,
+            MeetingStatus::Finalizing => meeting,
+            _ => {
+                return Err(MeetingRuntimeError::Validation(
+                    "transcription retry requires an interrupted or finalizing meeting".into(),
+                ));
+            }
+        };
+        if batch.meeting_id != meeting_id
+            || batch.base_revision != finalizing.transcript_revision
+            || !batch.marks_final
+        {
+            return Err(MeetingRuntimeError::Validation(
+                "transcription retry returned a non-final batch for another meeting or revision"
+                    .into(),
+            ));
+        }
+        self.inner.store.apply_transcript_batch(&batch)?;
+        let persisted = self.inner.store.get_meeting(meeting_id)?;
+        self.inner.store.transition_meeting(
+            meeting_id,
+            persisted.revision,
+            MeetingStatus::Completed,
+            &self.inner.clock.now(),
+            None,
+        )?;
+        let config = self.platform_projection()?.config;
+        if config.summary_enabled {
+            self.enqueue_summary_job(
+                meeting_id,
+                persisted.transcript_revision,
+                &config.summary_preset,
+            )?;
+        }
+        self.publish_unlocked("meeting-recovered", Some(meeting_id.into()), None)
     }
 
     pub fn update_meeting(
@@ -2439,8 +2505,8 @@ mod tests {
                 &FollowUpJobDraft {
                     id: "job-recovery".into(),
                     meeting_id: "meeting-recovery".into(),
-                    kind: FollowUpJobKind::Summary,
-                    idempotency_key: "recovery-summary".into(),
+                    kind: FollowUpJobKind::Custom("fixture-work".into()),
+                    idempotency_key: "recovery-fixture-work".into(),
                     payload: json!({}),
                     max_attempts: 3,
                     not_before: NOW.into(),
@@ -2468,10 +2534,72 @@ mod tests {
         assert_eq!(snapshot.revision, 1);
         assert_eq!(snapshot.meetings[0].lifecycle, "interrupted");
         let jobs = store.list_jobs("meeting-recovery").unwrap();
-        assert_eq!(jobs[0].state, JobState::Pending);
+        assert_eq!(
+            jobs.iter()
+                .find(|job| job.definition.id == "job-recovery")
+                .unwrap()
+                .state,
+            JobState::Pending
+        );
+        assert!(jobs.iter().any(|job| {
+            job.definition.kind == FollowUpJobKind::Custom("transcription".into())
+                && job.state == JobState::Pending
+        }));
         let reports = capture.recoveries.lock().unwrap();
         assert_eq!(reports[0].interrupted_meeting_ids, vec!["meeting-recovery"]);
         assert_eq!(reports[0].requeued_job_ids, vec!["job-recovery"]);
+        drop(reports);
+
+        let recovered = runtime
+            .complete_transcription_retry(
+                "meeting-recovery",
+                TranscriptBatch {
+                    meeting_id: "meeting-recovery".into(),
+                    batch_id: "recovery-final".into(),
+                    base_revision: 0,
+                    source: "recovery-stt".into(),
+                    observed_at: NOW.into(),
+                    marks_final: true,
+                    changes: vec![TranscriptChange::UpsertSegment {
+                        segment: TranscriptSegmentInput {
+                            id: "recovered-segment".into(),
+                            start_ms: 0,
+                            end_ms: 2_000,
+                            text: "Recovered audio was finalized.".into(),
+                            channel_id: Some("microphone".into()),
+                            speaker: None,
+                            confidence: Some(0.9),
+                            is_final: true,
+                            metadata: json!({}),
+                        },
+                    }],
+                },
+            )
+            .unwrap();
+        let meeting = recovered
+            .meetings
+            .iter()
+            .find(|meeting| meeting.id == "meeting-recovery")
+            .unwrap();
+        assert_eq!(meeting.lifecycle, "ready");
+        assert!(meeting.transcript_final);
+        assert_eq!(meeting.summary_state, "queued");
+
+        let duplicate = runtime
+            .complete_transcription_retry(
+                "meeting-recovery",
+                TranscriptBatch {
+                    meeting_id: "meeting-recovery".into(),
+                    batch_id: "ignored-redelivery".into(),
+                    base_revision: 1,
+                    source: "recovery-stt".into(),
+                    observed_at: NOW.into(),
+                    marks_final: true,
+                    changes: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(duplicate.revision, recovered.revision);
     }
 
     #[test]
