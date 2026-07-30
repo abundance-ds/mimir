@@ -4,8 +4,19 @@
 //! `MeetingStore` is the durable authority; capture, transcription, and UI
 //! adapters can be layered over its optimistic revisions and idempotent writes.
 
+pub mod capture;
+pub mod commands;
+pub mod config;
+pub mod jobs;
+pub mod local_whisper;
 mod model;
+pub mod native;
+pub mod platform;
+pub mod runtime;
 mod store;
+pub mod stt;
+pub(crate) mod tools;
+pub mod transcriber;
 mod transcript;
 
 pub use model::{

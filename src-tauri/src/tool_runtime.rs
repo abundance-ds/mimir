@@ -40,7 +40,7 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 34] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 38] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -182,6 +182,43 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 34] = [
         description: "Read recent authored changes in the mounted graph.",
         group: "graph",
         effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "meetings.list",
+        public_name: "meetings_list",
+        description: "List meetings recorded natively in Mimir Scribe.",
+        group: "meetings",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "meetings.get",
+        public_name: "meetings_get",
+        description: "Read one Mimir Scribe meeting and a bounded transcript slice.",
+        group: "meetings",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "meetings.search",
+        public_name: "meetings_search",
+        description:
+            "Search titles, summaries, and finalized transcript text recorded by Mimir Scribe.",
+        group: "meetings",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "meetings.update",
+        public_name: "meetings_update",
+        description: "Update the reviewed title, summary, or tags of a Mimir Scribe meeting.",
+        group: "meetings",
+        effect: "write",
         direct: false,
         connection: None,
     },
@@ -485,6 +522,7 @@ impl ToolRuntime {
             .register_core(core_tool_definitions())
             .map_err(|error| error.to_string())?;
         crate::business_graph::tools::register_native_tools(&self.registry, app)?;
+        crate::meetings::tools::register_native_tools(&self.registry, app)?;
         crate::connections::register_native_tools(&self.registry)?;
         *self
             .core_ui
@@ -1467,7 +1505,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 34);
+        assert_eq!(AGENT_TOOLS.len(), 38);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
@@ -1494,7 +1532,7 @@ mod tests {
             assert!(!spec.public_name.contains('.'));
             assert!(matches!(
                 spec.group,
-                "workbench" | "graph" | "chat" | "connections"
+                "workbench" | "graph" | "meetings" | "chat" | "connections"
             ));
             assert_eq!(spec.connection.is_some(), spec.group == "connections");
         }

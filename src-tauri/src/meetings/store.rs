@@ -498,6 +498,46 @@ impl MeetingStore {
         Ok(rows)
     }
 
+    /// Remove only durable source-audio chunk metadata. Channel definitions
+    /// remain because finalized transcript segments retain channel attribution.
+    pub fn delete_audio_chunks(&self, meeting_id: &str) -> Result<u64, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_meeting_tx(&transaction, meeting_id)?;
+        let removed = transaction
+            .execute("DELETE FROM audio_chunks WHERE meeting_id=?1", [meeting_id])?
+            as u64;
+        transaction.commit()?;
+        Ok(removed)
+    }
+
+    /// Permanently remove a terminal meeting and every SQLite-owned child row.
+    pub fn delete_meeting(&self, meeting_id: &str) -> Result<(), MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let status: Option<String> = transaction
+            .query_row(
+                "SELECT status FROM meetings WHERE id=?1",
+                [meeting_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let status = status.ok_or_else(|| not_found("meeting", meeting_id))?;
+        if matches!(status.as_str(), "recording" | "stopping" | "finalizing") {
+            return Err(MeetingStoreError::Validation(
+                "an active meeting cannot be permanently deleted".into(),
+            ));
+        }
+        let removed = transaction.execute("DELETE FROM meetings WHERE id=?1", [meeting_id])?;
+        if removed != 1 {
+            return Err(not_found("meeting", meeting_id));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn enqueue_job(
         &self,
         job: &FollowUpJobDraft,
@@ -1903,6 +1943,66 @@ mod tests {
                 .committed_at,
             committed.committed_at
         );
+    }
+
+    #[test]
+    fn privacy_deletion_removes_audio_metadata_and_cascades_the_complete_record() {
+        let store = store();
+        let recording = start_recording(&store);
+        let chunk = AudioChunkDraft {
+            id: "privacy-chunk".into(),
+            meeting_id: recording.id.clone(),
+            channel_id: "mic".into(),
+            sequence: 0,
+            start_ms: 0,
+            end_ms: 1_000,
+            sample_count: 48_000,
+            byte_len: 192_000,
+            sha256: "a".repeat(64),
+            relative_path: "meeting-1/audio/mic/00000000.f32le".into(),
+        };
+        store.stage_audio_chunk(&chunk, T1).unwrap();
+        store.commit_audio_chunk(&chunk.id, T2).unwrap();
+        store
+            .apply_transcript_batch(&batch(
+                "privacy-transcript",
+                0,
+                vec![TranscriptChange::UpsertSegment {
+                    segment: segment("privacy-segment", "private discussion"),
+                }],
+            ))
+            .unwrap();
+        store
+            .enqueue_job(&job("privacy-job", "privacy", 2), T2)
+            .unwrap();
+
+        assert_eq!(store.delete_audio_chunks("meeting-1").unwrap(), 1);
+        assert!(store
+            .recover_after_restart(T3)
+            .unwrap()
+            .staged_audio_chunks
+            .is_empty());
+
+        let failed = store
+            .transition_meeting(
+                "meeting-1",
+                store.get_meeting("meeting-1").unwrap().revision,
+                MeetingStatus::Failed,
+                T3,
+                Some(&MeetingFailure {
+                    code: "privacy-test".into(),
+                    message: "terminal".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        assert_eq!(failed.status, MeetingStatus::Failed);
+        store.delete_meeting("meeting-1").unwrap();
+        assert!(matches!(
+            store.get_meeting("meeting-1"),
+            Err(MeetingStoreError::NotFound { .. })
+        ));
+        assert!(store.list_jobs("meeting-1").is_err());
     }
 
     #[test]

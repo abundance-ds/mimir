@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { completeNativeQuit } from './appQuit.js'
 
-function harness({ guarded = true, settingsSaved = true } = {}) {
+function harness({ guarded = true, settingsSaved = true, quitConfirmed = true } = {}) {
   const order = []
   const requestClose = vi.fn(async () => {
     order.push('documents')
@@ -13,6 +13,7 @@ function harness({ guarded = true, settingsSaved = true } = {}) {
   })
   const confirmQuit = vi.fn(async () => {
     order.push('quit')
+    return quitConfirmed
   })
   return { order, requestClose, flushSettings, confirmQuit }
 }
@@ -41,5 +42,11 @@ describe('completeNativeQuit', () => {
     await expect(completeNativeQuit(h)).resolves.toBe(false)
     expect(h.order).toEqual(['documents', 'settings'])
     expect(h.confirmQuit).not.toHaveBeenCalled()
+  })
+
+  it('keeps Mimir open when stopping an active recording is cancelled', async () => {
+    const h = harness({ quitConfirmed: false })
+    await expect(completeNativeQuit(h)).resolves.toBe(false)
+    expect(h.order).toEqual(['documents', 'settings', 'quit'])
   })
 })

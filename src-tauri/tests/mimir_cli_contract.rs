@@ -254,6 +254,15 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
     assert!(graph_stdout.contains("graph_get.sourceRevision"));
     assert!(!graph_stdout.contains("mimir_state"));
 
+    let meetings_drawer = run_mimir(&url, &["tools", "meetings"]).await.unwrap();
+    assert_success(&meetings_drawer, "mimir tools meetings");
+    let meetings_stdout = stdout_of(&meetings_drawer);
+    assert!(meetings_stdout.starts_with("MEETINGS\n\n"));
+    assert!(meetings_stdout.contains("meetings_get"));
+    assert!(meetings_stdout.contains("Recording controls remain human-only"));
+    assert!(!meetings_stdout.contains("meetings_start"));
+    assert!(!meetings_stdout.contains("meetings_stop"));
+
     let graph_json = run_mimir(&url, &["tools", "graph", "--json"])
         .await
         .unwrap();
@@ -392,7 +401,7 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
     assert_eq!(init["result"]["capabilities"]["tools"], json!({}));
     assert_eq!(
         init["result"]["instructions"],
-        "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`."
+        "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`."
     );
 
     // notifications (no id) are accepted with 202 and an empty body.

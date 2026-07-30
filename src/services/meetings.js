@@ -2,12 +2,24 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 export const MEETING_EVENT = 'mimir://meeting-event'
+export const MEETING_PLATFORM_CHANGED_EVENT = 'mimir://meeting-platform-changed'
 
 export async function loadMeetingSnapshot() {
   return normalizeMeetingSnapshot(await invoke('meetings_snapshot'))
 }
 
+export async function requestMeetingMicrophonePermission() {
+  return normalizeMeetingSnapshot(await invoke('meetings_request_microphone_permission'))
+}
+
+export async function dismissMeetingCandidate(candidateId) {
+  return normalizeMeetingSnapshot(await invoke('meetings_dismiss_candidate', {
+    candidateId: requiredId(candidateId, 'meeting candidate'),
+  }))
+}
+
 export async function startMeeting(request = {}) {
+  await requestMeetingMicrophonePermission()
   return normalizeMeetingSnapshot(await invoke('meetings_start', {
     request: {
       title: optionalString(request.title),
@@ -118,7 +130,26 @@ export async function deleteMeetingModel(modelId) {
 
 export async function listenToMeetingEvents(onEvent) {
   if (typeof onEvent !== 'function') throw new Error('A meeting event handler is required.')
-  return listen(MEETING_EVENT, event => onEvent(normalizeMeetingEvent(event?.payload)))
+  const stopMeeting = await listen(
+    MEETING_EVENT,
+    event => onEvent(normalizeMeetingEvent(event?.payload)),
+  )
+  try {
+    const stopPlatform = await listen(
+      MEETING_PLATFORM_CHANGED_EVENT,
+      event => onEvent({
+        kind: String(event?.payload?.kind || 'platform-changed'),
+        refresh: true,
+      }),
+    )
+    return () => {
+      stopMeeting()
+      stopPlatform()
+    }
+  } catch (error) {
+    stopMeeting()
+    throw error
+  }
 }
 
 export function normalizeMeetingSnapshot(value) {

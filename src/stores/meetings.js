@@ -5,10 +5,12 @@ import {
   decideMeetingKgProposal,
   deleteMeeting,
   deleteMeetingModel,
+  dismissMeetingCandidate,
   exportMeeting,
   installMeetingModel,
   listenToMeetingEvents,
   loadMeetingSnapshot,
+  requestMeetingMicrophonePermission,
   retryMeetingJob,
   setMeetingMicMuted,
   setMeetingsApiKey,
@@ -115,6 +117,13 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
   }
 
+  async function dismissCandidate(id) {
+    return runPending(`candidate:${id}`, async () => {
+      applySnapshot(await dismissMeetingCandidate(id))
+      return true
+    })
+  }
+
   async function stop() {
     const active = activeMeeting.value
     if (!active || pending.value.stop) return null
@@ -172,6 +181,13 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
   }
 
+  async function requestMicrophonePermission() {
+    return runPending('microphone-permission', async () => {
+      applySnapshot(await requestMeetingMicrophonePermission())
+      return permissions.value.microphone
+    })
+  }
+
   async function saveApiKey(value) {
     return runPending('api-key', async () => {
       applySnapshot(await setMeetingsApiKey(value))
@@ -221,6 +237,10 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   function onEvent(event) {
+    if (event?.refresh) {
+      queueRefresh()
+      return
+    }
     if (!event || event.revision <= revision.value) return
     if (event.snapshot) {
       applySnapshot(event.snapshot)
@@ -228,6 +248,10 @@ export const useMeetingsStore = defineStore('meetings', () => {
       return
     }
     // Coalesce high-frequency notifications into one authoritative read.
+    queueRefresh()
+  }
+
+  function queueRefresh() {
     refreshQueued = true
     queueMicrotask(() => {
       if (!refreshQueued) return
@@ -280,6 +304,8 @@ export const useMeetingsStore = defineStore('meetings', () => {
     kgOffer,
     initialize,
     refresh,
+    requestMicrophonePermission,
+    dismissCandidate,
     start,
     stop,
     setMicMuted,

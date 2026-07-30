@@ -6,17 +6,23 @@
 //! seams; application setup receives one owned lifecycle handle whose drop
 //! cooperatively stops every background worker started here.
 
+#[cfg(any(test, target_os = "macos"))]
+use super::platform::MeetingEnvironmentProjection;
+#[cfg(not(target_os = "macos"))]
+use super::platform::UnavailableMeetingEnvironment;
+#[cfg(any(test, target_os = "macos"))]
+use super::runtime::{MeetingCandidate, MeetingPermissions};
 use super::{
     capture::NativeMeetingCapture,
     commands::{TauriMeetingEventSink, TauriMeetingPlatformChangeSink},
     local_whisper::ManagedWhisperTranscriber,
     platform::{
-        builtin_model_catalog, MeetingEnvironmentProbe, MeetingEnvironmentProjection,
-        MeetingPlatformChangeSink, MeetingPlatformPaths, NativeMeetingPlatform,
+        builtin_model_catalog, MeetingEnvironmentProbe, MeetingPlatformChangeSink,
+        MeetingPlatformPaths, NativeMeetingPlatform,
     },
     runtime::{
-        MeetingCandidate, MeetingCapturePort, MeetingClock, MeetingEventSink, MeetingPermissions,
-        MeetingPlatformPort, MeetingRuntime, MeetingTranscriptionPort, SystemMeetingClock,
+        MeetingCapturePort, MeetingClock, MeetingEventSink, MeetingPlatformPort, MeetingRuntime,
+        MeetingTranscriptionPort, SystemMeetingClock,
     },
     transcriber::{
         MeetingCredentialResolver, NativeMeetingTranscriber, RuntimeRouteResolver,
@@ -25,9 +31,13 @@ use super::{
     MeetingStore,
 };
 use chrono::Utc;
-use mimir_meeting_detect::{
-    DetectionCandidate, DetectionConfig, DetectionMonitor, DetectorSnapshot, PermissionState,
-};
+use mimir_meeting_detect::DetectionMonitor;
+#[cfg(any(test, target_os = "macos"))]
+use mimir_meeting_detect::{DetectionCandidate, DetectorSnapshot, PermissionState};
+#[cfg(target_os = "macos")]
+use mimir_meeting_detect::{DetectionConfig, DetectionEvent};
+#[cfg(target_os = "macos")]
+use std::collections::HashSet;
 use std::{
     fs,
     path::Path,
@@ -38,6 +48,8 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
+#[cfg(target_os = "macos")]
+use tauri_plugin_notification::NotificationExt;
 
 const STORE_FILE_NAME: &str = "meetings.sqlite";
 const RETENTION_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -132,22 +144,44 @@ pub fn bootstrap_native_meeting_engine(
     );
 
     let changes = TauriMeetingPlatformChangeSink::new(app);
-    let callback_changes = Arc::clone(&changes);
-    let detector = Arc::new(
-        DetectionMonitor::start(
-            DetectionConfig {
-                // The durable native config is applied by platform
-                // construction before this bootstrap returns.
-                enabled: false,
-                ..DetectionConfig::default()
-            },
-            move |_| {
-                MeetingPlatformChangeSink::changed(callback_changes.as_ref(), "detection");
-            },
+    #[cfg(target_os = "macos")]
+    let (detector, environment): (
+        Option<Arc<DetectionMonitor>>,
+        Arc<dyn MeetingEnvironmentProbe>,
+    ) = {
+        let callback_changes = Arc::clone(&changes);
+        let notification_app = app.clone();
+        let notified_candidates = Arc::new(Mutex::new(HashSet::<String>::new()));
+        let callback_notified_candidates = Arc::clone(&notified_candidates);
+        let detector = Arc::new(
+            DetectionMonitor::start(
+                DetectionConfig {
+                    // The durable native config is applied by platform
+                    // construction before this bootstrap returns.
+                    enabled: false,
+                    ..DetectionConfig::default()
+                },
+                move |event| {
+                    handle_detection_notification(
+                        &notification_app,
+                        &callback_notified_candidates,
+                        &event,
+                    );
+                    MeetingPlatformChangeSink::changed(callback_changes.as_ref(), "detection");
+                },
+            )
+            .map_err(|error| format!("Could not start native meeting detection: {error}"))?,
+        );
+        (
+            Some(Arc::clone(&detector)),
+            Arc::new(DetectionEnvironment::new(detector)),
         )
-        .map_err(|error| format!("Could not start native meeting detection: {error}"))?,
-    );
-    let environment = Arc::new(DetectionEnvironment::new(Arc::clone(&detector)));
+    };
+    #[cfg(not(target_os = "macos"))]
+    let (detector, environment): (
+        Option<Arc<DetectionMonitor>>,
+        Arc<dyn MeetingEnvironmentProbe>,
+    ) = (None, Arc::new(UnavailableMeetingEnvironment));
 
     let catalog = builtin_model_catalog()?;
     let manifests = catalog
@@ -211,16 +245,55 @@ pub fn bootstrap_native_meeting_engine(
     })
 }
 
+#[cfg(target_os = "macos")]
+fn handle_detection_notification(
+    app: &tauri::AppHandle,
+    notified: &Mutex<HashSet<String>>,
+    event: &DetectionEvent,
+) {
+    let Ok(mut notified) = notified.lock() else {
+        log::warn!("Scribe candidate-notification state was poisoned");
+        return;
+    };
+    match event {
+        DetectionEvent::CandidateEnded { candidate_id, .. } => {
+            notified.remove(candidate_id);
+        }
+        DetectionEvent::CandidateSuggested(candidate) => {
+            if !notified.insert(candidate.id.clone()) {
+                return;
+            }
+            let app_name = candidate.app_name.chars().take(120).collect::<String>();
+            if let Err(error) = app
+                .notification()
+                .builder()
+                .title("Meeting detected")
+                .body(format!(
+                    "{app_name} is using the microphone. Open Scribe to record."
+                ))
+                .show()
+            {
+                // Notification permission is independent of capture permission.
+                // The in-app candidate remains authoritative and actionable.
+                log::debug!("Scribe meeting notification was not shown: {error}");
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 struct DetectionEnvironment {
     monitor: Arc<DetectionMonitor>,
 }
 
+#[cfg(target_os = "macos")]
 impl DetectionEnvironment {
     fn new(monitor: Arc<DetectionMonitor>) -> Self {
         Self { monitor }
     }
 }
 
+#[cfg(target_os = "macos")]
 impl MeetingEnvironmentProbe for DetectionEnvironment {
     fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
         Ok(map_detector_snapshot(self.monitor.snapshot()))
@@ -230,8 +303,16 @@ impl MeetingEnvironmentProbe for DetectionEnvironment {
         self.monitor.set_enabled(enabled);
         Ok(())
     }
+
+    fn dismiss_candidate(&self, candidate_id: &str) -> Result<(), String> {
+        self.monitor
+            .dismiss_candidate(candidate_id)
+            .map(|_| ())
+            .map_err(|error| format!("Could not dismiss meeting candidate: {error}"))
+    }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn map_detector_snapshot(snapshot: DetectorSnapshot) -> MeetingEnvironmentProjection {
     let diagnostic = snapshot
         .diagnostic
@@ -252,6 +333,7 @@ fn map_detector_snapshot(snapshot: DetectorSnapshot) -> MeetingEnvironmentProjec
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn map_candidate(candidate: DetectionCandidate) -> MeetingCandidate {
     MeetingCandidate {
         id: candidate.id,
@@ -264,6 +346,7 @@ fn map_candidate(candidate: DetectionCandidate) -> MeetingCandidate {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn permission_name(permission: PermissionState) -> &'static str {
     match permission {
         PermissionState::NotDetermined => "not-determined",
@@ -324,7 +407,7 @@ impl MeetingCredentialResolver for EndpointBoundMeetingCredentialResolver {
 }
 
 struct NativeMeetingLifecycle {
-    detector: Arc<DetectionMonitor>,
+    detector: Option<Arc<DetectionMonitor>>,
     retention: RetentionMaintenance,
     stopped: AtomicBool,
 }
@@ -337,8 +420,13 @@ impl NativeMeetingLifecycle {
         let retention = self.retention.shutdown();
         let detector = self
             .detector
-            .stop()
-            .map_err(|error| format!("Could not stop native meeting detection: {error}"));
+            .as_ref()
+            .map(|detector| {
+                detector
+                    .stop()
+                    .map_err(|error| format!("Could not stop native meeting detection: {error}"))
+            })
+            .unwrap_or(Ok(()));
         match (retention, detector) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(first), Ok(())) | (Ok(()), Err(first)) => Err(first),

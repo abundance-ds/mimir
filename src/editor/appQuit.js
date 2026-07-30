@@ -12,6 +12,5 @@ export async function completeNativeQuit({
   const settingsSaved = await flushSettings()
   if (settingsSaved === false) return false
 
-  await confirmQuit()
-  return true
+  return (await confirmQuit()) !== false
 }

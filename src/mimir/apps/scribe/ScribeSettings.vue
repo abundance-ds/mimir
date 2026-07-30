@@ -19,8 +19,8 @@
       <section class="py-4">
         <h3 class="text-[11px] font-semibold">Capture and detection</h3>
         <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-          Detection can suggest a recording. It never starts one unless automatic recording
-          is deliberately enabled.
+          Detection suggests a recording after sustained meeting activity. Starting capture
+          always remains a deliberate human action.
         </p>
         <label class="scribe-setting-row">
           <span>
@@ -33,24 +33,22 @@
             @change="save({ detectionEnabled: $event.target.checked })"
           />
         </label>
-        <label class="scribe-setting-row">
-          <span>
-            <strong>Automatic recording</strong>
-            <small>Off by default. A persistent indicator and Stop remain visible.</small>
-          </span>
-          <input
-            type="checkbox"
-            :checked="config.autoRecord"
-            :disabled="!config.detectionEnabled"
-            @change="save({ autoRecord: $event.target.checked })"
-          />
-        </label>
         <dl class="mt-3 grid grid-cols-[130px_1fr] border-t border-rule-light text-[10px]">
           <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
           <dd class="border-b border-rule-light py-2">{{ permissions.microphone }}</dd>
           <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
           <dd class="border-b border-rule-light py-2">{{ permissions.systemAudio }}</dd>
         </dl>
+        <button
+          v-if="permissions.microphone !== 'granted'"
+          type="button"
+          data-scribe-grant-microphone
+          class="scribe-settings-button mt-3"
+          :disabled="Boolean(pending['microphone-permission'])"
+          @click="$emit('requestMicrophonePermission')"
+        >
+          Grant microphone access
+        </button>
       </section>
 
       <section class="py-4">
@@ -166,8 +164,8 @@
             </span>
           </label>
           <p class="text-[9px] leading-relaxed text-ink-3">
-            Remote URLs must use secure WebSocket or HTTPS. The key remains native and is never
-            returned to the renderer.
+            Remote URLs must use HTTPS; Mimir upgrades the connection to secure WebSocket.
+            The key remains native and is never returned to the renderer.
           </p>
         </div>
       </section>
@@ -241,6 +239,7 @@ const emit = defineEmits([
   'clearApiKey',
   'installModel',
   'deleteModel',
+  'requestMicrophonePermission',
 ])
 
 const customUrl = ref(props.config.customUrl)

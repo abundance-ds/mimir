@@ -1,0 +1,465 @@
+//! Read-mostly public projection of meetings recorded by Mimir Scribe.
+//!
+//! Recording controls intentionally do not exist here. Mimir's loopback MCP
+//! endpoint is trusted-local but unauthenticated, so exporting start/stop would
+//! let every local process exercise Mimir's microphone grant.
+
+use super::runtime::{MeetingRuntime, MeetingSnapshot, MeetingUpdatePatch, MeetingView};
+use crate::tool_registry::{
+    ToolCallContext, ToolDescriptor, ToolError, ToolErrorCode, ToolOwner, ToolRegistration,
+    ToolRegistry, ToolResult, ToolSource,
+};
+use serde_json::{json, Map, Value};
+use tauri::Manager;
+
+const DEFAULT_LIST_LIMIT: usize = 50;
+const MAX_LIST_LIMIT: usize = 100;
+const DEFAULT_TRANSCRIPT_LIMIT: usize = 100;
+const MAX_TRANSCRIPT_LIMIT: usize = 500;
+const MAX_QUERY_BYTES: usize = 512;
+
+pub(crate) fn register_native_tools(
+    registry: &ToolRegistry,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    for (canonical, alias, description, schema) in definitions() {
+        let app = app.clone();
+        let dispatch = canonical.to_string();
+        let registration = ToolRegistration::new(
+            ToolDescriptor::new(
+                canonical,
+                alias,
+                description,
+                schema,
+                ToolOwner::Core,
+                ToolSource::Native,
+            ),
+            move |_context: ToolCallContext, input: Value| {
+                let app = app.clone();
+                let dispatch = dispatch.clone();
+                async move {
+                    let runtime = app.state::<MeetingRuntime>();
+                    execute(&runtime, &dispatch, input).map(ToolResult::new)
+                }
+            },
+        );
+        registry
+            .register(registration)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value, ToolError> {
+    match action {
+        "meetings.list" => {
+            let snapshot = runtime.snapshot().map_err(runtime_error)?;
+            list_projection(&snapshot, input.get("limit").and_then(Value::as_u64))
+        }
+        "meetings.get" => {
+            let meeting_id = required_string(&input, "meeting_id")?;
+            let snapshot = runtime.snapshot().map_err(runtime_error)?;
+            get_projection(
+                &snapshot,
+                meeting_id,
+                input
+                    .get("transcript_offset")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                input.get("transcript_limit").and_then(Value::as_u64),
+            )
+        }
+        "meetings.search" => {
+            let query = required_string(&input, "query")?;
+            if query.len() > MAX_QUERY_BYTES {
+                return Err(invalid_input(format!(
+                    "query exceeds the {MAX_QUERY_BYTES}-byte limit"
+                )));
+            }
+            let snapshot = runtime.snapshot().map_err(runtime_error)?;
+            search_projection(&snapshot, query, input.get("limit").and_then(Value::as_u64))
+        }
+        "meetings.update" => {
+            let meeting_id = required_string(&input, "meeting_id")?;
+            let patch = MeetingUpdatePatch {
+                title: optional_string(&input, "title")?,
+                summary: optional_string(&input, "summary")?,
+                tags: optional_strings(&input, "tags")?,
+            };
+            runtime
+                .update_meeting(meeting_id, patch)
+                .map_err(runtime_error)
+                .and_then(|snapshot| get_projection(&snapshot, meeting_id, 0, Some(0)))
+        }
+        _ => Err(ToolError::new(
+            ToolErrorCode::NotFound,
+            format!("unknown native meeting tool: {action}"),
+        )),
+    }
+}
+
+fn list_projection(snapshot: &MeetingSnapshot, limit: Option<u64>) -> Result<Value, ToolError> {
+    let limit = bounded_limit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)?;
+    let meetings = snapshot
+        .meetings
+        .iter()
+        .filter(|meeting| is_public_meeting(meeting))
+        .take(limit)
+        .map(meeting_metadata)
+        .collect::<Result<Vec<_>, _>>()?;
+    let available = snapshot
+        .meetings
+        .iter()
+        .filter(|meeting| is_public_meeting(meeting))
+        .count();
+    Ok(json!({
+        "meetings": meetings,
+        "returned": meetings.len(),
+        "hasMore": available > meetings.len(),
+        "revision": snapshot.revision
+    }))
+}
+
+fn get_projection(
+    snapshot: &MeetingSnapshot,
+    meeting_id: &str,
+    offset: u64,
+    limit: Option<u64>,
+) -> Result<Value, ToolError> {
+    let meeting = find_meeting(snapshot, meeting_id)?;
+    let offset = usize::try_from(offset)
+        .map_err(|_| invalid_input("transcript_offset is too large"))?
+        .min(meeting.segments.len());
+    let limit = bounded_limit(limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT)?;
+    let end = offset.saturating_add(limit).min(meeting.segments.len());
+    let mut value = serde_json::to_value(meeting).map_err(serialization_error)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| serialization_error("meeting projection was not an object"))?;
+    object.insert(
+        "segments".into(),
+        serde_json::to_value(&meeting.segments[offset..end]).map_err(serialization_error)?,
+    );
+    object.insert(
+        "transcriptPage".into(),
+        json!({
+            "offset": offset,
+            "returned": end.saturating_sub(offset),
+            "total": meeting.segments.len(),
+            "hasMore": end < meeting.segments.len(),
+            "nextOffset": (end < meeting.segments.len()).then_some(end)
+        }),
+    );
+    Ok(value)
+}
+
+fn search_projection(
+    snapshot: &MeetingSnapshot,
+    query: &str,
+    limit: Option<u64>,
+) -> Result<Value, ToolError> {
+    let normalized = query.trim().to_lowercase();
+    if normalized.is_empty() {
+        return Err(invalid_input("query cannot be empty"));
+    }
+    let limit = bounded_limit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)?;
+    let mut hits = Vec::new();
+    for meeting in &snapshot.meetings {
+        if !is_public_meeting(meeting) {
+            continue;
+        }
+        let title_match = meeting.title.to_lowercase().contains(&normalized);
+        let summary_match = meeting
+            .summary
+            .as_deref()
+            .is_some_and(|summary| summary.to_lowercase().contains(&normalized));
+        let transcript_matches = meeting
+            .segments
+            .iter()
+            .filter(|segment| segment.text.to_lowercase().contains(&normalized))
+            .take(3)
+            .map(|segment| {
+                json!({
+                    "segmentId": segment.id,
+                    "startMs": segment.start_ms,
+                    "text": bounded_excerpt(&segment.text, 240)
+                })
+            })
+            .collect::<Vec<_>>();
+        if !title_match && !summary_match && transcript_matches.is_empty() {
+            continue;
+        }
+        hits.push(json!({
+            "meeting": meeting_metadata(meeting)?,
+            "matched": {
+                "title": title_match,
+                "summary": summary_match,
+                "transcript": transcript_matches
+            }
+        }));
+        if hits.len() == limit {
+            break;
+        }
+    }
+    Ok(json!({
+        "query": query.trim(),
+        "hits": hits,
+        "returned": hits.len(),
+        "revision": snapshot.revision
+    }))
+}
+
+fn meeting_metadata(meeting: &MeetingView) -> Result<Value, ToolError> {
+    let mut object = Map::new();
+    let serialized = serde_json::to_value(meeting).map_err(serialization_error)?;
+    for key in [
+        "id",
+        "title",
+        "lifecycle",
+        "transcription",
+        "startedAt",
+        "stoppedAt",
+        "durationMs",
+        "workspacePath",
+        "sourceApp",
+        "channels",
+        "transcriptRevision",
+        "transcriptFinal",
+        "summary",
+        "summaryState",
+        "kgState",
+        "error",
+        "updatedAt",
+    ] {
+        if let Some(value) = serialized.get(key) {
+            object.insert(key.into(), value.clone());
+        }
+    }
+    Ok(Value::Object(object))
+}
+
+fn find_meeting<'a>(
+    snapshot: &'a MeetingSnapshot,
+    meeting_id: &str,
+) -> Result<&'a MeetingView, ToolError> {
+    let meeting = snapshot
+        .meetings
+        .iter()
+        .find(|meeting| meeting.id == meeting_id)
+        .ok_or_else(|| {
+            ToolError::new(
+                ToolErrorCode::NotFound,
+                format!("Mimir Scribe meeting '{meeting_id}' was not found"),
+            )
+        })?;
+    if !is_public_meeting(meeting) {
+        return Err(ToolError::new(
+            ToolErrorCode::Unavailable,
+            "the meeting becomes available to agents after recording and finalization stop",
+        ));
+    }
+    Ok(meeting)
+}
+
+fn is_public_meeting(meeting: &MeetingView) -> bool {
+    matches!(
+        meeting.lifecycle.as_str(),
+        "ready" | "interrupted" | "failed"
+    )
+}
+
+fn required_string<'a>(input: &'a Value, field: &str) -> Result<&'a str, ToolError> {
+    input
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid_input(format!("{field} must be a non-empty string")))
+}
+
+fn optional_string(input: &Value, field: &str) -> Result<Option<String>, ToolError> {
+    let Some(value) = input.get(field) else {
+        return Ok(None);
+    };
+    let value = value
+        .as_str()
+        .ok_or_else(|| invalid_input(format!("{field} must be a string")))?;
+    Ok(Some(value.to_string()))
+}
+
+fn optional_strings(input: &Value, field: &str) -> Result<Option<Vec<String>>, ToolError> {
+    let Some(value) = input.get(field) else {
+        return Ok(None);
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| invalid_input(format!("{field} must be an array of strings")))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| invalid_input(format!("{field} must contain only strings")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(values))
+}
+
+fn bounded_limit(value: Option<u64>, default: usize, maximum: usize) -> Result<usize, ToolError> {
+    let value = value.unwrap_or(default as u64);
+    if value > maximum as u64 {
+        return Err(invalid_input(format!("limit cannot exceed {maximum}")));
+    }
+    usize::try_from(value).map_err(|_| invalid_input("limit is too large"))
+}
+
+fn bounded_excerpt(value: &str, maximum_chars: usize) -> String {
+    let mut chars = value.chars();
+    let mut excerpt = chars.by_ref().take(maximum_chars).collect::<String>();
+    if chars.next().is_some() {
+        excerpt.push('…');
+    }
+    excerpt
+}
+
+fn runtime_error(error: impl std::fmt::Display) -> ToolError {
+    ToolError::new(ToolErrorCode::Handler, error.to_string())
+}
+
+fn serialization_error(error: impl std::fmt::Display) -> ToolError {
+    ToolError::new(ToolErrorCode::Internal, error.to_string())
+}
+
+fn invalid_input(message: impl Into<String>) -> ToolError {
+    ToolError::new(ToolErrorCode::InvalidInput, message)
+}
+
+fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
+    vec![
+        (
+            "meetings.list",
+            "meetings_list",
+            "List completed and interrupted meetings recorded natively by Mimir Scribe. This is distinct from meetings synced from Granola.",
+            object_schema(
+                json!({
+                    "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT }
+                }),
+                &[],
+            ),
+        ),
+        (
+            "meetings.get",
+            "meetings_get",
+            "Read one Mimir Scribe meeting with a bounded finalized transcript slice. This never starts or controls recording.",
+            object_schema(
+                json!({
+                    "meeting_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "transcript_offset": { "type": "integer", "minimum": 0, "default": 0 },
+                    "transcript_limit": { "type": "integer", "minimum": 0, "maximum": MAX_TRANSCRIPT_LIMIT, "default": DEFAULT_TRANSCRIPT_LIMIT }
+                }),
+                &["meeting_id"],
+            ),
+        ),
+        (
+            "meetings.search",
+            "meetings_search",
+            "Search titles, summaries, and finalized transcript text recorded by Mimir Scribe.",
+            object_schema(
+                json!({
+                    "query": { "type": "string", "minLength": 1, "maxLength": MAX_QUERY_BYTES },
+                    "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT }
+                }),
+                &["query"],
+            ),
+        ),
+        (
+            "meetings.update",
+            "meetings_update",
+            "Update reviewed metadata for one Mimir Scribe meeting. Recording controls are deliberately not exposed to agents.",
+            object_schema(
+                json!({
+                    "meeting_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "title": { "type": "string", "maxLength": 200 },
+                    "summary": { "type": "string", "maxLength": 100000 },
+                    "tags": {
+                        "type": "array",
+                        "maxItems": 64,
+                        "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+                    }
+                }),
+                &["meeting_id"],
+            ),
+        ),
+    ]
+}
+
+fn object_schema(properties: Value, required: &[&str]) -> Value {
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meetings::runtime::{
+        MeetingConfig, MeetingPermissions, MeetingPlatformProjection, MeetingSnapshot,
+    };
+
+    fn snapshot() -> MeetingSnapshot {
+        MeetingSnapshot {
+            revision: 7,
+            meetings: vec![],
+            active_meeting_id: None,
+            candidates: vec![],
+            config: MeetingConfig::default(),
+            permissions: MeetingPermissions::default(),
+            models: vec![],
+            diagnostic: None,
+        }
+    }
+
+    #[test]
+    fn public_projection_has_no_recording_control() {
+        let definitions = definitions();
+        assert_eq!(definitions.len(), 4);
+        assert!(definitions.iter().all(|definition| {
+            !definition.0.contains("start")
+                && !definition.0.contains("stop")
+                && !definition.0.contains("record")
+        }));
+    }
+
+    #[test]
+    fn list_projection_is_bounded_and_distinguishes_native_meetings() {
+        let value = list_projection(&snapshot(), Some(100)).unwrap();
+        assert_eq!(value["returned"], 0);
+        assert!(definitions()[0].2.contains("recorded natively"));
+        assert_eq!(
+            list_projection(&snapshot(), Some(101)).unwrap_err().code,
+            ToolErrorCode::InvalidInput
+        );
+    }
+
+    #[test]
+    fn search_rejects_blank_and_oversized_queries() {
+        let empty = search_projection(&snapshot(), "  ", None).unwrap_err();
+        assert_eq!(empty.code, ToolErrorCode::InvalidInput);
+        let oversized = "x".repeat(MAX_QUERY_BYTES + 1);
+        let error = if oversized.len() > MAX_QUERY_BYTES {
+            invalid_input("query too long")
+        } else {
+            unreachable!()
+        };
+        assert_eq!(error.code, ToolErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn platform_projection_type_remains_serializable_for_tool_bootstrap() {
+        let projection = MeetingPlatformProjection::default();
+        assert!(serde_json::to_value(projection).is_ok());
+    }
+}

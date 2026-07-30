@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  dismissMeetingCandidate,
   listenToMeetingEvents,
   loadMeetingSnapshot,
+  requestMeetingMicrophonePermission,
   startMeeting,
   stopMeeting,
 } from '../services/meetings.js'
@@ -14,10 +16,12 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   decideMeetingKgProposal: vi.fn(),
   deleteMeeting: vi.fn(),
   deleteMeetingModel: vi.fn(),
+  dismissMeetingCandidate: vi.fn(),
   exportMeeting: vi.fn(),
   installMeetingModel: vi.fn(),
   listenToMeetingEvents: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
+  requestMeetingMicrophonePermission: vi.fn(),
   retryMeetingJob: vi.fn(),
   setMeetingMicMuted: vi.fn(),
   setMeetingsApiKey: vi.fn(),
@@ -55,6 +59,8 @@ describe('meetings store', () => {
       return vi.fn()
     })
     vi.mocked(loadMeetingSnapshot).mockReset().mockResolvedValue(emptySnapshot)
+    vi.mocked(requestMeetingMicrophonePermission).mockReset()
+    vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
   })
@@ -103,6 +109,20 @@ describe('meetings store', () => {
     expect(store.recording).toBe(true)
   })
 
+  it('refreshes an equal-revision projection after native platform progress', async () => {
+    const store = useMeetingsStore()
+    await store.initialize()
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      models: [{ id: 'whisper-small', status: 'downloading', downloadedBytes: 1024 }],
+    })
+
+    eventHandler({ kind: 'model-progress', refresh: true })
+    await vi.waitFor(() => expect(loadMeetingSnapshot).toHaveBeenCalledTimes(2))
+
+    expect(store.models[0]?.status).toBe('downloading')
+  })
+
   it('requires explicit consent and prevents a second active capture', async () => {
     const store = useMeetingsStore()
     await store.initialize()
@@ -127,6 +147,39 @@ describe('meetings store', () => {
     }))
     await expect(store.start({ consentConfirmed: true }))
       .rejects.toThrow('already active')
+  })
+
+  it('projects an explicitly granted microphone permission', async () => {
+    const store = useMeetingsStore()
+    await store.initialize()
+    vi.mocked(requestMeetingMicrophonePermission).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+    })
+
+    await expect(store.requestMicrophonePermission()).resolves.toBe('granted')
+    expect(store.permissions).toEqual({
+      microphone: 'granted',
+      systemAudio: 'prompt-on-start',
+    })
+  })
+
+  it('removes a dismissed meeting candidate from the authoritative snapshot', async () => {
+    const store = useMeetingsStore()
+    store.applySnapshot({
+      ...emptySnapshot,
+      revision: 2,
+      candidates: [{ id: 'candidate-zoom', appName: 'Zoom' }],
+    })
+    vi.mocked(dismissMeetingCandidate).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 3,
+      candidates: [],
+    })
+
+    await store.dismissCandidate('candidate-zoom')
+    expect(store.candidates).toEqual([])
   })
 
   it('keeps a finalizing meeting selected after Stop', async () => {

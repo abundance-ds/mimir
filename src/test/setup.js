@@ -66,7 +66,8 @@ const VALID_TAURI_COMMANDS = new Set([
   'routine_catalog', 'routine_reload', 'routine_run_now', 'routine_create', 'routine_update',
   'routine_duplicate', 'routine_trash', 'routine_reveal',
   // Scribe meetings
-  'meetings_snapshot', 'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
+  'meetings_snapshot', 'meetings_request_microphone_permission', 'meetings_dismiss_candidate',
+  'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
   'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_delete',
   'meetings_export', 'meetings_update_config', 'meetings_set_api_key',
   'meetings_clear_api_key', 'meetings_install_model', 'meetings_delete_model',
@@ -122,6 +123,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 }))
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
+  confirm: vi.fn(() => Promise.resolve(true)),
   open: vi.fn(),
   save: vi.fn(),
 }))

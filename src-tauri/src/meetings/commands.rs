@@ -4,13 +4,18 @@
 //! `src/services/meetings.js`. Potentially blocking native work is moved off
 //! Tauri's command task before entering the serialized runtime.
 
+use super::platform::MeetingPlatformChangeSink;
 use super::runtime::{
     MeetingConfigPatch, MeetingDeleteMode, MeetingEvent, MeetingEventSink, MeetingExport,
     MeetingExportFormat, MeetingRuntime, MeetingSnapshot, MeetingUpdatePatch, StartMeetingRequest,
     MEETING_EVENT,
 };
+use super::transcriber::TranscriptionChangeSink;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::Emitter;
+
+pub const MEETING_PLATFORM_CHANGED_EVENT: &str = "mimir://meeting-platform-changed";
 
 pub struct TauriMeetingEventSink {
     app: tauri::AppHandle,
@@ -27,6 +32,37 @@ impl MeetingEventSink for TauriMeetingEventSink {
         self.app
             .emit(MEETING_EVENT, event)
             .map_err(|error| format!("could not emit {MEETING_EVENT}: {error}"))
+    }
+}
+
+pub struct TauriMeetingPlatformChangeSink {
+    app: tauri::AppHandle,
+}
+
+impl TauriMeetingPlatformChangeSink {
+    pub fn new(app: &tauri::AppHandle) -> Arc<Self> {
+        Arc::new(Self { app: app.clone() })
+    }
+}
+
+impl MeetingPlatformChangeSink for TauriMeetingPlatformChangeSink {
+    fn changed(&self, kind: &'static str) {
+        let _ = self.app.emit(
+            MEETING_PLATFORM_CHANGED_EVENT,
+            serde_json::json!({ "kind": kind }),
+        );
+    }
+}
+
+impl TranscriptionChangeSink for TauriMeetingPlatformChangeSink {
+    fn changed(&self, meeting_id: &str) {
+        let _ = self.app.emit(
+            MEETING_PLATFORM_CHANGED_EVENT,
+            serde_json::json!({
+                "kind": "transcript",
+                "meetingId": meeting_id,
+            }),
+        );
     }
 }
 
@@ -47,6 +83,44 @@ pub async fn meetings_snapshot(
     let runtime = runtime.inner().clone();
     run_blocking("meeting snapshot", move || {
         runtime.snapshot().map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_request_microphone_permission(
+    runtime: tauri::State<'_, MeetingRuntime>,
+) -> Result<MeetingSnapshot, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("microphone permission request", move || {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        mimir_meeting_detect::request_microphone_permission(move |permission| {
+            let _ = send.send(permission);
+        })
+        .map_err(|error| error.to_string())?;
+        let permission = receive
+            .recv_timeout(Duration::from_secs(90))
+            .map_err(|_| "macOS did not complete the microphone permission request".to_string())?;
+        if permission.state != mimir_meeting_detect::PermissionState::Granted {
+            return Err(permission
+                .remediation
+                .unwrap_or_else(|| "Microphone access is required to record a meeting".into()));
+        }
+        runtime.snapshot().map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_dismiss_candidate(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    candidate_id: String,
+) -> Result<MeetingSnapshot, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting candidate dismissal", move || {
+        runtime
+            .dismiss_candidate(&candidate_id)
+            .map_err(|error| error.to_string())
     })
     .await
 }

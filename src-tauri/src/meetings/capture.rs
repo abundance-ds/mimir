@@ -7,7 +7,8 @@
 
 use super::{
     runtime::{CaptureStart, CaptureStop, CaptureStopResult, MeetingCapturePort},
-    AudioChunkDraft, AudioChunkStatus, MeetingStore, RecoveryReport,
+    AudioChunkDraft, AudioChunkStatus, MeetingStore, MeetingStoreError, RecoveryReport,
+    TranscriptBatch, TranscriptChange, TranscriptGapInput, TranscriptGapReason,
 };
 use chrono::{SecondsFormat, Utc};
 use sha2::{Digest, Sha256};
@@ -679,12 +680,12 @@ impl ChannelWriter {
                     let sample_count = usize::try_from(gap.sample_count.unwrap_or(0))
                         .map_err(|_| "audio gap sample count exceeds this platform".to_string())?;
                     input.resize(input.len().saturating_add(sample_count), 0.0);
-                    self.gaps.push(PersistedGap {
+                    self.record_gap(PersistedGap {
                         sequence: timeline_sequence,
                         start_ms: frame_start_ms,
                         end_ms: frame_start_ms.saturating_add(FRAME_MILLISECONDS),
-                        reason: format!("{:?}", gap.reason),
-                    });
+                        reason: bounded_gap_reason(&format!("{:?}", gap.reason)),
+                    })?;
                 }
             }
         }
@@ -705,12 +706,12 @@ impl ChannelWriter {
         let end_sample = start_sample
             .checked_add(gap_samples)
             .ok_or_else(|| "capture restart gap overflows the meeting timeline".to_string())?;
-        self.gaps.push(PersistedGap {
+        self.record_gap(PersistedGap {
             sequence: start_sample / canonical_frame_samples(),
             start_ms: start_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64,
             end_ms: end_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64,
-            reason: reason.to_owned(),
-        });
+            reason: bounded_gap_reason(reason),
+        })?;
 
         let mut remaining = gap_samples;
         while remaining > 0 {
@@ -726,6 +727,55 @@ impl ChannelWriter {
             self.persist_full_chunks()?;
         }
         self.flush_gap_manifest()
+    }
+
+    fn record_gap(&mut self, gap: PersistedGap) -> Result<(), String> {
+        self.persist_transcript_gap(&gap)?;
+        self.gaps.push(gap);
+        Ok(())
+    }
+
+    fn persist_transcript_gap(&self, gap: &PersistedGap) -> Result<(), String> {
+        let start_ms = i64::try_from(gap.start_ms)
+            .map_err(|_| "capture gap start exceeds the transcript timeline".to_string())?;
+        let end_ms = i64::try_from(gap.end_ms)
+            .map_err(|_| "capture gap end exceeds the transcript timeline".to_string())?;
+        let stable = format!(
+            "capture-gap-{}-{}-{}",
+            self.channel_id, gap.sequence, gap.start_ms
+        );
+        let change = TranscriptChange::OpenGap {
+            gap: TranscriptGapInput {
+                id: stable.clone(),
+                start_ms,
+                end_ms,
+                reason: transcript_gap_reason(&gap.reason),
+                channel_id: Some(self.channel_id.into()),
+                detail: Some(gap.reason.clone()),
+            },
+        };
+        for _ in 0..8 {
+            let base_revision = self
+                .store
+                .get_meeting(&self.meeting_id)
+                .map_err(|error| error.to_string())?
+                .transcript_revision;
+            let batch = TranscriptBatch {
+                meeting_id: self.meeting_id.clone(),
+                batch_id: stable.clone(),
+                base_revision,
+                source: "native-capture".into(),
+                observed_at: now(),
+                marks_final: false,
+                changes: vec![change.clone()],
+            };
+            match self.store.apply_transcript_batch(&batch) {
+                Ok(_) => return Ok(()),
+                Err(MeetingStoreError::RevisionConflict { .. }) => continue,
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Err("capture gap could not join the transcript revision after bounded retries".into())
     }
 
     fn push_canonical_samples(&mut self, samples: &[f32]) -> Result<(), String> {
@@ -860,6 +910,27 @@ fn ensure_free_space(path: &Path) -> Result<(), String> {
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn bounded_gap_reason(value: &str) -> String {
+    value.chars().take(512).collect()
+}
+
+fn transcript_gap_reason(value: &str) -> TranscriptGapReason {
+    let value = value.to_ascii_lowercase();
+    if value.contains("overflow") || value.contains("dropped") || value.contains("lag") {
+        TranscriptGapReason::BufferOverflow
+    } else if value.contains("device")
+        || value.contains("route")
+        || value.contains("restart")
+        || value.contains("stream ended")
+    {
+        TranscriptGapReason::DeviceChanged
+    } else if value.contains("permission") || value.contains("unavailable") {
+        TranscriptGapReason::CaptureUnavailable
+    } else {
+        TranscriptGapReason::Unknown
+    }
 }
 
 fn now() -> String {
@@ -1013,7 +1084,7 @@ mod tests {
             )
             .unwrap();
         let mut writer = ChannelWriter::new(
-            store,
+            Arc::clone(&store),
             directory.path().to_path_buf(),
             "restart-meeting".into(),
             "microphone",
@@ -1075,6 +1146,16 @@ mod tests {
         assert_eq!(gaps[0]["startMs"], 20);
         assert_eq!(gaps[0]["endMs"], 60);
         assert_eq!(gaps[0]["reason"], "default input device changed");
+        let transcript = store.transcript_snapshot("restart-meeting", None).unwrap();
+        assert_eq!(transcript.gaps.len(), 1);
+        assert_eq!(
+            transcript.gaps[0].gap.reason,
+            TranscriptGapReason::DeviceChanged
+        );
+        assert_eq!(
+            transcript.gaps[0].gap.channel_id.as_deref(),
+            Some("microphone")
+        );
     }
 
     #[test]

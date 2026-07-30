@@ -70,7 +70,23 @@ export function useEditorNativeLifecycle({
       flushSettings: () => editorSettings.flush(),
       confirmQuit: async () => {
         const { invoke } = await import('@tauri-apps/api/core')
+        const snapshot = await invoke('meetings_snapshot')
+        const activeMeetingId = snapshot?.activeMeetingId ?? snapshot?.active_meeting_id
+        if (activeMeetingId) {
+          const { confirm } = await import('@tauri-apps/plugin-dialog')
+          const accepted = await confirm(
+            'Scribe is recording a meeting. Mimir will stop capture, finish the transcript, and preserve the recording before quitting.',
+            {
+              title: 'Stop recording and quit?',
+              kind: 'warning',
+              okLabel: 'Stop and quit',
+              cancelLabel: 'Keep recording',
+            },
+          )
+          if (!accepted) return false
+        }
         await invoke('app_quit_confirmed')
+        return true
       },
     })
   }

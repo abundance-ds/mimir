@@ -814,8 +814,21 @@ fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn app_quit_confirmed(app: tauri::AppHandle) {
+fn app_quit_confirmed(
+    app: tauri::AppHandle,
+    meetings: tauri::State<'_, meetings::runtime::MeetingRuntime>,
+) -> Result<(), String> {
+    if let Some(meeting_id) = meetings
+        .snapshot()
+        .map_err(|error| error.to_string())?
+        .active_meeting_id
+    {
+        meetings
+            .stop(&meeting_id)
+            .map_err(|error| error.to_string())?;
+    }
     app.exit(0);
+    Ok(())
 }
 
 pub fn run() {
@@ -855,12 +868,43 @@ pub fn run() {
             enable_macos_spellcheck();
 
             mimir_cli::install().map_err(std::io::Error::other)?;
+            let meeting_engine =
+                meetings::native::bootstrap_native_meeting_engine_for_user(app.handle())
+                    .map_err(std::io::Error::other)?;
+            let meeting_runtime = meeting_engine.runtime();
+            let meeting_transcription = meeting_engine.transcription_port();
+            let meeting_paths = meeting_engine.paths();
+            if !app.manage(meeting_runtime.clone()) {
+                return Err(
+                    std::io::Error::other("Scribe meeting runtime was already registered").into(),
+                );
+            }
+            if !app.manage(meeting_engine) {
+                return Err(std::io::Error::other(
+                    "Scribe native lifecycle was already registered",
+                )
+                .into());
+            }
             create_main_window(app)?;
             let supervisor = app.state::<activities::ActivitySupervisor>();
             activity_commands::TauriActivitySink::install(app.handle(), &supervisor);
             let routines = app.state::<routine_runtime::RoutineRuntime>();
             routine_runtime::TauriRoutineSink::install(app.handle(), &routines);
             routines.start().map_err(std::io::Error::other)?;
+            let meeting_jobs = meetings::jobs::MeetingJobWorker::start(
+                meeting_runtime,
+                meeting_transcription,
+                routines.inner().clone(),
+                supervisor.inner().clone(),
+                meeting_paths,
+            )
+            .map_err(std::io::Error::other)?;
+            if !app.manage(meeting_jobs) {
+                return Err(std::io::Error::other(
+                    "Scribe follow-up worker was already registered",
+                )
+                .into());
+            }
             app.state::<tool_runtime::ToolRuntime>()
                 .initialize(app.handle())
                 .map_err(std::io::Error::other)?;
@@ -946,6 +990,22 @@ pub fn run() {
             notify_file_updated,
             settings_changed,
             app_quit_confirmed,
+            meetings::commands::meetings_snapshot,
+            meetings::commands::meetings_request_microphone_permission,
+            meetings::commands::meetings_dismiss_candidate,
+            meetings::commands::meetings_start,
+            meetings::commands::meetings_stop,
+            meetings::commands::meetings_set_mic_muted,
+            meetings::commands::meetings_update,
+            meetings::commands::meetings_decide_kg,
+            meetings::commands::meetings_retry_job,
+            meetings::commands::meetings_delete,
+            meetings::commands::meetings_export,
+            meetings::commands::meetings_update_config,
+            meetings::commands::meetings_set_api_key,
+            meetings::commands::meetings_clear_api_key,
+            meetings::commands::meetings_install_model,
+            meetings::commands::meetings_delete_model,
             spell_suggest,
             shell_exec::shell_exec,
             activity_commands::activity_list,

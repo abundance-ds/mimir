@@ -3,9 +3,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import {
   decideMeetingKgProposal,
+  dismissMeetingCandidate,
   listenToMeetingEvents,
   loadMeetingSnapshot,
   normalizeMeetingSnapshot,
+  requestMeetingMicrophonePermission,
   startMeeting,
   updateMeetingsConfig,
 } from './meetings.js'
@@ -51,6 +53,7 @@ describe('meetings service', () => {
       workspacePath: '/work',
       consentConfirmed: true,
     })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_request_microphone_permission')
     expect(invoke).toHaveBeenCalledWith('meetings_start', {
       request: {
         title: 'Architecture',
@@ -58,6 +61,29 @@ describe('meetings service', () => {
         candidateId: null,
         consentConfirmed: true,
       },
+    })
+  })
+
+  it('exposes the deliberate microphone permission action without starting capture', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      revision: 2,
+      meetings: [],
+      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+    })
+
+    await expect(requestMeetingMicrophonePermission()).resolves.toMatchObject({
+      revision: 2,
+      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+    })
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith('meetings_request_microphone_permission')
+  })
+
+  it('dismisses a detector suggestion through a human-only native command', async () => {
+    vi.mocked(invoke).mockResolvedValue({ revision: 3, meetings: [], candidates: [] })
+    await dismissMeetingCandidate('candidate-zoom')
+    expect(invoke).toHaveBeenCalledWith('meetings_dismiss_candidate', {
+      candidateId: 'candidate-zoom',
     })
   })
 
@@ -81,6 +107,6 @@ describe('meetings service', () => {
     })
     await listenToMeetingEvents(() => {})
     await loadMeetingSnapshot()
-    expect(order).toEqual(['listener', 'snapshot'])
+    expect(order).toEqual(['listener', 'listener', 'snapshot'])
   })
 })

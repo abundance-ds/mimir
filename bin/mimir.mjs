@@ -17,7 +17,7 @@ import {
 
 const FALLBACK_URL = 'http://127.0.0.1:17532/mcp'
 const REQUEST_TIMEOUT_MS = 10_000
-const TOOL_GROUPS = Object.freeze(['workbench', 'graph', 'chat', 'connections'])
+const TOOL_GROUPS = Object.freeze(['workbench', 'graph', 'meetings', 'chat', 'connections'])
 
 export async function main() {
   const [command, ...args] = process.argv.slice(2)
@@ -810,7 +810,7 @@ Use docs/_MAP.md to locate the owning document for a subsystem.`,
   tools: `Tool discovery
 
   mimir tools            concise available catalog
-  mimir tools <group>    compact signatures for workbench, graph, chat, or connections
+  mimir tools <group>    compact signatures for workbench, graph, meetings, chat, or connections
   mimir tools --json     machine-readable available catalog
   mimir tool <name>      complete inputs and ready call`,
 })
@@ -884,6 +884,7 @@ export function formatPublicTools(tools) {
 const TOOL_GROUP_NOTES = Object.freeze({
   workbench: 'mimir_propose opens a review; it does not change the file.',
   graph: 'Omitting scopeIds searches every mounted scope, including private. Use graph_get.sourceRevision as graph_update/graph_delete expectedRevision; graph_delete returns graph_restore.undoToken.',
+  meetings: 'Meeting tools expose completed and interrupted records only. Recording controls remain human-only in the Scribe app.',
   chat: 'target defaults to the linked or open room.',
   connections: 'Only configured tools appear. external-write sends or creates remote data.',
 })

@@ -316,6 +316,9 @@ pub trait MeetingTranscriptionPort: Send + Sync {
 /// model, Activity, file/export, and review systems keep their own authority.
 pub trait MeetingPlatformPort: Send + Sync {
     fn projection(&self) -> Result<MeetingPlatformProjection, String>;
+    fn dismiss_candidate(&self, _candidate_id: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn content(&self, meeting_id: &str) -> Result<MeetingContentProjection, String>;
     fn update_config(&self, patch: &MeetingConfigPatch) -> Result<(), String>;
     fn set_api_key(&self, api_key: &str) -> Result<(), String>;
@@ -528,6 +531,19 @@ impl MeetingRuntime {
         self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire))
     }
 
+    pub fn dismiss_candidate(
+        &self,
+        candidate_id: &str,
+    ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        require_nonempty(candidate_id, "meeting candidate id")?;
+        self.inner
+            .platform
+            .dismiss_candidate(candidate_id)
+            .map_err(|message| port_error("meeting candidate dismissal", message))?;
+        self.publish_unlocked("candidate-dismissed", None, None)
+    }
+
     pub fn start(
         &self,
         request: StartMeetingRequest,
@@ -572,6 +588,11 @@ impl MeetingRuntime {
                 .iter()
                 .find(|candidate| &candidate.id == candidate_id)
         });
+        if request.candidate_id.is_some() && candidate.is_none() {
+            return Err(MeetingRuntimeError::Validation(
+                "the selected meeting candidate is no longer available".into(),
+            ));
+        }
         let origin = MeetingOrigin {
             kind: if candidate.is_some() {
                 "detected".into()
@@ -660,6 +681,14 @@ impl MeetingRuntime {
             transcription,
             duration_ms: 0,
         });
+        if let Some(candidate_id) = request.candidate_id.as_deref() {
+            if let Err(message) = self.inner.platform.dismiss_candidate(candidate_id) {
+                self.set_diagnostic(format!(
+                    "Recording started, but its meeting suggestion could not be dismissed: {}",
+                    bounded_error(&message)
+                ))?;
+            }
+        }
 
         debug_assert_eq!(recording.status, MeetingStatus::Recording);
         self.publish_unlocked("capture-started", Some(meeting_id), Some(run_id))
@@ -1241,6 +1270,12 @@ impl MeetingRuntime {
     fn snapshot_unlocked(&self, revision: u64) -> Result<MeetingSnapshot, MeetingRuntimeError> {
         let projection = self.platform_projection()?;
         let active = self.active()?.clone();
+        let active_meeting_id = active.as_ref().map(|value| value.meeting_id.clone());
+        let candidates = if active.is_some() {
+            Vec::new()
+        } else {
+            projection.candidates
+        };
         let runtime_diagnostic = self.diagnostic()?.clone();
         let mut meetings = Vec::new();
         for record in self.inner.store.list_meetings(DEFAULT_MEETING_LIMIT)? {
@@ -1270,8 +1305,8 @@ impl MeetingRuntime {
         Ok(MeetingSnapshot {
             revision,
             meetings,
-            active_meeting_id: active.map(|value| value.meeting_id),
-            candidates: projection.candidates,
+            active_meeting_id,
+            candidates,
             config: projection.config,
             permissions: projection.permissions,
             models: projection.models,
@@ -2065,6 +2100,7 @@ mod tests {
         deleted: Vec<(String, MeetingDeleteMode)>,
         fail_export: Option<String>,
         fail_model_install: Option<String>,
+        dismissed_candidates: Vec<String>,
     }
 
     struct FakePlatform {
@@ -2090,6 +2126,7 @@ mod tests {
                     deleted: Vec::new(),
                     fail_export: None,
                     fail_model_install: None,
+                    dismissed_candidates: Vec::new(),
                 }),
             }
         }
@@ -2098,6 +2135,15 @@ mod tests {
     impl MeetingPlatformPort for FakePlatform {
         fn projection(&self) -> Result<MeetingPlatformProjection, String> {
             Ok(self.state.lock().unwrap().projection.clone())
+        }
+
+        fn dismiss_candidate(&self, candidate_id: &str) -> Result<(), String> {
+            self.state
+                .lock()
+                .unwrap()
+                .dismissed_candidates
+                .push(candidate_id.into());
+            Ok(())
         }
 
         fn content(&self, meeting_id: &str) -> Result<MeetingContentProjection, String> {
@@ -2374,6 +2420,46 @@ mod tests {
         let duplicate = service_fixture.runtime.start(service_request).unwrap();
         assert_eq!(duplicate.active_meeting_id, first.active_meeting_id);
         assert_eq!(service_fixture.capture.starts.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn detected_start_rejects_stale_candidates_and_suppresses_the_accepted_prompt() {
+        let fixture = make_fixture();
+        fixture.platform.state.lock().unwrap().projection.candidates = vec![MeetingCandidate {
+            id: "candidate-zoom".into(),
+            app_id: "us.zoom.xos".into(),
+            app_name: "Zoom".into(),
+            detected_at: None,
+            confidence: 0.95,
+        }];
+
+        let stale = fixture
+            .runtime
+            .start(StartMeetingRequest {
+                candidate_id: Some("missing".into()),
+                ..start_request("stale-candidate")
+            })
+            .unwrap_err();
+        assert!(stale.to_string().contains("no longer available"));
+
+        let started = fixture
+            .runtime
+            .start(StartMeetingRequest {
+                candidate_id: Some("candidate-zoom".into()),
+                ..start_request("accepted-candidate")
+            })
+            .unwrap();
+        assert!(started.candidates.is_empty());
+        assert_eq!(
+            fixture
+                .platform
+                .state
+                .lock()
+                .unwrap()
+                .dismissed_candidates
+                .clone(),
+            vec!["candidate-zoom"]
+        );
     }
 
     #[test]

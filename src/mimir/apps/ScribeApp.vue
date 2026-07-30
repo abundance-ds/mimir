@@ -152,17 +152,30 @@
           <p class="px-2 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-3">
             Detected
           </p>
-          <button
+          <div
             v-for="candidate in meetings.candidates"
             :key="candidate.id"
-            type="button"
-            class="scribe-library-row"
-            @click="beginStart(candidate)"
+            class="flex min-w-0 items-center"
           >
-            <IconPhone :size="13" class="shrink-0 text-ink-2" />
-            <span class="min-w-0 flex-1 truncate">{{ candidate.appName }}</span>
-            <span class="font-mono text-[9px] text-ink-3">Record?</span>
-          </button>
+            <button
+              type="button"
+              class="scribe-library-row min-w-0 flex-1"
+              @click="beginStart(candidate)"
+            >
+              <IconPhone :size="13" class="shrink-0 text-ink-2" />
+              <span class="min-w-0 flex-1 truncate">{{ candidate.appName }}</span>
+              <span class="font-mono text-[9px] text-ink-3">Record?</span>
+            </button>
+            <button
+              type="button"
+              class="scribe-icon-button mr-1 shrink-0"
+              :aria-label="`Dismiss ${candidate.appName} suggestion`"
+              :disabled="Boolean(meetings.pending[`candidate:${candidate.id}`])"
+              @click="dismissCandidate(candidate.id)"
+            >
+              <IconX :size="12" />
+            </button>
+          </div>
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto">
@@ -228,6 +241,7 @@
           @clear-api-key="clearApiKey"
           @install-model="installModel"
           @delete-model="deleteModel"
+          @request-microphone-permission="requestMicrophonePermission"
         />
 
         <div
@@ -242,6 +256,18 @@
           <p class="mt-2 max-w-lg text-[11px] leading-relaxed text-ink-2">
             Scribe records microphone and system audio. You are responsible for obtaining
             any consent or giving any notice required for this meeting.
+          </p>
+          <div
+            v-if="meetings.config.transcriptionMode === 'custom'"
+            data-scribe-hosted-disclosure
+            class="mt-3 max-w-lg border-l-2 border-accent bg-accent-soft px-3 py-2 text-[10px] leading-relaxed text-ink-2"
+          >
+            Both audio channels and transcript timing will be sent to
+            <strong class="font-semibold text-ink">{{ customDestination }}</strong>
+            for transcription. Mimir will not silently switch to another provider.
+          </div>
+          <p v-else class="mt-3 max-w-lg text-[10px] leading-relaxed text-ink-3">
+            Local transcription stays on this Mac and does not send meeting audio to a provider.
           </p>
           <label class="mt-5 flex items-start gap-2 text-[11px] leading-relaxed text-ink-2">
             <input
@@ -317,10 +343,19 @@
               <button
                 type="button"
                 class="scribe-button"
-                @click="exportSelected"
+                @click="exportSelected('markdown')"
               >
                 <IconDownload :size="13" />
                 Export
+              </button>
+              <button
+                v-if="meetings.selectedMeeting.lifecycle === 'ready'"
+                type="button"
+                class="scribe-button"
+                @click="beginEdit"
+              >
+                <IconEdit :size="13" />
+                Edit
               </button>
             </div>
             <nav class="mt-3 flex gap-4" aria-label="Meeting detail">
@@ -372,8 +407,48 @@
             </section>
 
             <section v-else-if="detailTab === 'summary'" aria-label="Summary">
+              <form
+                v-if="editingMeeting"
+                class="max-w-3xl space-y-4"
+                @submit.prevent="saveMeetingEdits"
+              >
+                <label class="block">
+                  <span class="scribe-settings-label">Reviewed title</span>
+                  <input
+                    v-model="editedTitle"
+                    data-scribe-edit-title
+                    class="scribe-settings-input"
+                    maxlength="200"
+                    required
+                  />
+                </label>
+                <label class="block">
+                  <span class="scribe-settings-label">Reviewed summary</span>
+                  <textarea
+                    v-model="editedSummary"
+                    data-scribe-edit-summary
+                    class="scribe-settings-input min-h-64 resize-y py-2 leading-relaxed"
+                    maxlength="100000"
+                  />
+                </label>
+                <div class="flex gap-2">
+                  <button type="button" class="scribe-button" @click="cancelEdit">
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    data-scribe-save-review
+                    class="scribe-primary-button"
+                    :disabled="!editedTitle.trim() || Boolean(
+                      meetings.pending[`update:${meetings.selectedMeeting.id}`],
+                    )"
+                  >
+                    Save review
+                  </button>
+                </div>
+              </form>
               <div
-                v-if="meetings.selectedMeeting.summary"
+                v-else-if="meetings.selectedMeeting.summary"
                 class="max-w-3xl select-text whitespace-pre-wrap text-[12px] leading-[1.6]"
               >
                 {{ meetings.selectedMeeting.summary }}
@@ -405,6 +480,37 @@
                   <dd class="border-b border-rule-light py-2 text-ink-2">{{ value }}</dd>
                 </template>
               </dl>
+              <div class="mt-6 max-w-2xl border-t border-rule pt-4">
+                <h3 class="text-[11px] font-semibold">Data and privacy</h3>
+                <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
+                  Exports create a user-owned copy. Deletion cannot remove prior exports,
+                  backups, or audio already processed by a custom provider.
+                </p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button type="button" class="scribe-button" @click="exportSelected('json')">
+                    Export JSON
+                  </button>
+                  <button type="button" class="scribe-button" @click="exportSelected('audio')">
+                    Export audio
+                  </button>
+                  <button
+                    type="button"
+                    class="scribe-button text-rem"
+                    @click="deleteSelected('audio')"
+                  >
+                    Delete source audio
+                  </button>
+                  <button
+                    type="button"
+                    data-scribe-delete-meeting
+                    class="scribe-button text-rem"
+                    @click="deleteSelected('all')"
+                  >
+                    <IconTrash :size="13" />
+                    Delete meeting
+                  </button>
+                </div>
+              </div>
             </section>
           </div>
         </article>
@@ -420,6 +526,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
   IconDownload,
+  IconEdit,
   IconMicrophone,
   IconMicrophoneOff,
   IconPhone,
@@ -428,7 +535,10 @@ import {
   IconRefresh,
   IconSettings,
   IconTopologyStar3,
+  IconTrash,
+  IconX,
 } from '@tabler/icons-vue'
+import { confirm } from '@tauri-apps/plugin-dialog'
 import { useMeetingsStore } from '../../stores/meetings.js'
 import ScribeSettings from './scribe/ScribeSettings.vue'
 
@@ -445,6 +555,9 @@ const consentConfirmed = ref(false)
 const startTitle = ref('')
 const candidateId = ref(null)
 const detailTab = ref('transcript')
+const editingMeeting = ref(false)
+const editedTitle = ref('')
+const editedSummary = ref('')
 const now = ref(Date.now())
 const liveAnnouncement = ref('')
 const detailTabs = [
@@ -459,12 +572,25 @@ const formattedElapsed = computed(() => (
     meetings.activeMeeting?.startedAt || new Date(now.value).toISOString(),
   )))
 ))
+const customDestination = computed(() => {
+  try {
+    return new URL(meetings.config.customUrl).host || 'the configured transcription service'
+  } catch {
+    return 'the configured transcription service'
+  }
+})
 
 watch(
   () => meetings.activeMeeting?.lifecycle,
   lifecycle => {
     if (!lifecycle) return
     liveAnnouncement.value = lifecycleLabel(lifecycle)
+  },
+)
+watch(
+  () => meetings.selectedMeeting?.id,
+  () => {
+    editingMeeting.value = false
   },
 )
 watch(
@@ -569,13 +695,67 @@ async function refresh() {
   }
 }
 
-async function exportSelected() {
+async function exportSelected(format = 'markdown') {
   const selected = meetings.selectedMeeting
   if (!selected) return
   try {
-    const result = await meetings.exportRecord(selected.id, 'markdown')
+    const result = await meetings.exportRecord(selected.id, format)
     const path = typeof result === 'string' ? result : result?.path
     if (path) emit('openFile', path)
+  } catch (error) {
+    emit('diagnostic', message(error))
+  }
+}
+
+function beginEdit() {
+  const selected = meetings.selectedMeeting
+  if (!selected) return
+  editedTitle.value = selected.title
+  editedSummary.value = selected.summary || ''
+  detailTab.value = 'summary'
+  editingMeeting.value = true
+}
+
+function cancelEdit() {
+  editingMeeting.value = false
+}
+
+async function saveMeetingEdits() {
+  const selected = meetings.selectedMeeting
+  if (!selected) return
+  try {
+    await meetings.saveMeeting(selected.id, {
+      title: editedTitle.value,
+      summary: editedSummary.value,
+    })
+    editingMeeting.value = false
+    liveAnnouncement.value = 'Meeting review saved'
+  } catch (error) {
+    emit('diagnostic', message(error))
+  }
+}
+
+async function deleteSelected(mode) {
+  const selected = meetings.selectedMeeting
+  if (!selected) return
+  const deletingAll = mode === 'all'
+  const accepted = await confirm(
+    deletingAll
+      ? `Permanently delete “${selected.title}” and its transcript, summary, and source audio?`
+      : `Permanently delete the source audio for “${selected.title}”? The transcript and summary will remain.`,
+    {
+      title: deletingAll ? 'Delete meeting?' : 'Delete source audio?',
+      kind: 'warning',
+      okLabel: deletingAll ? 'Delete meeting' : 'Delete audio',
+      cancelLabel: 'Cancel',
+    },
+  )
+  if (!accepted) return
+  try {
+    await meetings.remove(selected.id, mode)
+    liveAnnouncement.value = deletingAll
+      ? 'Meeting deleted'
+      : 'Meeting source audio deleted'
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -616,6 +796,22 @@ async function installModel(id) {
 async function deleteModel(id) {
   try {
     await meetings.deleteModel(id)
+  } catch (error) {
+    emit('diagnostic', message(error))
+  }
+}
+
+async function requestMicrophonePermission() {
+  try {
+    await meetings.requestMicrophonePermission()
+  } catch {
+    // The store owns the actionable native permission diagnostic.
+  }
+}
+
+async function dismissCandidate(id) {
+  try {
+    await meetings.dismissCandidate(id)
   } catch (error) {
     emit('diagnostic', message(error))
   }

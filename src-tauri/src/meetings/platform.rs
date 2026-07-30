@@ -93,6 +93,11 @@ pub trait MeetingEnvironmentProbe: Send + Sync {
     fn set_detection_enabled(&self, _enabled: bool) -> Result<(), String> {
         Ok(())
     }
+
+    /// Prevent a candidate accepted by the user from being suggested again.
+    fn dismiss_candidate(&self, _candidate_id: &str) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Explicitly unavailable environment probe for non-capture builds.
@@ -1138,6 +1143,7 @@ struct NativeMeetingPlatformInner {
     secrets: Arc<dyn MeetingSecretStore>,
     environment: Arc<dyn MeetingEnvironmentProbe>,
     models: Arc<ModelManager>,
+    changes: Arc<dyn MeetingPlatformChangeSink>,
     operation: Mutex<()>,
     diagnostics: Arc<Mutex<Vec<String>>>,
 }
@@ -1169,7 +1175,7 @@ impl NativeMeetingPlatform {
             model_catalog,
             disk,
             downloader,
-            changes,
+            Arc::clone(&changes),
             diagnostics.clone(),
         )?;
         let platform = Self {
@@ -1179,6 +1185,7 @@ impl NativeMeetingPlatform {
                 secrets,
                 environment,
                 models,
+                changes,
                 operation: Mutex::new(()),
                 diagnostics,
             }),
@@ -1402,6 +1409,13 @@ impl NativeMeetingPlatform {
                 })?;
                 sync_directory(&self.inner.paths.meetings_root)?;
             }
+            self.inner
+                .store
+                .delete_meeting(meeting_id)
+                .map_err(|error| format!("Could not delete meeting database record: {error}"))?;
+            let content_path = self.content_path(meeting_id)?;
+            remove_path_without_following(&content_path)?;
+            sync_directory(&self.inner.paths.content_root)?;
             return Ok(());
         }
 
@@ -1420,6 +1434,10 @@ impl NativeMeetingPlatform {
         if meeting_root.exists() {
             sync_directory(&meeting_root)?;
         }
+        self.inner
+            .store
+            .delete_audio_chunks(meeting_id)
+            .map_err(|error| format!("Could not delete meeting audio metadata: {error}"))?;
         Ok(())
     }
 
@@ -1607,6 +1625,12 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
             models: self.inner.models.projection()?,
             diagnostic: (!diagnostics.is_empty()).then(|| diagnostics.join("\n")),
         })
+    }
+
+    fn dismiss_candidate(&self, candidate_id: &str) -> Result<(), String> {
+        self.inner.environment.dismiss_candidate(candidate_id)?;
+        self.inner.changes.changed("detection");
+        Ok(())
     }
 
     fn content(&self, meeting_id: &str) -> Result<MeetingContentProjection, String> {
@@ -2469,7 +2493,11 @@ mod tests {
             .platform
             .delete_meeting("meeting-1", MeetingDeleteMode::All)
             .unwrap();
-        assert!(fixture.platform.content("meeting-1").unwrap().deleted);
+        assert!(matches!(
+            fixture.store.get_meeting("meeting-1"),
+            Err(crate::meetings::MeetingStoreError::NotFound { .. })
+        ));
+        assert!(!fixture.paths.content_root.join("meeting-1.json").exists());
     }
 
     #[test]
