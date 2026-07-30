@@ -40,6 +40,7 @@ use uuid::Uuid;
 const CONFIG_SCHEMA_VERSION: u32 = 1;
 const CONTENT_SCHEMA_VERSION: u32 = 1;
 const MODEL_STATE_SCHEMA_VERSION: u32 = 1;
+const KEYCHAIN_BINDING_SCHEMA_VERSION: u32 = 1;
 const KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
 const KEYCHAIN_ACCOUNT: &str = "meetings.custom-stt";
 const MAX_API_KEY_BYTES: usize = 64 * 1024;
@@ -123,14 +124,47 @@ impl MeetingEnvironmentProbe for UnavailableMeetingEnvironment {
 }
 
 pub trait MeetingSecretStore: Send + Sync {
-    fn read(&self) -> Result<Option<String>, String>;
-    fn set(&self, secret: &str) -> Result<(), String>;
+    fn read(&self, endpoint: &CustomSttEndpoint) -> Result<Option<String>, String>;
+    fn set(&self, endpoint: &CustomSttEndpoint, secret: &str) -> Result<(), String>;
     fn clear(&self) -> Result<(), String>;
 }
 
 /// Release-safe keychain storage. There is intentionally no file or
 /// environment fallback in either debug or release builds.
 pub struct KeychainMeetingSecretStore;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EndpointBoundKeychainSecret {
+    schema_version: u32,
+    endpoint_binding: String,
+    secret: String,
+}
+
+fn encode_endpoint_bound_secret(
+    endpoint: &CustomSttEndpoint,
+    secret: &str,
+) -> Result<String, String> {
+    serde_json::to_string(&EndpointBoundKeychainSecret {
+        schema_version: KEYCHAIN_BINDING_SCHEMA_VERSION,
+        endpoint_binding: endpoint.credential_binding(),
+        secret: secret.to_string(),
+    })
+    .map_err(|_| "Could not encode the endpoint-bound meeting credential".to_string())
+}
+
+fn decode_endpoint_bound_secret(encoded: &str, endpoint: &CustomSttEndpoint) -> Option<String> {
+    let bound = serde_json::from_str::<EndpointBoundKeychainSecret>(encoded).ok()?;
+    if bound.schema_version != KEYCHAIN_BINDING_SCHEMA_VERSION
+        || bound.endpoint_binding != endpoint.credential_binding()
+        || bound.secret.trim().is_empty()
+        || bound.secret.len() > MAX_API_KEY_BYTES
+        || bound.secret.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(bound.secret)
+}
 
 impl KeychainMeetingSecretStore {
     fn entry() -> Result<keyring::Entry, String> {
@@ -141,18 +175,24 @@ impl KeychainMeetingSecretStore {
 }
 
 impl MeetingSecretStore for KeychainMeetingSecretStore {
-    fn read(&self) -> Result<Option<String>, String> {
+    fn read(&self, endpoint: &CustomSttEndpoint) -> Result<Option<String>, String> {
         match Self::entry()?.get_password() {
-            Ok(secret) if !secret.trim().is_empty() => Ok(Some(secret)),
-            Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+            Ok(encoded) => {
+                // Pre-binding credentials and malformed values are deliberately
+                // treated as unconfigured. They can be overwritten by an
+                // explicit re-entry, but are never released to an endpoint.
+                Ok(decode_endpoint_bound_secret(&encoded, endpoint))
+            }
+            Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(format!(
                 "Could not read the meeting transcription credential from the OS keychain: {error}"
             )),
         }
     }
 
-    fn set(&self, secret: &str) -> Result<(), String> {
-        Self::entry()?.set_password(secret).map_err(|error| {
+    fn set(&self, endpoint: &CustomSttEndpoint, secret: &str) -> Result<(), String> {
+        let encoded = encode_endpoint_bound_secret(endpoint, secret)?;
+        Self::entry()?.set_password(&encoded).map_err(|error| {
             format!(
                 "OS keychain is unavailable; refusing to store the meeting transcription credential in plaintext: {error}"
             )
@@ -262,12 +302,16 @@ impl ModelArtifactDownloader for HttpsModelArtifactDownloader {
                     .user_agent("Mimir-Scribe/0.1")
                     .resolve_to_addrs(&host, &addresses)
                     .build()
-                    .map_err(|error| format!("Could not configure model download TLS: {error}"))?;
+                    .map_err(|error| {
+                        redacted_reqwest_error("Could not configure model download TLS", &error)
+                    })?;
                 let response = client
                     .get(current.clone())
                     .send()
                     .await
-                    .map_err(|error| format!("Managed model download failed: {error}"))?;
+                    .map_err(|error| {
+                        redacted_reqwest_error("Managed model download failed", &error)
+                    })?;
 
                 if is_redirect(response.status()) {
                     if redirect_count == MAX_DOWNLOAD_REDIRECTS {
@@ -308,8 +352,9 @@ impl ModelArtifactDownloader for HttpsModelArtifactDownloader {
                 let mut received = 0_u64;
                 let mut stream = response.bytes_stream();
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk
-                        .map_err(|error| format!("Managed model download was interrupted: {error}"))?;
+                    let chunk = chunk.map_err(|error| {
+                        redacted_reqwest_error("Managed model download was interrupted", &error)
+                    })?;
                     received = received
                         .checked_add(chunk.len() as u64)
                         .ok_or_else(|| "Managed model download size overflow".to_string())?;
@@ -331,6 +376,26 @@ impl ModelArtifactDownloader for HttpsModelArtifactDownloader {
             Err("Managed model download exceeded the redirect limit".into())
         })
     }
+}
+
+fn redacted_reqwest_error(context: &str, error: &reqwest::Error) -> String {
+    let category = if error.is_timeout() {
+        "network timeout"
+    } else if error.is_connect() {
+        "connection failure"
+    } else if error.is_body() {
+        "response body failure"
+    } else if error.is_decode() {
+        "response decode failure"
+    } else if error.is_request() {
+        "request failure"
+    } else {
+        "network failure"
+    };
+    // reqwest's Display representation can include the complete request URL,
+    // including a signed redirect query. Only a stable category may cross into
+    // diagnostics or durable job state.
+    format!("{context}: {category}")
 }
 
 fn is_redirect(status: StatusCode) -> bool {
@@ -1071,17 +1136,18 @@ impl ModelManager {
 
     fn record_install_failure(&self, model_id: &str, error: &str) {
         let state = classify_model_failure(error);
-        if let Err(persist_error) = self.persist_model_state(model_id, state) {
+        let summary = model_failure_summary(&state);
+        if self.persist_model_state(model_id, state).is_err() {
             push_diagnostic(
                 &self.diagnostics,
                 format!(
-                    "Managed model '{model_id}' failed: {error}; its failure state could not be saved: {persist_error}"
+                    "Managed model '{model_id}' failed: {summary}; its failure state could not be saved"
                 ),
             );
         } else {
             push_diagnostic(
                 &self.diagnostics,
-                format!("Managed model '{model_id}' failed: {error}"),
+                format!("Managed model '{model_id}' failed: {summary}"),
             );
         }
     }
@@ -1099,6 +1165,22 @@ fn classify_model_failure(error: &str) -> ModelDownloadState {
         ModelInvalidReason::Incomplete
     };
     ModelDownloadState::Invalid { reason }
+}
+
+fn model_failure_summary(state: &ModelDownloadState) -> &'static str {
+    match state {
+        ModelDownloadState::Invalid {
+            reason: ModelInvalidReason::SizeMismatch,
+        } => "artifact size verification failed",
+        ModelDownloadState::Invalid {
+            reason: ModelInvalidReason::ChecksumMismatch,
+        } => "artifact checksum verification failed",
+        ModelDownloadState::Invalid {
+            reason: ModelInvalidReason::PlatformMismatch,
+        } => "platform verification failed",
+        ModelDownloadState::Invalid { .. } => "download did not complete",
+        _ => "installation did not complete",
+    }
 }
 
 fn model_projection(
@@ -1219,32 +1301,32 @@ impl NativeMeetingPlatform {
         )
     }
 
-    /// Resolve the custom-provider credential for the native STT connector.
-    /// Secret bytes never enter persisted configuration or renderer projection.
-    pub fn custom_api_key(&self) -> Result<Option<String>, String> {
-        self.inner.secrets.read()
+    /// Resolve a custom-provider credential only when the requested endpoint is
+    /// still the exact route selected in native configuration. Configuration
+    /// comparison and Keychain access share the platform operation lock so an
+    /// endpoint switch cannot race credential release.
+    pub fn custom_api_key_for(
+        &self,
+        endpoint: &CustomSttEndpoint,
+    ) -> Result<Option<String>, String> {
+        let _operation = lock(&self.inner.operation)?;
+        let config = self.load_config()?;
+        let configured = configured_custom_stt_endpoint(&config)?.ok_or_else(|| {
+            "Custom meeting transcription is not selected; refusing credential access".to_string()
+        })?;
+        if &configured != endpoint {
+            return Err(
+                "Custom meeting transcription endpoint changed; refusing credential access".into(),
+            );
+        }
+        self.inner.secrets.read(endpoint)
     }
 
     /// Resolve the redacted persisted custom route into the WebSocket endpoint
     /// type required by the native STT connector.
     pub fn custom_stt_endpoint(&self) -> Result<Option<CustomSttEndpoint>, String> {
         let config = self.load_config()?;
-        if config.transcription_mode != "custom" {
-            return Ok(None);
-        }
-        let parsed = Url::parse(&config.custom_url)
-            .map_err(|_| "Custom meeting transcription URL is invalid".to_string())?;
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| "Custom meeting transcription URL has no hostname".to_string())?
-            .to_string();
-        let mut websocket = parsed;
-        websocket
-            .set_scheme("wss")
-            .map_err(|_| "Custom meeting transcription URL must use HTTPS".to_string())?;
-        CustomSttEndpoint::new(websocket.as_str(), &host)
-            .map(Some)
-            .map_err(|error| error.to_string())
+        configured_custom_stt_endpoint(&config)
     }
 
     /// Return a managed model only after re-hashing it immediately before
@@ -1633,7 +1715,11 @@ impl NativeMeetingPlatform {
 impl MeetingPlatformPort for NativeMeetingPlatform {
     fn projection(&self) -> Result<MeetingPlatformProjection, String> {
         let mut config = self.load_config()?;
-        config.api_key_configured = self.inner.secrets.read()?.is_some();
+        config.api_key_configured = configured_custom_stt_endpoint(&config)?
+            .map(|endpoint| self.inner.secrets.read(&endpoint))
+            .transpose()?
+            .flatten()
+            .is_some();
         let environment = self.inner.environment.projection()?;
         let mut diagnostics = lock(&self.inner.diagnostics)?.clone();
         if let Some(diagnostic) = environment.diagnostic {
@@ -1672,6 +1758,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
     fn update_config(&self, patch: &MeetingConfigPatch) -> Result<(), String> {
         let _operation = lock(&self.inner.operation)?;
         let mut config = self.load_config()?;
+        let previous_endpoint = stored_custom_stt_endpoint(&config)?;
         if let Some(value) = patch.detection_enabled {
             config.detection_enabled = value;
         }
@@ -1705,6 +1792,15 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         if let Some(value) = patch.retention_days {
             config.retention_days = value;
         }
+        validate_meeting_config(&config)?;
+        let next_endpoint = stored_custom_stt_endpoint(&config)?;
+        if previous_endpoint != next_endpoint {
+            // Clear before publishing the route. If Keychain access fails, the
+            // old configuration remains authoritative and no new endpoint can
+            // receive the old secret. If the subsequent config write fails,
+            // losing the credential is safe and explicit re-entry repairs it.
+            self.inner.secrets.clear()?;
+        }
         self.save_config(config.clone())?;
         self.inner
             .environment
@@ -1712,6 +1808,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
     }
 
     fn set_api_key(&self, api_key: &str) -> Result<(), String> {
+        let _operation = lock(&self.inner.operation)?;
         let secret = api_key.trim();
         if secret.is_empty() {
             return Err("Meeting transcription API key cannot be empty".into());
@@ -1719,10 +1816,15 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         if secret.len() > MAX_API_KEY_BYTES || secret.chars().any(char::is_control) {
             return Err("Meeting transcription API key is invalid or too large".into());
         }
-        self.inner.secrets.set(secret)
+        let config = self.load_config()?;
+        let endpoint = configured_custom_stt_endpoint(&config)?.ok_or_else(|| {
+            "Select a valid custom transcription endpoint before saving its API key".to_string()
+        })?;
+        self.inner.secrets.set(&endpoint, secret)
     }
 
     fn clear_api_key(&self) -> Result<(), String> {
+        let _operation = lock(&self.inner.operation)?;
         self.inner.secrets.clear()
     }
 
@@ -1791,6 +1893,12 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
 }
 
 fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
+    if config.auto_record {
+        return Err(
+            "Automatic meeting recording is disabled; every recording requires explicit human consent"
+                .into(),
+        );
+    }
     if config.local_model.trim() != config.local_model || config.local_model.is_empty() {
         return Err("Local meeting model cannot be empty or padded with whitespace".into());
     }
@@ -1836,6 +1944,26 @@ fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
 }
 
 fn validate_custom_https_url(raw: &str) -> Result<(), String> {
+    custom_stt_endpoint_from_https_url(raw).map(|_| ())
+}
+
+fn configured_custom_stt_endpoint(
+    config: &MeetingConfig,
+) -> Result<Option<CustomSttEndpoint>, String> {
+    if config.transcription_mode != "custom" {
+        return Ok(None);
+    }
+    stored_custom_stt_endpoint(config)
+}
+
+fn stored_custom_stt_endpoint(config: &MeetingConfig) -> Result<Option<CustomSttEndpoint>, String> {
+    if config.custom_url.is_empty() {
+        return Ok(None);
+    }
+    custom_stt_endpoint_from_https_url(&config.custom_url).map(Some)
+}
+
+fn custom_stt_endpoint_from_https_url(raw: &str) -> Result<CustomSttEndpoint, String> {
     let parsed = Url::parse(raw)
         .map_err(|_| "Custom meeting transcription URL is not a valid absolute URL".to_string())?;
     if parsed.scheme() != "https" {
@@ -1850,7 +1978,6 @@ fn validate_custom_https_url(raw: &str) -> Result<(), String> {
         .set_scheme("wss")
         .map_err(|_| "Custom meeting transcription URL must use HTTPS".to_string())?;
     CustomSttEndpoint::new(websocket.as_str(), &host)
-        .map(|_| ())
         .map_err(|error| format!("Unsafe custom meeting transcription URL: {error}"))
 }
 
@@ -2122,6 +2249,7 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, String> {
 mod tests {
     use super::*;
     use crate::meetings::{
+        native::EndpointBoundMeetingCredentialResolver, transcriber::MeetingCredentialResolver,
         AudioChannelDraft, AudioChannelKind, MeetingDraft, MeetingOrigin, TranscriptBatch,
         TranscriptChange, TranscriptSegmentInput,
     };
@@ -2136,15 +2264,21 @@ mod tests {
     const NOW: &str = "2026-07-30T10:00:00Z";
 
     #[derive(Default)]
-    struct FakeSecrets(Mutex<Option<String>>);
+    struct FakeSecrets(Mutex<Option<(String, String)>>);
 
     impl MeetingSecretStore for FakeSecrets {
-        fn read(&self) -> Result<Option<String>, String> {
-            Ok(self.0.lock().unwrap().clone())
+        fn read(&self, endpoint: &CustomSttEndpoint) -> Result<Option<String>, String> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|(binding, _)| binding == &endpoint.credential_binding())
+                .map(|(_, secret)| secret.clone()))
         }
 
-        fn set(&self, secret: &str) -> Result<(), String> {
-            *self.0.lock().unwrap() = Some(secret.into());
+        fn set(&self, endpoint: &CustomSttEndpoint, secret: &str) -> Result<(), String> {
+            *self.0.lock().unwrap() = Some((endpoint.credential_binding(), secret.to_string()));
             Ok(())
         }
 
@@ -2404,6 +2538,15 @@ mod tests {
     #[test]
     fn credentials_never_enter_config_or_content_files() {
         let fixture = fixture();
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                transcription_mode: Some("custom".into()),
+                custom_url: Some("https://stt.example.com/v1/listen".into()),
+                custom_model: Some("nova-2".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
         fixture.platform.set_api_key("secret-value").unwrap();
         assert!(
             fixture
@@ -2427,6 +2570,141 @@ mod tests {
                 .config
                 .api_key_configured
         );
+    }
+
+    #[test]
+    fn endpoint_bound_keychain_payload_rejects_legacy_and_mismatched_authority() {
+        let endpoint_a =
+            custom_stt_endpoint_from_https_url("https://a.example.com/v1/listen").unwrap();
+        let endpoint_b =
+            custom_stt_endpoint_from_https_url("https://b.example.com/v1/listen").unwrap();
+        let encoded = encode_endpoint_bound_secret(&endpoint_a, "native-secret").unwrap();
+
+        assert_eq!(
+            decode_endpoint_bound_secret(&encoded, &endpoint_a).as_deref(),
+            Some("native-secret")
+        );
+        assert_eq!(decode_endpoint_bound_secret(&encoded, &endpoint_b), None);
+        assert_eq!(
+            decode_endpoint_bound_secret("legacy-unbound-secret", &endpoint_a),
+            None
+        );
+        assert!(!encoded.contains(endpoint_a.as_str()));
+    }
+
+    #[test]
+    fn changing_custom_endpoint_invalidates_keychain_secret() {
+        let fixture = fixture();
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                transcription_mode: Some("custom".into()),
+                custom_url: Some("https://STT.example.com:443/v1/listen".into()),
+                custom_model: Some("nova-2".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+        fixture.platform.set_api_key("endpoint-a-secret").unwrap();
+        let endpoint_a = fixture.platform.custom_stt_endpoint().unwrap().unwrap();
+
+        // A spelling-only change preserves the same canonical authority.
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                custom_url: Some("https://stt.example.com/v1/listen".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+        assert_eq!(
+            fixture
+                .platform
+                .custom_api_key_for(&endpoint_a)
+                .unwrap()
+                .as_deref(),
+            Some("endpoint-a-secret")
+        );
+
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                custom_url: Some("https://other.example.com/v1/listen".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+        assert!(
+            !fixture
+                .platform
+                .projection()
+                .unwrap()
+                .config
+                .api_key_configured
+        );
+        assert!(fixture
+            .platform
+            .custom_api_key_for(&endpoint_a)
+            .unwrap_err()
+            .contains("changed"));
+    }
+
+    #[test]
+    fn endpoint_b_receives_no_authorization_before_key_reentry() {
+        let fixture = fixture();
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                transcription_mode: Some("custom".into()),
+                custom_url: Some("https://a.example.com/v1/listen".into()),
+                custom_model: Some("nova-2".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+        fixture.platform.set_api_key("endpoint-a-secret").unwrap();
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                custom_url: Some("https://b.example.com/v1/listen".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+        let endpoint_b = fixture.platform.custom_stt_endpoint().unwrap().unwrap();
+        let resolver =
+            EndpointBoundMeetingCredentialResolver::new(Arc::new(fixture.platform.clone()));
+
+        assert_eq!(resolver.bearer_token(&endpoint_b).unwrap(), None);
+        fixture.platform.set_api_key("endpoint-b-secret").unwrap();
+        assert_eq!(
+            resolver.bearer_token(&endpoint_b).unwrap().as_deref(),
+            Some("endpoint-b-secret")
+        );
+    }
+
+    #[test]
+    fn auto_record_true_is_rejected_by_native_configuration() {
+        let fixture = fixture();
+        let error = fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                auto_record: Some(true),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap_err();
+        assert!(error.contains("explicit human consent"));
+        assert!(!fixture.platform.projection().unwrap().config.auto_record);
+    }
+
+    #[test]
+    fn model_download_diagnostics_redact_signed_redirect_queries() {
+        let fixture = fixture();
+        fixture.platform.inner.models.record_install_failure(
+            "whisper-small",
+            "Managed model download failed for https://cdn.example/model?token=SECRET_QUERY",
+        );
+
+        let diagnostic = fixture.platform.projection().unwrap().diagnostic.unwrap();
+        assert!(diagnostic.contains("download did not complete"));
+        assert!(!diagnostic.contains("SECRET_QUERY"));
+        assert!(!diagnostic.contains("token="));
+        assert!(!diagnostic.contains("https://"));
     }
 
     #[test]

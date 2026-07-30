@@ -363,17 +363,18 @@ fn permission_name(permission: PermissionState) -> &'static str {
 /// Kept narrow so endpoint-binding behavior can be tested without touching a
 /// real keychain.
 pub trait MeetingCredentialAuthority: Send + Sync {
-    fn configured_endpoint(&self) -> Result<Option<super::config::CustomSttEndpoint>, String>;
-    fn custom_credential(&self) -> Result<Option<String>, String>;
+    fn custom_credential_for(
+        &self,
+        endpoint: &super::config::CustomSttEndpoint,
+    ) -> Result<Option<String>, String>;
 }
 
 impl MeetingCredentialAuthority for NativeMeetingPlatform {
-    fn configured_endpoint(&self) -> Result<Option<super::config::CustomSttEndpoint>, String> {
-        self.custom_stt_endpoint()
-    }
-
-    fn custom_credential(&self) -> Result<Option<String>, String> {
-        self.custom_api_key()
+    fn custom_credential_for(
+        &self,
+        endpoint: &super::config::CustomSttEndpoint,
+    ) -> Result<Option<String>, String> {
+        self.custom_api_key_for(endpoint)
     }
 }
 
@@ -394,15 +395,7 @@ impl MeetingCredentialResolver for EndpointBoundMeetingCredentialResolver {
         &self,
         endpoint: &super::config::CustomSttEndpoint,
     ) -> Result<Option<String>, String> {
-        let configured = self.authority.configured_endpoint()?.ok_or_else(|| {
-            "Custom meeting transcription is not selected; refusing credential access".to_string()
-        })?;
-        if &configured != endpoint {
-            return Err(
-                "Custom meeting transcription endpoint changed; refusing credential access".into(),
-            );
-        }
-        self.authority.custom_credential()
+        self.authority.custom_credential_for(endpoint)
     }
 }
 
@@ -541,13 +534,20 @@ mod tests {
     }
 
     impl MeetingCredentialAuthority for FakeAuthority {
-        fn configured_endpoint(
+        fn custom_credential_for(
             &self,
-        ) -> Result<Option<super::super::config::CustomSttEndpoint>, String> {
-            Ok(self.endpoint.clone())
-        }
-
-        fn custom_credential(&self) -> Result<Option<String>, String> {
+            endpoint: &super::super::config::CustomSttEndpoint,
+        ) -> Result<Option<String>, String> {
+            let configured = self.endpoint.as_ref().ok_or_else(|| {
+                "Custom meeting transcription is not selected; refusing credential access"
+                    .to_string()
+            })?;
+            if configured != endpoint {
+                return Err(
+                    "Custom meeting transcription endpoint changed; refusing credential access"
+                        .into(),
+                );
+            }
             self.reads.fetch_add(1, Ordering::SeqCst);
             Ok(self.secret.clone())
         }

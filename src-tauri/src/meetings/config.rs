@@ -260,6 +260,14 @@ impl CustomSttEndpoint {
         &self.canonical
     }
 
+    /// Stable, non-secret identity used to bind native credential material to
+    /// this exact canonical route. The digest, rather than the URL, is stored
+    /// beside the Keychain secret so even Keychain diagnostics cannot disclose
+    /// a provider path.
+    pub(crate) fn credential_binding(&self) -> String {
+        format!("{:x}", Sha256::digest(self.canonical.as_bytes()))
+    }
+
     pub fn validate_resolved_addresses(
         &self,
         addresses: impl IntoIterator<Item = IpAddr>,
@@ -388,16 +396,38 @@ fn is_public_ipv4(ip: Ipv4Addr) -> bool {
 }
 
 fn is_public_ipv6(ip: Ipv6Addr) -> bool {
-    if let Some(ipv4) = ip.to_ipv4_mapped() {
-        return is_public_ipv4(ipv4);
+    // Fail closed: globally routed unicast space is currently allocated only
+    // from 2000::/3. This one allow boundary rejects IPv4-compatible/mapped
+    // addresses, both NAT64 prefixes, discard-only, ULA, link/site-local,
+    // multicast, and unspecified space even if a platform resolver happens to
+    // return one of those representations.
+    if !ipv6_has_prefix(ip, Ipv6Addr::new(0x2000, 0, 0, 0, 0, 0, 0, 0), 3) {
+        return false;
     }
-    let segments = ip.segments();
-    !(ip.is_loopback()
-        || ip.is_unspecified()
-        || ip.is_multicast()
-        || (segments[0] & 0xfe00) == 0xfc00
-        || (segments[0] & 0xffc0) == 0xfe80
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+
+    // Special-purpose allocations that sit inside 2000::/3 are not suitable
+    // network authorities. Denying the complete 2001::/23 special-purpose
+    // block intentionally favors fail-closed provider routing over allowing
+    // protocol anycast and transition mechanisms that an STT service should
+    // never require.
+    ![
+        (Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23), // IETF protocol assignments
+        (Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32), // documentation
+        (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16), // 6to4 transition
+        (Ipv6Addr::new(0x3ffe, 0, 0, 0, 0, 0, 0, 0), 16), // former 6bone
+        (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20), // documentation
+    ]
+    .into_iter()
+    .any(|(network, prefix)| ipv6_has_prefix(ip, network, prefix))
+}
+
+fn ipv6_has_prefix(ip: Ipv6Addr, network: Ipv6Addr, prefix: u32) -> bool {
+    debug_assert!(prefix <= 128);
+    if prefix == 0 {
+        return true;
+    }
+    let shift = 128 - prefix;
+    (u128::from_be_bytes(ip.octets()) >> shift) == (u128::from_be_bytes(network.octets()) >> shift)
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1152,6 +1182,19 @@ mod tests {
         assert!(endpoint
             .validate_resolved_addresses(["8.8.8.8".parse().unwrap()])
             .is_ok());
+
+        let equivalent =
+            CustomSttEndpoint::new("wss://stt.example.com/mimir/v1", "STT.EXAMPLE.COM").unwrap();
+        assert_eq!(
+            endpoint.credential_binding(),
+            equivalent.credential_binding()
+        );
+        let other_path =
+            CustomSttEndpoint::new("wss://stt.example.com/mimir/v2", "stt.example.com").unwrap();
+        assert_ne!(
+            endpoint.credential_binding(),
+            other_path.credential_binding()
+        );
     }
 
     #[test]
@@ -1202,6 +1245,77 @@ mod tests {
         assert!(endpoint
             .validate_resolved_addresses(Vec::<IpAddr>::new())
             .is_err());
+    }
+
+    #[test]
+    fn custom_endpoint_rejects_all_non_global_ipv6_prefixes() {
+        let endpoint =
+            CustomSttEndpoint::new("wss://stt.example.com/v1", "stt.example.com").unwrap();
+        for address in [
+            "::",
+            "::1",
+            "::7f00:1",
+            "::ffff:7f00:1",
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::a00:1",
+            "100::1",
+            "2001::1",
+            "2001:2::1",
+            "2001:db8::1",
+            "2002:7f00:1::",
+            "3ffe::1",
+            "3fff::1",
+            "fc00::1",
+            "fd00::1",
+            "fe80::1",
+            "fec0::1",
+            "ff02::1",
+        ] {
+            assert!(
+                endpoint
+                    .validate_resolved_addresses([address.parse().unwrap()])
+                    .is_err(),
+                "{address} must not be accepted as a public provider address"
+            );
+        }
+        for address in ["2001:4860:4860::8888", "2606:4700:4700::1111"] {
+            assert!(
+                endpoint
+                    .validate_resolved_addresses([address.parse().unwrap()])
+                    .is_ok(),
+                "{address} should remain usable global unicast"
+            );
+        }
+    }
+
+    #[test]
+    fn model_redirect_rejects_all_non_global_ipv6_prefixes() {
+        let destination = ModelDownloadUrl::new("https://models.example.com/model.bin").unwrap();
+        for address in [
+            "::",
+            "::7f00:1",
+            "::ffff:a00:1",
+            "64:ff9b::c0a8:1",
+            "64:ff9b:1::ac10:1",
+            "100::1",
+            "2001:2::1",
+            "2001:db8::1",
+            "3fff::1",
+            "fc00::1",
+            "fe80::1",
+            "fec0::1",
+            "ff00::1",
+        ] {
+            assert!(
+                destination
+                    .validate_resolved_addresses([address.parse().unwrap()])
+                    .is_err(),
+                "{address} must not be accepted as a model redirect address"
+            );
+        }
+        assert!(destination
+            .validate_resolved_addresses(["2620:fe::fe".parse().unwrap()])
+            .is_ok());
     }
 
     #[test]
