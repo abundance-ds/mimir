@@ -62,3 +62,9 @@ tauri = { version = "2", features = ["test"] }
 security-framework = "3.7"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults", "NSArray", "NSRange", "NSGeometry"] }
 objc2-app-kit = { version = "0.3", features = ["NSSpellChecker"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+# The local Scribe runner is an owned in-process whisper.cpp build. Metal is
+# mandatory on the supported production target; unsupported targets compile an
+# explicit unavailable adapter rather than silently falling back to CPU.
+whisper-rs = { version = "=0.16.0", features = ["log_backend", "metal", "raw-api"] }
