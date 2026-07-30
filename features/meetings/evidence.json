@@ -359,7 +359,7 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/platform.rs",
-      "selector": "retention_skips_active_meetings_and_tombstones_expired_records",
+      "selector": "retention_skips_active_work_and_removes_only_expired_source_audio",
       "scenarios": ["MTG-150", "MTG-151", "MTG-152"]
     },
     {
