@@ -477,6 +477,8 @@ function appRow(app) {
       ? 'today'
       : app.id === 'business-graph'
         ? 'graph'
+        : app.id === 'scribe'
+          ? 'scribe'
         : (app.mode === 'terminal' ? 'terminal' : 'apps'),
     shortcut: '',
     available: true,

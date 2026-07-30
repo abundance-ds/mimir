@@ -178,6 +178,28 @@ pub fn builtin_apps() -> Vec<InstalledApp> {
             manifest_path: "builtin:business-graph".into(),
             builtin: true,
         },
+        InstalledApp {
+            definition: AppDefinition {
+                id: "scribe".into(),
+                title: "Scribe".into(),
+                description:
+                    "Record meetings, follow the live transcript, and turn outcomes into reviewed knowledge."
+                        .into(),
+                mode: AppMode::RustHelper,
+                entry: None,
+                command: None,
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                preset: None,
+                helper: Some("scribe".into()),
+                action_tool: None,
+                launch_only: false,
+                tools: Vec::new(),
+            },
+            directory: "builtin".into(),
+            manifest_path: "builtin:scribe".into(),
+            builtin: true,
+        },
     ]
 }
 
@@ -1312,7 +1334,7 @@ entry = "index.html"
         let directory = tempdir().unwrap();
         write_embedded_app(directory.path(), "inspector", "Inspector");
         let catalog = load_catalog(directory.path());
-        assert_eq!(catalog.apps.len(), 3);
+        assert_eq!(catalog.apps.len(), 4);
         assert!(catalog
             .apps
             .iter()
@@ -1330,6 +1352,15 @@ entry = "index.html"
             .apps
             .iter()
             .any(|app| app.definition.id == "business-graph" && app.builtin));
+        let scribe = catalog
+            .apps
+            .iter()
+            .find(|app| app.definition.id == "scribe")
+            .unwrap();
+        assert!(scribe.builtin);
+        assert_eq!(scribe.definition.mode, AppMode::RustHelper);
+        assert_eq!(scribe.definition.helper.as_deref(), Some("scribe"));
+        assert!(scribe.definition.tools.is_empty());
         assert!(catalog
             .apps
             .iter()

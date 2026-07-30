@@ -389,6 +389,7 @@ import {
   IconFocus2,
   IconLayoutSidebarLeftCollapse,
   IconMathPi,
+  IconMicrophone,
   IconPlus,
   IconSettings,
   IconRobot,
@@ -519,6 +520,7 @@ const icons = {
   apps: IconApps,
   today: IconFocus2,
   graph: IconTopologyStar3,
+  scribe: IconMicrophone,
   routines: IconClockPlay,
   default: IconSparkles,
 }
