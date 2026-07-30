@@ -2,8 +2,23 @@
 
 This directory records a source audit of
 [`fastrepl/anarlog`](https://github.com/fastrepl/anarlog) at the immutable
-commit in [`UPSTREAM`](UPSTREAM). It does **not** currently contain Anarlog
-implementation code and it is not part of Mimir's Cargo graph.
+commit in [`UPSTREAM`](UPSTREAM). Mimir does **not** depend on the Anarlog
+workspace. A narrow, modified subset of its behavior is present in two
+Mimir-owned Cargo crates:
+
+- `src-tauri/crates/mimir-meeting-audio`: realtime buffering, raw microphone
+  capture, Core Audio process-tap capture, dual-track joining, drift
+  accounting, and explicit capture-gap semantics;
+- `src-tauri/crates/mimir-meeting-detect`: process-level Core Audio evidence,
+  debounced candidate policy, microphone-permission projection, and a
+  cooperatively stopped listener worker.
+
+Every adapted implementation file has an origin header naming the upstream
+repository, immutable commit, and relevant upstream path. Mimir replaced the
+upstream public APIs, actor ownership, processed-audio recording path,
+provider catalog, persistence, and UI. The audit manifest remains a
+content-hash record of the reviewed upstream snapshot; it is not a Cargo
+source tree.
 
 Anarlog's repository is MIT licensed. The preserved upstream license is in
 [`LICENSE`](LICENSE); its copyright and permission notice must remain with
@@ -52,24 +67,27 @@ or distribution gates described below.
 
 ## Exact reuse decisions
 
-### Extract first: deterministic transcript core
+### Reimplemented: deterministic transcript core
 
-The first candidate is the provider-neutral portion of `crates/transcript`:
-word assembly/stitching, channel state, deltas, segments, speaker assignment,
-rendering, and their tests. Preserve the tests and replace Anarlog protocol
-types at a thin adapter boundary.
+Mimir implemented its own provider-neutral revision normalizer and canonical
+transcript records. Anarlog's word assembly, channel state, deltas, segments,
+and tests were design inputs; the Anarlog transcript crate was not copied or
+added to the Cargo graph.
 
 Do not import `postprocessor.rs`. It pulls in Anarlog's template system and
 JSON-patch prompting. Split it from the deterministic transcript core; Mimir's
 existing Activities and AI boundary should own any correction or summary job.
 
-### Adapt next: raw dual-channel macOS capture
+### Extracted and adapted: raw dual-channel macOS capture
 
 The useful capture seam is `CaptureConfig`, `CaptureFrame`, `CaptureStream`,
 and `AudioProvider`, followed by the realtime ring buffer, microphone capture,
 Core Audio process tap, resampling, join/alignment, and cancellation code.
-Mimir must preserve raw microphone and raw system tracks as the recoverable
-source of truth. AEC/VAD output is a derived live-transcription stream.
+Mimir preserves raw microphone and raw system tracks as independently
+recoverable source chunks. The adapted code now lives in
+`mimir-meeting-audio`; its Mimir-owned contract adds bounded realtime bridges,
+typed overflow and discontinuity gaps, cooperative teardown, stream-health
+snapshots, and drift resets.
 
 Do not reproduce Anarlog's current recorder routing: its source pipeline calls
 `preferred_mic()`, applies VAD masking, and sends that processed track to the
@@ -80,11 +98,11 @@ an atomic finalization path.
 
 The macOS system-audio implementation uses Core Audio process taps. Apple
 requires macOS 14.2 or newer, `NSAudioCaptureUsageDescription`, and a system
-audio recording permission prompt. Mimir currently declares neither a macOS
-minimum nor the audio usage keys/entitlement. Signed and notarized artifact
-tests are a release gate, not a post-merge manual check.
+audio recording permission prompt. Mimir declares macOS 14.2, both audio
+usage strings, and the audio-input entitlement. Signed and notarized artifact
+tests remain a release gate rather than a substitute for deterministic tests.
 
-### Adapt selectively: meeting evidence and timers
+### Extracted and adapted: meeting evidence and timers
 
 The useful detection pieces are the per-process Core Audio app snapshot,
 debounced state transitions, configurable notification delay/cooldown, and
@@ -99,20 +117,25 @@ is a no-op. The Accessibility meeting/chat scanner and English Zoom menu
 heuristics are brittle, permission-heavy, and outside the initial capture
 boundary.
 
-### Adapt narrowly: transcription protocols/providers
+The adapted implementation is `mimir-meeting-detect`. It owns and unregisters
+all Core Audio listeners, uses a wakeable polling worker, joins it on
+shutdown, excludes Mimir's own bundle identity, and can only create a local
+candidate. It has no recording capability.
+
+### Reimplemented: transcription protocols/providers
 
 The `owhisper-interface` word/batch/stream shapes and the deterministic batch
 accumulator are useful adapters, but the upstream file itself calls part of
 the shape a legacy database format. Mimir must define its own canonical word,
 segment, provider-attempt, and transcript-revision records.
 
-Do not import `owhisper-client` wholesale. It contains a broad provider
-catalog and Anarlog-specific dependencies. If an OpenAI-compatible provider is
-selected, extract only that adapter behind a Mimir-owned provider trait with
-typed errors, cancellation, timeouts, idempotency, secret redaction, and
-bounded upload/response handling.
+Mimir does not import `owhisper-client`. It defines `mimir.stt.v1`, with a
+managed local Whisper worker or one user-supplied public HTTPS endpoint
+upgraded to WSS. The implementation has typed revisions, cancellation,
+timeouts, credential redaction, DNS/IP pinning, bounded frames,
+acknowledgement replay, and no vendor-specific fallback.
 
-### Reference only: session supervision and persistence
+### Reimplemented: session supervision and persistence
 
 The single-active-session guard, active/finalizing snapshots, degraded
 record-only fallback, listener retry schedule, source/recorder supervision,

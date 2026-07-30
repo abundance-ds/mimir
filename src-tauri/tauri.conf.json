@@ -23,6 +23,9 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
+    "resources": [
+      "vendor/THIRD_PARTY_NOTICES.md"
+    ],
     "fileAssociations": [
       {
         "ext": ["md", "markdown"],
