@@ -46,6 +46,9 @@ jobs:
       - name: Check product identity
         run: bun run check:identity
 
+      - name: Check meeting specifications and traceability
+        run: bun run check:meetings
+
       - name: Test frontend
         run: bun run test
 

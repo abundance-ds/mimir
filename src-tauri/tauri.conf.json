@@ -34,6 +34,10 @@
         "mimeType": "text/plain",
         "description": "Text Document"
       }
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "14.2",
+      "entitlements": "./Entitlements.plist"
+    }
   }
 }

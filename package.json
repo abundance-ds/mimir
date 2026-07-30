@@ -13,6 +13,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "check:commands": "node scripts/check-tauri-commands.mjs",
     "check:identity": "node scripts/check-identity.mjs",
+    "check:meetings": "node scripts/check-meeting-specs.mjs && node --test scripts/check-meeting-specs.test.mjs && node scripts/check-scribe-packaging.mjs",
     "check:signing": "node scripts/check-signing.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "tauri": "node scripts/tauri.mjs",
