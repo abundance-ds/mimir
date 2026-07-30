@@ -14,6 +14,8 @@ small trusted team.
   reviewable diffs.
 - [Business graph](docs/business-graph.md) — linked projects, issues,
   decisions, and knowledge stored as Markdown.
+- [Tracker](docs/tracker.md) — optional native desktop activity timeline,
+  classification, breaks, and humane drift nudges.
 - [Chats](docs/chat.md) — team channels and DMs; an agent launched from a room
   reads and replies there.
 - [Apps](docs/apps-system.md) — local tools;

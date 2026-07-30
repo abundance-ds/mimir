@@ -686,6 +686,7 @@ const icons = {
   today: IconFocus2,
   graph: IconTopologyStar3,
   scribe: IconMicrophone,
+  tracker: IconClockPlay,
   routines: IconClockPlay,
   default: IconSparkles,
 }

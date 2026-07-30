@@ -76,6 +76,12 @@ const VALID_TAURI_COMMANDS = new Set([
   'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_run_summary', 'meetings_follow_up_context', 'meetings_retranscribe', 'meetings_delete',
   'meetings_export', 'meetings_update_config', 'meetings_set_api_key',
   'meetings_clear_api_key', 'meetings_install_model', 'meetings_delete_model',
+  // first-party Tracker
+  'tracker_status', 'tracker_config_update', 'tracker_set_enabled', 'tracker_set_armed',
+  'tracker_start_break', 'tracker_end_break', 'tracker_query', 'tracker_report',
+  'tracker_classifications', 'tracker_classification_update',
+  'tracker_import_preview', 'tracker_import_argus', 'tracker_accessibility_request',
+  'tracker_context_update',
   // canonical dynamic tool providers
   'tool_server_start', 'tool_server_stop', 'tool_server_status', 'tool_call_response',
   'tool_registry_snapshot', 'tool_registry_list', 'tool_registry_call',

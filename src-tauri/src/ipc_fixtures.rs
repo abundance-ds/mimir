@@ -46,6 +46,11 @@ use crate::routines::{
     MissedFirePolicy, RoutineDefinition, RoutineDiagnostic, RoutineFire, RoutineFireReason,
     RoutineOverlap, RoutineTick,
 };
+use crate::tracker::{
+    ActivityBlock as TrackerActivityBlock, ActivityCategory, ActivityPage, DailyBucket,
+    DurationBucket, HeatCell, PermissionStatus, TrackerConfig, TrackerMode, TrackerReport,
+    TrackerStatus,
+};
 use crate::workspace_files::WorkspaceEntry;
 
 fn fixtures_dir() -> PathBuf {
@@ -794,6 +799,103 @@ fn meetings_export() -> MeetingExport {
     }
 }
 
+fn tracker_block() -> TrackerActivityBlock {
+    TrackerActivityBlock {
+        id: 41,
+        start_ms: 1_775_024_100_000,
+        end_ms: 1_775_025_000_000,
+        duration_seconds: 900,
+        activity: ActivityCategory::Work,
+        subcategory: Some("Development".into()),
+        app_name: Some("Mimir".into()),
+        bundle_id: Some("rs.shoulde.mimir".into()),
+        domain: None,
+        window_title: Some("Tracker runtime — mimir".into()),
+        classification_key: Some("rs.shoulde.mimir".into()),
+        source: "collector".into(),
+        off_reason: None,
+    }
+}
+
+/// `tracker_status` → `TrackerStatus`.
+fn tracker_status() -> TrackerStatus {
+    let config = TrackerConfig {
+        enabled: true,
+        ..TrackerConfig::default()
+    };
+    TrackerStatus {
+        mode: TrackerMode::Armed,
+        config,
+        permissions: PermissionStatus {
+            platform_supported: true,
+            accessibility: true,
+            accessibility_required: true,
+            browser_automation_enabled: false,
+            notifications: Some("granted".into()),
+        },
+        current: Some(tracker_block()),
+        break_remaining_seconds: None,
+        queued_classifications: 2,
+        today_cost_usd: 0.0184,
+        launch_at_login_active: true,
+        autostart_diagnostic: None,
+        diagnostic: None,
+        revision: 12,
+    }
+}
+
+/// `tracker_query` → `ActivityPage`.
+fn tracker_query() -> ActivityPage {
+    ActivityPage {
+        blocks: vec![tracker_block()],
+        total: 1,
+        offset: 0,
+        limit: 100,
+    }
+}
+
+/// `tracker_report` → `TrackerReport`.
+fn tracker_report() -> TrackerReport {
+    TrackerReport {
+        start_ms: 1_775_001_600_000,
+        end_ms: 1_775_088_000_000,
+        totals: BTreeMap::from([
+            ("AFK".into(), 600),
+            ("Leisure".into(), 1_200),
+            ("Work".into(), 14_400),
+        ]),
+        total_tracked_seconds: 16_200,
+        work_leisure_ratio: Some(12.0),
+        longest_work_streak_seconds: 5_400,
+        top_apps: vec![DurationBucket {
+            key: "rs.shoulde.mimir".into(),
+            label: "Mimir".into(),
+            seconds: 7_200,
+            activity: Some(ActivityCategory::Work),
+        }],
+        subcategories: vec![DurationBucket {
+            key: "Development".into(),
+            label: "Development".into(),
+            seconds: 9_000,
+            activity: Some(ActivityCategory::Work),
+        }],
+        days: vec![DailyBucket {
+            date: "2026-04-01".into(),
+            totals: BTreeMap::from([
+                ("AFK".into(), 600),
+                ("Leisure".into(), 1_200),
+                ("Work".into(), 14_400),
+            ]),
+        }],
+        heatmap: vec![HeatCell {
+            weekday: 3,
+            hour: 10,
+            seconds: 3_600,
+        }],
+        total_blocks: 19,
+    }
+}
+
 /// Every golden fixture, keyed by the registered Tauri command name and
 /// pre-rendered as pretty JSON. Rendering straight from the typed value keeps
 /// serde's struct field order (a `Value` round-trip would sort keys).
@@ -831,6 +933,9 @@ fn fixtures() -> Vec<(&'static str, String)> {
         ),
         entry("meetings_start", meetings_snapshot()),
         entry("meetings_export", meetings_export()),
+        entry("tracker_status", tracker_status()),
+        entry("tracker_query", tracker_query()),
+        entry("tracker_report", tracker_report()),
     ]
 }
 

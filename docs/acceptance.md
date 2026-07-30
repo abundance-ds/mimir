@@ -216,8 +216,45 @@ requirements; they do not replace runtime verification.
   highlights Markdown source without a preview layer, autosaves, and is
   included in `mimir_state`.
 - Today and Business graph are functional built-in Tools.
+- Tracker is a functional built-in Rust-helper that is always discoverable in
+  Settings but absent from Tools and Go to until explicitly enabled.
 - Git state remains available through Files decorations and summaries; there
   is no separate Changes built-in.
+
+## Tracker
+
+- Tracker is disabled by default. While disabled it performs no sampling,
+  permission request, AI call, notification, login launch, or menu-bar install,
+  and retains existing history/configuration.
+- Enabling lazily exposes the singleton Tool Activity and menu-bar controls.
+  Armed, paused, needs-access, break, unsupported, and error states remain
+  distinct and visible.
+- App/bundle collection continues without Accessibility when title collection
+  is off. Browser domains require a separate opt-in, retain no full URL, and
+  degrade to app-only classification when denied.
+- The elapsed-time engine confirms foreground changes, backdates AFK to the
+  actual idle boundary, records OFF/relaunch gaps and manual breaks, and closes
+  the current interval before explicit Quit.
+- Closing the main window hides Mimir without stopping enabled Tracker.
+  Launch at login starts with the workbench hidden and its status is visible;
+  normal launch/Dock reopen still reveal it. Explicit Quit uses the ordinary
+  editor guard and checkpoints Tracker before process exit.
+- Day exposes an exact timeline ruler and evidence log. Week, Month, and All
+  provide exact clipped totals, composition, work/leisure ratio, longest Work
+  streak, app/subcategory rankings, daily stacks, and a local-time heatmap.
+- Unknown keys queue durably for provider-agnostic AI classification through
+  Mimir's model/keychain/host policy and one daily cost cap. Titles stay out of
+  prompts by default; manual rules win and can reclassify matching history.
+- Nudges respect grace, spacing, per-session maximum, lunch, earned-break, and
+  end-of-day protection. Provider/cost failure uses a local humane fallback.
+- Argus preview/import is read-only then transactional, refuses overlapping
+  collectors, handles malformed/zero/reversed/DST records explicitly, keeps
+  manual precedence, records a source hash, is idempotent, and never changes
+  the Argus source files.
+- SQLite survives relaunch with WAL checkpointing and quarantines a damaged
+  database without deleting it; a newer schema fails closed.
+- Tracker evidence is not exposed through `mimir_state`, graph context, or
+  public agent tools.
 
 ## Business graph
 

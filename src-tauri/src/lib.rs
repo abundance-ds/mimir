@@ -92,6 +92,7 @@ pub mod tool_bridge;
 pub mod tool_registry;
 mod tool_runtime;
 pub mod tool_server;
+pub mod tracker;
 #[cfg(test)]
 mod upgrade_fixtures;
 mod workspace_files;
@@ -829,13 +830,17 @@ fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> 
     Ok(())
 }
 
-fn create_main_window<M: Manager<tauri::Wry>>(manager: &M) -> tauri::Result<tauri::WebviewWindow> {
+fn create_main_window<M: Manager<tauri::Wry>>(
+    manager: &M,
+    visible: bool,
+) -> tauri::Result<tauri::WebviewWindow> {
     let mut builder =
         tauri::WebviewWindowBuilder::new(manager, "main", tauri::WebviewUrl::App("/".into()))
             .title("Mimir")
             .inner_size(1280.0, 800.0)
             .min_inner_size(520.0, 420.0)
-            .decorations(true);
+            .decorations(true)
+            .visible(visible);
 
     #[cfg(target_os = "macos")]
     {
@@ -900,10 +905,16 @@ pub fn run() {
         activity_supervisor.clone(),
     )
     .expect("routine runtime must initialize");
+    let tracker_runtime = tracker::TrackerRuntime::new(tracker::TrackerRuntimeConfig::default())
+        .expect("tracker runtime must initialize");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--mimir-tracker-background"]),
+        ))
         .register_uri_scheme_protocol("app", |_app, request| apps::serve_app_file(request))
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             let paths = file_open::resolve_file_args(&args, std::path::Path::new(&cwd));
@@ -912,6 +923,7 @@ pub fn run() {
         .manage(ProposalState::default())
         .manage(activity_supervisor)
         .manage(routine_runtime)
+        .manage(tracker_runtime)
         .manage(ai_proxy::AiStreamState::default())
         .manage(business_graph::GraphRuntime::default())
         .manage(file_open::PendingFilePaths::default())
@@ -943,7 +955,9 @@ pub fn run() {
                 )
                 .into());
             }
-            create_main_window(app)?;
+            let background_launch =
+                std::env::args().any(|argument| argument == "--mimir-tracker-background");
+            create_main_window(app, !background_launch)?;
             let supervisor = app.state::<activities::ActivitySupervisor>();
             activity_commands::TauriActivitySink::install(app.handle(), &supervisor);
             let routines = app.state::<routine_runtime::RoutineRuntime>();
@@ -963,6 +977,9 @@ pub fn run() {
                 )
                 .into());
             }
+            app.state::<tracker::TrackerRuntime>()
+                .install(app.handle())
+                .map_err(std::io::Error::other)?;
             app.state::<tool_runtime::ToolRuntime>()
                 .initialize(app.handle())
                 .map_err(std::io::Error::other)?;
@@ -1114,6 +1131,20 @@ pub fn run() {
             routine_runtime::routine_duplicate,
             routine_runtime::routine_trash,
             routine_runtime::routine_reveal,
+            tracker::runtime::tracker_status,
+            tracker::runtime::tracker_config_update,
+            tracker::runtime::tracker_set_enabled,
+            tracker::runtime::tracker_set_armed,
+            tracker::runtime::tracker_start_break,
+            tracker::runtime::tracker_end_break,
+            tracker::runtime::tracker_query,
+            tracker::runtime::tracker_report,
+            tracker::runtime::tracker_classifications,
+            tracker::runtime::tracker_classification_update,
+            tracker::runtime::tracker_import_preview,
+            tracker::runtime::tracker_import_argus,
+            tracker::runtime::tracker_accessibility_request,
+            tracker::runtime::tracker_context_update,
             file_open::take_pending_files,
             file_open::open_files_in_editor,
             file_index_commands::file_index_open,
@@ -1269,6 +1300,9 @@ pub fn run() {
             }
             tauri::RunEvent::Exit => {
                 app_handle.state::<chat::ChatRuntime>().disconnect();
+                if let Err(error) = app_handle.state::<tracker::TrackerRuntime>().shutdown() {
+                    log::error!("Could not flush Tracker before exit: {error}");
+                }
                 app_handle
                     .state::<routine_runtime::RoutineRuntime>()
                     .stop_background();
@@ -1295,7 +1329,7 @@ pub fn run() {
                 if let Some(main) = app_handle.get_webview_window("main") {
                     let _ = main.show();
                     let _ = main.set_focus();
-                } else if let Err(error) = create_main_window(app_handle) {
+                } else if let Err(error) = create_main_window(app_handle, true) {
                     log::error!("Could not recreate the main window: {error}");
                 }
             }

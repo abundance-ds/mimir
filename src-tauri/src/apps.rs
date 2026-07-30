@@ -200,6 +200,28 @@ pub fn builtin_apps() -> Vec<InstalledApp> {
             manifest_path: "builtin:scribe".into(),
             builtin: true,
         },
+        InstalledApp {
+            definition: AppDefinition {
+                id: "tracker".into(),
+                title: "Tracker".into(),
+                description:
+                    "See where the day went, correct the record, and interrupt accidental drift."
+                        .into(),
+                mode: AppMode::RustHelper,
+                entry: None,
+                command: None,
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                preset: None,
+                helper: Some("tracker".into()),
+                action_tool: None,
+                launch_only: false,
+                tools: Vec::new(),
+            },
+            directory: "builtin".into(),
+            manifest_path: "builtin:tracker".into(),
+            builtin: true,
+        },
     ]
 }
 
@@ -1339,6 +1361,11 @@ entry = "index.html"
             .apps
             .iter()
             .any(|app| app.definition.id == "scratch" && app.builtin));
+        assert!(catalog.apps.iter().any(|app| {
+            app.definition.id == "tracker"
+                && app.definition.helper.as_deref() == Some("tracker")
+                && app.builtin
+        }));
         let today = catalog
             .apps
             .iter()

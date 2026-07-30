@@ -79,6 +79,12 @@ pub fn ai_set_api_key(request: AiSetApiKeyRequest) -> Result<AiKeyStatus, String
 
 #[tauri::command]
 pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateResponse, String> {
+    generate_internal(request).await
+}
+
+pub(crate) async fn generate_internal(
+    request: AiGenerateRequest,
+) -> Result<AiGenerateResponse, String> {
     if request.stream.unwrap_or(false) {
         return Err("Streaming AI requests are not implemented in v0.3 foundation yet".to_string());
     }

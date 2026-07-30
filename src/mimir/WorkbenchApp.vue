@@ -175,6 +175,7 @@ import { useFileStore } from '../stores/files.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useMeetingsStore } from '../stores/meetings.js'
 import { useSettingsStore } from '../stores/settings.js'
+import { useTrackerStore } from '../stores/tracker.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
@@ -224,6 +225,7 @@ const launchers = useLaunchersStore()
 const meetings = useMeetingsStore()
 const workspaceFiles = useWorkspaceFilesStore()
 const settings = useSettingsStore()
+const tracker = useTrackerStore()
 const releaseSettingsSync = settings.startSync()
 const editorFiles = useFileStore()
 const editorRef = ref(null)
@@ -439,10 +441,13 @@ const editorMeta = computed(() => {
   return file.dirty ? 'Unsaved' : `${editorFiles.openFiles.length} tab${editorFiles.openFiles.length === 1 ? '' : 's'}`
 })
 
-const stableApps = computed(() => appsCatalog.apps.filter(
+const availableApps = computed(() => appsCatalog.apps.filter(
+  app => app.id !== 'tracker' || tracker.enabled,
+))
+const stableApps = computed(() => availableApps.value.filter(
   app => !createsFreshActivity(app),
 ))
-const freshActivityApps = computed(() => appsCatalog.apps.filter(createsFreshActivity))
+const freshActivityApps = computed(() => availableApps.value.filter(createsFreshActivity))
 const toolAppIds = computed(() => new Set(stableApps.value.map(app => app.id)))
 
 const toolRows = computed(() => orderSidebarRows([
@@ -495,16 +500,16 @@ const chatAgentRows = computed(() => launchers.decoratedPresets.filter(
 ))
 
 function appRow(app) {
+  let icon = 'apps'
+  if (app.id === 'scratch') icon = 'today'
+  else if (app.id === 'business-graph') icon = 'graph'
+  else if (app.id === 'scribe') icon = 'scribe'
+  else if (app.id === 'tracker') icon = 'tracker'
+  else if (app.mode === 'terminal') icon = 'terminal'
   return {
     id: `app:${app.id}`,
     title: app.title,
-    icon: app.id === 'scratch'
-      ? 'today'
-      : app.id === 'business-graph'
-        ? 'graph'
-        : app.id === 'scribe'
-          ? 'scribe'
-        : (app.mode === 'terminal' ? 'terminal' : 'apps'),
+    icon,
     shortcut: '',
     available: true,
   }
@@ -540,6 +545,38 @@ const {
   closeActivity,
   collapseEmptyEditor,
 })
+
+watch(
+  () => tracker.openRequestRevision,
+  revision => {
+    if (revision > 0 && tracker.enabled) void onLaunch('app:tracker')
+  },
+)
+
+watch(
+  () => tracker.enabled,
+  enabled => {
+    if (!enabled && activeActivity.value?.source?.appId === 'tracker') {
+      openCoreActivity('files')
+    }
+  },
+)
+
+watch(
+  () => [
+    lastWorkbenchFocus.value.owner,
+    activeActivity.value?.id,
+    activeActivity.value?.kind,
+    activeActivity.value?.source?.appId,
+    tracker.enabled,
+  ],
+  () => {
+    if (tracker.initialized) {
+      const context = tracker.enabled ? currentTrackerContext() : null
+      void Promise.resolve(tracker.setContext(context)).catch(() => {})
+    }
+  },
+)
 
 function launcherIcon(preset) {
   if (preset.kind === 'terminal') return 'terminal'
@@ -603,10 +640,18 @@ onMounted(async () => {
         diagnostic.value = `Scribe could not initialize: ${errorMessage(cause)}`
       }
     }),
+    tracker.initialize()
+      .then(() => (tracker.enabled ? tracker.setContext(currentTrackerContext()) : undefined))
+      .catch((cause) => {
+        if (!diagnostic.value) diagnostic.value = `Tracker could not initialize: ${errorMessage(cause)}`
+      }),
     chat.initialize().catch((cause) => {
       if (!diagnostic.value) diagnostic.value = `Chat could not initialize: ${errorMessage(cause)}`
     }),
   ])
+  if (!tracker.enabled && activeActivity.value?.source?.appId === 'tracker') {
+    openCoreActivity('files')
+  }
 })
 
 onUnmounted(() => {
@@ -625,6 +670,7 @@ onUnmounted(() => {
   toolRuntime.stop()
   chat.dispose()
   meetings.dispose()
+  tracker.dispose()
   if (window.__mimir_activityPaste === pasteToActiveTerminal) {
     delete window.__mimir_activityPaste
   }
@@ -993,7 +1039,7 @@ async function listAppsForTool() {
   await appsCatalog.load()
   return {
     directory: appsCatalog.directory,
-    apps: appsCatalog.apps,
+    apps: availableApps.value,
     diagnostics: appsCatalog.diagnostics,
   }
 }
@@ -1002,6 +1048,9 @@ async function launchAppFromTool(appId, requestedMode) {
   await appsCatalog.load()
   const app = appsCatalog.apps.find(candidate => candidate.id === appId)
   if (!app) throw new Error(`App '${appId}' is not installed.`)
+  if (app.id === 'tracker' && !tracker.enabled) {
+    throw new Error("Tracker is disabled. Enable it in Settings → Apps first.")
+  }
   const payload = await appsCatalog.prepareActivity(app, workspaceFiles.workspacePath || '')
   if (requestedMode && payload.launch.mode !== requestedMode) {
     throw new Error(
@@ -1014,6 +1063,18 @@ async function launchAppFromTool(appId, requestedMode) {
     appId,
     mode: payload.launch.mode,
   }
+}
+
+function currentTrackerContext() {
+  if (lastWorkbenchFocus.value.owner === 'editor') return 'editor'
+  const activity = activeActivity.value
+  if (!activity) return null
+  if (activity.source?.appId === 'business-graph') return 'business-graph'
+  if (activity.source?.appId === 'tracker') return 'tracker'
+  if (activity.kind === 'files') return 'files'
+  if (activity.kind === 'agent') return 'agent'
+  if (activity.kind === 'terminal') return 'terminal'
+  return activity.kind || null
 }
 
 async function launchAppPlan(payload, { throwOnError = false } = {}) {

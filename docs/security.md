@@ -35,6 +35,7 @@ naming the exact boundary it enforces.
 | Scribe custom STT | exact public HTTPS endpoint upgraded to WSS, pinned DNS/TLS, bounded protocol; endpoint-bound Keychain secret; recovery remains bound to the route/model approved at Start | configured provider receives integrity-verified committed meeting audio and transcript by design |
 | Scribe local STT | pinned model identity and Metal-only in-process runtime; only canonical digest-verified committed chunks enter inference | the model file and readable transcript/audio remain local user data |
 | Scribe follow-up | exact-argv durable Activity, terminal revision, bounded schema-validated output | the selected CLI agent has normal user-account filesystem/process authority |
+| Tracker collector | disabled native guard; lazy Accessibility; browser host-only retention; no screen capture or public tools | enabled title/domain history is sensitive local data readable by the user's account |
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
 | Launcher/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment |
 | API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
@@ -136,6 +137,30 @@ Release builds refuse plaintext fallback when keychain writes fail.
 debug builds additionally permit localhost/127.0.0.1. Provider errors pass
 through best-effort key-prefix redaction, so new credential formats require
 updating redaction.
+
+## Tracker evidence
+
+Tracker is disabled by default. Its Rust command boundary rejects opening
+Accessibility settings or creating a tracked break while disabled; the
+collector does not sample, call AI, notify, install launch-at-login, or expose a
+menu-bar item in that state.
+
+Enabled app/bundle identity comes from native `NSWorkspace`. Window titles are
+a separate Accessibility-gated option. Browser evidence is separately opt-in:
+per-browser Automation returns a URL, Rust immediately parses it, and only the
+normalized domain is stored. Full URLs and screen pixels are never retained.
+Window titles are bounded at 512 characters.
+
+Classification sends app/bundle and optional domain through the existing AI
+host policy and keychain-backed credentials. Titles are excluded unless the
+user enables `includeWindowTitlesInAi`. The daily cost cap includes
+classification and nudge generation. Local fallback nudges require no network.
+
+Tracker timeline/title/domain data is intentionally absent from automatic
+Mimir context, Business graph context, `mimir_state`, and the public agent tool
+projection. There is no `tracker_read` or `tracker_stats` tool. The dashboard
+and private Tauri commands remain trusted renderer surfaces, not an agent
+authorization boundary. See [tracker.md](tracker.md).
 
 ## Team chat
 

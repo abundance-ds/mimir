@@ -1,0 +1,46 @@
+{
+  "startMs": 1775001600000,
+  "endMs": 1775088000000,
+  "totals": {
+    "AFK": 600,
+    "Leisure": 1200,
+    "Work": 14400
+  },
+  "totalTrackedSeconds": 16200,
+  "workLeisureRatio": 12.0,
+  "longestWorkStreakSeconds": 5400,
+  "topApps": [
+    {
+      "key": "rs.shoulde.mimir",
+      "label": "Mimir",
+      "seconds": 7200,
+      "activity": "Work"
+    }
+  ],
+  "subcategories": [
+    {
+      "key": "Development",
+      "label": "Development",
+      "seconds": 9000,
+      "activity": "Work"
+    }
+  ],
+  "days": [
+    {
+      "date": "2026-04-01",
+      "totals": {
+        "AFK": 600,
+        "Leisure": 1200,
+        "Work": 14400
+      }
+    }
+  ],
+  "heatmap": [
+    {
+      "weekday": 3,
+      "hour": 10,
+      "seconds": 3600
+    }
+  ],
+  "totalBlocks": 19
+}

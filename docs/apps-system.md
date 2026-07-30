@@ -1,7 +1,7 @@
 # Apps
 
-Apps are local instruments. Mimir ships Today and Business graph as built-ins;
-additional definitions live under `~/.mimir/apps/`.
+Apps are local instruments. Mimir ships Today, Business graph, and Tracker as
+built-ins; additional definitions live under `~/.mimir/apps/`.
 
 There is no generic Apps Activity or launcher row. The Sidebar places stable
 Apps under Tools; the Activities `+` and Cmd/Ctrl+P expose terminal/process
@@ -20,9 +20,12 @@ are exact external-process presets. Stable Tool Activities stay out of
 Activities history.
 
 This is deliberately a personal/small-team local instrument manager. There is
-no marketplace, install workflow, trust gate, permission approval, enable
-switch, package origin, or team policy layer. Put code in `~/.mimir/apps`, reload,
-and run it.
+no marketplace, install workflow, trust gate, permission approval, generic App
+enable switch, package origin, or team policy layer. Put code in
+`~/.mimir/apps`, reload, and run it. Tracker is the deliberate exception at the
+subsystem level: its built-in definition is always discoverable in Settings,
+but its sensitive background collector is explicitly enabled or disabled by
+Tracker's native configuration.
 
 App manifests and frames are trusted local extension code. Manifest/path
 validation protects catalog/protocol integrity; it does not sandbox SDK
@@ -54,6 +57,14 @@ surface over the managed Rust `GraphRuntime`; it is not an iframe and does not
 use app-data JSON as canonical storage. The app composes physically separate
 private, project, and optional team Markdown roots. See
 [business-graph.md](business-graph.md).
+
+Tracker is the native first-party activity timeline. Its
+`rust-helper = "tracker"` route mounts a Vue Activity surface over the managed
+Rust `TrackerRuntime`; SQLite, not app-data JSON or the renderer, is canonical.
+It is disabled by default, remains visible in the catalog, and is omitted from
+Tools/Go to until enabled. The enable switch governs collector, launch-at-login,
+menu-bar item, permissions, AI, and notifications together while retaining
+history. See [tracker.md](tracker.md).
 
 ## Discovery
 
@@ -100,7 +111,7 @@ Common optional fields are `description`, `args`, `env`, `launchOnly`, and
 entries are accepted explicitly.
 
 `rust-helper` names require matching host code; they are not dynamically loaded
-Rust libraries. Business graph uses `business-graph`.
+Rust libraries. Business graph uses `business-graph`; Tracker uses `tracker`.
 
 `terminal` and `process` launch directly into one PTY-backed Activity from
 Sidebar or Settings. There is no intermediate app-plan row. Exact args

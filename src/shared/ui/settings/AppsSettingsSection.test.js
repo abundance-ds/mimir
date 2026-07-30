@@ -31,6 +31,16 @@ const builtIn = {
   manifestPath: 'builtin:scratch',
   tools: [],
 }
+const trackerBuiltIn = {
+  id: 'tracker',
+  title: 'Tracker',
+  description: 'Native desktop activity timeline',
+  mode: 'rust-helper',
+  helper: 'tracker',
+  builtin: true,
+  manifestPath: 'builtin:tracker',
+  tools: [],
+}
 const local = {
   id: 'ledger',
   title: 'Ledger',
@@ -143,6 +153,22 @@ describe('AppsSettingsSection', () => {
     expect(wrapper.emitted('openDefinition')).toEqual([
       ['/home/me/.mimir/apps/ledger/app.toml'],
     ])
+    wrapper.unmount()
+  })
+
+  it('keeps Tracker discoverable but requires subsystem opt-in before opening', async () => {
+    vi.mocked(loadAppsCatalog).mockResolvedValue(catalog([builtIn, trackerBuiltIn, local]))
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.get('[data-app-settings-row="tracker"]').exists()).toBe(true)
+    await wrapper.get('[data-app-settings-row="tracker"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-tracker-settings]').text()).toContain('Collector off')
+    expect(wrapper.get('[data-app-launch]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-app-launch]').text()).toContain('Enable to open')
+
     wrapper.unmount()
   })
 

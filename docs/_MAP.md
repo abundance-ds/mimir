@@ -24,8 +24,8 @@ resizing, rails, widths, and Activity navigation history.
 - `src/main.js` mounts `src/mimir/App.vue`; `?view=editor` mounts
   `src/editor/App.vue` as a standalone editor surface.
 - `src-tauri/src/main.rs` → `src-tauri/src/lib.rs`: main window; initializes
-  Activities, Routines, tool registry, MCP endpoint, file indexing, chat
-  runtime, and `mimir`.
+  Activities, Routines, Tracker, tool registry, MCP endpoint, file indexing,
+  chat runtime, and `mimir`.
 - Startup ordering: Rust registers core tools during Tauri setup; the renderer
   starts the MCP socket only after installing tool-relay listeners; editor
   hydration completes before its persistence watcher. See
@@ -43,6 +43,7 @@ resizing, rails, widths, and Activity navigation history.
 | Files/tree/search/preview/mutation | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, Files store/service/activity/row, Editor typed-preview path | native file modules; workspace/file stores; Files Activity; Editor preview tests |
 | Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
 | Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
+| Tracker/Argus migration | [Tracker](tracker.md), [persistence](persistence.md), [security](security.md) | native `tracker/`; Tracker service/store; `TrackerApp.vue`, tracker components, Apps Settings panel; Workbench optional-app projection | native engine/store/report/import/runtime; tracker service/store/app/settings/timeline/classification tests |
 | Routines/scheduler | [Routines](routines.md), [persistence](persistence.md) | `routines.rs`, `routine_runtime.rs`, Routine store/service/activity | native schema/runtime; Routine store/service/activity |
 | Scribe meetings/capture/transcription/follow-up | [Scribe meetings](meetings.md), [security](security.md), [persistence](persistence.md) | native `meetings/`, `crates/mimir-meeting-{audio,detect}`; Scribe service/store/app/settings; meeting hooks in `routine_runtime.rs` | Gherkin evidence; native runtime/audio/detection/STT/job/tool tests; Scribe service/store/app; packaged macOS hardware |
 | Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
@@ -75,9 +76,14 @@ resizing, rails, widths, and Activity navigation history.
   `src/stores/files.js` (typed tabs, dirty state, recents). Docs:
   [files.md](files.md).
 - Apps: `src/stores/appsCatalog.js`, `src/services/appsCatalog.js`,
-  `src/mimir/apps/` (Today, Business graph, embedded/launch-plan hosts),
+  `src/mimir/apps/` (Today, Business graph, Tracker, embedded/launch-plan hosts),
   `src/shared/ui/settings/AppsSettingsSection.vue`,
   `src/apps/sdk/mimir-sdk.js`. Docs: [apps-system.md](apps-system.md).
+- Tracker UI: `src/mimir/apps/TrackerApp.vue`,
+  `src/mimir/apps/tracker/` (timeline, overview, log, classifications),
+  `src/stores/tracker.js`, `src/services/tracker.js`, and
+  `src/shared/ui/settings/TrackerSettingsPanel.vue`. Docs:
+  [tracker.md](tracker.md).
 - Business graph UI: `src/mimir/apps/BusinessGraphApp.vue` (scope/projection
   shell), `src/mimir/apps/business-graph/` (board, portfolio, timeline,
   inspector, dispatch bar, create flows), `src/stores/businessGraph.js`,
@@ -124,6 +130,9 @@ resizing, rails, widths, and Activity navigation history.
 - Business graph: `src-tauri/src/business_graph/` (store, runtime, markdown,
   migration, context, performance), `src-tauri/src/business_graph/tools/`
   (per-domain MCP modules). Docs: [business-graph.md](business-graph.md).
+- Tracker: `src-tauri/src/tracker/` (platform sampler, engine, SQLite store,
+  reports, Argus import, lifecycle/AI/nudges). Docs:
+  [tracker.md](tracker.md).
 - Files: `src-tauri/src/file_index.rs`,
   `src-tauri/src/file_index_commands.rs`, `src-tauri/src/workspace_files.rs`,
   `src-tauri/src/file_open.rs`, `src-tauri/src/git.rs`. Docs:
@@ -166,6 +175,7 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/apps/` | local app TOML and app directories |
 | `~/.mimir/app-data/` | app-owned JSON values |
 | `~/.mimir/graph/private/` | private local Business graph Markdown |
+| `~/.mimir/tracker/tracker.sqlite` | Tracker configuration, timeline, classifications, usage, nudges, and imports |
 | `~/.mimir/routines/` | routine TOML |
 | `~/.mimir/routines-state.json` | next-fire planner state |
 | `~/.mimir/meetings.json` | native Scribe settings, excluding credentials |
@@ -201,6 +211,7 @@ ordering: [ipc.md](ipc.md).
 | [chat.md](chat.md) | chat architecture and room-linked agents; ops in `deploy/chat/README.md` |
 | [mcp.md](mcp.md) | registry contract, loopback transport, public projection |
 | [business-graph.md](business-graph.md) | GraphStore, ontology, scopes, projections, tools, migration |
+| [tracker.md](tracker.md) | optional collector, timeline, privacy, AI/nudges, Argus migration |
 | [files.md](files.md) | file index, search, quick-open, typed tabs |
 | [apps-system.md](apps-system.md) | local app formats and SDK |
 | [routines.md](routines.md) | scheduler and routine TOML |

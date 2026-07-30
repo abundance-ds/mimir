@@ -13,6 +13,7 @@ Bootstrap order, hydration constraints, and shutdown sequence.
 | Routine definitions and scheduler | `src-tauri/src/routines.rs`, `routine_runtime.rs` | `src/stores/routines.js` |
 | Workspace index and safe manager mutations | `src-tauri/src/file_index.rs`, `workspace_files.rs` | `src/stores/workspaceFiles.js` |
 | Business graph Markdown, indexes, scopes, revisions | physical graph roots through `business_graph::GraphRuntime` | `src/stores/businessGraph.js`, built-in Business graph app |
+| Tracker configuration, timeline, classifications, imports, background lifecycle | `tracker::TrackerRuntime` and `~/.mimir/tracker/tracker.sqlite` | `src/stores/tracker.js`, built-in Tracker app |
 | Open buffers, dirty state, editor review state | renderer Pinia stores and `src/editor/App.vue` | native session/proposal coordination only where required |
 | Settings snapshot | `~/.mimir/settings.json` through `local_settings.rs` ([settings.md](settings.md)) | `src/stores/settings.js` |
 | Unsaved editor recovery | `~/.mimir/session.json` through `session.rs` | `sessionPersist.js`, `sessionRestore.js` |
@@ -25,13 +26,14 @@ Routine, proposal, and registry results.
 ## Native bootstrap
 
 `src-tauri/src/lib.rs::run` constructs the registry, tool runtime, Activity
-supervisor, Routine runtime, and managed Business graph runtime before building
-Tauri. Setup then performs this order:
+supervisor, Routine runtime, Tracker runtime, and managed Business graph runtime
+before building Tauri. Setup then performs this order:
 
 1. install `mimir` CLI and the Pi extension;
 2. create the `main` window;
 3. attach Activity and Routine event sinks;
-4. start the Routine runtime;
+4. start the Routine runtime and install Tracker; disabled Tracker starts no
+   collection, while enabled Tracker restores its lifecycle and menu-bar item;
 5. register renderer-backed core definitions, native Business graph tools,
    and native connection tools (`crate::connections::register_native_tools`),
    then begin registry revision observation;
@@ -116,8 +118,10 @@ before native exit:
    document, and writes a session snapshot that honors discarded files.
 4. Settings are flushed after the session.
 5. Only then does `app_quit_confirmed` call `app.exit(0)`.
-6. Rust stops the Routine background loop, interrupts live Activities, persists
-   their final state, and flushes the Activity writer.
+6. Rust disconnects Chat; stops Tracker, closes its live interval, persists
+   shutdown time, and checkpoints SQLite; then stops the Routine background
+   loop, interrupts live Activities, persists their final state, and flushes
+   the Activity writer.
 
 Direct window close uses `windowCloseGuard.js`; its `allowNativeClose` flag
 permits exactly the close initiated after confirmation. Reentrant close
@@ -133,6 +137,7 @@ CodeMirror before canceling persistence and unregisters its proposal snapshot.
 |---|---|---|
 | Tauri setup or managed state | `src-tauri/src/lib.rs`, relevant runtime constructor | Rust module tests; frontend smoke/build |
 | Graph roots, watcher, or source refresh | `business_graph/runtime.rs`, `store.rs`, `WorkbenchApp.vue`, graph store/service | native scope/watcher/mutation tests; graph store/app tests |
+| Tracker lifecycle or sampling | `tracker/runtime.rs`, `engine.rs`, `platform.rs`, `WorkbenchApp.vue`, tracker store/service | native tracker tests; store/app/settings tests; desktop permission/tray/sleep smoke |
 | Workbench initialization | `useWorkspaceBootstrap.js`, `WorkbenchApp.vue`, `activityRuntime.js`, `toolRuntime.js` | Workbench controller/integration and store/service tests |
 | Editor hydration/recovery | `useEditorSessionLifecycle.js`, `sessionRestore.js`, `sessionPersist.js` | Editor lifecycle, session restore/persist, and Settings tests |
 | Window/application close | `windowCloseGuard.js`, `appQuit.js`, `lib.rs` exit handler | `windowCloseGuard.test.js`, `appQuit.test.js` |

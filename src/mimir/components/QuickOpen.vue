@@ -505,6 +505,7 @@ const icons = {
   apps: IconApps,
   today: IconFocus2,
   graph: IconTopologyStar3,
+  tracker: IconClockPlay,
   routines: IconClockPlay,
   'chat-channel': IconHash,
   'chat-direct': IconUser,

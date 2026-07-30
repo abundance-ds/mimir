@@ -244,14 +244,16 @@
           <button
             type="button"
             data-app-launch
-            :disabled="busy"
+            :disabled="busy || (selected.id === 'tracker' && !tracker.enabled)"
             class="flex h-7 shrink-0 items-center gap-1.5 border border-accent/40 bg-accent px-2.5 text-[9px] font-semibold text-accent-ink hover:bg-accent-2 disabled:opacity-40"
             @click="launch(selected)"
           >
             <IconArrowUpRight :size="12" />
-            Open
+            {{ selected.id === 'tracker' && !tracker.enabled ? 'Enable to open' : 'Open' }}
           </button>
         </header>
+
+        <TrackerSettingsPanel v-if="selected.id === 'tracker'" />
 
         <div class="grid grid-cols-[78px_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-3 text-[9px]">
           <span class="font-mono uppercase tracking-[0.1em] text-ink-4">Stable id</span>
@@ -344,11 +346,13 @@ import {
 } from '@tabler/icons-vue'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { useAppsCatalogStore } from '../../../stores/appsCatalog.js'
+import { useTrackerStore } from '../../../stores/tracker.js'
 import {
   revealAppDefinition,
   revealAppsDirectory,
 } from '../../../services/appsCatalog.js'
 import AppSection from './AppSettingsSectionRows.vue'
+import TrackerSettingsPanel from './TrackerSettingsPanel.vue'
 
 const emit = defineEmits(['launchApp', 'openDefinition'])
 
@@ -367,6 +371,7 @@ const ActionButton = defineComponent({
 
 const settings = useSettingsStore()
 const catalog = useAppsCatalogStore()
+const tracker = useTrackerStore()
 const root = ref(null)
 const searchInput = ref(null)
 const operationInput = ref(null)

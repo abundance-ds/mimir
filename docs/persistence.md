@@ -19,6 +19,7 @@ crash.
 | `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
 | `~/.mimir/app-data/<app-id>/<key>.json` | app SDK through `apps.rs` | namespaced by validated app id/key; value bytes are opaque to Rust |
 | private/project/team `knowledge/*.md`, `issues/*.md` | user, GraphRuntime UI/tools | Markdown is canonical; every node retains physical scope/path/revision; the in-memory GraphStore is disposable |
+| `~/.mimir/tracker/tracker.sqlite` | `tracker/store.rs`, `tracker/runtime.rs` | WAL database for configuration, exact activity intervals, rules/jobs, usage, nudges, and idempotent imports; disabled state retains data |
 | `~/.mimir/keys.env` | `ai_keys.rs`, debug only | owner-only atomic plaintext fallback when keychain storage fails |
 
 API keys in release builds are not file persistence: the OS keychain service
@@ -42,7 +43,10 @@ Filesystem errors still fail the operation.
 
 Quarantine currently applies to settings, session, model registry, launchers,
 Activity snapshots, Routine planner state, and business-graph event logs
-(`business_graph/runtime.rs`). User-authored App/Routine TOML
+(`business_graph/runtime.rs`). Tracker separately runs SQLite `quick_check`;
+an unreadable/damaged database and its WAL/SHM siblings move to a timestamped
+`.corrupt-*` sibling before a clean database is created, while a newer schema
+fails closed. User-authored App/Routine TOML
 is not quarantined: each invalid definition remains in place and becomes a
 catalog diagnostic so the user can repair its source.
 
@@ -73,6 +77,9 @@ snapshot from winning. Each high-frequency owner adds ordering:
 - Graph updates compare an optional source revision and use same-directory
   atomic replacement. External source watchers rebuild the read model; they do
   not become a competing writer.
+- Tracker has one mutex-serialized SQLite connection. Imports use one
+  transaction; high-frequency intervals update rows in place; normal shutdown
+  closes the current interval and checkpoints WAL before native exit.
 
 Do not bypass these queues with a direct invoke or assignment.
 
@@ -115,6 +122,7 @@ sequence is owned by [runtime-architecture.md](runtime-architecture.md).
 | Activity persisted record | `activities/model.rs`, `supervisor.rs`, `scrollback.rs` | supervisor restore/quarantine/shutdown tests |
 | Routine planner state | `routines.rs`, `routine_runtime.rs` | planner corruption/restart tests |
 | Business graph source/revision | `business_graph/markdown.rs`, `store.rs`, `runtime.rs` | golden round-trip, conflict, Trash/restore, watcher, migration-no-write tests |
+| Tracker schema/timeline/import | `tracker/store.rs`, `engine.rs`, `report.rs`, `import.rs`, `runtime.rs` | reopen/quarantine, transitions, DST/range, import idempotence/transaction, shutdown tests |
 | Model registry migration | embedded `resources/ai-models.json`, `ai_models.rs` | `ai_models.rs`, renderer model-control tests |
 
 See [settings.md](settings.md), [runtime-architecture.md](runtime-architecture.md),

@@ -26,6 +26,8 @@ reject a real command or conceal a removed one.
 |---|---|---|---|
 | `mimir://activity-event` | `activity_commands.rs` sink | `activityRuntime.js` | ordered native upsert/status/exit projection; listener precedes initial `activity_list` |
 | `mimir://routines-changed` | `routine_runtime.rs` sink | `services/routines.js` | notification payload may update catalog/run state; explicit catalog load remains recovery path |
+| `mimir://tracker-changed` | `tracker/runtime.rs` | `services/tracker.js`, Tracker store | revision + current status projection; listener precedes initial `tracker_status`; SQLite remains durable authority |
+| `mimir://tracker-open` | Tracker menu-bar item | Workbench Tracker store | reveal the enabled singleton Tracker Activity after showing/focusing `main` |
 | `mimir://open-files-pending` | `file_open.rs` | `useFileOpen.js` | payload is empty; consumer drains the native queue with `take_pending_files` |
 | `mimir://tool-relay-request` | Rust UI/app provider | core renderer or app relay | request id owns timeout/cancel/response |
 | `mimir://tool-relay-cancel` | Rust provider | same relay | abort before deleting pending entry; late response is ignored |

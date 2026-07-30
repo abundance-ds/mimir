@@ -20,6 +20,12 @@
     @open-settings="$emit('openSettings', $event)"
     @diagnostic="$emit('diagnostic', $event)"
   />
+  <TrackerApp
+    v-else-if="surface === 'tracker'"
+    ref="surfaceRef"
+    :active="active"
+    @diagnostic="$emit('diagnostic', $event)"
+  />
   <TodayApp
     v-else-if="surface === 'today'"
     ref="surfaceRef"
@@ -68,6 +74,7 @@ import { computed, ref } from 'vue'
 import { IconAlertTriangle } from '@tabler/icons-vue'
 import BusinessGraphApp from '../apps/BusinessGraphApp.vue'
 import ScribeApp from '../apps/ScribeApp.vue'
+import TrackerApp from '../apps/TrackerApp.vue'
 import TodayApp from '../apps/TodayApp.vue'
 import EmbeddedAppHost from '../apps/EmbeddedAppHost.vue'
 import LaunchPlanHost from '../apps/LaunchPlanHost.vue'
@@ -117,6 +124,10 @@ const surface = computed(() => {
     app.value.id === 'scribe'
     || (plan.value.mode === 'rust-helper' && plan.value.helper === 'scribe')
   ) return 'scribe'
+  if (
+    app.value.id === 'tracker'
+    || (plan.value.mode === 'rust-helper' && plan.value.helper === 'tracker')
+  ) return 'tracker'
   if (plan.value.mode === 'embedded') return 'embedded'
   if (['terminal', 'process', 'window', 'action', 'rust-helper'].includes(plan.value.mode)) {
     return 'launch'

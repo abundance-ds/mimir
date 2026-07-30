@@ -43,6 +43,7 @@ constructing a Tauri application.
 | Workspace indexing/mutations | `file_index.rs`, `workspace_files.rs`, `file_index_commands.rs` |
 | App manifests/protocol/mutations | `apps.rs` |
 | Business graph parsing/index/scopes/mutations/context/migration | `business_graph/markdown.rs`, `store.rs`, `runtime.rs`, `context.rs`, `migration.rs`, `tools.rs` |
+| Tracker transitions/store/reports/import/lifecycle | `tracker/engine.rs`, `store.rs`, `report.rs`, `import.rs`, `runtime.rs`, `platform.rs` |
 | Routine schema/planner/runtime | `routines.rs`, `routine_runtime.rs` |
 | Persistence/recovery | `persistence.rs`, `session.rs`, `local_settings.rs`, `ai_models.rs` |
 | Scribe lifecycle/store/capture/STT/jobs/tools | `meetings/`; `crates/mimir-meeting-audio`; `crates/mimir-meeting-detect` |
@@ -85,6 +86,7 @@ and signing launcher.
 | MCP definition/alias | Rust runtime/registry/server tests and `services/toolRuntime.test.js`; `mimir tools/call` smoke |
 | App manifest/SDK/provider | `apps.rs`, app catalog service/store, embedded host tests; local app smoke |
 | Business graph source/tool/projection | native graph modules and golden fixtures; graph service/store/app/projection/CLI tests; desktop board/inspector smoke |
+| Tracker collection/report/migration | native tracker modules and golden IPC fixtures; tracker service/store/app/settings/component tests; desktop permission/tray/sleep/import smoke |
 | Routine planner/mutation | `routines.rs`, `routine_runtime.rs`, store/service/activity tests |
 | File index/mutation | native index/workspace tests and workspace store/Files Activity tests |
 | Settings/persistence | native persistence/settings test and renderer store test, including cross-window mock |
@@ -120,6 +122,10 @@ and signing launcher.
 - `business_graph/performance.rs` uses loose debug budgets to catch accidental
   quadratic work. Treat measurements as regression guards, not production
   benchmark claims.
+- Tracker report and query tests use exact milliseconds and explicit IANA
+  timezones. Cover clipping and DST instead of asserting sample counts.
+- Tracker desktop smoke begins disabled. Confirm no menu-bar item, TCC prompt,
+  notification, AI call, or new interval before exercising opt-in.
 - `GraphSelect.test.js` encodes the no-native-dropdown contract and keyboard
   behavior shared by Board, inspector, and create flows.
 - `features/meetings/*.feature` is the Scribe behavior authority. Every

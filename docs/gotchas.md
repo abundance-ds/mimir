@@ -228,6 +228,24 @@ configured.
 
 ## Persistence and settings
 
+### Tracker enabled and armed are not synonyms
+
+Disabled is the privacy boundary: no sampling, permission request, AI,
+notification, launch-at-login, or Tracker menu-bar item. Armed is a collection
+state inside an enabled Tracker. Pausing must write an `OFF` transition without
+hiding the instrument or disabling login launch. Do not implement either state
+as a renderer-only visibility toggle.
+
+The legacy Argus app and Tracker must never collect simultaneously. Argus
+import refuses while Tracker is enabled or the exact legacy executable is
+running; keep source files untouched and perform the complete import in one
+transaction.
+
+Turning window-title collection off must also remove the Accessibility
+dependency. App/bundle identity therefore comes from native `NSWorkspace`;
+window titles come from the native Accessibility API. Browser domains are a
+different opt-in Automation boundary and only normalized hosts may persist.
+
 ### Use atomic writers for runtime state
 
 Launcher config, durable Activities, Routine state, app data, AI model

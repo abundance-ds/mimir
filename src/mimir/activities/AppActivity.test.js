@@ -104,6 +104,27 @@ describe('AppActivity', () => {
     expect(wrapper.emitted('openSettings')).toEqual([['scribe']])
   })
 
+  it('routes the built-in Tracker helper to its native Vue surface', () => {
+    const record = activity({
+      id: 'tracker',
+      title: 'Tracker',
+      mode: 'rust-helper',
+      helper: 'tracker',
+    }, { helper: 'tracker' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          TrackerApp: true,
+          EmbeddedAppHost: true,
+        },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'TrackerApp' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
   it('forwards workbench entry focus to the hosted surface', () => {
     const focusEntry = vi.fn()
     const record = activity({

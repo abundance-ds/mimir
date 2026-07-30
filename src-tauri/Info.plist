@@ -6,5 +6,7 @@
   <string>Mimir Scribe records your microphone when you explicitly start a meeting recording.</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>Mimir Scribe records meeting audio from this Mac when you explicitly start a meeting recording.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>When browser-domain tracking is enabled, Mimir asks the active browser for its current tab URL and stores only the domain.</string>
 </dict>
 </plist>

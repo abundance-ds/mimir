@@ -1,0 +1,22 @@
+{
+  "blocks": [
+    {
+      "id": 41,
+      "startMs": 1775024100000,
+      "endMs": 1775025000000,
+      "durationSeconds": 900,
+      "activity": "Work",
+      "subcategory": "Development",
+      "appName": "Mimir",
+      "bundleId": "rs.shoulde.mimir",
+      "domain": null,
+      "windowTitle": "Tracker runtime — mimir",
+      "classificationKey": "rs.shoulde.mimir",
+      "source": "collector",
+      "offReason": null
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 100
+}
