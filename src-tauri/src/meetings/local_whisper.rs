@@ -1205,4 +1205,131 @@ mod tests {
     fn production_build_registers_a_metal_device() {
         require_metal_device().unwrap();
     }
+
+    /// Release smoke for the exact managed model and the real Metal decoder.
+    ///
+    /// This is ignored because its immutable model is 487 MB and the audio
+    /// fixture is intentionally not bundled in the repository. The release
+    /// procedure supplies mono 16 kHz PCM WAV via `MIMIR_SCRIBE_WAV_PATH` and
+    /// the verified `ggml-small.bin` via `MIMIR_SCRIBE_MODEL_PATH`.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    #[ignore = "requires the pinned 487 MB model and a real speech WAV fixture"]
+    fn production_metal_model_transcribes_real_speech() {
+        let model_path = PathBuf::from(
+            std::env::var_os("MIMIR_SCRIBE_MODEL_PATH")
+                .expect("MIMIR_SCRIBE_MODEL_PATH must name the pinned ggml-small.bin"),
+        );
+        let wav_path = PathBuf::from(
+            std::env::var_os("MIMIR_SCRIBE_WAV_PATH")
+                .expect("MIMIR_SCRIBE_WAV_PATH must name a mono 16 kHz PCM WAV"),
+        );
+        let model_file = File::open(&model_path).unwrap();
+        let model_sha256 = Sha256Digest::calculate(model_file).unwrap();
+        assert_eq!(
+            model_sha256.to_string(),
+            "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+        );
+        assert_eq!(fs::metadata(&model_path).unwrap().len(), 487_601_967);
+
+        let artifact = VerifiedModelArtifact {
+            path: model_path,
+            sha256: model_sha256,
+        };
+        let mut prepared = MetalWhisperBackend.prepare(&artifact).unwrap();
+        let samples = read_mono_pcm16_wav(&wav_path).unwrap();
+        let segments = prepared.session.transcribe(&samples, "").unwrap();
+
+        assert!(
+            segments
+                .iter()
+                .any(|segment| !segment.text.trim().is_empty()),
+            "real Metal inference returned no speech"
+        );
+        assert!(
+            segments
+                .windows(2)
+                .all(|pair| pair[0].start_ms <= pair[1].start_ms),
+            "real Metal inference returned unordered segments"
+        );
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn release_wav_loader_rejects_wrong_rate_and_decodes_pcm16() {
+        let temporary = TempDir::new().unwrap();
+        let path = temporary.path().join("speech.wav");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&40_u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&32_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&4_u32.to_le_bytes());
+        bytes.extend_from_slice(&i16::MIN.to_le_bytes());
+        bytes.extend_from_slice(&i16::MAX.to_le_bytes());
+        fs::write(&path, bytes).unwrap();
+
+        assert_eq!(
+            read_mono_pcm16_wav(&path).unwrap(),
+            vec![-1.0, 32767.0 / 32768.0]
+        );
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn read_mono_pcm16_wav(path: &Path) -> Result<Vec<f32>, String> {
+        let bytes =
+            fs::read(path).map_err(|error| format!("could not read WAV fixture: {error}"))?;
+        if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+            return Err("speech fixture must be a RIFF/WAVE file".into());
+        }
+        let mut cursor = 12_usize;
+        let mut format = None;
+        let mut data = None;
+        while cursor.checked_add(8).is_some_and(|end| end <= bytes.len()) {
+            let id = &bytes[cursor..cursor + 4];
+            let length =
+                u32::from_le_bytes(bytes[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
+            let start = cursor + 8;
+            let end = start
+                .checked_add(length)
+                .ok_or_else(|| "WAV chunk length overflowed".to_string())?;
+            if end > bytes.len() {
+                return Err("WAV chunk exceeds the fixture length".into());
+            }
+            if id == b"fmt " {
+                if length < 16 {
+                    return Err("WAV fmt chunk is truncated".into());
+                }
+                format = Some((
+                    u16::from_le_bytes(bytes[start..start + 2].try_into().unwrap()),
+                    u16::from_le_bytes(bytes[start + 2..start + 4].try_into().unwrap()),
+                    u32::from_le_bytes(bytes[start + 4..start + 8].try_into().unwrap()),
+                    u16::from_le_bytes(bytes[start + 14..start + 16].try_into().unwrap()),
+                ));
+            } else if id == b"data" {
+                data = Some(&bytes[start..end]);
+            }
+            cursor = end + (length & 1);
+        }
+        let (encoding, channels, sample_rate, bits) =
+            format.ok_or_else(|| "WAV fixture has no fmt chunk".to_string())?;
+        if (encoding, channels, sample_rate, bits) != (1, 1, 16_000, 16) {
+            return Err("speech fixture must be mono 16 kHz 16-bit PCM".into());
+        }
+        let data = data.ok_or_else(|| "WAV fixture has no data chunk".to_string())?;
+        if data.len() % 2 != 0 {
+            return Err("WAV PCM data must contain complete 16-bit samples".into());
+        }
+        Ok(data
+            .chunks_exact(2)
+            .map(|sample| i16::from_le_bytes([sample[0], sample[1]]) as f32 / 32_768.0)
+            .collect())
+    }
 }
