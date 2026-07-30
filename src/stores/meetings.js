@@ -9,7 +9,9 @@ import {
   exportMeeting,
   installMeetingModel,
   listenToMeetingEvents,
+  loadMeetingLibraryPage,
   loadMeetingSnapshot,
+  loadMeetingTranscriptPage,
   requestMeetingMicrophonePermission,
   retryMeetingJob,
   setMeetingMicMuted,
@@ -23,6 +25,9 @@ import {
 export const useMeetingsStore = defineStore('meetings', () => {
   const revision = ref(0)
   const meetings = ref([])
+  const meetingsTruncated = ref(false)
+  const nextMeetingsBefore = ref(null)
+  const transcriptWindows = ref({})
   const candidates = ref([])
   const config = ref(defaultConfig())
   const permissions = ref({ microphone: 'unknown', systemAudio: 'unknown' })
@@ -36,15 +41,22 @@ export const useMeetingsStore = defineStore('meetings', () => {
   let unlisten = null
   let initializing = null
   let refreshQueued = false
+  let transcriptRefreshTimer = null
+  const transcriptRefreshIds = new Set()
 
-  const selectedMeeting = computed(() => (
-    meetings.value.find(meeting => meeting.id === selectedId.value)
+  const selectedMeeting = computed(() => {
+    const meeting = meetings.value.find(meeting => meeting.id === selectedId.value)
       || meetings.value.find(meeting => meeting.id === activeMeetingId.value)
       || meetings.value[0]
       || null
-  ))
+    if (!meeting) return null
+    return withTranscriptWindow(meeting, transcriptWindows.value[meeting.id])
+  })
   const activeMeeting = computed(() => (
-    meetings.value.find(meeting => meeting.id === activeMeetingId.value) || null
+    withTranscriptWindow(
+      meetings.value.find(meeting => meeting.id === activeMeetingId.value) || null,
+      transcriptWindows.value[activeMeetingId.value],
+    )
   ))
   const recording = computed(() => activeMeeting.value?.lifecycle === 'capturing')
   const stopping = computed(() => (
@@ -88,6 +100,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     loading.value = true
     try {
       applySnapshot(await loadMeetingSnapshot())
+      await refreshVisibleTranscripts()
       error.value = ''
       loaded.value = true
     } catch (cause) {
@@ -113,6 +126,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
       })
       applySnapshot(snapshot)
       if (snapshot.activeMeetingId) selectedId.value = snapshot.activeMeetingId
+      await refreshVisibleTranscripts()
       return activeMeeting.value
     })
   }
@@ -129,6 +143,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     if (!active || pending.value.stop) return null
     return runPending('stop', async () => {
       applySnapshot(await stopMeeting(active.id))
+      await refreshVisibleTranscripts()
       return selectedMeeting.value
     })
   }
@@ -217,13 +232,18 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   function select(id) {
-    if (meetings.value.some(meeting => meeting.id === id)) selectedId.value = id
+    if (!meetings.value.some(meeting => meeting.id === id)) return
+    selectedId.value = id
+    pruneTranscriptWindows()
+    void refreshTranscript(id).catch(() => {})
   }
 
   function applySnapshot(snapshot) {
     if (!snapshot || snapshot.revision < revision.value) return false
     revision.value = snapshot.revision
     meetings.value = snapshot.meetings
+    meetingsTruncated.value = snapshot.meetingsTruncated
+    nextMeetingsBefore.value = snapshot.nextMeetingsBefore
     candidates.value = snapshot.candidates
     config.value = snapshot.config
     permissions.value = snapshot.permissions
@@ -232,11 +252,19 @@ export const useMeetingsStore = defineStore('meetings', () => {
     if (!meetings.value.some(meeting => meeting.id === selectedId.value)) {
       selectedId.value = snapshot.activeMeetingId || meetings.value[0]?.id || ''
     }
+    pruneTranscriptWindows()
     if (snapshot.diagnostic) error.value = snapshot.diagnostic
     return true
   }
 
   function onEvent(event) {
+    if (
+      event?.meetingId
+      && String(event.kind || '').toLowerCase().includes('transcript')
+    ) {
+      queueTranscriptRefresh(event.meetingId)
+      return
+    }
     if (event?.refresh) {
       queueRefresh()
       return
@@ -260,6 +288,111 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
   }
 
+  async function refreshVisibleTranscripts() {
+    const ids = new Set([selectedId.value, activeMeetingId.value].filter(Boolean))
+    await Promise.allSettled([...ids].map(id => refreshTranscript(id)))
+  }
+
+  async function refreshTranscript(id, before = null) {
+    if (!id || !meetings.value.some(meeting => meeting.id === id)) return null
+    const existing = transcriptWindows.value[id]
+    if (existing?.loading) {
+      queueTranscriptRefresh(id)
+      return existing
+    }
+    setTranscriptWindow(id, {
+      ...(existing || emptyTranscriptWindow()),
+      loading: true,
+      error: '',
+    })
+    try {
+      const page = await loadMeetingTranscriptPage(id, before)
+      const current = transcriptWindows.value[id] || emptyTranscriptWindow()
+      setTranscriptWindow(id, {
+        ...current,
+        segments: page.segments,
+        revision: page.revision,
+        totalSegments: page.totalSegments,
+        hasMore: page.hasMore,
+        nextBefore: page.nextBefore,
+        showingLatest: before == null,
+        summary: before == null ? page.summary : current.summary,
+        summaryLoaded: before == null ? true : current.summaryLoaded,
+        loading: false,
+        error: '',
+      })
+      const meeting = meetings.value.find(value => value.id === id)
+      if (meeting && page.revision > meeting.transcriptRevision) {
+        meeting.transcriptRevision = page.revision
+      }
+      pruneTranscriptWindows()
+      return transcriptWindows.value[id]
+    } catch (cause) {
+      setTranscriptWindow(id, {
+        ...(transcriptWindows.value[id] || emptyTranscriptWindow()),
+        loading: false,
+        error: message(cause),
+      })
+      throw cause
+    }
+  }
+
+  async function loadEarlierTranscript() {
+    const meeting = selectedMeeting.value
+    if (!meeting?.transcriptNextBefore) return null
+    return refreshTranscript(meeting.id, meeting.transcriptNextBefore)
+  }
+
+  async function loadOlderMeetings() {
+    if (!nextMeetingsBefore.value || pending.value['library-page']) return null
+    return runPending('library-page', async () => {
+      const page = await loadMeetingLibraryPage(nextMeetingsBefore.value)
+      const known = new Set(meetings.value.map(meeting => meeting.id))
+      meetings.value = [
+        ...meetings.value,
+        ...page.meetings.filter(meeting => !known.has(meeting.id)),
+      ]
+      meetingsTruncated.value = page.hasMore
+      nextMeetingsBefore.value = page.nextBefore
+      return page.meetings.length
+    })
+  }
+
+  async function loadLatestTranscript() {
+    const meeting = selectedMeeting.value
+    if (!meeting) return null
+    return refreshTranscript(meeting.id)
+  }
+
+  function queueTranscriptRefresh(id) {
+    if (!id || !meetings.value.some(meeting => meeting.id === id)) return
+    // Do not kick a reader out of an older page when live words arrive.
+    const window = transcriptWindows.value[id]
+    if (window && !window.showingLatest) {
+      setTranscriptWindow(id, { ...window, newerAvailable: true })
+      return
+    }
+    transcriptRefreshIds.add(id)
+    if (transcriptRefreshTimer != null) return
+    transcriptRefreshTimer = setTimeout(() => {
+      transcriptRefreshTimer = null
+      const ids = [...transcriptRefreshIds]
+      transcriptRefreshIds.clear()
+      for (const meetingId of ids) void refreshTranscript(meetingId).catch(() => {})
+    }, 125)
+  }
+
+  function setTranscriptWindow(id, value) {
+    transcriptWindows.value = { ...transcriptWindows.value, [id]: value }
+  }
+
+  function pruneTranscriptWindows() {
+    const retained = new Set([selectedId.value, activeMeetingId.value].filter(Boolean))
+    transcriptWindows.value = Object.fromEntries(
+      Object.entries(transcriptWindows.value).filter(([id]) => retained.has(id)),
+    )
+  }
+
   async function runPending(key, operation) {
     if (pending.value[key]) return null
     pending.value = { ...pending.value, [key]: true }
@@ -281,11 +414,18 @@ export const useMeetingsStore = defineStore('meetings', () => {
     unlisten = null
     initializing = null
     loaded.value = false
+    if (transcriptRefreshTimer != null) clearTimeout(transcriptRefreshTimer)
+    transcriptRefreshTimer = null
+    transcriptRefreshIds.clear()
+    transcriptWindows.value = {}
   }
 
   return {
     revision,
     meetings,
+    meetingsTruncated,
+    nextMeetingsBefore,
+    transcriptWindows,
     candidates,
     config,
     permissions,
@@ -320,10 +460,46 @@ export const useMeetingsStore = defineStore('meetings', () => {
     installModel,
     deleteModel,
     select,
+    loadOlderMeetings,
+    loadEarlierTranscript,
+    loadLatestTranscript,
     applySnapshot,
     dispose,
   }
 })
+
+function emptyTranscriptWindow() {
+  return {
+    segments: [],
+    revision: 0,
+    totalSegments: 0,
+    hasMore: false,
+    nextBefore: null,
+    showingLatest: true,
+    newerAvailable: false,
+    summary: null,
+    summaryLoaded: false,
+    loading: false,
+    error: '',
+  }
+}
+
+function withTranscriptWindow(meeting, window) {
+  if (!meeting) return null
+  const detail = window || emptyTranscriptWindow()
+  return {
+    ...meeting,
+    segments: detail.segments,
+    summary: detail.summaryLoaded ? detail.summary : meeting.summary,
+    transcriptLoading: detail.loading,
+    transcriptError: detail.error,
+    transcriptTotalSegments: detail.totalSegments,
+    transcriptHasEarlier: detail.hasMore,
+    transcriptNextBefore: detail.nextBefore,
+    transcriptShowingLatest: detail.showingLatest,
+    transcriptNewerAvailable: detail.newerAvailable,
+  }
+}
 
 function defaultConfig() {
   return {

@@ -6,6 +6,8 @@ import {
   dismissMeetingCandidate,
   listenToMeetingEvents,
   loadMeetingSnapshot,
+  loadMeetingTranscriptPage,
+  normalizeMeetingTranscriptPage,
   normalizeMeetingSnapshot,
   requestMeetingMicrophonePermission,
   startMeeting,
@@ -108,5 +110,39 @@ describe('meetings service', () => {
     await listenToMeetingEvents(() => {})
     await loadMeetingSnapshot()
     expect(order).toEqual(['listener', 'listener', 'snapshot'])
+  })
+
+  it('caps transcript pages defensively before they enter renderer state', async () => {
+    const oversized = Array.from({ length: 100_000 }, (_, index) => ({
+      id: `segment-${index}`,
+      text: 'word',
+      start_ms: index * 1_000,
+      end_ms: index * 1_000 + 900,
+    }))
+    const normalized = normalizeMeetingTranscriptPage({
+      meeting_id: 'long-meeting',
+      revision: 7,
+      total_segments: 100_000,
+      has_more: true,
+      next_before: {
+        start_ms: 99_750_000,
+        end_ms: 99_750_900,
+        segment_id: 'segment-99750',
+      },
+      segments: oversized,
+    })
+    expect(normalized.segments).toHaveLength(250)
+    expect(normalized.totalSegments).toBe(100_000)
+
+    vi.mocked(invoke).mockResolvedValue({
+      meetingId: 'long-meeting',
+      segments: [],
+    })
+    await loadMeetingTranscriptPage('long-meeting', null, 10_000)
+    expect(invoke).toHaveBeenCalledWith('meetings_transcript_page', {
+      meetingId: 'long-meeting',
+      before: null,
+      limit: 250,
+    })
   })
 })

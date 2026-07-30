@@ -1254,8 +1254,8 @@ impl NativeMeetingPlatform {
         self.inner.models.artifact_for_use(model_id)
     }
 
-    /// Apply configured retention to completed, interrupted, or failed
-    /// meetings. Active lifecycle states are never removed.
+    /// Apply configured retention to source audio for terminal meetings whose
+    /// durable transcript and dependent work no longer need it.
     pub fn enforce_retention(&self, now: DateTime<Utc>) -> Result<Vec<String>, String> {
         let _operation = lock(&self.inner.operation)?;
         let config = self.load_config()?;
@@ -1264,35 +1264,58 @@ impl NativeMeetingPlatform {
         };
         let cutoff = now - Duration::days(i64::from(days));
         let mut removed = Vec::new();
-        for meeting in self
-            .inner
-            .store
-            .list_meetings(1_000)
-            .map_err(|error| error.to_string())?
-        {
-            if matches!(
-                meeting.status,
-                super::MeetingStatus::Detected
-                    | super::MeetingStatus::Recording
-                    | super::MeetingStatus::Stopping
-                    | super::MeetingStatus::Finalizing
-            ) {
-                continue;
+        let mut before = None;
+        loop {
+            let page = self
+                .inner
+                .store
+                .list_meetings_page(before.as_ref(), 250)
+                .map_err(|error| error.to_string())?;
+            for meeting in &page.meetings {
+                if matches!(
+                    meeting.status,
+                    super::MeetingStatus::Detected
+                        | super::MeetingStatus::Recording
+                        | super::MeetingStatus::Stopping
+                        | super::MeetingStatus::Finalizing
+                ) || self
+                    .inner
+                    .store
+                    .has_retention_hold(&meeting.id)
+                    .map_err(|error| error.to_string())?
+                {
+                    continue;
+                }
+                let transcript = self
+                    .inner
+                    .store
+                    .transcript_overview(&meeting.id, 1)
+                    .map_err(|error| error.to_string())?;
+                if !transcript.is_final
+                    || transcript.segment_count == 0
+                    || transcript.non_final_segment_count != 0
+                {
+                    continue;
+                }
+                let observed = meeting
+                    .finalized_at
+                    .as_deref()
+                    .or(meeting.stopped_at.as_deref())
+                    .unwrap_or(&meeting.updated_at);
+                let timestamp = DateTime::parse_from_rfc3339(observed)
+                    .map_err(|error| {
+                        format!("Meeting '{}' has an invalid timestamp: {error}", meeting.id)
+                    })?
+                    .with_timezone(&Utc);
+                if timestamp <= cutoff {
+                    self.delete_meeting_files(&meeting.id, MeetingDeleteMode::Audio)?;
+                    removed.push(meeting.id.clone());
+                }
             }
-            let observed = meeting
-                .finalized_at
-                .as_deref()
-                .or(meeting.stopped_at.as_deref())
-                .unwrap_or(&meeting.updated_at);
-            let timestamp = DateTime::parse_from_rfc3339(observed)
-                .map_err(|error| {
-                    format!("Meeting '{}' has an invalid timestamp: {error}", meeting.id)
-                })?
-                .with_timezone(&Utc);
-            if timestamp <= cutoff {
-                self.delete_meeting_files(&meeting.id, MeetingDeleteMode::All)?;
-                removed.push(meeting.id);
+            if !page.has_more {
+                break;
             }
+            before = page.next_before;
         }
         Ok(removed)
     }
@@ -2551,7 +2574,7 @@ mod tests {
     }
 
     #[test]
-    fn retention_skips_active_meetings_and_tombstones_expired_records() {
+    fn retention_skips_active_work_and_removes_only_expired_source_audio() {
         let fixture = fixture();
         create_meeting(&fixture, "meeting-old");
         let old = fixture.store.get_meeting("meeting-old").unwrap();
@@ -2587,12 +2610,35 @@ mod tests {
                 None,
             )
             .unwrap();
-        let finalizing = fixture.store.get_meeting("meeting-old").unwrap();
+        fixture
+            .store
+            .apply_transcript_batch(&TranscriptBatch {
+                meeting_id: "meeting-old".into(),
+                batch_id: "retention-terminal".into(),
+                base_revision: 0,
+                source: "test".into(),
+                observed_at: NOW.into(),
+                marks_final: true,
+                changes: vec![TranscriptChange::UpsertSegment {
+                    segment: TranscriptSegmentInput {
+                        id: "retention-segment".into(),
+                        start_ms: 0,
+                        end_ms: 1_000,
+                        text: "Durable transcript".into(),
+                        channel_id: Some("microphone".into()),
+                        speaker: None,
+                        confidence: Some(1.0),
+                        is_final: true,
+                        metadata: json!({}),
+                    },
+                }],
+            })
+            .unwrap();
         fixture
             .store
             .transition_meeting(
                 "meeting-old",
-                finalizing.revision,
+                fixture.store.get_meeting("meeting-old").unwrap().revision,
                 super::super::MeetingStatus::Completed,
                 NOW,
                 None,
@@ -2607,6 +2653,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(removed, vec!["meeting-old"]);
-        assert!(fixture.platform.content("meeting-old").unwrap().deleted);
+        assert!(!fixture.platform.content("meeting-old").unwrap().deleted);
+        assert!(fixture.store.get_meeting("meeting-old").is_ok());
+        assert_eq!(
+            fixture
+                .store
+                .transcript_snapshot("meeting-old", None)
+                .unwrap()
+                .segments
+                .len(),
+            1
+        );
     }
 }

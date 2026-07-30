@@ -7,6 +7,7 @@ import {
   dismissMeetingCandidate,
   listenToMeetingEvents,
   loadMeetingSnapshot,
+  loadMeetingTranscriptPage,
   requestMeetingMicrophonePermission,
   startMeeting,
   stopMeeting,
@@ -24,7 +25,9 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   exportMeeting: vi.fn(),
   installMeetingModel: vi.fn(),
   listenToMeetingEvents: vi.fn(),
+  loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
+  loadMeetingTranscriptPage: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
   retryMeetingJob: vi.fn(),
   setMeetingMicMuted: vi.fn(),
@@ -95,6 +98,15 @@ describe('ScribeApp', () => {
     setActivePinia(createPinia())
     vi.mocked(listenToMeetingEvents).mockReset().mockResolvedValue(vi.fn())
     vi.mocked(loadMeetingSnapshot).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(loadMeetingTranscriptPage).mockReset().mockImplementation(async meetingId => ({
+      meetingId,
+      revision: 0,
+      totalSegments: 0,
+      hasMore: false,
+      nextBefore: null,
+      segments: [],
+      summary: null,
+    }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
     vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(deleteMeeting).mockReset()

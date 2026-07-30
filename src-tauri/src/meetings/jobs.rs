@@ -442,7 +442,7 @@ fn execute_transcription_repair(
         .ok_or_else(|| "The repaired meeting is missing from its snapshot".to_string())?;
     Ok(json!({
         "transcriptRevision": repaired.transcript_revision,
-        "segmentCount": repaired.segments.len(),
+        "segmentCount": repaired.segment_count,
         "transcriptFinal": repaired.transcript_final
     }))
 }
@@ -483,8 +483,8 @@ fn is_exact_terminal_transcript(meeting: &MeetingView, requested_revision: u64) 
     meeting.lifecycle == "ready"
         && meeting.transcript_final
         && meeting.transcript_revision == requested_revision
-        && !meeting.segments.is_empty()
-        && meeting.segments.iter().all(|segment| segment.is_final)
+        && meeting.segment_count > 0
+        && meeting.transcript_all_final
 }
 
 fn prepare_hook_context(
@@ -1134,8 +1134,11 @@ mod tests {
             "transcription": "final",
             "durationMs": 1000,
             "micMuted": false,
+            "gapCount": 0,
             "transcriptRevision": 7,
             "transcriptFinal": true,
+            "segmentCount": 1,
+            "transcriptAllFinal": true,
             "segments": [{
                 "id": "segment-1",
                 "text": "Ship after review.",
@@ -1152,9 +1155,10 @@ mod tests {
         .unwrap();
         assert!(is_exact_terminal_transcript(&meeting, 7));
         assert!(!is_exact_terminal_transcript(&meeting, 6));
-        meeting.segments[0].is_final = false;
+        meeting.transcript_all_final = false;
         assert!(!is_exact_terminal_transcript(&meeting, 7));
-        meeting.segments.clear();
+        meeting.transcript_all_final = true;
+        meeting.segment_count = 0;
         assert!(!is_exact_terminal_transcript(&meeting, 7));
     }
 

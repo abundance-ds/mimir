@@ -4,7 +4,9 @@
 //! endpoint is trusted-local but unauthenticated, so exporting start/stop would
 //! let every local process exercise Mimir's microphone grant.
 
-use super::runtime::{MeetingRuntime, MeetingSnapshot, MeetingUpdatePatch, MeetingView};
+use super::runtime::{
+    MeetingLibraryCursor, MeetingRuntime, MeetingSnapshot, MeetingUpdatePatch, MeetingView,
+};
 use crate::tool_registry::{
     ToolCallContext, ToolDescriptor, ToolError, ToolErrorCode, ToolOwner, ToolRegistration,
     ToolRegistry, ToolResult, ToolSource,
@@ -15,7 +17,7 @@ use tauri::Manager;
 const DEFAULT_LIST_LIMIT: usize = 50;
 const MAX_LIST_LIMIT: usize = 100;
 const DEFAULT_TRANSCRIPT_LIMIT: usize = 100;
-const MAX_TRANSCRIPT_LIMIT: usize = 500;
+const MAX_TRANSCRIPT_LIMIT: usize = 250;
 const MAX_QUERY_BYTES: usize = 512;
 
 pub(crate) fn register_native_tools(
@@ -53,13 +55,27 @@ pub(crate) fn register_native_tools(
 fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value, ToolError> {
     match action {
         "meetings.list" => {
-            let snapshot = runtime.snapshot().map_err(runtime_error)?;
-            list_projection(&snapshot, input.get("limit").and_then(Value::as_u64))
+            let before = optional_library_cursor(&input)?;
+            let limit = bounded_limit(
+                input.get("limit").and_then(Value::as_u64),
+                DEFAULT_LIST_LIMIT,
+                MAX_LIST_LIMIT,
+            )?;
+            let page = runtime
+                .library_page(before, Some(limit as u32))
+                .map_err(runtime_error)?;
+            list_page_projection(
+                &page.meetings,
+                page.has_more,
+                page.next_before,
+                runtime.revision(),
+            )
         }
         "meetings.get" => {
             let meeting_id = required_string(&input, "meeting_id")?;
             let snapshot = runtime.snapshot().map_err(runtime_error)?;
             get_projection(
+                runtime,
                 &snapshot,
                 meeting_id,
                 input
@@ -71,13 +87,14 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
         }
         "meetings.search" => {
             let query = required_string(&input, "query")?;
-            if query.len() > MAX_QUERY_BYTES {
-                return Err(invalid_input(format!(
-                    "query exceeds the {MAX_QUERY_BYTES}-byte limit"
-                )));
-            }
+            validate_search_query(query)?;
             let snapshot = runtime.snapshot().map_err(runtime_error)?;
-            search_projection(&snapshot, query, input.get("limit").and_then(Value::as_u64))
+            search_projection(
+                runtime,
+                &snapshot,
+                query,
+                input.get("limit").and_then(Value::as_u64),
+            )
         }
         "meetings.update" => {
             let meeting_id = required_string(&input, "meeting_id")?;
@@ -89,7 +106,7 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
             runtime
                 .update_meeting(meeting_id, patch)
                 .map_err(runtime_error)
-                .and_then(|snapshot| get_projection(&snapshot, meeting_id, 0, Some(0)))
+                .and_then(|snapshot| get_projection(runtime, &snapshot, meeting_id, 0, Some(0)))
         }
         _ => Err(ToolError::new(
             ToolErrorCode::NotFound,
@@ -98,6 +115,7 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
     }
 }
 
+#[cfg(test)]
 fn list_projection(snapshot: &MeetingSnapshot, limit: Option<u64>) -> Result<Value, ToolError> {
     let limit = bounded_limit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)?;
     let meetings = snapshot
@@ -115,45 +133,86 @@ fn list_projection(snapshot: &MeetingSnapshot, limit: Option<u64>) -> Result<Val
     Ok(json!({
         "meetings": meetings,
         "returned": meetings.len(),
-        "hasMore": available > meetings.len(),
+        "hasMore": available > meetings.len() || snapshot.meetings_truncated,
+        "nextBefore": snapshot.next_meetings_before,
         "revision": snapshot.revision
     }))
 }
 
+fn list_page_projection(
+    page: &[MeetingView],
+    has_more: bool,
+    next_before: Option<MeetingLibraryCursor>,
+    revision: u64,
+) -> Result<Value, ToolError> {
+    let meetings = page
+        .iter()
+        .filter(|meeting| is_public_meeting(meeting))
+        .map(meeting_metadata)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({
+        "meetings": meetings,
+        "returned": meetings.len(),
+        "hasMore": has_more,
+        "nextBefore": next_before,
+        "revision": revision
+    }))
+}
+
 fn get_projection(
+    runtime: &MeetingRuntime,
     snapshot: &MeetingSnapshot,
     meeting_id: &str,
     offset: u64,
     limit: Option<u64>,
 ) -> Result<Value, ToolError> {
     let meeting = find_meeting(snapshot, meeting_id)?;
-    let offset = usize::try_from(offset)
-        .map_err(|_| invalid_input("transcript_offset is too large"))?
-        .min(meeting.segments.len());
     let limit = bounded_limit(limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT)?;
-    let end = offset.saturating_add(limit).min(meeting.segments.len());
+    let page = if limit == 0 {
+        None
+    } else {
+        Some(
+            runtime
+                .transcript_slice(meeting_id, offset, limit as u32)
+                .map_err(runtime_error)?,
+        )
+    };
     let mut value = serde_json::to_value(meeting).map_err(serialization_error)?;
     let object = value
         .as_object_mut()
         .ok_or_else(|| serialization_error("meeting projection was not an object"))?;
     object.insert(
         "segments".into(),
-        serde_json::to_value(&meeting.segments[offset..end]).map_err(serialization_error)?,
+        serde_json::to_value(
+            page.as_ref()
+                .map(|page| page.segments.as_slice())
+                .unwrap_or_default(),
+        )
+        .map_err(serialization_error)?,
     );
+    if let Some(summary) = page.as_ref().and_then(|page| page.summary.as_ref()) {
+        object.insert("summary".into(), Value::String(summary.clone()));
+    }
+    let returned = page.as_ref().map_or(0, |page| page.segments.len());
+    let total = page
+        .as_ref()
+        .map_or(meeting.segment_count, |page| page.total_segments);
+    let has_more = offset.saturating_add(returned as u64) < total;
     object.insert(
         "transcriptPage".into(),
         json!({
             "offset": offset,
-            "returned": end.saturating_sub(offset),
-            "total": meeting.segments.len(),
-            "hasMore": end < meeting.segments.len(),
-            "nextOffset": (end < meeting.segments.len()).then_some(end)
+            "returned": returned,
+            "total": total,
+            "hasMore": has_more,
+            "nextOffset": has_more.then_some(offset.saturating_add(returned as u64))
         }),
     );
     Ok(value)
 }
 
 fn search_projection(
+    runtime: &MeetingRuntime,
     snapshot: &MeetingSnapshot,
     query: &str,
     limit: Option<u64>,
@@ -163,24 +222,45 @@ fn search_projection(
         return Err(invalid_input("query cannot be empty"));
     }
     let limit = bounded_limit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)?;
+    let transcript_hits = runtime
+        .search_transcript(&normalized, (MAX_LIST_LIMIT * 3) as u32)
+        .map_err(runtime_error)?;
+    let mut candidates = snapshot
+        .meetings
+        .iter()
+        .cloned()
+        .map(|meeting| (meeting.id.clone(), meeting))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for transcript_hit in &transcript_hits {
+        if !candidates.contains_key(&transcript_hit.meeting_id) {
+            if let Ok(meeting) = runtime.meeting(&transcript_hit.meeting_id) {
+                candidates.insert(meeting.id.clone(), meeting);
+            }
+        }
+    }
     let mut hits = Vec::new();
-    for meeting in &snapshot.meetings {
+    for meeting in candidates.values() {
         if !is_public_meeting(meeting) {
             continue;
         }
         let title_match = meeting.title.to_lowercase().contains(&normalized);
-        let summary_match = meeting
-            .summary
+        let full_summary = if meeting.summary_truncated {
+            runtime
+                .transcript_slice(&meeting.id, 0, 1)
+                .map_err(runtime_error)?
+                .summary
+        } else {
+            meeting.summary.clone()
+        };
+        let summary_match = full_summary
             .as_deref()
             .is_some_and(|summary| summary.to_lowercase().contains(&normalized));
-        let transcript_matches = meeting
-            .segments
+        let transcript_matches = transcript_hits
             .iter()
-            .filter(|segment| segment.text.to_lowercase().contains(&normalized))
-            .take(3)
+            .filter(|segment| segment.meeting_id == meeting.id)
             .map(|segment| {
                 json!({
-                    "segmentId": segment.id,
+                    "segmentId": segment.segment_id,
                     "startMs": segment.start_ms,
                     "text": bounded_excerpt(&segment.text, 240)
                 })
@@ -207,6 +287,18 @@ fn search_projection(
         "returned": hits.len(),
         "revision": snapshot.revision
     }))
+}
+
+fn validate_search_query(query: &str) -> Result<(), ToolError> {
+    if query.trim().is_empty() {
+        return Err(invalid_input("query cannot be empty"));
+    }
+    if query.len() > MAX_QUERY_BYTES {
+        return Err(invalid_input(format!(
+            "query exceeds the {MAX_QUERY_BYTES}-byte limit"
+        )));
+    }
+    Ok(())
 }
 
 fn meeting_metadata(meeting: &MeetingView) -> Result<Value, ToolError> {
@@ -305,6 +397,33 @@ fn optional_strings(input: &Value, field: &str) -> Result<Option<Vec<String>>, T
     Ok(Some(values))
 }
 
+fn optional_library_cursor(input: &Value) -> Result<Option<MeetingLibraryCursor>, ToolError> {
+    let Some(value) = input.get("before") else {
+        return Ok(None);
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid_input("before must be a meeting library cursor object"))?;
+    let created_at = object
+        .get("created_at")
+        .or_else(|| object.get("createdAt"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid_input("before.created_at is required"))?;
+    let meeting_id = object
+        .get("meeting_id")
+        .or_else(|| object.get("meetingId"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid_input("before.meeting_id is required"))?;
+    Ok(Some(MeetingLibraryCursor {
+        created_at: created_at.into(),
+        meeting_id: meeting_id.into(),
+    }))
+}
+
 fn bounded_limit(value: Option<u64>, default: usize, maximum: usize) -> Result<usize, ToolError> {
     let value = value.unwrap_or(default as u64);
     if value > maximum as u64 {
@@ -342,7 +461,16 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
             "List completed and interrupted meetings recorded natively by Mimir Scribe. This is distinct from meetings synced from Granola.",
             object_schema(
                 json!({
-                    "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT }
+                    "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT },
+                    "before": {
+                        "type": "object",
+                        "properties": {
+                            "created_at": { "type": "string" },
+                            "meeting_id": { "type": "string" }
+                        },
+                        "required": ["created_at", "meeting_id"],
+                        "additionalProperties": false
+                    }
                 }),
                 &[],
             ),
@@ -413,6 +541,8 @@ mod tests {
         MeetingSnapshot {
             revision: 7,
             meetings: vec![],
+            meetings_truncated: false,
+            next_meetings_before: None,
             active_meeting_id: None,
             candidates: vec![],
             config: MeetingConfig::default(),
@@ -446,14 +576,10 @@ mod tests {
 
     #[test]
     fn search_rejects_blank_and_oversized_queries() {
-        let empty = search_projection(&snapshot(), "  ", None).unwrap_err();
+        let empty = validate_search_query("  ").unwrap_err();
         assert_eq!(empty.code, ToolErrorCode::InvalidInput);
         let oversized = "x".repeat(MAX_QUERY_BYTES + 1);
-        let error = if oversized.len() > MAX_QUERY_BYTES {
-            invalid_input("query too long")
-        } else {
-            unreachable!()
-        };
+        let error = validate_search_query(&oversized).unwrap_err();
         assert_eq!(error.code, ToolErrorCode::InvalidInput);
     }
 

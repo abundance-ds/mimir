@@ -82,9 +82,9 @@
       </span>
       <span class="truncate text-right text-ink-3">
         Transcript {{ transcriptionLabel(meetings.activeMeeting.transcription) }}
-        <template v-if="meetings.activeMeeting.gaps.length">
-          · {{ meetings.activeMeeting.gaps.length }}
-          {{ meetings.activeMeeting.gaps.length === 1 ? 'gap' : 'gaps' }}
+        <template v-if="meetings.activeMeeting.gapCount">
+          · {{ meetings.activeMeeting.gapCount }}
+          {{ meetings.activeMeeting.gapCount === 1 ? 'gap' : 'gaps' }}
         </template>
       </span>
     </div>
@@ -214,6 +214,20 @@
           >
             Recorded meetings will appear here.
           </div>
+          <button
+            v-else-if="meetings.meetingsTruncated"
+            type="button"
+            data-scribe-load-older
+            class="w-full border-t border-rule-light px-3 py-2 text-left text-[9px] leading-relaxed text-ink-3 hover:text-ink"
+            :disabled="Boolean(meetings.pending['library-page'])"
+            @click="meetings.loadOlderMeetings()"
+          >
+            {{
+              meetings.pending['library-page']
+                ? 'Loading older meetings…'
+                : 'Load older meetings'
+            }}
+          </button>
         </div>
 
         <button
@@ -378,7 +392,51 @@
           <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             <section v-if="detailTab === 'transcript'" aria-label="Transcript">
               <div
-                v-if="!meetings.selectedMeeting.segments.length"
+                v-if="
+                  meetings.selectedMeeting.transcriptTotalSegments
+                    > meetings.selectedMeeting.segments.length
+                "
+                class="mb-2 flex items-center gap-2 border-b border-rule-light pb-2"
+              >
+                <span class="flex-1 font-mono text-[9px] text-ink-3">
+                  Showing {{ meetings.selectedMeeting.segments.length }} of
+                  {{ meetings.selectedMeeting.transcriptTotalSegments }} segments
+                </span>
+                <button
+                  v-if="
+                    !meetings.selectedMeeting.transcriptShowingLatest
+                    || meetings.selectedMeeting.transcriptNewerAvailable
+                  "
+                  type="button"
+                  data-scribe-transcript-latest
+                  class="scribe-button"
+                  :disabled="meetings.selectedMeeting.transcriptLoading"
+                  @click="meetings.loadLatestTranscript()"
+                >
+                  Latest
+                </button>
+                <button
+                  v-if="meetings.selectedMeeting.transcriptHasEarlier"
+                  type="button"
+                  data-scribe-transcript-earlier
+                  class="scribe-button"
+                  :disabled="meetings.selectedMeeting.transcriptLoading"
+                  @click="meetings.loadEarlierTranscript()"
+                >
+                  Earlier
+                </button>
+              </div>
+              <div
+                v-if="
+                  meetings.selectedMeeting.transcriptLoading
+                  && !meetings.selectedMeeting.segments.length
+                "
+                class="py-12 text-center text-[11px] text-ink-3"
+              >
+                Loading transcript…
+              </div>
+              <div
+                v-else-if="!meetings.selectedMeeting.segments.length"
                 class="py-12 text-center text-[11px] text-ink-3"
               >
                 {{
@@ -880,7 +938,7 @@ function diagnosticRows(meeting) {
     ['Channels', meeting.channels.join(', ') || 'None'],
     ['Transcript revision', String(meeting.transcriptRevision)],
     ['Transcript final', meeting.transcriptFinal ? 'Yes' : 'No'],
-    ['Capture gaps', String(meeting.gaps.length)],
+    ['Capture gaps', String(meeting.gapCount)],
     ['Summary', meeting.summaryState.replaceAll('-', ' ')],
     ['Knowledge graph', meeting.kgState.replaceAll('-', ' ')],
     ['Source app', meeting.sourceApp || 'Manual'],

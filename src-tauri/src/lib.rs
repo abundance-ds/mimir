@@ -991,6 +991,8 @@ pub fn run() {
             settings_changed,
             app_quit_confirmed,
             meetings::commands::meetings_snapshot,
+            meetings::commands::meetings_library_page,
+            meetings::commands::meetings_transcript_page,
             meetings::commands::meetings_request_microphone_permission,
             meetings::commands::meetings_dismiss_candidate,
             meetings::commands::meetings_start,

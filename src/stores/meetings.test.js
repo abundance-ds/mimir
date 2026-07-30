@@ -3,7 +3,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import {
   dismissMeetingCandidate,
   listenToMeetingEvents,
+  loadMeetingLibraryPage,
   loadMeetingSnapshot,
+  loadMeetingTranscriptPage,
   requestMeetingMicrophonePermission,
   startMeeting,
   stopMeeting,
@@ -20,7 +22,9 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   exportMeeting: vi.fn(),
   installMeetingModel: vi.fn(),
   listenToMeetingEvents: vi.fn(),
+  loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
+  loadMeetingTranscriptPage: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
   retryMeetingJob: vi.fn(),
   setMeetingMicMuted: vi.fn(),
@@ -48,6 +52,16 @@ const emptySnapshot = {
   diagnostic: null,
 }
 
+const emptyTranscriptPage = {
+  meetingId: '',
+  revision: 0,
+  totalSegments: 0,
+  hasMore: false,
+  nextBefore: null,
+  segments: [],
+  summary: null,
+}
+
 describe('meetings store', () => {
   let eventHandler
 
@@ -59,6 +73,11 @@ describe('meetings store', () => {
       return vi.fn()
     })
     vi.mocked(loadMeetingSnapshot).mockReset().mockResolvedValue(emptySnapshot)
+    vi.mocked(loadMeetingLibraryPage).mockReset()
+    vi.mocked(loadMeetingTranscriptPage).mockReset().mockImplementation(async meetingId => ({
+      ...emptyTranscriptPage,
+      meetingId,
+    }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
     vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(startMeeting).mockReset()
@@ -217,5 +236,118 @@ describe('meetings store', () => {
     await store.stop()
     expect(store.selectedMeeting.lifecycle).toBe('finalizing')
     expect(store.stopping).toBe(true)
+  })
+
+  it('keeps a bounded page for a one-hundred-thousand-segment transcript', async () => {
+    const page = Array.from({ length: 250 }, (_, index) => ({
+      id: `segment-${index}`,
+      text: `word ${index}`,
+      startMs: 99_750_000 + index * 1_000,
+      endMs: 99_750_900 + index * 1_000,
+      channel: 'system',
+      final: true,
+      revision: 1,
+    }))
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [{
+        id: 'long-meeting',
+        title: 'Long meeting',
+        lifecycle: 'ready',
+        transcriptRevision: 1,
+        transcriptFinal: true,
+        segments: [],
+        jobs: [],
+        gaps: [],
+        gapCount: 0,
+        channels: ['microphone', 'system'],
+      }],
+    })
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue({
+      meetingId: 'long-meeting',
+      revision: 1,
+      totalSegments: 100_000,
+      hasMore: true,
+      nextBefore: {
+        startMs: 99_750_000,
+        endMs: 99_750_900,
+        segmentId: 'segment-0',
+      },
+      segments: page,
+      summary: 'Bounded.',
+    })
+
+    const store = useMeetingsStore()
+    await store.initialize()
+
+    expect(store.selectedMeeting.segments).toHaveLength(250)
+    expect(store.selectedMeeting.transcriptTotalSegments).toBe(100_000)
+    expect(Object.keys(store.transcriptWindows)).toEqual(['long-meeting'])
+  })
+
+  it('coalesces transcript event bursts without reloading the whole library', async () => {
+    vi.useFakeTimers()
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [{
+        id: 'live',
+        title: 'Live',
+        lifecycle: 'capturing',
+        transcriptRevision: 1,
+        segments: [],
+        jobs: [],
+        gaps: [],
+        gapCount: 0,
+        channels: ['microphone', 'system'],
+      }],
+      activeMeetingId: 'live',
+    })
+    const store = useMeetingsStore()
+    await store.initialize()
+    vi.mocked(loadMeetingTranscriptPage).mockClear()
+    vi.mocked(loadMeetingSnapshot).mockClear()
+
+    for (let index = 0; index < 1_000; index += 1) {
+      eventHandler({ kind: 'transcript', meetingId: 'live', refresh: true })
+    }
+    await vi.advanceTimersByTimeAsync(125)
+
+    expect(loadMeetingTranscriptPage).toHaveBeenCalledTimes(1)
+    expect(loadMeetingSnapshot).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('loads older meeting pages without discarding the selected library', async () => {
+    const recent = {
+      id: 'recent',
+      title: 'Recent',
+      lifecycle: 'ready',
+      segments: [],
+      jobs: [],
+      gaps: [],
+      channels: [],
+    }
+    const older = { ...recent, id: 'older', title: 'Older' }
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [recent],
+      meetingsTruncated: true,
+      nextMeetingsBefore: {
+        createdAt: '2026-01-02T00:00:00Z',
+        meetingId: 'recent',
+      },
+    })
+    vi.mocked(loadMeetingLibraryPage).mockResolvedValue({
+      meetings: [older],
+      hasMore: false,
+      nextBefore: null,
+    })
+    const store = useMeetingsStore()
+    await store.initialize()
+
+    await store.loadOlderMeetings()
+
+    expect(store.meetings.map(meeting => meeting.id)).toEqual(['recent', 'older'])
+    expect(store.meetingsTruncated).toBe(false)
   })
 })

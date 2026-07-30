@@ -5,6 +5,10 @@
 //! injected ports so the lifecycle can be tested without pretending that a
 //! browser mock exercised an audio device or provider.
 
+use super::store::{
+    MeetingListCursor as StoreMeetingListCursor, TranscriptPageCursor as StoreTranscriptPageCursor,
+    MAX_TRANSCRIPT_PAGE_SEGMENTS,
+};
 use super::{
     AudioChannelDraft, AudioChannelKind, FollowUpJob, FollowUpJobDraft, FollowUpJobKind, JobFinish,
     JobState, MeetingDraft, MeetingFailure, MeetingOrigin, MeetingRecord, MeetingStatus,
@@ -25,7 +29,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const MEETING_EVENT: &str = "mimir://meeting-event";
-const DEFAULT_MEETING_LIMIT: u32 = 1_000;
+const DEFAULT_MEETING_LIMIT: u32 = 200;
+const MAX_LIBRARY_GAPS: u32 = 100;
+const MAX_SUMMARY_PREVIEW_CHARS: usize = 2_000;
 const DEFAULT_JOB_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Error)]
@@ -356,6 +362,10 @@ pub trait MeetingEventSink: Send + Sync {
 pub struct MeetingSnapshot {
     pub revision: u64,
     pub meetings: Vec<MeetingView>,
+    #[serde(default)]
+    pub meetings_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_meetings_before: Option<MeetingLibraryCursor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_meeting_id: Option<String>,
     #[serde(default)]
@@ -402,12 +412,19 @@ pub struct MeetingView {
     pub channels: Vec<String>,
     #[serde(default)]
     pub gaps: Vec<MeetingGapView>,
+    pub gap_count: u64,
     pub transcript_revision: u64,
     pub transcript_final: bool,
+    #[serde(default)]
+    pub segment_count: u64,
+    #[serde(default)]
+    pub transcript_all_final: bool,
     #[serde(default)]
     pub segments: Vec<MeetingSegmentView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(default)]
+    pub summary_truncated: bool,
     pub summary_state: String,
     pub kg_state: String,
     #[serde(default)]
@@ -440,6 +457,53 @@ pub struct MeetingSegmentView {
     #[serde(rename = "final")]
     pub is_final: bool,
     pub revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingTranscriptCursor {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub segment_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingTranscriptPage {
+    pub meeting_id: String,
+    pub revision: u64,
+    pub total_segments: u64,
+    pub has_more: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_before: Option<MeetingTranscriptCursor>,
+    #[serde(default)]
+    pub segments: Vec<MeetingSegmentView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingTranscriptSearchHit {
+    pub meeting_id: String,
+    pub segment_id: String,
+    pub start_ms: u64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingLibraryCursor {
+    pub created_at: String,
+    pub meeting_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingLibraryPage {
+    pub meetings: Vec<MeetingView>,
+    pub has_more: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_before: Option<MeetingLibraryCursor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -529,6 +593,177 @@ impl MeetingRuntime {
     pub fn snapshot(&self) -> Result<MeetingSnapshot, MeetingRuntimeError> {
         let _operation = self.operation()?;
         self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire))
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.inner.revision.load(Ordering::Acquire)
+    }
+
+    pub fn library_page(
+        &self,
+        before: Option<MeetingLibraryCursor>,
+        limit: Option<u32>,
+    ) -> Result<MeetingLibraryPage, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        self.library_page_unlocked(before, limit.unwrap_or(DEFAULT_MEETING_LIMIT))
+    }
+
+    pub fn meeting(&self, meeting_id: &str) -> Result<MeetingView, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let record = self.inner.store.get_meeting(meeting_id)?;
+        let content = self
+            .inner
+            .platform
+            .content(meeting_id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        if content.deleted {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is deleted"
+            )));
+        }
+        let active = self.active()?.clone();
+        self.meeting_view(&record, &content, active.as_ref())
+    }
+
+    pub fn transcript_page(
+        &self,
+        meeting_id: &str,
+        before: Option<MeetingTranscriptCursor>,
+        limit: Option<u32>,
+    ) -> Result<MeetingTranscriptPage, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let record = self.inner.store.get_meeting(meeting_id)?;
+        let content = self
+            .inner
+            .platform
+            .content(meeting_id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        if content.deleted {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is deleted"
+            )));
+        }
+        let before = before
+            .map(|cursor| {
+                Ok::<StoreTranscriptPageCursor, MeetingRuntimeError>(StoreTranscriptPageCursor {
+                    start_ms: i64::try_from(cursor.start_ms).map_err(|_| {
+                        MeetingRuntimeError::Validation(
+                            "transcript cursor start exceeds the durable range".into(),
+                        )
+                    })?,
+                    end_ms: i64::try_from(cursor.end_ms).map_err(|_| {
+                        MeetingRuntimeError::Validation(
+                            "transcript cursor end exceeds the durable range".into(),
+                        )
+                    })?,
+                    segment_id: cursor.segment_id,
+                })
+            })
+            .transpose()?;
+        let page = self.inner.store.transcript_page(
+            meeting_id,
+            before.as_ref(),
+            limit.unwrap_or(MAX_TRANSCRIPT_PAGE_SEGMENTS),
+        )?;
+        let channel_names = record
+            .channels
+            .iter()
+            .map(|channel| {
+                (
+                    channel.definition.id.as_str(),
+                    channel.definition.kind.to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        Ok(MeetingTranscriptPage {
+            meeting_id: page.meeting_id,
+            revision: page.revision,
+            total_segments: page.total_segments,
+            has_more: page.has_more,
+            next_before: page.next_before.map(|cursor| MeetingTranscriptCursor {
+                start_ms: cursor.start_ms as u64,
+                end_ms: cursor.end_ms as u64,
+                segment_id: cursor.segment_id,
+            }),
+            segments: page
+                .segments
+                .iter()
+                .map(|segment| segment_view(segment, &channel_names))
+                .collect(),
+            // The latest page doubles as the selected-meeting detail read. Do
+            // not retransmit a potentially large reviewed summary on every
+            // walk into older transcript pages.
+            summary: before.is_none().then_some(content.summary).flatten(),
+        })
+    }
+
+    pub fn transcript_slice(
+        &self,
+        meeting_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> Result<MeetingTranscriptPage, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let record = self.inner.store.get_meeting(meeting_id)?;
+        let content = self
+            .inner
+            .platform
+            .content(meeting_id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        if content.deleted {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is deleted"
+            )));
+        }
+        let page = self
+            .inner
+            .store
+            .transcript_slice(meeting_id, offset, limit)?;
+        let channel_names = record
+            .channels
+            .iter()
+            .map(|channel| {
+                (
+                    channel.definition.id.as_str(),
+                    channel.definition.kind.to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        Ok(MeetingTranscriptPage {
+            meeting_id: page.meeting_id,
+            revision: page.revision,
+            total_segments: page.total_segments,
+            has_more: page.has_more,
+            next_before: None,
+            segments: page
+                .segments
+                .iter()
+                .map(|segment| segment_view(segment, &channel_names))
+                .collect(),
+            summary: (offset == 0).then_some(content.summary).flatten(),
+        })
+    }
+
+    pub fn search_transcript(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<MeetingTranscriptSearchHit>, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        self.inner
+            .store
+            .search_transcript(query, limit)
+            .map(|hits| {
+                hits.into_iter()
+                    .map(|hit| MeetingTranscriptSearchHit {
+                        meeting_id: hit.meeting_id,
+                        segment_id: hit.segment_id,
+                        start_ms: hit.start_ms as u64,
+                        text: hit.text,
+                    })
+                    .collect()
+            })
+            .map_err(Into::into)
     }
 
     pub fn dismiss_candidate(
@@ -1277,18 +1512,8 @@ impl MeetingRuntime {
             projection.candidates
         };
         let runtime_diagnostic = self.diagnostic()?.clone();
-        let mut meetings = Vec::new();
-        for record in self.inner.store.list_meetings(DEFAULT_MEETING_LIMIT)? {
-            let content = self
-                .inner
-                .platform
-                .content(&record.id)
-                .map_err(|message| port_error("meeting content projection", message))?;
-            if content.deleted {
-                continue;
-            }
-            meetings.push(self.meeting_view(&record, &content, active.as_ref())?);
-        }
+        let page = self.library_page_unlocked(None, DEFAULT_MEETING_LIMIT)?;
+        let mut meetings = page.meetings;
         meetings.sort_by(|left, right| {
             right
                 .started_at
@@ -1305,6 +1530,8 @@ impl MeetingRuntime {
         Ok(MeetingSnapshot {
             revision,
             meetings,
+            meetings_truncated: page.has_more,
+            next_meetings_before: page.next_before,
             active_meeting_id,
             candidates,
             config: projection.config,
@@ -1314,20 +1541,59 @@ impl MeetingRuntime {
         })
     }
 
+    fn library_page_unlocked(
+        &self,
+        before: Option<MeetingLibraryCursor>,
+        limit: u32,
+    ) -> Result<MeetingLibraryPage, MeetingRuntimeError> {
+        let active = self.active()?.clone();
+        let before = before.map(|cursor| StoreMeetingListCursor {
+            created_at: cursor.created_at,
+            meeting_id: cursor.meeting_id,
+        });
+        let page = self
+            .inner
+            .store
+            .list_meetings_page(before.as_ref(), limit.clamp(1, DEFAULT_MEETING_LIMIT))?;
+        let mut meetings = Vec::with_capacity(page.meetings.len());
+        for record in page.meetings {
+            let content = self
+                .inner
+                .platform
+                .content(&record.id)
+                .map_err(|message| port_error("meeting content projection", message))?;
+            if !content.deleted {
+                meetings.push(self.meeting_view(&record, &content, active.as_ref())?);
+            }
+        }
+        Ok(MeetingLibraryPage {
+            meetings,
+            has_more: page.has_more,
+            next_before: page.next_before.map(|cursor| MeetingLibraryCursor {
+                created_at: cursor.created_at,
+                meeting_id: cursor.meeting_id,
+            }),
+        })
+    }
+
     fn meeting_view(
         &self,
         record: &MeetingRecord,
         content: &MeetingContentProjection,
         active: Option<&ActiveCapture>,
     ) -> Result<MeetingView, MeetingRuntimeError> {
-        let transcript = self.inner.store.transcript_snapshot(&record.id, None)?;
-        let transcript_final = self.transcript_is_final(record)?;
+        let transcript = self
+            .inner
+            .store
+            .transcript_overview(&record.id, MAX_LIBRARY_GAPS)?;
+        let transcript_final = transcript.is_final;
         let jobs = self.inner.store.list_jobs(&record.id)?;
         let active = active.filter(|value| value.meeting_id == record.id);
-        let summary = content
+        let full_summary = content
             .summary
             .clone()
             .or_else(|| successful_summary(&jobs, "summary"));
+        let (summary, summary_truncated) = summary_preview(full_summary.as_deref());
         let generated_title = successful_summary(&jobs, "title");
         let title = content
             .title
@@ -1402,14 +1668,18 @@ impl MeetingRuntime {
                 .filter(|gap| gap.resolved_revision.is_none())
                 .map(|gap| gap_view(gap, &channel_names))
                 .collect(),
+            gap_count: transcript.unresolved_gap_count,
             transcript_revision: transcript.revision,
             transcript_final,
-            segments: transcript
-                .segments
-                .iter()
-                .map(|segment| segment_view(segment, &channel_names))
-                .collect(),
+            segment_count: transcript.segment_count,
+            transcript_all_final: transcript.segment_count > 0
+                && transcript.non_final_segment_count == 0,
+            // Transcript bodies are selected-meeting detail, never library
+            // snapshot data. Keeping this compatibility field empty prevents
+            // accidental whole-history regressions at the IPC boundary.
+            segments: Vec::new(),
             summary,
+            summary_truncated,
             summary_state,
             kg_state,
             jobs: jobs.iter().map(job_view).collect(),
@@ -1426,11 +1696,8 @@ impl MeetingRuntime {
         Ok(self
             .inner
             .store
-            .transcript_revisions(&meeting.id)?
-            .last()
-            .is_some_and(|revision| {
-                revision.revision == meeting.transcript_revision && revision.marks_final
-            }))
+            .transcript_overview(&meeting.id, 1)?
+            .is_final)
     }
 
     fn publish_unlocked(
@@ -1440,13 +1707,14 @@ impl MeetingRuntime {
         run_id: Option<String>,
     ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
         let revision = self.inner.revision.fetch_add(1, Ordering::AcqRel) + 1;
-        let snapshot = self.snapshot_unlocked(revision)?;
         let event = MeetingEvent {
             revision,
             run_id,
             meeting_id,
             kind: kind.into(),
-            snapshot: Some(snapshot.clone()),
+            // Events are compact invalidations. The authoritative bounded
+            // snapshot is read once by the renderer after coalescing bursts.
+            snapshot: None,
         };
         if let Err(error) = self.inner.events.publish(&event) {
             self.set_diagnostic(format!(
@@ -1454,7 +1722,7 @@ impl MeetingRuntime {
                 bounded_error(&error)
             ))?;
         }
-        Ok(snapshot)
+        self.snapshot_unlocked(revision)
     }
 
     fn interrupt_after_stop_failure(
@@ -1896,6 +2164,19 @@ fn successful_summary(jobs: &[FollowUpJob], field: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
+}
+
+fn summary_preview(summary: Option<&str>) -> (Option<String>, bool) {
+    let Some(summary) = summary else {
+        return (None, false);
+    };
+    let mut characters = summary.chars();
+    let preview = characters
+        .by_ref()
+        .take(MAX_SUMMARY_PREVIEW_CHARS)
+        .collect::<String>();
+    let truncated = characters.next().is_some();
+    (Some(preview), truncated)
 }
 
 fn kg_state(
@@ -2473,15 +2754,69 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(events[0].revision > base.revision);
         assert_eq!(events[0].revision, started.revision);
-        assert_eq!(
-            events[0].snapshot.as_ref().unwrap().revision,
-            events[0].revision
+        assert!(events[0].snapshot.is_none());
+        assert!(
+            serde_json::to_vec(&events[0]).unwrap().len() < 512,
+            "meeting invalidation event exceeded its 512-byte payload budget"
         );
         drop(events);
 
         let reconciled = fixture.runtime.snapshot().unwrap();
         assert_eq!(reconciled.revision, started.revision);
         assert_eq!(reconciled.active_meeting_id, started.active_meeting_id);
+    }
+
+    #[test]
+    fn library_and_summary_projections_have_explicit_payload_budgets() {
+        let fixture = make_fixture();
+        for index in 0..=DEFAULT_MEETING_LIMIT {
+            fixture
+                .store
+                .create_meeting(
+                    &MeetingDraft {
+                        id: format!("scale-{index:03}"),
+                        title: format!("Meeting {index}"),
+                        origin: MeetingOrigin::default(),
+                        channels: Vec::new(),
+                        metadata: json!({}),
+                    },
+                    NOW,
+                )
+                .unwrap();
+        }
+        fixture
+            .platform
+            .state
+            .lock()
+            .unwrap()
+            .contents
+            .entry("scale-200".into())
+            .or_default()
+            .summary = Some("s".repeat(100_000));
+
+        let snapshot = fixture.runtime.snapshot().unwrap();
+        assert_eq!(snapshot.meetings.len(), DEFAULT_MEETING_LIMIT as usize);
+        assert!(snapshot.meetings_truncated);
+        let meeting = snapshot
+            .meetings
+            .iter()
+            .find(|meeting| meeting.id == "scale-200")
+            .unwrap();
+        assert_eq!(
+            meeting.summary.as_deref().unwrap().chars().count(),
+            MAX_SUMMARY_PREVIEW_CHARS
+        );
+        assert!(meeting.summary_truncated);
+        assert!(
+            serde_json::to_vec(&snapshot).unwrap().len() < 256 * 1024,
+            "200-row meeting library exceeded its 256 KiB payload budget"
+        );
+
+        let detail = fixture
+            .runtime
+            .transcript_page("scale-200", None, None)
+            .unwrap();
+        assert_eq!(detail.summary.unwrap().len(), 100_000);
     }
 
     #[test]
@@ -2532,8 +2867,13 @@ mod tests {
             .find(|meeting| meeting.id == meeting_id)
             .unwrap();
         assert_eq!(meeting.transcript_revision, 1);
-        assert_eq!(meeting.segments[0].text, "partial");
-        assert!(!meeting.segments[0].is_final);
+        assert!(meeting.segments.is_empty());
+        let page = fixture
+            .runtime
+            .transcript_page(&meeting_id, None, None)
+            .unwrap();
+        assert_eq!(page.segments[0].text, "partial");
+        assert!(!page.segments[0].is_final);
         assert_eq!(duplicate.revision, applied.revision);
         assert_eq!(fixture.events.published.lock().unwrap().len(), 2);
     }
@@ -2556,7 +2896,16 @@ mod tests {
         assert_eq!(meeting.lifecycle, "ready");
         assert_eq!(meeting.transcription, "final");
         assert!(meeting.transcript_final);
-        assert_eq!(meeting.segments.len(), 1);
+        assert!(meeting.segments.is_empty());
+        assert_eq!(
+            fixture
+                .runtime
+                .transcript_page(&meeting_id, None, None)
+                .unwrap()
+                .segments
+                .len(),
+            1
+        );
         assert_eq!(meeting.summary_state, "queued");
         assert_eq!(meeting.kg_state, "not-offered");
         assert_eq!(meeting.jobs[0].kind, "title-summary");
@@ -2647,9 +2996,11 @@ mod tests {
             .find(|meeting| meeting.id == meeting_id)
             .unwrap();
         assert!(meeting.transcript_final);
-        assert_eq!(meeting.segments.len(), 1);
+        assert!(meeting.segments.is_empty());
+        let page = runtime.transcript_page(&meeting_id, None, None).unwrap();
+        assert_eq!(page.segments.len(), 1);
         assert_eq!(
-            meeting.segments[0].text,
+            page.segments[0].text,
             "The acknowledged provider tail is durable."
         );
     }
@@ -2806,8 +3157,14 @@ mod tests {
                 "missing renderer field {field}"
             );
         }
-        assert_eq!(meeting["segments"][0]["final"], true);
-        assert!(meeting["segments"][0].get("final_").is_none());
+        assert_eq!(meeting["segments"], json!([]));
+        let page = fixture
+            .runtime
+            .transcript_page(started.active_meeting_id.as_deref().unwrap(), None, None)
+            .unwrap();
+        let page = serde_json::to_value(page).unwrap();
+        assert_eq!(page["segments"][0]["final"], true);
+        assert!(page["segments"][0].get("final_").is_none());
 
         let clear_retention: MeetingConfigPatch =
             serde_json::from_value(json!({ "retentionDays": null })).unwrap();

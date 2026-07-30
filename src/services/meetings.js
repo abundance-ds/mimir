@@ -3,9 +3,29 @@ import { listen } from '@tauri-apps/api/event'
 
 export const MEETING_EVENT = 'mimir://meeting-event'
 export const MEETING_PLATFORM_CHANGED_EVENT = 'mimir://meeting-platform-changed'
+export const TRANSCRIPT_PAGE_SIZE = 250
 
 export async function loadMeetingSnapshot() {
   return normalizeMeetingSnapshot(await invoke('meetings_snapshot'))
+}
+
+export async function loadMeetingTranscriptPage(
+  meetingId,
+  before = null,
+  limit = TRANSCRIPT_PAGE_SIZE,
+) {
+  return normalizeMeetingTranscriptPage(await invoke('meetings_transcript_page', {
+    meetingId: requiredId(meetingId, 'meeting'),
+    before: before ? normalizeTranscriptCursor(before) : null,
+    limit: Math.min(TRANSCRIPT_PAGE_SIZE, Math.max(1, nonnegativeInteger(limit))),
+  }))
+}
+
+export async function loadMeetingLibraryPage(before, limit = 200) {
+  return normalizeMeetingLibraryPage(await invoke('meetings_library_page', {
+    before: before ? normalizeMeetingLibraryCursor(before) : null,
+    limit: Math.min(200, Math.max(1, nonnegativeInteger(limit))),
+  }))
 }
 
 export async function requestMeetingMicrophonePermission() {
@@ -139,6 +159,7 @@ export async function listenToMeetingEvents(onEvent) {
       MEETING_PLATFORM_CHANGED_EVENT,
       event => onEvent({
         kind: String(event?.payload?.kind || 'platform-changed'),
+        meetingId: optionalString(event?.payload?.meetingId ?? event?.payload?.meeting_id),
         refresh: true,
       }),
     )
@@ -162,6 +183,12 @@ export function normalizeMeetingSnapshot(value) {
   return {
     revision: nonnegativeInteger(snapshot.revision),
     meetings,
+    meetingsTruncated: Boolean(snapshot.meetingsTruncated ?? snapshot.meetings_truncated),
+    nextMeetingsBefore: snapshot.nextMeetingsBefore || snapshot.next_meetings_before
+      ? normalizeMeetingLibraryCursor(
+        snapshot.nextMeetingsBefore ?? snapshot.next_meetings_before,
+      )
+      : null,
     activeMeetingId: activeId,
     activeMeeting: meetings.find(meeting => meeting.id === activeId) || null,
     candidates: (Array.isArray(snapshot.candidates) ? snapshot.candidates : [])
@@ -173,6 +200,38 @@ export function normalizeMeetingSnapshot(value) {
       .filter(isPlainObject)
       .map(normalizeModel),
     diagnostic: optionalString(snapshot.diagnostic),
+  }
+}
+
+export function normalizeMeetingLibraryPage(value) {
+  const page = object(value)
+  return {
+    meetings: (Array.isArray(page.meetings) ? page.meetings : [])
+      .filter(isPlainObject)
+      .slice(0, 200)
+      .map(normalizeMeeting),
+    hasMore: Boolean(page.hasMore ?? page.has_more),
+    nextBefore: page.nextBefore || page.next_before
+      ? normalizeMeetingLibraryCursor(page.nextBefore ?? page.next_before)
+      : null,
+  }
+}
+
+export function normalizeMeetingTranscriptPage(value) {
+  const page = object(value)
+  return {
+    meetingId: String(page.meetingId ?? page.meeting_id ?? ''),
+    revision: nonnegativeInteger(page.revision),
+    totalSegments: nonnegativeInteger(page.totalSegments ?? page.total_segments),
+    hasMore: Boolean(page.hasMore ?? page.has_more),
+    nextBefore: page.nextBefore || page.next_before
+      ? normalizeTranscriptCursor(page.nextBefore ?? page.next_before)
+      : null,
+    segments: (Array.isArray(page.segments) ? page.segments : [])
+      .filter(isPlainObject)
+      .slice(0, TRANSCRIPT_PAGE_SIZE)
+      .map(normalizeSegment),
+    summary: optionalString(page.summary),
   }
 }
 
@@ -209,14 +268,20 @@ function normalizeMeeting(value) {
         endMs: nonnegativeInteger(gap.endMs ?? gap.end_ms),
         reason: String(gap.reason || 'capture-gap'),
       })),
+    gapCount: nonnegativeInteger(meeting.gapCount ?? meeting.gap_count),
     transcriptRevision: nonnegativeInteger(
       meeting.transcriptRevision ?? meeting.transcript_revision,
     ),
     transcriptFinal: Boolean(meeting.transcriptFinal ?? meeting.transcript_final),
+    segmentCount: nonnegativeInteger(meeting.segmentCount ?? meeting.segment_count),
+    transcriptAllFinal: Boolean(
+      meeting.transcriptAllFinal ?? meeting.transcript_all_final,
+    ),
     segments: (Array.isArray(meeting.segments) ? meeting.segments : [])
       .filter(isPlainObject)
       .map(normalizeSegment),
     summary: optionalString(meeting.summary),
+    summaryTruncated: Boolean(meeting.summaryTruncated ?? meeting.summary_truncated),
     summaryState: String(meeting.summaryState ?? meeting.summary_state ?? 'not-started'),
     kgState: String(meeting.kgState ?? meeting.kg_state ?? 'not-offered'),
     jobs: (Array.isArray(meeting.jobs) ? meeting.jobs : [])
@@ -225,6 +290,25 @@ function normalizeMeeting(value) {
     error: optionalString(meeting.error),
     updatedAt: optionalString(meeting.updatedAt ?? meeting.updated_at),
   }
+}
+
+function normalizeTranscriptCursor(value) {
+  const cursor = object(value)
+  const segmentId = String(cursor.segmentId ?? cursor.segment_id ?? '').trim()
+  if (!segmentId) throw new Error('Transcript cursor is missing its segment identifier.')
+  return {
+    startMs: nonnegativeInteger(cursor.startMs ?? cursor.start_ms),
+    endMs: nonnegativeInteger(cursor.endMs ?? cursor.end_ms),
+    segmentId,
+  }
+}
+
+function normalizeMeetingLibraryCursor(value) {
+  const cursor = object(value)
+  const createdAt = String(cursor.createdAt ?? cursor.created_at ?? '').trim()
+  const meetingId = String(cursor.meetingId ?? cursor.meeting_id ?? '').trim()
+  if (!createdAt || !meetingId) throw new Error('Meeting library cursor is incomplete.')
+  return { createdAt, meetingId }
 }
 
 function normalizeSegment(value) {

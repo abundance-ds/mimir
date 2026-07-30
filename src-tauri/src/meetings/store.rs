@@ -19,8 +19,57 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const MAX_TRANSCRIPT_PAGE_SEGMENTS: u32 = 250;
 const APPLICATION_ID: i64 = 0x4d4d4554; // "MMET"
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptPageCursor {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub segment_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TranscriptPage {
+    pub meeting_id: String,
+    pub revision: u64,
+    pub total_segments: u64,
+    pub has_more: bool,
+    pub next_before: Option<TranscriptPageCursor>,
+    pub segments: Vec<TranscriptSegmentRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TranscriptOverview {
+    pub revision: u64,
+    pub is_final: bool,
+    pub segment_count: u64,
+    pub non_final_segment_count: u64,
+    pub unresolved_gap_count: u64,
+    pub gaps: Vec<TranscriptGapRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptSearchHit {
+    pub meeting_id: String,
+    pub segment_id: String,
+    pub start_ms: i64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingListCursor {
+    pub created_at: String,
+    pub meeting_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeetingListPage {
+    pub meetings: Vec<MeetingRecord>,
+    pub has_more: bool,
+    pub next_before: Option<MeetingListCursor>,
+}
 
 #[derive(Debug, Error)]
 pub enum MeetingStoreError {
@@ -127,15 +176,58 @@ impl MeetingStore {
     }
 
     pub fn list_meetings(&self, limit: u32) -> Result<Vec<MeetingRecord>, MeetingStoreError> {
+        Ok(self.list_meetings_page(None, limit)?.meetings)
+    }
+
+    pub fn list_meetings_page(
+        &self,
+        before: Option<&MeetingListCursor>,
+        limit: u32,
+    ) -> Result<MeetingListPage, MeetingStoreError> {
+        if let Some(cursor) = before {
+            timestamp(&cursor.created_at)?;
+            validate_id(&cursor.meeting_id, "meeting list cursor id")
+                .map_err(MeetingStoreError::Validation)?;
+        }
+        let limit = limit.clamp(1, 1_000);
         let connection = self.lock()?;
-        let mut statement = connection
-            .prepare("SELECT id FROM meetings ORDER BY created_at DESC, id DESC LIMIT ?1")?;
+        let mut statement = connection.prepare(
+            "SELECT id FROM meetings
+             WHERE ?1 IS NULL
+                OR created_at < ?1
+                OR (created_at=?1 AND id < ?2)
+             ORDER BY created_at DESC,id DESC
+             LIMIT ?3",
+        )?;
         let ids = statement
-            .query_map([limit.clamp(1, 1_000)], |row| row.get::<_, String>(0))?
+            .query_map(
+                params![
+                    before.map(|cursor| cursor.created_at.as_str()),
+                    before.map(|cursor| cursor.meeting_id.as_str()),
+                    i64::from(limit) + 1
+                ],
+                |row| row.get::<_, String>(0),
+            )?
             .collect::<Result<Vec<_>, _>>()?;
-        ids.into_iter()
+        let has_more = ids.len() > limit as usize;
+        let meetings = ids
+            .into_iter()
+            .take(limit as usize)
             .map(|meeting_id| load_meeting(&connection, &meeting_id))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_before =
+            has_more
+                .then(|| meetings.last())
+                .flatten()
+                .map(|meeting| MeetingListCursor {
+                    created_at: meeting.created_at.clone(),
+                    meeting_id: meeting.id.clone(),
+                });
+        Ok(MeetingListPage {
+            meetings,
+            has_more,
+            next_before,
+        })
     }
 
     pub fn transition_meeting(
@@ -471,6 +563,231 @@ impl MeetingStore {
         })
     }
 
+    /// Read a bounded, keyset-paginated window from the current transcript.
+    ///
+    /// Pages are returned in presentation order, while the query walks the
+    /// durable index newest-first. A cursor is stable when new live segments
+    /// arrive and therefore cannot duplicate or skip older rows due to offset
+    /// shifts.
+    pub fn transcript_page(
+        &self,
+        meeting_id: &str,
+        before: Option<&TranscriptPageCursor>,
+        limit: u32,
+    ) -> Result<TranscriptPage, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        if let Some(cursor) = before {
+            validate_id(&cursor.segment_id, "transcript cursor segment id")
+                .map_err(MeetingStoreError::Validation)?;
+            if cursor.start_ms < 0 || cursor.end_ms <= cursor.start_ms {
+                return Err(MeetingStoreError::Validation(
+                    "transcript cursor has an invalid time range".into(),
+                ));
+            }
+        }
+        let limit = limit.clamp(1, MAX_TRANSCRIPT_PAGE_SEGMENTS);
+        let connection = self.lock()?;
+        let meeting = load_meeting(&connection, meeting_id)?;
+        let total_segments = connection.query_row(
+            "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id=?1",
+            [meeting_id],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let before_start = before.map(|cursor| cursor.start_ms);
+        let before_end = before.map(|cursor| cursor.end_ms);
+        let before_id = before.map(|cursor| cursor.segment_id.as_str());
+        let mut statement = connection.prepare(
+            "SELECT segment_id,start_ms,end_ms,text,channel_id,speaker,confidence,
+                    is_final,metadata_json,created_revision,updated_revision
+             FROM transcript_segments
+             WHERE meeting_id=?1
+               AND (
+                 ?2 IS NULL
+                 OR start_ms < ?2
+                 OR (start_ms=?2 AND end_ms < ?3)
+                 OR (start_ms=?2 AND end_ms=?3 AND segment_id < ?4)
+               )
+             ORDER BY start_ms DESC,end_ms DESC,segment_id DESC
+             LIMIT ?5",
+        )?;
+        let mut segments = statement
+            .query_map(
+                params![
+                    meeting_id,
+                    before_start,
+                    before_end,
+                    before_id,
+                    i64::from(limit) + 1
+                ],
+                current_segment_from_row,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let has_more = segments.len() > limit as usize;
+        segments.truncate(limit as usize);
+        let next_before =
+            has_more
+                .then(|| segments.last())
+                .flatten()
+                .map(|segment| TranscriptPageCursor {
+                    start_ms: segment.segment.start_ms,
+                    end_ms: segment.segment.end_ms,
+                    segment_id: segment.segment.id.clone(),
+                });
+        segments.reverse();
+        Ok(TranscriptPage {
+            meeting_id: meeting_id.into(),
+            revision: meeting.transcript_revision,
+            total_segments,
+            has_more,
+            next_before,
+            segments,
+        })
+    }
+
+    /// Backward-compatible chronological slice for bounded agent reads.
+    ///
+    /// Renderer navigation uses keyset pagination above. This offset form is
+    /// deliberately capped by callers and exists for the established
+    /// `meetings_get` tool contract.
+    pub fn transcript_slice(
+        &self,
+        meeting_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> Result<TranscriptPage, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let offset = i64::try_from(offset).map_err(|_| {
+            MeetingStoreError::Validation("transcript offset exceeds the durable range".into())
+        })?;
+        let limit = limit.clamp(1, MAX_TRANSCRIPT_PAGE_SEGMENTS);
+        let connection = self.lock()?;
+        let meeting = load_meeting(&connection, meeting_id)?;
+        let total_segments = connection.query_row(
+            "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id=?1",
+            [meeting_id],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let mut statement = connection.prepare(
+            "SELECT segment_id,start_ms,end_ms,text,channel_id,speaker,confidence,
+                    is_final,metadata_json,created_revision,updated_revision
+             FROM transcript_segments
+             WHERE meeting_id=?1
+             ORDER BY start_ms,end_ms,segment_id
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let segments = statement
+            .query_map(
+                params![meeting_id, i64::from(limit), offset],
+                current_segment_from_row,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let returned = segments.len() as u64;
+        Ok(TranscriptPage {
+            meeting_id: meeting_id.into(),
+            revision: meeting.transcript_revision,
+            total_segments,
+            has_more: (offset as u64).saturating_add(returned) < total_segments,
+            next_before: None,
+            segments,
+        })
+    }
+
+    /// Return only the bounded transcript metadata required by a library row.
+    pub fn transcript_overview(
+        &self,
+        meeting_id: &str,
+        gap_limit: u32,
+    ) -> Result<TranscriptOverview, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        let meeting = load_meeting(&connection, meeting_id)?;
+        let is_final = connection
+            .query_row(
+                "SELECT marks_final FROM transcript_revisions
+                 WHERE meeting_id=?1 AND revision=?2",
+                params![meeting_id, to_i64(meeting.transcript_revision)?],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        let (segment_count, non_final_segment_count) = connection.query_row(
+            "SELECT COUNT(*),COALESCE(SUM(CASE WHEN is_final=0 THEN 1 ELSE 0 END),0)
+             FROM transcript_segments WHERE meeting_id=?1",
+            [meeting_id],
+            |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+        )?;
+        let unresolved_gap_count = connection.query_row(
+            "SELECT COUNT(*) FROM transcript_gaps
+             WHERE meeting_id=?1 AND resolved_revision IS NULL",
+            [meeting_id],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let mut statement = connection.prepare(
+            "SELECT gap_id,start_ms,end_ms,reason,channel_id,detail,
+                    created_revision,resolved_revision
+             FROM transcript_gaps
+             WHERE meeting_id=?1 AND resolved_revision IS NULL
+             ORDER BY start_ms DESC,end_ms DESC,gap_id DESC
+             LIMIT ?2",
+        )?;
+        let mut gaps = statement
+            .query_map(params![meeting_id, gap_limit.clamp(1, 100)], gap_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        gaps.reverse();
+        Ok(TranscriptOverview {
+            revision: meeting.transcript_revision,
+            is_final,
+            segment_count,
+            non_final_segment_count,
+            unresolved_gap_count,
+            gaps,
+        })
+    }
+
+    pub fn search_transcript(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<TranscriptSearchHit>, MeetingStoreError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(MeetingStoreError::Validation(
+                "transcript search query cannot be empty".into(),
+            ));
+        }
+        let phrase = format!("\"{}\"", query.replace('"', "\"\""));
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "WITH ranked AS (
+               SELECT s.meeting_id,s.segment_id,s.start_ms,s.text,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY s.meeting_id
+                        ORDER BY s.start_ms,s.end_ms,s.segment_id
+                      ) AS meeting_rank
+               FROM transcript_segments_fts f
+               JOIN transcript_segments s
+                 ON s.meeting_id=f.meeting_id AND s.segment_id=f.segment_id
+               WHERE transcript_segments_fts MATCH ?1
+             )
+             SELECT meeting_id,segment_id,start_ms,text
+             FROM ranked
+             WHERE meeting_rank<=3
+             ORDER BY meeting_id,start_ms,segment_id
+             LIMIT ?2",
+        )?;
+        let hits = statement
+            .query_map(params![phrase, limit.clamp(1, 300)], |row| {
+                Ok(TranscriptSearchHit {
+                    meeting_id: row.get(0)?,
+                    segment_id: row.get(1)?,
+                    start_ms: row.get(2)?,
+                    text: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(hits)
+    }
+
     pub fn transcript_revisions(
         &self,
         meeting_id: &str,
@@ -496,6 +813,26 @@ impl MeetingStore {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    pub fn has_retention_hold(&self, meeting_id: &str) -> Result<bool, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        require_meeting(&connection, meeting_id)?;
+        let held = connection.query_row(
+            "SELECT
+               EXISTS(
+                 SELECT 1 FROM follow_up_jobs
+                 WHERE meeting_id=?1 AND state IN ('pending','running')
+               )
+               OR EXISTS(
+                 SELECT 1 FROM audio_chunks
+                 WHERE meeting_id=?1 AND status='staged'
+               )",
+            [meeting_id],
+            |row| row.get::<_, bool>(0),
+        )?;
+        Ok(held)
     }
 
     /// Remove only durable source-audio chunk metadata. Channel definitions
@@ -833,6 +1170,18 @@ fn migrate(connection: &mut Connection) -> Result<(), MeetingStoreError> {
         transaction.pragma_update(None, "user_version", 1)?;
         transaction.commit()?;
     }
+    if version < 2 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migration_v2(&transaction)?;
+        transaction.pragma_update(None, "user_version", 2)?;
+        transaction.commit()?;
+    }
+    if version < 3 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migration_v3(&transaction)?;
+        transaction.pragma_update(None, "user_version", 3)?;
+        transaction.commit()?;
+    }
     Ok(())
 }
 
@@ -1023,6 +1372,45 @@ fn migration_v1(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> 
          CREATE INDEX idx_jobs_claim
            ON follow_up_jobs(state,not_before,created_at,id);
          CREATE INDEX idx_jobs_meeting ON follow_up_jobs(meeting_id,created_at,id);",
+    )?;
+    Ok(())
+}
+
+fn migration_v2(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> {
+    transaction.execute_batch(
+        "CREATE INDEX IF NOT EXISTS transcript_segments_timeline
+         ON transcript_segments(meeting_id,start_ms,end_ms,segment_id);",
+    )?;
+    Ok(())
+}
+
+fn migration_v3(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> {
+    transaction.execute_batch(
+        "CREATE VIRTUAL TABLE transcript_segments_fts USING fts5(
+           meeting_id UNINDEXED,
+           segment_id UNINDEXED,
+           text,
+           tokenize='unicode61'
+         );
+         INSERT INTO transcript_segments_fts(meeting_id,segment_id,text)
+           SELECT meeting_id,segment_id,text FROM transcript_segments;
+         CREATE TRIGGER transcript_segments_fts_insert
+         AFTER INSERT ON transcript_segments BEGIN
+           INSERT INTO transcript_segments_fts(meeting_id,segment_id,text)
+           VALUES (new.meeting_id,new.segment_id,new.text);
+         END;
+         CREATE TRIGGER transcript_segments_fts_update
+         AFTER UPDATE ON transcript_segments BEGIN
+           DELETE FROM transcript_segments_fts
+           WHERE meeting_id=old.meeting_id AND segment_id=old.segment_id;
+           INSERT INTO transcript_segments_fts(meeting_id,segment_id,text)
+           VALUES (new.meeting_id,new.segment_id,new.text);
+         END;
+         CREATE TRIGGER transcript_segments_fts_delete
+         AFTER DELETE ON transcript_segments BEGIN
+           DELETE FROM transcript_segments_fts
+           WHERE meeting_id=old.meeting_id AND segment_id=old.segment_id;
+         END;",
     )?;
     Ok(())
 }
@@ -1360,6 +1748,41 @@ fn load_segments_at(
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(segments)
+}
+
+fn current_segment_from_row(row: &Row<'_>) -> rusqlite::Result<TranscriptSegmentRecord> {
+    let metadata: String = row.get(8)?;
+    Ok(TranscriptSegmentRecord {
+        segment: TranscriptSegmentInput {
+            id: row.get(0)?,
+            start_ms: row.get(1)?,
+            end_ms: row.get(2)?,
+            text: row.get(3)?,
+            channel_id: row.get(4)?,
+            speaker: row.get(5)?,
+            confidence: row.get(6)?,
+            is_final: row.get(7)?,
+            metadata: serde_json::from_str(&metadata).map_err(json_from_sql_error)?,
+        },
+        created_revision: row.get::<_, i64>(9)? as u64,
+        updated_revision: row.get::<_, i64>(10)? as u64,
+    })
+}
+
+fn gap_from_row(row: &Row<'_>) -> rusqlite::Result<TranscriptGapRecord> {
+    let reason: String = row.get(3)?;
+    Ok(TranscriptGapRecord {
+        gap: TranscriptGapInput {
+            id: row.get(0)?,
+            start_ms: row.get(1)?,
+            end_ms: row.get(2)?,
+            reason: gap_reason(&reason).map_err(text_from_sql_error)?,
+            channel_id: row.get(4)?,
+            detail: row.get(5)?,
+        },
+        created_revision: row.get::<_, i64>(6)? as u64,
+        resolved_revision: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+    })
 }
 
 fn load_gaps_at(
@@ -2064,6 +2487,128 @@ mod tests {
         assert_eq!(revision_two.segments[0].segment.text, "Final");
         assert!(revision_two.gaps.is_empty());
         assert_eq!(store.transcript_revisions("meeting-1").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn transcript_pages_remain_bounded_and_stable_at_one_hundred_thousand_segments() {
+        let store = store();
+        start_recording(&store);
+        {
+            let mut connection = store.lock().unwrap();
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO transcript_revisions (
+                       meeting_id,revision,base_revision,batch_id,source,observed_at,marks_final
+                     ) VALUES ('meeting-1',1,0,'scale-fixture','test',?1,0)",
+                    [T2],
+                )
+                .unwrap();
+            transaction
+                .execute(
+                    "UPDATE meetings SET transcript_revision=1 WHERE id='meeting-1'",
+                    [],
+                )
+                .unwrap();
+            {
+                let mut insert = transaction
+                    .prepare(
+                        "INSERT INTO transcript_segments (
+                           meeting_id,segment_id,start_ms,end_ms,text,channel_id,speaker,
+                           confidence,is_final,metadata_json,created_revision,updated_revision
+                         ) VALUES ('meeting-1',?1,?2,?3,'word','system',NULL,0.9,1,'{}',1,1)",
+                    )
+                    .unwrap();
+                for index in 0_i64..100_000 {
+                    let start_ms = index * 1_000;
+                    insert
+                        .execute(params![
+                            format!("segment-{index:06}"),
+                            start_ms,
+                            start_ms + 900
+                        ])
+                        .unwrap();
+                }
+            }
+            transaction.commit().unwrap();
+        }
+
+        let latest = store.transcript_page("meeting-1", None, 10_000).unwrap();
+        assert_eq!(latest.total_segments, 100_000);
+        assert_eq!(latest.segments.len(), MAX_TRANSCRIPT_PAGE_SEGMENTS as usize);
+        assert!(latest.has_more);
+        assert_eq!(
+            latest.segments.first().unwrap().segment.start_ms,
+            99_750_000
+        );
+        assert_eq!(latest.segments.last().unwrap().segment.start_ms, 99_999_000);
+        assert!(
+            serde_json::to_vec(&latest.segments).unwrap().len() < 128 * 1024,
+            "a single IPC transcript page exceeded its 128 KiB payload budget"
+        );
+
+        let older = store
+            .transcript_page("meeting-1", latest.next_before.as_ref(), 250)
+            .unwrap();
+        assert_eq!(older.segments.len(), 250);
+        assert_eq!(older.segments.first().unwrap().segment.start_ms, 99_500_000);
+        assert_eq!(older.segments.last().unwrap().segment.start_ms, 99_749_000);
+        assert_ne!(
+            latest.segments.first().unwrap().segment.id,
+            older.segments.last().unwrap().segment.id
+        );
+        let hits = store.search_transcript("word", 300).unwrap();
+        assert_eq!(hits.len(), 3);
+        assert!(hits.iter().all(|hit| hit.meeting_id == "meeting-1"));
+    }
+
+    #[test]
+    fn meeting_keyset_pages_reach_records_beyond_the_old_one_thousand_cap() {
+        let store = store();
+        {
+            let mut connection = store.lock().unwrap();
+            let transaction = connection.transaction().unwrap();
+            {
+                let mut insert = transaction
+                    .prepare(
+                        "INSERT INTO meetings (
+                           id,title,origin_json,status,created_at,updated_at,metadata_json
+                         ) VALUES (
+                           ?1,'Scale','{\"kind\":\"manual\",\"evidence\":{}}',
+                           'completed',?2,?2,'{}'
+                         )",
+                    )
+                    .unwrap();
+                for index in 0..1_205 {
+                    insert
+                        .execute(params![
+                            format!("meeting-{index:04}"),
+                            format!("2026-07-{:02}T10:00:00Z", 1 + index % 30)
+                        ])
+                        .unwrap();
+                }
+            }
+            transaction.commit().unwrap();
+        }
+
+        let mut before = None;
+        let mut ids = Vec::new();
+        loop {
+            let page = store.list_meetings_page(before.as_ref(), 250).unwrap();
+            ids.extend(page.meetings.iter().map(|meeting| meeting.id.clone()));
+            if !page.has_more {
+                break;
+            }
+            before = page.next_before;
+        }
+        assert_eq!(ids.len(), 1_205);
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            1_205
+        );
+        assert!(ids.contains(&"meeting-0000".to_string()));
     }
 
     #[test]
