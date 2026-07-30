@@ -19,7 +19,7 @@ use super::{
     MeetingStore, TranscriptBatch, TranscriptChange, TranscriptSegmentInput,
 };
 use chrono::{SecondsFormat, Utc};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{future::BoxFuture, SinkExt, StreamExt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -44,6 +44,7 @@ use tokio_tungstenite::{
         protocol::WebSocketConfig,
         Message,
     },
+    Connector as WebSocketConnector,
 };
 use url::Url;
 
@@ -473,7 +474,7 @@ fn run_worker(
             run_result?;
         }
         ResolvedTranscriptionProvider::Custom { endpoint, model } => {
-            let credential = credentials.bearer_token(&endpoint)?;
+            let credential = resolve_custom_credential(credentials.as_ref(), &endpoint)?;
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -495,21 +496,37 @@ fn run_worker(
     Ok(WorkerCompletion {
         source: source.into(),
         final_segment_count: sink.final_segment_count(),
-        unresolved_partial_count: sink
-            .accumulator
-            .segments()
-            .values()
-            .filter(|segment| segment.value.state == SegmentState::Partial)
-            .count(),
+        unresolved_partial_count: sink.accumulator.unresolved_partial_count(),
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+fn resolve_custom_credential(
+    resolver: &dyn MeetingCredentialResolver,
+    endpoint: &CustomSttEndpoint,
+) -> Result<Option<String>, String> {
+    resolver
+        .bearer_token(endpoint)
+        .map_err(|_| "could not resolve custom transcription credential".to_string())
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct PersistedAudioChunk {
     pub sequence: u64,
     pub start_ms: u64,
     pub end_ms: u64,
     pub bytes: Vec<u8>,
+}
+
+impl std::fmt::Debug for PersistedAudioChunk {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PersistedAudioChunk")
+            .field("sequence", &self.sequence)
+            .field("start_ms", &self.start_ms)
+            .field("end_ms", &self.end_ms)
+            .field("audio", &format_args!("[{} bytes]", self.bytes.len()))
+            .finish()
+    }
 }
 
 /// Safe reader for capture-owned channel files.
@@ -850,6 +867,34 @@ async fn run_custom(
     context: CustomRunContext<'_>,
     sink: &mut dyn NormalizedBatchSink,
 ) -> Result<(), String> {
+    run_custom_with_connector(context, sink, &ProductionCustomConnector).await
+}
+
+trait CustomConnectionFactory: Send + Sync {
+    fn connect<'a>(
+        &'a self,
+        endpoint: &'a CustomSttEndpoint,
+        credential: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<(PinnedWebSocket, SocketAddr), String>>;
+}
+
+struct ProductionCustomConnector;
+
+impl CustomConnectionFactory for ProductionCustomConnector {
+    fn connect<'a>(
+        &'a self,
+        endpoint: &'a CustomSttEndpoint,
+        credential: Option<&'a str>,
+    ) -> BoxFuture<'a, Result<(PinnedWebSocket, SocketAddr), String>> {
+        Box::pin(connect_pinned(endpoint, credential))
+    }
+}
+
+async fn run_custom_with_connector(
+    context: CustomRunContext<'_>,
+    sink: &mut dyn NormalizedBatchSink,
+    connector: &dyn CustomConnectionFactory,
+) -> Result<(), String> {
     let CustomRunContext {
         request,
         endpoint,
@@ -892,7 +937,7 @@ async fn run_custom(
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        let connection = connect_pinned(endpoint, credential).await;
+        let connection = connector.connect(endpoint, credential).await;
         let (mut websocket, _pinned_address) = match connection {
             Ok(connection) => connection,
             Err(message) => {
@@ -1103,7 +1148,7 @@ where
                 retry_after_ms,
             } => {
                 return Err(ProviderFailure {
-                    code: code.to_string(),
+                    code: opaque_provider_error_code(code.as_str()),
                     retryable,
                     retry_after: retry_after_ms.map(Duration::from_millis),
                 })
@@ -1140,7 +1185,7 @@ where
                 retry_after_ms,
             } => {
                 return Err(ProviderFailure {
-                    code: code.to_string(),
+                    code: opaque_provider_error_code(code.as_str()),
                     retryable,
                     retry_after: retry_after_ms.map(Duration::from_millis),
                 })
@@ -1181,17 +1226,29 @@ async fn connect_pinned(
     endpoint
         .validate_resolved_addresses(addresses.iter().map(SocketAddr::ip))
         .map_err(|error| error.to_string())?;
+    connect_prevalidated_addresses(endpoint, credential, addresses, None).await
+}
 
+/// Opens addresses already pinned to the approved endpoint. Production calls
+/// this only after public-address validation above. The test connector injects
+/// loopback plus a generated CA to exercise the real TLS/WebSocket path
+/// deterministically without weakening production routing.
+async fn connect_prevalidated_addresses(
+    endpoint: &CustomSttEndpoint,
+    credential: Option<&str>,
+    addresses: Vec<SocketAddr>,
+    connector: Option<WebSocketConnector>,
+) -> Result<(PinnedWebSocket, SocketAddr), String> {
     let mut last_error = None;
     for address in addresses {
         let tcp = match timeout(CONNECT_TIMEOUT, TcpStream::connect(address)).await {
             Ok(Ok(tcp)) => tcp,
-            Ok(Err(error)) => {
-                last_error = Some(error.to_string());
+            Ok(Err(_)) => {
+                last_error = Some("TCP connection failed");
                 continue;
             }
             Err(_) => {
-                last_error = Some("connection timed out".into());
+                last_error = Some("TCP connection timed out");
                 continue;
             }
         };
@@ -1217,7 +1274,7 @@ async fn connect_pinned(
             .max_frame_size(Some(MAX_PROVIDER_FRAME_BYTES));
         match timeout(
             CONNECT_TIMEOUT,
-            client_async_tls_with_config(request, tcp, Some(configuration), None),
+            client_async_tls_with_config(request, tcp, Some(configuration), connector.clone()),
         )
         .await
         {
@@ -1233,13 +1290,13 @@ async fn connect_pinned(
                 }
                 return Ok((websocket, address));
             }
-            Ok(Err(error)) => last_error = Some(error.to_string()),
-            Err(_) => last_error = Some("TLS/WebSocket handshake timed out".into()),
+            Ok(Err(_)) => last_error = Some("TLS/WebSocket handshake failed"),
+            Err(_) => last_error = Some("TLS/WebSocket handshake timed out"),
         }
     }
     Err(format!(
         "could not connect to any approved DNS address: {}",
-        last_error.unwrap_or_else(|| "connection unavailable".into())
+        last_error.unwrap_or("connection unavailable")
     ))
 }
 
@@ -1330,15 +1387,16 @@ fn non_retryable(message: impl ToString) -> ProviderFailure {
 }
 
 fn sanitize_error_code(message: &str) -> String {
-    let mut result = String::with_capacity(96);
-    for character in message.chars().take(96) {
-        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-            result.push(character.to_ascii_lowercase());
-        } else if !result.ends_with('-') {
-            result.push('-');
-        }
-    }
-    result.trim_matches('-').to_string()
+    opaque_diagnostic_code("transport-error", message)
+}
+
+fn opaque_provider_error_code(code: &str) -> String {
+    opaque_diagnostic_code("provider-error", code)
+}
+
+fn opaque_diagnostic_code(prefix: &str, sensitive: &str) -> String {
+    let digest = format!("{:x}", Sha256::digest(sensitive.as_bytes()));
+    format!("{prefix}-{}", &digest[..16])
 }
 
 fn sanitize_wire_component(value: &str) -> String {
@@ -1384,13 +1442,29 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meetings::stt::{NormalizedSegment, SegmentState};
+    use crate::meetings::stt::{
+        LanguageCapability, NormalizedSegment, SegmentState, SttCapabilities, STT_WIRE_VERSION,
+    };
     use crate::meetings::{
         AudioChannelDraft, AudioChannelKind, MeetingDraft, MeetingOrigin, MeetingStatus,
     };
+    use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
+    use rustls::{
+        pki_types::{CertificateDer, PrivatePkcs8KeyDer},
+        ClientConfig, RootCertStore, ServerConfig,
+    };
+    use std::net::Ipv4Addr;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
-    use tokio_tungstenite::tungstenite::protocol::Role;
+    use tokio::net::TcpListener;
+    use tokio_rustls::TlsAcceptor;
+    use tokio_tungstenite::{
+        accept_hdr_async,
+        tungstenite::{
+            handshake::server::{Request, Response},
+            protocol::Role,
+        },
+    };
 
     fn write_chunk(root: &Path, meeting_id: &str, channel: &str, sequence: u64, samples: &[f32]) {
         let directory = root.join(meeting_id).join("audio").join(channel);
@@ -1645,13 +1719,50 @@ mod tests {
     }
 
     #[test]
-    fn response_diagnostics_are_bounded_and_normalized() {
-        let input = "TLS peer said: SUPER SECRET /token?abc=123 ".repeat(20);
-        let output = sanitize_error_code(&input);
+    fn diagnostics_omit_credentials_provider_details_transcript_and_audio() {
+        const SECRET: &str = "SUPER_SECRET_BEARER_TOKEN_ABC123";
+        struct LeakingCredentialResolver;
+        impl MeetingCredentialResolver for LeakingCredentialResolver {
+            fn bearer_token(
+                &self,
+                _endpoint: &CustomSttEndpoint,
+            ) -> Result<Option<String>, String> {
+                Err(format!("credential lookup failed with {SECRET}"))
+            }
+        }
+
+        let endpoint =
+            CustomSttEndpoint::new("wss://speech.example.com/mimir", "speech.example.com").unwrap();
+        let credential_error =
+            resolve_custom_credential(&LeakingCredentialResolver, &endpoint).unwrap_err();
+        assert_eq!(
+            credential_error,
+            "could not resolve custom transcription credential"
+        );
+        assert!(!credential_error.contains(SECRET));
+
+        let output = sanitize_error_code(&format!("TLS peer said {SECRET}"));
         assert!(output.len() <= 96);
+        assert!(!output.contains(SECRET));
         assert!(output
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '-'));
+        let provider = opaque_provider_error_code(SECRET);
+        assert!(!provider.contains(SECRET));
+
+        let chunk = PersistedAudioChunk {
+            sequence: 1,
+            start_ms: 0,
+            end_ms: 1_000,
+            bytes: SECRET.as_bytes().to_vec(),
+        };
+        let chunk_debug = format!("{chunk:?}");
+        assert!(!chunk_debug.contains(SECRET));
+        assert!(chunk_debug.contains(&format!("{} bytes", SECRET.len())));
+
+        let transcript = provider_batch(1, "diagnostic", 1, SegmentState::Partial, SECRET);
+        let transcript_debug = format!("{transcript:?}");
+        assert!(!transcript_debug.contains(SECRET));
     }
 
     #[test]
@@ -1680,6 +1791,324 @@ mod tests {
                 .filter(|segment| segment.state == SegmentState::Final)
                 .count() as u64
         }
+    }
+
+    struct InjectedTlsConnector {
+        address: SocketAddr,
+        connector: WebSocketConnector,
+    }
+
+    impl CustomConnectionFactory for InjectedTlsConnector {
+        fn connect<'a>(
+            &'a self,
+            endpoint: &'a CustomSttEndpoint,
+            credential: Option<&'a str>,
+        ) -> BoxFuture<'a, Result<(PinnedWebSocket, SocketAddr), String>> {
+            let address = self.address;
+            let connector = self.connector.clone();
+            Box::pin(async move {
+                connect_prevalidated_addresses(endpoint, credential, vec![address], Some(connector))
+                    .await
+            })
+        }
+    }
+
+    fn generated_tls_configs(host: &str) -> (ServerConfig, ClientConfig) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca = CertifiedIssuer::self_signed(ca_params, KeyPair::generate().unwrap()).unwrap();
+        let server_key = KeyPair::generate().unwrap();
+        let server_params = CertificateParams::new(vec![host.to_string()]).unwrap();
+        let server_certificate = server_params.signed_by(&server_key, &ca).unwrap();
+        let private_key = PrivatePkcs8KeyDer::from(server_key.serialize_der()).into();
+        let server = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![server_certificate.der().clone(), ca.der().clone()],
+                private_key,
+            )
+            .unwrap();
+        let mut roots = RootCertStore::empty();
+        roots.add(CertificateDer::from(ca.der().to_vec())).unwrap();
+        let client = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        (server, client)
+    }
+
+    fn custom_capabilities() -> SttCapabilities {
+        SttCapabilities {
+            contract_version: STT_WIRE_VERSION,
+            operations: [TranscriptionOperation::Live].into_iter().collect(),
+            encodings: [AudioEncoding::PcmF32Le].into_iter().collect(),
+            sample_rates_hz: [SAMPLE_RATE_HZ].into_iter().collect(),
+            max_channels: CHANNELS,
+            max_audio_frame_bytes: MAX_INTERLEAVED_CHUNK_BYTES as u32,
+            supports_partial_results: true,
+            supports_speaker_labels: false,
+            languages: LanguageCapability::Any,
+        }
+    }
+
+    async fn accept_tls_websocket(
+        listener: &TcpListener,
+        acceptor: &TlsAcceptor,
+        expected_authorization: &str,
+        accepted_credentials: Arc<AtomicUsize>,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<TcpStream>> {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor.accept(tcp).await.unwrap();
+        let expected_authorization = expected_authorization.to_string();
+        accept_hdr_async(tls, move |request: &Request, mut response: Response| {
+            let credential_matches = request
+                .headers()
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                == Some(expected_authorization.as_str());
+            let protocol_matches = request
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|value| value.to_str().ok())
+                == Some(STT_WIRE_CONTRACT);
+            if credential_matches && protocol_matches {
+                accepted_credentials.fetch_add(1, Ordering::Relaxed);
+            }
+            response.headers_mut().insert(
+                "sec-websocket-protocol",
+                HeaderValue::from_static(STT_WIRE_CONTRACT),
+            );
+            Ok(response)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn expect_start<S>(websocket: &mut tokio_tungstenite::WebSocketStream<S>)
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let Message::Text(text) = websocket.next().await.unwrap().unwrap() else {
+            panic!("expected start metadata");
+        };
+        let ClientMessage::Start {
+            contract, request, ..
+        } = serde_json::from_str::<ClientMessage>(text.as_str()).unwrap()
+        else {
+            panic!("expected start frame");
+        };
+        assert_eq!(contract, STT_WIRE_CONTRACT);
+        assert_eq!(request.encoding, AudioEncoding::PcmF32Le);
+        assert_eq!(request.channels, CHANNELS);
+        send_server_message(
+            websocket,
+            &ServerMessage::Ready {
+                contract: STT_WIRE_CONTRACT.into(),
+                capabilities: custom_capabilities(),
+            },
+        )
+        .await;
+    }
+
+    async fn expect_audio<S>(
+        websocket: &mut tokio_tungstenite::WebSocketStream<S>,
+        expected_sequence: u64,
+    ) -> Vec<u8>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let Message::Text(metadata) = websocket.next().await.unwrap().unwrap() else {
+            panic!("expected audio metadata");
+        };
+        let ClientMessage::Audio {
+            sequence, byte_len, ..
+        } = serde_json::from_str::<ClientMessage>(metadata.as_str()).unwrap()
+        else {
+            panic!("expected audio metadata frame");
+        };
+        assert_eq!(sequence, expected_sequence);
+        let Message::Binary(audio) = websocket.next().await.unwrap().unwrap() else {
+            panic!("expected binary audio");
+        };
+        assert_eq!(audio.len(), byte_len as usize);
+        audio.to_vec()
+    }
+
+    fn provider_batch(
+        provider_sequence: u64,
+        batch_id: &str,
+        revision: u64,
+        state: SegmentState,
+        text: &str,
+    ) -> NormalizedTranscriptBatch {
+        NormalizedTranscriptBatch {
+            provider_sequence,
+            batch_id: WireId::new(batch_id).unwrap(),
+            segments: vec![NormalizedSegment {
+                segment_id: WireId::new("tls-utterance").unwrap(),
+                revision,
+                state,
+                start_ms: 0,
+                end_ms: 1_000,
+                text: text.into(),
+                channel_id: Some(WireId::new("microphone").unwrap()),
+                speaker: Some("You".into()),
+                language: Some("en".into()),
+                confidence: Some(0.98),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn generated_ca_tls_provider_reconnects_replays_and_finalizes_end_to_end() {
+        const HOST: &str = "scribe-test.example";
+        const BEARER: &str = "ultra-secret-bearer-value";
+        const PARTIAL: &str = "private transcript sentinel";
+        const FINAL: &str = "private transcript sentinel finalized";
+
+        let temporary = TempDir::new().unwrap();
+        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[0.1, 0.2]);
+        write_chunk(temporary.path(), "meeting-1", "system", 0, &[0.3, 0.4]);
+        write_chunk(temporary.path(), "meeting-1", "microphone", 1, &[0.5, 0.6]);
+        write_chunk(temporary.path(), "meeting-1", "system", 1, &[0.7, 0.8]);
+        let audio = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let store = recording_store();
+        let mut sink = StoreBatchSink::new(
+            Arc::clone(&store),
+            "meeting-1",
+            "tls-run",
+            "custom",
+            Arc::new(CountingChanges::default()),
+        )
+        .unwrap();
+
+        let (server_config, client_config) = generated_tls_configs(HOST);
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+        let accepted_credentials = Arc::new(AtomicUsize::new(0));
+        let credential_counter = Arc::clone(&accepted_credentials);
+        let server = tokio::spawn(async move {
+            let expected_authorization = format!("Bearer {BEARER}");
+            let mut first = accept_tls_websocket(
+                &listener,
+                &acceptor,
+                &expected_authorization,
+                Arc::clone(&credential_counter),
+            )
+            .await;
+            expect_start(&mut first).await;
+            let first_audio = expect_audio(&mut first, 0).await;
+            send_server_message(
+                &mut first,
+                &ServerMessage::Transcript {
+                    batch: provider_batch(1, "tls-partial", 1, SegmentState::Partial, PARTIAL),
+                },
+            )
+            .await;
+            send_server_message(
+                &mut first,
+                &ServerMessage::Error {
+                    code: WireId::new("transient-private-provider-detail").unwrap(),
+                    retryable: true,
+                    retry_after_ms: Some(1),
+                },
+            )
+            .await;
+            drop(first);
+
+            let mut second = accept_tls_websocket(
+                &listener,
+                &acceptor,
+                &expected_authorization,
+                Arc::clone(&credential_counter),
+            )
+            .await;
+            expect_start(&mut second).await;
+            let replayed_audio = expect_audio(&mut second, 0).await;
+            send_server_message(
+                &mut second,
+                &ServerMessage::Transcript {
+                    batch: provider_batch(2, "tls-final", 2, SegmentState::Final, FINAL),
+                },
+            )
+            .await;
+            send_server_message(
+                &mut second,
+                &ServerMessage::Acknowledged { audio_sequence: 0 },
+            )
+            .await;
+            let second_audio = expect_audio(&mut second, 1).await;
+            send_server_message(
+                &mut second,
+                &ServerMessage::Acknowledged { audio_sequence: 1 },
+            )
+            .await;
+            let Message::Text(stop) = second.next().await.unwrap().unwrap() else {
+                panic!("expected stop frame");
+            };
+            assert!(matches!(
+                serde_json::from_str::<ClientMessage>(stop.as_str()).unwrap(),
+                ClientMessage::Stop {
+                    final_audio_sequence: 1
+                }
+            ));
+            send_server_message(
+                &mut second,
+                &ServerMessage::Complete {
+                    final_provider_sequence: 2,
+                },
+            )
+            .await;
+            (first_audio, replayed_audio, second_audio)
+        });
+
+        let endpoint =
+            CustomSttEndpoint::new(&format!("wss://{HOST}:{}/listen", address.port()), HOST)
+                .unwrap();
+        let connector = InjectedTlsConnector {
+            address,
+            connector: WebSocketConnector::Rustls(Arc::new(client_config)),
+        };
+        let request = TranscriptionStart {
+            meeting_id: "meeting-1".into(),
+            run_id: "tls-run".into(),
+            route: endpoint.as_str().into(),
+            model: "tls-model".into(),
+        };
+        let (finalize_tx, finalize_rx) = mpsc::channel();
+        finalize_tx
+            .send(FinalizeCommand {
+                observed_at: "2026-07-31T12:00:00.000Z".into(),
+            })
+            .unwrap();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        run_custom_with_connector(
+            CustomRunContext {
+                request: &request,
+                endpoint: &endpoint,
+                model: &request.model,
+                credential: Some(BEARER),
+                audio: &audio,
+                finalize: &finalize_rx,
+                ready: &ready_tx,
+            },
+            &mut sink,
+            &connector,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ready_rx.recv().unwrap(), Ok(()));
+        let (first_audio, replayed_audio, second_audio) = server.await.unwrap();
+        assert_eq!(first_audio, replayed_audio);
+        assert_ne!(first_audio, second_audio);
+        assert_eq!(accepted_credentials.load(Ordering::Relaxed), 2);
+        let transcript = store.transcript_snapshot("meeting-1", None).unwrap();
+        assert_eq!(transcript.segments.len(), 1);
+        assert!(transcript.segments[0].segment.is_final);
+        assert_eq!(transcript.segments[0].segment.text, FINAL);
+        assert_eq!(sink.final_segment_count(), 1);
+        assert_eq!(sink.accumulator.unresolved_partial_count(), 0);
     }
 
     #[tokio::test]

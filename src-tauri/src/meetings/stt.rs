@@ -26,6 +26,10 @@ pub const MAX_NORMALIZED_BATCH_SEGMENTS: usize = 1_024;
 pub const MAX_SEGMENT_TEXT_BYTES: usize = 1_048_576;
 pub const MAX_WIRE_ID_BYTES: usize = 160;
 pub const MAX_DEDUP_BATCHES: usize = 4_096;
+/// Recent partial/final reconciliation window. Final transcript rows are
+/// durable in SQLite; keeping their full text here forever would make native
+/// memory proportional to meeting length.
+pub const MAX_RECONCILED_SEGMENTS: usize = 4_096;
 pub const MAX_REPLAY_DURATION_MS: u64 = 30_000;
 pub const MAX_REPLAY_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_REPLAY_CHUNKS: usize = 512;
@@ -456,6 +460,8 @@ pub enum NormalizeError {
     ProvenanceConflict,
     #[error("provider reused a segment revision with different content")]
     RevisionConflict,
+    #[error("provider has too many unresolved transcript segments")]
+    ReconciliationCapacityExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -480,6 +486,8 @@ pub struct TranscriptAccumulator {
     seen_batches: BTreeSet<(u64, WireId)>,
     seen_order: VecDeque<(u64, WireId)>,
     max_seen_batches: usize,
+    final_order: VecDeque<WireId>,
+    max_segments: usize,
 }
 
 impl Default for TranscriptAccumulator {
@@ -490,16 +498,29 @@ impl Default for TranscriptAccumulator {
 
 impl TranscriptAccumulator {
     pub fn new(max_seen_batches: usize) -> Self {
+        Self::with_limits(max_seen_batches, MAX_RECONCILED_SEGMENTS)
+    }
+
+    pub fn with_limits(max_seen_batches: usize, max_segments: usize) -> Self {
         Self {
             segments: BTreeMap::new(),
             seen_batches: BTreeSet::new(),
             seen_order: VecDeque::new(),
             max_seen_batches: max_seen_batches.clamp(1, MAX_DEDUP_BATCHES),
+            final_order: VecDeque::new(),
+            max_segments: max_segments.clamp(1, MAX_RECONCILED_SEGMENTS),
         }
     }
 
     pub fn segments(&self) -> &BTreeMap<WireId, AcceptedSegment> {
         &self.segments
+    }
+
+    pub fn unresolved_partial_count(&self) -> usize {
+        self.segments
+            .values()
+            .filter(|segment| segment.value.state == SegmentState::Partial)
+            .count()
     }
 
     pub fn apply(
@@ -553,13 +574,19 @@ impl TranscriptAccumulator {
             actions.push(Action::Accept(incoming));
         }
 
+        let mut next_segments = self.segments.clone();
+        let mut next_final_order = self.final_order.clone();
+        let mut newly_finalized = Vec::new();
         let mut accepted_segment_ids = Vec::new();
         let mut ignored_stale_segment_ids = Vec::new();
         for action in actions {
             match action {
                 Action::Accept(segment) => {
                     accepted_segment_ids.push(segment.segment_id.clone());
-                    self.segments.insert(
+                    if segment.state == SegmentState::Final {
+                        newly_finalized.push(segment.segment_id.clone());
+                    }
+                    next_segments.insert(
                         segment.segment_id.clone(),
                         AcceptedSegment {
                             value: segment,
@@ -570,6 +597,20 @@ impl TranscriptAccumulator {
                 Action::Ignore(segment_id) => ignored_stale_segment_ids.push(segment_id),
             }
         }
+        while next_segments.len() > self.max_segments {
+            let Some(finalized) = next_final_order.pop_front() else {
+                return Err(NormalizeError::ReconciliationCapacityExceeded);
+            };
+            if next_segments
+                .get(&finalized)
+                .is_some_and(|accepted| accepted.value.state == SegmentState::Final)
+            {
+                next_segments.remove(&finalized);
+            }
+        }
+        next_final_order.extend(newly_finalized);
+        self.segments = next_segments;
+        self.final_order = next_final_order;
         self.remember_batch(batch_key);
         Ok(ApplyReport {
             accepted_segment_ids,
@@ -1274,6 +1315,107 @@ mod tests {
         let debug = format!("{value:?}");
         assert!(!debug.contains("private meeting words"));
         assert!(debug.contains("21 bytes"));
+    }
+
+    #[test]
+    fn long_meeting_reconciliation_is_bounded_and_keeps_live_partial_replacement() {
+        let mut accumulator = TranscriptAccumulator::default();
+        let mut provider_sequence = 0_u64;
+        for page in 0..100_u64 {
+            let segments = (0..1_000_u64)
+                .map(|offset| {
+                    let index = page * 1_000 + offset;
+                    NormalizedSegment {
+                        segment_id: id(&format!("segment-{index}")),
+                        revision: 1,
+                        state: SegmentState::Final,
+                        start_ms: index * 10,
+                        end_ms: index * 10 + 10,
+                        text: format!("final-{index}"),
+                        channel_id: Some(id("microphone")),
+                        speaker: None,
+                        language: Some("en".into()),
+                        confidence: Some(0.9),
+                    }
+                })
+                .collect();
+            provider_sequence += 1;
+            accumulator
+                .apply(NormalizedTranscriptBatch {
+                    provider_sequence,
+                    batch_id: id(&format!("batch-{provider_sequence}")),
+                    segments,
+                })
+                .unwrap();
+            assert!(accumulator.segments().len() <= MAX_RECONCILED_SEGMENTS);
+        }
+        assert_eq!(accumulator.segments().len(), MAX_RECONCILED_SEGMENTS);
+        assert_eq!(accumulator.unresolved_partial_count(), 0);
+
+        let live = NormalizedSegment {
+            segment_id: id("live-segment"),
+            revision: 1,
+            state: SegmentState::Partial,
+            start_ms: 1_000_000,
+            end_ms: 1_000_010,
+            text: "live".into(),
+            channel_id: Some(id("system")),
+            speaker: None,
+            language: Some("en".into()),
+            confidence: Some(0.8),
+        };
+        accumulator
+            .apply(batch(provider_sequence + 1, "live-partial", live.clone()))
+            .unwrap();
+        assert_eq!(accumulator.unresolved_partial_count(), 1);
+        accumulator
+            .apply(batch(
+                provider_sequence + 2,
+                "live-final",
+                NormalizedSegment {
+                    revision: 2,
+                    state: SegmentState::Final,
+                    text: "live finalized".into(),
+                    ..live
+                },
+            ))
+            .unwrap();
+        assert_eq!(accumulator.unresolved_partial_count(), 0);
+        assert_eq!(
+            accumulator.segments()[&id("live-segment")].value.state,
+            SegmentState::Final
+        );
+    }
+
+    #[test]
+    fn unresolved_partial_capacity_fails_atomically() {
+        let mut accumulator = TranscriptAccumulator::with_limits(8, 2);
+        for index in 0..2 {
+            accumulator
+                .apply(batch(
+                    index + 1,
+                    &format!("partial-batch-{index}"),
+                    NormalizedSegment {
+                        segment_id: id(&format!("partial-{index}")),
+                        ..segment(1, SegmentState::Partial, "pending")
+                    },
+                ))
+                .unwrap();
+        }
+        let before = accumulator.segments().clone();
+        let result = accumulator.apply(batch(
+            3,
+            "partial-overflow",
+            NormalizedSegment {
+                segment_id: id("partial-overflow"),
+                ..segment(1, SegmentState::Partial, "pending")
+            },
+        ));
+        assert!(matches!(
+            result,
+            Err(NormalizeError::ReconciliationCapacityExceeded)
+        ));
+        assert_eq!(accumulator.segments(), &before);
     }
 
     #[test]
