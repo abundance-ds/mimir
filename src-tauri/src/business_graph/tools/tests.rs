@@ -71,6 +71,54 @@ fn graph_find_schema_matches_its_bounded_search_limit() {
 }
 
 #[test]
+fn graph_find_scans_the_whole_graph_past_the_store_page_size() {
+    let root = TempDir::new().unwrap();
+    fs::create_dir_all(root.path().join("knowledge")).unwrap();
+    for index in 0..505 {
+        fs::write(
+            root.path().join(format!("knowledge/note-{index:03}.md")),
+            format!(
+                "---\ntitle: Note {index}\ntype: note\nupdated: 2026-01-01T00:00:00.{index:03}Z\n---\n"
+            ),
+        )
+        .unwrap();
+    }
+    fs::write(
+        root.path().join("knowledge/ancient-needle.md"),
+        "---\ntitle: Ancient needle\ntype: note\nupdated: 2020-06-01T00:00:00.000Z\n---\n",
+    )
+    .unwrap();
+    let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+        "project:test",
+        GraphScopeKind::Project,
+        root.path(),
+    )]);
+
+    let found = execute_native_tool(&runtime, "graph.find", json!({ "limit": 1 })).unwrap();
+    assert_eq!(found.value["total"], 506);
+
+    let tail = execute_native_tool(
+        &runtime,
+        "graph.find",
+        json!({ "limit": 100, "offset": 500 }),
+    )
+    .unwrap();
+    assert_eq!(tail.value["total"], 506);
+    assert_eq!(tail.value["items"].as_array().unwrap().len(), 6);
+
+    // The needle sorts oldest of 506, so it only exists in results if find
+    // filters over the whole graph rather than the newest store page.
+    let filtered = execute_native_tool(
+        &runtime,
+        "graph.find",
+        json!({ "updatedBefore": "2021-01-01T00:00:00.000Z" }),
+    )
+    .unwrap();
+    assert_eq!(filtered.value["total"], 1);
+    assert_eq!(filtered.value["items"][0]["id"], "ancient-needle");
+}
+
+#[test]
 fn legacy_facades_and_generic_queries_share_one_store() {
     let (_root, runtime) = fixture();
     let graph = execute_native_tool(

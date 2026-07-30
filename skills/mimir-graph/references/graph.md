@@ -90,6 +90,8 @@ legacy nodes may contain other relation names.
 - `private:local` is local; `project:*` travels with the repo; `team:*` uses
   the configured shared graph. Omitted `scopeId` on create means the current
   project.
+- Omitted `scopeIds` on reads (`graph_find`, `graph_search`, `graph_list`)
+  means every mounted scope, including `private:local`.
 - Issue `status` and `priority` are properties. Project and assignee are
   `part_of` and `assigned_to` relations.
 - Use `graph_get.sourceRevision` as `graph_update.expectedRevision` or

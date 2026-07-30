@@ -119,7 +119,17 @@ fn find(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolErr
     let mut query = parse_input::<GraphQuery>(input.clone())?;
     query.offset = 0;
     query.limit = 500;
-    let result = runtime.query(&query).map_err(internal_error)?;
+    let mut result = runtime.query(&query).map_err(internal_error)?;
+    let graph_revision = result.graph_revision;
+    let mut candidates = std::mem::take(&mut result.items);
+    while candidates.len() < result.total {
+        query.offset = candidates.len();
+        result = runtime.query(&query).map_err(internal_error)?;
+        if result.items.is_empty() {
+            break;
+        }
+        candidates.extend(std::mem::take(&mut result.items));
+    }
     let scores = query_text.map(|text| {
         runtime
             .search(text, &query.scope_ids, 100)
@@ -135,8 +145,7 @@ fn find(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolErr
         Some(result) => Some(result?),
         None => None,
     };
-    let mut items = result
-        .items
+    let mut items = candidates
         .into_iter()
         .filter(|node| {
             scores
@@ -175,7 +184,7 @@ fn find(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolErr
         "total": total,
         "offset": offset.min(total),
         "limit": limit,
-        "graphRevision": result.graph_revision,
+        "graphRevision": graph_revision,
     }))
 }
 
@@ -384,7 +393,7 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
 
 fn query_properties() -> Value {
     json!({
-        "scopeIds": string_array("Physical scope ids."),
+        "scopeIds": string_array("Physical scope ids. Empty means all mounted scopes."),
         "kinds": {
             "type": "array",
             "items": { "type": "string", "enum": ENTITY_KINDS },
