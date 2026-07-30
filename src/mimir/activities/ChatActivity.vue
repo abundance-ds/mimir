@@ -10,7 +10,7 @@
     >
       <form
         data-chat-setup
-        class="w-full max-w-sm border border-rule bg-chrome-high p-5"
+        class="w-full max-w-sm rounded-[3px] border border-rule bg-chrome-high p-5"
         @submit.prevent="connect"
       >
         <div class="flex items-start gap-3">
@@ -22,7 +22,7 @@
             <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
               Use the account and passphrase from your team owner. Mimir keeps the passphrase in your system keychain.
             </p>
-            <p v-if="chat.status.diagnostic" class="mt-2 text-[9px] leading-relaxed text-rem">
+            <p v-if="chat.status.diagnostic" class="mt-2 text-[10px] leading-relaxed text-rem">
               {{ chat.status.diagnostic }}
             </p>
           </div>
@@ -52,7 +52,7 @@
         </p>
         <button
           type="submit"
-          class="mt-4 h-8 bg-accent px-4 text-[10px] font-semibold text-accent-ink hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class="mt-4 h-8 rounded-[2px] bg-accent px-4 text-[11px] font-semibold text-accent-ink hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           :disabled="setup.busy"
         >
           {{ setup.busy ? 'Connecting…' : 'Connect' }}
@@ -64,7 +64,7 @@
       <div
         v-if="chat.status.state !== 'connected'"
         data-chat-connection-state
-        class="flex shrink-0 items-center gap-2 border-b border-rule-light bg-chrome-high px-3 py-2 text-[10px] text-ink-2"
+        class="flex shrink-0 items-center gap-2 border-b border-rule-light bg-chrome-high px-3 py-2 text-[11px] text-ink-2"
         role="status"
       >
         <IconPlugConnectedX :size="14" :stroke-width="1.8" class="shrink-0 text-ink-3" />
@@ -73,7 +73,7 @@
         </span>
         <button
           type="button"
-          class="h-6 px-2 font-semibold text-ink-2 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class="h-6 rounded-[2px] px-2 text-[10px] font-semibold text-ink-2 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           @click="chat.reconnect()"
         >
           Retry
@@ -87,12 +87,12 @@
         <div class="max-w-xs">
           <IconMessages :size="24" :stroke-width="1.5" class="mx-auto text-ink-4" />
           <p class="mt-3 text-[12px] font-semibold text-ink">Start the team conversation</p>
-          <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
+          <p class="mt-1 text-[11px] leading-relaxed text-ink-3">
             Create a channel, join one, or message a teammate directly.
           </p>
           <button
             type="button"
-            class="mt-4 h-8 bg-accent px-3 text-[10px] font-semibold text-accent-ink hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            class="mt-4 h-8 rounded-[2px] bg-accent px-3.5 text-[11px] font-semibold text-accent-ink hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             @click="openNewFlow('menu')"
           >
             New chat
@@ -104,12 +104,12 @@
         <section data-chat-search class="flex min-h-0 flex-1 flex-col">
           <form class="flex shrink-0 items-center gap-2 border-b border-rule bg-chrome-high p-2" @submit.prevent="chat.runSearch()">
             <div class="relative min-w-0 flex-1">
-              <IconSearch :size="14" class="pointer-events-none absolute left-2 top-2 text-ink-4" />
+              <IconSearch :size="14" class="pointer-events-none absolute left-2 top-2.5 text-ink-4" />
               <input
                 ref="searchInput"
                 v-model="chat.searchState.query"
                 data-chat-search-input
-                class="h-8 w-full border border-rule bg-surface pl-7 pr-2 text-[11px] text-ink outline-none focus:border-accent"
+                class="h-8 w-full border border-rule bg-surface pl-7 pr-2 text-[12px] text-ink outline-none focus:border-accent"
                 :placeholder="`Search ${chat.activeTarget}`"
                 aria-label="Search chat messages"
               />
@@ -119,7 +119,7 @@
                 v-for="scope in SEARCH_SCOPES"
                 :key="scope.id"
                 type="button"
-                class="px-2 text-[9px] font-medium text-ink-3 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                class="px-2.5 text-[10px] font-medium text-ink-3 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 :class="{ 'bg-chrome text-ink': chat.searchState.scope === scope.id }"
                 :aria-pressed="chat.searchState.scope === scope.id"
                 @click="chat.searchState.scope = scope.id"
@@ -139,7 +139,7 @@
           </form>
 
           <div class="min-h-0 flex-1 overflow-y-auto">
-            <div v-if="chat.searchState.loading" class="p-5 text-center text-[10px] text-ink-3" role="status">
+            <div v-if="chat.searchState.loading" class="p-5 text-center text-[11px] text-ink-3" role="status">
               Searching cached chat…
             </div>
             <div v-else-if="chat.searchState.error" class="p-5 text-center" role="alert">
@@ -153,7 +153,7 @@
               <p class="text-[11px] font-semibold text-ink">No matching messages</p>
               <p class="mt-1 text-[10px] text-ink-3">Try fewer or different words.</p>
             </div>
-            <div v-else-if="!chat.searchState.query.trim()" class="p-5 text-center text-[10px] text-ink-3">
+            <div v-else-if="!chat.searchState.query.trim()" class="p-5 text-center text-[11px] text-ink-3">
               Search the local chat cache. This also works offline.
             </div>
             <button
@@ -164,10 +164,10 @@
               @click="chat.openSearchResult(message)"
             >
               <span class="flex items-baseline gap-2">
-                <span class="text-[10px] font-semibold text-ink">{{ senderName(message) }}</span>
-                <span class="font-mono text-[8px] text-ink-4">{{ message.target }} · {{ compactDate(message.serverTime) }}</span>
+                <span class="text-[11px] font-semibold text-ink">{{ senderName(message) }}</span>
+                <span class="font-mono text-[10px] text-ink-4">{{ message.target }} · {{ compactDate(message.serverTime) }}</span>
               </span>
-              <span class="mt-1 line-clamp-2 block text-[10px] leading-relaxed text-ink-2">{{ message.body }}</span>
+              <span class="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-ink-2">{{ message.body }}</span>
             </button>
           </div>
         </section>
@@ -183,10 +183,10 @@
           aria-live="off"
           @scroll="onTimelineScroll"
         >
-          <div class="mx-auto w-full max-w-3xl px-3 pb-4 pt-2">
+          <div class="mx-auto w-full max-w-3xl px-2 pb-5 pt-2">
             <div
               v-if="chat.loadingByTarget[chat.activeTarget] && !messages.length"
-              class="py-8 text-center text-[10px] text-ink-3"
+              class="py-10 text-center text-[11px] text-ink-3"
               role="status"
             >
               Loading messages…
@@ -195,7 +195,7 @@
               v-else-if="messages.length && !chat.olderComplete[chat.activeTarget]"
               type="button"
               data-chat-load-older
-              class="mx-auto mb-3 block h-7 px-3 text-[9px] font-medium text-ink-3 hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              class="mx-auto mb-3 flex h-7 items-center rounded-[3px] border border-rule px-3 text-[10px] font-medium text-ink-3 transition-colors hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               :disabled="chat.loadingByTarget[chat.activeTarget]"
               @click="loadOlder"
             >
@@ -204,21 +204,22 @@
 
             <div
               v-if="!chat.loadingByTarget[chat.activeTarget] && !messages.length"
-              class="py-12 text-center"
+              class="py-16 text-center"
             >
-              <p class="text-[11px] font-semibold text-ink">No messages yet</p>
-              <p class="mt-1 text-[10px] text-ink-3">Start the conversation.</p>
+              <IconMessages :size="20" :stroke-width="1.5" class="mx-auto text-ink-4" />
+              <p class="mt-3 text-[12px] font-semibold text-ink">No messages yet</p>
+              <p class="mt-1 text-[11px] text-ink-3">Start the conversation.</p>
             </div>
 
             <template v-for="(message, index) in messages" :key="message.id">
               <div
                 v-if="showsDay(index)"
-                class="my-4 flex items-center gap-3"
+                class="my-4 flex items-center gap-3 px-1"
                 role="separator"
                 :aria-label="longDate(message.serverTime)"
               >
                 <span class="h-px flex-1 bg-rule-light" />
-                <span class="font-mono text-[8px] uppercase tracking-[0.08em] text-ink-4">
+                <span class="font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-ink-3">
                   {{ dayLabel(message.serverTime) }}
                 </span>
                 <span class="h-px flex-1 bg-rule-light" />
@@ -227,21 +228,21 @@
               <div
                 v-if="message.id === newMarkerId"
                 data-chat-new-marker
-                class="my-3 flex items-center gap-3"
+                class="my-3 flex items-center gap-3 px-1"
                 role="separator"
                 aria-label="New messages"
               >
                 <span class="h-px flex-1 bg-accent/50" />
-                <span class="font-mono text-[8px] uppercase tracking-[0.1em] text-accent">New messages</span>
+                <span class="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-accent">New messages</span>
                 <span class="h-px flex-1 bg-accent/50" />
               </div>
 
               <article
                 :id="`chat-message-${message.id}`"
                 :data-chat-message="message.id"
-                class="chat-message group relative rounded-sm pr-9"
+                class="chat-message group relative rounded-[3px]"
                 :class="[
-                  groupStart(index) ? 'mt-3 pt-1' : 'mt-0.5',
+                  groupStart(index) ? 'mt-3.5' : 'mt-0.5',
                   {
                     'bg-accent-soft': highlightedId === message.id,
                     'bg-accent-soft/50': message.mentioned && !message.own && highlightedId !== message.id,
@@ -253,186 +254,215 @@
                 @dblclick="beginReply(message)"
                 @keydown="onMessageKeydown($event, message, index)"
               >
-                <div v-if="groupStart(index)" class="flex min-w-0 items-baseline gap-2 px-2">
-                  <span class="truncate text-[10px] font-semibold text-ink">
-                    {{ senderName(message) }}
-                  </span>
-                  <component
-                    :is="message.activityId ? 'button' : 'span'"
-                    v-if="message.agentLabel"
-                    :type="message.activityId ? 'button' : undefined"
-                    :title="message.activityId ? 'Open the agent Activity' : undefined"
-                    class="shrink-0 bg-chrome px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.05em] text-ink-2"
-                    :class="{ 'hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent': message.activityId }"
-                    @click.stop="message.activityId && $emit('openActivity', message.activityId)"
-                  >
-                    Agent · via {{ message.senderAccount || chat.status.account }}
-                  </component>
-                  <time
-                    class="shrink-0 font-mono text-[8px] tabular-nums text-ink-4"
-                    :datetime="message.serverTime"
-                    :title="exactDate(message.serverTime)"
-                  >
-                    {{ timeLabel(message.serverTime) }}
-                  </time>
-                  <span
-                    v-if="message.editedAt && !message.deleted"
-                    class="font-mono text-[8px] text-ink-4"
-                    :title="`Edited ${exactDate(message.editedAt)}`"
-                  >
-                    edited
-                  </span>
-                </div>
-
-                <button
-                  v-if="message.replyTo"
-                  type="button"
-                  class="mx-2 mt-1 block max-w-[calc(100%-16px)] truncate bg-chrome-high px-2 py-1 text-left text-[9px] text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                  :tabindex="focusableMessageId === message.id ? 0 : -1"
-                  @click.stop="jumpToReply(message.replyTo)"
-                >
-                  <template v-if="messageById.get(message.replyTo)">
-                    <span class="font-semibold">{{ senderName(messageById.get(message.replyTo)) }}</span>
-                    · {{ singleLine(messageById.get(message.replyTo).body) }}
-                  </template>
-                  <template v-else>Earlier message unavailable</template>
-                </button>
-
-                <form
-                  v-if="editingId === message.id"
-                  class="mx-2 my-1 bg-chrome-high p-2"
-                  @submit.prevent="submitEdit(message)"
-                >
-                  <textarea
-                    v-model="editDraft"
-                    :data-chat-edit-input="message.id"
-                    rows="2"
-                    class="max-h-28 w-full resize-y border border-rule bg-surface px-2 py-1.5 text-[11px] leading-relaxed text-ink outline-none focus:border-accent"
-                    :disabled="editingBusy"
-                    @keydown.esc.prevent="cancelEdit"
-                    @keydown.meta.enter.prevent="submitEdit(message)"
-                    @keydown.ctrl.enter.prevent="submitEdit(message)"
-                  />
-                  <div class="mt-1.5 flex items-center gap-2">
-                    <span class="min-w-0 flex-1 text-[8px] text-ink-4">
-                      {{ editDraftBytes }}/350 bytes · ⌘Enter to save
+                <div class="flex gap-2.5 px-3 py-1">
+                  <div class="w-9 shrink-0 select-none" aria-hidden="true">
+                    <span
+                      v-if="groupStart(index)"
+                      class="grid size-8 place-items-center rounded-[3px] border text-[11px] font-semibold tracking-[0.02em]"
+                      :class="message.agentLabel
+                        ? 'border-accent/30 bg-accent-soft text-accent'
+                        : 'border-rule bg-chrome text-ink-2'"
+                    >
+                      <IconRobot v-if="message.agentLabel" :size="15" :stroke-width="1.8" />
+                      <span v-else>{{ senderInitials(message) }}</span>
                     </span>
-                    <button
-                      type="button"
-                      class="h-6 px-2 text-[9px] text-ink-3 hover:bg-chrome hover:text-ink"
-                      :disabled="editingBusy"
-                      @click="cancelEdit"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      class="h-6 bg-accent px-2.5 text-[9px] font-semibold text-accent-ink disabled:opacity-40"
-                      :disabled="!canSaveEdit || editingBusy"
-                    >
-                      {{ editingBusy ? 'Saving…' : 'Save' }}
-                    </button>
+                    <time
+                      v-else
+                      class="chat-gutter-time font-mono text-[10px] tabular-nums text-ink-4"
+                      :datetime="message.serverTime"
+                      :title="exactDate(message.serverTime)"
+                    >{{ timeLabel(message.serverTime) }}</time>
                   </div>
-                </form>
 
-                <div
-                  v-else-if="!isAttachmentFallback(message)"
-                  class="px-2 py-0.5 text-[11px] leading-[1.55]"
-                  :class="message.deleted ? 'italic text-ink-4' : 'text-ink'"
-                >
-                  <span v-if="message.deleted">Message deleted</span>
-                  <template v-for="(block, blockIndex) in messageBlocks(message.body)" :key="blockIndex">
-                    <pre
-                      v-if="block.code"
-                      class="my-1 max-w-full overflow-x-auto border border-rule bg-chrome-high p-2 font-mono text-[10px] leading-relaxed text-ink-2"
-                    ><code>{{ block.text }}</code></pre>
-                    <span v-else class="whitespace-pre-wrap break-words"><template
-                      v-for="(part, partIndex) in textParts(block.text)"
-                      :key="partIndex"
-                    ><button
-                      v-if="part.chatLink"
+                  <div class="min-w-0 flex-1">
+                    <div v-if="groupStart(index)" class="flex min-w-0 items-baseline gap-2">
+                      <span
+                        class="truncate text-[13px] font-semibold leading-snug"
+                        :class="message.agentLabel ? 'text-accent' : 'text-ink'"
+                      >
+                        {{ senderName(message) }}
+                      </span>
+                      <component
+                        :is="message.activityId ? 'button' : 'span'"
+                        v-if="message.agentLabel"
+                        :type="message.activityId ? 'button' : undefined"
+                        :title="message.activityId ? 'Open the agent Activity' : undefined"
+                        class="shrink-0 font-mono text-[10px] text-ink-4"
+                        :class="{ 'hover:text-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent': message.activityId }"
+                        @click.stop="message.activityId && $emit('openActivity', message.activityId)"
+                      >agent · via {{ message.senderAccount || chat.status.account }}</component>
+                      <time
+                        class="shrink-0 font-mono text-[10px] tabular-nums text-ink-3"
+                        :datetime="message.serverTime"
+                        :title="exactDate(message.serverTime)"
+                      >
+                        {{ timeLabel(message.serverTime) }}
+                      </time>
+                      <span
+                        v-if="message.editedAt && !message.deleted"
+                        class="shrink-0 font-mono text-[10px] text-ink-4"
+                        :title="`Edited ${exactDate(message.editedAt)}`"
+                      >
+                        edited
+                      </span>
+                    </div>
+
+                    <button
+                      v-if="message.replyTo"
                       type="button"
-                      class="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+                      class="mt-0.5 flex max-w-full items-center gap-1.5 rounded-[3px] bg-chrome-high px-2 py-1 text-left hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                       :tabindex="focusableMessageId === message.id ? 0 : -1"
-                      @click.stop="openPermalink(part.text)"
-                    >{{ part.text }}</button><a
-                      v-else-if="part.url"
-                      :href="part.text"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
-                      :tabindex="focusableMessageId === message.id ? 0 : -1"
-                      @click.stop
-                    >{{ part.text }}</a><template v-else>{{ part.text }}</template></template></span>
-                  </template>
-                </div>
+                      @click.stop="jumpToReply(message.replyTo)"
+                    >
+                      <IconArrowBackUp :size="12" :stroke-width="1.8" class="shrink-0 text-ink-4" />
+                      <span class="min-w-0 truncate text-[11px] leading-relaxed">
+                        <template v-if="messageById.get(message.replyTo)">
+                          <span class="font-semibold text-ink-2">{{ senderName(messageById.get(message.replyTo)) }}</span>
+                          <span class="text-ink-3"> · {{ singleLine(messageById.get(message.replyTo).body) }}</span>
+                        </template>
+                        <span v-else class="italic text-ink-4">Earlier message unavailable</span>
+                      </span>
+                    </button>
 
-                <div
-                  v-if="!message.deleted && message.attachments?.length"
-                  class="grid max-w-md gap-1 px-2 pb-1 pt-1"
-                  data-chat-attachments
-                >
-                  <button
-                    v-for="attachment in message.attachments"
-                    :key="attachment.id"
-                    type="button"
-                    class="group/attachment overflow-hidden bg-chrome-high text-left hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                    :disabled="attachmentBusy[attachment.id]"
-                    :tabindex="focusableMessageId === message.id ? 0 : -1"
-                    @click.stop="openAttachment(attachment)"
-                  >
-                    <img
-                      v-if="chat.attachmentPreviews[attachment.id]"
-                      :src="chat.attachmentPreviews[attachment.id]"
-                      :alt="attachment.name"
-                      class="max-h-64 w-full bg-chrome object-contain"
-                    />
-                    <span class="flex min-h-11 items-center gap-2 px-2.5 py-2">
-                      <span class="grid size-7 shrink-0 place-items-center bg-surface text-ink-3">
-                        <IconPhoto v-if="isPreviewableImage(attachment)" :size="14" />
-                        <IconFile v-else :size="14" />
-                      </span>
-                      <span class="min-w-0 flex-1">
-                        <strong class="block truncate text-[10px] font-semibold text-ink">
-                          {{ attachment.name }}
-                        </strong>
-                        <small class="mt-0.5 block font-mono text-[8px] text-ink-4">
-                          {{ formatBytes(attachment.size) }} · {{ attachmentType(attachment) }}
-                        </small>
-                      </span>
-                      <span class="shrink-0 text-ink-4 group-hover/attachment:text-ink">
-                        <IconLoader2 v-if="attachmentBusy[attachment.id]" :size="14" class="animate-spin" />
-                        <IconExternalLink v-else-if="attachment.localPath" :size="14" />
-                        <IconDownload v-else :size="14" />
-                      </span>
-                    </span>
-                  </button>
-                </div>
+                    <form
+                      v-if="editingId === message.id"
+                      class="my-1 rounded-[3px] border border-rule bg-chrome-high p-2"
+                      @submit.prevent="submitEdit(message)"
+                    >
+                      <textarea
+                        v-model="editDraft"
+                        :data-chat-edit-input="message.id"
+                        rows="2"
+                        class="max-h-28 w-full resize-y rounded-[2px] border border-rule bg-surface px-2 py-1.5 text-[13px] leading-relaxed text-ink outline-none focus:border-accent"
+                        :disabled="editingBusy"
+                        @keydown.esc.prevent="cancelEdit"
+                        @keydown.meta.enter.prevent="submitEdit(message)"
+                        @keydown.ctrl.enter.prevent="submitEdit(message)"
+                      />
+                      <div class="mt-1.5 flex items-center gap-2">
+                        <span class="min-w-0 flex-1 font-mono text-[10px] text-ink-4">
+                          {{ editDraftBytes }}/350 bytes · ⌘Enter to save
+                        </span>
+                        <button
+                          type="button"
+                          class="h-6 rounded-[2px] px-2 text-[10px] text-ink-3 hover:bg-chrome hover:text-ink"
+                          :disabled="editingBusy"
+                          @click="cancelEdit"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          class="h-6 rounded-[2px] bg-accent px-2.5 text-[10px] font-semibold text-accent-ink hover:bg-accent-2 disabled:opacity-40"
+                          :disabled="!canSaveEdit || editingBusy"
+                        >
+                          {{ editingBusy ? 'Saving…' : 'Save' }}
+                        </button>
+                      </div>
+                    </form>
 
-                <div
-                  v-if="!message.deleted && message.reactions?.length"
-                  class="flex flex-wrap gap-1 px-2 pb-0.5 pt-1"
-                  data-chat-reactions
-                >
-                  <button
-                    v-for="reaction in message.reactions"
-                    :key="reaction.value"
-                    type="button"
-                    class="flex h-6 items-center gap-1 bg-chrome px-1.5 text-[10px] text-ink-2 hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                    :class="{ 'bg-accent-soft text-accent': reaction.own }"
-                    :title="reaction.reactors?.join(', ')"
-                    :aria-pressed="reaction.own"
-                    :tabindex="focusableMessageId === message.id ? 0 : -1"
-                    @click.stop="toggleReaction(message, reaction.value)"
-                  >
-                    <span>{{ reaction.value }}</span>
-                    <span class="font-mono text-[8px] tabular-nums">{{ reaction.count }}</span>
-                  </button>
+                    <div
+                      v-else-if="!isAttachmentFallback(message)"
+                      class="chat-body py-px text-[13px] leading-[1.55]"
+                      :class="message.deleted ? 'italic text-ink-4' : 'text-ink'"
+                    >
+                      <span v-if="message.deleted">Message deleted</span>
+                      <template v-for="(block, blockIndex) in messageBlocks(message.body)" :key="blockIndex">
+                        <pre
+                          v-if="block.code"
+                          class="my-1.5 max-w-full overflow-x-auto rounded-[3px] border border-rule bg-chrome-high px-2.5 py-2 font-mono text-[12px] leading-relaxed text-ink-2"
+                        ><code>{{ block.text }}</code></pre>
+                        <span v-else class="whitespace-pre-wrap break-words"><template
+                          v-for="(part, partIndex) in textParts(block.text)"
+                          :key="partIndex"
+                        ><button
+                          v-if="part.chatLink"
+                          type="button"
+                          class="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+                          :tabindex="focusableMessageId === message.id ? 0 : -1"
+                          @click.stop="openPermalink(part.text)"
+                        >{{ part.text }}</button><a
+                          v-else-if="part.url"
+                          :href="part.text"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+                          :tabindex="focusableMessageId === message.id ? 0 : -1"
+                          @click.stop
+                        >{{ part.text }}</a><template v-else>{{ part.text }}</template></template></span>
+                      </template>
+                    </div>
+
+                    <div
+                      v-if="!message.deleted && message.attachments?.length"
+                      class="grid max-w-lg gap-1.5 pb-0.5 pt-1"
+                      data-chat-attachments
+                    >
+                      <button
+                        v-for="attachment in message.attachments"
+                        :key="attachment.id"
+                        type="button"
+                        class="group/attachment overflow-hidden rounded-[3px] border border-rule bg-chrome-high text-left transition-colors hover:border-ink-4 hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                        :disabled="attachmentBusy[attachment.id]"
+                        :tabindex="focusableMessageId === message.id ? 0 : -1"
+                        @click.stop="openAttachment(attachment)"
+                      >
+                        <img
+                          v-if="chat.attachmentPreviews[attachment.id]"
+                          :src="chat.attachmentPreviews[attachment.id]"
+                          :alt="attachment.name"
+                          class="max-h-64 w-full bg-chrome object-contain"
+                        />
+                        <span class="flex min-h-11 items-center gap-2.5 px-2.5 py-2">
+                          <span class="grid size-8 shrink-0 place-items-center rounded-[2px] border border-rule bg-surface text-ink-3">
+                            <IconPhoto v-if="isPreviewableImage(attachment)" :size="15" />
+                            <IconFile v-else :size="15" />
+                          </span>
+                          <span class="min-w-0 flex-1">
+                            <strong class="block truncate text-[11px] font-semibold text-ink">
+                              {{ attachment.name }}
+                            </strong>
+                            <small class="mt-0.5 block font-mono text-[10px] text-ink-4">
+                              {{ formatBytes(attachment.size) }} · {{ attachmentType(attachment) }}
+                            </small>
+                          </span>
+                          <span class="shrink-0 text-ink-4 group-hover/attachment:text-ink">
+                            <IconLoader2 v-if="attachmentBusy[attachment.id]" :size="14" class="animate-spin" />
+                            <IconExternalLink v-else-if="attachment.localPath" :size="14" />
+                            <IconDownload v-else :size="14" />
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+
+                    <div
+                      v-if="!message.deleted && message.reactions?.length"
+                      class="flex flex-wrap gap-1 pb-0.5 pt-1"
+                      data-chat-reactions
+                    >
+                      <button
+                        v-for="reaction in message.reactions"
+                        :key="reaction.value"
+                        type="button"
+                        class="flex h-6 items-center gap-1 rounded-[3px] border px-1.5 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                        :class="reaction.own
+                          ? 'border-accent/40 bg-accent-soft text-accent'
+                          : 'border-rule bg-chrome-high text-ink-2 hover:border-ink-4 hover:bg-chrome-mid'"
+                        :title="reaction.reactors?.join(', ')"
+                        :aria-pressed="reaction.own"
+                        :tabindex="focusableMessageId === message.id ? 0 : -1"
+                        @click.stop="toggleReaction(message, reaction.value)"
+                      >
+                        <span class="leading-none">{{ reaction.value }}</span>
+                        <span class="font-mono text-[10px] tabular-nums">{{ reaction.count }}</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div
                   v-if="!message.deleted && editingId !== message.id"
-                  class="chat-message-actions absolute right-1 top-1 flex bg-surface shadow-sm"
+                  class="chat-message-actions absolute -top-3 right-2 flex overflow-hidden rounded-[3px] border border-rule bg-surface shadow-md"
                   data-chat-actions
                 >
                   <button
@@ -469,7 +499,7 @@
 
                 <div
                   v-if="openActionsId === message.id"
-                  class="absolute right-1 top-8 z-20 min-w-40 border border-rule bg-surface p-1 shadow-xl"
+                  class="absolute right-2 top-6 z-20 min-w-44 rounded-[3px] border border-rule bg-surface p-1 shadow-lg"
                   data-chat-actions
                   @pointerdown.stop
                 >
@@ -482,7 +512,7 @@
                       v-for="reaction in QUICK_REACTIONS"
                       :key="reaction"
                       type="button"
-                      class="grid size-8 place-items-center text-base hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                      class="grid size-8 place-items-center rounded-[3px] text-base hover:bg-chrome-high focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                       @click="toggleReaction(message, reaction)"
                     >
                       {{ reaction }}
@@ -510,13 +540,13 @@
                       <span>Delete message</span>
                     </button>
                     <div v-else-if="message.own" class="p-1.5">
-                      <p class="text-[9px] font-semibold text-ink">Delete this message?</p>
-                      <p class="mt-0.5 text-[8px] leading-relaxed text-ink-3">Replies keep a deleted-message marker.</p>
+                      <p class="text-[10px] font-semibold text-ink">Delete this message?</p>
+                      <p class="mt-0.5 text-[9px] leading-relaxed text-ink-3">Replies keep a deleted-message marker.</p>
                       <div class="mt-2 flex justify-end gap-1">
-                        <button class="h-6 px-2 text-[9px] text-ink-3 hover:bg-chrome" @click="deleteConfirmId = ''">
+                        <button class="h-6 rounded-[2px] px-2 text-[10px] text-ink-3 hover:bg-chrome" @click="deleteConfirmId = ''">
                           Cancel
                         </button>
-                        <button class="h-6 bg-rem px-2 text-[9px] font-semibold text-white" @click="deleteOwnMessage(message)">
+                        <button class="h-6 rounded-[2px] bg-rem px-2 text-[10px] font-semibold text-white" @click="deleteOwnMessage(message)">
                           Delete
                         </button>
                       </div>
@@ -534,101 +564,104 @@
           v-if="newBelow"
           type="button"
           data-chat-new-below
-          class="absolute bottom-[76px] left-1/2 z-10 -translate-x-1/2 bg-ink px-3 py-1.5 text-[9px] font-semibold text-surface shadow-lg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class="absolute bottom-[76px] left-1/2 z-10 flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full bg-ink px-3.5 text-[10px] font-semibold text-surface shadow-lg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           @click="scrollToBottom"
         >
-          {{ newBelow }} new {{ newBelow === 1 ? 'message' : 'messages' }} ↓
+          {{ newBelow }} new {{ newBelow === 1 ? 'message' : 'messages' }}
+          <IconArrowDown :size="12" :stroke-width="2" />
         </button>
 
         <form
           data-chat-composer
-          class="shrink-0 border-t border-rule bg-chrome-high p-2"
+          class="shrink-0 border-t border-rule bg-chrome-high px-3 pb-1 pt-2"
           @submit.prevent="submitMessage"
         >
           <div
-            v-if="uploads.length"
-            class="mb-1.5 grid gap-1"
-            aria-live="polite"
+            class="overflow-hidden rounded-[3px] border border-rule bg-surface transition-colors focus-within:border-accent"
+            :class="{ 'bg-chrome': !chat.connected }"
           >
             <div
-              v-for="upload in uploads"
-              :key="upload.id"
-              class="flex min-h-7 items-center gap-2 bg-chrome px-2 text-[9px]"
+              v-if="uploads.length"
+              class="grid gap-1 border-b border-rule-light px-2.5 py-2"
+              aria-live="polite"
             >
-              <IconLoader2 v-if="upload.state === 'uploading'" :size="12" class="shrink-0 animate-spin text-accent" />
-              <IconPaperclip v-else :size="12" class="shrink-0 text-ink-3" />
-              <span class="min-w-0 flex-1 truncate text-ink-2">{{ upload.name }}</span>
-              <span :class="upload.state === 'error' ? 'text-rem' : 'text-ink-4'">
-                {{ upload.state === 'uploading' ? 'Uploading…' : upload.state === 'error' ? upload.error : 'Sent' }}
+              <div
+                v-for="upload in uploads"
+                :key="upload.id"
+                class="flex min-h-7 items-center gap-2 rounded-[2px] bg-chrome-high px-2 text-[10px]"
+              >
+                <IconLoader2 v-if="upload.state === 'uploading'" :size="12" class="shrink-0 animate-spin text-accent" />
+                <IconPaperclip v-else :size="12" class="shrink-0 text-ink-3" />
+                <span class="min-w-0 flex-1 truncate text-ink-2">{{ upload.name }}</span>
+                <span :class="upload.state === 'error' ? 'text-rem' : 'text-ink-4'">
+                  {{ upload.state === 'uploading' ? 'Uploading…' : upload.state === 'error' ? upload.error : 'Sent' }}
+                </span>
+              </div>
+            </div>
+            <div
+              v-if="replyingTo"
+              class="flex min-w-0 items-center gap-2 border-b border-rule-light bg-chrome-high/70 px-2.5 py-1.5 text-[11px] text-ink-3"
+            >
+              <IconArrowBackUp :size="12" class="shrink-0" />
+              <span class="min-w-0 flex-1 truncate">
+                Replying to <strong class="font-semibold text-ink">{{ senderName(replyingTo) }}</strong>
+                — {{ singleLine(replyingTo.body) }}
               </span>
+              <button
+                type="button"
+                title="Cancel reply"
+                aria-label="Cancel reply"
+                class="grid size-5 shrink-0 place-items-center rounded-[2px] hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                @click="replyingId = ''"
+              >
+                <IconX :size="12" />
+              </button>
+            </div>
+            <div class="flex items-end gap-1 px-1.5 py-1">
+              <button
+                type="button"
+                class="grid size-7 shrink-0 place-items-center rounded-[2px] text-ink-3 transition-colors hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-35"
+                title="Attach files"
+                aria-label="Attach files"
+                :disabled="!chat.connected || uploading"
+                @click="pickAttachments"
+              >
+                <IconPaperclip :size="15" :stroke-width="1.8" />
+              </button>
+              <textarea
+                ref="composer"
+                v-model="draft"
+                data-chat-composer-input
+                rows="1"
+                class="max-h-[132px] min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1 text-[13px] leading-[1.4] text-ink outline-none placeholder:text-ink-4 disabled:text-ink-4"
+                :placeholder="composerPlaceholder"
+                :disabled="!chat.connected || sending"
+                @input="onComposerInput"
+                @blur="finishTyping"
+                @keydown="onComposerKeydown"
+                @paste="onComposerPaste"
+              />
+              <button
+                type="submit"
+                class="grid size-7 shrink-0 place-items-center rounded-[2px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:cursor-not-allowed"
+                :class="canSend ? 'bg-accent text-accent-ink hover:bg-accent-2' : 'text-ink-4'"
+                :disabled="!canSend"
+                title="Send message"
+                aria-label="Send message"
+              >
+                <IconSend :size="15" :stroke-width="1.8" />
+              </button>
             </div>
           </div>
-          <div
-            v-if="replyingTo"
-            class="mb-1.5 flex min-w-0 items-center gap-2 bg-chrome px-2 py-1.5 text-[9px] text-ink-3"
-          >
-            <IconArrowBackUp :size="12" class="shrink-0" />
-            <span class="min-w-0 flex-1 truncate">
-              Replying to <strong class="text-ink-2">{{ senderName(replyingTo) }}</strong>
-              — {{ singleLine(replyingTo.body) }}
-            </span>
-            <button
-              type="button"
-              title="Cancel reply"
-              aria-label="Cancel reply"
-              class="grid size-5 shrink-0 place-items-center hover:bg-chrome-high hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              @click="replyingId = ''"
-            >
-              <IconX :size="12" />
-            </button>
-          </div>
-          <p
-            v-if="typingLabel"
-            class="mb-1 min-h-3 px-1 text-[9px] text-ink-3"
-            aria-live="polite"
-          >
-            {{ typingLabel }}
-          </p>
-          <div class="flex items-end gap-2">
-            <button
-              type="button"
-              class="grid size-9 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-35"
-              title="Attach files"
-              aria-label="Attach files"
-              :disabled="!chat.connected || uploading"
-              @click="pickAttachments"
-            >
-              <IconPaperclip :size="16" :stroke-width="1.8" />
-            </button>
-            <textarea
-              ref="composer"
-              v-model="draft"
-              data-chat-composer-input
-              rows="1"
-              class="max-h-[132px] min-h-9 min-w-0 flex-1 resize-none border border-rule bg-surface px-2.5 py-2 text-[11px] leading-[1.45] text-ink outline-none placeholder:text-ink-4 focus:border-accent disabled:bg-chrome disabled:text-ink-3"
-              :placeholder="composerPlaceholder"
-              :disabled="!chat.connected || sending"
-              @input="onComposerInput"
-              @blur="finishTyping"
-              @keydown="onComposerKeydown"
-              @paste="onComposerPaste"
-            />
-            <button
-              type="submit"
-              class="grid size-9 shrink-0 place-items-center bg-accent text-accent-ink hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-35"
-              :disabled="!canSend"
-              title="Send message"
-              aria-label="Send message"
-            >
-              <IconArrowUp :size="16" :stroke-width="2" />
-            </button>
-          </div>
-          <div class="mt-1 flex min-h-3 items-center">
-            <span v-if="composerError" class="text-[9px] text-rem" role="alert">{{ composerError }}</span>
-            <span v-else-if="!chat.connected" class="text-[9px] text-ink-3">
+          <div class="flex min-h-[26px] items-center gap-2 px-1.5">
+            <span v-if="composerError" class="text-[10px] text-rem" role="alert">{{ composerError }}</span>
+            <span v-else-if="!chat.connected" class="text-[10px] text-ink-3">
               Reconnect to send. Your draft is safe.
             </span>
-            <span v-else class="ml-auto font-mono text-[8px] text-ink-4">
+            <span v-else-if="typingLabel" class="text-[10px] text-ink-3" aria-live="polite">
+              {{ typingLabel }}
+            </span>
+            <span class="ml-auto shrink-0 font-mono text-[9px] text-ink-4">
               Enter to send · Shift+Enter for a new line
             </span>
           </div>
@@ -638,7 +671,7 @@
 
     <div
       v-if="dragActive"
-      class="pointer-events-none absolute inset-2 z-30 grid place-items-center border border-accent bg-surface/95"
+      class="pointer-events-none absolute inset-2 z-30 grid place-items-center rounded-[4px] border border-dashed border-accent bg-surface/95"
       role="status"
     >
       <div class="text-center">
@@ -656,7 +689,7 @@
     >
       <section
         ref="newFlowDialog"
-        class="w-full max-w-sm border border-rule bg-surface p-4 shadow-xl"
+        class="w-full max-w-sm rounded-[4px] border border-rule bg-surface p-4 shadow-xl"
         role="dialog"
         aria-modal="true"
         :aria-label="newFlowTitle"
@@ -668,17 +701,17 @@
             type="button"
             title="Back"
             aria-label="Back"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            class="grid size-7 place-items-center rounded-[2px] text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             @click="newFlow.mode = 'menu'"
           >
             <IconArrowLeft :size="14" />
           </button>
-          <h2 class="min-w-0 flex-1 text-[12px] font-semibold text-ink">{{ newFlowTitle }}</h2>
+          <h2 class="min-w-0 flex-1 text-[13px] font-semibold text-ink">{{ newFlowTitle }}</h2>
           <button
             type="button"
             title="Close"
             aria-label="Close"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            class="grid size-7 place-items-center rounded-[2px] text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             @click="closeNewFlow"
           >
             <IconX :size="14" />
@@ -687,15 +720,21 @@
 
         <div v-if="newFlow.mode === 'menu'" class="mt-3 grid gap-1">
           <button ref="newFlowMenuFirst" class="new-chat-choice" @click="newFlow.mode = 'channel'">
-            <IconHash :size="16" />
+            <span class="grid size-8 shrink-0 place-items-center rounded-[3px] border border-rule bg-chrome-high text-ink-2">
+              <IconHash :size="15" :stroke-width="1.8" />
+            </span>
             <span><strong>New channel</strong><small>Create a room for ongoing work</small></span>
           </button>
           <button class="new-chat-choice" @click="newFlow.mode = 'join'">
-            <IconDoorEnter :size="16" />
+            <span class="grid size-8 shrink-0 place-items-center rounded-[3px] border border-rule bg-chrome-high text-ink-2">
+              <IconDoorEnter :size="15" :stroke-width="1.8" />
+            </span>
             <span><strong>Join channel</strong><small>Open an existing room by name</small></span>
           </button>
           <button class="new-chat-choice" @click="prepareDirect">
-            <IconUser :size="16" />
+            <span class="grid size-8 shrink-0 place-items-center rounded-[3px] border border-rule bg-chrome-high text-ink-2">
+              <IconUser :size="15" :stroke-width="1.8" />
+            </span>
             <span><strong>Direct message</strong><small>Start a conversation with one person</small></span>
           </button>
         </div>
@@ -740,18 +779,18 @@
               v-for="member in filteredMembers"
               :key="member.nick"
               type="button"
-              class="flex h-9 w-full items-center gap-2 px-2 text-left hover:bg-chrome-high focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+              class="flex h-9 w-full items-center gap-2 rounded-[2px] px-2 text-left hover:bg-chrome-high focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
               @click="openDirect(member.account || member.nick)"
             >
               <span
-                class="size-1.5 shrink-0 rounded-full"
-                :class="member.away ? 'bg-ink-4' : 'bg-add'"
+                class="size-2 shrink-0 rounded-full"
+                :class="member.away ? 'border border-ink-4 bg-transparent' : 'bg-add'"
                 :title="member.away ? member.awayMessage || 'Away' : 'Available'"
                 aria-hidden="true"
               />
-              <span class="min-w-0 flex-1 truncate text-[10px] font-medium text-ink">{{ member.displayName }}</span>
-              <span v-if="member.away" class="text-[8px] text-ink-4">away</span>
-              <span class="truncate font-mono text-[8px] text-ink-4">{{ member.account || member.nick }}</span>
+              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">{{ member.displayName }}</span>
+              <span v-if="member.away" class="text-[9px] text-ink-4">away</span>
+              <span class="truncate font-mono text-[9px] text-ink-4">{{ member.account || member.nick }}</span>
             </button>
             <p v-if="!filteredMembers.length" class="px-2 py-3 text-center text-[9px] text-ink-3">
               No known teammate matches. Enter their exact account below.
@@ -782,8 +821,8 @@ import {
 } from 'vue'
 import {
   IconArrowBackUp,
+  IconArrowDown,
   IconArrowLeft,
-  IconArrowUp,
   IconDoorEnter,
   IconDownload,
   IconDots,
@@ -798,7 +837,9 @@ import {
   IconPencil,
   IconPhoto,
   IconPlugConnectedX,
+  IconRobot,
   IconSearch,
+  IconSend,
   IconTrash,
   IconUser,
   IconX,
@@ -1754,6 +1795,16 @@ function senderName(message) {
   ))?.displayName || message.senderNick
 }
 
+function senderInitials(message) {
+  const name = String(senderName(message) || '').trim()
+  if (!name) return '?'
+  const parts = name.split(/\s+/)
+  const initials = parts.length > 1
+    ? `${parts[0][0]}${parts.at(-1)[0]}`
+    : name.slice(0, 2)
+  return initials.toUpperCase()
+}
+
 function messageBlocks(body) {
   return String(body || '').split('```').map((text, index) => ({
     code: index % 2 === 1,
@@ -1916,6 +1967,25 @@ function errorMessage(error) {
   outline-offset: -1px;
 }
 
+.chat-body {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.chat-gutter-time {
+  display: block;
+  margin-top: 5px;
+  text-align: right;
+  line-height: 1.2;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-message:hover .chat-gutter-time,
+.chat-message:focus-within .chat-gutter-time {
+  opacity: 1;
+}
+
 .chat-message-actions {
   opacity: 0;
   pointer-events: none;
@@ -1929,16 +1999,16 @@ function errorMessage(error) {
 
 .chat-message-action {
   display: grid;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 1.625rem;
+  height: 1.625rem;
   place-items: center;
-  color: var(--color-ink-4);
+  color: var(--color-ink-3);
 }
 
 .chat-message-action:hover,
 .chat-message-action:focus-visible {
   outline: none;
-  background: var(--color-chrome);
+  background: var(--color-chrome-high);
   color: var(--color-ink);
 }
 
@@ -1949,12 +2019,13 @@ function errorMessage(error) {
 .chat-action-menu-item {
   display: flex;
   width: 100%;
-  height: 1.875rem;
+  height: 1.75rem;
   align-items: center;
   gap: 0.5rem;
   padding: 0 0.5rem;
+  border-radius: 2px;
   text-align: left;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-ink-2);
 }
 
@@ -1974,7 +2045,7 @@ function errorMessage(error) {
   justify-content: space-between;
   margin-bottom: 0.25rem;
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-ink-3);
@@ -1991,7 +2062,7 @@ function errorMessage(error) {
   border: 1px solid var(--color-rule);
   background: var(--color-surface);
   padding: 0 0.5rem;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-ink);
   outline: none;
 }
@@ -2008,8 +2079,9 @@ function errorMessage(error) {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 3px;
   text-align: left;
   color: var(--color-ink-2);
 }
@@ -2027,22 +2099,23 @@ function errorMessage(error) {
 }
 
 .new-chat-choice strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .new-chat-choice small {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-ink-3);
 }
 
 .chat-primary-button {
   height: 2rem;
-  margin-top: 1rem;
+  margin-top: 0.875rem;
   padding: 0 0.75rem;
+  border-radius: 2px;
   background: var(--color-accent);
   color: var(--color-accent-ink);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -2060,7 +2133,8 @@ function errorMessage(error) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-message {
+  .chat-message,
+  .chat-gutter-time {
     transition: none;
   }
 }

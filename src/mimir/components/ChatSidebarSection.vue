@@ -80,13 +80,23 @@
           :title="targetTitleAttribute(target)"
           @click="$emit('selectChat', target.id)"
         >
-          <span class="grid size-7 place-items-center text-ink-3">
+          <span class="relative grid size-7 place-items-center text-ink-3">
             <IconHash
               v-if="target.kind === 'channel'"
               :size="15"
               :stroke-width="1.8"
             />
-            <IconUser v-else :size="14" :stroke-width="1.8" />
+            <template v-else>
+              <IconUser :size="14" :stroke-width="1.8" />
+              <span
+                v-if="memberFor(target)"
+                data-chat-presence
+                class="absolute bottom-[3px] right-[3px] size-2 rounded-full"
+                :class="memberFor(target).away ? 'border border-ink-4 bg-transparent' : 'bg-add'"
+                :title="memberFor(target).away ? memberFor(target).awayMessage || 'Away' : 'Available'"
+                aria-hidden="true"
+              />
+            </template>
           </span>
           <template #label>
             <span :class="{ 'font-semibold text-ink': target.unreadCount > 0 }">
@@ -151,12 +161,17 @@ const preferredTarget = computed(
     || '',
 )
 
+function memberFor(target) {
+  if (target.kind !== 'direct') return null
+  const key = target.id?.toLowerCase()
+  return props.members.find(candidate => (
+    candidate.nick?.toLowerCase() === key
+      || candidate.account?.toLowerCase() === key
+  )) || null
+}
+
 function directTitle(target) {
-  const member = props.members.find(candidate => (
-    candidate.nick?.toLowerCase() === target.id?.toLowerCase()
-      || candidate.account?.toLowerCase() === target.id?.toLowerCase()
-  ))
-  return member?.displayName || target.title || target.id
+  return memberFor(target)?.displayName || target.title || target.id
 }
 
 function targetTitle(target) {

@@ -109,7 +109,7 @@
           </div>
         </form>
         <p v-if="menuError" class="mt-1.5 text-[9px] leading-snug text-rem">{{ menuError }}</p>
-        <p v-if="chat.activeRecord?.kind === 'channel'" class="mt-1 font-mono text-[8px] uppercase tracking-[0.08em] text-ink-4">
+        <p v-if="chat.activeRecord?.kind === 'channel'" class="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-4">
           {{ chat.activeRecord.memberCount }} {{ chat.activeRecord.memberCount === 1 ? 'member' : 'members' }}
         </p>
         <div
@@ -120,19 +120,19 @@
           <div
             v-for="member in visibleMembers"
             :key="member.account || member.nick"
-            class="flex h-6 min-w-0 items-center gap-1.5 text-[9px]"
+            class="flex h-6 min-w-0 items-center gap-1.5 text-[10px]"
           >
             <span
-              class="h-1.5 w-1.5 shrink-0 rounded-full"
-              :class="member.away ? 'bg-ink-4' : 'bg-add'"
+              class="size-2 shrink-0 rounded-full"
+              :class="member.away ? 'border border-ink-4 bg-transparent' : 'bg-add'"
               :title="member.away ? member.awayMessage || 'Away' : 'Available'"
               aria-hidden="true"
             />
             <span class="min-w-0 flex-1 truncate text-ink-2">{{ member.displayName || member.nick }}</span>
-            <span v-if="member.away" class="text-[8px] text-ink-4">away</span>
+            <span v-if="member.away" class="text-[9px] text-ink-4">away</span>
             <span
               v-if="member.account && member.account !== member.displayName"
-              class="max-w-20 truncate font-mono text-[8px] text-ink-4"
+              class="max-w-20 truncate font-mono text-[9px] text-ink-4"
             >
               {{ member.account }}
             </span>

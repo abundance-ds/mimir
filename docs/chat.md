@@ -18,10 +18,10 @@ production-verified again.
 
 - Unread: one dot per room, aggregate dot on Chats header, dock badge follows total. Muting suppresses alerts, not unread state.
 - Cmd/Ctrl+P finds rooms by name/topic when query present; rooms do not crowd default results.
-- Dense transcript layout; consecutive messages group. One-level replies with jump. Day boundaries, New messages marker, timestamps, agent provenance, code blocks, links.
+- Dense transcript layout; consecutive messages group. Sender groups open with a monogram chip (robot glyph in accent for agents); hover/focus on a grouped message reveals its gutter timestamp. Message bodies are selectable. One-level replies with jump. Day boundaries, New messages marker, timestamps, agent provenance, code blocks, links.
 - Hover/focus message toolbar: one-level reply, five-reaction toggle, inline edit (author, short), deliberate delete confirmation (stable tombstone). Copied `mimir://chat/<target>/<message>` link opens exact cached message.
 - File attachments: paperclip / drag-drop / paste. Cards show name, size/type, verified image preview, native open. Downloads cached under `~/.mimir/chat-files/` after size + SHA-256 match.
-- Presence: available or away (Ergo marks always-on accounts away on disconnect). Typing indicators are ephemeral, never persisted.
+- Presence: available or away (Ergo marks always-on accounts away on disconnect). DM rows show it on the person icon: filled dot available, hollow away. Typing indicators are ephemeral, never persisted.
 - Notifications: focused desktop alerts for incoming DM / direct @mention while not visible. Require explicit Settings > Chat permission. Muting suppresses alerts.
 - Composer: one draft + scroll position per room. Enter sends, Shift+Enter newline, single-flight send. Disconnected: history/search available, sending disabled, draft retained.
 - Create channel, Join channel, Direct message: three short flows. Known teammates offered first for DMs.
