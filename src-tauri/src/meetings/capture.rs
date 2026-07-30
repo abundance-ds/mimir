@@ -46,7 +46,7 @@ pub struct NativeMeetingCapture {
 impl NativeMeetingCapture {
     pub fn new(store: Arc<MeetingStore>, data_dir: impl Into<PathBuf>) -> Result<Self, String> {
         let data_dir = data_dir.into();
-        fs::create_dir_all(data_dir.join("audio"))
+        fs::create_dir_all(&data_dir)
             .map_err(|error| format!("could not create meeting audio directory: {error}"))?;
         Ok(Self {
             store,
@@ -386,7 +386,7 @@ impl ChannelWriter {
             self.persist_chunk(chunk)?;
         }
         if !self.gaps.is_empty() {
-            let relative = format!("audio/{}/{}/gaps.json", self.meeting_id, self.channel_id);
+            let relative = format!("{}/audio/{}/gaps.json", self.meeting_id, self.channel_id);
             let path = contained_path(&self.data_dir, &relative)?;
             crate::persistence::write_json_atomic(path, &self.gaps)
                 .map_err(|error| error.to_string())?;
@@ -406,7 +406,7 @@ impl ChannelWriter {
         let start_ms = start_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64;
         let end_ms = end_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64;
         let relative = format!(
-            "audio/{}/{}/{sequence:08}.f32le",
+            "{}/audio/{}/{sequence:08}.f32le",
             self.meeting_id, self.channel_id
         );
         let draft = AudioChunkDraft {
@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn contained_audio_paths_reject_escape_components() {
         let root = Path::new("/tmp/mimir-meetings");
-        assert!(contained_path(root, "audio/meeting/mic/1.f32le").is_ok());
+        assert!(contained_path(root, "meeting/audio/mic/1.f32le").is_ok());
         assert!(contained_path(root, "../secret").is_err());
         assert!(contained_path(root, "/tmp/secret").is_err());
         assert_eq!(
