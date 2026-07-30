@@ -84,6 +84,15 @@ pub struct MeetingEnvironmentProjection {
 
 pub trait MeetingEnvironmentProbe: Send + Sync {
     fn projection(&self) -> Result<MeetingEnvironmentProjection, String>;
+
+    /// Keep native detection policy aligned with the durable setting.
+    ///
+    /// Implementations without an owned detector may retain the default
+    /// no-op. The production detector adapter updates an atomic worker flag and
+    /// wakes its poll loop immediately.
+    fn set_detection_enabled(&self, _enabled: bool) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Explicitly unavailable environment probe for non-capture builds.
@@ -1176,7 +1185,11 @@ impl NativeMeetingPlatform {
         };
         // Load once during construction so corruption is quarantined before
         // runtime projection and diagnostics are stable.
-        let _ = platform.load_config()?;
+        let config = platform.load_config()?;
+        platform
+            .inner
+            .environment
+            .set_detection_enabled(config.detection_enabled)?;
         Ok(platform)
     }
 
@@ -1645,7 +1658,10 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         if let Some(value) = patch.retention_days {
             config.retention_days = value;
         }
-        self.save_config(config)
+        self.save_config(config.clone())?;
+        self.inner
+            .environment
+            .set_detection_enabled(config.detection_enabled)
     }
 
     fn set_api_key(&self, api_key: &str) -> Result<(), String> {
@@ -2106,6 +2122,21 @@ mod tests {
         }
     }
 
+    struct TrackingEnvironment {
+        detection_updates: Arc<Mutex<Vec<bool>>>,
+    }
+
+    impl MeetingEnvironmentProbe for TrackingEnvironment {
+        fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
+            FakeEnvironment.projection()
+        }
+
+        fn set_detection_enabled(&self, enabled: bool) -> Result<(), String> {
+            self.detection_updates.lock().unwrap().push(enabled);
+            Ok(())
+        }
+    }
+
     struct FakeDisk;
 
     impl MeetingDiskSpaceProbe for FakeDisk {
@@ -2160,6 +2191,10 @@ mod tests {
     }
 
     fn fixture() -> Fixture {
+        fixture_with_environment(Arc::new(FakeEnvironment))
+    }
+
+    fn fixture_with_environment(environment: Arc<dyn MeetingEnvironmentProbe>) -> Fixture {
         let directory = tempfile::tempdir().unwrap();
         let paths = MeetingPlatformPaths::from_mimir_root(directory.path());
         fs::create_dir_all(&paths.meetings_root).unwrap();
@@ -2175,7 +2210,7 @@ mod tests {
                 manifest: manifest(&model_bytes),
             }],
             Arc::new(FakeSecrets::default()),
-            Arc::new(FakeEnvironment),
+            environment,
             Arc::new(FakeDisk),
             Arc::new(FakeDownloader {
                 bytes: model_bytes,
@@ -2280,6 +2315,25 @@ mod tests {
             .filter_map(Result::ok)
             .any(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"));
         assert!(quarantined);
+    }
+
+    #[test]
+    fn durable_detection_setting_is_applied_at_startup_and_after_updates() {
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let fixture = fixture_with_environment(Arc::new(TrackingEnvironment {
+            detection_updates: Arc::clone(&updates),
+        }));
+
+        assert_eq!(*updates.lock().unwrap(), vec![false]);
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                detection_enabled: Some(true),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+
+        assert_eq!(*updates.lock().unwrap(), vec![false, true]);
     }
 
     #[test]
