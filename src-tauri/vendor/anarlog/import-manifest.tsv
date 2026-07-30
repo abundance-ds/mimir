@@ -1,0 +1,149 @@
+# SHA-256 is over the raw file content at commit 08aad83f0c5cef1317d74a31519ae3190d726504.
+# disposition	component	upstream_path	destination_hint	rationale
+ba9cc3a7e074c5cfe3985d6956f24c9f7575592a0483e314c9fcb4f72ee1b615	notice	meta	LICENSE	src-tauri/vendor/anarlog/LICENSE	Preserved verbatim; required for every copy or substantial portion.
+ea37e1a3f86770c95013b0457d151650b3d257e0e506e295a58ef855cbac0f74	reference	meta	README.md	-	Product claims and orientation only; not an implementation contract.
+157077ae4adc75c99165cbf9ed879943b59a94401f334345e4232395c8c73477	reference	build	Cargo.toml	-	Workspace dependency inventory; never import the workspace wholesale.
+1362bca5864ae15d4ac01405d83e29a375879adc3119a5aaf528c9e27f703857	reference	build	rust-toolchain.toml	-	Audit pin uses Rust 1.94; Mimir owns its toolchain.
+5aee90ef628ac07434d99e53ddabd5072fccacd32d99e7906f0cdd13700e289e	reference	build	package.json	-	Node 22 and pnpm 11 monorepo metadata; do not merge into Mimir.
+
+50dd367e5cd74aa558887e8032b1cb318f5b2e6ba55f6dceb1e9a45d901fd262	adapt	audio-contract	crates/audio/Cargo.toml	src-tauri/crates/mimir-meeting-audio/Cargo.toml	Recreate a lean dependency set under Mimir ownership.
+f869d42a0f90417a1fef22bff306f5749d1166425eff4bfde08496e2db32a80b	candidate	audio-contract	crates/audio/src/lib.rs	src-tauri/crates/mimir-meeting-audio/src/contract.rs	Extract CaptureConfig, raw/AEC CaptureFrame views, stream, provider seam, and tests.
+6196c5cb4700667278402534eb22b14dfc1054038aef8fdc6f484825a258fb7d	adapt	audio-capture	crates/audio-actual/Cargo.toml	src-tauri/crates/mimir-meeting-audio/Cargo.toml	Select only macOS dependencies; do not inherit Linux/Windows/native codec sprawl.
+b333e06bcf7bcc83e38c57d9901646bfe3b848ef2fd8b0012cac0d9831b3fc25	adapt	audio-capture	crates/audio-actual/src/lib.rs	src-tauri/crates/mimir-meeting-audio/src/lib.rs	Replace Anarlog names, probes, silence playback, and panic-prone device lookup.
+8b101c2754b6d65362b4b35f3d21003b6f8df92e93ddec62ac037375dfed546f	candidate	audio-capture	crates/audio-actual/src/async_ring.rs	src-tauri/crates/mimir-meeting-audio/src/async_ring.rs	Realtime-to-async bridge; retain death/drop tests and expose overflow health.
+a046e64c5f2545703fe72175610a059456103b392e57de96fd24509e49729987	candidate	audio-capture	crates/audio-actual/src/rt_ring.rs	src-tauri/crates/mimir-meeting-audio/src/rt_ring.rs	Allocation-bounded downmix/conversion helpers and deterministic tests.
+aa1799e36018040752381fc9777f5dd475d70f83c8af2e39e80fe7eb322479c5	adapt	audio-capture	crates/audio-actual/src/mic.rs	src-tauri/crates/mimir-meeting-audio/src/macos/mic.rs	Keep bounded realtime capture; surface dropped samples and hot-plug failure as session health.
+a020c071f3fd9e040f3f59706b5b16cfb729709532d822a841a2a1309171436d	adapt	audio-capture	crates/audio-actual/src/capture/mod.rs	src-tauri/crates/mimir-meeting-audio/src/capture/mod.rs	Remove hard-coded 50 ms startup sleep and make initialization/rollback explicit.
+b1e6748448f40c4f8380d6ae127613b16c5d9f5e014ab5594f51b17c823c4f59	adapt	audio-capture	crates/audio-actual/src/capture/joiner.rs	src-tauri/crates/mimir-meeting-audio/src/capture/joiner.rs	Keep silence-fill tests; replace silent queue drops with metrics and degraded state.
+7ad5431139dd18fd6c1b370a625446389bd17dfbd287ce64a0548670097b8f7e	adapt	audio-capture	crates/audio-actual/src/capture/stream.rs	src-tauri/crates/mimir-meeting-audio/src/capture/stream.rs	Keep bounded channel/cancellation/alignment; raw tracks must remain canonical.
+58af28e76542785e6f6ba07e8f6fd0bc1bf19be10f17793853e58f08d6b532f4	adapt	audio-capture	crates/audio-actual/src/speaker/mod.rs	src-tauri/crates/mimir-meeting-audio/src/macos/system_audio.rs	Extract only the selected macOS backend and Mimir identity.
+fb90773a0fac0946359e676137e6ebce11cbada2e5cd8e803abbf5a0857c6f95	adapt	audio-capture	crates/audio-actual/src/speaker/macos.rs	src-tauri/crates/mimir-meeting-audio/src/macos/system_audio.rs	Core Audio process tap candidate; macOS 14.2+, TCC, teardown, overflow, and package QA required.
+8cc80794b9085da33f68bec036e1a3b59a618b5fa39eb9df85315c22c563906f	reference	audio-capture	crates/audio-actual/src/speaker/linux.rs	-	Mimir release target is macOS arm64; revisit only with a separate Linux release goal.
+b528a43cc2e8e8cd6f75f78721a43970651bbe95c05425cc432d9c8f1d7e878d	reference	audio-capture	crates/audio-actual/src/speaker/windows.rs	-	Mimir release target is macOS arm64; revisit only with a separate Windows release goal.
+
+116da8adb41290e64e29560d6bd5d70331372ef3de995708601eecba037da95a	adapt	audio-sync	crates/audio-sync/Cargo.toml	src-tauri/crates/mimir-meeting-audio/Cargo.toml	Recreate dependency declaration after benchmark and drift-contract review.
+d10baecfd9146254b7d3dfac850e97be4994f47f549644c5b2b5e8b9d0f99b40	candidate	audio-sync	crates/audio-sync/src/lib.rs	src-tauri/crates/mimir-meeting-audio/src/sync/mod.rs	Small public seam for tested lag/drift estimation.
+61099639913e71f6b969cba966da51c23c819f2bb924a0d857d45ee739b5523c	candidate	audio-sync	crates/audio-sync/src/drift.rs	src-tauri/crates/mimir-meeting-audio/src/sync/drift.rs	Deterministic drift behavior and tests.
+3652e04456bbe4da6bef8c373f2ba2d4450e758b7d2154ebdc5261aebaa3f87e	candidate	audio-sync	crates/audio-sync/src/estimator.rs	src-tauri/crates/mimir-meeting-audio/src/sync/estimator.rs	Estimator candidate; validate long-session stability with fixture/property tests.
+cd7c1f8d3a09c3bf579450c65ba6890d49a5eab0f9bb8370be37c9d12cad80fa	candidate	audio-sync	crates/audio-sync/src/level.rs	src-tauri/crates/mimir-meeting-audio/src/sync/level.rs	Signal-level helper with deterministic tests.
+6bcdd1cd7f02f291a987e27114e93cb477e82154fb8902f2d6040352937d08c2	adapt	audio-sync	crates/audio-sync/src/probe.rs	src-tauri/crates/mimir-meeting-audio/src/sync/probe.rs	Catch-up/locking behavior is useful; panic containment and health events must be explicit.
+f75e7acfba5b17cef8b260525618303182f085a6da5278bdcb6636aa1ae21906	candidate	audio-sync	crates/audio-sync/tests/e2e.rs	src-tauri/crates/mimir-meeting-audio/tests/sync_fixtures.rs	Port fixtures/assertions before implementation.
+768d2ee99e82a7a2190e00b015fd34192831810af9d3c2885afed8ba1d77a6b4	adapt	resampler	crates/resampler/Cargo.toml	src-tauri/crates/mimir-meeting-audio/Cargo.toml	Import only the active dynamic implementation and exact dependency versions.
+051ece1671ea6deb7cafbc9ec9949fba20bb5444a8c3c4745f3e82ae47f4309d	candidate	resampler	crates/resampler/src/lib.rs	src-tauri/crates/mimir-meeting-audio/src/resampler/mod.rs	Public seam and error behavior.
+9038974cbd0766fe870200871077f054aec170df9ce8b81b9daba2e7e6a7bc9a	candidate	resampler	crates/resampler/src/driver.rs	src-tauri/crates/mimir-meeting-audio/src/resampler/driver.rs	Chunk driver candidate; preserve boundary tests.
+8a1289279db5045a5653a00dd09977095393ee7d3ca7c03e3aff923b832673c7	adapt	resampler	crates/resampler/src/async_source/mod.rs	src-tauri/crates/mimir-meeting-audio/src/resampler/mod.rs	Drop deprecated variants and expose one Mimir-owned source trait.
+05b86067449902d68a1836f1fa0b2b8621d42f35a93d4714fdf1c01984bc612d	candidate	resampler	crates/resampler/src/async_source/dynamic_new.rs	src-tauri/crates/mimir-meeting-audio/src/resampler/dynamic.rs	Active dynamic-rate implementation and tests.
+
+7f5d13d8798fab2ee9a1c64a6f50a3a5c46489cc76d510d21eb783910193f380	legal-hold	aec	crates/aec/Cargo.toml	-	ONNX Runtime/dependency and model distribution review required.
+6a2e6771989b50a46bbe0b278c7f93bc4ac148d38a720c4bd1ab3da287a3b4d3	legal-hold	aec	crates/aec/src/lib.rs	-	Do not copy until the six checked-in model files have documented origin and license.
+a060e46a6bebed03d6360262d814851dc6c2806cec7c1b6a388e617cae7c082c	legal-hold	aec-model	crates/aec/data/models/model_128_1.onnx	-	Model origin/license not recorded at the Mimir boundary.
+6b6e312f701a3fad2aac2981ca1ed978d25dffa0bc8da9f33235a2e91f56705a	legal-hold	aec-model	crates/aec/data/models/model_128_2.onnx	-	Model origin/license not recorded at the Mimir boundary.
+e7df5a25fce3565bc7d3b9c0b3a4e53f7adb96a4cc772dc189df895f6f33adb7	legal-hold	aec-model	crates/aec/data/models/model_256_1.onnx	-	Model origin/license not recorded at the Mimir boundary.
+19c07ebe462c424523609afb635e5ff42f1127aa434879ddb744d2db68a22dee	legal-hold	aec-model	crates/aec/data/models/model_256_2.onnx	-	Model origin/license not recorded at the Mimir boundary.
+72e664d7f2dea2fcc0b7dafedf60a2fa95ce8184095501f58f95332f00825911	legal-hold	aec-model	crates/aec/data/models/model_512_1.onnx	-	Model origin/license not recorded at the Mimir boundary.
+5218598dda3729f954aff857402cb4c8752b88528b62fe60b7600feebed9efd3	legal-hold	aec-model	crates/aec/data/models/model_512_2.onnx	-	Model origin/license not recorded at the Mimir boundary.
+1ce93abf53952e19914b09e8bcd11669f0ce0714c3c287286c3819d917a816b2	legal-hold	vad	crates/vad/Cargo.toml	-	ONNX model provenance and runtime dependency review required.
+eb75cfec6ef9eeca80edf3d720596efcb02aaf444758c260b73e123bb6c3a577	legal-hold	vad	crates/vad/src/lib.rs	-	Code is MIT via Anarlog, but selected backend depends on held weights.
+1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3	legal-hold	vad-model	crates/vad/data/models/silero_v6.2.onnx	-	Record upstream model revision/license before copying or distributing.
+44b41f361c16f44688ea9ef3c61d66ad56999273ce47166a9e507e6d6d6ead17	adapt	vad-masking	crates/vad-masking/Cargo.toml	src-tauri/crates/mimir-meeting-audio/Cargo.toml	Derived live-stream feature only; never apply to canonical raw audio.
+6ec523c5412dda5ed680e720e1455b5de93894f799acf4fa0c805e56bfe42065	adapt	vad-masking	crates/vad-masking/src/lib.rs	src-tauri/crates/mimir-meeting-audio/src/vad_mask.rs	Wait on VAD backend/license decision.
+2211ce5bd21784a705fc135c511b8596f94ae9621123c3e2146e8d181494d26b	adapt	vad-masking	crates/vad-masking/src/masking.rs	src-tauri/crates/mimir-meeting-audio/src/vad_mask.rs	Port behavior/tests only after raw-vs-derived invariant exists.
+08c9ce4902561a2efc184740f2d9e743d6c220f62b189c106e31c8a708fab692	adapt	vad-masking	crates/vad-masking/src/streaming.rs	src-tauri/crates/mimir-meeting-audio/src/vad_mask.rs	Live path only; bounded latency and bypass tests required.
+
+32237ae4f1dbdb83d99e2174900c0b2e61244827e8fdd4a91a6009ff4f740eb8	adapt	transcript	crates/transcript/Cargo.toml	src-tauri/crates/mimir-meeting-transcript/Cargo.toml	Remove template-app/postprocessor and reduce protocol dependencies.
+afc4c9d8dea476c2c7c58f6de8f216cff7018b7164c462ca7edf37d5e77d2e82	adapt	transcript	crates/transcript/src/lib.rs	src-tauri/crates/mimir-meeting-transcript/src/lib.rs	Export deterministic core only; exclude postprocessor.
+8b1a86bd18b620f7be7b0959f569f8335ab25ee5868c8f5c91750bd0baf243e6	candidate	transcript	crates/transcript/src/channel_state.rs	src-tauri/crates/mimir-meeting-transcript/src/channel_state.rs	Final/partial channel state and correction lifecycle.
+1599fa399f4597d408a1ee42c8ced243788889c92145807ec23edd8591eb88e8	candidate	transcript	crates/transcript/src/label.rs	src-tauri/crates/mimir-meeting-transcript/src/label.rs	Stable speaker labels and tests; adapt Mimir participant identities.
+e4c9ddd3cd3c3f1c5a6649cd735760c4a7f43705dda70a19f115db5c683ffc14	reject	transcript	crates/transcript/src/postprocessor.rs	-	Anarlog template/LLM JSON-patch flow belongs in Mimir Activities, not transcript core.
+bb3da80acda60c51bc34d590713a084063c378713883b0e2d8eb55891b730420	candidate	transcript	crates/transcript/src/processor.rs	src-tauri/crates/mimir-meeting-transcript/src/processor.rs	Deterministic stream/batch delta processing; isolate upstream wire conversion.
+bc1f4461b43f66dbc0997ad70a13fc2feb61c2b3f4a90fe0d65f1597af4c62f3	candidate	transcript	crates/transcript/src/render.rs	src-tauri/crates/mimir-meeting-transcript/src/render.rs	Stable segment rendering/IDs and tests.
+eb1e1373e0d2ec4d1344d059951d5efa67452b1f2cdd593d3679af601356e24e	candidate	transcript	crates/transcript/src/segments/collect.rs	src-tauri/crates/mimir-meeting-transcript/src/segments/collect.rs	Segment collection behavior.
+8d70afd0ab358a19b1a8088a0f8fd3987152002672c2149229eaa3a1b71085e8	candidate	transcript	crates/transcript/src/segments/mod.rs	src-tauri/crates/mimir-meeting-transcript/src/segments/mod.rs	Segment module seam.
+cfe0a29afdf740341d30174c51e95ca189e52af3c5da48fae6211306790fa86d	candidate	transcript	crates/transcript/src/segments/model.rs	src-tauri/crates/mimir-meeting-transcript/src/segments/model.rs	Internal segment model.
+c9978d66ed14a03f43c2aaf64ade894cd4195c882fe2ccbca30d8e3caa90f33e	candidate	transcript	crates/transcript/src/segments/normalize.rs	src-tauri/crates/mimir-meeting-transcript/src/segments/normalize.rs	Timing/spacing normalization.
+9fafda568b41016f0739ccc7a368ddb201dbbcc5306ef2a7f2d8eabeb3abdd6e	candidate	transcript	crates/transcript/src/segments/speakers.rs	src-tauri/crates/mimir-meeting-transcript/src/segments/speakers.rs	Speaker propagation rules.
+4b3f2636bc530f1f8d476907bd43dd701a9153d9034458a74e0b81b013e68f1d	candidate	transcript	crates/transcript/src/segments/tests.rs	src-tauri/crates/mimir-meeting-transcript/src/segments/tests.rs	Port before implementation; covers overlap/crosstalk/identity leakage.
+b051ba640b8e6d80a4c0fa822e69333f2c2956fa88f2001ff926996040fdb4de	candidate	transcript	crates/transcript/src/types/delta.rs	src-tauri/crates/mimir-meeting-transcript/src/types/delta.rs	Provider-neutral delta type after removing wire coupling.
+7560ad17cd897fca674616f6ad1991791a79d2064dfb3f2d9d085186d4d6066e	candidate	transcript	crates/transcript/src/types/mod.rs	src-tauri/crates/mimir-meeting-transcript/src/types/mod.rs	Type module seam.
+7c21dd5af31fdc1091cc8dcf8ab0cafc97bcd48ddfff73c29879c04f3589def9	candidate	transcript	crates/transcript/src/types/segment.rs	src-tauri/crates/mimir-meeting-transcript/src/types/segment.rs	Segment/domain types.
+41be6887871da3a7a8498ab6b47ad71f620e6fb373687ca8636f4abf892f2aa7	candidate	transcript	crates/transcript/src/types/speaker.rs	src-tauri/crates/mimir-meeting-transcript/src/types/speaker.rs	Identity assignment behavior and tests.
+1e46294d17cdff18918816f0be4b4ff475f76f0513177e3017653c1eb061dc02	candidate	transcript	crates/transcript/src/types/word.rs	src-tauri/crates/mimir-meeting-transcript/src/types/word.rs	Raw/partial/final word state.
+e9aa5c55ffc91cb1595b3e6331c02ac65559e9ded19cbe137a97a8fdaba15afc	candidate	transcript	crates/transcript/src/words/assembly.rs	src-tauri/crates/mimir-meeting-transcript/src/words/assembly.rs	Unicode/punctuation/spacing assembly and tests.
+8d51d071fd62c56b348a2ffec46de5fc7bcd804db64f03eb094df42399255b9c	candidate	transcript	crates/transcript/src/words/finalize.rs	src-tauri/crates/mimir-meeting-transcript/src/words/finalize.rs	Finalization state transition.
+1860d3e688463452b73df2e85ab71d23877f4248fa2f2e3b01cdf50a1e8ae79e	candidate	transcript	crates/transcript/src/words/mod.rs	src-tauri/crates/mimir-meeting-transcript/src/words/mod.rs	Word module seam.
+30b61eb0c4505e68201ddd8b45b7338399999daa19cd72181b9593fa9878de84	candidate	transcript	crates/transcript/src/words/stitch.rs	src-tauri/crates/mimir-meeting-transcript/src/words/stitch.rs	Dedup/stitch rules and tests.
+
+5da0124f0fa1bd5818090c566a4c39b81a3a3f7751b72fd083192754c1e3831f	adapt	detection	crates/detect/Cargo.toml	src-tauri/crates/mimir-meeting-detect/Cargo.toml	Build macOS-only minimal dependency closure.
+77baf21a2aa56d8bc1076043615153015702fe928632da395a3d20c8211e53ac	adapt	detection	crates/detect/src/lib.rs	src-tauri/crates/mimir-meeting-detect/src/lib.rs	Define evidence events and owned cancellation; exclude Zoom/sleep/AX by default.
+27b2b423bdcf3364bdd9a02fca3be1a7a21cde86d41b0f37ca8fe3ef7c331c86	adapt	detection	crates/detect/src/list/mod.rs	src-tauri/crates/mimir-meeting-detect/src/apps.rs	Parameterize Mimir self identity; remove Anarlog/Hyprnote/Char hard-coding.
+b7273287b195a553a2dbfb3cc39ef3dc6b2f2e6cddeb080129c60bf0e6e41cc3	adapt	detection	crates/detect/src/list/macos.rs	src-tauri/crates/mimir-meeting-detect/src/macos/apps.rs	Core Audio process/app mapping candidate with failure tests and privacy review.
+6c9e0acde4b57786c44def51dd3d93016d18116fd58b563be978349386bf3464	candidate	detection	crates/detect/src/mic/macos/state.rs	src-tauri/crates/mimir-meeting-detect/src/state.rs	Debounce/snapshot state machine and tests.
+4632fd123daca158e2456680e1855e8068b4d1c4dac0ae269bb25a4dd0353e60	adapt	detection	crates/detect/src/mic/macos/device.rs	src-tauri/crates/mimir-meeting-detect/src/macos/device.rs	Callback mechanics only after RAII listener registration/removal exists.
+9bb65efdd42e5982117322f3fff6dbe79cce4ec913d3fdf7110cafc787d2688d	reject	detection	crates/detect/src/mic/macos/mod.rs	-	Permanently parked thread and leaked listener data; stop does not unregister.
+96cb12d34310f6e91282b716d266cd1514eed315e1e61380e049d648ad0f9da6	reject	detection	crates/detect/src/mic/macos/app.rs	-	Infinite polling thread has no shutdown token.
+9e4851c368ca8fcfa68fdbd7eec5190c7593073544565dcb780789eac43885d6	reject	detection	crates/detect/src/mic/windows.rs	-	No-op implementation.
+6f585c12073e81386400ad7b165a9d0a6bb37b4aca95366723b1535013c14ecb	reject	detection	crates/detect/src/utils.rs	-	BackgroundTask stop drops JoinHandle without awaiting termination.
+8d261001de226828d46f2be9f8134c9e27a290296045758e0b8b300c17637357	reject	detection	crates/detect/src/meeting_ax.rs	-	Brittle permission-heavy UI tree/chat automation outside initial boundary.
+3c71e42d1206c993e6421f5ac4729270e2a1999b0354abf5d6f821ca8c7eac1e	reject	detection	crates/detect/src/zoom.rs	-	English menu-title polling is locale/version brittle.
+2d16999cb0d23400475db7919ea0e0ce17dd0ad9beeccd12b05a515147a711b2	candidate	detection-policy	plugins/detect/src/mic_usage_tracker.rs	src-tauri/crates/mimir-meeting-detect/src/tracker.rs	Delay/cancel/restart/cooldown behavior and deterministic timer tests.
+cba86fa6175009eab77ee1ff06f2cb983cb51512a209cb4828a5a312b5f7edab	candidate	detection-policy	plugins/detect/src/timer_registry.rs	src-tauri/crates/mimir-meeting-detect/src/timers.rs	Generation/cancellation registry; adapt to Mimir scheduler.
+73cb3992edbae7d82739b868a111561dc3a55bd15b96b120355501f516c5661e	adapt	detection-policy	plugins/detect/src/policy.rs	src-tauri/crates/mimir-meeting-detect/src/policy.rs	Retain include/ignore concepts; replace category/bundle lists and add confidence evidence.
+c763b0a4983d3fbcc6a7015440435ab563aa19f30b389753f57373d4a12ace0e	candidate	detection-policy	plugins/detect/tests/mic_detection.rs	src-tauri/crates/mimir-meeting-detect/tests/detection_policy.rs	Port Gherkin scenarios for delay, cancellation, duplicate starts, cooldown, and settings.
+
+9427c2016628d2c43285b60fa408f8608d0c6f1e966b81a3f17d6b1e54e8164d	reject	session-engine	crates/listener-core/Cargo.toml	-	Wholesale import brings ractor, Sentry, storage, codecs, providers, and local models.
+8e7dbb7345e58d571eaa13d1ebb3eb905e58ade95c17c86270a4784b880a1b38	reference	session-engine	crates/listener-core/src/lib.rs	-	State/snapshot/degraded mode vocabulary only.
+df7c87067d7d773657f733d0acacf0d41d7dd219ed5e930d257ce8053dd8ee10	adapt	session-engine	crates/listener-core/src/events.rs	src-tauri/src/meetings/events.rs	Lifecycle/status/data separation is useful; define Mimir event/version/error codes.
+eafa47045ea25b8445d36eb48d3404131d649e6adb895537f6b00fe3c03bf622	reference	session-engine	crates/listener-core/src/actors/root.rs	-	Single-active/finalizing guard and stale-session recovery semantics.
+93b88f7ced04c64ee16ba273b8dc7e26dba08ec9e3fa739fabaf65477bbc86b2	reject	session-engine	crates/listener-core/src/actors/session/types.rs	-	Core params include provider keys/models and Anarlog storage/identity concerns.
+6f306b5794b07a90f66a76850dc378e2a41c55019fd13f9d18c0759a3867c338	reject	session-engine	crates/listener-core/src/actors/session/lifecycle.rs	-	Global Sentry context and Anarlog telemetry must not cross boundary.
+834aff25f2bb2d9ec39b06813f6ecdf6caea3a4a2e987a8c45ed202a60038797	reference	session-engine	crates/listener-core/src/actors/session/supervisor.rs	-	Record-only fallback/retry/meltdown behavior; implement in Mimir without ractor.
+28f5215c42f3377a4f383cf8052a4cde277abdd3c0790d87b185c9b1cf44e8f9	reference	session-engine	crates/listener-core/src/actors/session/supervisor/children.rs	-	Child start/stop ordering and restart-budget test cases.
+f8be46af6c12423b0e61fe0ffb63d00c6590568803802d3a11ac792fc5fa0257	reference	session-engine	crates/listener-core/src/actors/session/supervisor/mode.rs	-	Requested/live/batch-fallback transition semantics.
+ca8794a08ceac664cb15ded9236dd69f8ad376bb03788cc803b46014c92846f4	reject	session-engine	crates/listener-core/src/actors/source/pipeline.rs	-	Records preferred AEC/VAD-masked mic instead of raw; actor casts hide backpressure.
+9252bd6e1954bb7358f99f3ef4566aaa4215902215e2929239f43db907e9c244	reject	session-engine	crates/listener-core/src/actors/recorder/disk.rs	-	Synchronous per-sample writes, lossy MP3 finalization, destructive resume, LGPL path.
+b26f0dfef97ea166fc94f7158489499a9d79dd68da567e347e875b0aeba077a8	adapt	transcript-live	crates/listener-core/src/live_transcript.rs	src-tauri/crates/mimir-meeting-transcript/src/live.rs	Extract only tests/neutral merge rules after transcript core; remove Soniqo normalization.
+
+e8f90ca5089c87f1f9e5814eeb8c00d0e99f027648811c4a60cd769ec4001ae2	reject	batch-engine	crates/listener2-core/Cargo.toml	-	Wholesale import brings broad providers, local models, denoise, and ractor.
+b7edd0502e5822b1937bbf50db7e704eb454cbfd73603c08a5e374a01ba2c87b	candidate	batch-engine	crates/listener2-core/src/batch/accumulator.rs	src-tauri/crates/mimir-meeting-transcript/src/batch_accumulator.rs	Deterministic streamed batch merge/final snapshot tests.
+5df4c5df198c37acc0ba8a7c7d696a597ba00910e0e400daf686da2a95ed5221	reference	batch-engine	crates/listener2-core/src/batch/simple.rs	-	Timeout/cancellation/progress tests are useful; provider routing is not.
+482e0d86d86e8f5b760944dda1cb10d3a24ad5cf254ff32c589cb9b6ffcee992	reference	batch-engine	crates/listener2-core/src/batch/progressive/actor.rs	-	Idle timeout/finalization behavior only; do not import ractor.
+c48744de64bb597db688d648171a5e6c57ea6c9c5e6fbf3b211965fd336c8958	adapt	batch-engine	crates/listener2-core/src/error.rs	src-tauri/src/meetings/error.rs	Map to stable Mimir error codes and user remediation.
+a2ee2096424beec04c327e90e2da7706ee2c19891837449d17ff78c712db8804	adapt	batch-engine	crates/listener2-core/src/events.rs	src-tauri/src/meetings/events.rs	Version progress/completed/failed events and persist terminal state.
+b2e3e6f968b5c3004b3bc3943d0fb560a41d5f4f64fb5ca13abfd66ad50e594a	candidate	batch-engine	crates/listener2-core/src/runtime.rs	src-tauri/src/meetings/runtime.rs	Small injected runtime seam; align with Mimir persistence/event services.
+
+d8fcffd63e0a475d828df9fbaab75e36ce8d7bd8b614dd87cbf450f261a1e240	adapt	stt-protocol	crates/owhisper-interface/Cargo.toml	src-tauri/crates/mimir-meeting-transcript/Cargo.toml	Keep only serde/domain dependencies; drop OpenAPI/Specta/schema concerns.
+06b8f48852a20148b1d36b66dae3a2549f201f4d6ad39914946b36c67e98b42a	adapt	stt-protocol	crates/owhisper-interface/src/lib.rs	src-tauri/crates/mimir-meeting-transcript/src/wire/mod.rs	Do not make legacy Word2 shape canonical; wire adapters only.
+6e79e896ca9508f9bc244edca1cbf05a6ab7781d4674b52078d75cfd5acda2d6	candidate	stt-protocol	crates/owhisper-interface/src/batch.rs	src-tauri/crates/mimir-meeting-transcript/src/wire/batch.rs	Batch response word/channel schema and tests.
+ea7a72b9d464fead16f3851164d960887518ba448bb0aff421213f8586c17f15	adapt	stt-protocol	crates/owhisper-interface/src/batch_sse.rs	src-tauri/crates/mimir-meeting-transcript/src/wire/batch_sse.rs	Only if selected provider returns SSE; enforce bounds and terminal semantics.
+f696e8172a76901823df8d1759ea83261d40dc96a7127d2c9d4407fdda9fdf0d	adapt	stt-protocol	crates/owhisper-interface/src/batch_stream.rs	src-tauri/crates/mimir-meeting-transcript/src/wire/batch_stream.rs	Wire format only; persist idempotent batch offsets/revisions.
+b96734708ebda435fc7bbb1b0f3fc179321990b99f7bc9d0d9e9c5fd2bf5b90a	candidate	stt-protocol	crates/owhisper-interface/src/progress.rs	src-tauri/crates/mimir-meeting-transcript/src/progress.rs	Provider-neutral inference phase/progress model.
+597193885dc1915a2e1dae348f23ae5864337680fbdd0558952d8d37bb84a784	candidate	stt-protocol	crates/owhisper-interface/src/stream.rs	src-tauri/crates/mimir-meeting-transcript/src/wire/stream.rs	Streaming word/result schema and timestamp/channel helpers.
+8142c210236467bd0aae3dc9acb51012952edd7a2ea2c44f2acdc399202d270c	reject	stt-provider	crates/owhisper-client/Cargo.toml	-	Broad provider/local/observability closure is outside Mimir's lean provider boundary.
+f1a23930d7731e8d646b665c429a49e9f52412859e53cfa309492c30ec1bad56	reference	stt-provider	crates/owhisper-client/src/providers.rs	-	Provider capability checklist only; do not expose 21 providers by URL guessing.
+d09bba85620cf2c4d44862e4a2c7d3ac3732119dde12231bb2c1cf374151e2c0	reject	stt-provider	crates/owhisper-client/src/adapter/mod.rs	-	Global adapter union and hosted/local routing are Anarlog-specific.
+a76c2857f52ad6d553aaccc24489465c000e8c873b49ef59a9790db5d2453e2c	adapt	stt-provider	crates/owhisper-client/src/adapter/openai/mod.rs	src-tauri/src/meetings/providers/openai_compatible.rs	Selected adapter only; own URL validation, secret redaction, typed errors, and limits.
+988b8a43c000a584a4d3053ea5287f7f0ada5ebec18551287a6ab6a2661e73b9	adapt	stt-provider	crates/owhisper-client/src/adapter/openai/batch.rs	src-tauri/src/meetings/providers/openai_compatible.rs	Batch upload candidate with cancellation, timeout, size cap, retry/idempotency tests.
+0d0abcf1bf2ae9f1a32e924a669a43571ec3aecb66b4b4b454b02d9bfe49de23	adapt	stt-provider	crates/owhisper-client/src/adapter/openai/live.rs	src-tauri/src/meetings/providers/openai_compatible.rs	Realtime candidate only after protocol/partial/final contract and reconnect tests.
+
+e07568ae16714f4a79ff7c2edcbfe30a92ffe9e577a2a58073d6ddbb50c7dccb	reject	hooks	crates/hooks/Cargo.toml	-	Do not add Anarlog hook subsystem.
+10821dd38727c0b23ebdfb3c2513b60f009e2e86aee414b025f09bd6c71ce2e3	reject	hooks	crates/hooks/src/config.rs	-	String command format violates Mimir exact-argv contract.
+4591745b9912fa0c248f6977f0e4398b3a6c0203bf92de29c76b1d351db10829	reference	hooks	crates/hooks/src/event.rs	-	Event names/arguments are input to Mimir durable job design only.
+fcaa73e72ea4960afd03c4e88708ff5749be8ea11874f8a7c509f8a00a2b444e	reject	hooks	crates/hooks/src/runner.rs	-	Whitespace splitting, env expansion, 5 s timeout, unbounded output, concurrent best effort.
+
+a21ed2d3711773c43dcdd2f62562ac3efb699ad88f79bcc167a32d53da7cd41c	legal-hold	local-stt	crates/transcribe-soniqo/Cargo.toml	-	Swift/Metal and model distribution review required.
+6a1ca205c9094c242bdf46c45f2b9f51a6e581cfac96a53148fa1d190130b10a	reject	local-stt	crates/transcribe-soniqo/build.rs	-	Mutates speech-swift's declared macOS platform and requires full Xcode/Metal toolchain.
+fee64f03fd79ae866f25b8302014bbee28defc38cec80d39109109d8563fd162	legal-hold	local-stt	crates/transcribe-soniqo/src/lib.rs	-	Model repositories/weights have separate terms; not an approved baseline backend.
+0201711d0cad8e9fb9770805cd713b2d4298f2b3fb2356b8761b614d5b6f8971	legal-hold	local-stt	crates/transcribe-soniqo/swift-lib/Package.swift	-	Pins speech-swift 0.0.22; record Apache notice plus all transitive/model terms.
+96ca383b66293480cf91a38fc85b5dbb420d1a38309d8e5d6da2252956e1850f	legal-hold	local-stt	crates/transcribe-soniqo/swift-lib/Package.resolved	-	Exact Swift dependency graph for legal/supply-chain review.
+9d1e164e7b1f5fafa760109b359d222b3ab1d9b63a7baae04ba33fc0be5048e7	reference	local-stt	crates/transcribe-speechanalyzer/Cargo.toml	-	Optional macOS 26 backend only.
+187f55b17af4360602eafa9d1c95ff7f742a2bbba2c7068f1f777240b8481534	reference	local-stt	crates/transcribe-speechanalyzer/src/lib.rs	-	Availability/assets/locale behavior; not baseline due macOS 26 requirement.
+5890e0c0cdda4b617e9447fa260d71ec3d859869da04fc1e5bf0ce2a4f904b57	reject	local-stt	crates/whisper-local/Cargo.toml	-	Disabled legacy path with pinned Codeberg whisper-rs fork.
+85ebd676b4554f919f5879920f38ade45c1992660b02c95aacca6e6ceee4bab5	reference	local-stt	crates/whisper-local/src/lib.rs	-	Behavior evidence only; select and pin a maintained backend independently.
+7f535931100a69d72dc7fcbff8ede82dbb96954b60d2e111ab9e73a93ee0c450	reject	local-stt	crates/transcribe-whisper-local/Cargo.toml	-	Disabled legacy service and dependency closure.
+e361e36859d5492f19d75d8093dfb77316f8a26b39f8f4cd446bfddc27b49b3e	reference	local-stt	crates/transcribe-whisper-local/src/lib.rs	-	Streaming/batch separation evidence only.
+
+5b634b3f2cb242aba3542b06e5d45c7720cf753d16301e90d117523a1fff6828	reference	storage	crates/db-app/migrations/20260710223922_canonical_data_model.sql	-	Domain checklist only; Anarlog schema is tied to CloudSync/E2EE and lacks Mimir job journal.
+a913ac5ae042063f1da75ccda0e9974b78c95d6ea133b70c0ee78d4abdcee115	reference	settings	apps/desktop/src/settings/schema.ts	-	Retention/detection/provider settings checklist; do not copy React state schema.
+e51c322d7ae98febdb7dee3fc520103513ef7c523ca5689209a413ad0b1ded0a	reference	product-docs	docs/automatic-capture.mdx	-	Confirms mic detection is a reminder, not auto-record; consent/control behavior input.
+f67338f292c985897ef483c16561e6a9b0fed5fd1ec3569087767f1102d40e84	reference	product-docs	docs/data-and-privacy.mdx	-	Provider disclosure, local/cloud boundary, retention, and recording-consent checklist.
+c52c54ca28447225a756bec6d48d39a96e7d78f567d9fae6a2859cc412f8d6de	reference	product-docs	docs/offline.mdx	-	Offline capability and predownload/test expectations.

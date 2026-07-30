@@ -1,0 +1,9 @@
+repository=https://github.com/fastrepl/anarlog.git
+commit=08aad83f0c5cef1317d74a31519ae3190d726504
+commit_date=2026-07-31T03:42:14+09:00
+desktop_release_baseline=desktop_v1.3.11
+desktop_release_baseline_commit=caf4d3a7fa612b017426cba42625c41265f452b3
+license=MIT
+copyright=Copyright (c) 2023-present Fastrepl, Inc.
+audit_date=2026-07-30
+manifest_format=sha256-tab-disposition-tab-component-tab-upstream_path-tab-destination_hint-tab-rationale
