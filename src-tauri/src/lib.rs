@@ -28,6 +28,7 @@ mod git;
 mod ipc_fixtures;
 mod launchers;
 mod local_settings;
+pub mod meetings;
 pub mod mimir_cli;
 mod persistence;
 pub mod routine_runtime;
