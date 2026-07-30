@@ -272,6 +272,10 @@ pub struct ActivityRecord {
     pub id: String,
     pub kind: ActivityKind,
     pub title: String,
+    /// True only while a newly launched agent still has its launcher title.
+    /// The first automatic or explicit rename permanently consumes it.
+    #[serde(default)]
+    pub auto_title_eligible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
     pub status: ActivityStatus,
@@ -335,6 +339,7 @@ mod tests {
             id: "agent:one".into(),
             kind: ActivityKind::Agent,
             title: "Codex".into(),
+            auto_title_eligible: true,
             workspace_path: Some("/work".into()),
             status: ActivityStatus::Ready,
             created_at: "2026-07-25T10:00:00Z".into(),
@@ -364,6 +369,7 @@ mod tests {
         };
 
         let value = serde_json::to_value(&record).unwrap();
+        assert_eq!(value["autoTitleEligible"], true);
         assert_eq!(value["workspacePath"], "/work");
         assert_eq!(value["source"]["launcherId"], "codex");
         assert_eq!(value["source"]["type"], "business-graph-work");

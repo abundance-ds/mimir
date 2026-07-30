@@ -40,13 +40,22 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 33] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 34] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
         description: "Active editor, selection, comments, and Today priority.",
         group: "workbench",
         effect: "read",
+        direct: true,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "activities.auto-title",
+        public_name: "mimir_title",
+        description: "Set a concise title for the current Activity on its first substantive turn.",
+        group: "workbench",
+        effect: "write",
         direct: true,
         connection: None,
     },
@@ -1138,6 +1147,22 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             &[],
         ),
         definition(
+            "activities.auto-title",
+            "mimir_title",
+            "Call once at the start of the first substantive user turn with a concise 3-8 word Activity title. Explicit or previously generated titles are preserved.",
+            object_schema(
+                json!({
+                    "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60,
+                        "description": "A concise 3-8 word description of the user's task, without provider names or trailing punctuation."
+                    }
+                }),
+                &["title"],
+            ),
+        ),
+        definition(
             "activities.list",
             "activities_list",
             "List durable terminal, agent, app, files, and routine activities.",
@@ -1442,7 +1467,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 33);
+        assert_eq!(AGENT_TOOLS.len(), 34);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
@@ -1455,7 +1480,15 @@ mod tests {
             .filter(|spec| spec.direct)
             .map(|spec| spec.public_name)
             .collect();
-        assert_eq!(direct, ["mimir_state", "mimir_reveal", "mimir_propose"]);
+        assert_eq!(
+            direct,
+            [
+                "mimir_state",
+                "mimir_title",
+                "mimir_reveal",
+                "mimir_propose"
+            ]
+        );
 
         for spec in AGENT_TOOLS {
             assert!(!spec.public_name.contains('.'));

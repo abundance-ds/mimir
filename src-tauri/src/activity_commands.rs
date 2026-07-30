@@ -168,6 +168,17 @@ pub fn activity_rename(
 }
 
 #[tauri::command]
+pub fn activity_auto_title(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+    title: String,
+) -> Result<ActivityRecord, String> {
+    supervisor
+        .auto_title(&activity_id, title)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn activity_set_archived(
     supervisor: tauri::State<'_, ActivitySupervisor>,
     activity_id: String,
@@ -227,6 +238,7 @@ mod tests {
             id: id.into(),
             kind: ActivityKind::Agent,
             title: id.into(),
+            auto_title_eligible: false,
             workspace_path: None,
             status: ActivityStatus::Ready,
             created_at: "2026-07-25T00:00:00Z".into(),
@@ -253,12 +265,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let supervisor =
             ActivitySupervisor::new(ActivitySupervisorConfig::new(temp.path())).unwrap();
+        let mut record = completed_record("command-lifecycle");
+        record.auto_title_eligible = true;
         supervisor
-            .spawn(SpawnActivityRequest::new(
-                completed_record("command-lifecycle"),
-                80,
-                24,
-            ))
+            .spawn(SpawnActivityRequest::new(record, 80, 24))
             .unwrap();
         while !supervisor
             .snapshot("command-lifecycle", None)
@@ -273,6 +283,15 @@ mod tests {
         let app = tauri::test::mock_app();
         app.manage(supervisor);
 
+        let automatic = activity_auto_title(
+            app.state(),
+            "command-lifecycle".into(),
+            "Automatic command title".into(),
+        )
+        .unwrap();
+        assert_eq!(automatic.title, "Automatic command title");
+        assert!(!automatic.auto_title_eligible);
+
         let renamed = activity_rename(
             app.state(),
             "command-lifecycle".into(),
@@ -280,6 +299,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(renamed.title, "Command title");
+
+        let ignored = activity_auto_title(
+            app.state(),
+            "command-lifecycle".into(),
+            "Must not replace manual title".into(),
+        )
+        .unwrap();
+        assert_eq!(ignored.title, "Command title");
 
         let archived =
             activity_set_archived(app.state(), "command-lifecycle".into(), true).unwrap();

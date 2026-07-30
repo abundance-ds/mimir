@@ -212,7 +212,7 @@ const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS: [&str; 3] =
     [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26"];
 const MIMIR_INSTRUCTIONS: &str =
-    "Mimir: `mimir tools` (all) · `mimir tools <workbench|graph|chat|connections>` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`";
+    "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`.";
 
 fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
     requested

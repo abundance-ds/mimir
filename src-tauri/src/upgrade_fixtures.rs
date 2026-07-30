@@ -746,6 +746,7 @@ fn generate_current_version_snapshot() {
         id: "agent-fixture-0001".into(),
         kind: ActivityKind::Agent,
         title: "Codex review".into(),
+        auto_title_eligible: false,
         workspace_path: Some("/Users/tester/projects/acme".into()),
         status: ActivityStatus::Ready,
         created_at: "2026-07-27T09:00:00Z".into(),

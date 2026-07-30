@@ -957,6 +957,7 @@ pub fn run() {
             activity_commands::activity_stop,
             activity_commands::activity_close,
             activity_commands::activity_rename,
+            activity_commands::activity_auto_title,
             activity_commands::activity_set_archived,
             activity_commands::activity_clear,
             activity_commands::activity_interrupt_all,

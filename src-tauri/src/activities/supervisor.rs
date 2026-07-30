@@ -847,10 +847,51 @@ impl ActivitySupervisor {
             let dispatch = lock(&self.inner.dispatch);
             let mut record = lock(&activity.record);
             let scrollback = lock(&activity.scrollback);
-            if record.title == title {
+            if record.title == title && !record.auto_title_eligible {
                 return Ok(record.clone());
             }
             record.title = title;
+            record.auto_title_eligible = false;
+            record.updated_at = timestamp();
+            let snapshot = record.clone();
+            let persisted = persisted_snapshot(&record, &scrollback);
+            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
+                self.inner.persistence.save(path, value);
+            }
+            let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
+            (snapshot, sinks)
+        };
+        publish_to_sinks(
+            &sinks,
+            &ActivityEvent::Upsert {
+                record: record.clone(),
+            },
+        );
+        Ok(record)
+    }
+
+    /// Accept one model-authored title while an agent still has its launch
+    /// placeholder. Later calls are harmless, and an explicit rename wins
+    /// atomically even when it races the model tool call.
+    pub fn auto_title(
+        &self,
+        activity_id: &str,
+        title: impl Into<String>,
+    ) -> Result<ActivityRecord, SupervisorError> {
+        let title = normalize_auto_title(&title.into());
+        if title.is_empty() {
+            return Err(SupervisorError::EmptyTitle);
+        }
+        let activity = self.activity(activity_id)?;
+        let (record, sinks) = {
+            let dispatch = lock(&self.inner.dispatch);
+            let mut record = lock(&activity.record);
+            if record.kind != ActivityKind::Agent || !record.auto_title_eligible {
+                return Ok(record.clone());
+            }
+            let scrollback = lock(&activity.scrollback);
+            record.title = title;
+            record.auto_title_eligible = false;
             record.updated_at = timestamp();
             let snapshot = record.clone();
             let persisted = persisted_snapshot(&record, &scrollback);
@@ -1711,6 +1752,31 @@ fn apply_status_change(record: &mut ActivityRecord, change: Option<&AgentStatusC
     }
 }
 
+fn normalize_auto_title(value: &str) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact = compact.trim_matches(|character| {
+        matches!(
+            character,
+            '"' | '\'' | '`' | '*' | '#' | '“' | '”' | '‘' | '’'
+        )
+    });
+    let words = compact
+        .split_whitespace()
+        .take(8)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut bounded = words.chars().take(60).collect::<String>();
+    if words.chars().count() > 60 {
+        if let Some(boundary) = bounded.rfind(' ') {
+            bounded.truncate(boundary);
+        }
+    }
+    bounded
+        .trim_end_matches(|character| matches!(character, '.' | ',' | ';' | ':'))
+        .trim()
+        .to_string()
+}
+
 fn classify_exit(
     stop_intent: u8,
     child_result: Result<ExitStatus, String>,
@@ -2088,6 +2154,7 @@ mod tests {
             id: id.into(),
             kind: ActivityKind::Agent,
             title: id.into(),
+            auto_title_eligible: false,
             workspace_path: None,
             status: ActivityStatus::Ready,
             created_at: now.clone(),
@@ -2786,6 +2853,67 @@ mod tests {
         });
         assert!(!recover_legacy_codex_session_id(&config, &mut ambiguous));
         assert!(ambiguous.session.unwrap().cli_session_id.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn automatic_title_is_one_shot_and_never_overwrites_an_explicit_rename() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+
+        let mut automatic = durable_record(
+            "automatic-title",
+            "/bin/sh",
+            vec!["-c".into(), "true".into()],
+        );
+        automatic.auto_title_eligible = true;
+        supervisor
+            .spawn(SpawnActivityRequest::new(automatic, 80, 24))
+            .unwrap();
+        wait_for_end(&supervisor, "automatic-title");
+
+        let (event_tx, event_rx) = mpsc::channel();
+        supervisor.subscribe(Arc::new(event_tx));
+        let titled = supervisor
+            .auto_title(
+                "automatic-title",
+                "  **Restore reliable Activity titles across every supported provider today.**  ",
+            )
+            .unwrap();
+        assert_eq!(
+            titled.title,
+            "Restore reliable Activity titles across every supported"
+        );
+        assert!(!titled.auto_title_eligible);
+        assert!(matches!(
+            event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ActivityEvent::Upsert { record }
+                if record.title
+                    == "Restore reliable Activity titles across every supported"
+        ));
+
+        let ignored = supervisor
+            .auto_title("automatic-title", "Replace the generated title")
+            .unwrap();
+        assert_eq!(ignored.title, titled.title);
+        assert!(event_rx.recv_timeout(Duration::from_millis(20)).is_err());
+
+        let mut explicit = durable_record(
+            "explicit-title",
+            "/bin/sh",
+            vec!["-c".into(), "true".into()],
+        );
+        explicit.auto_title_eligible = true;
+        supervisor
+            .spawn(SpawnActivityRequest::new(explicit, 80, 24))
+            .unwrap();
+        wait_for_end(&supervisor, "explicit-title");
+        supervisor.rename("explicit-title", "User title").unwrap();
+        let protected = supervisor
+            .auto_title("explicit-title", "Model title")
+            .unwrap();
+        assert_eq!(protected.title, "User title");
+        assert!(!protected.auto_title_eligible);
     }
 
     #[cfg(unix)]

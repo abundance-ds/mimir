@@ -669,6 +669,7 @@ impl RoutineRuntime {
             id: activity_id,
             kind: ActivityKind::Routine,
             title: resolved.definition.title.clone(),
+            auto_title_eligible: false,
             workspace_path: Some(resolved.launch.cwd.clone()),
             status: ActivityStatus::Ready,
             created_at: now.clone(),
