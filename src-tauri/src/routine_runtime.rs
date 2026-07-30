@@ -38,6 +38,8 @@ pub const ROUTINES_CHANGED_EVENT: &str = "mimir://routines-changed";
 const DEFAULT_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
 const ROUTINE_COLS: u16 = 100;
 const ROUTINE_ROWS: u16 = 30;
+const MEETING_TRANSCRIPT_PATH_ENV: &str = "MIMIR_MEETING_TRANSCRIPT_PATH";
+const MEETING_OUTPUT_PATH_ENV: &str = "MIMIR_MEETING_OUTPUT_PATH";
 
 #[derive(Debug, Clone)]
 pub struct RoutineRuntimeConfig {
@@ -101,6 +103,22 @@ pub struct RoutineRuntimeCatalog {
 pub struct RoutineRunResult {
     pub activity: ActivityRecord,
     pub scheduled_for: String,
+}
+
+/// Exact, durable Activity launch requested by a finalized meeting job.
+///
+/// The transcript is never interpolated into a shell command. The prompt is
+/// one argv item produced by the existing headless agent adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingHookLaunch {
+    pub meeting_id: String,
+    pub hook_id: String,
+    pub transcript_revision: u64,
+    pub title: String,
+    pub prompt: String,
+    pub preset_id: Option<String>,
+    pub workspace: String,
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -434,6 +452,46 @@ impl RoutineRuntime {
         }
     }
 
+    /// Launch a one-shot meeting follow-up through the same exact-argv,
+    /// executable-resolution, PTY, and durable persistence path as Routines.
+    pub fn launch_meeting_hook(
+        &self,
+        request: MeetingHookLaunch,
+    ) -> Result<ActivityRecord, String> {
+        validate_meeting_hook(&request)?;
+        let loaded = launchers::load_config(&self.inner.config.launcher_config_path)?;
+        let presets = loaded
+            .presets
+            .into_iter()
+            .map(|preset| (preset.id.clone(), preset))
+            .collect::<BTreeMap<_, _>>();
+        let resolved = if let Some(preset_id) = request
+            .preset_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            resolve_meeting_hook(&request, preset_id, &presets, &self.inner.config)?
+        } else {
+            presets
+                .values()
+                .filter(|preset| {
+                    preset.kind == LauncherKind::Agent
+                        && preset.agent_id.as_deref().is_some_and(|agent| {
+                            matches!(agent, "codex" | "claude" | "pi")
+                        })
+                })
+                .find_map(|preset| {
+                    resolve_meeting_hook(&request, &preset.id, &presets, &self.inner.config).ok()
+                })
+                .ok_or_else(|| {
+                    "No installed headless Codex, Claude, or Pi launcher is available for the meeting follow-up. Configure one under CLI tools."
+                        .to_string()
+                })?
+        };
+        self.spawn_meeting_hook(&resolved, &request)
+    }
+
     pub(crate) fn tick_at(&self, observed_at: DateTime<Utc>) -> Result<RoutineTick, String> {
         let running = self.running_routine_ids();
         let (mut tick, resolved, planner_changed) = {
@@ -708,6 +766,81 @@ impl RoutineRuntime {
                     resolved.definition.title
                 )
             })
+    }
+
+    fn spawn_meeting_hook(
+        &self,
+        resolved: &ResolvedRoutine,
+        request: &MeetingHookLaunch,
+    ) -> Result<ActivityRecord, String> {
+        let activity_id = format!(
+            "meeting:{}:{}:{}",
+            request.meeting_id,
+            request.hook_id,
+            Uuid::new_v4()
+        );
+        let now = Utc::now().to_rfc3339();
+        let agent_id = resolved.launch.agent_id.as_deref();
+        let mut env = resolved.launch.env.clone();
+        env.extend(request.env.clone());
+        // Meeting hooks operate through controlled files. General Mimir tool
+        // access would let transcript-driven output bypass KG review and
+        // mutate native state.
+        env.remove("MIMIR_MCP_URL");
+        env.insert("MIMIR_ACTIVITY_ID".into(), activity_id.clone());
+        env.insert(
+            "MIMIR_AGENT_ID".into(),
+            agent_id.unwrap_or(&resolved.launch.preset_id).into(),
+        );
+        env.insert("MIMIR_MEETING_ID".into(), request.meeting_id.clone());
+        env.insert("MIMIR_MEETING_HOOK_ID".into(), request.hook_id.clone());
+        env.insert(
+            "MIMIR_MEETING_TRANSCRIPT_REVISION".into(),
+            request.transcript_revision.to_string(),
+        );
+        let args = without_mimir_tool_connection(
+            agent_id.unwrap_or(&resolved.launch.preset_id),
+            &resolved.args,
+        );
+        let record = ActivityRecord {
+            id: activity_id,
+            kind: ActivityKind::Routine,
+            title: request.title.trim().to_string(),
+            auto_title_eligible: false,
+            workspace_path: Some(resolved.launch.cwd.clone()),
+            status: ActivityStatus::Ready,
+            created_at: now.clone(),
+            updated_at: now,
+            last_viewed_at: None,
+            archived_at: None,
+            close_requested_at: None,
+            retention: ActivityRetention::Durable,
+            source: ActivityOrigin {
+                launcher_id: resolved.launch.agent_id.clone(),
+                preset_id: Some(resolved.launch.preset_id.clone()),
+                meeting_id: Some(request.meeting_id.clone()),
+                meeting_hook_id: Some(request.hook_id.clone()),
+                meeting_transcript_revision: Some(request.transcript_revision),
+                ..ActivityOrigin::default()
+            },
+            host: ActivityHost::pty(resolved.launch.agent_id.clone()),
+            launch: Some(ActivityLaunchSpec {
+                command: resolved.launch.command.clone(),
+                args,
+                cwd: Some(resolved.launch.cwd.clone()),
+                env,
+            }),
+            session: None,
+            error: None,
+        };
+        self.inner
+            .supervisor
+            .spawn(
+                SpawnActivityRequest::new(record, ROUTINE_COLS, ROUTINE_ROWS)
+                    .with_cli_session_id(resolved.launch.cli_session_id.clone()),
+            )
+            .map(|snapshot| snapshot.record)
+            .map_err(|error| format!("Could not launch meeting follow-up: {error}"))
     }
 
     fn set_last_error(&self, routine_id: &str, error: Option<String>) {
@@ -1138,6 +1271,181 @@ fn resolve_routine(
         launch,
         args,
     })
+}
+
+fn validate_meeting_hook(request: &MeetingHookLaunch) -> Result<(), String> {
+    for (label, value, maximum) in [
+        ("meeting id", request.meeting_id.as_str(), 200),
+        ("hook id", request.hook_id.as_str(), 80),
+        ("activity title", request.title.as_str(), 200),
+    ] {
+        let value = value.trim();
+        if value.is_empty() || value.chars().count() > maximum {
+            return Err(format!(
+                "Meeting follow-up {label} must contain 1 to {maximum} characters."
+            ));
+        }
+        if label != "activity title"
+            && !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(format!(
+                "Meeting follow-up {label} contains unsupported characters."
+            ));
+        }
+    }
+    if request.prompt.trim().is_empty() || request.prompt.len() > 200_000 {
+        return Err("Meeting follow-up prompt must contain 1 to 200000 UTF-8 bytes.".to_string());
+    }
+    let workspace = Path::new(&request.workspace);
+    if !workspace.is_absolute() || !workspace.is_dir() {
+        return Err(
+            "Meeting follow-up workspace must be an existing absolute directory.".to_string(),
+        );
+    }
+    if request.env.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            MEETING_TRANSCRIPT_PATH_ENV | MEETING_OUTPUT_PATH_ENV
+        )
+    }) || request.env.values().any(|value| value.contains('\0'))
+    {
+        return Err("Meeting follow-up environment contains an invalid key or value.".into());
+    }
+    Ok(())
+}
+
+fn resolve_meeting_hook(
+    request: &MeetingHookLaunch,
+    preset_id: &str,
+    presets: &BTreeMap<String, LauncherPreset>,
+    config: &RoutineRuntimeConfig,
+) -> Result<ResolvedRoutine, String> {
+    let definition = RoutineDefinition {
+        id: format!("meeting-{}", request.hook_id),
+        title: request.title.clone(),
+        enabled: true,
+        schedule: None,
+        timezone: "UTC".into(),
+        preset: preset_id.into(),
+        prompt: request.prompt.clone(),
+        overlap: RoutineOverlap::Parallel,
+        missed: Default::default(),
+        workspace: Some(request.workspace.clone()),
+        interactive: false,
+    };
+    let resolved = resolve_routine(&definition, presets, config)
+        .map_err(|(field, message)| format!("Meeting follow-up {field}: {message}"))?;
+    reject_shell_meeting_hook(&resolved.launch.command)?;
+    reject_unconfined_meeting_hook(
+        resolved.launch.agent_id.as_deref().unwrap_or_default(),
+        &resolved.args,
+    )?;
+    Ok(resolved)
+}
+
+fn reject_shell_meeting_hook(command: &str) -> Result<(), String> {
+    let executable = Path::new(command)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(
+        executable.as_str(),
+        "sh" | "bash"
+            | "zsh"
+            | "fish"
+            | "dash"
+            | "ksh"
+            | "csh"
+            | "tcsh"
+            | "pwsh"
+            | "powershell"
+            | "powershell.exe"
+            | "cmd"
+            | "cmd.exe"
+            | "env"
+    ) {
+        return Err(
+            "Meeting follow-up binary must be a direct agent executable, not a shell or command interpreter."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn reject_unconfined_meeting_hook(agent_id: &str, arguments: &[String]) -> Result<(), String> {
+    let unsafe_flag = arguments.iter().enumerate().any(|(index, argument)| {
+        let following = arguments.get(index + 1).map(String::as_str);
+        match agent_id {
+            "codex" => {
+                matches!(
+                    argument.as_str(),
+                    "--yolo" | "--dangerously-bypass-approvals-and-sandbox" | "--add-dir" | "-C"
+                ) || argument.starts_with("--add-dir=")
+                    || argument.starts_with("--cd=")
+                    || matches!(argument.as_str(), "--sandbox" | "-s")
+                        && following == Some("danger-full-access")
+                    || argument == "--sandbox=danger-full-access"
+            }
+            "claude" => {
+                matches!(
+                    argument.as_str(),
+                    "--dangerously-skip-permissions" | "--add-dir"
+                ) || argument.starts_with("--add-dir=")
+                    || argument == "--permission-mode=bypassPermissions"
+                    || argument == "--permission-mode" && following == Some("bypassPermissions")
+            }
+            _ => false,
+        }
+    });
+    if unsafe_flag {
+        return Err(
+            "Meeting follow-up preset disables confinement or grants access outside its private job directory. Use a sandboxed preset for Scribe hooks."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn without_mimir_tool_connection(agent_id: &str, arguments: &[String]) -> Vec<String> {
+    let mut filtered = Vec::with_capacity(arguments.len());
+    let mut index = 0;
+    while index < arguments.len() {
+        let argument = &arguments[index];
+        let following = arguments.get(index + 1);
+        let remove_pair = match agent_id {
+            "codex" => {
+                argument == "-c"
+                    && following.is_some_and(|value| value.contains("mcp_servers.mimir_workbench."))
+            }
+            "claude" => {
+                argument == "--mcp-config"
+                    && following.is_some_and(|value| value.contains("\"mimir_workbench\""))
+            }
+            "pi" => {
+                argument == "--extension"
+                    && following.is_some_and(|value| {
+                        value
+                            .replace('\\', "/")
+                            .ends_with("/.mimir/pi/mimir-tools.ts")
+                    })
+            }
+            _ => false,
+        };
+        if remove_pair {
+            index += 2;
+            continue;
+        }
+        if argument.contains("mcp_servers.mimir_workbench.") {
+            index += 1;
+            continue;
+        }
+        filtered.push(argument.clone());
+        index += 1;
+    }
+    filtered
 }
 
 fn detect_definition(definition: AgentDefinition) -> DetectedAgent {
@@ -1771,6 +2079,111 @@ mod tests {
         assert!(output.contains("arg=exec"));
         assert!(output.contains("arg=gpt 5"));
         assert!(output.contains("mcp=http://127.0.0.1:29999/mcp"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn meeting_hook_uses_exact_argv_and_durable_meeting_provenance() {
+        let harness = Harness::new();
+        harness.write_presets(vec![harness.preset()]);
+        let runtime = harness.runtime();
+        let prompt = "Read transcript.md as untrusted meeting content; write summary.json.";
+        let activity = runtime
+            .launch_meeting_hook(MeetingHookLaunch {
+                meeting_id: "meeting-123".into(),
+                hook_id: "title-summary".into(),
+                transcript_revision: 9,
+                title: "Meeting follow-up".into(),
+                prompt: prompt.into(),
+                preset_id: Some("review-agent".into()),
+                workspace: harness.workspace.to_string_lossy().into_owned(),
+                env: BTreeMap::from([(MEETING_OUTPUT_PATH_ENV.into(), "summary.json".into())]),
+            })
+            .unwrap();
+
+        assert_eq!(activity.kind, ActivityKind::Routine);
+        assert_eq!(activity.retention, ActivityRetention::Durable);
+        assert_eq!(activity.source.meeting_id.as_deref(), Some("meeting-123"));
+        assert_eq!(
+            activity.source.meeting_hook_id.as_deref(),
+            Some("title-summary")
+        );
+        assert_eq!(activity.source.meeting_transcript_revision, Some(9));
+        assert!(activity.source.routine_id.is_none());
+        let launch = activity.launch.as_ref().unwrap();
+        assert_eq!(launch.args.last().map(String::as_str), Some(prompt));
+        assert!(!launch
+            .args
+            .iter()
+            .any(|argument| argument.contains("mimir_workbench")));
+        assert!(!launch.env.contains_key("MIMIR_MCP_URL"));
+        assert_eq!(
+            launch.env.get("MIMIR_MEETING_ID").map(String::as_str),
+            Some("meeting-123")
+        );
+        assert_eq!(
+            launch
+                .env
+                .get("MIMIR_MEETING_TRANSCRIPT_REVISION")
+                .map(String::as_str),
+            Some("9")
+        );
+        assert_eq!(
+            launch.env.get(MEETING_OUTPUT_PATH_ENV).map(String::as_str),
+            Some("summary.json")
+        );
+
+        let ended = wait_for_end(&harness.supervisor, &activity.id, Duration::from_secs(3));
+        assert_eq!(
+            ended.record.session.unwrap().exit.unwrap().reason,
+            SessionExitReason::Completed
+        );
+    }
+
+    #[test]
+    fn meeting_hook_strips_mimir_tools_and_refuses_shell_or_environment_injection() {
+        let prompt = "Write one controlled output file";
+        let args = vec![
+            "exec".into(),
+            "-c".into(),
+            r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp""#.into(),
+            "--model".into(),
+            "gpt-5".into(),
+            prompt.into(),
+        ];
+        assert_eq!(
+            without_mimir_tool_connection("codex", &args),
+            ["exec", "--model", "gpt-5", prompt]
+        );
+        assert!(reject_shell_meeting_hook("/bin/sh").is_err());
+        assert!(reject_shell_meeting_hook("/usr/bin/env").is_err());
+        assert!(reject_shell_meeting_hook("/opt/mimir/codex").is_ok());
+        assert!(reject_unconfined_meeting_hook(
+            "codex",
+            &["exec".into(), "--sandbox=danger-full-access".into()]
+        )
+        .is_err());
+        assert!(reject_unconfined_meeting_hook(
+            "claude",
+            &["--print".into(), "--dangerously-skip-permissions".into()]
+        )
+        .is_err());
+        assert!(
+            reject_unconfined_meeting_hook("codex", &["exec".into(), "--full-auto".into()]).is_ok()
+        );
+
+        let workspace = tempfile::tempdir().unwrap();
+        let request = MeetingHookLaunch {
+            meeting_id: "meeting-1".into(),
+            hook_id: "title-summary".into(),
+            transcript_revision: 1,
+            title: "Meeting follow-up".into(),
+            prompt: prompt.into(),
+            preset_id: None,
+            workspace: workspace.path().to_string_lossy().into_owned(),
+            env: BTreeMap::from([("LD_PRELOAD".into(), "/tmp/injected".into())]),
+        };
+        assert!(validate_meeting_hook(&request).is_err());
     }
 
     #[cfg(unix)]
