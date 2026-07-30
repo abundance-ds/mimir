@@ -99,6 +99,21 @@ Chat identity is outside the renderer settings snapshot; the native chat runtime
 owns `~/.mimir/chat.json` and credentials. See [security.md](security.md) and
 [chat.md](chat.md).
 
+## Scribe settings
+
+Scribe configuration is also outside the renderer settings snapshot. The
+native meeting platform owns `~/.mimir/meetings.json` because detection,
+retention, and recovery must be available before any renderer mounts. The
+Scribe settings component is a projection mutated only through
+`meetings_update_config`.
+
+The custom transcription secret is never part of that JSON or returned to the
+renderer. `meetings_set_api_key` and `meetings_clear_api_key` address the
+macOS Keychain entry directly; snapshots expose only
+`apiKeyConfigured: boolean`. Detection changes propagate immediately to the
+owned native monitor. Local model progress comes from the managed installation
+state, not from optimistic renderer state. See [meetings.md](meetings.md).
+
 ## File-first top-level namespaces
 
 The CLI reads two file-first top-level namespaces that the renderer store
@@ -138,6 +153,7 @@ prefixes do not match the filter.
 | Change theme | `AppearanceSection.vue`, `themes.css`, `DARK_THEMES`, terminal/app observers |
 | Change Business graph settings | `stores/settings.js`, `GraphSettingsSection.vue`, graph app/Workbench mount watchers; settings and graph app tests |
 | Change Chat connection settings | `ChatSettingsSection.vue`, `services/chat.js`, native `chat/`; credential/reconnect and UI tests |
+| Change Scribe settings | `ScribeSettings.vue`, meetings service/store, native `meetings/platform.rs`; config corruption, Keychain, detector propagation, and UI tests |
 
 See [persistence.md](persistence.md), [workbench-design.md](workbench-design.md),
 and [gotchas.md](gotchas.md).

@@ -8,6 +8,8 @@ Bun for the JavaScript workspace, Cargo for Rust.
 - Node.js 22 for build/test/release wrappers
 - stable Rust with `rustfmt`
 - platform dependencies for Tauri v2
+- macOS Scribe builds: Xcode command-line tools, CMake, and libclang; the
+  embedded whisper.cpp build uses Metal
 
 Ubuntu CI deps: see `.github/workflows/build.yml`.
 
@@ -37,6 +39,7 @@ Dev-loop essentials:
 bun run test
 bun run build
 bun run docs:check
+bun run check:meetings
 ```
 
 Full CI-equivalent (add Rust):
@@ -49,6 +52,11 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
 Run package scripts through Bun (`scripts/test.mjs`, `scripts/build.mjs` set required Node flags); do not call Vitest or Vite directly for release verification.
+
+The first clean Scribe build compiles whisper.cpp and can take several minutes.
+The multilingual Whisper Small artifact is not stored in Git or bundled in the
+app; the verified in-product install downloads about 488 MB into
+`~/.mimir/models/stt/`.
 
 See [testing.md](testing.md) for what each command proves, environment limits, and change-to-test routing.
 
@@ -67,6 +75,9 @@ bun tauri build
 ```
 
 - **macOS arm64**: Tauri imports `APPLE_CERTIFICATE`, applies Developer ID signature, submits through `notarytool`, staples and validates.
+- The bundle targets macOS 14.2+, includes microphone/system-audio purpose
+  strings, and signs with the audio-input entitlement. `bun run
+  check:meetings` statically verifies these inputs before packaging.
 
 The `.env` (gitignored, `0600`) holds Apple credentials. Use the Bun launcher (`bun tauri build`), not `source .env` -- avoids shell interpolation of base64 values. `.env.example` records variable names.
 

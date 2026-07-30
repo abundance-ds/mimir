@@ -18,6 +18,8 @@ small trusted team.
   reads and replies there.
 - [Apps](docs/apps-system.md) — local tools;
   [Routines](docs/routines.md) — scheduled agent or command runs.
+- [Scribe](docs/meetings.md) — local-first meeting detection, dual-channel
+  recording, transcription, and reviewable follow-up Activities.
 
 ## Develop
 

@@ -235,6 +235,42 @@ secret bytes are written.
 rejects the identical provider URL, so a local model endpoint that works in
 development fails after packaging.
 
+### Scribe local and custom routes are different trust classes
+
+“Local” means the managed in-process Whisper runtime and never a localhost
+URL. A custom Scribe endpoint must be public HTTPS in debug and release; Mimir
+upgrades it to WSS, DNS-validates and pins it, and releases its Keychain secret
+only for that exact configured endpoint. Do not reuse `ai_transport.rs` or add
+a localhost exception.
+
+### Scribe mute is not pause
+
+Microphone mute writes aligned silence while system capture and the canonical
+clock continue. Do not introduce a paused lifecycle or remove muted frames:
+that makes microphone/system timestamps and reconnect replay disagree.
+
+### Capture and transcription must never share backpressure
+
+The native audio callback may only write into the bounded realtime ring.
+Durable one-second chunks are the handoff to local/custom STT. Do not await
+inference, sockets, renderer events, or SQLite from the callback, and do not
+let an STT failure stop or discard already captured audio.
+
+### Scribe events are invalidations, not transcript authority
+
+The renderer installs both meeting listeners and then reads a snapshot.
+Destroyed windows can miss events while native recording continues. Keep
+events small and revisioned; correctness belongs to SQLite plus snapshot/page
+reads, not event replay.
+
+### Stop-time agents consume hostile transcript text
+
+Meeting speech can contain instructions, paths, JSON, or shell syntax. Hook
+launches must preserve exact argv, keep owned paths below the meeting root,
+reject symlinks, bound reads/output, and validate the complete output schema.
+Never interpolate transcript content into a command line or directly mutate
+the knowledge graph.
+
 ## Files and platform
 
 ### Cancel superseded content searches

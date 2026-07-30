@@ -31,6 +31,10 @@ naming the exact boundary it enforces.
 | App SDK filesystem | host file commands | not workspace-scoped |
 | App HTTP | only `http`/`https`, timeout cap | no host allowlist; Apps may contact arbitrary hosts |
 | AI transport | model registry host allowlist; release rejects localhost | provider receives prompt/context by design |
+| Scribe capture | native human consent gate; no public start/mute/stop tools | macOS grants audio access to the Mimir process, not to an isolated meeting sandbox |
+| Scribe custom STT | exact public HTTPS endpoint upgraded to WSS, pinned DNS/TLS, bounded protocol; endpoint-bound Keychain secret | configured provider receives meeting audio and transcript by design |
+| Scribe local STT | pinned model identity and Metal-only in-process runtime | the model file and readable transcript/audio remain local user data |
+| Scribe follow-up | exact-argv durable Activity, terminal revision, bounded schema-validated output | the selected CLI agent has normal user-account filesystem/process authority |
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
 | Launcher/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment |
 | API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
@@ -162,6 +166,37 @@ DM/direct @mention; require explicit OS permission.
 Operations, bootstrap, admin token flow, and backup contents are in
 [`deploy/chat/README.md`](../deploy/chat/README.md).
 
+## Scribe meetings
+
+Meeting detection observes local microphone-use metadata and running
+application identity; it does not capture audio. Recording requires a
+deliberate renderer confirmation and is not present in the public MCP
+projection. This matters because `/mcp` is unauthenticated loopback: exporting
+recording controls would let any local process exercise Mimir's TCC grants.
+
+The recorder writes independent microphone and system tracks under
+`~/.mimir/meetings/`. Those bytes and SQLite transcripts are readable to the
+local account and its processes; full-disk encryption and account security are
+outside Mimir's boundary. Diagnostics contain ids, state, durations, bounded
+errors, and route class, never raw audio, transcript text, prompts, or API keys.
+
+Local transcription performs no provider request. Managed model installation
+is the one expected network path: the immutable manifest requires HTTPS,
+public DNS, pinned resolved addresses, exact length, and SHA-256 before atomic
+install. Custom transcription permits only the explicit endpoint saved by the
+user. The native credential resolver returns the Keychain secret only when
+that exact validated endpoint is selected.
+
+Meeting transcripts are untrusted input to stop-time CLI agents. Prompts mark
+the transcript as quoted data, exact argv avoids shell reconstruction, input
+and output paths must remain under the owned meeting directory, symlinks are
+rejected, reads/writes are bounded, and JSON output is strictly validated.
+Knowledge-graph work produces a reviewable proposal only; accepting it follows
+the graph's normal revision-aware review boundary.
+
+See [meetings.md](meetings.md) for the complete capture, retention, and
+deletion contract.
+
 ## Change map
 
 | Change | Required review |
@@ -173,6 +208,8 @@ Operations, bootstrap, admin token flow, and backup contents are in
 | New credential source | release/debug policy, storage permissions, status reporting |
 | Process execution | argv/shell boundary, environment inheritance, timeout/descendant behavior |
 | Tauri window/capability | `capabilities/default.json`, window labels, invoke/event reachability |
+| Meeting capture/STT/hook | TCC consent, callback budget, independent tracks, endpoint/credential binding, transcript trust, bounded durable output, deletion/retention |
 
 See [mcp.md](mcp.md), [apps-system.md](apps-system.md),
-[files.md](files.md), [ai-system.md](ai-system.md), and [chat.md](chat.md).
+[files.md](files.md), [ai-system.md](ai-system.md), [chat.md](chat.md), and
+[meetings.md](meetings.md).

@@ -44,6 +44,7 @@ resizing, rails, widths, and Activity navigation history.
 | Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
 | Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
 | Routines/scheduler | [Routines](routines.md), [persistence](persistence.md) | `routines.rs`, `routine_runtime.rs`, Routine store/service/activity | native schema/runtime; Routine store/service/activity |
+| Scribe meetings/capture/transcription/follow-up | [Scribe meetings](meetings.md), [security](security.md), [persistence](persistence.md) | native `meetings/`, `crates/mimir-meeting-{audio,detect}`; Scribe service/store/app/settings; meeting hooks in `routine_runtime.rs` | Gherkin evidence; native runtime/audio/detection/STT/job/tool tests; Scribe service/store/app; packaged macOS hardware |
 | Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
@@ -85,6 +86,9 @@ resizing, rails, widths, and Activity navigation history.
   `src/mimir/activities/RoutinesActivity.vue`,
   `src/mimir/activities/routineSchedule.js` (cron ↔ builder mapping). Docs:
   [routines.md](routines.md).
+- Scribe: `src/stores/meetings.js`, `src/services/meetings.js`,
+  `src/mimir/apps/ScribeApp.vue`, `src/mimir/apps/scribe/`, and the persistent
+  sidebar recording control. Docs: [meetings.md](meetings.md).
 - Editor: `src/editor/App.vue` (orchestration, editor bridge),
   `src/editor/composables/` (session/native/proposal lifecycle, command API,
   content sync, document bridge, keyboard),
@@ -127,6 +131,10 @@ resizing, rails, widths, and Activity navigation history.
 - Apps/Routines: `src-tauri/src/apps.rs`, `src-tauri/src/routines.rs`,
   `src-tauri/src/routine_runtime.rs`. Docs: [apps-system.md](apps-system.md),
   [routines.md](routines.md).
+- Scribe: `src-tauri/src/meetings/`,
+  `src-tauri/crates/mimir-meeting-audio/`, and
+  `src-tauri/crates/mimir-meeting-detect/`. Docs:
+  [meetings.md](meetings.md).
 - AI: `src-tauri/src/ai.rs`, `src-tauri/src/ai_proxy.rs`,
   `src-tauri/src/ai_keys.rs`, `src-tauri/src/ai_models.rs`,
   `src-tauri/src/ai_providers.rs`, `src-tauri/src/ai_transport.rs`,
@@ -160,6 +168,9 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/graph/private/` | private local Business graph Markdown |
 | `~/.mimir/routines/` | routine TOML |
 | `~/.mimir/routines-state.json` | next-fire planner state |
+| `~/.mimir/meetings.json` | native Scribe settings, excluding credentials |
+| `~/.mimir/meetings/` | meeting database, channel audio, content, artifacts, and exports |
+| `~/.mimir/models/stt/` | verified Scribe local model artifacts and state |
 | `~/.mimir/settings.json` | editor/workbench/settings data |
 | `~/.mimir/session.json` | open editor tabs, drafts, recents, and zoom |
 | `~/.mimir/models.json` | inline/ghost AI provider and model registry |
@@ -193,6 +204,7 @@ ordering: [ipc.md](ipc.md).
 | [files.md](files.md) | file index, search, quick-open, typed tabs |
 | [apps-system.md](apps-system.md) | local app formats and SDK |
 | [routines.md](routines.md) | scheduler and routine TOML |
+| [meetings.md](meetings.md) | Scribe capture, transcription, recovery, follow-up, UX, privacy |
 | [editor-system.md](editor-system.md) | Markdown editor and review flow |
 | [inline-ai.md](inline-ai.md) | Cmd+K and ghost completion |
 | [comments.md](comments.md) | pseudo-XML comments and inline UI |

@@ -284,6 +284,45 @@ requirements; they do not replace runtime verification.
 - A returned routine run opens as a terminal-backed Activity; the `Routines`
   singleton remains the manager surface.
 
+## Scribe meetings
+
+- Sustained microphone use by a recognized call process yields one deduplicated
+  local candidate. Disabled detection owns no listeners and emits no prompt.
+- A candidate or manual start opens the consent confirmation; capture cannot
+  begin without the explicit acknowledgement and a deliberate user action.
+- Recording exposes a persistent elapsed-time, mute, and Stop control outside
+  the Scribe surface. Only one recording can be active.
+- Microphone and system audio commit as separate lossless timelines. Mute
+  writes microphone silence; route/device interruption reopens both streams
+  with aligned gap evidence and monotonic timestamps.
+- Capture remains durable while local inference is slow or a custom provider
+  disconnects. A provider failure is visible and never triggers a silent route
+  fallback.
+- Local transcription uses only a fully verified pinned artifact and Metal
+  runtime. Custom transcription uses only the exact public HTTPS endpoint
+  upgraded to WSS, explicit model, endpoint-bound Keychain secret, and
+  versioned bounded protocol.
+- Partial transcript revisions are visually distinct and replaced
+  idempotently by finals. Stop does not label a transcript final while any
+  provider tail or partial remains unresolved.
+- Forced renderer loss leaves native capture running. Forced process loss
+  restores an interrupted, honest record and completes staged-chunk and
+  transcript recovery on relaunch.
+- Stop finalizes durable audio and transcript before enqueuing a visible
+  title-and-summary Activity. The Activity uses exact argv and controlled,
+  immutable transcript input; failures remain retryable.
+- A successful summary offers a separate knowledge-graph choice. “Create”
+  produces a reviewable proposal; “Not now” and “Never” do not mutate graph
+  data.
+- Agent tools can list, get, search, and update completed/interrupted Scribe
+  records with bounded results. They cannot start, mute, stop, request
+  permission, configure a provider, or publish a graph mutation.
+- Delete audio preserves the reviewed record. Delete meeting removes owned
+  local data. Retention never removes active or recovery-held audio.
+- Packaged macOS arm64 release evidence covers TCC prompts, real two-channel
+  capture, model inference, custom WSS, crash recovery, long-run budgets,
+  signing, notarization, and clean install.
+
 ## Editor and comments
 
 - Markdown tabs, open/save/save-as, autosave, formatting, spellcheck, live

@@ -18,7 +18,7 @@ issue session IDs. It must not be exposed beyond loopback.
 Initialization contains only:
 
 ```text
-Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`.
+Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`.
 ```
 
 Normal `tools/list` advertises `mimir_state`, `mimir_title`, `mimir_reveal`,
@@ -34,8 +34,9 @@ directly advertised. `tools/call` resolves only these public names. Internal
 dotted names and historical aliases are rejected even if a private registry
 handler exists.
 
-The projection includes the 5 chat tools (`chat_rooms`, `chat_read`,
-`chat_search`, `chat_send`, `chat_download`) and up to 13 connection tools.
+The projection includes 4 read/update-only native Scribe tools, the 5 chat
+tools (`chat_rooms`, `chat_read`, `chat_search`, `chat_send`,
+`chat_download`), and up to 13 connection tools.
 See [agent-interface.md](agent-interface.md) for the full canonical tool
 listing and counts.
 

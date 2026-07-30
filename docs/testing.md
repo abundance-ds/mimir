@@ -45,6 +45,7 @@ constructing a Tauri application.
 | Business graph parsing/index/scopes/mutations/context/migration | `business_graph/markdown.rs`, `store.rs`, `runtime.rs`, `context.rs`, `migration.rs`, `tools.rs` |
 | Routine schema/planner/runtime | `routines.rs`, `routine_runtime.rs` |
 | Persistence/recovery | `persistence.rs`, `session.rs`, `local_settings.rs`, `ai_models.rs` |
+| Scribe lifecycle/store/capture/STT/jobs/tools | `meetings/`; `crates/mimir-meeting-audio`; `crates/mimir-meeting-detect` |
 
 Rust command wrappers that only unwrap Tauri state can remain thin; the owning
 helper/runtime must carry the behavior test.
@@ -56,6 +57,7 @@ helper/runtime must carry the behavior test.
 | Renderer unit/component | `bun run test` | JS/Vue state, DOM contracts, mocked IPC | desktop integration or Rust |
 | Renderer production build | `bun run build` | module graph, Vue/Tailwind/Rollup output | native behavior |
 | Documentation integrity | `bun run docs:check` | local links/paths, `_MAP` coverage, version agreement | semantic accuracy |
+| Scribe specification/packaging | `bun run check:meetings` | stable Gherkin contract, evidence manifest, purpose strings, entitlement, deployment target | actual TCC grant, hardware capture, or transcript accuracy |
 | Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | formatting only | compilation |
 | Rust unit/integration | `cargo test --manifest-path src-tauri/Cargo.toml` | native helpers/runtimes | real packaged webview |
 | Rust compile | `cargo check --manifest-path src-tauri/Cargo.toml` | Linux-compilable command graph | macOS-only execution |
@@ -86,6 +88,7 @@ and signing launcher.
 | File index/mutation | native index/workspace tests and workspace store/Files Activity tests |
 | Settings/persistence | native persistence/settings test and renderer store test, including cross-window mock |
 | AI model/provider transport | Rust model/provider/usage tests and renderer model/transport/InlineAI tests |
+| Scribe domain/IPC/UI | `bun run check:meetings`; native meeting/audio/detection tests; meeting service/store/Scribe app tests; packaged hardware smoke |
 
 ## Test seams that encode architecture
 
@@ -115,6 +118,32 @@ and signing launcher.
   benchmark claims.
 - `GraphSelect.test.js` encodes the no-native-dropdown contract and keyboard
   behavior shared by Board, inspector, and create flows.
+- `features/meetings/*.feature` is the Scribe behavior authority. Every
+  scenario has one stable `MTG-*` id and one evidence class. The manifest maps
+  automated selectors and keeps packaged/hardware/manual claims separate; a
+  happy-dom or fake-audio pass cannot satisfy a TCC, device-route, soak, or
+  signing claim.
+
+### Scribe focused gates
+
+Run the portable automated layer:
+
+```bash
+bun run check:meetings
+bun run test -- src/services/meetings.test.js src/stores/meetings.test.js src/mimir/apps/ScribeApp.test.js
+cargo test --manifest-path src-tauri/Cargo.toml meetings::
+cargo test --manifest-path src-tauri/crates/mimir-meeting-audio/Cargo.toml
+cargo test --manifest-path src-tauri/crates/mimir-meeting-detect/Cargo.toml
+```
+
+Before a release, the evidence manifest must also point to current macOS arm64
+results for: clean-install microphone and system-audio prompts, denial and
+repair, real dual-channel call, route/device change, sleep/wake, forced kill
+and relaunch, local-model install and inference, custom WSS interoperability,
+Stop through title/summary and KG proposal, eight-hour capture, 24-hour
+detection, and the signed/notarized DMG. Manual evidence records the exact app
+version, commit, OS, hardware/routes, model/provider identity, result, and
+timestamp.
 
 ### Golden IPC fixtures
 

@@ -5,12 +5,13 @@ Status: implemented, 2026-07-29
 ## Discovery
 
 `mimir tools` prints every currently callable public tool, grouped as
-Workbench, Graph, Chat, and Connections. Each heading points to its focused
+Workbench, Graph, Meetings, Chat, and Connections. Each heading points to its focused
 drawer:
 
 ```text
 mimir tools workbench
 mimir tools graph
+mimir tools meetings
 mimir tools chat
 mimir tools connections
 ```
@@ -70,6 +71,19 @@ graph_context  build bounded context around a node
 graph_events   read recent authored graph changes
 ```
 
+Meetings:
+
+```text
+meetings_list    list completed or interrupted meetings recorded by Scribe
+meetings_get     read one meeting and a bounded finalized transcript slice
+meetings_search  search native titles, summaries, and transcript text
+meetings_update  update reviewed title, summary, or tags
+```
+
+Recording, microphone mute, and stop are intentionally human-only Scribe
+controls. Agents cannot exercise Mimir's macOS audio grants. Granola tools
+remain a distinct read/sync connection for meetings recorded elsewhere.
+
 Chat:
 
 ```text
@@ -94,8 +108,8 @@ granola_search   granola_get      granola_sync
 slack_search     slack_read       slack_send
 ```
 
-The maximum surface is 33 tools; without connections it is 20, without chat
-and connections it is 15. `mimir doctor` reports the public count, registered
+The maximum surface is 38 tools; without connections it is 25, without chat
+and connections it is 20. `mimir doctor` reports the public count, registered
 connection tools, and local credential errors -- not remote service health.
 
 Issues are graph nodes. Knowledge, issues, projects, and research are not
