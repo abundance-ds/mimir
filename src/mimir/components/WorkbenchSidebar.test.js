@@ -93,6 +93,31 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-row="tool:files"]').exists()).toBe(true)
   })
 
+  it('keeps an explicit meeting status and one-step Stop available in expanded and rail modes', async () => {
+    const wrapper = render()
+    await wrapper.setProps({
+      meetingCapture: {
+        id: 'meeting-1',
+        title: 'Architecture review',
+        lifecycle: 'capturing',
+        startedAt: new Date(Date.now() - 62_000).toISOString(),
+        durationMs: 62_000,
+        micMuted: false,
+      },
+    })
+
+    expect(wrapper.get('[data-sidebar-meeting-capture]').text()).toContain('Recording')
+    expect(wrapper.get('[data-sidebar-meeting-capture]').text()).toContain('Architecture review')
+    await wrapper.get('[data-sidebar-meeting-stop]').trigger('click')
+    expect(wrapper.emitted('stopMeeting')).toHaveLength(1)
+
+    await wrapper.setProps({ collapsed: true })
+    expect(wrapper.get('[data-sidebar-meeting-stop]').attributes('aria-label'))
+      .toBe('Stop meeting recording')
+    await wrapper.get('[data-sidebar-meeting-open]').trigger('click')
+    expect(wrapper.emitted('openMeeting')).toHaveLength(1)
+  })
+
   it('keeps the same rows and exposes source identity in rail mode', async () => {
     const wrapper = render()
     const activityRow = wrapper.get('[data-sidebar-row="activity:agent:one"]').element

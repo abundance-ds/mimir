@@ -54,6 +54,27 @@ describe('AppActivity', () => {
     expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
   })
 
+  it('routes the built-in Scribe tool to its native meeting surface', () => {
+    const record = activity({
+      id: 'scribe',
+      title: 'Scribe',
+      mode: 'rust-helper',
+      helper: 'scribe',
+    }, { helper: 'scribe' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          ScribeApp: true,
+          EmbeddedAppHost: true,
+        },
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'ScribeApp' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
+  })
+
   it('forwards workbench entry focus to the hosted surface', () => {
     const focusEntry = vi.fn()
     const record = activity({

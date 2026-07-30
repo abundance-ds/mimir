@@ -25,6 +25,7 @@
         :chat-section-collapsed="settings.sidebarChatsCollapsed"
         :active-activity-id="workbench.activeActivityId || ''"
         :activity-sort="activityNavigator.mode"
+        :meeting-capture="meetingCapture"
         @launch="onLaunch"
         @select-activity="selectActivity"
         @select-chat="openChatTarget"
@@ -41,6 +42,8 @@
         @sort-activities="sortActivities"
         @toggle-chat-collapse="settings.set('sidebarChatsCollapsed', !settings.sidebarChatsCollapsed)"
         @settings="openSettings"
+        @open-meeting="onLaunch('app:scribe')"
+        @stop-meeting="stopMeetingCapture"
       />
     </template>
 
@@ -166,6 +169,7 @@ import { useAppsCatalogStore } from '../stores/appsCatalog.js'
 import { useChatStore } from '../stores/chat.js'
 import { useFileStore } from '../stores/files.js'
 import { useLaunchersStore } from '../stores/launchers.js'
+import { useMeetingsStore } from '../stores/meetings.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
@@ -213,6 +217,7 @@ const activityRuntime = useActivityRuntimeStore()
 const appsCatalog = useAppsCatalogStore()
 const chat = useChatStore()
 const launchers = useLaunchersStore()
+const meetings = useMeetingsStore()
 const workspaceFiles = useWorkspaceFilesStore()
 const settings = useSettingsStore()
 const releaseSettingsSync = settings.startSync()
@@ -400,6 +405,18 @@ const activityMeta = computed(() => {
   return humanStatus(activity.status)
 })
 const workspaceName = computed(() => basename(workspaceFiles.workspacePath))
+const meetingCapture = computed(() => {
+  const meeting = meetings.activeMeeting
+  if (!meeting) return null
+  return {
+    id: meeting.id,
+    title: meeting.title,
+    lifecycle: meeting.lifecycle,
+    startedAt: meeting.startedAt,
+    durationMs: meeting.durationMs,
+    micMuted: meeting.micMuted,
+  }
+})
 const recentWorkspaces = computed(() => (
   (Array.isArray(settings.recentWorkspaceFolders) ? settings.recentWorkspaceFolders : [])
     .map(path => ({ path, name: basename(path) }))
@@ -573,6 +590,11 @@ onMounted(async () => {
   window.__mimir_activityPaste = pasteToActiveTerminal
   await Promise.all([
     workspaceBootstrap.start(),
+    meetings.initialize().catch((cause) => {
+      if (!diagnostic.value) {
+        diagnostic.value = `Scribe could not initialize: ${errorMessage(cause)}`
+      }
+    }),
     chat.initialize().catch((cause) => {
       if (!diagnostic.value) diagnostic.value = `Chat could not initialize: ${errorMessage(cause)}`
     }),
@@ -594,6 +616,7 @@ onUnmounted(() => {
   activityRuntime.dispose()
   toolRuntime.stop()
   chat.dispose()
+  meetings.dispose()
   if (window.__mimir_activityPaste === pasteToActiveTerminal) {
     delete window.__mimir_activityPaste
   }
@@ -640,6 +663,14 @@ async function onLaunch(id) {
     workbench.setPaneState('activity', 'expanded')
   } catch (cause) {
     diagnostic.value = `${preset.title} did not launch: ${errorMessage(cause)}`
+  }
+}
+
+async function stopMeetingCapture() {
+  try {
+    await meetings.stop()
+  } catch (cause) {
+    diagnostic.value = `Scribe could not stop recording: ${errorMessage(cause)}`
   }
 }
 

@@ -68,6 +68,56 @@
         </span>
       </SidebarRow>
 
+      <div
+        v-if="meetingCapture"
+        data-sidebar-meeting-capture
+        class="mx-1 mt-1 flex min-h-9 items-center border-y border-rule bg-surface"
+        role="status"
+        aria-label="Meeting recording controls"
+      >
+        <button
+          type="button"
+          data-sidebar-meeting-open
+          class="flex min-w-0 flex-1 items-center text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          :title="`${meetingCapture.title} — ${meetingCaptureLabel}`"
+          @click="$emit('openMeeting')"
+        >
+          <span class="grid size-8 shrink-0 place-items-center text-rem">
+            <IconPlayerRecordFilled
+              v-if="meetingCapture.lifecycle === 'capturing'"
+              :size="11"
+              aria-hidden="true"
+            />
+            <IconLoader2
+              v-else
+              :size="13"
+              class="motion-safe:animate-spin"
+              aria-hidden="true"
+            />
+          </span>
+          <span v-if="!collapsed" class="min-w-0 flex-1 pr-1">
+            <span class="block truncate text-[10px] font-semibold text-ink">
+              {{ meetingCapture.lifecycle === 'capturing' ? 'Recording' : 'Finalizing' }}
+              {{ meetingElapsed }}
+            </span>
+            <span class="block truncate font-mono text-[9px] text-ink-3">
+              {{ meetingCapture.title }}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          data-sidebar-meeting-stop
+          class="grid size-8 shrink-0 place-items-center text-rem hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+          title="Stop meeting recording"
+          aria-label="Stop meeting recording"
+          :disabled="meetingCapture.lifecycle !== 'capturing'"
+          @click="$emit('stopMeeting')"
+        >
+          <IconPlayerStopFilled :size="12" />
+        </button>
+      </div>
+
       <ChatSidebarSection
         v-if="chatEnabled"
         :collapsed="collapsed"
@@ -389,6 +439,7 @@ import {
   IconFocus2,
   IconLayoutSidebarLeftCollapse,
   IconMathPi,
+  IconLoader2,
   IconMicrophone,
   IconPlus,
   IconSettings,
@@ -399,6 +450,8 @@ import {
   IconSparkles,
   IconPencil,
   IconPlayerStop,
+  IconPlayerStopFilled,
+  IconPlayerRecordFilled,
   IconTrash,
 } from '@tabler/icons-vue'
 import SidebarRow from './SidebarRow.vue'
@@ -426,6 +479,7 @@ const props = defineProps({
   chatSectionCollapsed: { type: Boolean, default: false },
   activeActivityId: { type: String, default: '' },
   activitySort: { type: String, default: 'manual' },
+  meetingCapture: { type: Object, default: null },
 })
 
 const emit = defineEmits([
@@ -444,9 +498,12 @@ const emit = defineEmits([
   'reorderActivities',
   'sortActivities',
   'toggleChatCollapse',
+  'openMeeting',
+  'stopMeeting',
   'settings',
 ])
 const activityMenuId = ref('')
+const meetingNow = ref(Date.now())
 const sortMenuOpen = ref(false)
 const activitiesCollapsed = ref(false)
 const renamingId = ref('')
@@ -456,6 +513,26 @@ const activityCreateButtonRef = ref(null)
 const activityCreateMenuRef = ref(null)
 const activityCreateMenuOpen = ref(false)
 const activityCreateMenuStyle = ref({})
+const meetingElapsed = computed(() => {
+  if (!props.meetingCapture) return ''
+  const started = Date.parse(props.meetingCapture.startedAt || '')
+  const elapsed = props.meetingCapture.lifecycle === 'capturing' && Number.isFinite(started)
+    ? Math.max(props.meetingCapture.durationMs || 0, meetingNow.value - started)
+    : Number(props.meetingCapture.durationMs) || 0
+  const totalSeconds = Math.floor(elapsed / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`
+})
+const meetingCaptureLabel = computed(() => (
+  props.meetingCapture?.lifecycle === 'capturing'
+    ? `Recording ${meetingElapsed.value}`
+    : 'Finalizing'
+))
+let meetingClock = null
 const LIVE_STATUSES = new Set(['ready', 'starting', 'working', 'needs-input', 'idle'])
 const SORT_OPTIONS = Object.freeze([
   { id: 'manual', label: 'Manual' },
@@ -479,9 +556,15 @@ const activityCreateAppStart = computed(() => {
   return index > 0 ? index : -1
 })
 
-onMounted(() => document.addEventListener('pointerdown', closeMenus))
+onMounted(() => {
+  document.addEventListener('pointerdown', closeMenus)
+  meetingClock = window.setInterval(() => {
+    if (props.meetingCapture?.lifecycle === 'capturing') meetingNow.value = Date.now()
+  }, 1000)
+})
 onUnmounted(() => {
   document.removeEventListener('pointerdown', closeMenus)
+  if (meetingClock) window.clearInterval(meetingClock)
   closeActivityCreateMenu()
 })
 

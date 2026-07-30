@@ -65,6 +65,11 @@ const VALID_TAURI_COMMANDS = new Set([
   // routines
   'routine_catalog', 'routine_reload', 'routine_run_now', 'routine_create', 'routine_update',
   'routine_duplicate', 'routine_trash', 'routine_reveal',
+  // Scribe meetings
+  'meetings_snapshot', 'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
+  'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_delete',
+  'meetings_export', 'meetings_update_config', 'meetings_set_api_key',
+  'meetings_clear_api_key', 'meetings_install_model', 'meetings_delete_model',
   // canonical dynamic tool providers
   'tool_server_start', 'tool_server_stop', 'tool_server_status', 'tool_call_response',
   'tool_registry_snapshot', 'tool_registry_list', 'tool_registry_call',
