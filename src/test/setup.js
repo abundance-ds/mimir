@@ -45,7 +45,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // Activities and launcher presets
   'activity_list', 'activity_search_history', 'activity_spawn', 'activity_respawn', 'activity_snapshot', 'activity_write',
   'activity_resize', 'activity_stop', 'activity_close', 'activity_interrupt_all', 'activity_flush',
-  'activity_rename', 'activity_set_archived', 'activity_clear',
+  'activity_rename', 'activity_auto_title', 'activity_set_archived', 'activity_clear',
   'launcher_detect_agents', 'launcher_load_config', 'launcher_save_config', 'launcher_resolve',
   // team chat
   'chat_status', 'chat_config', 'chat_configure', 'chat_update_config', 'chat_reconnect',

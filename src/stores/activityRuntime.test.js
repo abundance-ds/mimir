@@ -99,6 +99,7 @@ describe('activity runtime store', () => {
 
     expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
       id: 'agent:new-id',
+      autoTitleEligible: true,
       retention: 'durable',
       launch: expect.objectContaining({
         command: '/bin/codex',
@@ -112,6 +113,21 @@ describe('activity runtime store', () => {
     }), {}, null)
     expect(record.status).toBe('idle')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:new-id')
+  })
+
+  it('protects an explicit launch title from automatic replacement', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce('explicit-id')
+    const runtime = useActivityRuntimeStore()
+
+    await runtime.launchPreset({ id: 'review' }, '/w', {
+      title: 'Review · #general',
+    })
+
+    expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'agent:explicit-id',
+      title: 'Review · #general',
+      autoTitleEligible: false,
+    }), {}, null)
   })
 
   it('seeds editable agent input without appending Enter or argv instructions', async () => {
@@ -153,10 +169,10 @@ describe('activity runtime store', () => {
   })
 
   it.each([
-    ['codex', ['review', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'], ['resume', '11111111-1111-4111-8111-111111111111', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"']],
-    ['claude', ['--session-id', '22222222-2222-4222-8222-222222222222', '--mcp-config', '{}'], ['--resume', '11111111-1111-4111-8111-111111111111', '--mcp-config', '{}']],
-    ['pi', ['--session-id=22222222-2222-4222-8222-222222222222', '--extension', '/tmp/mimir-tools.ts'], ['--session', '11111111-1111-4111-8111-111111111111', '--extension', '/tmp/mimir-tools.ts']],
-    ['gemini', ['--session-id', '22222222-2222-4222-8222-222222222222', '--model', 'gemini-2.5-pro'], ['--resume', '11111111-1111-4111-8111-111111111111', '--model', 'gemini-2.5-pro']],
+    ['codex', ['review', '--yolo', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'], ['resume', '11111111-1111-4111-8111-111111111111', '--yolo', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"']],
+    ['claude', ['--session-id', '22222222-2222-4222-8222-222222222222', '--dangerously-skip-permissions', '--mcp-config', '{}'], ['--resume', '11111111-1111-4111-8111-111111111111', '--dangerously-skip-permissions', '--mcp-config', '{}']],
+    ['pi', ['--session-id=22222222-2222-4222-8222-222222222222', '--no-approve', '--extension', '/tmp/mimir-tools.ts'], ['--session', '11111111-1111-4111-8111-111111111111', '--no-approve', '--extension', '/tmp/mimir-tools.ts']],
+    ['gemini', ['--session-id', '22222222-2222-4222-8222-222222222222', '--yolo', '--model', 'gemini-2.5-pro'], ['--resume', '11111111-1111-4111-8111-111111111111', '--yolo', '--model', 'gemini-2.5-pro']],
   ])('builds exact %s resume argv', (strategy, args, expected) => {
     expect(exactResumeArguments(
       args,
@@ -177,7 +193,7 @@ describe('activity runtime store', () => {
     }
   })
 
-  it('resumes an ended agent inside its existing Activity identity', async () => {
+  it('resumes an ended agent with its recorded launch policy and refreshed integration', async () => {
     api.resolveLauncher.mockResolvedValueOnce({
       presetId: 'codex',
       title: 'Codex',
@@ -185,7 +201,7 @@ describe('activity runtime store', () => {
       agentId: 'codex',
       resumeStrategy: 'codex',
       command: '/bin/codex',
-      args: ['--model', 'gpt-5', '-c', 'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp"'],
+      args: ['--sandbox', 'read-only', '--model', 'gpt-5'],
       cwd: '/w',
       env: {},
     })
@@ -193,6 +209,20 @@ describe('activity runtime store', () => {
     const ended = {
       ...backendRecord,
       status: 'interrupted',
+      launch: {
+        command: '/bin/codex',
+        args: [
+          '--yolo',
+          '--model',
+          'gpt-5.4',
+          '-c',
+          'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex"',
+        ],
+        cwd: '/w',
+        env: {
+          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex',
+        },
+      },
       session: {
         runId: 'run-1',
         cliSessionId: '11111111-1111-4111-8111-111111111111',
@@ -212,8 +242,9 @@ describe('activity runtime store', () => {
         args: [
           'resume',
           '11111111-1111-4111-8111-111111111111',
+          '--yolo',
           '--model',
-          'gpt-5',
+          'gpt-5.4',
           '-c',
           'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex"',
         ],

@@ -63,6 +63,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       id,
       kind,
       title: options.title || resolved.title,
+      autoTitleEligible: kind === 'agent' && !options.title,
       workspacePath: resolved.cwd,
       status: 'ready',
       createdAt: timestamp,
@@ -156,6 +157,13 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       activityId: activity.id,
       agentId,
     })
+    // A continuation keeps the launch policy of the session it belongs to.
+    // Resolving the launcher again supplies the current executable and identity,
+    // but must not silently replace the recorded model, permission, or tool flags.
+    const recordedArgs = Array.isArray(activity.launch?.args)
+      ? activity.launch.args
+      : resolved.args
+    const recordedMcpUrl = activity.launch?.env?.MIMIR_MCP_URL || baseMcpUrl
     const record = {
       ...activity,
       status: 'ready',
@@ -172,8 +180,8 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       },
       launch: {
         command: resolved.command,
-        args: exactResumeArguments(resolved.args, resumeStrategy, cliSessionId)
-          .map(argument => replaceMcpUrl(argument, baseMcpUrl, mcpUrl)),
+        args: exactResumeArguments(recordedArgs, resumeStrategy, cliSessionId)
+          .map(argument => replaceMcpUrl(argument, recordedMcpUrl, mcpUrl)),
         cwd: resolved.cwd,
         env: {
           ...(activity.launch?.env || {}),
@@ -357,6 +365,7 @@ function canonicalBackendRecord(record) {
   // a restored Activity retains its previous archive timestamp forever.
   return {
     ...record,
+    autoTitleEligible: Boolean(record.autoTitleEligible),
     archivedAt: record.archivedAt ?? null,
     closeRequestedAt: record.closeRequestedAt ?? null,
   }
@@ -385,10 +394,10 @@ function replaceMcpUrl(argument, original, replacement) {
     original,
     'http://127.0.0.1:17532/mcp',
   ].filter(Boolean))]
-  return candidates.reduce(
-    (value, candidate) => value.replaceAll(String(candidate), replacement),
-    argument,
-  )
+  const candidate = candidates.find(value => argument.includes(String(value)))
+  return candidate
+    ? argument.replaceAll(String(candidate), replacement)
+    : argument
 }
 
 export function exactResumeArguments(args = [], strategy = 'none', cliSessionId = '') {
@@ -425,6 +434,7 @@ export function exactResumeArguments(args = [], strategy = 'none', cliSessionId 
 
 function codexGlobalArguments(args) {
   const flags = new Set([
+    '--yolo',
     '--full-auto',
     '--dangerously-bypass-approvals-and-sandbox',
     '--dangerously-bypass-hook-trust',

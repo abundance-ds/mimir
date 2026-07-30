@@ -105,6 +105,18 @@ export async function executeToolRequest(request, options = {}) {
   }
 
   switch (tool) {
+    case 'activities.auto-title': {
+      const activityId = String(context.metadata?.activityId || '').trim()
+      if (!activityId) {
+        throw invalidInputError('mimir_title is only available inside a scoped Activity.')
+      }
+      return options.autoTitleActivity
+        ? options.autoTitleActivity(activityId, input.title)
+        : invoke('activity_auto_title', {
+            activityId,
+            title: input.title,
+          })
+    }
     case 'activities.list':
       return options.listActivities
         ? options.listActivities()
