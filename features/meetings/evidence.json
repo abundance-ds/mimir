@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "phase": "red",
+  "idPattern": "^MTG-[0-9]{3}$",
+  "requiredScenarioTags": [
+    "red"
+  ],
+  "evidenceTags": [
+    "domain",
+    "native",
+    "renderer",
+    "desktop",
+    "hardware",
+    "contract",
+    "security",
+    "legal",
+    "recovery",
+    "performance",
+    "accessibility",
+    "packaging",
+    "release",
+    "supply-chain"
+  ],
+  "releaseTarget": {
+    "supported": [
+      "macos-arm64"
+    ],
+    "parked": [
+      "linux",
+      "windows"
+    ]
+  },
+  "upstreamReference": {
+    "repository": "https://github.com/fastrepl/anarlog.git",
+    "commit": "08aad83f0c5cef1317d74a31519ae3190d726504",
+    "license": "MIT",
+    "policy": "Curated, provenance-recorded extraction only; the upstream workspace is not a product dependency."
+  },
+  "performanceBudgets": {
+    "audioCallbackP99MaximumFrameFraction": 0.25,
+    "channelDriftMaximumMillisecondsOverFourHours": 20,
+    "forcedTerminationUncertainAudioMaximumSeconds": 2,
+    "levelProjectionMaximumHertz": 10,
+    "provisionalTranscriptProjectionMaximumHertz": 5,
+    "providerStallSeconds": 30,
+    "captureSoakHours": 8,
+    "detectionSoakHours": 24,
+    "lifecycleCycles": 100,
+    "largeTranscriptWords": 100000,
+    "accuracyPolicy": "Per-model and per-language baselines use a licensed, versioned corpus; a release cannot regress beyond its approved tolerance."
+  },
+  "suites": [
+    {
+      "feature": "features/meetings/01_detection_and_consent.feature",
+      "idRange": [
+        "MTG-001",
+        "MTG-008"
+      ],
+      "owner": "meeting-detection-and-consent",
+      "plannedEvidence": [
+        "native fake-clock and application-signal scenarios",
+        "packaged permission and consent interaction evidence",
+        "privacy and jurisdiction review"
+      ]
+    },
+    {
+      "feature": "features/meetings/02_capture_lifecycle.feature",
+      "idRange": [
+        "MTG-020",
+        "MTG-027"
+      ],
+      "owner": "meeting-runtime",
+      "plannedEvidence": [
+        "executable native lifecycle scenarios",
+        "IPC snapshot and event ordering contracts",
+        "guarded Quit desktop evidence"
+      ]
+    },
+    {
+      "feature": "features/meetings/03_multichannel_capture.feature",
+      "idRange": [
+        "MTG-040",
+        "MTG-048"
+      ],
+      "owner": "meeting-audio",
+      "plannedEvidence": [
+        "synthetic dual-channel fixtures",
+        "real device and route-change evidence",
+        "disk failure and backpressure injection"
+      ]
+    },
+    {
+      "feature": "features/meetings/04_transcription.feature",
+      "idRange": [
+        "MTG-060",
+        "MTG-074"
+      ],
+      "owner": "meeting-transcription",
+      "plannedEvidence": [
+        "provider and transcript golden contracts",
+        "local network-deny and packaged sidecar evidence",
+        "hosted custom-URL transport and credential tests",
+        "resumable batch and model verification evidence"
+      ]
+    },
+    {
+      "feature": "features/meetings/05_crash_recovery.feature",
+      "idRange": [
+        "MTG-090",
+        "MTG-097"
+      ],
+      "owner": "meeting-recovery",
+      "plannedEvidence": [
+        "forced renderer and process termination tests",
+        "corrupt-state and repeated-relaunch fixtures",
+        "redacted recovery diagnostics"
+      ]
+    },
+    {
+      "feature": "features/meetings/06_title_and_summary_finalization.feature",
+      "idRange": [
+        "MTG-110",
+        "MTG-117"
+      ],
+      "owner": "meeting-finalization-jobs",
+      "plannedEvidence": [
+        "durable Activity launch and exact argv contracts",
+        "title compare-and-set concurrency tests",
+        "idempotent retry and untrusted-input tests"
+      ]
+    },
+    {
+      "feature": "features/meetings/07_knowledge_graph_proposals.feature",
+      "idRange": [
+        "MTG-130",
+        "MTG-137"
+      ],
+      "owner": "meeting-graph-proposals",
+      "plannedEvidence": [
+        "bounded graph context and scope tests",
+        "review accept, reject, and revision-conflict contracts",
+        "proposal idempotency and deletion tests"
+      ]
+    },
+    {
+      "feature": "features/meetings/08_retention_privacy_and_security.feature",
+      "idRange": [
+        "MTG-150",
+        "MTG-160"
+      ],
+      "owner": "meeting-data-governance",
+      "plannedEvidence": [
+        "retention clock and recovery-hold tests",
+        "path, permissions, redaction, and delete tests",
+        "local end-to-end network-deny evidence"
+      ]
+    },
+    {
+      "feature": "features/meetings/09_performance_and_backpressure.feature",
+      "idRange": [
+        "MTG-180",
+        "MTG-186"
+      ],
+      "owner": "meeting-performance",
+      "plannedEvidence": [
+        "eight-hour dual-channel soak report",
+        "queue saturation and provider stall report",
+        "lifecycle and detector leak report",
+        "licensed accuracy-corpus results"
+      ]
+    },
+    {
+      "feature": "features/meetings/10_accessibility_and_workbench.feature",
+      "idRange": [
+        "MTG-200",
+        "MTG-205"
+      ],
+      "owner": "meeting-workbench",
+      "plannedEvidence": [
+        "renderer keyboard and accessibility tests",
+        "screen-reader announcement audit",
+        "narrow, default, wide, theme, motion, and zoom visual matrix"
+      ]
+    },
+    {
+      "feature": "features/meetings/11_packaging_upgrade_and_supply_chain.feature",
+      "idRange": [
+        "MTG-220",
+        "MTG-228"
+      ],
+      "owner": "meeting-release",
+      "plannedEvidence": [
+        "signed clean-install macOS arm64 hardware run",
+        "entitlement and capability audit",
+        "migration and rollback fixtures",
+        "SBOM, notices, model manifests, and provenance audit"
+      ]
+    }
+  ]
+}
