@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   dismissMeetingCandidate,
+  issueMeetingStartConsent,
   listenToMeetingEvents,
   loadMeetingLibraryPage,
   loadMeetingSnapshot,
@@ -21,6 +22,7 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   dismissMeetingCandidate: vi.fn(),
   exportMeeting: vi.fn(),
   installMeetingModel: vi.fn(),
+  issueMeetingStartConsent: vi.fn(),
   listenToMeetingEvents: vi.fn(),
   loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
@@ -44,6 +46,9 @@ const emptySnapshot = {
   config: {
     detectionEnabled: false,
     transcriptionMode: 'local',
+    customUrl: '',
+    customModel: '',
+    localModel: 'whisper-small',
     summaryEnabled: true,
     kgPrompt: 'ask',
   },
@@ -79,7 +84,13 @@ describe('meetings store', () => {
       meetingId,
     }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
+      .mockResolvedValue(emptySnapshot)
     vi.mocked(dismissMeetingCandidate).mockReset()
+    vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
+      token: 'native-secret',
+      requestId: 'scribe-start-native',
+      expiresInMs: 45_000,
+    })
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
   })
@@ -142,7 +153,7 @@ describe('meetings store', () => {
     expect(store.models[0]?.status).toBe('downloading')
   })
 
-  it('requires explicit consent and prevents a second active capture', async () => {
+  it('obtains single-use native consent after permission and prevents a second capture', async () => {
     const store = useMeetingsStore()
     await store.initialize()
     vi.mocked(startMeeting).mockResolvedValue({
@@ -160,11 +171,19 @@ describe('meetings store', () => {
         channels: ['microphone', 'system'],
       }],
     })
-    await store.start({ title: 'Planning', consentConfirmed: true })
+    await store.start({ title: 'Planning' })
+    expect(issueMeetingStartConsent).toHaveBeenCalledWith({
+      candidateId: undefined,
+      candidateAppName: undefined,
+      transcriptionMode: 'local',
+      destination: null,
+      model: 'whisper-small',
+    })
     expect(startMeeting).toHaveBeenCalledWith(expect.objectContaining({
-      consentConfirmed: true,
+      requestId: 'scribe-start-native',
+      consentToken: 'native-secret',
     }))
-    await expect(store.start({ consentConfirmed: true }))
+    await expect(store.start({}))
       .rejects.toThrow('already active')
   })
 

@@ -8,6 +8,7 @@ import {
   dismissMeetingCandidate,
   exportMeeting,
   installMeetingModel,
+  issueMeetingStartConsent,
   listenToMeetingEvents,
   loadMeetingLibraryPage,
   loadMeetingSnapshot,
@@ -120,9 +121,25 @@ export const useMeetingsStore = defineStore('meetings', () => {
       throw new Error('A meeting is already active.')
     }
     return runPending('start', async () => {
+      applySnapshot(await requestMeetingMicrophonePermission())
+      const candidate = request?.candidateId
+        ? candidates.value.find(value => value.id === request.candidateId)
+        : null
+      if (request?.candidateId && !candidate) {
+        throw new Error('The selected meeting suggestion is no longer available.')
+      }
+      const custom = config.value.transcriptionMode === 'custom'
+      const consent = await issueMeetingStartConsent({
+        candidateId: candidate?.id,
+        candidateAppName: candidate?.appName,
+        transcriptionMode: config.value.transcriptionMode,
+        destination: custom ? config.value.customUrl : null,
+        model: custom ? config.value.customModel : config.value.localModel,
+      })
       const snapshot = await startMeeting({
         ...request,
-        consentConfirmed: request?.consentConfirmed === true,
+        requestId: consent.requestId,
+        consentToken: consent.token,
       })
       applySnapshot(snapshot)
       if (snapshot.activeMeetingId) selectedId.value = snapshot.activeMeetingId

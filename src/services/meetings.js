@@ -38,14 +38,37 @@ export async function dismissMeetingCandidate(candidateId) {
   }))
 }
 
+export async function issueMeetingStartConsent(disclosure = {}) {
+  const mode = String(disclosure.transcriptionMode || '').trim()
+  if (!['local', 'custom'].includes(mode)) {
+    throw new Error('Recording disclosure must identify local or custom transcription.')
+  }
+  const grant = await invoke('meetings_issue_start_consent', {
+    disclosure: {
+      candidateId: optionalString(disclosure.candidateId),
+      candidateAppName: optionalString(disclosure.candidateAppName),
+      transcriptionMode: mode,
+      destination: mode === 'custom' ? optionalString(disclosure.destination) : null,
+      model: requiredId(disclosure.model, 'transcription model'),
+    },
+  })
+  const value = object(grant)
+  return {
+    token: requiredId(value.token, 'native recording consent token'),
+    requestId: requiredId(value.requestId ?? value.request_id, 'native recording request'),
+    expiresInMs: nonnegativeInteger(value.expiresInMs ?? value.expires_in_ms),
+    disclosure: object(value.disclosure),
+  }
+}
+
 export async function startMeeting(request = {}) {
-  await requestMeetingMicrophonePermission()
   return normalizeMeetingSnapshot(await invoke('meetings_start', {
     request: {
+      requestId: requiredId(request.requestId, 'native recording request'),
       title: optionalString(request.title),
       workspacePath: optionalString(request.workspacePath),
       candidateId: optionalString(request.candidateId),
-      consentConfirmed: request.consentConfirmed === true,
+      consentToken: requiredId(request.consentToken, 'native recording consent token'),
     },
   }))
 }

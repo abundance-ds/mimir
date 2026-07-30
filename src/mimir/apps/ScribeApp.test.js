@@ -5,6 +5,7 @@ import {
   decideMeetingKgProposal,
   deleteMeeting,
   dismissMeetingCandidate,
+  issueMeetingStartConsent,
   listenToMeetingEvents,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
@@ -24,6 +25,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   dismissMeetingCandidate: vi.fn(),
   exportMeeting: vi.fn(),
   installMeetingModel: vi.fn(),
+  issueMeetingStartConsent: vi.fn(),
   listenToMeetingEvents: vi.fn(),
   loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
@@ -107,7 +109,12 @@ describe('ScribeApp', () => {
       segments: [],
       summary: null,
     }))
-    vi.mocked(requestMeetingMicrophonePermission).mockReset()
+    vi.mocked(requestMeetingMicrophonePermission).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
+      token: 'native-secret',
+      requestId: 'scribe-start-native',
+      expiresInMs: 45_000,
+    })
     vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(deleteMeeting).mockReset()
     vi.mocked(updateMeeting).mockReset()
@@ -136,8 +143,25 @@ describe('ScribeApp', () => {
       title: 'Planning',
       candidateId: null,
       workspacePath: '/work',
-      consentConfirmed: true,
+      requestId: 'scribe-start-native',
+      consentToken: 'native-secret',
     }))
+  })
+
+  it('keeps the disclosure open with an actionable error when native consent expires', async () => {
+    vi.mocked(startMeeting).mockRejectedValue(new Error(
+      'Recording consent expired. Review the disclosure and confirm again.',
+    ))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-new]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-new]').trigger('click')
+    await wrapper.get('[data-scribe-consent-checkbox]').setValue(true)
+    await wrapper.get('[data-scribe-confirm-start]').trigger('click')
+
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-consent-error]').text())
+      .toContain('Review the disclosure and confirm again'))
+    expect(wrapper.get('[data-scribe-consent]').exists()).toBe(true)
   })
 
   it('discloses the exact hosted destination before custom transcription capture', async () => {

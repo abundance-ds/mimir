@@ -278,10 +278,19 @@
           >
             Both audio channels and transcript timing will be sent to
             <strong class="font-semibold text-ink">{{ customDestination }}</strong>
+            using model <strong class="font-semibold text-ink">{{ meetings.config.customModel }}</strong>
             for transcription. Mimir will not silently switch to another provider.
           </div>
           <p v-else class="mt-3 max-w-lg text-[10px] leading-relaxed text-ink-3">
-            Local transcription stays on this Mac and does not send meeting audio to a provider.
+            Local transcription with {{ meetings.config.localModel }} stays on this Mac and does
+            not send meeting audio to a provider.
+          </p>
+          <p
+            v-if="candidateAppName"
+            data-scribe-candidate-disclosure
+            class="mt-2 text-[10px] leading-relaxed text-ink-3"
+          >
+            This recording was suggested because {{ candidateAppName }} is using the microphone.
           </p>
           <label class="mt-5 flex items-start gap-2 text-[11px] leading-relaxed text-ink-2">
             <input
@@ -316,6 +325,14 @@
               {{ meetings.pending.start ? 'Starting…' : 'Start recording' }}
             </button>
           </div>
+          <p
+            v-if="consentError"
+            data-scribe-consent-error
+            role="alert"
+            class="mt-3 text-[10px] leading-relaxed text-danger"
+          >
+            {{ consentError }}
+          </p>
         </div>
 
         <div
@@ -610,8 +627,10 @@ const meetings = useMeetingsStore()
 const settingsOpen = ref(false)
 const confirmingStart = ref(false)
 const consentConfirmed = ref(false)
+const consentError = ref('')
 const startTitle = ref('')
 const candidateId = ref(null)
+const candidateAppName = ref('')
 const detailTab = ref('transcript')
 const editingMeeting = ref(false)
 const editedTitle = ref('')
@@ -681,8 +700,10 @@ defineExpose({ focusEntry })
 
 function beginStart(candidate = null) {
   candidateId.value = candidate?.id || null
+  candidateAppName.value = candidate?.appName || ''
   startTitle.value = candidate?.appName ? `${candidate.appName} meeting` : ''
   consentConfirmed.value = false
+  consentError.value = ''
   settingsOpen.value = false
   confirmingStart.value = true
 }
@@ -690,21 +711,27 @@ function beginStart(candidate = null) {
 function cancelStart() {
   confirmingStart.value = false
   candidateId.value = null
+  candidateAppName.value = ''
   consentConfirmed.value = false
+  consentError.value = ''
 }
 
 async function start() {
+  consentError.value = ''
   try {
     await meetings.start({
       title: startTitle.value,
       candidateId: candidateId.value,
       workspacePath: props.workspacePath,
-      consentConfirmed: consentConfirmed.value,
     })
     cancelStart()
     liveAnnouncement.value = 'Recording started'
   } catch (error) {
-    emit('diagnostic', message(error))
+    const detail = message(error)
+    consentError.value = /consent|disclosure|suggestion changed/i.test(detail)
+      ? 'Recording confirmation expired or changed. Review the disclosure and confirm again.'
+      : detail
+    emit('diagnostic', detail)
   }
 }
 

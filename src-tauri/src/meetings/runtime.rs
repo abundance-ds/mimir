@@ -40,6 +40,10 @@ pub enum MeetingRuntimeError {
     Store(#[from] MeetingStoreError),
     #[error("recording requires an explicit consent confirmation")]
     ConsentRequired,
+    #[error(
+        "recording settings or the selected meeting suggestion changed; review the disclosure and confirm again"
+    )]
+    ConsentContextChanged,
     #[error("microphone permission is not granted")]
     MicrophonePermissionRequired,
     #[error("meeting '{meeting_id}' is already active")]
@@ -68,8 +72,28 @@ pub struct StartMeetingRequest {
     pub workspace_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_id: Option<String>,
-    #[serde(default)]
-    pub consent_confirmed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent_token: Option<String>,
+    /// Set only by the native IPC command after consuming a window-bound,
+    /// short-lived consent grant. Serde deliberately cannot populate it.
+    #[serde(skip)]
+    pub(crate) authorized_consent: Option<MeetingStartConsentContext>,
+}
+
+/// The exact recording disclosure protected by a native consent grant.
+///
+/// This never contains the grant token and is never persisted. Candidate
+/// identity is included so reusing a consent grant after detector churn cannot
+/// authorize a different meeting. The full custom endpoint and model are
+/// included even though the UI presents the endpoint host prominently.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct MeetingStartConsentContext {
+    pub candidate_id: Option<String>,
+    pub candidate_app_id: Option<String>,
+    pub candidate_app_name: Option<String>,
+    pub transcription_mode: String,
+    pub destination: Option<String>,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -779,16 +803,37 @@ impl MeetingRuntime {
         self.publish_unlocked("candidate-dismissed", None, None)
     }
 
+    /// Resolve the exact native state a human must see before recording.
+    ///
+    /// The command layer uses this both when issuing a consent grant and when
+    /// consuming it. `start` resolves it once more while holding the runtime
+    /// operation lock, closing the settings/candidate TOCTOU window.
+    pub(crate) fn start_consent_context(
+        &self,
+        candidate_id: Option<&str>,
+    ) -> Result<MeetingStartConsentContext, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let projection = self.platform_projection()?;
+        validate_config(&projection.config)?;
+        consent_context_for_projection(&projection, candidate_id)
+    }
+
     pub fn start(
         &self,
         request: StartMeetingRequest,
     ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
         let _operation = self.operation()?;
-        if !request.consent_confirmed {
-            return Err(MeetingRuntimeError::ConsentRequired);
-        }
         let projection = self.platform_projection()?;
         validate_config(&projection.config)?;
+        let current_consent =
+            consent_context_for_projection(&projection, request.candidate_id.as_deref())?;
+        match request.authorized_consent.as_ref() {
+            None => return Err(MeetingRuntimeError::ConsentRequired),
+            Some(authorized) if authorized != &current_consent => {
+                return Err(MeetingRuntimeError::ConsentContextChanged);
+            }
+            Some(_) => {}
+        }
         if projection.permissions.microphone != "granted" {
             return Err(MeetingRuntimeError::MicrophonePermissionRequired);
         }
@@ -1930,6 +1975,42 @@ fn transcription_route(config: &MeetingConfig) -> (String, String) {
     }
 }
 
+fn consent_context_for_projection(
+    projection: &MeetingPlatformProjection,
+    candidate_id: Option<&str>,
+) -> Result<MeetingStartConsentContext, MeetingRuntimeError> {
+    let candidate = match candidate_id {
+        Some(candidate_id) => Some(
+            projection
+                .candidates
+                .iter()
+                .find(|candidate| candidate.id == candidate_id)
+                .ok_or_else(|| {
+                    MeetingRuntimeError::Validation(
+                        "the selected meeting candidate is no longer available".into(),
+                    )
+                })?,
+        ),
+        None => None,
+    };
+    let (destination, model) = if projection.config.transcription_mode == "custom" {
+        (
+            Some(projection.config.custom_url.clone()),
+            projection.config.custom_model.clone(),
+        )
+    } else {
+        (None, projection.config.local_model.clone())
+    };
+    Ok(MeetingStartConsentContext {
+        candidate_id: candidate.map(|value| value.id.clone()),
+        candidate_app_id: candidate.map(|value| value.app_id.clone()),
+        candidate_app_name: candidate.map(|value| value.app_name.clone()),
+        transcription_mode: projection.config.transcription_mode.clone(),
+        destination,
+        model,
+    })
+}
+
 fn validate_config(config: &MeetingConfig) -> Result<(), MeetingRuntimeError> {
     match config.transcription_mode.as_str() {
         "local" => require_nonempty(&config.local_model, "local transcription model"),
@@ -2637,32 +2718,78 @@ mod tests {
         }
     }
 
-    fn start_request(request_id: &str) -> StartMeetingRequest {
+    fn start_request(runtime: &MeetingRuntime, request_id: &str) -> StartMeetingRequest {
+        start_request_for_candidate(runtime, request_id, None)
+    }
+
+    fn start_request_for_candidate(
+        runtime: &MeetingRuntime,
+        request_id: &str,
+        candidate_id: Option<&str>,
+    ) -> StartMeetingRequest {
         StartMeetingRequest {
             request_id: Some(request_id.into()),
             title: Some("Release review".into()),
             workspace_path: Some("/workspace".into()),
-            candidate_id: None,
-            consent_confirmed: true,
+            candidate_id: candidate_id.map(str::to_string),
+            consent_token: None,
+            authorized_consent: Some(runtime.start_consent_context(candidate_id).unwrap()),
         }
     }
 
     #[test]
     fn explicit_consent_single_active_and_idempotent_controls() {
         let fixture = make_fixture();
+        let forged: StartMeetingRequest = serde_json::from_value(json!({
+            "requestId": "forged",
+            "consentToken": "renderer-controlled",
+            "authorizedConsent": {
+                "transcriptionMode": "local",
+                "model": "whisper-small"
+            }
+        }))
+        .unwrap();
+        assert!(forged.authorized_consent.is_none());
+        assert!(matches!(
+            fixture.runtime.start(forged).unwrap_err(),
+            MeetingRuntimeError::ConsentRequired
+        ));
+
         let error = fixture
             .runtime
             .start(StartMeetingRequest {
-                consent_confirmed: false,
-                ..start_request("without-consent")
+                authorized_consent: None,
+                ..start_request(&fixture.runtime, "without-consent")
             })
             .unwrap_err();
         assert!(matches!(error, MeetingRuntimeError::ConsentRequired));
         assert!(fixture.capture.starts.lock().unwrap().is_empty());
 
-        let first = fixture.runtime.start(start_request("request-1")).unwrap();
+        let context_fixture = make_fixture();
+        let authorized = start_request(&context_fixture.runtime, "changed-context");
+        context_fixture
+            .platform
+            .state
+            .lock()
+            .unwrap()
+            .projection
+            .config
+            .local_model = "whisper-medium".into();
+        assert!(matches!(
+            context_fixture.runtime.start(authorized).unwrap_err(),
+            MeetingRuntimeError::ConsentContextChanged
+        ));
+        assert!(context_fixture.capture.starts.lock().unwrap().is_empty());
+
+        let first = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "request-1"))
+            .unwrap();
         let meeting_id = first.active_meeting_id.clone().unwrap();
-        let duplicate = fixture.runtime.start(start_request("request-1")).unwrap();
+        let duplicate = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "request-1"))
+            .unwrap();
         assert_eq!(
             duplicate.active_meeting_id.as_deref(),
             Some(meeting_id.as_str())
@@ -2671,7 +2798,7 @@ mod tests {
 
         let error = fixture
             .runtime
-            .start(start_request("request-2"))
+            .start(start_request(&fixture.runtime, "request-2"))
             .unwrap_err();
         assert!(matches!(error, MeetingRuntimeError::ActiveMeeting { .. }));
 
@@ -2692,7 +2819,7 @@ mod tests {
         let service_fixture = make_fixture();
         let service_request = StartMeetingRequest {
             request_id: None,
-            ..start_request("ignored")
+            ..start_request(&service_fixture.runtime, "ignored")
         };
         let first = service_fixture
             .runtime
@@ -2718,17 +2845,18 @@ mod tests {
             .runtime
             .start(StartMeetingRequest {
                 candidate_id: Some("missing".into()),
-                ..start_request("stale-candidate")
+                ..start_request(&fixture.runtime, "stale-candidate")
             })
             .unwrap_err();
         assert!(stale.to_string().contains("no longer available"));
 
         let started = fixture
             .runtime
-            .start(StartMeetingRequest {
-                candidate_id: Some("candidate-zoom".into()),
-                ..start_request("accepted-candidate")
-            })
+            .start(start_request_for_candidate(
+                &fixture.runtime,
+                "accepted-candidate",
+                Some("candidate-zoom"),
+            ))
             .unwrap();
         assert!(started.candidates.is_empty());
         assert_eq!(
@@ -2749,7 +2877,10 @@ mod tests {
         let base = fixture.runtime.snapshot().unwrap();
         assert_eq!(base.revision, 0);
 
-        let started = fixture.runtime.start(start_request("ordered")).unwrap();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "ordered"))
+            .unwrap();
         let events = fixture.events.published.lock().unwrap();
         assert_eq!(events.len(), 1);
         assert!(events[0].revision > base.revision);
@@ -2822,7 +2953,10 @@ mod tests {
     #[test]
     fn real_time_batches_reject_stale_runs_and_are_idempotent() {
         let fixture = make_fixture();
-        let started = fixture.runtime.start(start_request("live-batch")).unwrap();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "live-batch"))
+            .unwrap();
         let meeting_id = started.active_meeting_id.unwrap();
         let run_id = fixture.capture.starts.lock().unwrap()[0].run_id.clone();
         let batch = TranscriptBatch {
@@ -2883,7 +3017,7 @@ mod tests {
         let fixture = make_fixture();
         let started = fixture
             .runtime
-            .start(start_request("complete-flow"))
+            .start(start_request(&fixture.runtime, "complete-flow"))
             .unwrap();
         let meeting_id = started.active_meeting_id.unwrap();
 
@@ -2986,7 +3120,9 @@ mod tests {
             Arc::new(FakeEvents::default()),
         )
         .unwrap();
-        let started = runtime.start(start_request("provider-tail")).unwrap();
+        let started = runtime
+            .start(start_request(&runtime, "provider-tail"))
+            .unwrap();
         let meeting_id = started.active_meeting_id.unwrap();
 
         let stopped = runtime.stop(&meeting_id).unwrap();
@@ -3137,7 +3273,10 @@ mod tests {
     #[test]
     fn renderer_dto_uses_exact_final_and_projection_fields() {
         let fixture = make_fixture();
-        let started = fixture.runtime.start(start_request("serde-shape")).unwrap();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "serde-shape"))
+            .unwrap();
         let snapshot = fixture
             .runtime
             .stop(started.active_meeting_id.as_deref().unwrap())
@@ -3191,7 +3330,7 @@ mod tests {
 
         let started = fixture
             .runtime
-            .start(start_request("export-error"))
+            .start(start_request(&fixture.runtime, "export-error"))
             .unwrap();
         let meeting_id = started.active_meeting_id.unwrap();
         fixture.runtime.stop(&meeting_id).unwrap();
@@ -3210,7 +3349,7 @@ mod tests {
         *fixture.capture.fail_start.lock().unwrap() = Some("device busy".into());
         let error = fixture
             .runtime
-            .start(start_request("capture-error"))
+            .start(start_request(&fixture.runtime, "capture-error"))
             .unwrap_err();
         assert!(error.to_string().contains("device busy"));
         let meetings = fixture.store.list_meetings(10).unwrap();

@@ -863,6 +863,7 @@ pub fn run() {
         .manage(tool_registry)
         .manage(tool_runtime)
         .manage(chat_runtime)
+        .manage(meetings::commands::MeetingStartConsentAuthority::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             enable_macos_spellcheck();
@@ -995,6 +996,7 @@ pub fn run() {
             meetings::commands::meetings_transcript_page,
             meetings::commands::meetings_request_microphone_permission,
             meetings::commands::meetings_dismiss_candidate,
+            meetings::commands::meetings_issue_start_consent,
             meetings::commands::meetings_start,
             meetings::commands::meetings_stop,
             meetings::commands::meetings_set_mic_muted,

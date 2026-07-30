@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import {
   decideMeetingKgProposal,
   dismissMeetingCandidate,
+  issueMeetingStartConsent,
   listenToMeetingEvents,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
@@ -48,20 +49,41 @@ describe('meetings service', () => {
     })
   })
 
-  it('starts only with an explicit consent assertion', async () => {
-    vi.mocked(invoke).mockResolvedValue({ revision: 1, meetings: [] })
+  it('acquires native consent authority and starts only with its opaque grant', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({
+        token: 'native-secret',
+        requestId: 'scribe-start-native',
+        expiresInMs: 45_000,
+        disclosure: { transcriptionMode: 'local', model: 'whisper-small' },
+      })
+      .mockResolvedValueOnce({ revision: 1, meetings: [] })
+    const consent = await issueMeetingStartConsent({
+      transcriptionMode: 'local',
+      model: 'whisper-small',
+    })
     await startMeeting({
       title: 'Architecture',
       workspacePath: '/work',
-      consentConfirmed: true,
+      requestId: consent.requestId,
+      consentToken: consent.token,
     })
-    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_request_microphone_permission')
+    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_issue_start_consent', {
+      disclosure: {
+        candidateId: null,
+        candidateAppName: null,
+        transcriptionMode: 'local',
+        destination: null,
+        model: 'whisper-small',
+      },
+    })
     expect(invoke).toHaveBeenCalledWith('meetings_start', {
       request: {
+        requestId: 'scribe-start-native',
         title: 'Architecture',
         workspacePath: '/work',
         candidateId: null,
-        consentConfirmed: true,
+        consentToken: 'native-secret',
       },
     })
   })
