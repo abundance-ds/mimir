@@ -392,7 +392,7 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
     assert_eq!(init["result"]["capabilities"]["tools"], json!({}));
     assert_eq!(
         init["result"]["instructions"],
-        "Mimir: `mimir tools` (all) · `mimir tools <workbench|graph|chat|connections>` · `mimir tool <name>` · `mimir skill <query>` · `mimir doctor`"
+        "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`."
     );
 
     // notifications (no id) are accepted with 202 and an empty body.
