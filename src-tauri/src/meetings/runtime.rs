@@ -747,18 +747,22 @@ impl MeetingRuntime {
             base_revision: finalizing.transcript_revision,
             observed_at: self.inner.clock.now(),
         };
-        let batch = match self.inner.transcription.finalize(&transcript_request) {
+        let finalize_result = self.inner.transcription.finalize(&transcript_request);
+        // A provider can durably commit acknowledged tail segments before
+        // either completing or reporting a terminal failure.
+        let after_provider_drain = self.inner.store.get_meeting(meeting_id)?;
+        let batch = match finalize_result {
             Ok(batch) => batch,
             Err(message) => {
                 self.enqueue_transcription_retry(
                     meeting_id,
-                    finalizing.transcript_revision,
+                    after_provider_drain.transcript_revision,
                     &message,
                 )?;
                 self.interrupt_after_stop_failure(
                     meeting_id,
                     &active.run_id,
-                    finalizing.revision,
+                    after_provider_drain.revision,
                     "transcript-finalize-failed",
                     &message,
                 )?;
@@ -767,24 +771,38 @@ impl MeetingRuntime {
         };
         if !batch.marks_final {
             let message = "transcription finalizer returned a non-terminal batch";
-            self.enqueue_transcription_retry(meeting_id, finalizing.transcript_revision, message)?;
+            self.enqueue_transcription_retry(
+                meeting_id,
+                after_provider_drain.transcript_revision,
+                message,
+            )?;
             self.interrupt_after_stop_failure(
                 meeting_id,
                 &active.run_id,
-                finalizing.revision,
+                after_provider_drain.revision,
                 "transcript-not-final",
                 message,
             )?;
             return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
         }
-        if batch.meeting_id != meeting_id || batch.base_revision != finalizing.transcript_revision {
+        // The transcription port may durably commit final live-provider
+        // segments while draining its acknowledged tail. Refresh after the
+        // worker joins and require the terminal marker to extend that exact
+        // durable revision, not the pre-join snapshot.
+        if batch.meeting_id != meeting_id
+            || batch.base_revision != after_provider_drain.transcript_revision
+        {
             let message =
                 "transcription finalizer returned a batch for another meeting or revision";
-            self.enqueue_transcription_retry(meeting_id, finalizing.transcript_revision, message)?;
+            self.enqueue_transcription_retry(
+                meeting_id,
+                after_provider_drain.transcript_revision,
+                message,
+            )?;
             self.interrupt_after_stop_failure(
                 meeting_id,
                 &active.run_id,
-                finalizing.revision,
+                after_provider_drain.revision,
                 "transcript-invalid-batch",
                 message,
             )?;
@@ -796,13 +814,13 @@ impl MeetingRuntime {
                 let message = error.to_string();
                 self.enqueue_transcription_retry(
                     meeting_id,
-                    finalizing.transcript_revision,
+                    after_provider_drain.transcript_revision,
                     &message,
                 )?;
                 self.interrupt_after_stop_failure(
                     meeting_id,
                     &active.run_id,
-                    finalizing.revision,
+                    after_provider_drain.revision,
                     "transcript-persist-failed",
                     &message,
                 )?;
@@ -1585,7 +1603,10 @@ fn capture_channels(permissions: &MeetingPermissions) -> Vec<AudioChannelDraft> 
         sample_format: "f32le".into(),
         device_id: None,
     }];
-    if permissions.system_audio == "granted" {
+    if !matches!(
+        permissions.system_audio.as_str(),
+        "denied" | "restricted" | "unavailable"
+    ) {
         channels.push(AudioChannelDraft {
             id: "system".into(),
             kind: AudioChannelKind::System,
@@ -1612,16 +1633,12 @@ fn validate_config(config: &MeetingConfig) -> Result<(), MeetingRuntimeError> {
         "custom" => {
             require_nonempty(&config.custom_url, "custom transcription URL")?;
             require_nonempty(&config.custom_model, "custom transcription model")?;
-            if !config.custom_url.starts_with("https://")
-                && !config.custom_url.starts_with("http://127.0.0.1")
-                && !config.custom_url.starts_with("http://localhost")
-            {
+            if !config.custom_url.starts_with("https://") {
                 return Err(MeetingRuntimeError::Validation(
-                    "custom transcription URL must use HTTPS or the product-owned loopback policy"
-                        .into(),
+                    "custom transcription URL must use HTTPS".into(),
                 ));
             }
-            if config.custom_url.starts_with("https://") && !config.api_key_configured {
+            if !config.api_key_configured {
                 return Err(MeetingRuntimeError::Validation(
                     "custom hosted transcription requires a configured native credential".into(),
                 ));
@@ -1990,6 +2007,53 @@ mod tests {
                         metadata: json!({}),
                     },
                 }],
+            })
+        }
+    }
+
+    struct DrainingTranscription {
+        store: Arc<MeetingStore>,
+    }
+
+    impl MeetingTranscriptionPort for DrainingTranscription {
+        fn start(&self, _request: &TranscriptionStart) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
+            let tail = TranscriptBatch {
+                meeting_id: request.meeting_id.clone(),
+                batch_id: format!("tail-{}", request.run_id),
+                base_revision: request.base_revision,
+                source: "draining-stt".into(),
+                observed_at: request.observed_at.clone(),
+                marks_final: false,
+                changes: vec![TranscriptChange::UpsertSegment {
+                    segment: TranscriptSegmentInput {
+                        id: "drained-segment".into(),
+                        start_ms: 0,
+                        end_ms: 1_000,
+                        text: "The acknowledged provider tail is durable.".into(),
+                        channel_id: Some("system".into()),
+                        speaker: Some("Them".into()),
+                        confidence: Some(0.95),
+                        is_final: true,
+                        metadata: json!({}),
+                    },
+                }],
+            };
+            let applied = self
+                .store
+                .apply_transcript_batch(&tail)
+                .map_err(|error| error.to_string())?;
+            Ok(TranscriptBatch {
+                meeting_id: request.meeting_id.clone(),
+                batch_id: format!("terminal-{}", request.run_id),
+                base_revision: applied.revision,
+                source: "draining-stt".into(),
+                observed_at: request.observed_at.clone(),
+                marks_final: true,
+                changes: Vec::new(),
             })
         }
     }
@@ -2471,6 +2535,37 @@ mod tests {
             .find(|meeting| meeting.id == meeting_id)
             .unwrap();
         assert_eq!(meeting.jobs.len(), 2);
+    }
+
+    #[test]
+    fn stop_accepts_a_terminal_marker_after_the_provider_durably_drains_its_tail() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            Arc::new(DrainingTranscription {
+                store: Arc::clone(&store),
+            }),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+        let started = runtime.start(start_request("provider-tail")).unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+
+        let stopped = runtime.stop(&meeting_id).unwrap();
+        let meeting = stopped
+            .meetings
+            .iter()
+            .find(|meeting| meeting.id == meeting_id)
+            .unwrap();
+        assert!(meeting.transcript_final);
+        assert_eq!(meeting.segments.len(), 1);
+        assert_eq!(
+            meeting.segments[0].text,
+            "The acknowledged provider tail is durable."
+        );
     }
 
     #[test]

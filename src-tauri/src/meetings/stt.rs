@@ -240,6 +240,12 @@ impl SttCapabilities {
                 maximum: self.max_channels,
             });
         }
+        if request.channel_ids.len() != usize::from(request.channels)
+            || request.channel_ids.iter().collect::<BTreeSet<_>>().len()
+                != request.channel_ids.len()
+        {
+            mismatches.push(CapabilityMismatch::ChannelIdentifiers);
+        }
         if request.audio_frame_bytes == 0 || request.audio_frame_bytes > self.max_audio_frame_bytes
         {
             mismatches.push(CapabilityMismatch::AudioFrameBytes {
@@ -278,6 +284,8 @@ pub struct SttPreflightRequest {
     pub encoding: AudioEncoding,
     pub sample_rate_hz: u32,
     pub channels: u8,
+    /// Ordered channel identifiers matching the interleaved PCM layout.
+    pub channel_ids: Vec<WireId>,
     pub audio_frame_bytes: u32,
     pub partial_results: bool,
     pub speaker_labels: bool,
@@ -297,6 +305,7 @@ pub enum CapabilityMismatch {
     Encoding { requested: AudioEncoding },
     SampleRate { requested_hz: u32 },
     Channels { requested: u8, maximum: u8 },
+    ChannelIdentifiers,
     AudioFrameBytes { requested: u32, maximum: u32 },
     PartialResults,
     SpeakerLabels,
@@ -592,6 +601,7 @@ pub enum ClientMessage {
     Start {
         contract: String,
         session_id: WireId,
+        model: WireId,
         request: SttPreflightRequest,
     },
     Audio {
@@ -606,10 +616,11 @@ pub enum ClientMessage {
 }
 
 impl ClientMessage {
-    pub fn start(session_id: WireId, request: SttPreflightRequest) -> Self {
+    pub fn start(session_id: WireId, model: WireId, request: SttPreflightRequest) -> Self {
         Self::Start {
             contract: STT_WIRE_CONTRACT.to_string(),
             session_id,
+            model,
             request,
         }
     }
@@ -1069,6 +1080,7 @@ mod tests {
             encoding: AudioEncoding::PcmS16Le,
             sample_rate_hz: 48_000,
             channels: 2,
+            channel_ids: vec![id("microphone"), id("system")],
             audio_frame_bytes: 32_000,
             partial_results: true,
             speaker_labels: false,
@@ -1118,7 +1130,7 @@ mod tests {
         request.speaker_labels = true;
         request.language = Some("fr-FR".into());
         let failure = capabilities().preflight(&request).unwrap_err();
-        assert_eq!(failure.mismatches.len(), 6);
+        assert_eq!(failure.mismatches.len(), 7);
         let json = serde_json::to_string(&failure.mismatches).unwrap();
         assert!(!json.contains("fallback"));
         assert!(!json.contains("provider"));
@@ -1137,12 +1149,17 @@ mod tests {
 
     #[test]
     fn wire_contract_has_stable_json_shape_and_no_vendor_fields() {
-        let message = ClientMessage::start(id("meeting-1"), request());
+        let message = ClientMessage::start(id("meeting-1"), id("nova-3"), request());
         let value = serde_json::to_value(message).unwrap();
         assert_eq!(value["type"], "start");
         assert_eq!(value["contract"], STT_WIRE_CONTRACT);
         assert_eq!(value["sessionId"], "meeting-1");
+        assert_eq!(value["model"], "nova-3");
         assert_eq!(value["request"]["sampleRateHz"], 48_000);
+        assert_eq!(
+            value["request"]["channelIds"],
+            serde_json::json!(["microphone", "system"])
+        );
         let encoded = serde_json::to_string(&value).unwrap();
         for vendor in ["deepgram", "openai", "google", "aws", "azure"] {
             assert!(!encoded.contains(vendor));
