@@ -2691,6 +2691,7 @@ dependencies = [
  "keyring",
  "log",
  "mimir-meeting-audio",
+ "mimir-meeting-detect",
  "notify",
  "objc2-app-kit",
  "objc2-foundation",
@@ -2728,6 +2729,18 @@ dependencies = [
  "cpal",
  "futures-util",
  "ringbuf",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mimir-meeting-detect"
+version = "0.1.0"
+dependencies = [
+ "cidre",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "thiserror 2.0.18",
 ]
