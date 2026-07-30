@@ -143,6 +143,12 @@ pub struct ActivityOrigin {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatch_job_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meeting_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meeting_hook_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meeting_transcript_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_node_kind: Option<String>,
@@ -355,6 +361,9 @@ mod tests {
                 graph_node_id: Some("issue-1".into()),
                 graph_scope_ids: vec!["project:test".into()],
                 graph_revision: Some(7),
+                meeting_id: Some("meeting-1".into()),
+                meeting_hook_id: Some("title-summary".into()),
+                meeting_transcript_revision: Some(4),
                 ..ActivityOrigin::default()
             },
             host: ActivityHost::pty(Some("codex".into())),
@@ -376,6 +385,9 @@ mod tests {
         assert_eq!(value["source"]["graphNodeId"], "issue-1");
         assert_eq!(value["source"]["graphScopeIds"][0], "project:test");
         assert_eq!(value["source"]["graphRevision"], 7);
+        assert_eq!(value["source"]["meetingId"], "meeting-1");
+        assert_eq!(value["source"]["meetingHookId"], "title-summary");
+        assert_eq!(value["source"]["meetingTranscriptRevision"], 4);
         assert_eq!(value["host"]["type"], "pty");
         assert_eq!(value["host"]["resumeStrategy"], "codex");
         assert_eq!(value["launch"]["args"][1], "two words");
