@@ -1772,7 +1772,7 @@ fn normalize_auto_title(value: &str) -> String {
         }
     }
     bounded
-        .trim_end_matches(|character| matches!(character, '.' | ',' | ';' | ':'))
+        .trim_end_matches(['.', ',', ';', ':'])
         .trim()
         .to_string()
 }

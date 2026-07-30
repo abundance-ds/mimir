@@ -6,6 +6,7 @@
 
 mod model;
 mod store;
+mod transcript;
 
 pub use model::{
     AudioChannel, AudioChannelDraft, AudioChannelKind, AudioChunk, AudioChunkDraft,
@@ -16,3 +17,7 @@ pub use model::{
     TranscriptSegmentRecord, TranscriptSnapshot,
 };
 pub use store::{MeetingStore, MeetingStoreError, CURRENT_SCHEMA_VERSION};
+pub use transcript::{
+    ProviderTranscriptFrame, TranscriptNormalization, TranscriptNormalizer,
+    TranscriptNormalizerError,
+};
