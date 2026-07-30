@@ -20,7 +20,7 @@ use std::{
         mpsc, Arc, Mutex, MutexGuard,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::watch;
 
@@ -29,6 +29,139 @@ const FRAME_MILLISECONDS: u64 = 20;
 const CHUNK_SAMPLES: usize = CANONICAL_SAMPLE_RATE_HZ as usize;
 const MINIMUM_FREE_BYTES: u64 = 512 * 1024 * 1024;
 const START_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_RESTART_ATTEMPTS: u8 = 6;
+const RESTART_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
+const RESTART_MAX_BACKOFF: Duration = Duration::from_secs(4);
+const RESTART_STABLE_MICROPHONE_FRAMES: u32 = 250;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RestartAttempt {
+    number: u8,
+    delay: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TimelineGapPlan {
+    microphone_catch_up_frames: u64,
+    system_catch_up_frames: u64,
+    interruption_frames: u64,
+}
+
+/// Restart budget and timeline-continuity policy for one capture session.
+///
+/// Opening both devices successfully does not immediately reset the budget:
+/// a driver that repeatedly opens and EOFs must still terminate. Five seconds
+/// of microphone frames marks the replacement pair stable.
+#[derive(Debug)]
+struct CaptureRestartPolicy {
+    failures: u8,
+    stable_microphone_frames: u32,
+    max_attempts: u8,
+    initial_backoff: Duration,
+    max_backoff: Duration,
+    stable_frames_required: u32,
+}
+
+impl Default for CaptureRestartPolicy {
+    fn default() -> Self {
+        Self {
+            failures: 0,
+            stable_microphone_frames: 0,
+            max_attempts: MAX_RESTART_ATTEMPTS,
+            initial_backoff: RESTART_INITIAL_BACKOFF,
+            max_backoff: RESTART_MAX_BACKOFF,
+            stable_frames_required: RESTART_STABLE_MICROPHONE_FRAMES,
+        }
+    }
+}
+
+impl CaptureRestartPolicy {
+    fn record_failure(&mut self) -> Option<RestartAttempt> {
+        if self.failures >= self.max_attempts {
+            return None;
+        }
+        self.failures = self.failures.saturating_add(1);
+        self.stable_microphone_frames = 0;
+        let shift = u32::from(self.failures.saturating_sub(1)).min(31);
+        let multiplier = 1_u32.checked_shl(shift).unwrap_or(u32::MAX);
+        let delay = self
+            .initial_backoff
+            .checked_mul(multiplier)
+            .unwrap_or(self.max_backoff)
+            .min(self.max_backoff);
+        Some(RestartAttempt {
+            number: self.failures,
+            delay,
+        })
+    }
+
+    fn record_microphone_frame(&mut self) {
+        if self.failures == 0 {
+            return;
+        }
+        self.stable_microphone_frames = self.stable_microphone_frames.saturating_add(1);
+        if self.stable_microphone_frames >= self.stable_frames_required {
+            self.failures = 0;
+            self.stable_microphone_frames = 0;
+        }
+    }
+
+    fn gap_plan(
+        microphone_samples: u64,
+        system_samples: u64,
+        interruption: Duration,
+    ) -> TimelineGapPlan {
+        let aligned_samples = microphone_samples.max(system_samples);
+        TimelineGapPlan {
+            microphone_catch_up_frames: frames_for_samples(
+                aligned_samples.saturating_sub(microphone_samples),
+            ),
+            system_catch_up_frames: frames_for_samples(
+                aligned_samples.saturating_sub(system_samples),
+            ),
+            interruption_frames: frames_for_interruption(interruption),
+        }
+    }
+}
+
+fn frames_for_samples(samples: u64) -> u64 {
+    samples.saturating_add(canonical_frame_samples().saturating_sub(1)) / canonical_frame_samples()
+}
+
+fn frames_for_interruption(interruption: Duration) -> u64 {
+    let millis = interruption.as_millis().min(u128::from(u64::MAX)) as u64;
+    millis
+        .max(1)
+        .saturating_add(FRAME_MILLISECONDS.saturating_sub(1))
+        / FRAME_MILLISECONDS
+}
+
+const fn canonical_frame_samples() -> u64 {
+    CANONICAL_SAMPLE_RATE_HZ as u64 * FRAME_MILLISECONDS / 1_000
+}
+
+struct StartupReadiness {
+    sender: Option<mpsc::SyncSender<Result<(), String>>>,
+}
+
+impl StartupReadiness {
+    fn new(sender: mpsc::SyncSender<Result<(), String>>) -> Self {
+        Self {
+            sender: Some(sender),
+        }
+    }
+
+    /// Returns `true` only for the first report.
+    fn report(&mut self, result: Result<(), String>) -> Result<bool, String> {
+        let Some(sender) = self.sender.take() else {
+            return Ok(false);
+        };
+        sender
+            .send(result)
+            .map_err(|_| "meeting capture caller stopped during initialization".to_string())?;
+        Ok(true)
+    }
+}
 
 #[derive(Debug)]
 struct CaptureSession {
@@ -193,93 +326,276 @@ fn run_capture_worker(
     ready: mpsc::SyncSender<Result<(), String>>,
 ) -> Result<CaptureStopResult, String> {
     use futures_util::StreamExt;
-    use mimir_meeting_audio::{CaptureHealth, FrameDuration, MicrophoneInput, SystemAudioInput};
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
         .map_err(|error| format!("could not initialize meeting audio runtime: {error}"))?;
     runtime.block_on(async move {
-        let microphone = match MicrophoneInput::open(None)
-            .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
-        {
-            Ok(stream) => stream,
+        let mut readiness = StartupReadiness::new(ready);
+        let initial_streams = match open_native_streams() {
+            Ok(streams) => streams,
             Err(error) => {
-                let message = format!("microphone capture is unavailable: {error}");
-                let _ = ready.send(Err(message.clone()));
-                return Err(message);
+                let _ = readiness.report(Err(error.clone()));
+                return Err(error);
             }
         };
-        let system = match SystemAudioInput::open()
-            .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
-        {
-            Ok(stream) => stream,
-            Err(error) => {
-                let message = format!(
-                    "system audio capture is unavailable; grant Screen & System Audio Recording permission and retry: {error}"
-                );
-                let _ = ready.send(Err(message.clone()));
-                return Err(message);
-            }
-        };
-        ready
-            .send(Ok(()))
-            .map_err(|_| "meeting capture caller stopped during initialization".to_string())?;
+        readiness.report(Ok(()))?;
 
-        tokio::pin!(microphone);
-        tokio::pin!(system);
         let mut mic_writer = ChannelWriter::new(
             Arc::clone(&store),
             data_dir.clone(),
             request.meeting_id.clone(),
             "microphone",
         );
-        let mut system_writer = ChannelWriter::new(
-            store,
-            data_dir,
-            request.meeting_id.clone(),
-            "system",
-        );
-        let mut microphone_open = true;
-        let mut system_open = true;
-        while microphone_open || system_open {
-            tokio::select! {
+        let mut system_writer =
+            ChannelWriter::new(store, data_dir, request.meeting_id.clone(), "system");
+        let mut streams = Some(initial_streams);
+        let mut restart_policy = CaptureRestartPolicy::default();
+
+        let capture_result: Result<(), String> = 'capture: loop {
+            let pair = streams
+                .as_mut()
+                .expect("native streams are restored before capture resumes");
+            let event = tokio::select! {
                 biased;
                 changed = stop.changed() => {
                     if changed.is_err() || *stop.borrow() {
-                        break;
+                        CaptureLoopEvent::Stop
+                    } else {
+                        continue;
                     }
                 }
-                frame = microphone.next(), if microphone_open => {
+                frame = pair.microphone.next() => {
                     match frame {
-                        Some(frame) => mic_writer.push_frame(
-                            frame,
-                            microphone_muted.load(Ordering::Acquire),
-                        )?,
-                        None => microphone_open = false,
+                        Some(frame) => CaptureLoopEvent::Microphone(frame),
+                        None => CaptureLoopEvent::Interrupted(
+                            "the microphone stream ended unexpectedly",
+                        ),
                     }
                 }
-                frame = system.next(), if system_open => {
+                frame = pair.system.next() => {
                     match frame {
-                        Some(frame) => system_writer.push_frame(frame, false)?,
-                        None => system_open = false,
+                        Some(frame) => CaptureLoopEvent::System(frame),
+                        None => CaptureLoopEvent::Interrupted(
+                            "the system-audio process tap ended unexpectedly",
+                        ),
+                    }
+                }
+            };
+
+            match event {
+                CaptureLoopEvent::Stop => break Ok(()),
+                CaptureLoopEvent::Microphone(frame) => {
+                    if let Err(error) =
+                        mic_writer.push_frame(frame, microphone_muted.load(Ordering::Acquire))
+                    {
+                        break Err(error);
+                    }
+                    restart_policy.record_microphone_frame();
+                }
+                CaptureLoopEvent::System(frame) => {
+                    if let Err(error) = system_writer.push_frame(frame, false) {
+                        break Err(error);
+                    }
+                }
+                CaptureLoopEvent::Interrupted(reason) => {
+                    // Always discard both streams. Keeping the surviving
+                    // source would let the independent device clocks diverge
+                    // and would hide part of the outage in only one track.
+                    drop(streams.take());
+                    let interrupted_at = Instant::now();
+                    let mut last_failure = reason.to_string();
+
+                    loop {
+                        let Some(attempt) = restart_policy.record_failure() else {
+                            if let Err(error) = apply_restart_gap(
+                                &mut mic_writer,
+                                &mut system_writer,
+                                interrupted_at.elapsed(),
+                                reason,
+                            ) {
+                                break 'capture Err(error);
+                            }
+                            break 'capture Err(restart_exhausted_message(
+                                restart_policy.max_attempts,
+                                &last_failure,
+                            ));
+                        };
+
+                        if wait_for_stop(&mut stop, attempt.delay).await {
+                            if let Err(error) = apply_restart_gap(
+                                &mut mic_writer,
+                                &mut system_writer,
+                                interrupted_at.elapsed(),
+                                "capture stopped while audio devices were reconnecting",
+                            ) {
+                                break 'capture Err(error);
+                            }
+                            break 'capture Ok(());
+                        }
+
+                        match open_native_streams() {
+                            Ok(reopened) => {
+                                if let Err(error) = apply_restart_gap(
+                                    &mut mic_writer,
+                                    &mut system_writer,
+                                    interrupted_at.elapsed(),
+                                    reason,
+                                ) {
+                                    break 'capture Err(error);
+                                }
+                                streams = Some(reopened);
+                                break;
+                            }
+                            Err(error) => {
+                                last_failure =
+                                    format!("restart attempt {} failed: {error}", attempt.number);
+                            }
+                        }
                     }
                 }
             }
-        }
-        mic_writer.finish()?;
-        system_writer.finish()?;
-        if !*stop.borrow() && (!microphone_open || !system_open) {
-            return Err(
-                "an audio device stopped unexpectedly; durable audio was finalized for recovery"
-                    .into(),
-            );
-        }
-        let duration_ms = mic_writer
-            .duration_ms()
-            .max(system_writer.duration_ms());
-        Ok(CaptureStopResult { duration_ms })
+        };
+
+        drop(streams);
+        let alignment_result = align_channel_writers(
+            &mut mic_writer,
+            &mut system_writer,
+            "capture stopped while one channel was ahead",
+        );
+        let mic_finish = mic_writer.finish();
+        let system_finish = system_writer.finish();
+        let duration_ms = mic_writer.duration_ms().max(system_writer.duration_ms());
+        combine_capture_results(
+            capture_result,
+            alignment_result,
+            mic_finish,
+            system_finish,
+            duration_ms,
+        )
     })
+}
+
+#[cfg(target_os = "macos")]
+struct NativeCaptureStreams {
+    microphone: std::pin::Pin<Box<mimir_meeting_audio::MicrophoneStream>>,
+    system: std::pin::Pin<Box<mimir_meeting_audio::SystemAudioStream>>,
+}
+
+#[cfg(target_os = "macos")]
+enum CaptureLoopEvent {
+    Stop,
+    Microphone(mimir_meeting_audio::RawAudioFrame),
+    System(mimir_meeting_audio::RawAudioFrame),
+    Interrupted(&'static str),
+}
+
+#[cfg(target_os = "macos")]
+fn open_native_streams() -> Result<NativeCaptureStreams, String> {
+    use mimir_meeting_audio::{CaptureHealth, FrameDuration, MicrophoneInput, SystemAudioInput};
+
+    let microphone = MicrophoneInput::open(None)
+        .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
+        .map_err(|error| {
+            format!(
+                "microphone capture is unavailable; reconnect or select an input device and verify Microphone permission: {error}"
+            )
+        })?;
+    let system = SystemAudioInput::open()
+        .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
+        .map_err(|error| {
+            format!(
+                "system audio capture is unavailable; verify Screen & System Audio Recording permission and the default output device: {error}"
+            )
+        })?;
+    Ok(NativeCaptureStreams {
+        microphone: Box::pin(microphone),
+        system: Box::pin(system),
+    })
+}
+
+#[cfg(target_os = "macos")]
+async fn wait_for_stop(stop: &mut watch::Receiver<bool>, delay: Duration) -> bool {
+    if *stop.borrow() {
+        return true;
+    }
+    tokio::select! {
+        biased;
+        changed = stop.changed() => changed.is_err() || *stop.borrow(),
+        _ = tokio::time::sleep(delay) => false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn restart_exhausted_message(attempts: u8, last_failure: &str) -> String {
+    format!(
+        "audio capture could not recover after {attempts} attempts; reconnect or select the microphone and output devices, verify Microphone and Screen & System Audio Recording permissions, then stop and start the recording. Last failure: {last_failure}"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn apply_restart_gap(
+    microphone: &mut ChannelWriter,
+    system: &mut ChannelWriter,
+    interruption: Duration,
+    reason: &str,
+) -> Result<(), String> {
+    let plan = CaptureRestartPolicy::gap_plan(
+        microphone.canonical_samples,
+        system.canonical_samples,
+        interruption,
+    );
+    microphone.push_timeline_gap_frames(
+        plan.microphone_catch_up_frames,
+        "microphone channel aligned before capture restart",
+    )?;
+    system.push_timeline_gap_frames(
+        plan.system_catch_up_frames,
+        "system channel aligned before capture restart",
+    )?;
+    microphone.push_timeline_gap_frames(plan.interruption_frames, reason)?;
+    system.push_timeline_gap_frames(plan.interruption_frames, reason)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn align_channel_writers(
+    microphone: &mut ChannelWriter,
+    system: &mut ChannelWriter,
+    reason: &str,
+) -> Result<(), String> {
+    let aligned_samples = microphone.canonical_samples.max(system.canonical_samples);
+    microphone.push_timeline_gap_frames(
+        frames_for_samples(aligned_samples.saturating_sub(microphone.canonical_samples)),
+        reason,
+    )?;
+    system.push_timeline_gap_frames(
+        frames_for_samples(aligned_samples.saturating_sub(system.canonical_samples)),
+        reason,
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn combine_capture_results(
+    capture: Result<(), String>,
+    alignment: Result<(), String>,
+    microphone_finish: Result<(), String>,
+    system_finish: Result<(), String>,
+    duration_ms: u64,
+) -> Result<CaptureStopResult, String> {
+    let mut failures = Vec::new();
+    for result in [capture, alignment, microphone_finish, system_finish] {
+        if let Err(error) = result {
+            failures.push(error);
+        }
+    }
+    if failures.is_empty() {
+        Ok(CaptureStopResult { duration_ms })
+    } else {
+        Err(failures.join("; "))
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -344,7 +660,11 @@ impl ChannelWriter {
         frame: mimir_meeting_audio::RawAudioFrame,
         muted: bool,
     ) -> Result<(), String> {
-        let frame_start_ms = frame.sequence.saturating_mul(FRAME_MILLISECONDS);
+        frame
+            .validate()
+            .map_err(|error| format!("audio backend emitted an invalid frame: {error}"))?;
+        let frame_start_ms = self.duration_ms();
+        let timeline_sequence = self.canonical_samples / canonical_frame_samples();
         let mut input = Vec::with_capacity(frame.sample_count as usize);
         for span in frame.spans {
             match span {
@@ -360,7 +680,7 @@ impl ChannelWriter {
                         .map_err(|_| "audio gap sample count exceeds this platform".to_string())?;
                     input.resize(input.len().saturating_add(sample_count), 0.0);
                     self.gaps.push(PersistedGap {
-                        sequence: frame.sequence,
+                        sequence: timeline_sequence,
                         start_ms: frame_start_ms,
                         end_ms: frame_start_ms.saturating_add(FRAME_MILLISECONDS),
                         reason: format!("{:?}", gap.reason),
@@ -370,8 +690,54 @@ impl ChannelWriter {
         }
         let target_samples =
             (CANONICAL_SAMPLE_RATE_HZ as u64 * FRAME_MILLISECONDS / 1_000) as usize;
-        self.buffer.extend(resample_exact(&input, target_samples));
-        self.canonical_samples = self.canonical_samples.saturating_add(target_samples as u64);
+        let canonical = resample_exact(&input, target_samples);
+        self.push_canonical_samples(&canonical)
+    }
+
+    fn push_timeline_gap_frames(&mut self, frames: u64, reason: &str) -> Result<(), String> {
+        if frames == 0 {
+            return Ok(());
+        }
+        let start_sample = self.canonical_samples;
+        let gap_samples = frames
+            .checked_mul(canonical_frame_samples())
+            .ok_or_else(|| "capture restart gap exceeds the meeting timeline".to_string())?;
+        let end_sample = start_sample
+            .checked_add(gap_samples)
+            .ok_or_else(|| "capture restart gap overflows the meeting timeline".to_string())?;
+        self.gaps.push(PersistedGap {
+            sequence: start_sample / canonical_frame_samples(),
+            start_ms: start_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64,
+            end_ms: end_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64,
+            reason: reason.to_owned(),
+        });
+
+        let mut remaining = gap_samples;
+        while remaining > 0 {
+            let space = CHUNK_SAMPLES.saturating_sub(self.buffer.len()).max(1);
+            let take = remaining.min(space as u64) as usize;
+            self.buffer
+                .resize(self.buffer.len().saturating_add(take), 0.0);
+            self.canonical_samples = self
+                .canonical_samples
+                .checked_add(take as u64)
+                .ok_or_else(|| "canonical meeting audio timeline overflowed".to_string())?;
+            remaining = remaining.saturating_sub(take as u64);
+            self.persist_full_chunks()?;
+        }
+        self.flush_gap_manifest()
+    }
+
+    fn push_canonical_samples(&mut self, samples: &[f32]) -> Result<(), String> {
+        self.buffer.extend_from_slice(samples);
+        self.canonical_samples = self
+            .canonical_samples
+            .checked_add(samples.len() as u64)
+            .ok_or_else(|| "canonical meeting audio timeline overflowed".to_string())?;
+        self.persist_full_chunks()
+    }
+
+    fn persist_full_chunks(&mut self) -> Result<(), String> {
         while self.buffer.len() >= CHUNK_SAMPLES {
             let remainder = self.buffer.split_off(CHUNK_SAMPLES);
             let chunk = std::mem::replace(&mut self.buffer, remainder);
@@ -385,13 +751,16 @@ impl ChannelWriter {
             let chunk = std::mem::take(&mut self.buffer);
             self.persist_chunk(chunk)?;
         }
-        if !self.gaps.is_empty() {
-            let relative = format!("{}/audio/{}/gaps.json", self.meeting_id, self.channel_id);
-            let path = contained_path(&self.data_dir, &relative)?;
-            crate::persistence::write_json_atomic(path, &self.gaps)
-                .map_err(|error| error.to_string())?;
+        self.flush_gap_manifest()
+    }
+
+    fn flush_gap_manifest(&self) -> Result<(), String> {
+        if self.gaps.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        let relative = format!("{}/audio/{}/gaps.json", self.meeting_id, self.channel_id);
+        let path = contained_path(&self.data_dir, &relative)?;
+        crate::persistence::write_json_atomic(path, &self.gaps).map_err(|error| error.to_string())
     }
 
     fn persist_chunk(&mut self, samples: Vec<f32>) -> Result<(), String> {
@@ -500,6 +869,213 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restart_backoff_is_exponential_capped_and_bounded() {
+        let mut policy = CaptureRestartPolicy {
+            max_attempts: 5,
+            initial_backoff: Duration::from_millis(100),
+            max_backoff: Duration::from_millis(350),
+            stable_frames_required: 3,
+            ..CaptureRestartPolicy::default()
+        };
+
+        let attempts = (0..5)
+            .map(|_| policy.record_failure().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            attempts,
+            vec![
+                RestartAttempt {
+                    number: 1,
+                    delay: Duration::from_millis(100)
+                },
+                RestartAttempt {
+                    number: 2,
+                    delay: Duration::from_millis(200)
+                },
+                RestartAttempt {
+                    number: 3,
+                    delay: Duration::from_millis(350)
+                },
+                RestartAttempt {
+                    number: 4,
+                    delay: Duration::from_millis(350)
+                },
+                RestartAttempt {
+                    number: 5,
+                    delay: Duration::from_millis(350)
+                },
+            ]
+        );
+        assert_eq!(policy.record_failure(), None);
+    }
+
+    #[test]
+    fn reopening_does_not_reset_budget_until_stream_is_stable() {
+        let mut policy = CaptureRestartPolicy {
+            max_attempts: 3,
+            stable_frames_required: 3,
+            ..CaptureRestartPolicy::default()
+        };
+
+        assert_eq!(policy.record_failure().unwrap().number, 1);
+        policy.record_microphone_frame();
+        policy.record_microphone_frame();
+        assert_eq!(policy.record_failure().unwrap().number, 2);
+        policy.record_microphone_frame();
+        policy.record_microphone_frame();
+        policy.record_microphone_frame();
+        assert_eq!(policy.record_failure().unwrap().number, 1);
+    }
+
+    #[test]
+    fn restart_gap_plan_aligns_channels_and_rounds_outage_up() {
+        let frame = canonical_frame_samples();
+        let plan = CaptureRestartPolicy::gap_plan(
+            frame.saturating_mul(7),
+            frame.saturating_mul(5),
+            Duration::from_millis(21),
+        );
+
+        assert_eq!(
+            plan,
+            TimelineGapPlan {
+                microphone_catch_up_frames: 0,
+                system_catch_up_frames: 2,
+                interruption_frames: 2,
+            }
+        );
+        let microphone_resume = 7 + plan.microphone_catch_up_frames + plan.interruption_frames;
+        let system_resume = 5 + plan.system_catch_up_frames + plan.interruption_frames;
+        assert_eq!(microphone_resume, system_resume);
+    }
+
+    #[test]
+    fn even_an_immediate_restart_persists_one_explicit_gap_frame() {
+        assert_eq!(frames_for_interruption(Duration::ZERO), 1);
+        assert_eq!(frames_for_interruption(Duration::from_millis(20)), 1);
+        assert_eq!(frames_for_interruption(Duration::from_millis(21)), 2);
+    }
+
+    #[test]
+    fn startup_readiness_reports_only_the_initial_outcome() {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let mut readiness = StartupReadiness::new(sender);
+
+        assert!(readiness.report(Ok(())).unwrap());
+        assert!(!readiness
+            .report(Err("a later restart failed".into()))
+            .unwrap());
+        assert_eq!(receiver.recv().unwrap(), Ok(()));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn restarted_stream_sequence_keeps_one_continuous_durable_timeline() {
+        use crate::meetings::{
+            AudioChannelDraft, AudioChannelKind, MeetingDraft, MeetingOrigin, MeetingStatus,
+        };
+        use mimir_meeting_audio::{AudioFormat, AudioSource, RawAudioFrame, RawAudioSpan};
+        use serde_json::json;
+        use tempfile::tempdir;
+
+        let directory = tempdir().unwrap();
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "restart-meeting".into(),
+                    title: "Restart test".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: vec![AudioChannelDraft {
+                        id: "microphone".into(),
+                        kind: AudioChannelKind::Microphone,
+                        sample_rate_hz: CANONICAL_SAMPLE_RATE_HZ,
+                        channels: 1,
+                        sample_format: "f32le".into(),
+                        device_id: None,
+                    }],
+                    metadata: json!({}),
+                },
+                "2026-07-31T10:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                "restart-meeting",
+                0,
+                MeetingStatus::Recording,
+                "2026-07-31T10:00:01Z",
+                None,
+            )
+            .unwrap();
+        let mut writer = ChannelWriter::new(
+            store,
+            directory.path().to_path_buf(),
+            "restart-meeting".into(),
+            "microphone",
+        );
+        let samples_per_frame = canonical_frame_samples();
+        let frame = |sequence, start_sample, value| RawAudioFrame {
+            source: AudioSource::Microphone,
+            sequence,
+            format: AudioFormat::mono(CANONICAL_SAMPLE_RATE_HZ).unwrap(),
+            start_sample,
+            sample_count: samples_per_frame,
+            spans: vec![RawAudioSpan::Samples {
+                start_sample,
+                samples: vec![value; samples_per_frame as usize],
+            }],
+        };
+
+        writer.push_frame(frame(99, 31_680, 1.0), false).unwrap();
+        writer
+            .push_timeline_gap_frames(2, "default input device changed")
+            .unwrap();
+        // A replacement backend starts its own sequence/sample clock at zero.
+        writer.push_frame(frame(0, 0, 2.0), false).unwrap();
+        writer.finish().unwrap();
+
+        assert_eq!(writer.duration_ms(), 80);
+        let bytes = fs::read(
+            directory
+                .path()
+                .join("restart-meeting/audio/microphone/00000000.f32le"),
+        )
+        .unwrap();
+        let samples = bytes
+            .chunks_exact(4)
+            .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(samples.len(), samples_per_frame as usize * 4);
+        assert!(samples[..samples_per_frame as usize]
+            .iter()
+            .all(|sample| *sample == 1.0));
+        assert!(
+            samples[samples_per_frame as usize..samples_per_frame as usize * 3]
+                .iter()
+                .all(|sample| *sample == 0.0)
+        );
+        assert!(samples[samples_per_frame as usize * 3..]
+            .iter()
+            .all(|sample| *sample == 2.0));
+
+        let gaps: serde_json::Value = serde_json::from_slice(
+            &fs::read(
+                directory
+                    .path()
+                    .join("restart-meeting/audio/microphone/gaps.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(gaps[0]["startMs"], 20);
+        assert_eq!(gaps[0]["endMs"], 60);
+        assert_eq!(gaps[0]["reason"], "default input device changed");
+    }
 
     #[test]
     fn resampling_keeps_exact_timeline_size_and_endpoints() {
