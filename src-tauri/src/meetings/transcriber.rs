@@ -16,7 +16,8 @@ use super::{
         SttPreflightRequest, TranscriptAccumulator, TranscriptionOperation, WireId,
         STT_WIRE_CONTRACT,
     },
-    MeetingStore, TranscriptBatch, TranscriptChange, TranscriptSegmentInput,
+    AudioChunk, AudioChunkStatus, MeetingStore, TranscriptBatch, TranscriptChange,
+    TranscriptSegmentInput,
 };
 use chrono::{SecondsFormat, Utc};
 use futures_util::{future::BoxFuture, SinkExt, StreamExt};
@@ -24,7 +25,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap},
-    fs, io,
+    fs::{self, File, OpenOptions},
+    io::{self, Read},
     net::SocketAddr,
     path::{Component, Path, PathBuf},
     sync::{
@@ -432,7 +434,8 @@ fn run_worker(
     finalize: Receiver<FinalizeCommand>,
     ready: SyncSender<Result<(), String>>,
 ) -> Result<WorkerCompletion, String> {
-    let audio = PersistedAudioSource::new(data_dir, &request.meeting_id)?;
+    let audio =
+        PersistedAudioSource::authoritative(Arc::clone(&store), data_dir, &request.meeting_id)?;
     let source = match &provider {
         ResolvedTranscriptionProvider::Local { .. } => "local",
         ResolvedTranscriptionProvider::Custom { .. } => "custom",
@@ -529,18 +532,55 @@ impl std::fmt::Debug for PersistedAudioChunk {
     }
 }
 
+enum AudioAuthority {
+    CommittedStore(Arc<MeetingStore>),
+    #[cfg(test)]
+    FixtureDirectory,
+}
+
+enum AuthorizedAudioChunk {
+    Committed(Box<AudioChunk>),
+    #[cfg(test)]
+    Fixture {
+        path: PathBuf,
+    },
+}
+
 /// Safe reader for capture-owned channel files.
+///
+/// Production construction requires a [`MeetingStore`]. SQLite's committed
+/// rows are the only authority for which files may cross the STT boundary;
+/// directory contents are never discovered or trusted.
 pub struct PersistedAudioSource {
     root: PathBuf,
     meeting_id: String,
+    authority: AudioAuthority,
 }
 
 impl PersistedAudioSource {
+    pub(crate) fn authoritative(
+        store: Arc<MeetingStore>,
+        data_dir: impl Into<PathBuf>,
+        meeting_id: &str,
+    ) -> Result<Self, String> {
+        validate_path_component(meeting_id, "meeting id")?;
+        Ok(Self {
+            root: data_dir.into(),
+            meeting_id: meeting_id.into(),
+            authority: AudioAuthority::CommittedStore(store),
+        })
+    }
+
+    /// Raw fixture construction exists only for isolated local-whisper unit
+    /// tests. It is absent from production builds and cannot be reached by a
+    /// runtime provider.
+    #[cfg(test)]
     pub fn new(data_dir: impl Into<PathBuf>, meeting_id: &str) -> Result<Self, String> {
         validate_path_component(meeting_id, "meeting id")?;
         Ok(Self {
             root: data_dir.into(),
             meeting_id: meeting_id.into(),
+            authority: AudioAuthority::FixtureDirectory,
         })
     }
 
@@ -588,25 +628,29 @@ impl PersistedAudioSource {
                 "audio reads must request between 1 and {MAX_AUDIO_READ_CHUNKS} chunks"
             ));
         }
-        let microphone = self.channel_files("microphone")?;
-        let system = self.channel_files("system")?;
+        let microphone =
+            self.authorized_channel_chunks("microphone", first_sequence, maximum_chunks)?;
+        let system = self.authorized_channel_chunks("system", first_sequence, maximum_chunks)?;
         let mut result = Vec::new();
         let mut sequence = first_sequence;
         while result.len() < maximum_chunks {
-            let microphone_path = microphone.get(&sequence);
-            let system_path = system.get(&sequence);
-            match (microphone_path, system_path) {
+            let microphone_chunk = microphone.get(&sequence);
+            let system_chunk = system.get(&sequence);
+            match (microphone_chunk, system_chunk) {
                 (None, None) => break,
                 (Some(_), Some(_)) => {}
                 _ if include_unpaired_final_chunks => {}
                 _ => break,
             }
-            let microphone_bytes = microphone_path
-                .map(|path| read_mono_chunk(path))
+            // A missing final channel is projected as silence only after the
+            // other channel has been authorized and read. No synthetic file
+            // or database row is created.
+            let microphone_bytes = microphone_chunk
+                .map(|chunk| self.read_authorized_chunk(chunk))
                 .transpose()?
                 .unwrap_or_default();
-            let system_bytes = system_path
-                .map(|path| read_mono_chunk(path))
+            let system_bytes = system_chunk
+                .map(|chunk| self.read_authorized_chunk(chunk))
                 .transpose()?
                 .unwrap_or_default();
             let bytes = interleave_f32le(&microphone_bytes, &system_bytes)?;
@@ -626,12 +670,56 @@ impl PersistedAudioSource {
         Ok(result)
     }
 
-    fn channel_files(&self, channel: &str) -> Result<BTreeMap<u64, PathBuf>, String> {
+    fn authorized_channel_chunks(
+        &self,
+        channel: &str,
+        first_sequence: u64,
+        maximum_chunks: usize,
+    ) -> Result<BTreeMap<u64, AuthorizedAudioChunk>, String> {
         validate_path_component(channel, "audio channel")?;
-        let Some(directory) = validated_audio_directory(&self.root, &self.meeting_id, channel)?
-        else {
-            return Ok(BTreeMap::new());
-        };
+        match &self.authority {
+            AudioAuthority::CommittedStore(store) => {
+                let chunks = store
+                    .committed_audio_chunks(
+                        &self.meeting_id,
+                        channel,
+                        first_sequence,
+                        maximum_chunks as u32,
+                    )
+                    .map_err(|error| error.to_string())?
+                    .into_iter()
+                    .map(|chunk| {
+                        let sequence = chunk.definition.sequence;
+                        (sequence, AuthorizedAudioChunk::Committed(Box::new(chunk)))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                Ok(chunks)
+            }
+            #[cfg(test)]
+            AudioAuthority::FixtureDirectory => {
+                self.fixture_channel_chunks(channel, first_sequence, maximum_chunks)
+            }
+        }
+    }
+
+    fn read_authorized_chunk(&self, chunk: &AuthorizedAudioChunk) -> Result<Vec<u8>, String> {
+        match chunk {
+            AuthorizedAudioChunk::Committed(chunk) => {
+                read_committed_mono_chunk(&self.root, &self.meeting_id, chunk)
+            }
+            #[cfg(test)]
+            AuthorizedAudioChunk::Fixture { path, .. } => read_fixture_mono_chunk(path),
+        }
+    }
+
+    #[cfg(test)]
+    fn fixture_channel_chunks(
+        &self,
+        channel: &str,
+        first_sequence: u64,
+        _maximum_chunks: usize,
+    ) -> Result<BTreeMap<u64, AuthorizedAudioChunk>, String> {
+        let directory = self.root.join(&self.meeting_id).join("audio").join(channel);
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -665,7 +753,16 @@ impl PersistedAudioSource {
             let sequence = stem
                 .parse::<u64>()
                 .map_err(|_| "audio chunk sequence is invalid".to_string())?;
-            if chunks.insert(sequence, entry.path()).is_some() {
+            if sequence < first_sequence {
+                continue;
+            }
+            if chunks
+                .insert(
+                    sequence,
+                    AuthorizedAudioChunk::Fixture { path: entry.path() },
+                )
+                .is_some()
+            {
                 return Err(format!(
                     "durable {channel} audio contains duplicate sequence {sequence}"
                 ));
@@ -675,42 +772,98 @@ impl PersistedAudioSource {
     }
 }
 
-/// Resolve only Mimir-owned directory components without following a replaced
-/// meeting, audio, or channel symlink. Lexical containment alone is
-/// insufficient because another local process can swap a directory after
-/// capture but before delayed transcription.
-fn validated_audio_directory(
+fn read_committed_mono_chunk(
     root: &Path,
     meeting_id: &str,
-    channel: &str,
-) -> Result<Option<PathBuf>, String> {
-    let paths = [
-        root.to_path_buf(),
-        root.join(meeting_id),
-        root.join(meeting_id).join("audio"),
-        root.join(meeting_id).join("audio").join(channel),
-    ];
-    for path in &paths {
-        let metadata = match fs::symlink_metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(format!(
-                    "could not inspect durable audio directory authority: {error}"
-                ))
-            }
-        };
-        if metadata.file_type().is_symlink() {
-            return Err("durable audio directory authority contains a symbolic link".into());
-        }
-        if !metadata.is_dir() {
-            return Err("durable audio directory authority is not a directory".into());
-        }
+    chunk: &AudioChunk,
+) -> Result<Vec<u8>, String> {
+    let definition = &chunk.definition;
+    if chunk.status != AudioChunkStatus::Committed
+        || chunk.committed_at.is_none()
+        || chunk.integrity_error.is_some()
+    {
+        return Err("audio chunk is not a healthy committed database record".into());
     }
-    Ok(paths.last().cloned())
+    if definition.meeting_id != meeting_id {
+        return Err("audio chunk database authority belongs to another meeting".into());
+    }
+    validate_path_component(&definition.channel_id, "audio channel")?;
+    let canonical_relative_path = format!(
+        "{meeting_id}/audio/{}/{:08}.f32le",
+        definition.channel_id, definition.sequence
+    );
+    if definition.relative_path != canonical_relative_path {
+        return Err("audio chunk database path is not canonical".into());
+    }
+    let expected_byte_len = definition
+        .sample_count
+        .checked_mul(BYTES_PER_SAMPLE as u64)
+        .ok_or_else(|| "audio chunk byte length overflow".to_string())?;
+    if definition.byte_len != expected_byte_len
+        || definition.byte_len == 0
+        || definition.byte_len > MAX_MONO_CHUNK_BYTES as u64
+    {
+        return Err("audio chunk database length is invalid".into());
+    }
+    let expected_start_ms = definition
+        .sequence
+        .checked_mul(1_000)
+        .ok_or_else(|| "audio chunk timestamp overflow".to_string())?;
+    let expected_duration_ms = definition
+        .sample_count
+        .checked_mul(1_000)
+        .ok_or_else(|| "audio chunk duration overflow".to_string())?
+        / SAMPLE_RATE_HZ as u64;
+    let expected_end_ms = expected_start_ms
+        .checked_add(expected_duration_ms.max(1))
+        .ok_or_else(|| "audio chunk timestamp overflow".to_string())?;
+    if u64::try_from(definition.start_ms).ok() != Some(expected_start_ms)
+        || u64::try_from(definition.end_ms).ok() != Some(expected_end_ms)
+    {
+        return Err("audio chunk database timestamps are invalid".into());
+    }
+    if definition.sha256.len() != 64
+        || !definition
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("audio chunk database digest is invalid".into());
+    }
+
+    let mut file = open_committed_chunk_no_follow(
+        root,
+        meeting_id,
+        &definition.channel_id,
+        definition.sequence,
+    )?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("could not inspect committed audio chunk: {error}"))?;
+    if !metadata.is_file() || metadata.len() != definition.byte_len {
+        return Err("committed audio chunk is not a regular file of the recorded length".into());
+    }
+    let read_limit = definition
+        .byte_len
+        .checked_add(1)
+        .ok_or_else(|| "audio chunk read limit overflow".to_string())?;
+    let mut bytes = Vec::with_capacity(definition.byte_len as usize);
+    file.by_ref()
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("could not read committed audio chunk: {error}"))?;
+    if bytes.len() as u64 != definition.byte_len {
+        return Err("committed audio chunk changed while it was being read".into());
+    }
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    if !digest.eq_ignore_ascii_case(&definition.sha256) {
+        return Err("committed audio chunk failed its database SHA-256 check".into());
+    }
+    Ok(bytes)
 }
 
-fn read_mono_chunk(path: &Path) -> Result<Vec<u8>, String> {
+#[cfg(test)]
+fn read_fixture_mono_chunk(path: &Path) -> Result<Vec<u8>, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("could not inspect durable audio chunk: {error}"))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
@@ -726,6 +879,86 @@ fn read_mono_chunk(path: &Path) -> Result<Vec<u8>, String> {
         return Err("durable audio chunk changed while it was being read".into());
     }
     Ok(bytes)
+}
+
+#[cfg(unix)]
+fn open_committed_chunk_no_follow(
+    root: &Path,
+    meeting_id: &str,
+    channel_id: &str,
+    sequence: u64,
+) -> Result<File, String> {
+    use std::{
+        ffi::CString,
+        os::{
+            fd::{AsRawFd, FromRawFd},
+            raw::{c_char, c_int},
+            unix::fs::OpenOptionsExt,
+        },
+    };
+
+    #[cfg(target_os = "macos")]
+    const O_DIRECTORY: c_int = 0x0010_0000;
+    #[cfg(target_os = "macos")]
+    const O_NOFOLLOW: c_int = 0x0000_0100;
+    #[cfg(target_os = "macos")]
+    const O_CLOEXEC: c_int = 0x0100_0000;
+    #[cfg(not(target_os = "macos"))]
+    const O_DIRECTORY: c_int = 0x0001_0000;
+    #[cfg(not(target_os = "macos"))]
+    const O_NOFOLLOW: c_int = 0x0002_0000;
+    #[cfg(not(target_os = "macos"))]
+    const O_CLOEXEC: c_int = 0x0008_0000;
+    const O_RDONLY: c_int = 0;
+
+    unsafe extern "C" {
+        fn openat(directory_fd: c_int, path: *const c_char, flags: c_int, ...) -> c_int;
+    }
+
+    fn child(parent: &File, name: &str, flags: c_int, kind: &str) -> Result<File, String> {
+        let name = CString::new(name)
+            .map_err(|_| format!("committed audio {kind} contains a NUL byte"))?;
+        // SAFETY: `parent` remains open for this call, `name` is a valid
+        // NUL-terminated C string, and no creation flag requiring a mode is
+        // passed. Ownership of a successful descriptor moves into `File`.
+        let descriptor = unsafe { openat(parent.as_raw_fd(), name.as_ptr(), flags) };
+        if descriptor < 0 {
+            return Err(format!(
+                "could not open committed audio {kind} without following links: {}",
+                io::Error::last_os_error()
+            ));
+        }
+        // SAFETY: `openat` returned a fresh owned descriptor above.
+        Ok(unsafe { File::from_raw_fd(descriptor) })
+    }
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    let root = options.open(root).map_err(|error| {
+        format!("could not open committed audio root without following links: {error}")
+    })?;
+    let directory_flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+    let meeting = child(&root, meeting_id, directory_flags, "meeting directory")?;
+    let audio = child(&meeting, "audio", directory_flags, "audio directory")?;
+    let channel = child(&audio, channel_id, directory_flags, "channel directory")?;
+    child(
+        &channel,
+        &format!("{sequence:08}.f32le"),
+        O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+        "chunk",
+    )
+}
+
+#[cfg(not(unix))]
+fn open_committed_chunk_no_follow(
+    _root: &Path,
+    _meeting_id: &str,
+    _channel_id: &str,
+    _sequence: u64,
+) -> Result<File, String> {
+    Err("secure committed audio reads are unavailable on this platform".into())
 }
 
 fn interleave_f32le(microphone: &[u8], system: &[u8]) -> Result<Vec<u8>, String> {
@@ -1485,7 +1718,8 @@ mod tests {
         LanguageCapability, NormalizedSegment, SegmentState, SttCapabilities, STT_WIRE_VERSION,
     };
     use crate::meetings::{
-        AudioChannelDraft, AudioChannelKind, MeetingDraft, MeetingOrigin, MeetingStatus,
+        AudioChannelDraft, AudioChannelKind, AudioChunkDraft, MeetingDraft, MeetingOrigin,
+        MeetingStatus,
     };
     use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
     use rustls::{
@@ -1505,14 +1739,71 @@ mod tests {
         },
     };
 
-    fn write_chunk(root: &Path, meeting_id: &str, channel: &str, sequence: u64, samples: &[f32]) {
-        let directory = root.join(meeting_id).join("audio").join(channel);
-        fs::create_dir_all(&directory).unwrap();
+    fn chunk_definition(
+        meeting_id: &str,
+        channel: &str,
+        sequence: u64,
+        samples: &[f32],
+    ) -> (AudioChunkDraft, Vec<u8>) {
         let bytes = samples
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect::<Vec<_>>();
-        fs::write(directory.join(format!("{sequence:08}.f32le")), bytes).unwrap();
+        let start_ms = sequence * 1_000;
+        let duration_ms = (samples.len() as u64 * 1_000) / SAMPLE_RATE_HZ as u64;
+        (
+            AudioChunkDraft {
+                id: format!("{meeting_id}-{channel}-{sequence:08}"),
+                meeting_id: meeting_id.into(),
+                channel_id: channel.into(),
+                sequence,
+                start_ms: start_ms as i64,
+                end_ms: start_ms.saturating_add(duration_ms.max(1)) as i64,
+                sample_count: samples.len() as u64,
+                byte_len: bytes.len() as u64,
+                sha256: format!("{:x}", Sha256::digest(&bytes)),
+                relative_path: format!("{meeting_id}/audio/{channel}/{sequence:08}.f32le"),
+            },
+            bytes,
+        )
+    }
+
+    fn write_chunk_file(root: &Path, definition: &AudioChunkDraft, bytes: &[u8]) -> PathBuf {
+        let path = root.join(&definition.relative_path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    fn stage_chunk(
+        store: &MeetingStore,
+        root: &Path,
+        meeting_id: &str,
+        channel: &str,
+        sequence: u64,
+        samples: &[f32],
+    ) -> AudioChunkDraft {
+        let (definition, bytes) = chunk_definition(meeting_id, channel, sequence, samples);
+        write_chunk_file(root, &definition, &bytes);
+        store
+            .stage_audio_chunk(&definition, "2026-07-30T10:00:02Z")
+            .unwrap();
+        definition
+    }
+
+    fn commit_chunk(
+        store: &MeetingStore,
+        root: &Path,
+        meeting_id: &str,
+        channel: &str,
+        sequence: u64,
+        samples: &[f32],
+    ) -> AudioChunkDraft {
+        let definition = stage_chunk(store, root, meeting_id, channel, sequence, samples);
+        store
+            .commit_audio_chunk(&definition.id, "2026-07-30T10:00:03Z")
+            .unwrap();
+        definition
     }
 
     #[derive(Default)]
@@ -1537,14 +1828,24 @@ mod tests {
                         confidence: None,
                         evidence: json!({}),
                     },
-                    channels: vec![AudioChannelDraft {
-                        id: "microphone".into(),
-                        kind: AudioChannelKind::Microphone,
-                        sample_rate_hz: 16_000,
-                        channels: 1,
-                        sample_format: "f32le".into(),
-                        device_id: None,
-                    }],
+                    channels: vec![
+                        AudioChannelDraft {
+                            id: "microphone".into(),
+                            kind: AudioChannelKind::Microphone,
+                            sample_rate_hz: 16_000,
+                            channels: 1,
+                            sample_format: "f32le".into(),
+                            device_id: None,
+                        },
+                        AudioChannelDraft {
+                            id: "system".into(),
+                            kind: AudioChannelKind::System,
+                            sample_rate_hz: 16_000,
+                            channels: 1,
+                            sample_format: "f32le".into(),
+                            device_id: None,
+                        },
+                    ],
                     metadata: json!({}),
                 },
                 "2026-07-30T10:00:00Z",
@@ -1611,9 +1912,25 @@ mod tests {
     #[test]
     fn durable_channels_are_interleaved_only_at_the_provider_boundary() {
         let temporary = TempDir::new().unwrap();
-        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[1.0, 2.0]);
-        write_chunk(temporary.path(), "meeting-1", "system", 0, &[3.0, 4.0]);
-        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let store = recording_store();
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[1.0, 2.0],
+        );
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "system",
+            0,
+            &[3.0, 4.0],
+        );
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
         let chunks = source.paired_chunks_from(0).unwrap();
         let values = chunks[0]
             .bytes
@@ -1630,29 +1947,44 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let temporary = TempDir::new().unwrap();
+        let store = recording_store();
         let outside = temporary.path().join("outside");
-        write_chunk(&outside, "external", "microphone", 0, &[0.75]);
+        fs::create_dir_all(&outside).unwrap();
+        let (definition, bytes) = chunk_definition("meeting-1", "microphone", 0, &[0.75]);
+        fs::write(outside.join("00000000.f32le"), bytes).unwrap();
+        store
+            .stage_audio_chunk(&definition, "2026-07-30T10:00:02Z")
+            .unwrap();
+        store
+            .commit_audio_chunk(&definition.id, "2026-07-30T10:00:03Z")
+            .unwrap();
         let meeting_audio = temporary.path().join("meeting-1").join("audio");
         fs::create_dir_all(&meeting_audio).unwrap();
-        symlink(
-            outside.join("external").join("audio").join("microphone"),
-            meeting_audio.join("microphone"),
-        )
-        .unwrap();
+        symlink(&outside, meeting_audio.join("microphone")).unwrap();
         fs::create_dir_all(meeting_audio.join("system")).unwrap();
-        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
 
-        let error = source.paired_chunks_from(0).unwrap_err();
+        let error = source.final_chunks_from(0).unwrap_err();
 
-        assert!(error.contains("symbolic link"));
+        assert!(error.contains("without following links"));
     }
 
     #[test]
     fn a_shorter_channel_is_padded_without_mutating_its_durable_file() {
         let temporary = TempDir::new().unwrap();
-        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[1.0, 2.0]);
-        write_chunk(temporary.path(), "meeting-1", "system", 0, &[3.0]);
-        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let store = recording_store();
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[1.0, 2.0],
+        );
+        commit_chunk(&store, temporary.path(), "meeting-1", "system", 0, &[3.0]);
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
         let values = source.paired_chunks_from(0).unwrap()[0]
             .bytes
             .chunks_exact(4)
@@ -1674,8 +2006,17 @@ mod tests {
     #[test]
     fn an_unpaired_chunk_is_not_disclosed_to_the_provider() {
         let temporary = TempDir::new().unwrap();
-        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[1.0]);
-        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let store = recording_store();
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[1.0],
+        );
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
         assert!(source.paired_chunks_from(0).unwrap().is_empty());
         let final_chunk = source.final_chunks_from(0).unwrap().pop().unwrap();
         let values = final_chunk
@@ -1689,10 +2030,26 @@ mod tests {
     #[test]
     fn live_reader_never_advances_past_an_unpaired_sequence() {
         let temporary = TempDir::new().unwrap();
-        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[1.0]);
-        write_chunk(temporary.path(), "meeting-1", "microphone", 1, &[2.0]);
-        write_chunk(temporary.path(), "meeting-1", "system", 1, &[3.0]);
-        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let store = recording_store();
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[1.0],
+        );
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            1,
+            &[2.0],
+        );
+        commit_chunk(&store, temporary.path(), "meeting-1", "system", 1, &[3.0]);
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
 
         assert!(source.paired_chunks_from(0).unwrap().is_empty());
         let final_chunks = source.final_chunks_from(0).unwrap();
@@ -1708,17 +2065,27 @@ mod tests {
     #[test]
     fn durable_audio_reads_are_contiguous_and_memory_bounded() {
         let temporary = TempDir::new().unwrap();
+        let store = recording_store();
         for sequence in 0..40 {
-            write_chunk(
+            commit_chunk(
+                &store,
                 temporary.path(),
                 "meeting-1",
                 "microphone",
                 sequence,
                 &[1.0],
             );
-            write_chunk(temporary.path(), "meeting-1", "system", sequence, &[2.0]);
+            commit_chunk(
+                &store,
+                temporary.path(),
+                "meeting-1",
+                "system",
+                sequence,
+                &[2.0],
+            );
         }
-        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
         let chunks = source.paired_chunks_from_bounded(0, 7).unwrap();
         assert_eq!(chunks.len(), 7);
         assert_eq!(chunks.last().unwrap().sequence, 6);
@@ -1726,6 +2093,112 @@ mod tests {
         assert!(source
             .paired_chunks_from_bounded(0, MAX_AUDIO_READ_CHUNKS + 1)
             .is_err());
+    }
+
+    #[test]
+    fn unregistered_staged_and_corrupt_files_are_silence_not_stt_input() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+
+        let (unregistered, unregistered_bytes) =
+            chunk_definition("meeting-1", "microphone", 0, &[91.0]);
+        write_chunk_file(temporary.path(), &unregistered, &unregistered_bytes);
+        commit_chunk(&store, temporary.path(), "meeting-1", "system", 0, &[1.0]);
+
+        stage_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            1,
+            &[92.0],
+        );
+        commit_chunk(&store, temporary.path(), "meeting-1", "system", 1, &[2.0]);
+
+        let corrupt = stage_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            2,
+            &[93.0],
+        );
+        store
+            .mark_audio_chunk_corrupt(
+                &corrupt.id,
+                "test integrity rejection",
+                "2026-07-30T10:00:03Z",
+            )
+            .unwrap();
+        commit_chunk(&store, temporary.path(), "meeting-1", "system", 2, &[3.0]);
+
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
+        assert!(source.paired_chunks_from(0).unwrap().is_empty());
+        let projected = source
+            .final_chunks_from(0)
+            .unwrap()
+            .into_iter()
+            .flat_map(|chunk| {
+                chunk
+                    .bytes
+                    .chunks_exact(BYTES_PER_SAMPLE)
+                    .map(|sample| f32::from_le_bytes(sample.try_into().unwrap()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(projected, vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0]);
+        assert!(!projected.contains(&91.0));
+        assert!(!projected.contains(&92.0));
+        assert!(!projected.contains(&93.0));
+    }
+
+    #[test]
+    fn tampered_committed_file_fails_sha256_before_stt_disclosure() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        let microphone = commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[1.0],
+        );
+        commit_chunk(&store, temporary.path(), "meeting-1", "system", 0, &[2.0]);
+        fs::write(
+            temporary.path().join(&microphone.relative_path),
+            9_f32.to_le_bytes(),
+        )
+        .unwrap();
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
+
+        let error = source.final_chunks_from(0).unwrap_err();
+
+        assert!(error.contains("SHA-256"));
+    }
+
+    #[test]
+    fn noncanonical_committed_database_path_is_rejected_before_file_read() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        let (mut definition, bytes) = chunk_definition("meeting-1", "microphone", 0, &[7.0]);
+        definition.relative_path = "meeting-1/audio/microphone/alternate.f32le".into();
+        write_chunk_file(temporary.path(), &definition, &bytes);
+        store
+            .stage_audio_chunk(&definition, "2026-07-30T10:00:02Z")
+            .unwrap();
+        store
+            .commit_audio_chunk(&definition.id, "2026-07-30T10:00:03Z")
+            .unwrap();
+        let source =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
+
+        let error = source.final_chunks_from(0).unwrap_err();
+
+        assert!(error.contains("not canonical"));
     }
 
     #[test]
@@ -2029,12 +2502,42 @@ mod tests {
         const FINAL: &str = "private transcript sentinel finalized";
 
         let temporary = TempDir::new().unwrap();
-        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[0.1, 0.2]);
-        write_chunk(temporary.path(), "meeting-1", "system", 0, &[0.3, 0.4]);
-        write_chunk(temporary.path(), "meeting-1", "microphone", 1, &[0.5, 0.6]);
-        write_chunk(temporary.path(), "meeting-1", "system", 1, &[0.7, 0.8]);
-        let audio = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
         let store = recording_store();
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[0.1, 0.2],
+        );
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "system",
+            0,
+            &[0.3, 0.4],
+        );
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            1,
+            &[0.5, 0.6],
+        );
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "system",
+            1,
+            &[0.7, 0.8],
+        );
+        let audio =
+            PersistedAudioSource::authoritative(Arc::clone(&store), temporary.path(), "meeting-1")
+                .unwrap();
         let mut sink = StoreBatchSink::new(
             Arc::clone(&store),
             "meeting-1",
@@ -2176,9 +2679,25 @@ mod tests {
     #[tokio::test]
     async fn scripted_wire_peer_receives_durable_audio_and_completes_with_a_final_batch() {
         let temporary = TempDir::new().unwrap();
-        write_chunk(temporary.path(), "meeting-1", "microphone", 0, &[0.25, 0.5]);
-        write_chunk(temporary.path(), "meeting-1", "system", 0, &[0.75, 1.0]);
-        let audio = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+        let store = recording_store();
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "microphone",
+            0,
+            &[0.25, 0.5],
+        );
+        commit_chunk(
+            &store,
+            temporary.path(),
+            "meeting-1",
+            "system",
+            0,
+            &[0.75, 1.0],
+        );
+        let audio =
+            PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
         let (finalize_tx, finalize_rx) = mpsc::channel();
         finalize_tx
             .send(FinalizeCommand {

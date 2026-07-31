@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 pub const MAX_TRANSCRIPT_PAGE_SEGMENTS: u32 = 250;
+pub const MAX_COMMITTED_AUDIO_CHUNK_PAGE: u32 = 512;
 const APPLICATION_ID: i64 = 0x4d4d4554; // "MMET"
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -537,6 +538,73 @@ impl MeetingStore {
             .expect("updated audio chunk must exist");
         transaction.commit()?;
         Ok(stored)
+    }
+
+    /// Read one bounded, sequence-keyset page of committed channel audio.
+    ///
+    /// This is the only audio-file projection suitable for transcription.
+    /// Filesystem discovery is deliberately not an authority: staged,
+    /// corrupt, and unregistered paths never appear here.
+    pub fn committed_audio_chunks(
+        &self,
+        meeting_id: &str,
+        channel_id: &str,
+        first_sequence: u64,
+        limit: u32,
+    ) -> Result<Vec<AudioChunk>, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        validate_id(channel_id, "audio channel id").map_err(MeetingStoreError::Validation)?;
+        if limit == 0 || limit > MAX_COMMITTED_AUDIO_CHUNK_PAGE {
+            return Err(MeetingStoreError::Validation(format!(
+                "committed audio reads must request between 1 and {MAX_COMMITTED_AUDIO_CHUNK_PAGE} chunks"
+            )));
+        }
+
+        let connection = self.lock()?;
+        let meeting_exists = connection
+            .query_row("SELECT 1 FROM meetings WHERE id=?1", [meeting_id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some();
+        if !meeting_exists {
+            return Err(not_found("meeting", meeting_id));
+        }
+        let channel_exists = connection
+            .query_row(
+                "SELECT 1 FROM audio_channels WHERE meeting_id=?1 AND id=?2",
+                params![meeting_id, channel_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !channel_exists {
+            return Err(not_found("audio channel", channel_id));
+        }
+
+        let mut statement = connection.prepare(
+            "SELECT id,meeting_id,channel_id,sequence,start_ms,end_ms,sample_count,
+                    byte_len,sha256,relative_path,status,staged_at,committed_at,
+                    fingerprint,integrity_error
+             FROM audio_chunks
+             WHERE meeting_id=?1 AND channel_id=?2
+               AND status='committed' AND sequence>=?3
+             ORDER BY sequence
+             LIMIT ?4",
+        )?;
+        let chunks = statement
+            .query_map(
+                params![
+                    meeting_id,
+                    channel_id,
+                    to_i64(first_sequence)?,
+                    i64::from(limit)
+                ],
+                audio_chunk_from_row,
+            )?
+            .map(|result| result.map(|(chunk, _)| chunk))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(chunks)
     }
 
     pub fn apply_transcript_batch(
@@ -3057,6 +3125,56 @@ mod tests {
                 .committed_at,
             committed.committed_at
         );
+    }
+
+    #[test]
+    fn committed_audio_projection_is_status_filtered_keyset_ordered_and_bounded() {
+        let store = store();
+        start_recording(&store);
+        for sequence in 0..4 {
+            let chunk = AudioChunkDraft {
+                id: format!("chunk-{sequence}"),
+                meeting_id: "meeting-1".into(),
+                channel_id: "mic".into(),
+                sequence,
+                start_ms: (sequence * 1_000) as i64,
+                end_ms: (sequence * 1_000 + 1) as i64,
+                sample_count: 1,
+                byte_len: 4,
+                sha256: format!("{sequence:x}").repeat(64),
+                relative_path: format!("meeting-1/audio/mic/{sequence:08}.f32le"),
+            };
+            store.stage_audio_chunk(&chunk, T1).unwrap();
+        }
+        store.commit_audio_chunk("chunk-1", T2).unwrap();
+        store
+            .mark_audio_chunk_corrupt("chunk-2", "fixture corruption", T2)
+            .unwrap();
+        store.commit_audio_chunk("chunk-3", T2).unwrap();
+
+        assert_eq!(
+            store
+                .committed_audio_chunks("meeting-1", "mic", 0, 10)
+                .unwrap()
+                .into_iter()
+                .map(|chunk| chunk.definition.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert_eq!(
+            store
+                .committed_audio_chunks("meeting-1", "mic", 2, 1)
+                .unwrap()[0]
+                .definition
+                .sequence,
+            3
+        );
+        assert!(store
+            .committed_audio_chunks("meeting-1", "mic", 0, 0)
+            .is_err());
+        assert!(store
+            .committed_audio_chunks("meeting-1", "mic", 0, MAX_COMMITTED_AUDIO_CHUNK_PAGE + 1,)
+            .is_err());
     }
 
     #[test]
