@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import TrackerClassifications from './TrackerClassifications.vue'
 
@@ -19,12 +19,15 @@ describe('TrackerClassifications', () => {
 
     const row = wrapper.get('[data-tracker-classification="com.mitchellh.ghostty"]')
     expect(row.text()).toContain('pending')
-    expect(row.get('select').element.value).toBe('UNKNOWN')
+    expect(row.find('select').exists()).toBe(false)
+    expect(row.get('[data-tracker-category-trigger]').text()).toContain('UNKNOWN')
+    wrapper.unmount()
   })
 
   it('saves a manual correction and explicitly applies it to history', async () => {
     const saveRule = vi.fn().mockResolvedValue({})
     const wrapper = mount(TrackerClassifications, {
+      attachTo: document.body,
       props: {
         saveRule,
         rules: [{
@@ -37,9 +40,12 @@ describe('TrackerClassifications', () => {
       },
     })
     const row = wrapper.get('[data-tracker-classification="Safari | example.com"]')
-    await row.get('select').setValue('Work')
+    await row.get('[data-tracker-category-trigger]').trigger('click')
+    await new DOMWrapper(
+      document.querySelector('[data-tracker-category-option="Work"]'),
+    ).trigger('click')
     await row.get('input').setValue('Research')
-    await row.get('button').trigger('click')
+    await row.get('[data-tracker-classification-save]').trigger('click')
     await flushPromises()
 
     expect(saveRule).toHaveBeenCalledWith({
@@ -49,5 +55,6 @@ describe('TrackerClassifications', () => {
       applyHistory: true,
     })
     expect(wrapper.emitted('saved')).toHaveLength(1)
+    wrapper.unmount()
   })
 })

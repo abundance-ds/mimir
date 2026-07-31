@@ -95,6 +95,10 @@ larger. Sidebar rows are 32px high; denser Files rows are 28px high.
 - Disabled controls remain legible and do not respond to hover.
 - Filled accent buttons are reserved for the primary action in a local flow.
 - Inputs use surface background, a rule border, and accent focus.
+- Never use a native/system `<select>`. Selection controls use a Mimir-owned
+  combobox and listbox popover styled with theme tokens. They expose an
+  accessible name and selected state, and support Arrow keys, Home/End,
+  Enter/Space, Escape, and Tab without trapping focus.
 - Dialogs and popovers may be rounded; workbench panes remain square.
 
 ### CodeMirror and xterm

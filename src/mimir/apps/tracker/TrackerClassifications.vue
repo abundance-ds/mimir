@@ -38,13 +38,12 @@
           >
             <td class="truncate px-3 py-2 font-mono text-ink-2" :title="rule.key">{{ rule.key }}</td>
             <td class="px-2 py-1.5">
-              <select
-                :value="draft(rule).activity"
-                class="h-7 w-full border border-rule bg-surface px-1.5 text-[10px] text-ink outline-none focus:border-accent"
-                @change="patch(rule, { activity: $event.target.value })"
-              >
-                <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
-              </select>
+              <TrackerCategorySelect
+                :model-value="draft(rule).activity"
+                :options="categories"
+                :aria-label="`Category for ${rule.key}`"
+                @update:model-value="patch(rule, { activity: $event })"
+              />
             </td>
             <td class="px-2 py-1.5">
               <input
@@ -61,6 +60,7 @@
             <td class="px-2 py-1.5">
               <button
                 type="button"
+                data-tracker-classification-save
                 :disabled="saving === rule.key || !changed(rule)"
                 class="h-7 w-full border border-accent/40 px-1.5 text-[9px] font-semibold text-accent hover:bg-accent-soft disabled:border-rule disabled:text-ink-4 disabled:opacity-50"
                 @click="save(rule)"
@@ -87,6 +87,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { IconSearch } from '@tabler/icons-vue'
+import TrackerCategorySelect from './TrackerCategorySelect.vue'
 
 const props = defineProps({
   rules: { type: Array, default: () => [] },
