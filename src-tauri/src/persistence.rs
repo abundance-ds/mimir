@@ -100,7 +100,7 @@ where
 
 /// Atomically replace `path` with already-serialized bytes.
 pub fn write_bytes_atomic(path: impl AsRef<Path>, contents: &[u8]) -> Result<(), PersistenceError> {
-    write_bytes_atomic_inner(path.as_ref(), contents, false)
+    write_bytes_atomic_inner(path.as_ref(), contents, false, false)
 }
 
 /// Atomically replace a secret file and enforce owner-only permissions on
@@ -109,22 +109,69 @@ pub fn write_secret_bytes_atomic(
     path: impl AsRef<Path>,
     contents: &[u8],
 ) -> Result<(), PersistenceError> {
-    write_bytes_atomic_inner(path.as_ref(), contents, true)
+    write_bytes_atomic_inner(path.as_ref(), contents, true, false)
+}
+
+/// Atomically replace a private file and keep both it and its immediate
+/// directory owner-only.
+///
+/// Unlike [`write_secret_bytes_atomic`], this is intended for a managed data
+/// tree rather than a single secret in a caller-owned directory. Symbolic-link
+/// targets and parents are refused.
+pub fn write_private_bytes_atomic(
+    path: impl AsRef<Path>,
+    contents: &[u8],
+) -> Result<(), PersistenceError> {
+    write_bytes_atomic_inner(path.as_ref(), contents, true, true)
+}
+
+/// Serialize `value` as pretty JSON and atomically replace an owner-only file.
+pub fn write_private_json_atomic<T>(
+    path: impl AsRef<Path>,
+    value: &T,
+) -> Result<(), PersistenceError>
+where
+    T: Serialize + ?Sized,
+{
+    let path = path.as_ref();
+    let mut contents =
+        serde_json::to_vec_pretty(value).map_err(|source| PersistenceError::Serialize {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    contents.push(b'\n');
+    write_private_bytes_atomic(path, &contents)
 }
 
 fn write_bytes_atomic_inner(
     path: &Path,
     contents: &[u8],
     owner_only: bool,
+    private_parent: bool,
 ) -> Result<(), PersistenceError> {
     validate_file_name(path)?;
 
     let parent = parent_directory(path);
-    fs::create_dir_all(parent)
-        .map_err(|source| io_error("create parent directory for", parent, source))?;
+    if private_parent {
+        validate_private_managed_path(parent)?;
+        ensure_private_directory(parent)?;
+    } else {
+        fs::create_dir_all(parent)
+            .map_err(|source| io_error("create parent directory for", parent, source))?;
+    }
 
-    let existing_permissions = match fs::metadata(path) {
+    let existing_permissions = match fs::symlink_metadata(path) {
         Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(io_error(
+                    "replace unsafe non-regular file at",
+                    path,
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "target must be a regular file and not a symbolic link",
+                    ),
+                ));
+            }
             let permissions = metadata.permissions();
             if !owner_only && permissions.readonly() {
                 return Err(io_error(
@@ -139,7 +186,7 @@ fn write_bytes_atomic_inner(
         Err(source) => return Err(io_error("inspect file before replacing", path, source)),
     };
 
-    let mut pending = create_pending_file(path)?;
+    let mut pending = create_pending_file(path, owner_only)?;
     #[cfg(unix)]
     if owner_only {
         use std::os::unix::fs::PermissionsExt;
@@ -344,6 +391,313 @@ pub fn quarantine_corrupt_file(
     ))
 }
 
+/// Create or repair one managed directory as owner-only.
+///
+/// The path itself is inspected without following symbolic links. Callers
+/// building a nested managed tree should use [`ensure_private_subdirectory`]
+/// so every component below the trusted root receives the same treatment.
+pub fn ensure_private_directory(path: impl AsRef<Path>) -> Result<(), PersistenceError> {
+    let path = path.as_ref();
+    validate_private_managed_path(path)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+                return Err(unsafe_managed_path(path, "directory"));
+            }
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir(path)
+                .map_err(|source| io_error("create private directory", path, source))?;
+            let metadata = fs::symlink_metadata(path)
+                .map_err(|source| io_error("inspect created private directory", path, source))?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+                return Err(unsafe_managed_path(path, "directory"));
+            }
+        }
+        Err(source) => return Err(io_error("inspect private directory", path, source)),
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = open_no_follow(path, false)
+            .map_err(|source| io_error("open private directory", path, source))?;
+        if !directory
+            .metadata()
+            .map_err(|source| io_error("inspect open private directory", path, source))?
+            .is_dir()
+        {
+            return Err(unsafe_managed_path(path, "directory"));
+        }
+        directory
+            .set_permissions(fs::Permissions::from_mode(0o700))
+            .map_err(|source| io_error("set private directory permissions on", path, source))?;
+    }
+    Ok(())
+}
+
+/// Resolve a relative directory below `root`, creating and repairing each
+/// component without accepting symbolic links.
+pub fn ensure_private_subdirectory(
+    root: impl AsRef<Path>,
+    relative: impl AsRef<Path>,
+) -> Result<PathBuf, PersistenceError> {
+    let root = root.as_ref();
+    ensure_private_directory(root)?;
+    let mut resolved = root.to_path_buf();
+    for component in private_relative_components(relative.as_ref())? {
+        resolved.push(component);
+        ensure_private_directory(&resolved)?;
+    }
+    Ok(resolved)
+}
+
+/// Repair an existing managed tree without following symbolic links.
+///
+/// Directories become `0700` and regular files become `0600` on Unix. Any
+/// symlink or special file fails closed so startup never traverses outside the
+/// managed root while repairing legacy permissions.
+pub fn repair_private_tree(root: impl AsRef<Path>) -> Result<(), PersistenceError> {
+    let root = root.as_ref();
+    ensure_private_directory(root)?;
+    let entries = fs::read_dir(root)
+        .map_err(|source| io_error("read private managed directory", root, source))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|source| io_error("read private managed directory entry", root, source))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|source| io_error("inspect private managed entry", &path, source))?;
+        if file_type.is_symlink() {
+            return Err(unsafe_managed_path(&path, "directory or regular file"));
+        }
+        if file_type.is_dir() {
+            repair_private_tree(&path)?;
+        } else if file_type.is_file() {
+            repair_private_file(&path)?;
+        } else {
+            return Err(unsafe_managed_path(&path, "directory or regular file"));
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a contained private-file path, creating/repairing every parent
+/// directory and refusing an existing symlink or non-regular target.
+///
+/// A missing target is permitted so the returned path can be passed directly
+/// to [`write_private_bytes_atomic`].
+pub fn prepare_private_file_path(
+    root: impl AsRef<Path>,
+    relative: impl AsRef<Path>,
+) -> Result<PathBuf, PersistenceError> {
+    let relative = relative.as_ref();
+    let file_name = relative.file_name().ok_or_else(|| {
+        io_error(
+            "resolve private file path",
+            relative,
+            io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"),
+        )
+    })?;
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+    let private_parent = ensure_private_subdirectory(root, parent)?;
+    let path = private_parent.join(file_name);
+    repair_private_file_if_exists(&path)?;
+    Ok(path)
+}
+
+/// Create an empty owner-only regular file, or repair an existing one.
+///
+/// The immediate parent must already exist and is also repaired to `0700` on
+/// Unix. Creation uses `create_new` and a `0600` mode so a permissive process
+/// umask never exposes a window with broader permissions.
+pub fn create_private_file(path: impl AsRef<Path>) -> Result<(), PersistenceError> {
+    let path = path.as_ref();
+    validate_file_name(path)?;
+    let parent = parent_directory(path);
+    validate_private_managed_path(parent)?;
+    ensure_private_directory(parent)?;
+    if repair_private_file_if_exists(path)? {
+        return Ok(());
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(path) {
+        Ok(file) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(fs::Permissions::from_mode(0o600))
+                    .map_err(|source| io_error("set private file permissions on", path, source))?;
+            }
+            file.sync_all()
+                .map_err(|source| io_error("sync new private file", path, source))?;
+            sync_directory(parent_directory(path))?;
+            Ok(())
+        }
+        Err(source) if source.kind() == io::ErrorKind::AlreadyExists => repair_private_file(path),
+        Err(source) => Err(io_error("create private file", path, source)),
+    }
+}
+
+/// Repair an existing regular file to owner-only permissions without
+/// accepting a symbolic link.
+pub fn repair_private_file(path: impl AsRef<Path>) -> Result<(), PersistenceError> {
+    let path = path.as_ref();
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|source| io_error("inspect private file", path, source))?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Err(unsafe_managed_path(path, "regular file"));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let file = open_no_follow(path, true).map_err(|source| {
+            io_error("open private file without following links", path, source)
+        })?;
+        let opened = file
+            .metadata()
+            .map_err(|source| io_error("inspect open private file", path, source))?;
+        if !opened.file_type().is_file()
+            || metadata.dev() != opened.dev()
+            || metadata.ino() != opened.ino()
+        {
+            return Err(unsafe_managed_path(path, "stable regular file"));
+        }
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|source| io_error("set private file permissions on", path, source))?;
+    }
+    Ok(())
+}
+
+/// Repair an existing private file, returning `false` only when it is absent.
+pub fn repair_private_file_if_exists(path: impl AsRef<Path>) -> Result<bool, PersistenceError> {
+    let path = path.as_ref();
+    match fs::symlink_metadata(path) {
+        Ok(_) => {
+            repair_private_file(path)?;
+            Ok(true)
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(io_error("inspect optional private file", path, source)),
+    }
+}
+
+fn private_relative_components(path: &Path) -> Result<Vec<&OsStr>, PersistenceError> {
+    use std::path::Component;
+    if path.is_absolute() {
+        return Err(io_error(
+            "resolve private relative path",
+            path,
+            io::Error::new(io::ErrorKind::InvalidInput, "path must be relative"),
+        ));
+    }
+    path.components()
+        .map(|component| match component {
+            Component::Normal(component) => Ok(component),
+            _ => Err(io_error(
+                "resolve private relative path",
+                path,
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "path contains a non-normal component",
+                ),
+            )),
+        })
+        .collect()
+}
+
+fn unsafe_managed_path(path: &Path, expected: &str) -> PersistenceError {
+    io_error(
+        "use private managed path",
+        path,
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("expected {expected}, refusing symbolic link or special file"),
+        ),
+    )
+}
+
+fn validate_private_managed_path(path: &Path) -> Result<(), PersistenceError> {
+    if path.as_os_str().is_empty()
+        || path == Path::new(".")
+        || path.parent().is_none()
+        || path.parent().is_some_and(|parent| parent == path)
+    {
+        return Err(io_error(
+            "use private managed path",
+            path,
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "refusing a current-directory or filesystem-root permission target",
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn open_no_follow(path: &Path, regular_file: bool) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    options.custom_flags(no_follow_flag());
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if (regular_file && !metadata.is_file()) || (!regular_file && !metadata.is_dir()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "opened path has an unexpected file type",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const fn no_follow_flag() -> i32 {
+    0x0002_0000
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+const fn no_follow_flag() -> i32 {
+    0x0000_0100
+}
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const fn no_follow_flag() -> i32 {
+    // Unknown Unix targets still receive lstat/inode checks. The production
+    // target is macOS and CI exercises Linux, whose constants are defined
+    // above.
+    0
+}
+
 fn validate_file_name(path: &Path) -> Result<&OsStr, PersistenceError> {
     path.file_name().ok_or_else(|| {
         io_error(
@@ -466,13 +820,22 @@ fn quarantine_name(file_name: &OsStr, attempt: u16) -> OsString {
     name
 }
 
-fn create_pending_file(target: &Path) -> Result<PendingFile, PersistenceError> {
+fn create_pending_file(target: &Path, owner_only: bool) -> Result<PendingFile, PersistenceError> {
     let parent = parent_directory(target);
     let file_name = validate_file_name(target)?;
+    #[cfg(not(unix))]
+    let _ = owner_only;
 
     for attempt in 0..128_u16 {
         let path = parent.join(temporary_name(file_name, attempt));
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if owner_only {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
             Ok(file) => return Ok(PendingFile::new(path, file)),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(source) => {
@@ -969,5 +1332,105 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(fs::read(&first).unwrap(), b"first corruption");
         assert_eq!(fs::read(&second).unwrap(), b"second corruption");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_tree_refuses_symlinks_and_repairs_atomic_replacement_modes() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("meetings");
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+        let nested = ensure_private_subdirectory(&root, "meeting-1/audio/microphone").unwrap();
+        assert_eq!(
+            fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&nested).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        let artifact =
+            prepare_private_file_path(&root, "meeting-1/audio/microphone/00000000.f32le").unwrap();
+        fs::write(&artifact, b"old").unwrap();
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o666)).unwrap();
+        write_private_bytes_atomic(&artifact, b"replacement").unwrap();
+        assert_eq!(fs::read(&artifact).unwrap(), b"replacement");
+        assert_eq!(
+            fs::metadata(&artifact).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let outside = directory.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let linked = root.join("linked");
+        symlink(&outside, &linked).unwrap();
+        assert!(ensure_private_subdirectory(&root, "linked/channel").is_err());
+        assert!(prepare_private_file_path(&root, "linked/private.bin").is_err());
+
+        let target = outside.join("target");
+        fs::write(&target, b"outside").unwrap();
+        let file_link = root.join("file-link");
+        symlink(&target, &file_link).unwrap();
+        assert!(repair_private_file(&file_link).is_err());
+        assert!(write_private_bytes_atomic(&file_link, b"changed").is_err());
+        assert_eq!(fs::read(target).unwrap(), b"outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_creation_is_owner_only_under_a_permissive_umask_subprocess() {
+        const CHILD: &str = "MIMIR_PRIVATE_UMASK_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            unsafe extern "C" {
+                fn umask(mask: u32) -> u32;
+            }
+            // SAFETY: this process runs exactly this one test, so changing the
+            // process-global umask cannot race another test or application
+            // thread. The parent test below creates this isolated subprocess.
+            unsafe {
+                umask(0);
+            }
+            use std::os::unix::fs::PermissionsExt;
+            let directory = tempdir().unwrap();
+            let root = directory.path().join("scribe");
+            ensure_private_directory(&root).unwrap();
+            let file = prepare_private_file_path(&root, "meeting/audio/chunk.f32le").unwrap();
+            write_private_bytes_atomic(&file, b"private").unwrap();
+            assert_eq!(
+                fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(file.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            return;
+        }
+
+        let test_name =
+            "persistence::tests::private_creation_is_owner_only_under_a_permissive_umask_subprocess";
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated permissive-umask check failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

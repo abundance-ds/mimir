@@ -7,12 +7,16 @@ use super::model::{
     TranscriptGapInput, TranscriptGapReason, TranscriptGapRecord, TranscriptRevision,
     TranscriptSegmentInput, TranscriptSegmentRecord, TranscriptSnapshot,
 };
+use crate::persistence::{
+    create_private_file, ensure_private_directory, repair_private_file_if_exists,
+    repair_private_tree, PersistenceError,
+};
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
     time::Duration,
 };
@@ -73,6 +77,8 @@ pub struct MeetingListPage {
 
 #[derive(Debug, Error)]
 pub enum MeetingStoreError {
+    #[error("meeting store private-storage error: {0}")]
+    PrivateStorage(#[from] PersistenceError),
     #[error("meeting store database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("meeting store serialization error: {0}")]
@@ -107,19 +113,30 @@ pub enum MeetingStoreError {
 
 pub struct MeetingStore {
     connection: Mutex<Connection>,
+    database_path: Option<PathBuf>,
 }
 
 impl MeetingStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, MeetingStoreError> {
-        let connection = Connection::open(path)?;
-        Self::from_connection(connection)
+        let path = path.as_ref();
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        ensure_private_directory(parent)?;
+        repair_private_tree(parent)?;
+        repair_sqlite_files(path)?;
+        create_private_file(path)?;
+        let store = Self::from_connection(Connection::open(path)?, Some(path.to_path_buf()))?;
+        store.repair_database_permissions()?;
+        Ok(store)
     }
 
     pub fn open_in_memory() -> Result<Self, MeetingStoreError> {
-        Self::from_connection(Connection::open_in_memory()?)
+        Self::from_connection(Connection::open_in_memory()?, None)
     }
 
-    fn from_connection(mut connection: Connection) -> Result<Self, MeetingStoreError> {
+    fn from_connection(
+        mut connection: Connection,
+        database_path: Option<PathBuf>,
+    ) -> Result<Self, MeetingStoreError> {
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
@@ -136,7 +153,15 @@ impl MeetingStore {
         }
         Ok(Self {
             connection: Mutex::new(connection),
+            database_path,
         })
+    }
+
+    fn repair_database_permissions(&self) -> Result<(), MeetingStoreError> {
+        if let Some(path) = &self.database_path {
+            repair_sqlite_files(path)?;
+        }
+        Ok(())
     }
 
     pub fn schema_version(&self) -> Result<u32, MeetingStoreError> {
@@ -1148,6 +1173,17 @@ impl MeetingStore {
             .lock()
             .map_err(|_| MeetingStoreError::Poisoned)
     }
+}
+
+fn repair_sqlite_files(database_path: &Path) -> Result<(), MeetingStoreError> {
+    repair_private_file_if_exists(database_path)?;
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut name = database_path.as_os_str().to_os_string();
+        name.push(suffix);
+        let sidecar = PathBuf::from(name);
+        repair_private_file_if_exists(sidecar)?;
+    }
+    Ok(())
 }
 
 fn migrate(connection: &mut Connection) -> Result<(), MeetingStoreError> {
@@ -2279,6 +2315,84 @@ mod tests {
         }
         let reopened = MeetingStore::open(&path).unwrap();
         assert_eq!(reopened.get_meeting("meeting-1").unwrap().channels.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn meeting_database_and_wal_sidecars_are_repaired_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("meetings");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let path = root.join("meetings.sqlite");
+        let store = MeetingStore::open(&path).unwrap();
+        store.create_meeting(&meeting(), T0).unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let wal = PathBuf::from(format!("{}-wal", path.display()));
+        let shm = PathBuf::from(format!("{}-shm", path.display()));
+        assert!(wal.exists(), "WAL mode must keep a live write-ahead log");
+        assert!(shm.exists(), "WAL mode must keep a live shared-memory file");
+
+        // Simulate state left by an older permissive build, then verify an
+        // ordinary startup repairs all SQLite-owned artifacts.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o666)).unwrap();
+        std::fs::set_permissions(&shm, std::fs::Permissions::from_mode(0o666)).unwrap();
+        drop(store);
+        let reopened = MeetingStore::open(&path).unwrap();
+        reopened.repair_database_permissions().unwrap();
+        for artifact in [&path, &wal, &shm] {
+            if artifact.exists() {
+                assert_eq!(
+                    std::fs::metadata(artifact).unwrap().permissions().mode() & 0o777,
+                    0o600,
+                    "{} was not owner-only",
+                    artifact.display()
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn meeting_database_open_refuses_database_and_sidecar_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("meetings");
+        std::fs::create_dir(&root).unwrap();
+        let outside = directory.path().join("outside.sqlite");
+        std::fs::write(&outside, b"outside").unwrap();
+        let database = root.join("meetings.sqlite");
+        symlink(&outside, &database).unwrap();
+        assert!(matches!(
+            MeetingStore::open(&database),
+            Err(MeetingStoreError::PrivateStorage(_))
+        ));
+        assert_eq!(std::fs::read(&outside).unwrap(), b"outside");
+
+        std::fs::remove_file(&database).unwrap();
+        let store = MeetingStore::open(&database).unwrap();
+        drop(store);
+        let outside_sidecar = directory.path().join("outside-sidecar");
+        std::fs::write(&outside_sidecar, b"outside sidecar").unwrap();
+        let wal = PathBuf::from(format!("{}-wal", database.display()));
+        symlink(&outside_sidecar, &wal).unwrap();
+        assert!(matches!(
+            MeetingStore::open(&database),
+            Err(MeetingStoreError::PrivateStorage(_))
+        ));
+        assert_eq!(std::fs::read(&outside_sidecar).unwrap(), b"outside sidecar");
     }
 
     #[test]

@@ -10,12 +10,16 @@ use super::{
     AudioChunkDraft, AudioChunkStatus, MeetingStore, MeetingStoreError, RecoveryReport,
     TranscriptBatch, TranscriptChange, TranscriptGapInput, TranscriptGapReason,
 };
+use crate::persistence::{
+    ensure_private_directory, prepare_private_file_path, write_private_bytes_atomic,
+    write_private_json_atomic,
+};
 use chrono::{SecondsFormat, Utc};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex, MutexGuard,
@@ -180,8 +184,8 @@ pub struct NativeMeetingCapture {
 impl NativeMeetingCapture {
     pub fn new(store: Arc<MeetingStore>, data_dir: impl Into<PathBuf>) -> Result<Self, String> {
         let data_dir = data_dir.into();
-        fs::create_dir_all(&data_dir)
-            .map_err(|error| format!("could not create meeting audio directory: {error}"))?;
+        ensure_private_directory(&data_dir)
+            .map_err(|error| format!("could not secure meeting audio directory: {error}"))?;
         Ok(Self {
             store,
             data_dir,
@@ -196,7 +200,7 @@ impl NativeMeetingCapture {
     }
 
     fn recover_chunk(&self, chunk: &super::AudioChunk) -> Result<(), String> {
-        let path = contained_path(&self.data_dir, &chunk.definition.relative_path)?;
+        let path = private_audio_path(&self.data_dir, &chunk.definition.relative_path)?;
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -809,8 +813,8 @@ impl ChannelWriter {
             return Ok(());
         }
         let relative = format!("{}/audio/{}/gaps.json", self.meeting_id, self.channel_id);
-        let path = contained_path(&self.data_dir, &relative)?;
-        crate::persistence::write_json_atomic(path, &self.gaps).map_err(|error| error.to_string())
+        let path = private_audio_path(&self.data_dir, &relative)?;
+        write_private_json_atomic(path, &self.gaps).map_err(|error| error.to_string())
     }
 
     fn persist_chunk(&mut self, samples: Vec<f32>) -> Result<(), String> {
@@ -843,8 +847,8 @@ impl ChannelWriter {
         self.store
             .stage_audio_chunk(&draft, &now())
             .map_err(|error| error.to_string())?;
-        let path = contained_path(&self.data_dir, &relative)?;
-        crate::persistence::write_bytes_atomic(&path, &bytes).map_err(|error| error.to_string())?;
+        let path = private_audio_path(&self.data_dir, &relative)?;
+        write_private_bytes_atomic(&path, &bytes).map_err(|error| error.to_string())?;
         self.store
             .commit_audio_chunk(&draft.id, &now())
             .map_err(|error| error.to_string())?;
@@ -882,16 +886,9 @@ fn resample_exact(input: &[f32], output_len: usize) -> Vec<f32> {
         .collect()
 }
 
-fn contained_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let relative = Path::new(relative);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err("meeting audio path is not a contained relative path".into());
-    }
-    Ok(root.join(relative))
+fn private_audio_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    prepare_private_file_path(root, relative)
+        .map_err(|error| format!("meeting audio path is not a safe contained path: {error}"))
 }
 
 fn ensure_free_space(path: &Path) -> Result<(), String> {
@@ -1173,14 +1170,28 @@ mod tests {
     }
 
     #[test]
-    fn contained_audio_paths_reject_escape_components() {
-        let root = Path::new("/tmp/mimir-meetings");
-        assert!(contained_path(root, "meeting/audio/mic/1.f32le").is_ok());
-        assert!(contained_path(root, "../secret").is_err());
-        assert!(contained_path(root, "/tmp/secret").is_err());
-        assert_eq!(
-            contained_path(root, "audio/./secret").unwrap(),
-            root.join("audio/secret")
-        );
+    fn private_audio_paths_reject_escape_components() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("mimir-meetings");
+        fs::create_dir(&root).unwrap();
+        assert!(private_audio_path(&root, "meeting/audio/mic/1.f32le").is_ok());
+        assert!(private_audio_path(&root, "../secret").is_err());
+        assert!(private_audio_path(&root, "/tmp/secret").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_audio_path_refuses_a_symlinked_parent_component() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("meetings");
+        let outside = directory.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, root.join("meeting-1")).unwrap();
+
+        assert!(private_audio_path(&root, "meeting-1/audio/microphone/00000000.f32le").is_err());
+        assert!(!outside.join("audio").exists());
     }
 }

@@ -19,6 +19,7 @@ use crate::{
         ActivityEvent, ActivityEventSink, ActivityRecord, ActivityStatus, ActivitySubscriptionId,
         ActivitySupervisor, SessionExitReason,
     },
+    persistence::{ensure_private_directory, repair_private_file},
     routine_runtime::{MeetingHookLaunch, RoutineRuntime},
 };
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
@@ -500,14 +501,22 @@ fn prepare_hook_context(
         .export(&job.definition.meeting_id, MeetingExportFormat::Markdown)
         .map_err(|error| format!("Could not materialize the meeting transcript: {error}"))?;
     let transcript_path = PathBuf::from(export.path);
+    if let Some(parent) = transcript_path.parent() {
+        ensure_private_directory(parent).map_err(|error| {
+            format!("Could not secure the meeting transcript directory: {error}")
+        })?;
+    }
     require_regular_file(&transcript_path, MAX_OUTPUT_BYTES * 8)?;
 
     let meeting_root = contained_join(&inner.paths.meetings_root, &job.definition.meeting_id)?;
-    create_private_directory(&meeting_root)?;
+    ensure_private_directory(&meeting_root)
+        .map_err(|error| format!("Could not secure managed meeting directory: {error}"))?;
     let followups = contained_join(&meeting_root, "followups")?;
-    create_private_directory(&followups)?;
+    ensure_private_directory(&followups)
+        .map_err(|error| format!("Could not secure managed follow-up directory: {error}"))?;
     let job_root = contained_join(&followups, &job.definition.id)?;
-    create_private_directory(&job_root)?;
+    ensure_private_directory(&job_root)
+        .map_err(|error| format!("Could not secure managed follow-up job directory: {error}"))?;
     let output_path = contained_join(&job_root, output_name)?;
 
     Ok(HookContext {
@@ -783,6 +792,8 @@ fn read_controlled_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, 
 }
 
 fn open_controlled_file(path: &Path, maximum_bytes: u64) -> Result<fs::File, String> {
+    repair_private_file(path)
+        .map_err(|error| format!("Could not secure meeting artifact: {error}"))?;
     let before = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect meeting artifact: {error}"))?;
     if before.file_type().is_symlink()
@@ -814,6 +825,8 @@ fn open_controlled_file(path: &Path, maximum_bytes: u64) -> Result<fs::File, Str
 }
 
 fn require_regular_file(path: &Path, maximum_bytes: u64) -> Result<(), String> {
+    repair_private_file(path)
+        .map_err(|error| format!("Could not secure meeting artifact: {error}"))?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect meeting artifact: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
@@ -821,35 +834,6 @@ fn require_regular_file(path: &Path, maximum_bytes: u64) -> Result<(), String> {
     }
     if metadata.len() == 0 || metadata.len() > maximum_bytes {
         return Err("Meeting artifact has an invalid size".into());
-    }
-    Ok(())
-}
-
-fn create_private_directory(path: &Path) -> Result<(), String> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(format!(
-                "Refusing unsafe managed meeting directory {}",
-                path.display()
-            ));
-        }
-    } else {
-        fs::create_dir(path).map_err(|error| {
-            format!(
-                "Could not create managed meeting directory {}: {error}",
-                path.display()
-            )
-        })?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
-            format!(
-                "Could not restrict managed meeting directory {}: {error}",
-                path.display()
-            )
-        })?;
     }
     Ok(())
 }
@@ -1111,9 +1095,22 @@ mod tests {
         assert!(contained_join(directory.path(), "../escape").is_err());
         let output = directory.path().join("summary.json");
         fs::write(&output, br#"{"schemaVersion":1}"#).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&output, fs::Permissions::from_mode(0o666)).unwrap();
+        }
         assert!(require_regular_file(&output, 1024).is_ok());
         assert!(open_controlled_file(&output, 1024).is_ok());
         assert!(controlled_output_exists(&output).unwrap());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
