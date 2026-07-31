@@ -43,6 +43,12 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install pinned Rust advisory scanner
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Audit locked dependencies
+        run: bun run check:advisories
+
       - name: Check product identity
         run: bun run check:identity
 

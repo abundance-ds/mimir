@@ -50,9 +50,9 @@
     },
     {
       "feature": "features/meetings/02_capture_lifecycle.feature",
-      "idRange": ["MTG-020", "MTG-028"],
+      "idRange": ["MTG-020", "MTG-029"],
       "owner": "meeting-runtime",
-      "verificationScope": ["native lifecycle and single-owner tests", "ended-worker Stop and transcriber handoff", "snapshot and event ordering contracts", "guarded desktop Quit"]
+      "verificationScope": ["native lifecycle and single-owner tests", "ended-worker Stop, reconnect-gap revision refresh, and transcriber handoff", "snapshot and event ordering contracts", "guarded desktop Quit"]
     },
     {
       "feature": "features/meetings/03_multichannel_capture.feature",
@@ -211,6 +211,12 @@
       "path": "src-tauri/src/meetings/runtime.rs",
       "selector": "stop_winning_failed_worker_race_enqueues_repair_before_delayed_callback",
       "scenarios": ["MTG-028"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "stop_refreshes_revision_after_capture_records_reconnect_gap",
+      "scenarios": ["MTG-029"]
     },
     {
       "kind": "rust-test",

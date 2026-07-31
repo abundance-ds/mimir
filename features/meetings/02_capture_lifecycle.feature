@@ -67,3 +67,10 @@ Feature: Own meeting capture as one durable native lifecycle
     And Stop drains and removes the live transcriber before same-process repair can be claimed
     And exactly one repair job remains bound to the original capture generation
     And the delayed failure callback cannot duplicate or replace that recovery owner
+
+  @MTG-029 @automated @native @recovery
+  Scenario: Stop accepts a reconnect gap committed while capture is joining
+    Given native capture is reconnecting an audio device when Stop begins
+    When capture records the unavailable interval before its worker joins
+    Then Stop refreshes the durable meeting revision after capture teardown
+    And the meeting reaches durable finalization with the reconnect gap preserved

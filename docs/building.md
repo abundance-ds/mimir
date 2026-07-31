@@ -121,6 +121,17 @@ the human-readable inventory, model/vendor pins, packaged resources, and the
 license policy. Review the generated diff before committing; generated files
 are never an excuse to skip license review.
 
+The deterministic inventory is complemented by a current advisory scan:
+
+```bash
+cargo install cargo-audit --version 0.22.2 --locked
+bun run check:advisories
+```
+
+CI runs this before any test or package job. It fails on RustSec
+vulnerabilities and Bun production advisories; the advisory database result
+is time-sensitive evidence and is not embedded into the reproducible SBOM.
+
 Verify final artifacts:
 
 ```bash

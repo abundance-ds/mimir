@@ -34,7 +34,7 @@ fn git_status_blocking(path: &str) -> Result<Vec<GitStatusEntry>, String> {
     let mut entries = statuses
         .iter()
         .filter_map(|entry| {
-            let repository_relative = entry.path()?;
+            let repository_relative = entry.path().ok()?;
             let status = entry.status();
             let label = if status.is_index_new() || status.is_wt_new() {
                 "new"

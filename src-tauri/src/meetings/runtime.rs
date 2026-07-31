@@ -1314,9 +1314,16 @@ impl MeetingRuntime {
         if let Some(current) = self.active()?.as_mut() {
             current.duration_ms = stopped.duration_ms;
         }
+        // Native capture joins before finalization. During device reconnect or
+        // sleep recovery that join can durably append an explicit transcript
+        // gap, which advances both the transcript and meeting revisions.
+        // Finalization must extend that post-teardown authority rather than
+        // the revision captured before Stop signalled the worker.
+        debug_assert_eq!(stopping.status, MeetingStatus::Stopping);
+        let after_capture_stop = self.inner.store.get_meeting(meeting_id)?;
         let finalizing = self.inner.store.transition_meeting(
             meeting_id,
-            stopping.revision,
+            after_capture_stop.revision,
             MeetingStatus::Finalizing,
             &self.inner.clock.now(),
             None,
@@ -3003,6 +3010,61 @@ mod tests {
         }
     }
 
+    struct ReconnectGapOnStopCapture {
+        store: Arc<MeetingStore>,
+    }
+
+    impl MeetingCapturePort for ReconnectGapOnStopCapture {
+        fn recover(&self, _report: &RecoveryReport) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn start(&self, _request: &CaptureStart) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn stop(&self, request: &CaptureStop) -> Result<CaptureStopResult, String> {
+            let meeting = self
+                .store
+                .get_meeting(&request.meeting_id)
+                .map_err(|error| error.to_string())?;
+            self.store
+                .apply_transcript_batch(&TranscriptBatch {
+                    meeting_id: request.meeting_id.clone(),
+                    batch_id: format!("reconnect-gap-{}", request.run_id),
+                    base_revision: meeting.transcript_revision,
+                    source: "native-capture".into(),
+                    observed_at: NOW.into(),
+                    marks_final: false,
+                    changes: vec![TranscriptChange::OpenGap {
+                        gap: crate::meetings::TranscriptGapInput {
+                            id: "microphone-reconnect-gap".into(),
+                            start_ms: 40_000,
+                            end_ms: 42_000,
+                            reason: crate::meetings::TranscriptGapReason::DeviceChanged,
+                            channel_id: Some("microphone".into()),
+                            detail: Some(
+                                "capture stopped while audio devices were reconnecting".into(),
+                            ),
+                        },
+                    }],
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(CaptureStopResult {
+                duration_ms: 42_000,
+            })
+        }
+
+        fn set_microphone_muted(
+            &self,
+            _meeting_id: &str,
+            _run_id: &str,
+            _muted: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     struct PromotingRecoveryCapture {
         store: Arc<MeetingStore>,
     }
@@ -3949,6 +4011,39 @@ mod tests {
             .find(|meeting| meeting.id == meeting_id)
             .unwrap();
         assert_eq!(meeting.jobs.len(), 2);
+    }
+
+    #[test]
+    fn stop_refreshes_revision_after_capture_records_reconnect_gap() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let capture = Arc::new(ReconnectGapOnStopCapture {
+            store: Arc::clone(&store),
+        });
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            capture,
+            Arc::new(FakeTranscription::default()),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+        let started = runtime
+            .start(start_request(&runtime, "stop-during-reconnect"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+
+        let stopped = runtime
+            .stop(&meeting_id)
+            .expect("Stop must refresh revisions committed while capture joins");
+
+        let meeting = store.get_meeting(&meeting_id).unwrap();
+        assert_eq!(meeting.status, MeetingStatus::Completed);
+        assert_eq!(stopped.active_meeting_id, None);
+        let overview = store.transcript_overview(&meeting_id, 10).unwrap();
+        assert!(overview.is_final);
+        assert_eq!(overview.unresolved_gap_count, 1);
+        assert_eq!(overview.gaps[0].gap.id, "microphone-reconnect-gap");
     }
 
     #[test]

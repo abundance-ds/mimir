@@ -139,6 +139,19 @@ cargo test --manifest-path src-tauri/crates/mimir-meeting-audio/Cargo.toml
 cargo test --manifest-path src-tauri/crates/mimir-meeting-detect/Cargo.toml
 ```
 
+Release verification also scans both lockfiles against current advisory
+databases:
+
+```bash
+cargo install cargo-audit --version 0.22.2 --locked
+bun run check:advisories
+```
+
+The audit fails on RustSec vulnerabilities or Bun production advisories.
+RustSec informational warnings remain visible for review; parked-platform
+bindings and unmaintained transitive APIs are not silently reclassified as
+vulnerabilities.
+
 For crash-boundary changes, run the full `meetings::runtime::tests` and
 `meetings::store::tests` groups rather than filtering to one happy path.
 Lifecycle recovery, transcript repair, default-hook outbox, retention holds,

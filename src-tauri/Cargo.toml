@@ -35,7 +35,7 @@ dirs = "5"
 chrono = "0.4"
 chrono-tz = "0.10"
 cron = "0.17"
-git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "https"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "https"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"

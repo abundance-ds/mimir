@@ -129,6 +129,10 @@ When Stop discovers that the capture worker already ended, it durably records
 the interruption, drains and removes the live transcriber, and only then makes
 same-process repair claimable. A delayed failure callback is an idempotent
 redelivery and cannot create a second recovery owner.
+If Stop instead joins a worker while device or sleep recovery is recording an
+explicit gap, it reloads the post-teardown meeting revision before entering
+`Finalizing`; the gap remains authoritative without turning a successful Stop
+into a revision conflict.
 
 ## Transcription routes
 
