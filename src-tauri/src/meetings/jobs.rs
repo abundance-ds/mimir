@@ -399,36 +399,65 @@ fn execute_transcription_repair(
     inner: &MeetingJobWorkerInner,
     job: &FollowUpJob,
 ) -> Result<Value, String> {
+    execute_transcription_repair_with(&inner.runtime, inner.transcription.as_ref(), job)
+}
+
+pub(crate) fn execute_transcription_repair_with(
+    runtime: &MeetingRuntime,
+    transcription: &dyn MeetingTranscriptionPort,
+    job: &FollowUpJob,
+) -> Result<Value, String> {
+    // A provider may have committed its terminal batch and lifecycle before
+    // the job lease result reached SQLite. Redelivery must finish locally and
+    // perform zero model, credential, network, or audio-disclosure work.
+    if runtime
+        .complete_terminal_recovery(&job.definition.meeting_id)
+        .map_err(|error| format!("Could not reconcile terminal Scribe recovery: {error}"))?
+        .is_some()
+    {
+        return transcription_repair_result(runtime, &job.definition.meeting_id);
+    }
     // Repair is bound to the exact route and model persisted from the native
     // consent grant. Looking at current global settings here would let old
     // meeting audio cross a disclosure boundary after Local -> custom or
     // endpoint-A -> endpoint-B configuration changes.
     let route = required_job_payload_string(job, "transcriptionRoute")?;
     let model = required_job_payload_string(job, "transcriptionModel")?;
-    let run_id = format!("repair-{}", job.definition.id);
-    inner.transcription.start(&TranscriptionStart {
+    let capture_generation = required_job_payload_string(job, "captureGeneration")?;
+    let run_id = format!("repair-{capture_generation}");
+    transcription.start(&TranscriptionStart {
         meeting_id: job.definition.meeting_id.clone(),
         run_id: run_id.clone(),
         route: route.into(),
         model: model.into(),
+        repair_generation: Some(capture_generation.to_string()),
     })?;
-    let current = inner
-        .runtime
+    let current = runtime
         .meeting(&job.definition.meeting_id)
         .map_err(|error| format!("Could not refresh Scribe recovery state: {error}"))?;
-    let batch = inner.transcription.finalize(&TranscriptionFinalize {
+    let batch = transcription.finalize(&TranscriptionFinalize {
         meeting_id: job.definition.meeting_id.clone(),
-        run_id,
+        run_id: run_id.clone(),
         base_revision: current.transcript_revision,
         observed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
     })?;
-    inner
-        .runtime
-        .complete_transcription_retry(&job.definition.meeting_id, batch)
+    runtime
+        .complete_transcription_retry(
+            &job.definition.meeting_id,
+            capture_generation,
+            &run_id,
+            batch,
+        )
         .map_err(|error| format!("Could not commit the repaired transcript: {error}"))?;
-    let repaired = inner
-        .runtime
-        .meeting(&job.definition.meeting_id)
+    transcription_repair_result(runtime, &job.definition.meeting_id)
+}
+
+fn transcription_repair_result(
+    runtime: &MeetingRuntime,
+    meeting_id: &str,
+) -> Result<Value, String> {
+    let repaired = runtime
+        .meeting(meeting_id)
         .map_err(|error| format!("Could not reload the repaired meeting: {error}"))?;
     Ok(json!({
         "transcriptRevision": repaired.transcript_revision,

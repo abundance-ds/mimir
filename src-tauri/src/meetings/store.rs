@@ -23,7 +23,7 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 pub const MAX_TRANSCRIPT_PAGE_SEGMENTS: u32 = 250;
 pub const MAX_COMMITTED_AUDIO_CHUNK_PAGE: u32 = 512;
 const APPLICATION_ID: i64 = 0x4d4d4554; // "MMET"
@@ -57,6 +57,12 @@ pub struct TranscriptOverview {
     pub non_final_segment_count: u64,
     pub unresolved_gap_count: u64,
     pub gaps: Vec<TranscriptGapRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptRepairBegin {
+    Collecting,
+    AlreadyCommitted { revision: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,6 +278,26 @@ impl MeetingStore {
 
     pub fn list_meetings(&self, limit: u32) -> Result<Vec<MeetingRecord>, MeetingStoreError> {
         Ok(self.list_meetings_page(None, limit)?.meetings)
+    }
+
+    /// Return every interrupted meeting that still needs a startup
+    /// transcription decision. This query is intentionally independent of
+    /// the bounded renderer library projection.
+    pub fn interrupted_meeting_ids(&self) -> Result<Vec<String>, MeetingStoreError> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id FROM meetings
+             WHERE status='interrupted'
+               AND NOT EXISTS (
+                 SELECT 1 FROM meeting_deletions d
+                 WHERE d.meeting_id=meetings.id AND d.mode='all'
+               )
+             ORDER BY id",
+        )?;
+        let ids = statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
     }
 
     pub fn list_meetings_page(
@@ -703,6 +729,387 @@ impl MeetingStore {
             "UPDATE meetings SET transcript_revision=?2,revision=revision+1,updated_at=?3
              WHERE id=?1",
             params![batch.meeting_id, to_i64(revision)?, observed_at],
+        )?;
+        transaction.commit()?;
+        Ok(TranscriptApplyResult {
+            revision,
+            duplicate: false,
+        })
+    }
+
+    /// Start (or restart) one repair generation without exposing its partial
+    /// output as the authoritative transcript.
+    ///
+    /// A provider retry always begins reading committed audio from sequence
+    /// zero. Clearing only this generation's staging rows in the same
+    /// transaction means a process crash can never mix an old partial pass
+    /// with a later complete pass. A committed generation is immutable and is
+    /// returned without reopening provider work.
+    pub fn begin_transcript_repair(
+        &self,
+        meeting_id: &str,
+        capture_generation: &str,
+        provider_run_id: &str,
+        observed_at: &str,
+    ) -> Result<TranscriptRepairBegin, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        validate_id(capture_generation, "capture generation")
+            .map_err(MeetingStoreError::Validation)?;
+        validate_id(provider_run_id, "provider run id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let meeting = load_meeting_tx(&transaction, meeting_id)?;
+        if !matches!(
+            meeting.status,
+            MeetingStatus::Interrupted | MeetingStatus::Finalizing
+        ) {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting '{meeting_id}' is {} and cannot begin transcript repair",
+                meeting.status
+            )));
+        }
+        let existing = transaction
+            .query_row(
+                "SELECT provider_run_id,state,terminal_revision
+                 FROM transcript_repair_runs
+                 WHERE meeting_id=?1 AND capture_generation=?2",
+                params![meeting_id, capture_generation],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((stored_run_id, state, terminal_revision)) = existing {
+            if stored_run_id != provider_run_id {
+                return Err(MeetingStoreError::IdempotencyConflict {
+                    key: format!("{meeting_id}:{capture_generation}"),
+                });
+            }
+            if state == "committed" {
+                let revision = terminal_revision.ok_or_else(|| {
+                    MeetingStoreError::Validation(format!(
+                        "committed transcript repair '{meeting_id}:{capture_generation}' has no terminal revision"
+                    ))
+                })?;
+                transaction.commit()?;
+                return Ok(TranscriptRepairBegin::AlreadyCommitted {
+                    revision: from_i64(revision, "repair terminal revision")?,
+                });
+            }
+            transaction.execute(
+                "DELETE FROM transcript_repair_segments
+                 WHERE meeting_id=?1 AND capture_generation=?2",
+                params![meeting_id, capture_generation],
+            )?;
+            transaction.execute(
+                "UPDATE transcript_repair_runs
+                 SET state='collecting',updated_at=?3,terminal_revision=NULL
+                 WHERE meeting_id=?1 AND capture_generation=?2",
+                params![meeting_id, capture_generation, observed_at],
+            )?;
+        } else {
+            transaction.execute(
+                "INSERT INTO transcript_repair_runs (
+                   meeting_id,capture_generation,provider_run_id,state,
+                   started_at,updated_at,terminal_revision
+                 ) VALUES (?1,?2,?3,'collecting',?4,?4,NULL)",
+                params![meeting_id, capture_generation, provider_run_id, observed_at],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(TranscriptRepairBegin::Collecting)
+    }
+
+    /// Persist a bounded provider batch into private repair staging.
+    ///
+    /// These rows are not indexed by transcript search, rendered, or returned
+    /// to agents. The authoritative transcript changes only when the complete
+    /// all-final generation is reconciled below.
+    pub fn stage_transcript_repair_batch(
+        &self,
+        capture_generation: &str,
+        provider_run_id: &str,
+        batch: &TranscriptBatch,
+    ) -> Result<(), MeetingStoreError> {
+        validate_transcript_batch(batch).map_err(MeetingStoreError::Validation)?;
+        validate_id(capture_generation, "capture generation")
+            .map_err(MeetingStoreError::Validation)?;
+        validate_id(provider_run_id, "provider run id").map_err(MeetingStoreError::Validation)?;
+        if batch.marks_final {
+            return Err(MeetingStoreError::Validation(
+                "repair staging cannot accept a terminal batch".into(),
+            ));
+        }
+        let observed_at = timestamp(&batch.observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_collecting_repair_tx(
+            &transaction,
+            &batch.meeting_id,
+            capture_generation,
+            provider_run_id,
+        )?;
+        for change in &batch.changes {
+            match change {
+                TranscriptChange::UpsertSegment { segment } => {
+                    if let Some(channel_id) = &segment.channel_id {
+                        require_channel_tx(&transaction, &batch.meeting_id, channel_id)?;
+                    }
+                    let mut metadata = segment.metadata.clone();
+                    let object = metadata.as_object_mut().ok_or_else(|| {
+                        MeetingStoreError::Validation(
+                            "repair transcript segment metadata must be an object".into(),
+                        )
+                    })?;
+                    object.insert(
+                        "providerRunId".into(),
+                        serde_json::Value::String(provider_run_id.into()),
+                    );
+                    object.insert("owner".into(), serde_json::Value::String("stt".into()));
+                    transaction.execute(
+                        "INSERT INTO transcript_repair_segments (
+                           meeting_id,capture_generation,segment_id,start_ms,end_ms,text,
+                           channel_id,speaker,confidence,is_final,metadata_json,updated_at
+                         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                         ON CONFLICT(meeting_id,capture_generation,segment_id) DO UPDATE SET
+                           start_ms=excluded.start_ms,end_ms=excluded.end_ms,
+                           text=excluded.text,channel_id=excluded.channel_id,
+                           speaker=excluded.speaker,confidence=excluded.confidence,
+                           is_final=excluded.is_final,
+                           metadata_json=excluded.metadata_json,
+                           updated_at=excluded.updated_at",
+                        params![
+                            batch.meeting_id,
+                            capture_generation,
+                            segment.id,
+                            segment.start_ms,
+                            segment.end_ms,
+                            segment.text,
+                            segment.channel_id,
+                            segment.speaker,
+                            segment.confidence,
+                            segment.is_final,
+                            json(metadata)?,
+                            observed_at
+                        ],
+                    )?;
+                }
+                TranscriptChange::DeleteSegment { segment_id } => {
+                    transaction.execute(
+                        "DELETE FROM transcript_repair_segments
+                         WHERE meeting_id=?1 AND capture_generation=?2 AND segment_id=?3",
+                        params![batch.meeting_id, capture_generation, segment_id],
+                    )?;
+                }
+                TranscriptChange::OpenGap { .. } | TranscriptChange::ResolveGap { .. } => {
+                    return Err(MeetingStoreError::Validation(
+                        "provider repair batches cannot mutate capture-owned transcript gaps"
+                            .into(),
+                    ));
+                }
+            }
+        }
+        transaction.execute(
+            "UPDATE transcript_repair_runs SET updated_at=?3
+             WHERE meeting_id=?1 AND capture_generation=?2",
+            params![batch.meeting_id, capture_generation, observed_at],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Atomically replace the STT projection with one complete repair pass.
+    ///
+    /// The reconciliation is expressed as set-based SQLite operations. It
+    /// creates exactly one bounded internal transcript revision regardless of
+    /// whether the meeting has ten, five thousand, or one hundred thousand
+    /// segments; Rust never loads that corpus into memory. Capture gap rows and
+    /// every earlier segment-version row remain intact for provenance.
+    pub fn commit_transcript_repair(
+        &self,
+        capture_generation: &str,
+        provider_run_id: &str,
+        terminal: &TranscriptBatch,
+    ) -> Result<TranscriptApplyResult, MeetingStoreError> {
+        validate_transcript_batch(terminal).map_err(MeetingStoreError::Validation)?;
+        validate_id(capture_generation, "capture generation")
+            .map_err(MeetingStoreError::Validation)?;
+        validate_id(provider_run_id, "provider run id").map_err(MeetingStoreError::Validation)?;
+        if !terminal.marks_final || !terminal.changes.is_empty() {
+            return Err(MeetingStoreError::Validation(
+                "repair completion requires an empty terminal marker".into(),
+            ));
+        }
+        let observed_at = timestamp(&terminal.observed_at)?;
+        let batch_hash = transcript_batch_fingerprint(terminal, &observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let meeting = load_meeting_tx(&transaction, &terminal.meeting_id)?;
+        let repair = require_repair_tx(
+            &transaction,
+            &terminal.meeting_id,
+            capture_generation,
+            provider_run_id,
+        )?;
+        if repair.0 == "committed" {
+            let revision = repair.1.ok_or_else(|| {
+                MeetingStoreError::Validation(
+                    "committed transcript repair has no terminal revision".into(),
+                )
+            })?;
+            let (stored_batch_id, stored_hash) = transaction.query_row(
+                "SELECT r.batch_id,b.batch_hash
+                 FROM transcript_revisions r
+                 JOIN transcript_batches b
+                   ON b.meeting_id=r.meeting_id AND b.revision=r.revision
+                 WHERE r.meeting_id=?1 AND r.revision=?2",
+                params![terminal.meeting_id, revision],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )?;
+            if stored_batch_id != terminal.batch_id || stored_hash != batch_hash {
+                return Err(MeetingStoreError::IdempotencyConflict {
+                    key: format!("{}/{}", terminal.meeting_id, terminal.batch_id),
+                });
+            }
+            transaction.commit()?;
+            return Ok(TranscriptApplyResult {
+                revision: from_i64(revision, "repair terminal revision")?,
+                duplicate: true,
+            });
+        }
+        if meeting.transcript_revision != terminal.base_revision {
+            return Err(MeetingStoreError::RevisionConflict {
+                meeting_id: terminal.meeting_id.clone(),
+                expected: terminal.base_revision,
+                actual: meeting.transcript_revision,
+            });
+        }
+        let non_final: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM transcript_repair_segments
+             WHERE meeting_id=?1 AND capture_generation=?2 AND is_final=0",
+            params![terminal.meeting_id, capture_generation],
+            |row| row.get(0),
+        )?;
+        if non_final != 0 {
+            return Err(MeetingStoreError::Validation(format!(
+                "transcript repair contains {non_final} unresolved partial segment(s)"
+            )));
+        }
+        let revision = meeting
+            .transcript_revision
+            .checked_add(1)
+            .ok_or_else(|| MeetingStoreError::Validation("transcript revision overflow".into()))?;
+        transaction.execute(
+            "INSERT INTO transcript_revisions (
+               meeting_id,revision,base_revision,batch_id,source,observed_at,marks_final
+             ) VALUES (?1,?2,?3,?4,?5,?6,1)",
+            params![
+                terminal.meeting_id,
+                to_i64(revision)?,
+                to_i64(terminal.base_revision)?,
+                terminal.batch_id,
+                terminal.source.trim(),
+                observed_at
+            ],
+        )?;
+
+        // History for rows absent from the completed pass records their
+        // deletion. Rows present in both projections receive one upsert
+        // version below, preserving their original created revision.
+        transaction.execute(
+            "INSERT INTO transcript_segment_versions (
+               meeting_id,segment_id,revision,operation,created_revision
+             )
+             SELECT current.meeting_id,current.segment_id,?3,'delete',
+                    current.created_revision
+             FROM transcript_segments current
+             WHERE current.meeting_id=?1
+               AND NOT EXISTS (
+                 SELECT 1 FROM transcript_repair_segments staged
+                 WHERE staged.meeting_id=current.meeting_id
+                   AND staged.capture_generation=?2
+                   AND staged.segment_id=current.segment_id
+               )",
+            params![terminal.meeting_id, capture_generation, to_i64(revision)?],
+        )?;
+        transaction.execute(
+            "INSERT INTO transcript_segment_versions (
+               meeting_id,segment_id,revision,operation,start_ms,end_ms,text,
+               channel_id,speaker,confidence,is_final,metadata_json,created_revision
+             )
+             SELECT staged.meeting_id,staged.segment_id,?3,'upsert',
+                    staged.start_ms,staged.end_ms,staged.text,staged.channel_id,
+                    staged.speaker,staged.confidence,staged.is_final,
+                    staged.metadata_json,
+                    COALESCE(current.created_revision,?3)
+             FROM transcript_repair_segments staged
+             LEFT JOIN transcript_segments current
+               ON current.meeting_id=staged.meeting_id
+              AND current.segment_id=staged.segment_id
+             WHERE staged.meeting_id=?1 AND staged.capture_generation=?2",
+            params![terminal.meeting_id, capture_generation, to_i64(revision)?],
+        )?;
+        transaction.execute(
+            "DELETE FROM transcript_segments WHERE meeting_id=?1",
+            [terminal.meeting_id.as_str()],
+        )?;
+        transaction.execute(
+            "INSERT INTO transcript_segments (
+               meeting_id,segment_id,start_ms,end_ms,text,channel_id,speaker,
+               confidence,is_final,metadata_json,created_revision,updated_revision
+             )
+             SELECT staged.meeting_id,staged.segment_id,staged.start_ms,
+                    staged.end_ms,staged.text,staged.channel_id,staged.speaker,
+                    staged.confidence,staged.is_final,staged.metadata_json,
+                    COALESCE(versions.created_revision,?3),?3
+             FROM transcript_repair_segments staged
+             LEFT JOIN (
+               SELECT meeting_id,segment_id,MIN(created_revision) AS created_revision
+               FROM transcript_segment_versions
+               WHERE meeting_id=?1
+               GROUP BY meeting_id,segment_id
+             ) versions
+               ON versions.meeting_id=staged.meeting_id
+              AND versions.segment_id=staged.segment_id
+             WHERE staged.meeting_id=?1 AND staged.capture_generation=?2",
+            params![terminal.meeting_id, capture_generation, to_i64(revision)?],
+        )?;
+        transaction.execute(
+            "INSERT INTO transcript_batches (
+               meeting_id,batch_id,batch_hash,revision
+             ) VALUES (?1,?2,?3,?4)",
+            params![
+                terminal.meeting_id,
+                terminal.batch_id,
+                batch_hash,
+                to_i64(revision)?
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE meetings SET transcript_revision=?2,revision=revision+1,updated_at=?3
+             WHERE id=?1",
+            params![terminal.meeting_id, to_i64(revision)?, observed_at],
+        )?;
+        transaction.execute(
+            "UPDATE transcript_repair_runs
+             SET state='committed',updated_at=?3,terminal_revision=?4
+             WHERE meeting_id=?1 AND capture_generation=?2",
+            params![
+                terminal.meeting_id,
+                capture_generation,
+                observed_at,
+                to_i64(revision)?
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM transcript_repair_segments
+             WHERE meeting_id=?1 AND capture_generation=?2",
+            params![terminal.meeting_id, capture_generation],
         )?;
         transaction.commit()?;
         Ok(TranscriptApplyResult {
@@ -1909,6 +2316,12 @@ fn migrate(connection: &mut Connection) -> Result<(), MeetingStoreError> {
         transaction.pragma_update(None, "user_version", 5)?;
         transaction.commit()?;
     }
+    if version < 6 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migration_v6(&transaction)?;
+        transaction.pragma_update(None, "user_version", 6)?;
+        transaction.commit()?;
+    }
     Ok(())
 }
 
@@ -2208,6 +2621,109 @@ fn migration_v5(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> 
          END;",
     )?;
     Ok(())
+}
+
+fn migration_v6(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> {
+    transaction.execute_batch(
+        "CREATE TABLE transcript_repair_runs (
+           meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+           capture_generation TEXT NOT NULL,
+           provider_run_id TEXT NOT NULL,
+           state TEXT NOT NULL CHECK(state IN ('collecting','committed')),
+           started_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL,
+           terminal_revision INTEGER,
+           PRIMARY KEY(meeting_id,capture_generation),
+           FOREIGN KEY(meeting_id,terminal_revision)
+             REFERENCES transcript_revisions(meeting_id,revision),
+           CHECK(
+             (state='collecting' AND terminal_revision IS NULL)
+             OR (state='committed' AND terminal_revision IS NOT NULL)
+           )
+         );
+         CREATE TABLE transcript_repair_segments (
+           meeting_id TEXT NOT NULL,
+           capture_generation TEXT NOT NULL,
+           segment_id TEXT NOT NULL,
+           start_ms INTEGER NOT NULL CHECK(start_ms>=0),
+           end_ms INTEGER NOT NULL CHECK(end_ms>start_ms),
+           text TEXT NOT NULL,
+           channel_id TEXT,
+           speaker TEXT,
+           confidence REAL,
+           is_final INTEGER NOT NULL,
+           metadata_json TEXT NOT NULL,
+           updated_at TEXT NOT NULL,
+           PRIMARY KEY(meeting_id,capture_generation,segment_id),
+           FOREIGN KEY(meeting_id,capture_generation)
+             REFERENCES transcript_repair_runs(meeting_id,capture_generation)
+             ON DELETE CASCADE,
+           FOREIGN KEY(meeting_id,channel_id)
+             REFERENCES audio_channels(meeting_id,id),
+           CHECK(confidence IS NULL OR (confidence>=0.0 AND confidence<=1.0))
+         );
+         CREATE INDEX idx_transcript_repair_state
+           ON transcript_repair_runs(state,updated_at,meeting_id,capture_generation);
+
+         -- Pre-v6 repair rows hash an intent keyed by mutable transcript
+         -- revision. Rewriting only their key/payload would invalidate that
+         -- request hash. Cancel the legacy owners atomically; startup scans
+         -- every interrupted meeting and creates one freshly hashed job bound
+         -- to its immutable capture generation.
+         UPDATE follow_up_jobs
+         SET state='cancelled',
+             last_error='superseded by capture-generation repair ownership migration',
+             lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL
+         WHERE kind='custom:transcription'
+           AND state IN ('pending','running');",
+    )?;
+    Ok(())
+}
+
+fn require_collecting_repair_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+    capture_generation: &str,
+    provider_run_id: &str,
+) -> Result<(), MeetingStoreError> {
+    let (state, _) =
+        require_repair_tx(transaction, meeting_id, capture_generation, provider_run_id)?;
+    if state != "collecting" {
+        return Err(MeetingStoreError::Validation(format!(
+            "transcript repair '{meeting_id}:{capture_generation}' is already committed"
+        )));
+    }
+    Ok(())
+}
+
+fn require_repair_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+    capture_generation: &str,
+    provider_run_id: &str,
+) -> Result<(String, Option<i64>), MeetingStoreError> {
+    let repair = transaction
+        .query_row(
+            "SELECT provider_run_id,state,terminal_revision
+             FROM transcript_repair_runs
+             WHERE meeting_id=?1 AND capture_generation=?2",
+            params![meeting_id, capture_generation],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| not_found("transcript repair", capture_generation))?;
+    if repair.0 != provider_run_id {
+        return Err(MeetingStoreError::IdempotencyConflict {
+            key: format!("{meeting_id}:{capture_generation}"),
+        });
+    }
+    Ok((repair.1, repair.2))
 }
 
 fn insert_channel(
@@ -3216,6 +3732,31 @@ mod tests {
         }
     }
 
+    fn repair_terminal(base_revision: u64) -> TranscriptBatch {
+        TranscriptBatch {
+            meeting_id: "meeting-1".into(),
+            batch_id: "repair-terminal".into(),
+            base_revision,
+            source: "repair-local-whisper".into(),
+            observed_at: T3.into(),
+            marks_final: true,
+            changes: Vec::new(),
+        }
+    }
+
+    fn interrupt(store: &MeetingStore) {
+        let meeting = store.get_meeting("meeting-1").unwrap();
+        store
+            .transition_meeting(
+                "meeting-1",
+                meeting.revision,
+                MeetingStatus::Interrupted,
+                T2,
+                None,
+            )
+            .unwrap();
+    }
+
     fn job(id: &str, key: &str, max_attempts: u32) -> FollowUpJobDraft {
         FollowUpJobDraft {
             id: id.into(),
@@ -3269,11 +3810,93 @@ mod tests {
         }
 
         let store = MeetingStore::from_connection(connection, None).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 5);
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         let hits = store.search_content("acy substring", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].meeting_id, "meeting-legacy");
         assert!(hits[0].title_match);
+    }
+
+    #[test]
+    fn schema_v6_cancels_mutable_revision_repairs_before_fresh_generation_ownership() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        {
+            let transaction = connection.transaction().unwrap();
+            migration_v1(&transaction).unwrap();
+            migration_v2(&transaction).unwrap();
+            migration_v3(&transaction).unwrap();
+            migration_v4(&transaction).unwrap();
+            migration_v5(&transaction).unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO meetings (
+                       id,title,origin_json,status,created_at,updated_at,metadata_json
+                     ) VALUES (
+                       'meeting-legacy-repair','Legacy repair',
+                       '{\"kind\":\"manual\",\"evidence\":{}}','interrupted',?1,?1,
+                       '{\"runId\":\"run-stable-generation\"}'
+                     )",
+                    [T0],
+                )
+                .unwrap();
+            for (id, revision) in [("legacy-repair-zero", 0), ("legacy-repair-one", 1)] {
+                transaction
+                    .execute(
+                        "INSERT INTO follow_up_jobs (
+                           id,meeting_id,kind,idempotency_key,request_hash,payload_json,
+                           state,attempts,max_attempts,not_before,created_at,updated_at
+                         ) VALUES (
+                           ?1,'meeting-legacy-repair','custom:transcription',?2,?3,?4,
+                           'pending',0,3,?5,?5,?5
+                         )",
+                        params![
+                            id,
+                            format!("meeting-legacy-repair:transcription:{revision}"),
+                            format!("legacy-intent-hash-{revision}"),
+                            serde_json::to_string(&json!({
+                                "meetingId": "meeting-legacy-repair",
+                                "transcriptRevision": revision
+                            }))
+                            .unwrap(),
+                            T0
+                        ],
+                    )
+                    .unwrap();
+            }
+            transaction
+                .pragma_update(None, "application_id", APPLICATION_ID)
+                .unwrap();
+            transaction.pragma_update(None, "user_version", 5).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        let store = MeetingStore::from_connection(connection, None).unwrap();
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        let legacy = store.list_jobs("meeting-legacy-repair").unwrap();
+        assert_eq!(legacy.len(), 2);
+        assert!(legacy.iter().all(|job| job.state == JobState::Cancelled));
+        assert!(legacy.iter().all(|job| {
+            job.last_error.as_deref()
+                == Some("superseded by capture-generation repair ownership migration")
+        }));
+
+        let fresh = FollowUpJobDraft {
+            id: "job-transcription-run-stable-generation".into(),
+            meeting_id: "meeting-legacy-repair".into(),
+            kind: FollowUpJobKind::Custom("transcription".into()),
+            idempotency_key: "meeting-legacy-repair:transcription:run-stable-generation".into(),
+            payload: json!({
+                "meetingId": "meeting-legacy-repair",
+                "captureGeneration": "run-stable-generation",
+                "transcriptionRoute": "local",
+                "transcriptionModel": "whisper-small"
+            }),
+            max_attempts: 3,
+            not_before: T1.into(),
+        };
+        let (enqueued, duplicate) = store.enqueue_job(&fresh, T1).unwrap();
+        assert!(!duplicate);
+        assert_eq!(enqueued.state, JobState::Pending);
     }
 
     #[test]
@@ -3507,6 +4130,244 @@ mod tests {
                 Some("2026-07-30T10:02:00.000Z")
             );
         }
+    }
+
+    #[test]
+    fn repair_replaces_partial_and_final_stt_rows_but_preserves_gaps_and_history() {
+        let store = store();
+        start_recording(&store);
+        let mut old_final = segment("old-final", "Old final");
+        old_final.is_final = true;
+        let prior = batch(
+            "prior-live",
+            0,
+            vec![
+                TranscriptChange::UpsertSegment { segment: old_final },
+                TranscriptChange::UpsertSegment {
+                    segment: segment("stale-partial", "unfinished"),
+                },
+                TranscriptChange::OpenGap {
+                    gap: TranscriptGapInput {
+                        id: "capture-gap".into(),
+                        start_ms: 1_000,
+                        end_ms: 2_000,
+                        reason: TranscriptGapReason::CaptureUnavailable,
+                        channel_id: Some("system".into()),
+                        detail: Some("capture sleep provenance".into()),
+                    },
+                },
+            ],
+        );
+        store.apply_transcript_batch(&prior).unwrap();
+        interrupt(&store);
+
+        assert_eq!(
+            store
+                .begin_transcript_repair(
+                    "meeting-1",
+                    "run-generation-1",
+                    "repair-run-generation-1",
+                    T2,
+                )
+                .unwrap(),
+            TranscriptRepairBegin::Collecting
+        );
+        let mut repaired = segment("new-final", "Repaired from audio sequence zero");
+        repaired.is_final = true;
+        store
+            .stage_transcript_repair_batch(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &batch(
+                    "repair-segments",
+                    1,
+                    vec![TranscriptChange::UpsertSegment { segment: repaired }],
+                ),
+            )
+            .unwrap();
+        let applied = store
+            .commit_transcript_repair(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &repair_terminal(1),
+            )
+            .unwrap();
+        assert_eq!(applied.revision, 2);
+        assert!(!applied.duplicate);
+
+        let current = store.transcript_snapshot("meeting-1", None).unwrap();
+        assert_eq!(current.segments.len(), 1);
+        assert_eq!(current.segments[0].segment.id, "new-final");
+        assert!(current.segments[0].segment.is_final);
+        assert_eq!(
+            current.segments[0].segment.metadata["providerRunId"],
+            "repair-run-generation-1"
+        );
+        assert_eq!(current.gaps.len(), 1);
+        assert_eq!(current.gaps[0].gap.id, "capture-gap");
+
+        let before_repair = store.transcript_snapshot("meeting-1", Some(1)).unwrap();
+        assert_eq!(before_repair.segments.len(), 2);
+        assert!(before_repair
+            .segments
+            .iter()
+            .any(|segment| segment.segment.id == "stale-partial"));
+        assert_eq!(before_repair.gaps[0].gap.id, "capture-gap");
+
+        let duplicate = store
+            .commit_transcript_repair(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &repair_terminal(1),
+            )
+            .unwrap();
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.revision, 2);
+    }
+
+    #[test]
+    fn repair_restart_twice_clears_stale_staging_and_requires_all_final_output() {
+        let store = store();
+        start_recording(&store);
+        interrupt(&store);
+        let mut partial = segment("provider-segment", "partial repair");
+        partial.metadata = json!({"attempt": 1});
+        store
+            .begin_transcript_repair(
+                "meeting-1",
+                "run-generation-1",
+                "repair-run-generation-1",
+                T1,
+            )
+            .unwrap();
+        store
+            .stage_transcript_repair_batch(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &batch(
+                    "repair-partial",
+                    0,
+                    vec![TranscriptChange::UpsertSegment { segment: partial }],
+                ),
+            )
+            .unwrap();
+        assert!(store
+            .commit_transcript_repair(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &repair_terminal(0),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("unresolved partial"));
+
+        // Two process restarts replay audio from zero under the same stable
+        // provider run. Each begin clears only private staging; no partial
+        // repair row ever reaches the authoritative transcript.
+        for observed_at in [T2, T3] {
+            assert_eq!(
+                store
+                    .begin_transcript_repair(
+                        "meeting-1",
+                        "run-generation-1",
+                        "repair-run-generation-1",
+                        observed_at,
+                    )
+                    .unwrap(),
+                TranscriptRepairBegin::Collecting
+            );
+            assert_eq!(
+                store
+                    .transcript_overview("meeting-1", 1)
+                    .unwrap()
+                    .segment_count,
+                0
+            );
+        }
+        let mut final_segment = segment("provider-segment", "complete repair");
+        final_segment.is_final = true;
+        store
+            .stage_transcript_repair_batch(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &batch(
+                    "repair-final",
+                    0,
+                    vec![TranscriptChange::UpsertSegment {
+                        segment: final_segment,
+                    }],
+                ),
+            )
+            .unwrap();
+        store
+            .commit_transcript_repair(
+                "run-generation-1",
+                "repair-run-generation-1",
+                &repair_terminal(0),
+            )
+            .unwrap();
+        let overview = store.transcript_overview("meeting-1", 1).unwrap();
+        assert!(overview.is_final);
+        assert_eq!(overview.segment_count, 1);
+        assert_eq!(overview.non_final_segment_count, 0);
+    }
+
+    #[test]
+    fn silent_repair_commits_an_empty_all_final_generation() {
+        let store = store();
+        start_recording(&store);
+        interrupt(&store);
+        store
+            .begin_transcript_repair("meeting-1", "run-silent", "repair-run-silent", T2)
+            .unwrap();
+        store
+            .commit_transcript_repair("run-silent", "repair-run-silent", &repair_terminal(0))
+            .unwrap();
+        let overview = store.transcript_overview("meeting-1", 1).unwrap();
+        assert!(overview.is_final);
+        assert_eq!(overview.segment_count, 0);
+        assert_eq!(overview.non_final_segment_count, 0);
+    }
+
+    #[test]
+    fn repair_reconciliation_is_one_revision_beyond_one_hundred_thousand_segments() {
+        let store = store();
+        start_recording(&store);
+        interrupt(&store);
+        store
+            .begin_transcript_repair("meeting-1", "run-scale", "repair-run-scale", T2)
+            .unwrap();
+        {
+            let connection = store.lock().unwrap();
+            connection
+                .execute_batch(
+                    "WITH RECURSIVE counter(value) AS (
+                       SELECT 0
+                       UNION ALL
+                       SELECT value+1 FROM counter WHERE value<100000
+                     )
+                     INSERT INTO transcript_repair_segments (
+                       meeting_id,capture_generation,segment_id,start_ms,end_ms,
+                       text,channel_id,speaker,confidence,is_final,metadata_json,
+                       updated_at
+                     )
+                     SELECT 'meeting-1','run-scale',printf('segment-%06d',value),
+                            value*10,value*10+9,printf('text %d',value),
+                            'system',NULL,NULL,1,
+                            '{\"owner\":\"stt\",\"providerRunId\":\"repair-run-scale\"}',
+                            '2026-07-30T10:02:00Z'
+                     FROM counter;",
+                )
+                .unwrap();
+        }
+        let applied = store
+            .commit_transcript_repair("run-scale", "repair-run-scale", &repair_terminal(0))
+            .unwrap();
+        assert_eq!(applied.revision, 1);
+        let overview = store.transcript_overview("meeting-1", 1).unwrap();
+        assert_eq!(overview.segment_count, 100_001);
+        assert_eq!(overview.non_final_segment_count, 0);
+        assert!(overview.is_final);
     }
 
     #[test]

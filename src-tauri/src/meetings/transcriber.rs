@@ -17,7 +17,7 @@ use super::{
         STT_WIRE_CONTRACT,
     },
     AudioChunk, AudioChunkStatus, MeetingStore, TranscriptBatch, TranscriptChange,
-    TranscriptSegmentInput,
+    TranscriptRepairBegin, TranscriptSegmentInput,
 };
 use chrono::{SecondsFormat, Utc};
 use futures_util::{future::BoxFuture, SinkExt, StreamExt};
@@ -317,6 +317,25 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                 request.meeting_id
             ));
         }
+        if let Some(capture_generation) = request.repair_generation.as_deref() {
+            match self
+                .store
+                .begin_transcript_repair(
+                    &request.meeting_id,
+                    capture_generation,
+                    &request.run_id,
+                    &now(),
+                )
+                .map_err(|error| error.to_string())?
+            {
+                TranscriptRepairBegin::Collecting => {}
+                TranscriptRepairBegin::AlreadyCommitted { revision } => {
+                    return Err(format!(
+                        "transcript repair generation was already committed at revision {revision}"
+                    ));
+                }
+            }
+        }
         let provider = self.provider_resolver.resolve(request)?;
 
         let (finalize_tx, finalize_rx) = mpsc::channel();
@@ -465,6 +484,7 @@ fn run_worker(
         &request.meeting_id,
         &request.run_id,
         source,
+        request.repair_generation.as_deref(),
         changes,
     )?;
 
@@ -1037,6 +1057,7 @@ struct StoreBatchSink {
     meeting_id: String,
     provider_run_id: String,
     source: String,
+    repair_generation: Option<String>,
     accumulator: TranscriptAccumulator,
     final_segment_count: u64,
     changes: Arc<dyn TranscriptionChangeSink>,
@@ -1048,6 +1069,7 @@ impl StoreBatchSink {
         meeting_id: &str,
         provider_run_id: &str,
         source: &str,
+        repair_generation: Option<&str>,
         changes: Arc<dyn TranscriptionChangeSink>,
     ) -> Result<Self, String> {
         WireId::new(meeting_id.to_string()).map_err(|error| error.to_string())?;
@@ -1057,6 +1079,7 @@ impl StoreBatchSink {
             meeting_id: meeting_id.into(),
             provider_run_id: provider_run_id.into(),
             source: source.into(),
+            repair_generation: repair_generation.map(str::to_string),
             accumulator: TranscriptAccumulator::default(),
             final_segment_count: 0,
             changes,
@@ -1122,6 +1145,8 @@ impl NormalizedBatchSink for StoreBatchSink {
                     confidence: segment.confidence.map(f64::from),
                     is_final: segment.state == SegmentState::Final,
                     metadata: json!({
+                        "owner": "stt",
+                        "providerRunId": self.provider_run_id,
                         "providerSequence": accepted.provider_sequence,
                         "providerRevision": segment.revision,
                         "language": segment.language,
@@ -1153,10 +1178,16 @@ impl NormalizedBatchSink for StoreBatchSink {
             marks_final: false,
             changes,
         };
-        self.store
-            .apply_transcript_batch(&durable)
-            .map_err(|error| error.to_string())?;
-        self.changes.changed(&self.meeting_id);
+        if let Some(capture_generation) = self.repair_generation.as_deref() {
+            self.store
+                .stage_transcript_repair_batch(capture_generation, &self.provider_run_id, &durable)
+                .map_err(|error| error.to_string())?;
+        } else {
+            self.store
+                .apply_transcript_batch(&durable)
+                .map_err(|error| error.to_string())?;
+            self.changes.changed(&self.meeting_id);
+        }
         self.accumulator = candidate;
         self.final_segment_count = self.final_segment_count.saturating_add(accepted_finals);
         Ok(())
@@ -1877,6 +1908,45 @@ mod tests {
         }
     }
 
+    struct OneFinalRepairLocal;
+
+    impl LocalTranscriber for OneFinalRepairLocal {
+        fn verify(&self, model_id: &str) -> Result<VerifiedLocalRuntime, String> {
+            Ok(VerifiedLocalRuntime {
+                runtime_id: "repair-test-runtime".into(),
+                runtime_version: "1".into(),
+                model_sha256: format!("verified-{model_id}"),
+            })
+        }
+
+        fn run(&self, context: LocalTranscriptionContext<'_>) -> Result<(), String> {
+            context
+                .sink
+                .ingest(NormalizedTranscriptBatch {
+                    provider_sequence: 1,
+                    batch_id: WireId::new("repair-provider-batch").unwrap(),
+                    segments: vec![NormalizedSegment {
+                        segment_id: WireId::new("utterance-repaired").unwrap(),
+                        revision: 1,
+                        state: SegmentState::Final,
+                        start_ms: 0,
+                        end_ms: 1_000,
+                        text: "Repaired only after the complete pass.".into(),
+                        channel_id: Some(WireId::new("microphone").unwrap()),
+                        speaker: Some("You".into()),
+                        language: Some("en".into()),
+                        confidence: Some(0.97),
+                    }],
+                })
+                .map_err(|error| error.to_string())?;
+            context
+                .finalize
+                .recv()
+                .map_err(|_| "repair test finalization channel closed".to_string())?;
+            Ok(())
+        }
+    }
+
     fn recording_store() -> Arc<MeetingStore> {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let created = store
@@ -1943,6 +2013,7 @@ mod tests {
             run_id: "silent-run".into(),
             route: "local".into(),
             model: "whisper-small".into(),
+            repair_generation: None,
         };
         transcriber.start(&start).unwrap();
 
@@ -1965,6 +2036,96 @@ mod tests {
     }
 
     #[test]
+    fn repair_worker_stages_privately_then_reconciles_from_audio_zero() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        store
+            .apply_transcript_batch(&TranscriptBatch {
+                meeting_id: "meeting-1".into(),
+                batch_id: "pre-crash-partial".into(),
+                base_revision: 0,
+                source: "custom".into(),
+                observed_at: "2026-07-30T10:00:02Z".into(),
+                marks_final: false,
+                changes: vec![TranscriptChange::UpsertSegment {
+                    segment: TranscriptSegmentInput {
+                        id: "stale-live-partial".into(),
+                        start_ms: 0,
+                        end_ms: 500,
+                        text: "stale partial".into(),
+                        channel_id: Some("microphone".into()),
+                        speaker: None,
+                        confidence: Some(0.4),
+                        is_final: false,
+                        metadata: json!({
+                            "owner": "stt",
+                            "providerRunId": "crashed-live-run"
+                        }),
+                    },
+                }],
+            })
+            .unwrap();
+        let meeting = store.get_meeting("meeting-1").unwrap();
+        store
+            .transition_meeting(
+                "meeting-1",
+                meeting.revision,
+                MeetingStatus::Interrupted,
+                "2026-07-30T10:00:03Z",
+                None,
+            )
+            .unwrap();
+        let changes = Arc::new(CountingChanges::default());
+        let transcriber = NativeMeetingTranscriber::new(
+            Arc::clone(&store),
+            temporary.path(),
+            Arc::new(RuntimeRouteResolver),
+            Arc::new(NoMeetingCredential),
+            Arc::new(OneFinalRepairLocal),
+            changes.clone(),
+        )
+        .unwrap();
+        let start = TranscriptionStart {
+            meeting_id: "meeting-1".into(),
+            run_id: "repair-run-generation-1".into(),
+            route: "local".into(),
+            model: "whisper-small".into(),
+            repair_generation: Some("run-generation-1".into()),
+        };
+        transcriber.start(&start).unwrap();
+        let terminal = transcriber
+            .finalize(&TranscriptionFinalize {
+                meeting_id: "meeting-1".into(),
+                run_id: start.run_id.clone(),
+                base_revision: 1,
+                observed_at: "2026-07-30T10:05:00Z".into(),
+            })
+            .unwrap();
+
+        // Provider output has completed, but only private repair staging has
+        // changed. The pre-crash transcript remains authoritative until the
+        // terminal reconciliation transaction.
+        let before_commit = store.transcript_snapshot("meeting-1", None).unwrap();
+        assert_eq!(before_commit.segments.len(), 1);
+        assert_eq!(before_commit.segments[0].segment.id, "stale-live-partial");
+        assert_eq!(changes.0.load(Ordering::Relaxed), 0);
+        store
+            .commit_transcript_repair("run-generation-1", "repair-run-generation-1", &terminal)
+            .unwrap();
+        let after_commit = store.transcript_snapshot("meeting-1", None).unwrap();
+        assert_eq!(after_commit.segments.len(), 1);
+        assert_eq!(
+            after_commit.segments[0].segment.text,
+            "Repaired only after the complete pass."
+        );
+        assert!(after_commit.segments[0].segment.is_final);
+        assert_eq!(
+            after_commit.segments[0].segment.metadata["providerRunId"],
+            "repair-run-generation-1"
+        );
+    }
+
+    #[test]
     fn partial_segments_are_live_durable_and_replaced_by_their_final_revision() {
         let store = recording_store();
         let changes = Arc::new(CountingChanges::default());
@@ -1973,6 +2134,7 @@ mod tests {
             "meeting-1",
             "run-1",
             "custom",
+            None,
             changes.clone(),
         )
         .unwrap();
@@ -2311,6 +2473,7 @@ mod tests {
                 run_id: "run-1".into(),
                 route: "local".into(),
                 model: "whisper-small".into(),
+                repair_generation: None,
             })
             .unwrap();
         assert!(matches!(local, ResolvedTranscriptionProvider::Local { .. }));
@@ -2321,6 +2484,7 @@ mod tests {
                 run_id: "run-1".into(),
                 route: "https://speech.example.com/mimir".into(),
                 model: "meeting-model".into(),
+                repair_generation: None,
             })
             .unwrap();
         let ResolvedTranscriptionProvider::Custom { endpoint, .. } = custom else {
@@ -2334,6 +2498,7 @@ mod tests {
                 run_id: "run-1".into(),
                 route: "http://speech.example.com/mimir".into(),
                 model: "meeting-model".into(),
+                repair_generation: None,
             })
             .is_err());
         assert!(resolver
@@ -2342,6 +2507,7 @@ mod tests {
                 run_id: "run-1".into(),
                 route: "http://127.0.0.1:9000/mimir".into(),
                 model: "meeting-model".into(),
+                repair_generation: None,
             })
             .is_err());
     }
@@ -2669,6 +2835,7 @@ mod tests {
             "meeting-1",
             "tls-run",
             "custom",
+            None,
             Arc::new(CountingChanges::default()),
         )
         .unwrap();
@@ -2766,6 +2933,7 @@ mod tests {
             run_id: "tls-run".into(),
             route: endpoint.as_str().into(),
             model: "tls-model".into(),
+            repair_generation: None,
         };
         let (finalize_tx, finalize_rx) = mpsc::channel();
         finalize_tx

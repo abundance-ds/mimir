@@ -29,7 +29,7 @@ pub use model::{
 };
 pub use store::{
     MeetingDeletion, MeetingDeletionMode, MeetingDeletionStage, MeetingStore, MeetingStoreError,
-    CURRENT_SCHEMA_VERSION,
+    TranscriptRepairBegin, CURRENT_SCHEMA_VERSION,
 };
 pub use transcript::{
     ProviderTranscriptFrame, TranscriptNormalization, TranscriptNormalizer,
