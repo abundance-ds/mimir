@@ -1,10 +1,17 @@
 <template>
   <section
+    ref="settingsRoot"
     data-scribe-settings-panel
+    :aria-labelledby="embedded ? undefined : 'scribe-settings-title'"
+    :aria-label="embedded ? 'Scribe settings' : undefined"
+    tabindex="-1"
     :class="embedded ? 'min-h-full' : 'h-full overflow-y-auto'"
+    @keydown.esc="close"
   >
     <header v-if="!embedded" class="flex h-10 items-center border-b border-rule px-4">
-      <h2 class="flex-1 text-[11px] font-semibold">Scribe settings</h2>
+      <h2 id="scribe-settings-title" class="flex-1 text-[11px] font-semibold">
+        Scribe settings
+      </h2>
       <button
         type="button"
         class="grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
@@ -35,9 +42,13 @@
         </label>
         <dl class="mt-3 grid grid-cols-[130px_1fr] border-t border-rule-light text-[10px]">
           <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
-          <dd class="border-b border-rule-light py-2">{{ permissions.microphone }}</dd>
+          <dd class="border-b border-rule-light py-2">
+            {{ permissionLabel(permissions.microphone) }}
+          </dd>
           <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
-          <dd class="border-b border-rule-light py-2">{{ permissions.systemAudio }}</dd>
+          <dd class="border-b border-rule-light py-2">
+            {{ permissionLabel(permissions.systemAudio) }}
+          </dd>
         </dl>
         <button
           v-if="permissions.microphone !== 'granted'"
@@ -53,26 +64,36 @@
 
       <section class="py-4">
         <h3 class="text-[11px] font-semibold">Transcription</h3>
-        <div class="mt-3 grid grid-cols-2 border border-rule">
+        <div
+          class="mt-3 grid grid-cols-2 border border-rule"
+          role="radiogroup"
+          aria-label="Transcription route"
+        >
           <button
             type="button"
+            role="radio"
             class="h-9 border-r border-rule text-[10px]"
             :class="config.transcriptionMode === 'local'
               ? 'bg-accent-soft text-ink'
               : 'bg-chrome-high text-ink-3 hover:bg-chrome-mid'"
-            :aria-pressed="config.transcriptionMode === 'local'"
+            :aria-checked="config.transcriptionMode === 'local'"
+            :tabindex="config.transcriptionMode === 'local' ? 0 : -1"
             @click="save({ transcriptionMode: 'local' })"
+            @keydown="onModeKeydown"
           >
             Local model
           </button>
           <button
             type="button"
+            role="radio"
             class="h-9 text-[10px]"
             :class="config.transcriptionMode === 'custom'
               ? 'bg-accent-soft text-ink'
               : 'bg-chrome-high text-ink-3 hover:bg-chrome-mid'"
-            :aria-pressed="config.transcriptionMode === 'custom'"
+            :aria-checked="config.transcriptionMode === 'custom'"
+            :tabindex="config.transcriptionMode === 'custom' ? 0 : -1"
             @click="save({ transcriptionMode: 'custom' })"
+            @keydown="onModeKeydown"
           >
             Custom URL
           </button>
@@ -92,6 +113,17 @@
               <small class="block font-mono text-[9px] text-ink-3">
                 {{ modelStatus(model) }}
               </small>
+              <span
+                v-if="model.status === 'downloading'"
+                role="progressbar"
+                :aria-label="`Installing ${model.title}`"
+                :aria-valuenow="modelProgress(model)"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                class="sr-only"
+              >
+                {{ modelProgress(model) }}%
+              </span>
             </span>
             <button
               v-if="model.status !== 'installed'"
@@ -100,7 +132,7 @@
               :disabled="Boolean(pending[`model:${model.id}`])"
               @click="$emit('installModel', model.id)"
             >
-              Install
+              {{ pending[`model:${model.id}`] ? 'Installing…' : 'Install' }}
             </button>
             <button
               v-else
@@ -109,7 +141,7 @@
               :disabled="Boolean(pending[`model:${model.id}`])"
               @click="$emit('deleteModel', model.id)"
             >
-              Remove
+              {{ pending[`model:${model.id}`] ? 'Removing…' : 'Remove' }}
             </button>
           </div>
         </div>
@@ -122,6 +154,7 @@
               type="url"
               class="scribe-settings-input"
               placeholder="https://stt.example.com/v1/listen"
+              aria-describedby="scribe-custom-route-help"
               @change="save({ customUrl })"
             />
           </label>
@@ -134,7 +167,7 @@
               @change="save({ customModel })"
             />
           </label>
-          <label class="block">
+          <form class="block" @submit.prevent="saveKey">
             <span class="scribe-settings-label">API key</span>
             <span class="flex gap-2">
               <input
@@ -145,12 +178,11 @@
                 :placeholder="config.apiKeyConfigured ? 'Stored in Keychain' : 'Enter API key'"
               />
               <button
-                type="button"
+                type="submit"
                 class="scribe-settings-button"
                 :disabled="!apiKey.trim() || Boolean(pending['api-key'])"
-                @click="saveKey"
               >
-                Save key
+                {{ pending['api-key'] ? 'Saving…' : 'Save key' }}
               </button>
               <button
                 v-if="config.apiKeyConfigured"
@@ -159,13 +191,14 @@
                 :disabled="Boolean(pending['api-key'])"
                 @click="$emit('clearApiKey')"
               >
-                Clear
+                {{ pending['api-key'] ? 'Clearing…' : 'Clear' }}
               </button>
             </span>
-          </label>
-          <p class="text-[9px] leading-relaxed text-ink-3">
+          </form>
+          <p id="scribe-custom-route-help" class="text-[9px] leading-relaxed text-ink-3">
             Remote URLs must use HTTPS; Mimir upgrades the connection to secure WebSocket.
-            The key remains native and is never returned to the renderer.
+            Both audio channels and transcript timing go only to that exact endpoint.
+            The key remains in Keychain and is never returned to this screen.
           </p>
         </div>
       </section>
@@ -185,15 +218,12 @@
         </label>
         <label class="mt-3 block">
           <span class="scribe-settings-label">Knowledge-graph follow-up</span>
-          <select
-            :value="config.kgPrompt"
-            class="scribe-settings-input"
-            @change="save({ kgPrompt: $event.target.value })"
-          >
-            <option value="ask">Ask every time</option>
-            <option value="always-draft">Always create a reviewable draft</option>
-            <option value="never">Never ask</option>
-          </select>
+          <ScribeSelect
+            :model-value="config.kgPrompt"
+            :options="kgPromptOptions"
+            aria-label="Knowledge-graph follow-up"
+            @update:model-value="save({ kgPrompt: $event })"
+          />
         </label>
       </section>
 
@@ -201,17 +231,12 @@
         <h3 class="text-[11px] font-semibold">Retention</h3>
         <label class="mt-3 block">
           <span class="scribe-settings-label">Keep source audio</span>
-          <select
-            :value="retentionValue"
-            class="scribe-settings-input"
-            @change="saveRetention($event.target.value)"
-          >
-            <option value="0">Delete after final transcript</option>
-            <option value="7">7 days</option>
-            <option value="30">30 days</option>
-            <option value="90">90 days</option>
-            <option value="forever">Until I delete it</option>
-          </select>
+          <ScribeSelect
+            :model-value="retentionValue"
+            :options="retentionOptions"
+            aria-label="Keep source audio"
+            @update:model-value="saveRetention"
+          />
         </label>
         <p class="mt-2 text-[9px] leading-relaxed text-ink-3">
           Recovery-required audio and audio used by an active follow-up job are held until safe.
@@ -224,6 +249,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { IconX } from '@tabler/icons-vue'
+import ScribeSelect from './ScribeSelect.vue'
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -242,12 +268,25 @@ const emit = defineEmits([
   'requestMicrophonePermission',
 ])
 
+const settingsRoot = ref(null)
 const customUrl = ref(props.config.customUrl)
 const customModel = ref(props.config.customModel)
 const apiKey = ref('')
 const retentionValue = computed(() => (
   props.config.retentionDays == null ? 'forever' : String(props.config.retentionDays)
 ))
+const kgPromptOptions = [
+  { value: 'ask', label: 'Ask every time' },
+  { value: 'always-draft', label: 'Always create a reviewable draft' },
+  { value: 'never', label: 'Never ask' },
+]
+const retentionOptions = [
+  { value: '0', label: 'Delete after final transcript' },
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: 'forever', label: 'Until I delete it' },
+]
 
 watch(() => props.config.customUrl, value => { customUrl.value = value })
 watch(() => props.config.customModel, value => { customModel.value = value })
@@ -266,16 +305,57 @@ function saveRetention(value) {
   save({ retentionDays: value === 'forever' ? null : Number(value) })
 }
 
+function focusEntry() {
+  settingsRoot.value?.querySelector('button, input, [tabindex="0"]')?.focus()
+}
+
+defineExpose({ focusEntry })
+
+function close(event) {
+  if (props.embedded) return
+  event?.preventDefault()
+  event?.stopPropagation()
+  emit('close')
+}
+
+function onModeKeydown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+    return
+  }
+  const custom = ['ArrowRight', 'ArrowDown', 'End'].includes(event.key)
+  const mode = custom ? 'custom' : 'local'
+  event.preventDefault()
+  save({ transcriptionMode: mode })
+  event.currentTarget
+    ?.parentElement
+    ?.querySelector(`[role="radio"]:nth-child(${custom ? 2 : 1})`)
+    ?.focus()
+}
+
 function modelStatus(model) {
   if (model.status === 'downloading') {
-    const total = Math.max(1, model.bytes)
-    return `Downloading ${Math.round((model.downloadedBytes / total) * 100)}%`
+    return `Downloading ${modelProgress(model)}%`
   }
   if (model.status === 'installed') {
     return `${formatBytes(model.bytes)} · checksum verified`
   }
   if (model.error) return model.error
   return `${formatBytes(model.bytes)} download`
+}
+
+function modelProgress(model) {
+  const total = Math.max(1, model.bytes)
+  return Math.min(100, Math.round((model.downloadedBytes / total) * 100))
+}
+
+function permissionLabel(value) {
+  return ({
+    granted: 'Granted',
+    denied: 'Denied — use the button below to open the system prompt',
+    'prompt-on-start': 'Requested when recording starts',
+    restricted: 'Restricted by macOS',
+    unknown: 'Not checked',
+  })[value] || String(value || 'Unknown').replaceAll('-', ' ')
 }
 
 function formatBytes(bytes) {
@@ -341,6 +421,14 @@ function formatBytes(bytes) {
   border-color: var(--color-accent);
 }
 
+.scribe-settings-input:focus-visible,
+.scribe-settings-button:focus-visible,
+[role='radio']:focus-visible,
+input[type='checkbox']:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 .scribe-settings-button {
   min-height: 30px;
   border: 1px solid var(--color-rule);
@@ -351,5 +439,10 @@ function formatBytes(bytes) {
 
 .scribe-settings-button:hover:not(:disabled) {
   background: var(--color-chrome-mid);
+}
+
+.scribe-settings-button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 </style>

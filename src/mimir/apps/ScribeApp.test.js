@@ -223,6 +223,63 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
   })
 
+  it('presents partial speech and capture gaps on one keyboard-navigable time ledger', async () => {
+    const reviewed = meeting({
+      lifecycle: 'ready',
+      transcription: 'final',
+      transcriptFinal: true,
+      gapCount: 1,
+      gaps: [{
+        channel: 'system',
+        startMs: 1_500,
+        endMs: 2_750,
+        reason: 'device-restart',
+      }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue({
+      meetingId: 'm1',
+      revision: 3,
+      totalSegments: 2,
+      hasMore: false,
+      nextBefore: null,
+      segments: [
+        {
+          id: 's1',
+          text: 'Opening thought',
+          startMs: 0,
+          endMs: 1_000,
+          channel: 'microphone',
+          final: true,
+          revision: 1,
+        },
+        {
+          id: 's2',
+          text: 'Working wording',
+          startMs: 3_000,
+          endMs: 4_000,
+          channel: 'system',
+          final: false,
+          revision: 2,
+        },
+      ],
+      summary: null,
+    })
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(
+      wrapper.findAll('[data-scribe-ledger-kind]'),
+    ).toHaveLength(3))
+
+    expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('You')
+    expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('Capture gap')
+    expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('wording may change')
+    const tabs = wrapper.get('[role="tablist"]').findAll('[role="tab"]')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    await tabs[0].trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.get('#scribe-detail-tab-summary').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#scribe-detail-panel-summary').attributes('role')).toBe('tabpanel')
+  })
+
   it('offers a deliberate permission repair action without enabling automatic recording', async () => {
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
       permissions: { microphone: 'denied', systemAudio: 'prompt-on-start' },
@@ -239,6 +296,19 @@ describe('ScribeApp', () => {
     await wrapper.get('[data-scribe-grant-microphone]').trigger('click')
 
     await vi.waitFor(() => expect(requestMeetingMicrophonePermission).toHaveBeenCalledTimes(1))
+  })
+
+  it('uses explicit route choices and keyboard listboxes in settings', async () => {
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-settings]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-settings]').trigger('click')
+
+    expect(wrapper.get('[role="radiogroup"]').attributes('aria-label'))
+      .toBe('Transcription route')
+    expect(wrapper.findAll('[role="radio"]')).toHaveLength(2)
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.findAll('[role="combobox"]')).toHaveLength(2)
   })
 
   it('offers a reviewable KG draft only after title and summary complete', async () => {

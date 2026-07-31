@@ -1,10 +1,12 @@
 <template>
   <section
+    ref="scribeRoot"
     data-scribe-app
-    class="flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
+    class="scribe-root flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
+    :aria-busy="meetings.loading || undefined"
     @keydown="onKeydown"
   >
-    <header class="flex h-11 shrink-0 items-center border-b border-rule px-3">
+    <header class="scribe-app-header flex min-h-11 shrink-0 items-center border-b border-rule px-3">
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
           <IconMicrophone :size="15" :stroke-width="1.8" class="text-ink-2" />
@@ -55,11 +57,13 @@
         <button
           type="button"
           data-scribe-settings
+          ref="settingsButton"
           class="scribe-icon-button"
           :aria-expanded="settingsOpen"
+          aria-controls="scribe-settings-panel"
           title="Scribe settings"
           aria-label="Scribe settings"
-          @click="settingsOpen = !settingsOpen"
+          @click="toggleSettings"
         >
           <IconSettings :size="14" />
         </button>
@@ -98,11 +102,15 @@
     <div
       v-if="meetings.kgOffer"
       data-scribe-kg-offer
-      class="flex shrink-0 items-center gap-3 border-b border-rule bg-surface px-3 py-2"
+      role="region"
+      aria-labelledby="scribe-kg-offer-title"
+      class="scribe-kg-offer flex shrink-0 items-center gap-3 border-b border-rule bg-surface px-3 py-2"
     >
       <IconTopologyStar3 :size="15" class="shrink-0 text-ink-2" />
       <p class="min-w-0 flex-1 text-[11px] text-ink-2">
-        <strong class="font-semibold text-ink">{{ meetings.kgOffer.title }}</strong>
+        <strong id="scribe-kg-offer-title" class="font-semibold text-ink">
+          {{ meetings.kgOffer.title }}
+        </strong>
         has a title and summary. Create reviewable knowledge-graph entries?
       </p>
       <button
@@ -115,6 +123,14 @@
       </button>
       <button
         type="button"
+        class="scribe-button"
+        :disabled="Boolean(meetings.pending[`kg:${meetings.kgOffer.id}`])"
+        @click="decideKg(meetings.kgOffer.id, 'never')"
+      >
+        Never ask
+      </button>
+      <button
+        type="button"
         class="scribe-primary-button"
         :disabled="Boolean(meetings.pending[`kg:${meetings.kgOffer.id}`])"
         @click="decideKg(meetings.kgOffer.id, 'create-draft')"
@@ -123,9 +139,9 @@
       </button>
     </div>
 
-    <div class="flex min-h-0 flex-1">
+    <div class="scribe-workspace flex min-h-0 flex-1">
       <aside
-        class="flex w-[224px] shrink-0 flex-col border-r border-rule bg-chrome"
+        class="scribe-library flex w-[224px] shrink-0 flex-col border-r border-rule bg-chrome"
         aria-label="Meeting library"
       >
         <div class="flex h-9 shrink-0 items-center border-b border-rule-light px-2">
@@ -160,7 +176,7 @@
             <button
               type="button"
               class="scribe-library-row min-w-0 flex-1"
-              @click="beginStart(candidate)"
+              @click="beginStart(candidate, $event)"
             >
               <IconPhone :size="13" class="shrink-0 text-ink-2" />
               <span class="min-w-0 flex-1 truncate">{{ candidate.appName }}</span>
@@ -178,15 +194,25 @@
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto">
+        <div
+          class="min-h-0 flex-1 overflow-y-auto"
+          role="listbox"
+          aria-label="Recorded meetings"
+          :aria-busy="meetings.loading || undefined"
+        >
           <button
             v-for="meeting in meetings.meetings"
             :key="meeting.id"
             type="button"
+            data-scribe-meeting-row
+            role="option"
             class="scribe-library-row min-h-12"
             :class="{ 'bg-accent-soft': meeting.id === meetings.selectedId }"
-            :aria-current="meeting.id === meetings.selectedId ? 'true' : undefined"
+            :aria-selected="meeting.id === meetings.selectedId"
+            :aria-label="meetingRowLabel(meeting)"
+            :tabindex="meeting.id === meetings.selectedId ? 0 : -1"
             @click="meetings.select(meeting.id)"
+            @keydown="onLibraryKeydown($event, meeting.id)"
           >
             <span class="min-w-0 flex-1 text-left">
               <span class="block truncate text-[11px] font-medium">{{ meeting.title }}</span>
@@ -209,10 +235,18 @@
           </button>
 
           <div
-            v-if="meetings.loaded && !meetings.meetings.length"
+            v-if="meetings.loading && !meetings.loaded"
+            data-scribe-library-loading
+            role="status"
             class="px-3 py-6 text-center text-[10px] leading-relaxed text-ink-3"
           >
-            Recorded meetings will appear here.
+            Loading meetings…
+          </div>
+          <div
+            v-else-if="meetings.loaded && !meetings.meetings.length"
+            class="px-3 py-6 text-center text-[10px] leading-relaxed text-ink-3"
+          >
+            No recordings yet. Choose Record meeting when everyone is informed.
           </div>
           <button
             v-else-if="meetings.meetingsTruncated"
@@ -235,21 +269,23 @@
           data-scribe-new
           class="m-2 flex h-8 items-center justify-center gap-1.5 border border-rule bg-chrome-high text-[10px] font-semibold hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-50"
           :disabled="Boolean(meetings.activeMeeting)"
-          @click="beginStart()"
+          @click="beginStart(null, $event)"
         >
           <IconMicrophone :size="13" />
           Record meeting
         </button>
       </aside>
 
-      <main class="min-w-0 flex-1 overflow-hidden bg-chrome-high">
+      <main class="scribe-main min-w-0 flex-1 overflow-hidden bg-chrome-high">
         <ScribeSettings
           v-if="settingsOpen"
+          id="scribe-settings-panel"
+          ref="settingsPanel"
           :config="meetings.config"
           :permissions="meetings.permissions"
           :models="meetings.models"
           :pending="meetings.pending"
-          @close="settingsOpen = false"
+          @close="closeSettings"
           @save="saveConfig"
           @save-api-key="saveApiKey"
           @clear-api-key="clearApiKey"
@@ -260,33 +296,49 @@
 
         <div
           v-else-if="confirmingStart"
+          ref="consentPanel"
           data-scribe-consent
+          role="region"
+          aria-labelledby="scribe-consent-title"
+          :aria-describedby="consentDescriptionIds"
+          tabindex="-1"
           class="mx-auto flex h-full max-w-xl flex-col justify-center px-8"
         >
           <p class="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3">
             Before recording
           </p>
-          <h2 class="mt-2 text-[17px] font-semibold">Confirm everyone is informed</h2>
-          <p class="mt-2 max-w-lg text-[11px] leading-relaxed text-ink-2">
+          <h2 id="scribe-consent-title" class="mt-2 text-[17px] font-semibold">
+            Confirm everyone is informed
+          </h2>
+          <p
+            id="scribe-consent-scope"
+            class="mt-2 max-w-lg text-[11px] leading-relaxed text-ink-2"
+          >
             Scribe records microphone and system audio. You are responsible for obtaining
             any consent or giving any notice required for this meeting.
           </p>
           <div
             v-if="meetings.config.transcriptionMode === 'custom'"
+            id="scribe-consent-route"
             data-scribe-hosted-disclosure
-            class="mt-3 max-w-lg border-l-2 border-accent bg-accent-soft px-3 py-2 text-[10px] leading-relaxed text-ink-2"
+            class="mt-3 max-w-lg border-y border-rule bg-accent-soft px-3 py-2 text-[10px] leading-relaxed text-ink-2"
           >
             Both audio channels and transcript timing will be sent to
             <strong class="font-semibold text-ink">{{ customDestination }}</strong>
             using model <strong class="font-semibold text-ink">{{ meetings.config.customModel }}</strong>
             for transcription. Mimir will not silently switch to another provider.
           </div>
-          <p v-else class="mt-3 max-w-lg text-[10px] leading-relaxed text-ink-3">
+          <p
+            v-else
+            id="scribe-consent-route"
+            class="mt-3 max-w-lg text-[10px] leading-relaxed text-ink-3"
+          >
             Local transcription with {{ meetings.config.localModel }} stays on this Mac and does
             not send meeting audio to a provider.
           </p>
           <p
             v-if="candidateAppName"
+            id="scribe-consent-candidate"
             data-scribe-candidate-disclosure
             class="mt-2 text-[10px] leading-relaxed text-ink-3"
           >
@@ -295,9 +347,11 @@
           <label class="mt-5 flex items-start gap-2 text-[11px] leading-relaxed text-ink-2">
             <input
               v-model="consentConfirmed"
+              ref="consentCheckbox"
               data-scribe-consent-checkbox
               type="checkbox"
               class="mt-0.5 accent-accent"
+              :aria-describedby="consentDescriptionIds"
             />
             <span>I have informed the participants and may record this meeting.</span>
           </label>
@@ -313,7 +367,14 @@
             />
           </label>
           <div class="mt-5 flex items-center gap-2">
-            <button type="button" class="scribe-button" @click="cancelStart">Cancel</button>
+            <button
+              type="button"
+              class="scribe-button"
+              :disabled="Boolean(meetings.pending.start)"
+              @click="cancelStart"
+            >
+              Cancel
+            </button>
             <button
               type="button"
               data-scribe-confirm-start
@@ -329,7 +390,7 @@
             v-if="consentError"
             data-scribe-consent-error
             role="alert"
-            class="mt-3 text-[10px] leading-relaxed text-danger"
+            class="mt-3 text-[10px] leading-relaxed text-rem"
           >
             {{ consentError }}
           </p>
@@ -348,7 +409,7 @@
           <button
             type="button"
             class="scribe-primary-button mt-4 self-start"
-            @click="beginStart()"
+            @click="beginStart(null, $event)"
           >
             Record meeting
           </button>
@@ -358,11 +419,15 @@
           v-else
           data-scribe-meeting
           class="flex h-full min-h-0 flex-col"
+          :aria-labelledby="`scribe-meeting-title-${meetings.selectedMeeting.id}`"
         >
           <header class="shrink-0 border-b border-rule px-4 py-3">
             <div class="flex items-start gap-3">
               <div class="min-w-0 flex-1">
-                <h2 class="truncate text-[15px] font-semibold">
+                <h2
+                  :id="`scribe-meeting-title-${meetings.selectedMeeting.id}`"
+                  class="truncate text-[15px] font-semibold"
+                >
                   {{ meetings.selectedMeeting.title }}
                 </h2>
                 <p class="mt-1 font-mono text-[9px] text-ink-3">
@@ -374,10 +439,15 @@
               <button
                 type="button"
                 class="scribe-button"
+                :disabled="meetingActionPending('export')"
                 @click="exportSelected('markdown')"
               >
                 <IconDownload :size="13" />
-                Export
+                {{
+                  meetingActionPending('export:markdown')
+                    ? 'Exporting…'
+                    : 'Export'
+                }}
               </button>
               <button
                 v-if="meetings.selectedMeeting.lifecycle === 'ready'"
@@ -389,16 +459,47 @@
                 Edit
               </button>
             </div>
-            <nav class="mt-3 flex gap-4" aria-label="Meeting detail">
+            <div
+              v-if="meetingNeedsRecovery(meetings.selectedMeeting)"
+              data-scribe-recovery
+              role="status"
+              class="mt-3 flex items-center gap-2 border-y border-rule-light py-2 text-[10px]"
+            >
+              <IconAlertTriangle :size="13" class="shrink-0 text-rem" />
+              <span class="min-w-0 flex-1 text-ink-2">
+                {{ recoveryStatus(meetings.selectedMeeting) }}
+              </span>
+              <button
+                v-if="failedJob(meetings.selectedMeeting, 'transcription')"
+                type="button"
+                class="scribe-button"
+                :disabled="Boolean(
+                  meetings.pending[`retry:${meetings.selectedMeeting.id}:transcription`],
+                )"
+                @click="retryJob(meetings.selectedMeeting.id, 'transcription')"
+              >
+                Retry transcription
+              </button>
+            </div>
+            <nav
+              class="mt-3 flex gap-4"
+              role="tablist"
+              aria-label="Meeting detail"
+              @keydown="onDetailTabKeydown"
+            >
               <button
                 v-for="tab in detailTabs"
                 :key="tab.id"
                 type="button"
+                :id="`scribe-detail-tab-${tab.id}`"
+                role="tab"
                 class="border-b pb-1 text-[10px]"
                 :class="detailTab === tab.id
                   ? 'border-accent text-ink'
                   : 'border-transparent text-ink-3 hover:text-ink'"
-                :aria-current="detailTab === tab.id ? 'page' : undefined"
+                :aria-selected="detailTab === tab.id"
+                :aria-controls="`scribe-detail-panel-${tab.id}`"
+                :tabindex="detailTab === tab.id ? 0 : -1"
                 @click="detailTab = tab.id"
               >
                 {{ tab.label }}
@@ -407,7 +508,13 @@
           </header>
 
           <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-            <section v-if="detailTab === 'transcript'" aria-label="Transcript">
+            <section
+              v-if="detailTab === 'transcript'"
+              id="scribe-detail-panel-transcript"
+              role="tabpanel"
+              aria-labelledby="scribe-detail-tab-transcript"
+              tabindex="0"
+            >
               <div
                 v-if="
                   meetings.selectedMeeting.transcriptTotalSegments
@@ -444,16 +551,36 @@
                 </button>
               </div>
               <div
+                v-if="meetings.selectedMeeting.transcriptError"
+                data-scribe-transcript-error
+                role="alert"
+                class="scribe-inline-alert mb-3"
+              >
+                <IconAlertTriangle :size="13" class="shrink-0 text-rem" />
+                <span class="min-w-0 flex-1">
+                  Transcript could not be loaded: {{ meetings.selectedMeeting.transcriptError }}
+                </span>
+                <button
+                  type="button"
+                  class="scribe-button"
+                  :disabled="meetings.selectedMeeting.transcriptLoading"
+                  @click="meetings.loadLatestTranscript()"
+                >
+                  Retry transcript
+                </button>
+              </div>
+              <div
                 v-if="
                   meetings.selectedMeeting.transcriptLoading
-                  && !meetings.selectedMeeting.segments.length
+                  && !transcriptLedgerEntries(meetings.selectedMeeting).length
                 "
+                role="status"
                 class="py-12 text-center text-[11px] text-ink-3"
               >
                 Loading transcript…
               </div>
               <div
-                v-else-if="!meetings.selectedMeeting.segments.length"
+                v-else-if="!transcriptLedgerEntries(meetings.selectedMeeting).length"
                 class="py-12 text-center text-[11px] text-ink-3"
               >
                 {{
@@ -462,26 +589,60 @@
                     : 'No transcript is available.'
                 }}
               </div>
-              <ol v-else class="divide-y divide-rule-light">
+              <ol
+                v-else
+                data-scribe-transcript-ledger
+                class="scribe-transcript-ledger"
+                aria-label="Transcript time ledger"
+              >
                 <li
-                  v-for="segment in meetings.selectedMeeting.segments"
-                  :key="`${segment.id}:${segment.revision}`"
-                  class="grid grid-cols-[72px_minmax(0,1fr)] gap-3 py-2"
-                  :class="{ 'opacity-60': !segment.final }"
+                  v-for="entry in transcriptLedgerEntries(meetings.selectedMeeting)"
+                  :key="entry.key"
+                  :data-scribe-ledger-kind="entry.kind"
+                  :data-scribe-ledger-channel="entry.channel"
+                  class="scribe-transcript-entry"
                 >
-                  <span class="font-mono text-[9px] text-ink-3">
-                    {{ segment.speaker || channelSpeaker(segment.channel) }}
-                    <br />
-                    {{ timestamp(segment.startMs) }}
-                  </span>
-                  <p class="select-text text-[12px] leading-[1.55] text-ink">
-                    {{ segment.text }}
-                  </p>
+                  <div class="scribe-transcript-time">
+                    <time :datetime="durationDateTime(entry.startMs)">
+                      {{ timestamp(entry.startMs) }}
+                    </time>
+                    <span class="scribe-transcript-marker" aria-hidden="true" />
+                    <span>{{ entrySpeaker(entry) }}</span>
+                  </div>
+                  <div v-if="entry.kind === 'segment'" class="min-w-0 py-2">
+                    <p class="select-text text-[12px] leading-[1.55] text-ink">
+                      {{ entry.text }}
+                    </p>
+                    <span
+                      v-if="!entry.final"
+                      class="mt-1 block font-mono text-[9px] text-ink-3"
+                    >
+                      Live partial · wording may change
+                    </span>
+                  </div>
+                  <div
+                    v-else
+                    class="scribe-gap-notice"
+                    role="note"
+                    :aria-label="gapLabel(entry)"
+                  >
+                    <IconAlertTriangle :size="13" class="shrink-0 text-rem" />
+                    <span>
+                      <strong class="font-medium text-ink-2">Capture gap</strong>
+                      · {{ gapDuration(entry) }} · {{ humanize(entry.reason) }}
+                    </span>
+                  </div>
                 </li>
               </ol>
             </section>
 
-            <section v-else-if="detailTab === 'summary'" aria-label="Summary">
+            <section
+              v-else-if="detailTab === 'summary'"
+              id="scribe-detail-panel-summary"
+              role="tabpanel"
+              aria-labelledby="scribe-detail-tab-summary"
+              tabindex="0"
+            >
               <form
                 v-if="editingMeeting"
                 class="max-w-3xl space-y-4"
@@ -536,14 +697,27 @@
                   v-if="meetings.selectedMeeting.summaryState === 'failed'"
                   type="button"
                   class="scribe-button mt-3"
+                  :disabled="Boolean(
+                    meetings.pending[`retry:${meetings.selectedMeeting.id}:title-summary`],
+                  )"
                   @click="retryJob(meetings.selectedMeeting.id, 'title-summary')"
                 >
-                  Retry title and summary
+                  {{
+                    meetings.pending[`retry:${meetings.selectedMeeting.id}:title-summary`]
+                      ? 'Retrying…'
+                      : 'Retry title and summary'
+                  }}
                 </button>
               </div>
             </section>
 
-            <section v-else aria-label="Meeting diagnostics">
+            <section
+              v-else
+              id="scribe-detail-panel-details"
+              role="tabpanel"
+              aria-labelledby="scribe-detail-tab-details"
+              tabindex="0"
+            >
               <dl class="grid max-w-2xl grid-cols-[150px_1fr] border-t border-rule text-[10px]">
                 <template
                   v-for="[label, value] in diagnosticRows(meetings.selectedMeeting)"
@@ -555,6 +729,48 @@
                   <dd class="border-b border-rule-light py-2 text-ink-2">{{ value }}</dd>
                 </template>
               </dl>
+              <div
+                v-if="meetings.selectedMeeting.jobs.length"
+                class="mt-6 max-w-2xl border-t border-rule"
+              >
+                <h3 class="py-3 text-[11px] font-semibold">Follow-up work</h3>
+                <ul class="border-t border-rule-light" aria-label="Meeting follow-up jobs">
+                  <li
+                    v-for="job in meetings.selectedMeeting.jobs"
+                    :key="job.id"
+                    class="flex min-h-10 items-center gap-3 border-b border-rule-light py-2 text-[10px]"
+                  >
+                    <span class="min-w-0 flex-1">
+                      <strong class="block font-medium text-ink-2">
+                        {{ jobLabel(job.kind) }}
+                      </strong>
+                      <span class="mt-0.5 block font-mono text-[9px] text-ink-3">
+                        {{ humanize(job.status) }} · attempt {{ job.attempt }}
+                        <template v-if="job.error"> · {{ job.error }}</template>
+                      </span>
+                    </span>
+                    <button
+                      v-if="job.activityId"
+                      type="button"
+                      class="scribe-button"
+                      @click="$emit('openActivity', job.activityId)"
+                    >
+                      Open Activity
+                    </button>
+                    <button
+                      v-if="job.status === 'failed'"
+                      type="button"
+                      class="scribe-button"
+                      :disabled="Boolean(
+                        meetings.pending[`retry:${meetings.selectedMeeting.id}:${job.kind}`],
+                      )"
+                      @click="retryJob(meetings.selectedMeeting.id, job.kind)"
+                    >
+                      Retry
+                    </button>
+                  </li>
+                </ul>
+              </div>
               <div class="mt-6 max-w-2xl border-t border-rule pt-4">
                 <h3 class="text-[11px] font-semibold">Data and privacy</h3>
                 <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
@@ -562,27 +778,43 @@
                   backups, or audio already processed by a custom provider.
                 </p>
                 <div class="mt-3 flex flex-wrap gap-2">
-                  <button type="button" class="scribe-button" @click="exportSelected('json')">
-                    Export JSON
+                  <button
+                    type="button"
+                    class="scribe-button"
+                    :disabled="meetingActionPending('export')"
+                    @click="exportSelected('json')"
+                  >
+                    {{ meetingActionPending('export:json') ? 'Exporting…' : 'Export JSON' }}
                   </button>
-                  <button type="button" class="scribe-button" @click="exportSelected('audio')">
-                    Export audio
+                  <button
+                    type="button"
+                    class="scribe-button"
+                    :disabled="meetingActionPending('export')"
+                    @click="exportSelected('audio')"
+                  >
+                    {{ meetingActionPending('export:audio') ? 'Exporting…' : 'Export audio' }}
                   </button>
                   <button
                     type="button"
                     class="scribe-button text-rem"
+                    :disabled="meetingActionPending('delete')"
                     @click="deleteSelected('audio')"
                   >
-                    Delete source audio
+                    {{
+                      meetingActionPending('delete')
+                        ? 'Deleting…'
+                        : 'Delete source audio'
+                    }}
                   </button>
                   <button
                     type="button"
                     data-scribe-delete-meeting
                     class="scribe-button text-rem"
+                    :disabled="meetingActionPending('delete')"
                     @click="deleteSelected('all')"
                   >
                     <IconTrash :size="13" />
-                    Delete meeting
+                    {{ meetingActionPending('delete') ? 'Deleting…' : 'Delete meeting' }}
                   </button>
                 </div>
               </div>
@@ -597,7 +829,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
   IconDownload,
@@ -624,6 +856,11 @@ const props = defineProps({
 const emit = defineEmits(['openFile', 'openActivity', 'diagnostic'])
 
 const meetings = useMeetingsStore()
+const scribeRoot = ref(null)
+const settingsButton = ref(null)
+const settingsPanel = ref(null)
+const consentPanel = ref(null)
+const consentCheckbox = ref(null)
 const settingsOpen = ref(false)
 const confirmingStart = ref(false)
 const consentConfirmed = ref(false)
@@ -637,6 +874,7 @@ const editedTitle = ref('')
 const editedSummary = ref('')
 const now = ref(Date.now())
 const liveAnnouncement = ref('')
+let startOpener = null
 const detailTabs = [
   { id: 'transcript', label: 'Transcript' },
   { id: 'summary', label: 'Summary' },
@@ -651,11 +889,19 @@ const formattedElapsed = computed(() => (
 ))
 const customDestination = computed(() => {
   try {
-    return new URL(meetings.config.customUrl).host || 'the configured transcription service'
+    const destination = new URL(meetings.config.customUrl)
+    return destination.protocol === 'https:'
+      ? destination.toString()
+      : 'the configured transcription service'
   } catch {
     return 'the configured transcription service'
   }
 })
+const consentDescriptionIds = computed(() => [
+  'scribe-consent-scope',
+  'scribe-consent-route',
+  candidateAppName.value ? 'scribe-consent-candidate' : null,
+].filter(Boolean).join(' '))
 
 watch(
   () => meetings.activeMeeting?.lifecycle,
@@ -693,12 +939,17 @@ onUnmounted(() => {
 })
 
 function focusEntry() {
-  document.querySelector('[data-scribe-stop], [data-scribe-new]')?.focus()
+  scribeRoot.value?.querySelector('[data-scribe-stop], [data-scribe-new]')?.focus()
 }
 
 defineExpose({ focusEntry })
 
-function beginStart(candidate = null) {
+function beginStart(candidate = null, event = null) {
+  startOpener = event?.currentTarget instanceof HTMLElement
+    ? event.currentTarget
+    : document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
   candidateId.value = candidate?.id || null
   candidateAppName.value = candidate?.appName || ''
   startTitle.value = candidate?.appName ? `${candidate.appName} meeting` : ''
@@ -706,14 +957,21 @@ function beginStart(candidate = null) {
   consentError.value = ''
   settingsOpen.value = false
   confirmingStart.value = true
+  nextTick(() => consentPanel.value?.focus())
 }
 
 function cancelStart() {
+  if (meetings.pending.start) return
   confirmingStart.value = false
   candidateId.value = null
   candidateAppName.value = ''
   consentConfirmed.value = false
   consentError.value = ''
+  nextTick(() => {
+    if (startOpener?.isConnected) startOpener.focus()
+    else focusEntry()
+    startOpener = null
+  })
 }
 
 async function start() {
@@ -728,9 +986,14 @@ async function start() {
     liveAnnouncement.value = 'Recording started'
   } catch (error) {
     const detail = message(error)
-    consentError.value = /consent|disclosure|suggestion changed/i.test(detail)
+    const requiresReconfirmation = /consent|disclosure|suggestion changed/i.test(detail)
+    consentError.value = requiresReconfirmation
       ? 'Recording confirmation expired or changed. Review the disclosure and confirm again.'
       : detail
+    if (requiresReconfirmation) {
+      consentConfirmed.value = false
+      nextTick(() => consentCheckbox.value?.focus())
+    }
     emit('diagnostic', detail)
   }
 }
@@ -755,6 +1018,11 @@ async function toggleMute() {
 async function decideKg(id, decision) {
   try {
     const meeting = await meetings.decideKg(id, decision)
+    liveAnnouncement.value = ({
+      'create-draft': 'Knowledge-graph draft queued for review',
+      'not-now': 'Knowledge-graph draft deferred',
+      never: 'Knowledge-graph follow-up dismissed',
+    })[decision]
     if (meeting?.jobs?.length) {
       const activityId = meeting.jobs.find(job => job.kind === 'kg-proposal')?.activityId
       if (activityId) emit('openActivity', activityId)
@@ -767,6 +1035,7 @@ async function decideKg(id, decision) {
 async function retryJob(id, kind) {
   try {
     await meetings.retryJob(id, kind)
+    liveAnnouncement.value = `${jobLabel(kind)} retry queued`
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -787,6 +1056,7 @@ async function exportSelected(format = 'markdown') {
     const result = await meetings.exportRecord(selected.id, format)
     const path = typeof result === 'string' ? result : result?.path
     if (path) emit('openFile', path)
+    liveAnnouncement.value = `${exportLabel(format)} exported`
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -849,6 +1119,7 @@ async function deleteSelected(mode) {
 async function saveConfig(patch) {
   try {
     await meetings.saveConfig(patch)
+    liveAnnouncement.value = 'Scribe setting saved'
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -857,6 +1128,7 @@ async function saveConfig(patch) {
 async function saveApiKey(value) {
   try {
     await meetings.saveApiKey(value)
+    liveAnnouncement.value = 'Custom transcription key saved in Keychain'
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -865,6 +1137,7 @@ async function saveApiKey(value) {
 async function clearApiKey() {
   try {
     await meetings.clearApiKey()
+    liveAnnouncement.value = 'Custom transcription key removed'
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -873,6 +1146,7 @@ async function clearApiKey() {
 async function installModel(id) {
   try {
     await meetings.installModel(id)
+    liveAnnouncement.value = 'Local model installation started'
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -881,6 +1155,7 @@ async function installModel(id) {
 async function deleteModel(id) {
   try {
     await meetings.deleteModel(id)
+    liveAnnouncement.value = 'Local model removed'
   } catch (error) {
     emit('diagnostic', message(error))
   }
@@ -888,7 +1163,8 @@ async function deleteModel(id) {
 
 async function requestMicrophonePermission() {
   try {
-    await meetings.requestMicrophonePermission()
+    const permission = await meetings.requestMicrophonePermission()
+    liveAnnouncement.value = `Microphone permission ${permissionLabel(permission)}`
   } catch {
     // The store owns the actionable native permission diagnostic.
   }
@@ -903,10 +1179,58 @@ async function dismissCandidate(id) {
 }
 
 function onKeydown(event) {
-  if (event.key === 'Escape' && confirmingStart.value) {
+  if (event.key === 'Escape' && confirmingStart.value && !meetings.pending.start) {
     cancelStart()
     event.preventDefault()
   }
+}
+
+function toggleSettings() {
+  if (settingsOpen.value) {
+    closeSettings()
+    return
+  }
+  confirmingStart.value = false
+  settingsOpen.value = true
+  nextTick(() => settingsPanel.value?.focusEntry?.())
+}
+
+function closeSettings() {
+  settingsOpen.value = false
+  nextTick(() => settingsButton.value?.focus())
+}
+
+function onDetailTabKeydown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  const current = detailTabs.findIndex(tab => tab.id === detailTab.value)
+  let next = current
+  if (event.key === 'Home') next = 0
+  if (event.key === 'End') next = detailTabs.length - 1
+  if (event.key === 'ArrowLeft') next = (current - 1 + detailTabs.length) % detailTabs.length
+  if (event.key === 'ArrowRight') next = (current + 1) % detailTabs.length
+  detailTab.value = detailTabs[next].id
+  event.preventDefault()
+  nextTick(() => scribeRoot.value
+    ?.querySelector(`#scribe-detail-tab-${detailTabs[next].id}`)
+    ?.focus())
+}
+
+function onLibraryKeydown(event, id) {
+  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+  const rows = [...scribeRoot.value?.querySelectorAll('[data-scribe-meeting-row]') || []]
+  const current = rows.findIndex(row => row === event.currentTarget)
+  if (current < 0 || !rows.length) return
+  let next = current
+  if (event.key === 'Home') next = 0
+  if (event.key === 'End') next = rows.length - 1
+  if (event.key === 'ArrowUp') next = Math.max(0, current - 1)
+  if (event.key === 'ArrowDown') next = Math.min(rows.length - 1, current + 1)
+  const target = rows[next]
+  if (!(target instanceof HTMLElement)) return
+  event.preventDefault()
+  target.focus()
+  const nextId = meetings.meetings[next]?.id
+  if (nextId && nextId !== id) meetings.select(nextId)
 }
 
 function channelLabel(channel) {
@@ -972,9 +1296,119 @@ function diagnosticRows(meeting) {
   ]
 }
 
+function transcriptLedgerEntries(meeting) {
+  const segments = (meeting?.segments || []).map(segment => ({
+    ...segment,
+    kind: 'segment',
+    key: `segment:${segment.id}:${segment.revision}`,
+  }))
+  const gaps = (meeting?.gaps || []).map((gap, index) => ({
+    ...gap,
+    kind: 'gap',
+    key: `gap:${gap.channel}:${gap.startMs}:${gap.endMs}:${index}`,
+  }))
+  return [...segments, ...gaps].sort((left, right) => (
+    left.startMs - right.startMs
+    || (left.kind === 'gap' ? -1 : 1)
+    || left.key.localeCompare(right.key)
+  ))
+}
+
+function entrySpeaker(entry) {
+  if (entry.kind === 'gap') return `${channelSpeaker(entry.channel)} gap`
+  return entry.speaker || channelSpeaker(entry.channel)
+}
+
+function gapDuration(gap) {
+  return `${formatDuration(Math.max(0, gap.endMs - gap.startMs))} unavailable`
+}
+
+function gapLabel(gap) {
+  return `Capture gap for ${channelSpeaker(gap.channel)} at ${timestamp(gap.startMs)}; ${
+    gapDuration(gap)
+  }; ${humanize(gap.reason)}`
+}
+
+function meetingRowLabel(meeting) {
+  return [
+    meeting.title,
+    meetingDate(meeting),
+    lifecycleLabel(meeting.lifecycle),
+    meeting.lifecycle === 'capturing' ? formatDuration(meeting.durationMs) : null,
+  ].filter(Boolean).join(', ')
+}
+
+function meetingNeedsRecovery(meeting) {
+  return ['interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle)
+    || Boolean(meeting?.error)
+}
+
+function recoveryStatus(meeting) {
+  const transcriptionJob = meeting.jobs.find(job => job.kind === 'transcription')
+  if (transcriptionJob?.status === 'failed') {
+    return 'Stored audio is safe, but transcript recovery failed. Retry when the transcription route is available.'
+  }
+  if (['queued', 'running'].includes(transcriptionJob?.status)) {
+    return `Stored audio is safe. Transcript recovery is ${transcriptionJob.status}.`
+  }
+  if (meeting.error) return `Stored audio needs attention: ${meeting.error}`
+  return 'Capture ended unexpectedly. Stored audio is safe and recovery will resume after restart.'
+}
+
+function failedJob(meeting, kind) {
+  return meeting?.jobs?.find(job => job.kind === kind && job.status === 'failed') || null
+}
+
+function jobLabel(kind) {
+  return ({
+    'title-summary': 'Title and summary',
+    'kg-proposal': 'Knowledge-graph draft',
+    transcription: 'Transcript recovery',
+  })[kind] || humanize(kind)
+}
+
+function meetingActionPending(action) {
+  const id = meetings.selectedMeeting?.id
+  if (!id) return false
+  if (action === 'export') {
+    return Object.keys(meetings.pending).some(key => key.startsWith(`export:${id}:`))
+  }
+  if (action.startsWith('export:')) {
+    return Boolean(meetings.pending[`export:${id}:${action.slice('export:'.length)}`])
+  }
+  if (action === 'delete') return Boolean(meetings.pending[`delete:${id}`])
+  return false
+}
+
+function exportLabel(format) {
+  return ({
+    markdown: 'Markdown meeting',
+    json: 'JSON meeting',
+    audio: 'Meeting audio',
+  })[format] || 'Meeting'
+}
+
+function permissionLabel(value) {
+  return ({
+    granted: 'granted',
+    denied: 'denied',
+    'prompt-on-start': 'requested when capture starts',
+    unknown: 'not determined',
+  })[value] || humanize(value)
+}
+
+function humanize(value) {
+  return String(value || 'unknown').replaceAll(/[-_]/g, ' ')
+}
+
 function timestamp(milliseconds) {
   const seconds = Math.floor(Math.max(0, milliseconds) / 1000)
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function durationDateTime(milliseconds) {
+  const seconds = Math.max(0, Number(milliseconds) || 0) / 1000
+  return `PT${seconds}S`
 }
 
 function formatDuration(milliseconds) {
@@ -1006,6 +1440,10 @@ function message(error) {
 </script>
 
 <style scoped>
+.scribe-root {
+  container: scribe / inline-size;
+}
+
 .scribe-button,
 .scribe-primary-button,
 .scribe-stop {
@@ -1111,5 +1549,138 @@ function message(error) {
 .scribe-alert button {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.scribe-inline-alert {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  border-block: 1px solid var(--color-rule-light);
+  padding: 6px 0;
+  color: var(--color-rem);
+  font-size: 10px;
+}
+
+.scribe-transcript-ledger {
+  border-top: 1px solid var(--color-rule);
+}
+
+.scribe-transcript-entry {
+  display: grid;
+  min-height: 52px;
+  grid-template-columns: 84px minmax(0, 1fr);
+  column-gap: 16px;
+  border-bottom: 1px solid var(--color-rule-light);
+}
+
+.scribe-transcript-time {
+  position: relative;
+  display: grid;
+  align-content: center;
+  align-self: stretch;
+  border-right: 1px solid var(--color-rule);
+  padding-right: 13px;
+  color: var(--color-ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.scribe-transcript-time > span:last-child {
+  overflow: hidden;
+  color: var(--color-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scribe-transcript-marker {
+  position: absolute;
+  top: 50%;
+  right: -4px;
+  width: 7px;
+  height: 1px;
+  background: var(--color-rule);
+}
+
+.scribe-transcript-entry[data-scribe-ledger-kind='segment']
+  .scribe-transcript-time > span:last-child {
+  font-weight: 600;
+}
+
+.scribe-transcript-entry[data-scribe-ledger-kind='gap'] {
+  background: var(--color-chrome-mid);
+}
+
+.scribe-gap-notice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding-block: 8px;
+  color: var(--color-ink-3);
+  font-size: 10px;
+}
+
+[role='tabpanel']:focus-visible,
+[data-scribe-consent]:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+@container scribe (max-width: 620px) {
+  .scribe-workspace {
+    flex-direction: column;
+  }
+
+  .scribe-library {
+    width: 100%;
+    max-height: 172px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-rule);
+  }
+
+  .scribe-main {
+    min-height: 240px;
+  }
+
+  .scribe-kg-offer {
+    flex-wrap: wrap;
+  }
+
+  .scribe-kg-offer p {
+    flex-basis: calc(100% - 30px);
+  }
+}
+
+@container scribe (max-width: 440px) {
+  .scribe-app-header {
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding-block: 4px;
+  }
+
+  [data-scribe-ledger] {
+    grid-template-columns: repeat(3, auto);
+    gap: 2px 12px;
+    padding-block: 5px;
+  }
+
+  [data-scribe-ledger] > :last-child {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .scribe-transcript-entry {
+    grid-template-columns: 66px minmax(0, 1fr);
+    column-gap: 10px;
+  }
+
+  .scribe-transcript-time {
+    padding-right: 9px;
+  }
 }
 </style>

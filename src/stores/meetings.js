@@ -333,6 +333,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
         hasMore: page.hasMore,
         nextBefore: page.nextBefore,
         showingLatest: before == null,
+        newerAvailable: before == null ? false : current.newerAvailable,
         summary: before == null ? page.summary : current.summary,
         summaryLoaded: before == null ? true : current.summaryLoaded,
         loading: false,
