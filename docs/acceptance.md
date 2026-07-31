@@ -325,7 +325,10 @@ requirements; they do not replace runtime verification.
   data.
 - Agent tools can list, get, search, and update completed/interrupted Scribe
   records with bounded results. They cannot start, mute, stop, request
-  permission, configure a provider, or publish a graph mutation.
+  permission, configure a provider, or publish a graph mutation. Search terms
+  are at least three characters and cover full reviewed title/summary/tags
+  plus terminal transcript across the complete library, not only the latest
+  renderer page.
 - Delete audio preserves the reviewed record. Delete meeting removes owned
   local data. Retention never removes active or recovery-held audio.
 - Packaged macOS arm64 release evidence covers TCC prompts, real two-channel

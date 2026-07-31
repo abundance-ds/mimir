@@ -22,7 +22,7 @@ use mimir::{
 
 const TEST_TOKEN: &str = "contract-test-token";
 
-/// A minimal registry with four synthetic core tools:
+/// A minimal registry with five synthetic core tools:
 ///
 /// * `graph.get` (`graph_get`) — returns input plus caller metadata, so tests
 ///   can assert on public-tool round-trips and transport-assigned context.
@@ -30,6 +30,7 @@ const TEST_TOKEN: &str = "contract-test-token";
 ///   allowlist and CLI transport rather than existing only as a private handler.
 /// * `editor.state` (`editor_state`) — backs the direct `mimir_state` tool.
 /// * `graph.status` (`graph_status`) — supplies scopes for `mimir doctor`.
+/// * `meetings.get` (`meetings_get`) — keeps the focused Scribe drawer backed.
 fn test_registry() -> ToolRegistry {
     let registry = ToolRegistry::new();
     register_core_tool(
@@ -127,6 +128,28 @@ fn test_registry() -> ToolRegistry {
         },
     )
     .expect("register graph.status");
+    register_core_tool(
+        &registry,
+        "meetings.get",
+        "meetings_get",
+        "Read one Mimir Scribe meeting.",
+        json!({
+            "type": "object",
+            "properties": {
+                "meeting_id": { "type": "string", "minLength": 1 }
+            },
+            "required": ["meeting_id"],
+            "additionalProperties": false
+        }),
+        ToolSource::Native,
+        |_context: ToolCallContext, input: Value| async move {
+            Ok(ToolResult::new(json!({
+                "id": input["meeting_id"],
+                "title": "Contract meeting"
+            })))
+        },
+    )
+    .expect("register meetings.get");
     registry
 }
 
@@ -590,7 +613,7 @@ async fn mimir_doctor_reports_connection_context_scopes_and_catalog() {
     assert_success(&output, "mimir doctor");
     assert_eq!(
         stdout_of(&output),
-        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      3\n"
+        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      4\n"
     );
     assert!(!stdout_of(&output).contains("agent:contract"));
     assert!(!stdout_of(&output).contains("codex"));
@@ -910,8 +933,8 @@ async fn mimir_cli_loop_discovers_the_lean_alias_and_round_trips_a_call() {
     let tools = catalog.as_array().expect("catalog is an array");
     assert_eq!(
         tools.len(),
-        3,
-        "public projection should include state, graph get, and graph events: {catalog}",
+        4,
+        "public projection should include state, graph get, graph events, and meetings get: {catalog}",
     );
     let state = tools
         .iter()

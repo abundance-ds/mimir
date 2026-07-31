@@ -273,6 +273,16 @@ Dock/system Quit has a native windowless guard for the same reason. If native
 meeting state cannot be inspected, restore the window and fail closed instead
 of allowing process exit.
 
+### Scribe library search never depends on the renderer snapshot
+
+The UI snapshot is deliberately capped. Agent search uses the private SQLite
+indexes for full reviewed titles, summaries, tags, and terminal transcript
+text, then loads only the bounded matching meetings. Keep the three-character
+trigram minimum: falling back to substring-scanning arbitrary 4 MiB summaries
+would hold the serialized meeting runtime for unbounded time. Content-file
+fingerprints repair interrupted index synchronization without rereading every
+summary on every launch.
+
 ### Silence is a valid terminal transcript
 
 A provider that drains with zero final segments and zero unresolved partials

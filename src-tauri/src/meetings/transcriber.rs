@@ -23,6 +23,8 @@ use chrono::{SecondsFormat, Utc};
 use futures_util::{future::BoxFuture, SinkExt, StreamExt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::time::Instant;
 use std::{
     collections::{BTreeMap, HashMap},
     fs::{self, File, OpenOptions},
@@ -30,6 +32,7 @@ use std::{
     net::SocketAddr,
     path::{Component, Path, PathBuf},
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender, SyncSender},
         Arc, Mutex, MutexGuard,
     },
@@ -250,6 +253,7 @@ pub struct NativeMeetingTranscriber {
     local: Arc<dyn LocalTranscriber>,
     changes: Arc<dyn TranscriptionChangeSink>,
     sessions: Mutex<HashMap<String, TranscriptionSession>>,
+    startup_cleanup_pending: Arc<AtomicBool>,
 }
 
 impl NativeMeetingTranscriber {
@@ -272,6 +276,7 @@ impl NativeMeetingTranscriber {
             local,
             changes,
             sessions: Mutex::new(HashMap::new()),
+            startup_cleanup_pending: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -300,6 +305,12 @@ impl NativeMeetingTranscriber {
 impl MeetingTranscriptionPort for NativeMeetingTranscriber {
     fn start(&self, request: &TranscriptionStart) -> Result<(), String> {
         let mut sessions = self.sessions()?;
+        if self.startup_cleanup_pending.load(Ordering::Acquire) {
+            return Err(
+                "a timed-out transcription startup is still being reclaimed; retry after it exits"
+                    .into(),
+            );
+        }
         if sessions.contains_key(&request.meeting_id) {
             return Err(format!(
                 "meeting '{}' already owns a transcription worker",
@@ -307,9 +318,6 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             ));
         }
         let provider = self.provider_resolver.resolve(request)?;
-        if let ResolvedTranscriptionProvider::Local { model_id } = &provider {
-            self.local.verify(model_id)?;
-        }
 
         let (finalize_tx, finalize_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -323,7 +331,8 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         let worker = thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
-                run_worker(
+                let startup_error = ready_tx.clone();
+                let result = run_worker(
                     store,
                     data_dir,
                     worker_request,
@@ -333,7 +342,15 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                     changes,
                     finalize_rx,
                     ready_tx,
-                )
+                );
+                if let Err(message) = &result {
+                    // This succeeds only while the caller is still waiting for
+                    // startup. Once Ready was consumed, the receiver is gone
+                    // and a later runtime failure cannot masquerade as a
+                    // second startup outcome.
+                    let _ = startup_error.try_send(Err(message.clone()));
+                }
+                result
             })
             .map_err(|error| format!("could not spawn transcription worker: {error}"))?;
 
@@ -350,12 +367,22 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             }
             Ok(Err(message)) => {
                 let _ = finalize_tx.send(FinalizeCommand { observed_at: now() });
-                let _ = worker.join();
+                drop(ready_rx);
+                reap_transcription_startup(
+                    "meeting transcription startup",
+                    worker,
+                    Arc::clone(&self.startup_cleanup_pending),
+                );
                 Err(message)
             }
             Err(error) => {
                 let _ = finalize_tx.send(FinalizeCommand { observed_at: now() });
-                let _ = worker.join();
+                drop(ready_rx);
+                reap_transcription_startup(
+                    "timed-out meeting transcription startup",
+                    worker,
+                    Arc::clone(&self.startup_cleanup_pending),
+                );
                 Err(format!(
                     "transcription provider did not become ready within {} seconds: {error}",
                     START_READY_TIMEOUT.as_secs()
@@ -443,7 +470,10 @@ fn run_worker(
 
     match provider {
         ResolvedTranscriptionProvider::Local { model_id } => {
-            // `start` already verified this exact model before spawning.
+            // Verification can hash a large artifact and probe the native
+            // runtime. Keep it inside the bounded startup worker so a blocked
+            // filesystem/runtime cannot pin the serialized meeting runtime.
+            local.verify(&model_id)?;
             ready
                 .send(Ok(()))
                 .map_err(|_| "transcription caller stopped during local startup".to_string())?;
@@ -493,6 +523,26 @@ fn run_worker(
         source: source.into(),
         unresolved_partial_count: sink.accumulator.unresolved_partial_count(),
     })
+}
+
+fn reap_transcription_startup<T: Send + 'static>(
+    label: &'static str,
+    worker: thread::JoinHandle<T>,
+    pending: Arc<AtomicBool>,
+) {
+    pending.store(true, Ordering::Release);
+    let reaper_pending = Arc::clone(&pending);
+    if let Err(error) = thread::Builder::new()
+        .name("mimir-stt-startup-reaper".into())
+        .spawn(move || {
+            if worker.join().is_err() {
+                log::error!("{label} panicked while being reclaimed");
+            }
+            reaper_pending.store(false, Ordering::Release);
+        })
+    {
+        log::error!("Could not reclaim {label} in the background: {error}");
+    }
 }
 
 fn resolve_custom_credential(
@@ -2356,6 +2406,31 @@ mod tests {
         assert_eq!(reconnect_delay(1), Duration::from_millis(250));
         assert_eq!(reconnect_delay(2), Duration::from_millis(500));
         assert_eq!(reconnect_delay(20), MAX_RECONNECT_DELAY);
+    }
+
+    #[test]
+    fn timed_out_transcriber_returns_without_joining_and_late_ready_is_rejected() {
+        let (release_tx, release_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+        let worker = thread::spawn(move || {
+            release_rx.recv().unwrap();
+            assert!(ready_tx.send(Ok(())).is_err());
+        });
+        let pending = Arc::new(AtomicBool::new(false));
+
+        assert!(ready_rx.recv_timeout(Duration::from_millis(5)).is_err());
+        drop(ready_rx);
+        let returned_at = Instant::now();
+        reap_transcription_startup("test transcription startup", worker, Arc::clone(&pending));
+
+        assert!(returned_at.elapsed() < Duration::from_millis(100));
+        assert!(pending.load(Ordering::Acquire));
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while pending.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!pending.load(Ordering::Acquire));
     }
 
     #[derive(Default)]

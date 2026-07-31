@@ -182,6 +182,7 @@ pub struct NativeMeetingCapture {
     data_dir: PathBuf,
     sessions: Mutex<HashMap<String, CaptureSession>>,
     failure_sink: Arc<Mutex<Option<Arc<dyn MeetingCaptureFailureSink>>>>,
+    startup_cleanup_pending: Arc<AtomicBool>,
 }
 
 impl NativeMeetingCapture {
@@ -194,6 +195,7 @@ impl NativeMeetingCapture {
             data_dir,
             sessions: Mutex::new(HashMap::new()),
             failure_sink: Arc::new(Mutex::new(None)),
+            startup_cleanup_pending: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -263,6 +265,12 @@ impl MeetingCapturePort for NativeMeetingCapture {
 
     fn start(&self, request: &CaptureStart) -> Result<(), String> {
         let mut sessions = self.sessions()?;
+        if self.startup_cleanup_pending.load(Ordering::Acquire) {
+            return Err(
+                "a timed-out meeting audio startup is still being reclaimed; retry after it exits"
+                    .into(),
+            );
+        }
         let finished = sessions
             .iter()
             .filter(|(_, session)| session.worker.is_finished())
@@ -342,13 +350,23 @@ impl MeetingCapturePort for NativeMeetingCapture {
             Ok(Err(message)) => {
                 let _ = startup_decision_tx.send(false);
                 let _ = stop.send(true);
-                let _ = worker.join();
+                drop(ready_rx);
+                reap_startup_worker(
+                    "meeting audio startup",
+                    worker,
+                    Arc::clone(&self.startup_cleanup_pending),
+                );
                 Err(message)
             }
             Err(error) => {
                 let _ = startup_decision_tx.send(false);
                 let _ = stop.send(true);
-                let _ = worker.join();
+                drop(ready_rx);
+                reap_startup_worker(
+                    "timed-out meeting audio startup",
+                    worker,
+                    Arc::clone(&self.startup_cleanup_pending),
+                );
                 Err(format!(
                     "meeting audio devices did not initialize within {} seconds: {error}",
                     START_TIMEOUT.as_secs()
@@ -381,6 +399,29 @@ impl MeetingCapturePort for NativeMeetingCapture {
             .ok_or_else(|| format!("meeting '{meeting_id}' has no audio worker"))?;
         session.microphone_muted.store(muted, Ordering::Release);
         Ok(())
+    }
+}
+
+fn reap_startup_worker<T: Send + 'static>(
+    label: &'static str,
+    worker: thread::JoinHandle<T>,
+    pending: Arc<AtomicBool>,
+) {
+    pending.store(true, Ordering::Release);
+    let reaper_pending = Arc::clone(&pending);
+    if let Err(error) = thread::Builder::new()
+        .name("mimir-audio-startup-reaper".into())
+        .spawn(move || {
+            if worker.join().is_err() {
+                log::error!("{label} panicked while being reclaimed");
+            }
+            reaper_pending.store(false, Ordering::Release);
+        })
+    {
+        // The worker handle is detached when spawning the reaper fails. Keep
+        // the gate closed for this process because its completion can no
+        // longer be observed safely; an application restart resets ownership.
+        log::error!("Could not reclaim {label} in the background: {error}");
     }
 }
 
@@ -1041,6 +1082,39 @@ mod tests {
             ]
         );
         assert_eq!(policy.record_failure(), None);
+    }
+
+    #[test]
+    fn timed_out_start_returns_without_joining_and_late_worker_cannot_arm() {
+        let (release_tx, release_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+        let (decision_tx, decision_rx) = mpsc::sync_channel(1);
+        let armed = Arc::new(AtomicBool::new(false));
+        let worker_armed = Arc::clone(&armed);
+        let worker = thread::spawn(move || {
+            release_rx.recv().unwrap();
+            assert!(ready_tx.send(Ok(())).is_err());
+            if decision_rx.recv().unwrap_or(false) {
+                worker_armed.store(true, Ordering::Release);
+            }
+        });
+        let pending = Arc::new(AtomicBool::new(false));
+
+        assert!(ready_rx.recv_timeout(Duration::from_millis(5)).is_err());
+        decision_tx.send(false).unwrap();
+        drop(ready_rx);
+        let returned_at = Instant::now();
+        reap_startup_worker("test meeting audio startup", worker, Arc::clone(&pending));
+
+        assert!(returned_at.elapsed() < Duration::from_millis(100));
+        assert!(pending.load(Ordering::Acquire));
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while pending.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!pending.load(Ordering::Acquire));
+        assert!(!armed.load(Ordering::Acquire));
     }
 
     #[test]

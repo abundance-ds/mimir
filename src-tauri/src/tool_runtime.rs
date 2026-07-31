@@ -207,7 +207,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 38] = [
         canonical_name: "meetings.search",
         public_name: "meetings_search",
         description:
-            "Search titles, summaries, and finalized transcript text recorded by Mimir Scribe.",
+            "Search reviewed titles, full summaries, tags, and terminal transcript text across the complete Mimir Scribe library.",
         group: "meetings",
         effect: "read",
         direct: false,

@@ -76,7 +76,7 @@ Meetings:
 ```text
 meetings_list    list completed or interrupted meetings recorded by Scribe
 meetings_get     read one meeting and a bounded finalized transcript slice
-meetings_search  search native titles, summaries, and transcript text
+meetings_search  search reviewed titles, full summaries, tags, and terminal transcript text
 meetings_update  update reviewed title, summary, or tags
 ```
 

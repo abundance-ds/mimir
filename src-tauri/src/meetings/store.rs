@@ -5,7 +5,7 @@ use super::model::{
     FollowUpJobKind, JobFinish, JobState, MeetingDraft, MeetingFailure, MeetingRecord,
     MeetingStatus, RecoveryReport, TranscriptApplyResult, TranscriptBatch, TranscriptChange,
     TranscriptGapInput, TranscriptGapReason, TranscriptGapRecord, TranscriptRevision,
-    TranscriptSegmentInput, TranscriptSegmentRecord, TranscriptSnapshot,
+    TranscriptSegmentInput, TranscriptSegmentRecord, TranscriptSnapshot, MAX_TITLE_CHARS,
 };
 use crate::persistence::{
     create_private_file, ensure_private_directory, repair_private_file_if_exists,
@@ -23,10 +23,14 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 pub const MAX_TRANSCRIPT_PAGE_SEGMENTS: u32 = 250;
 pub const MAX_COMMITTED_AUDIO_CHUNK_PAGE: u32 = 512;
 const APPLICATION_ID: i64 = 0x4d4d4554; // "MMET"
+const MAX_CONTENT_SEARCH_QUERY_BYTES: usize = 512;
+const MAX_INDEXED_SUMMARY_BYTES: usize = 4 * 1024 * 1024;
+const MAX_INDEXED_TAGS: usize = 64;
+const MAX_INDEXED_TAG_BYTES: usize = 160;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptPageCursor {
@@ -61,6 +65,14 @@ pub struct TranscriptSearchHit {
     pub segment_id: String,
     pub start_ms: i64,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingContentSearchHit {
+    pub meeting_id: String,
+    pub title_match: bool,
+    pub summary_match: bool,
+    pub tags_match: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,7 +382,11 @@ impl MeetingStore {
                updated_at=?3,
                revision=revision+1,
                started_at=CASE WHEN ?2='recording' THEN COALESCE(started_at,?3) ELSE started_at END,
-               stopped_at=CASE WHEN ?2 IN ('stopping','finalizing') THEN COALESCE(stopped_at,?3) ELSE stopped_at END,
+               stopped_at=CASE
+                 WHEN ?2 IN ('stopping','finalizing','interrupted','failed')
+                 THEN COALESCE(stopped_at,?3)
+                 ELSE stopped_at
+               END,
                finalized_at=CASE WHEN ?2='completed' THEN ?3 ELSE finalized_at END,
                interrupted_at=CASE WHEN ?2='interrupted' THEN ?3 ELSE interrupted_at END,
                failure_code=?4,
@@ -923,7 +939,9 @@ impl MeetingStore {
                FROM transcript_segments_fts f
                JOIN transcript_segments s
                  ON s.meeting_id=f.meeting_id AND s.segment_id=f.segment_id
+               JOIN meetings m ON m.id=s.meeting_id
                WHERE transcript_segments_fts MATCH ?1
+                 AND m.status IN ('completed','interrupted','failed')
                  AND NOT EXISTS (
                    SELECT 1 FROM meeting_deletions d
                    WHERE d.meeting_id=s.meeting_id AND d.mode='all'
@@ -932,7 +950,9 @@ impl MeetingStore {
              SELECT meeting_id,segment_id,start_ms,text
              FROM ranked
              WHERE meeting_rank<=3
-             ORDER BY meeting_id,start_ms,segment_id
+             ORDER BY (
+               SELECT created_at FROM meetings WHERE id=ranked.meeting_id
+             ) DESC,meeting_id DESC,start_ms,segment_id
              LIMIT ?2",
         )?;
         let hits = statement
@@ -945,6 +965,209 @@ impl MeetingStore {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        Ok(hits)
+    }
+
+    /// Atomically synchronize the private reviewed-content search authority.
+    ///
+    /// The JSON review document remains the human-editable projection. This
+    /// transaction owns the queryable copy, including its trigram index, so a
+    /// search never walks an unbounded content directory.
+    pub fn sync_content_search(
+        &self,
+        meeting_id: &str,
+        title: &str,
+        summary: Option<&str>,
+        tags: &[String],
+        deleted: bool,
+        content_fingerprint: &str,
+    ) -> Result<(), MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(MeetingStoreError::Validation(
+                "meeting search title cannot be empty".into(),
+            ));
+        }
+        if title.chars().count() > MAX_TITLE_CHARS {
+            return Err(MeetingStoreError::Validation(
+                "meeting search title exceeds the durable limit".into(),
+            ));
+        }
+        if summary.is_some_and(|value| value.len() > MAX_INDEXED_SUMMARY_BYTES) {
+            return Err(MeetingStoreError::Validation(
+                "meeting search summary exceeds the durable limit".into(),
+            ));
+        }
+        if tags.len() > MAX_INDEXED_TAGS
+            || tags.iter().any(|tag| {
+                tag.trim().is_empty()
+                    || tag.len() > MAX_INDEXED_TAG_BYTES
+                    || tag.chars().any(char::is_control)
+            })
+        {
+            return Err(MeetingStoreError::Validation(
+                "meeting search tags exceed the durable limits".into(),
+            ));
+        }
+        if content_fingerprint.is_empty()
+            || content_fingerprint.len() > 512
+            || content_fingerprint.chars().any(char::is_control)
+        {
+            return Err(MeetingStoreError::Validation(
+                "meeting content fingerprint is invalid".into(),
+            ));
+        }
+        let tags_json = json(tags)?;
+        let tags_text = tags.join("\n");
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_meeting(&transaction, meeting_id)?;
+        transaction.execute(
+            "INSERT INTO meeting_content_search (
+               meeting_id,title,summary,tags_json,tags_text,deleted,content_fingerprint
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7)
+             ON CONFLICT(meeting_id) DO UPDATE SET
+               title=excluded.title,
+               summary=excluded.summary,
+               tags_json=excluded.tags_json,
+               tags_text=excluded.tags_text,
+               deleted=excluded.deleted,
+               content_fingerprint=excluded.content_fingerprint",
+            params![
+                meeting_id,
+                title,
+                summary.unwrap_or_default(),
+                tags_json,
+                tags_text,
+                deleted,
+                content_fingerprint
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn content_search_fingerprint(
+        &self,
+        meeting_id: &str,
+    ) -> Result<Option<String>, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        require_meeting(&connection, meeting_id)?;
+        connection
+            .query_row(
+                "SELECT content_fingerprint FROM meeting_content_search
+                 WHERE meeting_id=?1",
+                [meeting_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Search every durable reviewed title, full summary, and tag.
+    ///
+    /// Queries use the FTS5 trigram index for true substring matching. The
+    /// three-character minimum is deliberate: shorter terms cannot use the
+    /// index and would require reading arbitrarily many multi-megabyte
+    /// summaries while holding the meeting operation boundary.
+    pub fn search_content(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<MeetingContentSearchHit>, MeetingStoreError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(MeetingStoreError::Validation(
+                "meeting content search query cannot be empty".into(),
+            ));
+        }
+        if query.len() > MAX_CONTENT_SEARCH_QUERY_BYTES {
+            return Err(MeetingStoreError::Validation(
+                "meeting content search query exceeds the durable limit".into(),
+            ));
+        }
+        if query.chars().count() < 3 {
+            return Err(MeetingStoreError::Validation(
+                "meeting content search query must contain at least 3 characters".into(),
+            ));
+        }
+        let limit = limit.clamp(1, 100);
+        let normalized = query.to_lowercase();
+        let connection = self.lock()?;
+        let phrase = format!("\"{}\"", query.replace('"', "\"\""));
+        let mut statement = connection.prepare(
+            "WITH field_matches AS (
+               SELECT meeting_id,1 AS title_match,0 AS summary_match,0 AS tags_match
+               FROM meeting_content_search_fts WHERE title MATCH ?1
+               UNION ALL
+               SELECT meeting_id,0,1,0
+               FROM meeting_content_search_fts WHERE summary MATCH ?1
+               UNION ALL
+               SELECT meeting_id,0,0,1
+               FROM meeting_content_search_fts WHERE tags MATCH ?1
+             ),
+             grouped AS (
+               SELECT meeting_id,
+                      MAX(title_match) AS title_match,
+                      MAX(summary_match) AS summary_match,
+                      MAX(tags_match) AS tags_match
+               FROM field_matches GROUP BY meeting_id
+             )
+             SELECT g.meeting_id,g.title_match,g.summary_match,g.tags_match,
+                    c.title,c.tags_json
+             FROM grouped g
+             JOIN meeting_content_search c ON c.meeting_id=g.meeting_id
+             JOIN meetings m ON m.id=g.meeting_id
+             WHERE c.deleted=0
+               AND m.status IN ('completed','interrupted','failed')
+               AND NOT EXISTS (
+                 SELECT 1 FROM meeting_deletions d
+                 WHERE d.meeting_id=g.meeting_id AND d.mode='all'
+               )
+             ORDER BY m.created_at DESC,m.id DESC",
+        )?;
+        let rows = statement.query_map([phrase], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        let mut hits = Vec::with_capacity(limit as usize);
+        for row in rows {
+            let (
+                meeting_id,
+                indexed_title_match,
+                summary_match,
+                indexed_tags_match,
+                title,
+                tags_json,
+            ) = row?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json)?;
+            // Recheck bounded title/tag values with Rust's Unicode lowercase
+            // semantics and reject a theoretical cross-tag trigram match.
+            let title_match = indexed_title_match && title.to_lowercase().contains(&normalized);
+            let tags_match = indexed_tags_match
+                && tags
+                    .iter()
+                    .any(|tag| tag.to_lowercase().contains(&normalized));
+            if title_match || summary_match || tags_match {
+                hits.push(MeetingContentSearchHit {
+                    meeting_id,
+                    title_match,
+                    summary_match,
+                    tags_match,
+                });
+                if hits.len() == limit as usize {
+                    break;
+                }
+            }
+        }
         Ok(hits)
     }
 
@@ -1680,6 +1903,12 @@ fn migrate(connection: &mut Connection) -> Result<(), MeetingStoreError> {
         transaction.pragma_update(None, "user_version", 4)?;
         transaction.commit()?;
     }
+    if version < 5 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migration_v5(&transaction)?;
+        transaction.pragma_update(None, "user_version", 5)?;
+        transaction.commit()?;
+    }
     Ok(())
 }
 
@@ -1928,6 +2157,55 @@ fn migration_v4(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> 
          );
          CREATE INDEX idx_meeting_deletions_stage
            ON meeting_deletions(stage,requested_at,meeting_id);",
+    )?;
+    Ok(())
+}
+
+fn migration_v5(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> {
+    transaction.execute_batch(
+        "CREATE TABLE meeting_content_search (
+           meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+           title TEXT NOT NULL,
+           summary TEXT NOT NULL DEFAULT '',
+           tags_json TEXT NOT NULL DEFAULT '[]',
+           tags_text TEXT NOT NULL DEFAULT '',
+           deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
+           content_fingerprint TEXT NOT NULL DEFAULT 'missing'
+         );
+         INSERT INTO meeting_content_search(meeting_id,title)
+           SELECT id,title FROM meetings;
+         CREATE TRIGGER meeting_content_search_meeting_insert
+         AFTER INSERT ON meetings BEGIN
+           INSERT INTO meeting_content_search(meeting_id,title)
+           VALUES (new.id,new.title);
+         END;
+
+         CREATE VIRTUAL TABLE meeting_content_search_fts USING fts5(
+           meeting_id UNINDEXED,
+           title,
+           summary,
+           tags,
+           tokenize='trigram'
+         );
+         INSERT INTO meeting_content_search_fts(meeting_id,title,summary,tags)
+           SELECT meeting_id,title,summary,tags_text FROM meeting_content_search;
+         CREATE TRIGGER meeting_content_search_fts_insert
+         AFTER INSERT ON meeting_content_search BEGIN
+           INSERT INTO meeting_content_search_fts(meeting_id,title,summary,tags)
+           VALUES (new.meeting_id,new.title,new.summary,new.tags_text);
+         END;
+         CREATE TRIGGER meeting_content_search_fts_update
+         AFTER UPDATE ON meeting_content_search BEGIN
+           DELETE FROM meeting_content_search_fts
+           WHERE meeting_id=old.meeting_id;
+           INSERT INTO meeting_content_search_fts(meeting_id,title,summary,tags)
+           VALUES (new.meeting_id,new.title,new.summary,new.tags_text);
+         END;
+         CREATE TRIGGER meeting_content_search_fts_delete
+         AFTER DELETE ON meeting_content_search BEGIN
+           DELETE FROM meeting_content_search_fts
+           WHERE meeting_id=old.meeting_id;
+         END;",
     )?;
     Ok(())
 }
@@ -2857,6 +3135,7 @@ mod tests {
     const T1: &str = "2026-07-30T10:01:00Z";
     const T2: &str = "2026-07-30T10:02:00Z";
     const T3: &str = "2026-07-30T10:03:00Z";
+    const T4: &str = "2026-07-30T10:04:00Z";
 
     fn store() -> MeetingStore {
         MeetingStore::open_in_memory().unwrap()
@@ -2960,6 +3239,110 @@ mod tests {
         }
         let reopened = MeetingStore::open(&path).unwrap();
         assert_eq!(reopened.get_meeting("meeting-1").unwrap().channels.len(), 2);
+    }
+
+    #[test]
+    fn schema_v5_backfills_existing_meeting_titles_into_private_search() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        {
+            let transaction = connection.transaction().unwrap();
+            migration_v1(&transaction).unwrap();
+            migration_v2(&transaction).unwrap();
+            migration_v3(&transaction).unwrap();
+            migration_v4(&transaction).unwrap();
+            transaction
+                .execute(
+                    "INSERT INTO meetings (
+                       id,title,origin_json,status,created_at,updated_at,metadata_json
+                     ) VALUES (
+                       'meeting-legacy','Legacy substring sentinel',
+                       '{\"kind\":\"manual\",\"evidence\":{}}','completed',?1,?1,'{}'
+                     )",
+                    [T0],
+                )
+                .unwrap();
+            transaction
+                .pragma_update(None, "application_id", APPLICATION_ID)
+                .unwrap();
+            transaction.pragma_update(None, "user_version", 4).unwrap();
+            transaction.commit().unwrap();
+        }
+
+        let store = MeetingStore::from_connection(connection, None).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 5);
+        let hits = store.search_content("acy substring", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].meeting_id, "meeting-legacy");
+        assert!(hits[0].title_match);
+    }
+
+    #[test]
+    fn reviewed_content_search_preserves_substrings_and_scrubs_fts_on_deletion() {
+        let store = store();
+        let created = store.create_meeting(&meeting(), T0).unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Failed,
+                T1,
+                Some(&MeetingFailure {
+                    code: "fixture".into(),
+                    message: "terminal fixture".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        store
+            .sync_content_search(
+                "meeting-1",
+                "Überarbeitete ReleasePlanung",
+                Some("The decision lives beyond every library preview."),
+                &["RoadmapSentinel".into()],
+                false,
+                "test-content-v1",
+            )
+            .unwrap();
+
+        let title = store.search_content("leasePlan", 10).unwrap();
+        assert_eq!(title.len(), 1);
+        assert!(title[0].title_match);
+        assert!(matches!(
+            store.search_content("üb", 10),
+            Err(MeetingStoreError::Validation(message))
+                if message.contains("at least 3 characters")
+        ));
+        let short_unicode = store.search_content("übe", 10).unwrap();
+        assert_eq!(short_unicode.len(), 1);
+        assert!(short_unicode[0].title_match);
+        let summary = store.search_content("beyond every", 10).unwrap();
+        assert_eq!(summary.len(), 1);
+        assert!(summary[0].summary_match);
+        let tag = store.search_content("mapSent", 10).unwrap();
+        assert_eq!(tag.len(), 1);
+        assert!(tag[0].tags_match);
+
+        store
+            .begin_deletion("meeting-1", MeetingDeletionMode::All, T2)
+            .unwrap();
+        assert!(store
+            .search_content("ReleasePlanung", 10)
+            .unwrap()
+            .is_empty());
+        store.mark_deletion_files_removed("meeting-1", T3).unwrap();
+        store
+            .remove_deletion_database_authority("meeting-1", T4)
+            .unwrap();
+        let connection = store.lock().unwrap();
+        let indexed_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM meeting_content_search_fts
+                 WHERE meeting_id='meeting-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed_rows, 0, "permanent deletion retained indexed text");
     }
 
     #[cfg(unix)]
@@ -3084,6 +3467,46 @@ mod tests {
             store.transition_meeting(&detected.id, 1, MeetingStatus::Completed, T2, None),
             Err(MeetingStoreError::InvalidTransition { .. })
         ));
+    }
+
+    #[test]
+    fn interrupted_and_failed_recordings_keep_a_terminal_stop_timestamp() {
+        for (meeting_id, terminal) in [
+            ("meeting-interrupted", MeetingStatus::Interrupted),
+            ("meeting-failed", MeetingStatus::Failed),
+        ] {
+            let store = store();
+            let mut draft = meeting();
+            draft.id = meeting_id.into();
+            let created = store.create_meeting(&draft, T0).unwrap();
+            let recording = store
+                .transition_meeting(
+                    meeting_id,
+                    created.revision,
+                    MeetingStatus::Recording,
+                    T1,
+                    None,
+                )
+                .unwrap();
+            let failure = (terminal == MeetingStatus::Failed).then_some(MeetingFailure {
+                code: "capture-failed".into(),
+                message: "capture worker ended".into(),
+                retryable: true,
+            });
+            let ended = store
+                .transition_meeting(
+                    meeting_id,
+                    recording.revision,
+                    terminal,
+                    T2,
+                    failure.as_ref(),
+                )
+                .unwrap();
+            assert_eq!(
+                ended.stopped_at.as_deref(),
+                Some("2026-07-30T10:02:00.000Z")
+            );
+        }
     }
 
     #[test]
@@ -3535,6 +3958,16 @@ mod tests {
             latest.segments.first().unwrap().segment.id,
             older.segments.last().unwrap().segment.id
         );
+        for status in [
+            MeetingStatus::Stopping,
+            MeetingStatus::Finalizing,
+            MeetingStatus::Completed,
+        ] {
+            let meeting = store.get_meeting("meeting-1").unwrap();
+            store
+                .transition_meeting("meeting-1", meeting.revision, status, T3, None)
+                .unwrap();
+        }
         let hits = store.search_transcript("word", 300).unwrap();
         assert_eq!(hits.len(), 3);
         assert!(hits.iter().all(|hit| hit.meeting_id == "meeting-1"));

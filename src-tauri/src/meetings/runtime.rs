@@ -22,7 +22,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, Weak,
     },
 };
 use thiserror::Error;
@@ -522,6 +522,20 @@ pub struct MeetingTranscriptSearchHit {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingLibrarySearchMatch {
+    pub title: bool,
+    pub summary: bool,
+    pub tags: bool,
+    pub transcript: Vec<MeetingTranscriptSearchHit>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeetingLibrarySearchHit {
+    pub meeting: MeetingView,
+    pub matched: MeetingLibrarySearchMatch,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingLibraryCursor {
@@ -579,6 +593,10 @@ pub struct MeetingRuntime {
     inner: Arc<MeetingRuntimeInner>,
 }
 
+struct WeakMeetingRuntime {
+    inner: Weak<MeetingRuntimeInner>,
+}
+
 impl MeetingRuntime {
     pub fn new(
         store: Arc<MeetingStore>,
@@ -629,6 +647,12 @@ impl MeetingRuntime {
             runtime.set_diagnostic(format!("Meeting audio recovery needs attention: {error}"))?;
         }
         Ok(runtime)
+    }
+
+    pub(crate) fn capture_failure_sink(&self) -> Arc<dyn MeetingCaptureFailureSink> {
+        Arc::new(WeakMeetingRuntime {
+            inner: Arc::downgrade(&self.inner),
+        })
     }
 
     pub fn snapshot(&self) -> Result<MeetingSnapshot, MeetingRuntimeError> {
@@ -805,6 +829,90 @@ impl MeetingRuntime {
                     .collect()
             })
             .map_err(Into::into)
+    }
+
+    /// Search the full durable library without depending on the 200-row UI
+    /// snapshot. The two indexed streams each contribute enough distinct
+    /// meetings to produce the newest bounded union without missing an older
+    /// title/summary/tag-only or transcript-only result.
+    pub fn search_library(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<MeetingLibrarySearchHit>, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        require_nonempty(query, "meeting search query")?;
+        let limit = limit.min(100);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        #[derive(Default)]
+        struct MatchAccumulator {
+            title: bool,
+            summary: bool,
+            tags: bool,
+            transcript: Vec<MeetingTranscriptSearchHit>,
+        }
+        let mut candidates = HashMap::<String, MatchAccumulator>::new();
+        for hit in self.inner.store.search_content(query, limit)? {
+            let candidate = candidates.entry(hit.meeting_id).or_default();
+            candidate.title |= hit.title_match;
+            candidate.summary |= hit.summary_match;
+            candidate.tags |= hit.tags_match;
+        }
+        for hit in self
+            .inner
+            .store
+            .search_transcript(query, limit.saturating_mul(3))?
+        {
+            let meeting_id = hit.meeting_id.clone();
+            candidates
+                .entry(meeting_id)
+                .or_default()
+                .transcript
+                .push(MeetingTranscriptSearchHit {
+                    meeting_id: hit.meeting_id,
+                    segment_id: hit.segment_id,
+                    start_ms: hit.start_ms as u64,
+                    text: hit.text,
+                });
+        }
+
+        let active = self.active()?.clone();
+        let mut hits = Vec::with_capacity(candidates.len());
+        for (meeting_id, matched) in candidates {
+            let record = self.inner.store.get_meeting(&meeting_id)?;
+            let content = self
+                .inner
+                .platform
+                .content(&meeting_id)
+                .map_err(|message| port_error("meeting content projection", message))?;
+            if content.deleted
+                || !matches!(
+                    record.status,
+                    MeetingStatus::Completed | MeetingStatus::Interrupted | MeetingStatus::Failed
+                )
+            {
+                continue;
+            }
+            let view = self.meeting_view(&record, &content, active.as_ref())?;
+            hits.push((
+                record.created_at,
+                record.id,
+                MeetingLibrarySearchHit {
+                    meeting: view,
+                    matched: MeetingLibrarySearchMatch {
+                        title: matched.title,
+                        summary: matched.summary,
+                        tags: matched.tags,
+                        transcript: matched.transcript,
+                    },
+                },
+            ));
+        }
+        hits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        hits.truncate(limit as usize);
+        Ok(hits.into_iter().map(|(_, _, hit)| hit).collect())
     }
 
     pub fn dismiss_candidate(
@@ -1271,17 +1379,45 @@ impl MeetingRuntime {
             run_id: run_id.into(),
         });
         let recording = self.inner.store.get_meeting(meeting_id)?;
+        let failure = MeetingFailure {
+            code: "capture-runtime-failed".into(),
+            message: bounded_error(message),
+            retryable: true,
+        };
+        let interrupted = self.inner.store.transition_meeting(
+            meeting_id,
+            recording.revision,
+            MeetingStatus::Interrupted,
+            &self.inner.clock.now(),
+            None,
+        )?;
+        *self.active()? = None;
+        let _ = self.set_diagnostic(format!(
+            "Recording stopped after a native capture failure: {}",
+            bounded_error(message)
+        ));
+        // Publish the durable failure before draining a slow provider. This is
+        // a renderer invalidation only; projection failure cannot delay
+        // transcript repair or undo the already committed lifecycle.
+        if let Err(error) = self.publish_unlocked(
+            "capture-runtime-failed",
+            Some(meeting_id.into()),
+            Some(run_id.into()),
+        ) {
+            log::error!("Could not publish the durable Scribe capture failure: {error}");
+        }
+
         let finalize = self.inner.transcription.finalize(&TranscriptionFinalize {
             meeting_id: meeting_id.into(),
             run_id: run_id.into(),
-            base_revision: recording.transcript_revision,
+            base_revision: interrupted.transcript_revision,
             observed_at: self.inner.clock.now(),
         });
 
         let transcript_final = match finalize {
             Ok(batch)
                 if batch.meeting_id == meeting_id
-                    && batch.base_revision == recording.transcript_revision
+                    && batch.base_revision == interrupted.transcript_revision
                     && batch.marks_final =>
             {
                 self.inner.store.apply_transcript_batch(&batch).is_ok()
@@ -1295,36 +1431,25 @@ impl MeetingRuntime {
                 current.revision,
                 MeetingStatus::Failed,
                 &self.inner.clock.now(),
-                Some(&MeetingFailure {
-                    code: "capture-runtime-failed".into(),
-                    message: bounded_error(message),
-                    retryable: true,
-                }),
+                Some(&failure),
             )?;
+            self.publish_unlocked(
+                "capture-runtime-reconciled",
+                Some(meeting_id.into()),
+                Some(run_id.into()),
+            )
         } else {
-            self.inner.store.transition_meeting(
-                meeting_id,
-                current.revision,
-                MeetingStatus::Interrupted,
-                &self.inner.clock.now(),
-                None,
-            )?;
             self.enqueue_transcription_retry(
                 meeting_id,
                 current.transcript_revision,
                 "capture ended before transcript finalization",
             )?;
+            self.publish_unlocked(
+                "transcription-repair-queued",
+                Some(meeting_id.into()),
+                Some(run_id.into()),
+            )
         }
-        *self.active()? = None;
-        self.set_diagnostic(format!(
-            "Recording stopped after a native capture failure: {}",
-            bounded_error(message)
-        ))?;
-        self.publish_unlocked(
-            "capture-runtime-failed",
-            Some(meeting_id.into()),
-            Some(run_id.into()),
-        )
     }
 
     /// Persist one non-terminal real-time transcript batch emitted by the STT
@@ -1884,8 +2009,10 @@ impl MeetingRuntime {
             transcript_revision: transcript.revision,
             transcript_final,
             segment_count: transcript.segment_count,
-            transcript_all_final: transcript.segment_count > 0
-                && transcript.non_final_segment_count == 0,
+            // "All" is vacuously true for a proven silent terminal
+            // transcript. Hook eligibility separately requires speech, so
+            // this projection never fabricates follow-up work.
+            transcript_all_final: transcript.non_final_segment_count == 0,
             // Transcript bodies are selected-meeting detail, never library
             // snapshot data. Keeping this compatibility field empty prevents
             // accidental whole-history regressions at the IPC boundary.
@@ -2145,6 +2272,20 @@ impl MeetingCaptureFailureSink for MeetingRuntime {
                 bounded_error(message)
             ));
         }
+    }
+}
+
+impl MeetingCaptureFailureSink for WeakMeetingRuntime {
+    fn capture_failed(&self, meeting_id: &str, run_id: &str, message: &str) {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        MeetingCaptureFailureSink::capture_failed(
+            &MeetingRuntime { inner },
+            meeting_id,
+            run_id,
+            message,
+        );
     }
 }
 
@@ -2627,6 +2768,46 @@ mod tests {
                 batch_id: format!("empty-final-{}", request.run_id),
                 base_revision: request.base_revision,
                 source: "silent-stt".into(),
+                observed_at: request.observed_at.clone(),
+                marks_final: true,
+                changes: Vec::new(),
+            })
+        }
+    }
+
+    struct FailureOrderingTranscription {
+        store: Arc<MeetingStore>,
+        events: Arc<FakeEvents>,
+        observed_interrupted_before_finalize: Mutex<bool>,
+    }
+
+    impl MeetingTranscriptionPort for FailureOrderingTranscription {
+        fn start(&self, _request: &TranscriptionStart) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
+            let durable = self
+                .store
+                .get_meeting(&request.meeting_id)
+                .map_err(|error| error.to_string())?;
+            let event_was_published = self
+                .events
+                .published
+                .lock()
+                .map_err(|_| "test event mutex was poisoned".to_string())?
+                .iter()
+                .any(|event| event.kind == "capture-runtime-failed");
+            *self
+                .observed_interrupted_before_finalize
+                .lock()
+                .map_err(|_| "test observation mutex was poisoned".to_string())? =
+                durable.status == MeetingStatus::Interrupted && event_was_published;
+            Ok(TranscriptBatch {
+                meeting_id: request.meeting_id.clone(),
+                batch_id: format!("failure-terminal-{}", request.run_id),
+                base_revision: request.base_revision,
+                source: "failure-ordering-stt".into(),
                 observed_at: request.observed_at.clone(),
                 marks_final: true,
                 changes: Vec::new(),
@@ -3404,6 +3585,7 @@ mod tests {
             MeetingStatus::Completed
         );
         assert!(meeting.transcript_final);
+        assert!(meeting.transcript_all_final);
         assert_eq!(meeting.segment_count, 0);
         assert!(!store
             .list_jobs(&meeting_id)
@@ -3918,5 +4100,65 @@ mod tests {
             fixture.store.get_meeting(&meeting_id).unwrap().status,
             MeetingStatus::Failed
         );
+    }
+
+    #[test]
+    fn capture_failure_is_visible_before_slow_transcription_drain() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let events = Arc::new(FakeEvents::default());
+        let transcription = Arc::new(FailureOrderingTranscription {
+            store: Arc::clone(&store),
+            events: Arc::clone(&events),
+            observed_interrupted_before_finalize: Mutex::new(false),
+        });
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            transcription.clone(),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            events,
+        )
+        .unwrap();
+        let started = runtime
+            .start(start_request(&runtime, "visible-before-drain"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        let run_id = runtime.active().unwrap().as_ref().unwrap().run_id.clone();
+
+        runtime.capture_failed(
+            &meeting_id,
+            &run_id,
+            "disk reserve was exhausted while persisting audio",
+        );
+
+        assert!(*transcription
+            .observed_interrupted_before_finalize
+            .lock()
+            .unwrap());
+        assert_eq!(
+            store.get_meeting(&meeting_id).unwrap().status,
+            MeetingStatus::Failed
+        );
+    }
+
+    #[test]
+    fn native_capture_failure_sink_does_not_keep_runtime_alive() {
+        let runtime = MeetingRuntime::new(
+            Arc::new(MeetingStore::open_in_memory().unwrap()),
+            Arc::new(FakeCapture::default()),
+            Arc::new(FakeTranscription::default()),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+        let weak_inner = Arc::downgrade(&runtime.inner);
+        let sink = runtime.capture_failure_sink();
+
+        drop(runtime);
+
+        assert!(weak_inner.upgrade().is_none());
+        sink.capture_failed("ended-meeting", "ended-run", "late worker completion");
     }
 }

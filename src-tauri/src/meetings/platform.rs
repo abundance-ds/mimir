@@ -36,6 +36,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
     thread,
+    time::UNIX_EPOCH,
 };
 use uuid::Uuid;
 
@@ -51,6 +52,7 @@ const MAX_TAGS: usize = 64;
 const MAX_TAG_BYTES: usize = 160;
 const MODEL_PROGRESS_CHECKPOINT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS: usize = 5;
+const MAX_DIAGNOSTIC_CHARS: usize = 1_024;
 
 #[derive(Debug, Clone)]
 pub struct MeetingPlatformPaths {
@@ -1236,6 +1238,8 @@ struct NativeMeetingPlatformInner {
     operation: Mutex<()>,
     diagnostics: Arc<Mutex<Vec<String>>>,
     #[cfg(test)]
+    content_loads: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     deletion_fault: Mutex<Option<&'static str>>,
 }
 
@@ -1277,16 +1281,31 @@ impl NativeMeetingPlatform {
                 operation: Mutex::new(()),
                 diagnostics,
                 #[cfg(test)]
+                content_loads: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
                 deletion_fault: Mutex::new(None),
             }),
         };
         // Load once during construction so corruption is quarantined before
         // runtime projection and diagnostics are stable.
+        platform.reconcile_content_search()?;
         let config = platform.load_config()?;
-        platform
+        if let Err(error) = platform
             .inner
             .environment
-            .set_detection_enabled(config.detection_enabled)?;
+            .set_detection_enabled(config.detection_enabled)
+        {
+            // Detection is assistive. A monitor that cannot apply its startup
+            // policy must remain visible, but cannot take manual capture down
+            // with it. Explicit later settings mutations still return errors.
+            push_diagnostic(
+                &platform.inner.diagnostics,
+                format!(
+                    "Meeting detection could not start; manual recording remains available: {}",
+                    bounded_diagnostic(&error)
+                ),
+            );
+        }
         Ok(platform)
     }
 
@@ -1482,6 +1501,10 @@ impl NativeMeetingPlatform {
     }
 
     fn load_content(&self, meeting_id: &str) -> Result<PersistedMeetingContent, String> {
+        #[cfg(test)]
+        self.inner
+            .content_loads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = self.content_path(meeting_id)?;
         match load_json_optional_quarantining::<PersistedMeetingContent>(&path)
             .map_err(|error| error.to_string())?
@@ -1502,6 +1525,13 @@ impl NativeMeetingPlatform {
                 self.default_content(meeting_id)
             }
         }
+    }
+
+    #[cfg(test)]
+    fn content_load_count(&self) -> usize {
+        self.inner
+            .content_loads
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn default_content(&self, meeting_id: &str) -> Result<PersistedMeetingContent, String> {
@@ -1532,8 +1562,93 @@ impl NativeMeetingPlatform {
         meeting_id: &str,
         content: &PersistedMeetingContent,
     ) -> Result<(), String> {
-        write_private_json_atomic(self.content_path(meeting_id)?, content)
-            .map_err(|error| error.to_string())
+        let content_path = self.content_path(meeting_id)?;
+        write_private_json_atomic(&content_path, content).map_err(|error| error.to_string())?;
+        if content.deleted
+            && self
+                .inner
+                .store
+                .deletion(meeting_id)
+                .map_err(|error| error.to_string())?
+                .is_some_and(|deletion| deletion.mode == StoreDeletionMode::All)
+        {
+            // The durable deletion journal already hides this content from
+            // every indexed reader; the imminent meeting-row cascade scrubs
+            // the FTS copy. Do not ask a tombstoned row to accept an update.
+            return Ok(());
+        }
+        let meeting = self
+            .inner
+            .store
+            .get_meeting(meeting_id)
+            .map_err(|error| error.to_string())?;
+        let fingerprint = content_file_fingerprint(&content_path)?;
+        self.inner
+            .store
+            .sync_content_search(
+                meeting_id,
+                content.title.as_deref().unwrap_or(&meeting.title),
+                content.summary.as_deref(),
+                &content.tags,
+                content.deleted,
+                &fingerprint,
+            )
+            .map_err(|error| format!("Could not synchronize private meeting search: {error}"))
+    }
+
+    fn reconcile_content_search(&self) -> Result<(), String> {
+        let mut before = None;
+        loop {
+            let page = self
+                .inner
+                .store
+                .list_meetings_page(before.as_ref(), 250)
+                .map_err(|error| {
+                    format!("Could not page meetings for private content indexing: {error}")
+                })?;
+            for meeting in &page.meetings {
+                let content_path = self.content_path(&meeting.id)?;
+                let observed_fingerprint = content_file_fingerprint(&content_path)?;
+                let indexed_fingerprint = self
+                    .inner
+                    .store
+                    .content_search_fingerprint(&meeting.id)
+                    .map_err(|error| {
+                        format!(
+                            "Could not inspect the reviewed-content index for meeting '{}': {error}",
+                            meeting.id
+                        )
+                    })?;
+                if indexed_fingerprint.as_deref() == Some(observed_fingerprint.as_str()) {
+                    continue;
+                }
+                let content = self.load_content(&meeting.id)?;
+                // A corrupt file may have been quarantined while loading, so
+                // fingerprint the post-recovery authority rather than the
+                // stale path state observed above.
+                let reconciled_fingerprint = content_file_fingerprint(&content_path)?;
+                self.inner
+                    .store
+                    .sync_content_search(
+                        &meeting.id,
+                        content.title.as_deref().unwrap_or(&meeting.title),
+                        content.summary.as_deref(),
+                        &content.tags,
+                        content.deleted,
+                        &reconciled_fingerprint,
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "Could not index reviewed content for meeting '{}': {error}",
+                            meeting.id
+                        )
+                    })?;
+            }
+            if !page.has_more {
+                return Ok(());
+            }
+            before = page.next_before;
+        }
     }
 
     fn delete_meeting_files(
@@ -1907,8 +2022,9 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
 
     fn update_config(&self, patch: &MeetingConfigPatch) -> Result<(), String> {
         let _operation = lock(&self.inner.operation)?;
-        let mut config = self.load_config()?;
-        let previous_endpoint = stored_custom_stt_endpoint(&config)?;
+        let previous_config = self.load_config()?;
+        let mut config = previous_config.clone();
+        let previous_endpoint = stored_custom_stt_endpoint(&previous_config)?;
         if let Some(value) = patch.detection_enabled {
             config.detection_enabled = value;
         }
@@ -1944,17 +2060,39 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         }
         validate_meeting_config(&config)?;
         let next_endpoint = stored_custom_stt_endpoint(&config)?;
-        if previous_endpoint != next_endpoint {
-            // Clear before publishing the route. If Keychain access fails, the
-            // old configuration remains authoritative and no new endpoint can
-            // receive the old secret. If the subsequent config write fails,
-            // losing the credential is safe and explicit re-entry repairs it.
-            self.inner.secrets.clear()?;
+        let detection_changed = previous_config.detection_enabled != config.detection_enabled;
+        if detection_changed {
+            self.inner
+                .environment
+                .set_detection_enabled(config.detection_enabled)
+                .map_err(|error| bounded_diagnostic(&error))?;
         }
-        self.save_config(config.clone())?;
-        self.inner
-            .environment
-            .set_detection_enabled(config.detection_enabled)
+        let persist = (|| {
+            if previous_endpoint != next_endpoint {
+                // Clear before publishing the route. If Keychain access
+                // fails, the old configuration remains authoritative and no
+                // new endpoint can receive the old secret. Losing a secret
+                // after a later atomic config-write failure is safe and
+                // explicit re-entry repairs it.
+                self.inner.secrets.clear()?;
+            }
+            self.save_config(config)
+        })();
+        if let Err(error) = persist {
+            if detection_changed {
+                if let Err(rollback) = self
+                    .inner
+                    .environment
+                    .set_detection_enabled(previous_config.detection_enabled)
+                {
+                    return Err(bounded_diagnostic(&format!(
+                        "{error}; meeting detection rollback also failed: {rollback}"
+                    )));
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn set_api_key(&self, api_key: &str) -> Result<(), String> {
@@ -2469,12 +2607,65 @@ fn format_timestamp(milliseconds: i64) -> String {
     )
 }
 
+fn content_file_fingerprint(path: &Path) -> Result<String, String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok("missing".into()),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect private meeting content: {error}"
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Private meeting content must be a regular file".into());
+    }
+    let modified = metadata
+        .modified()
+        .map_err(|error| format!("Could not inspect private meeting content timestamp: {error}"))?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "Private meeting content has an invalid timestamp".to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok(format!(
+            "v1:{}:{}:{}:{}:{}",
+            metadata.dev(),
+            metadata.ino(),
+            metadata.len(),
+            modified.as_secs(),
+            modified.subsec_nanos()
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(format!(
+            "v1:{}:{}:{}",
+            metadata.len(),
+            modified.as_secs(),
+            modified.subsec_nanos()
+        ))
+    }
+}
+
 fn push_diagnostic(diagnostics: &Mutex<Vec<String>>, diagnostic: String) {
     if let Ok(mut values) = diagnostics.lock() {
         if !values.contains(&diagnostic) {
             values.push(diagnostic);
         }
     }
+}
+
+fn bounded_diagnostic(value: &str) -> String {
+    let mut characters = value.chars();
+    let mut bounded = characters
+        .by_ref()
+        .take(MAX_DIAGNOSTIC_CHARS)
+        .collect::<String>();
+    if characters.next().is_some() {
+        bounded.push('…');
+    }
+    bounded
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, String> {
@@ -2553,6 +2744,21 @@ mod tests {
         fn set_detection_enabled(&self, enabled: bool) -> Result<(), String> {
             self.detection_updates.lock().unwrap().push(enabled);
             Ok(())
+        }
+    }
+
+    struct FailingDetectionEnvironment;
+
+    impl MeetingEnvironmentProbe for FailingDetectionEnvironment {
+        fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
+            FakeEnvironment.projection()
+        }
+
+        fn set_detection_enabled(&self, _enabled: bool) -> Result<(), String> {
+            Err(format!(
+                "detector unavailable {}",
+                "bounded-diagnostic-tail".repeat(100)
+            ))
         }
     }
 
@@ -3097,6 +3303,7 @@ mod tests {
                 }],
             })
             .unwrap();
+        complete_meeting(&fixture, "meeting-1");
         fixture
             .platform
             .update_content(
@@ -3116,6 +3323,180 @@ mod tests {
         assert!(markdown.contains("A release decision was made."));
         assert!(markdown.contains("Ship it carefully."));
         assert!(markdown.contains("00:00:01 · Alex"));
+        let summary_hits = fixture
+            .store
+            .search_content("release decision", 10)
+            .unwrap();
+        assert_eq!(summary_hits.len(), 1);
+        assert!(summary_hits[0].summary_match);
+        let tag_hits = fixture.store.search_content("lea", 10).unwrap();
+        assert_eq!(tag_hits.len(), 1);
+        assert!(tag_hits[0].tags_match);
+    }
+
+    #[test]
+    fn startup_reconciles_existing_reviewed_content_into_private_search() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = MeetingPlatformPaths::from_mimir_root(directory.path());
+        fs::create_dir_all(&paths.content_root).unwrap();
+        let store =
+            Arc::new(MeetingStore::open(paths.meetings_root.join("meetings.sqlite")).unwrap());
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "meeting-before-index".into(),
+                    title: "Original title".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: Vec::new(),
+                    metadata: json!({}),
+                },
+                NOW,
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                super::super::MeetingStatus::Failed,
+                "2026-07-30T10:01:00Z",
+                Some(&super::super::MeetingFailure {
+                    code: "fixture".into(),
+                    message: "terminal fixture".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        write_private_json_atomic(
+            paths.content_root.join("meeting-before-index.json"),
+            &PersistedMeetingContent {
+                schema_version: CONTENT_SCHEMA_VERSION,
+                title: Some("Reviewed startup title".into()),
+                summary: Some(format!(
+                    "{} startup-full-summary-sentinel",
+                    "reviewed context ".repeat(180)
+                )),
+                tags: vec!["startup-index-tag".into()],
+                ..PersistedMeetingContent::default()
+            },
+        )
+        .unwrap();
+
+        let model_bytes = b"verified managed model".to_vec();
+        let completion = Arc::new((Mutex::new(false), Condvar::new()));
+        let platform = NativeMeetingPlatform::new(
+            paths.clone(),
+            Arc::clone(&store),
+            vec![MeetingModelCatalogEntry {
+                title: "Whisper Small".into(),
+                manifest: manifest(&model_bytes),
+            }],
+            Arc::new(FakeSecrets::default()),
+            Arc::new(FakeEnvironment),
+            Arc::new(FakeDisk),
+            Arc::new(FakeDownloader {
+                bytes: model_bytes,
+                completion,
+            }),
+            Arc::new(NoopMeetingPlatformChangeSink),
+        )
+        .unwrap();
+        assert_eq!(
+            platform.content_load_count(),
+            1,
+            "the dirty legacy content file should be loaded exactly once"
+        );
+        let indexed_fingerprint = store
+            .content_search_fingerprint("meeting-before-index")
+            .unwrap()
+            .unwrap();
+        assert_ne!(indexed_fingerprint, "missing");
+
+        for (query, field) in [
+            ("startup title", "title"),
+            ("full-summary-sentinel", "summary"),
+            ("index-tag", "tags"),
+        ] {
+            let hits = store.search_content(query, 10).unwrap();
+            assert_eq!(hits.len(), 1, "startup missed {field}");
+            assert_eq!(hits[0].meeting_id, "meeting-before-index");
+            assert!(match field {
+                "title" => hits[0].title_match,
+                "summary" => hits[0].summary_match,
+                "tags" => hits[0].tags_match,
+                _ => false,
+            });
+        }
+
+        let model_bytes = b"verified managed model".to_vec();
+        let completion = Arc::new((Mutex::new(false), Condvar::new()));
+        let restarted = NativeMeetingPlatform::new(
+            paths,
+            Arc::clone(&store),
+            vec![MeetingModelCatalogEntry {
+                title: "Whisper Small".into(),
+                manifest: manifest(&model_bytes),
+            }],
+            Arc::new(FakeSecrets::default()),
+            Arc::new(FakeEnvironment),
+            Arc::new(FakeDisk),
+            Arc::new(FakeDownloader {
+                bytes: model_bytes,
+                completion,
+            }),
+            Arc::new(NoopMeetingPlatformChangeSink),
+        )
+        .unwrap();
+        assert_eq!(
+            restarted.content_load_count(),
+            0,
+            "an unchanged library restart must not re-read reviewed content bodies"
+        );
+    }
+
+    #[test]
+    fn detector_policy_failure_degrades_startup_but_settings_still_surface_it() {
+        let fixture = fixture_with_environment(Arc::new(FailingDetectionEnvironment));
+        let diagnostic = fixture.platform.projection().unwrap().diagnostic.unwrap();
+        assert!(diagnostic.contains("manual recording remains available"));
+        assert!(diagnostic.chars().count() <= MAX_DIAGNOSTIC_CHARS + 100);
+        assert!(
+            !diagnostic.ends_with("bounded-diagnostic-tail"),
+            "unbounded detector error reached the public projection"
+        );
+
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                detection_enabled: Some(false),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+        assert!(
+            !fixture
+                .platform
+                .projection()
+                .unwrap()
+                .config
+                .detection_enabled
+        );
+
+        let error = fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                detection_enabled: Some(true),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap_err();
+        assert!(error.contains("detector unavailable"));
+        assert!(
+            !fixture
+                .platform
+                .projection()
+                .unwrap()
+                .config
+                .detection_enabled,
+            "a rejected detector policy must not mutate durable configuration"
+        );
     }
 
     #[test]
@@ -3183,6 +3564,24 @@ mod tests {
             !hook_input.exists(),
             "whole-record deletion must remove managed hook transcript inputs"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn content_fingerprint_errors_never_disclose_private_paths() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let private_path = directory.path().join("meeting-secret.json");
+        let outside = directory.path().join("outside.json");
+        fs::write(&outside, b"private content").unwrap();
+        symlink(&outside, &private_path).unwrap();
+
+        let error = content_file_fingerprint(&private_path).unwrap_err();
+        assert!(error.contains("regular file"));
+        assert!(!error.contains(&directory.path().display().to_string()));
+        assert!(!error.contains("meeting-secret"));
+        assert!(!error.contains("outside.json"));
     }
 
     #[test]

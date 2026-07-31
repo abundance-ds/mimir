@@ -196,6 +196,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/lib.rs",
+      "selector": "windowless_quit_stops_before_exit_and_failures_keep_process_open",
+      "scenarios": ["MTG-025"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/model.rs",
       "selector": "gherkin_terminal_meetings_never_reopen",
       "scenarios": ["MTG-026"]

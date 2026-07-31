@@ -4,8 +4,10 @@
 //! endpoint is trusted-local but unauthenticated, so exporting start/stop would
 //! let every local process exercise Mimir's microphone grant.
 
+#[cfg(test)]
+use super::runtime::MeetingSnapshot;
 use super::runtime::{
-    MeetingLibraryCursor, MeetingRuntime, MeetingSnapshot, MeetingUpdatePatch, MeetingView,
+    MeetingLibraryCursor, MeetingLibrarySearchHit, MeetingRuntime, MeetingUpdatePatch, MeetingView,
 };
 use crate::tool_registry::{
     ToolCallContext, ToolDescriptor, ToolError, ToolErrorCode, ToolOwner, ToolRegistration,
@@ -88,13 +90,15 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
         "meetings.search" => {
             let query = required_string(&input, "query")?;
             validate_search_query(query)?;
-            let snapshot = runtime.snapshot().map_err(runtime_error)?;
-            search_projection(
-                runtime,
-                &snapshot,
-                query,
+            let limit = bounded_limit(
                 input.get("limit").and_then(Value::as_u64),
-            )
+                DEFAULT_LIST_LIMIT,
+                MAX_LIST_LIMIT,
+            )?;
+            let hits = runtime
+                .search_library(query, limit as u32)
+                .map_err(runtime_error)?;
+            search_projection(&hits, query, runtime.revision())
         }
         "meetings.update" => {
             let meeting_id = required_string(&input, "meeting_id")?;
@@ -213,86 +217,55 @@ fn get_projection(
 }
 
 fn search_projection(
-    runtime: &MeetingRuntime,
-    snapshot: &MeetingSnapshot,
+    search_hits: &[MeetingLibrarySearchHit],
     query: &str,
-    limit: Option<u64>,
+    revision: u64,
 ) -> Result<Value, ToolError> {
-    let normalized = query.trim().to_lowercase();
-    if normalized.is_empty() {
+    if query.trim().is_empty() {
         return Err(invalid_input("query cannot be empty"));
     }
-    let limit = bounded_limit(limit, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)?;
-    let transcript_hits = runtime
-        .search_transcript(&normalized, (MAX_LIST_LIMIT * 3) as u32)
-        .map_err(runtime_error)?;
-    let mut candidates = snapshot
-        .meetings
+    let hits = search_hits
         .iter()
-        .cloned()
-        .map(|meeting| (meeting.id.clone(), meeting))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    for transcript_hit in &transcript_hits {
-        if !candidates.contains_key(&transcript_hit.meeting_id) {
-            if let Ok(meeting) = runtime.meeting(&transcript_hit.meeting_id) {
-                candidates.insert(meeting.id.clone(), meeting);
-            }
-        }
-    }
-    let mut hits = Vec::new();
-    for meeting in candidates.values() {
-        if !is_public_meeting(meeting) {
-            continue;
-        }
-        let title_match = meeting.title.to_lowercase().contains(&normalized);
-        let full_summary = if meeting.summary_truncated {
-            runtime
-                .transcript_slice(&meeting.id, 0, 1)
-                .map_err(runtime_error)?
-                .summary
-        } else {
-            meeting.summary.clone()
-        };
-        let summary_match = full_summary
-            .as_deref()
-            .is_some_and(|summary| summary.to_lowercase().contains(&normalized));
-        let transcript_matches = transcript_hits
-            .iter()
-            .filter(|segment| segment.meeting_id == meeting.id)
-            .map(|segment| {
-                json!({
-                    "segmentId": segment.segment_id,
-                    "startMs": segment.start_ms,
-                    "text": bounded_excerpt(&segment.text, 240)
+        .map(|hit| {
+            let transcript_matches = hit
+                .matched
+                .transcript
+                .iter()
+                .map(|segment| {
+                    json!({
+                        "segmentId": segment.segment_id,
+                        "startMs": segment.start_ms,
+                        "text": bounded_excerpt(&segment.text, 240)
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
-        if !title_match && !summary_match && transcript_matches.is_empty() {
-            continue;
-        }
-        hits.push(json!({
-            "meeting": meeting_metadata(meeting)?,
-            "matched": {
-                "title": title_match,
-                "summary": summary_match,
-                "transcript": transcript_matches
-            }
-        }));
-        if hits.len() == limit {
-            break;
-        }
-    }
+                .collect::<Vec<_>>();
+            Ok(json!({
+                "meeting": meeting_metadata(&hit.meeting)?,
+                "matched": {
+                    "title": hit.matched.title,
+                    "summary": hit.matched.summary,
+                    "tags": hit.matched.tags,
+                    "transcript": transcript_matches
+                }
+            }))
+        })
+        .collect::<Result<Vec<_>, ToolError>>()?;
     Ok(json!({
         "query": query.trim(),
         "hits": hits,
         "returned": hits.len(),
-        "revision": snapshot.revision
+        "revision": revision
     }))
 }
 
 fn validate_search_query(query: &str) -> Result<(), ToolError> {
     if query.trim().is_empty() {
         return Err(invalid_input("query cannot be empty"));
+    }
+    if query.trim().chars().count() < 3 {
+        return Err(invalid_input(
+            "query must contain at least 3 characters for indexed substring search",
+        ));
     }
     if query.len() > MAX_QUERY_BYTES {
         return Err(invalid_input(format!(
@@ -479,10 +452,10 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
         (
             "meetings.search",
             "meetings_search",
-            "Search titles, summaries, and finalized transcript text recorded by Mimir Scribe.",
+            "Search reviewed titles, full summaries, tags, and finalized transcript text across the complete Mimir Scribe library.",
             object_schema(
                 json!({
-                    "query": { "type": "string", "minLength": 1, "maxLength": MAX_QUERY_BYTES },
+                    "query": { "type": "string", "minLength": 3, "maxLength": MAX_QUERY_BYTES },
                     "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT }
                 }),
                 &["query"],
@@ -529,7 +502,8 @@ mod tests {
         TranscriptionFinalize, TranscriptionStart,
     };
     use crate::meetings::{
-        MeetingDraft, MeetingFailure, MeetingOrigin, MeetingStatus, MeetingStore, TranscriptBatch,
+        MeetingDeletionMode, MeetingDraft, MeetingFailure, MeetingOrigin, MeetingStatus,
+        MeetingStore, TranscriptBatch, TranscriptChange, TranscriptSegmentInput,
     };
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
@@ -697,6 +671,9 @@ mod tests {
     fn search_rejects_blank_and_oversized_queries() {
         let empty = validate_search_query("  ").unwrap_err();
         assert_eq!(empty.code, ToolErrorCode::InvalidInput);
+        let short = validate_search_query("ab").unwrap_err();
+        assert_eq!(short.code, ToolErrorCode::InvalidInput);
+        assert!(short.message.contains("at least 3 characters"));
         let oversized = "x".repeat(MAX_QUERY_BYTES + 1);
         let error = validate_search_query(&oversized).unwrap_err();
         assert_eq!(error.code, ToolErrorCode::InvalidInput);
@@ -709,11 +686,11 @@ mod tests {
     }
 
     #[test]
-    fn get_and_update_resolve_records_beyond_the_snapshot_cap() {
+    fn get_update_and_search_resolve_records_beyond_the_snapshot_cap() {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         for index in 0..=200 {
             let id = format!("meeting-{index:03}");
-            let created = store
+            store
                 .create_meeting(
                     &MeetingDraft {
                         id: id.clone(),
@@ -725,10 +702,35 @@ mod tests {
                     "2026-07-31T00:00:00Z",
                 )
                 .unwrap();
+            if index == 0 {
+                store
+                    .apply_transcript_batch(&TranscriptBatch {
+                        meeting_id: id.clone(),
+                        batch_id: "oldest-search-transcript".into(),
+                        base_revision: 0,
+                        source: "test".into(),
+                        observed_at: "2026-07-31T00:00:00.500Z".into(),
+                        marks_final: true,
+                        changes: vec![TranscriptChange::UpsertSegment {
+                            segment: TranscriptSegmentInput {
+                                id: "oldest-segment".into(),
+                                start_ms: 1_000,
+                                end_ms: 2_000,
+                                text: "Transcript authority sentinel appears here.".into(),
+                                channel_id: None,
+                                speaker: None,
+                                confidence: Some(1.0),
+                                is_final: true,
+                                metadata: json!({}),
+                            },
+                        }],
+                    })
+                    .unwrap();
+            }
             store
                 .transition_meeting(
                     &id,
-                    created.revision,
+                    store.get_meeting(&id).unwrap().revision,
                     MeetingStatus::Failed,
                     "2026-07-31T00:00:01Z",
                     Some(&MeetingFailure {
@@ -740,11 +742,31 @@ mod tests {
                 .unwrap();
         }
         let platform = Arc::new(TestPlatform::default());
+        let full_summary = format!("{} oldest-summary-sentinel", "summary context ".repeat(180));
+        platform.contents.lock().unwrap().insert(
+            "meeting-000".into(),
+            MeetingContentProjection {
+                title: Some("Reviewed oldest title sentinel".into()),
+                summary: Some(full_summary.clone()),
+                tags: vec!["release-roadmap-sentinel".into()],
+                ..MeetingContentProjection::default()
+            },
+        );
+        store
+            .sync_content_search(
+                "meeting-000",
+                "Reviewed oldest title sentinel",
+                Some(&full_summary),
+                &["release-roadmap-sentinel".into()],
+                false,
+                "test-content-v1",
+            )
+            .unwrap();
         let runtime = MeetingRuntime::new(
-            store,
+            Arc::clone(&store),
             Arc::new(TestCapture),
             Arc::new(TestTranscription),
-            platform,
+            platform.clone(),
             Arc::new(TestClock),
             Arc::new(TestEvents),
         )
@@ -771,5 +793,147 @@ mod tests {
         )
         .unwrap();
         assert_eq!(updated["title"], "Reviewed oldest meeting");
+
+        // Keep the durable index aligned with this fake platform's update;
+        // the production NativeMeetingPlatform performs this in one owned
+        // operation.
+        store
+            .sync_content_search(
+                "meeting-000",
+                "Reviewed oldest meeting",
+                Some(&full_summary),
+                &["release-roadmap-sentinel".into()],
+                false,
+                "test-content-v2",
+            )
+            .unwrap();
+        for (query, field) in [
+            ("oldest meeting", "title"),
+            ("oldest-summary-sentinel", "summary"),
+            ("roadmap-sentinel", "tags"),
+            ("authority sentinel", "transcript"),
+        ] {
+            let result = execute(
+                &runtime,
+                "meetings.search",
+                json!({"query": query, "limit": 10}),
+            )
+            .unwrap();
+            assert_eq!(result["returned"], 1, "query '{query}'");
+            assert_eq!(result["hits"][0]["meeting"]["id"], "meeting-000");
+            if field == "transcript" {
+                assert_eq!(
+                    result["hits"][0]["matched"]["transcript"][0]["segmentId"],
+                    "oldest-segment"
+                );
+            } else {
+                assert_eq!(result["hits"][0]["matched"][field], true);
+            }
+            assert!(
+                serde_json::to_vec(&result).unwrap().len() < 32 * 1024,
+                "bounded search result exceeded its payload budget"
+            );
+        }
+
+        let detected = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "meeting-in-progress".into(),
+                    title: "In progress exclusion sentinel".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: Vec::new(),
+                    metadata: json!({}),
+                },
+                "2026-07-31T00:00:03Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &detected.id,
+                detected.revision,
+                MeetingStatus::Recording,
+                "2026-07-31T00:00:04Z",
+                None,
+            )
+            .unwrap();
+        store
+            .sync_content_search(
+                &detected.id,
+                &detected.title,
+                Some("in-progress-private-sentinel"),
+                &[],
+                false,
+                "test-content-in-progress",
+            )
+            .unwrap();
+        platform.contents.lock().unwrap().insert(
+            detected.id.clone(),
+            MeetingContentProjection {
+                title: Some(detected.title),
+                summary: Some("in-progress-private-sentinel".into()),
+                ..MeetingContentProjection::default()
+            },
+        );
+
+        let deleted = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "meeting-deleted".into(),
+                    title: "Deleted exclusion sentinel".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: Vec::new(),
+                    metadata: json!({}),
+                },
+                "2026-07-31T00:00:05Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &deleted.id,
+                deleted.revision,
+                MeetingStatus::Failed,
+                "2026-07-31T00:00:06Z",
+                Some(&MeetingFailure {
+                    code: "fixture".into(),
+                    message: "terminal fixture".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        store
+            .sync_content_search(
+                &deleted.id,
+                &deleted.title,
+                Some("deleted-private-sentinel"),
+                &[],
+                false,
+                "test-content-deleted",
+            )
+            .unwrap();
+        platform.contents.lock().unwrap().insert(
+            deleted.id.clone(),
+            MeetingContentProjection {
+                title: Some(deleted.title),
+                summary: Some("deleted-private-sentinel".into()),
+                ..MeetingContentProjection::default()
+            },
+        );
+        store
+            .begin_deletion(
+                "meeting-deleted",
+                MeetingDeletionMode::All,
+                "2026-07-31T00:00:07Z",
+            )
+            .unwrap();
+
+        for query in ["in-progress-private-sentinel", "deleted-private-sentinel"] {
+            let result = execute(
+                &runtime,
+                "meetings.search",
+                json!({"query": query, "limit": 10}),
+            )
+            .unwrap();
+            assert_eq!(result["returned"], 0, "query '{query}' leaked a record");
+        }
     }
 }

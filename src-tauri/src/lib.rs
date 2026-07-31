@@ -22,6 +22,44 @@ fn windowless_meeting_quit(active_meeting_id: Result<Option<String>, ()>) -> Win
     }
 }
 
+fn finish_windowless_meeting_quit(
+    quit: WindowlessMeetingQuit,
+    stop: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    match quit {
+        WindowlessMeetingQuit::Stop(meeting_id) => stop(&meeting_id),
+        WindowlessMeetingQuit::RestoreForInspectionFailure => {
+            Err("native meeting state could not be inspected".to_string())
+        }
+        WindowlessMeetingQuit::Allow => Ok(()),
+    }
+}
+
+fn guard_windowless_meeting_quit(
+    quit: WindowlessMeetingQuit,
+    prevent_exit: impl FnOnce(),
+    restore_window: impl FnOnce() -> Result<(), String>,
+) -> Option<(WindowlessMeetingQuit, Option<String>)> {
+    if quit == WindowlessMeetingQuit::Allow {
+        return None;
+    }
+    prevent_exit();
+    let restore_error = restore_window().err();
+    Some((quit, restore_error))
+}
+
+fn complete_windowless_meeting_quit(
+    quit: WindowlessMeetingQuit,
+    stop: impl FnOnce(&str) -> Result<(), String>,
+    exit: impl FnOnce(),
+    keep_open: impl FnOnce(String),
+) {
+    match finish_windowless_meeting_quit(quit, stop) {
+        Ok(()) => exit(),
+        Err(error) => keep_open(error),
+    }
+}
+
 pub mod activities;
 mod activity_commands;
 mod ai;
@@ -1157,10 +1195,17 @@ pub fn run() {
                                 );
                             }),
                         );
-                        if quit != WindowlessMeetingQuit::Allow {
-                            api.prevent_exit();
+                        if let Some((quit, restore_error)) = guard_windowless_meeting_quit(
+                            quit,
+                            || api.prevent_exit(),
+                            || {
+                                create_main_window(app_handle)
+                                    .map(|_| ())
+                                    .map_err(|error| error.to_string())
+                            },
+                        ) {
                             let app = app_handle.clone();
-                            if let Err(error) = create_main_window(app_handle) {
+                            if let Some(error) = restore_error {
                                 log::error!(
                                     "Could not restore the main window for guarded Scribe Quit: {error}"
                                 );
@@ -1168,25 +1213,23 @@ pub fn run() {
                             tauri::async_runtime::spawn_blocking(move || {
                                 let runtime =
                                     app.state::<meetings::runtime::MeetingRuntime>();
-                                let result = match quit {
-                                    WindowlessMeetingQuit::Stop(meeting_id) => runtime
-                                        .stop(&meeting_id)
-                                        .map(|_| ())
-                                        .map_err(|error| {
-                                        format!(
-                                            "Could not durably stop Scribe during windowless Quit: {error}"
-                                        )
-                                    }),
-                                    WindowlessMeetingQuit::RestoreForInspectionFailure => Err(
-                                        "native meeting state could not be inspected".to_string(),
-                                    ),
-                                    WindowlessMeetingQuit::Allow => Ok(()),
-                                };
-                                match result {
-                                    Ok(()) => app.exit(0),
-                                    Err(error) => {
+                                let exit_app = app.clone();
+                                let failure_app = app.clone();
+                                complete_windowless_meeting_quit(
+                                    quit,
+                                    |meeting_id| {
+                                        runtime.stop(meeting_id).map(|_| ()).map_err(|error| {
+                                            format!(
+                                                "Could not durably stop Scribe during windowless Quit: {error}"
+                                            )
+                                        })
+                                    },
+                                    move || exit_app.exit(0),
+                                    move |error| {
                                         log::error!("{error}");
-                                        if let Some(main) = app.get_webview_window("main") {
+                                        if let Some(main) =
+                                            failure_app.get_webview_window("main")
+                                        {
                                             let _ = main.show();
                                             let _ = main.set_focus();
                                             let _ = main.emit(
@@ -1194,8 +1237,8 @@ pub fn run() {
                                                 error,
                                             );
                                         }
-                                    }
-                                }
+                                    },
+                                );
                             });
                         }
                     }
@@ -1240,6 +1283,7 @@ pub fn run() {
 #[cfg(test)]
 mod windowless_quit_tests {
     use super::*;
+    use std::cell::RefCell;
 
     #[test]
     fn windowless_quit_fails_closed_on_active_or_unknown_native_state() {
@@ -1255,5 +1299,75 @@ mod windowless_quit_tests {
             windowless_meeting_quit(Ok(None)),
             WindowlessMeetingQuit::Allow
         );
+    }
+
+    #[test]
+    fn windowless_quit_stops_before_exit_and_failures_keep_process_open() {
+        let order = RefCell::new(Vec::new());
+        complete_windowless_meeting_quit(
+            WindowlessMeetingQuit::Stop("meeting-live".into()),
+            |meeting_id| {
+                order.borrow_mut().push(format!("stop:{meeting_id}"));
+                Ok(())
+            },
+            || order.borrow_mut().push("exit".into()),
+            |error| order.borrow_mut().push(format!("failure:{error}")),
+        );
+        assert_eq!(*order.borrow(), ["stop:meeting-live", "exit"]);
+
+        order.borrow_mut().clear();
+        complete_windowless_meeting_quit(
+            WindowlessMeetingQuit::Stop("meeting-failing".into()),
+            |meeting_id| {
+                order.borrow_mut().push(format!("stop:{meeting_id}"));
+                Err("durable stop failed".into())
+            },
+            || order.borrow_mut().push("exit".into()),
+            |error| order.borrow_mut().push(format!("failure:{error}")),
+        );
+        assert_eq!(
+            *order.borrow(),
+            ["stop:meeting-failing", "failure:durable stop failed"]
+        );
+        assert_eq!(
+            finish_windowless_meeting_quit(
+                WindowlessMeetingQuit::RestoreForInspectionFailure,
+                |_meeting_id| panic!("inspection failure must not attempt an unknown stop")
+            )
+            .unwrap_err(),
+            "native meeting state could not be inspected"
+        );
+    }
+
+    #[test]
+    fn windowless_quit_prevents_exit_before_attempting_window_recovery() {
+        let order = RefCell::new(Vec::new());
+        let guarded = guard_windowless_meeting_quit(
+            WindowlessMeetingQuit::Stop("meeting-live".into()),
+            || order.borrow_mut().push("prevent-exit"),
+            || {
+                order.borrow_mut().push("restore-window");
+                Err("renderer unavailable".into())
+            },
+        )
+        .expect("an active recording must guard windowless Quit");
+        assert_eq!(*order.borrow(), ["prevent-exit", "restore-window"]);
+        assert_eq!(
+            guarded.0,
+            WindowlessMeetingQuit::Stop("meeting-live".into())
+        );
+        assert_eq!(guarded.1.as_deref(), Some("renderer unavailable"));
+
+        order.borrow_mut().clear();
+        assert!(guard_windowless_meeting_quit(
+            WindowlessMeetingQuit::Allow,
+            || order.borrow_mut().push("unexpected-prevent"),
+            || {
+                order.borrow_mut().push("unexpected-restore");
+                Ok(())
+            },
+        )
+        .is_none());
+        assert!(order.borrow().is_empty());
     }
 }

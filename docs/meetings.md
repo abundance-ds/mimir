@@ -192,12 +192,20 @@ permission, credential, model-install, export, delete, or KG-mutation tool is
 published. Granola remains a separate connection for externally recorded
 meetings.
 
+`meetings_search` requires at least three characters and queries private
+SQLite trigram indexes for the complete reviewed title, full summary, tags,
+and terminal transcript—not the 200-record renderer snapshot. Results and
+per-meeting transcript excerpts remain capped, ordered newest first, and
+exclude live or permanently deleting records. Reviewed content JSON remains
+the editing authority; a file fingerprint repairs only missing/stale index
+rows after an interrupted write.
+
 ## Local data and deletion
 
 | Path | Contents |
 |---|---|
 | `~/.mimir/meetings.json` | native-owned Scribe configuration, no secret |
-| `~/.mimir/meetings/meetings.sqlite` | lifecycle, chunk, transcript, and job authority |
+| `~/.mimir/meetings/meetings.sqlite` | lifecycle, chunk, transcript, job authority, and private reviewed-content search index |
 | `~/.mimir/meetings/<id>/audio/` | independent committed channel chunks and gaps |
 | `~/.mimir/meetings/<id>/followups/<job>/` | immutable bounded hook transcript input and controlled output |
 | `~/.mimir/meetings/.content/` | reviewed title, summary, tags, and KG decision |
