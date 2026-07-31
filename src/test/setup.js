@@ -67,7 +67,8 @@ const VALID_TAURI_COMMANDS = new Set([
   'routine_duplicate', 'routine_trash', 'routine_reveal',
   // Scribe meetings
   'meetings_snapshot', 'meetings_library_page', 'meetings_transcript_page',
-  'meetings_request_microphone_permission', 'meetings_dismiss_candidate',
+  'meetings_request_microphone_permission', 'meetings_open_system_audio_settings',
+  'meetings_dismiss_candidate',
   'meetings_issue_start_consent',
   'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
   'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_delete',

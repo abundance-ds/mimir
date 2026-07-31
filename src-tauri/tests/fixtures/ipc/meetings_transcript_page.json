@@ -1,0 +1,34 @@
+{
+  "meetingId": "meeting-final-01",
+  "revision": 48,
+  "totalSegments": 482,
+  "hasMore": true,
+  "nextBefore": {
+    "startMs": 1120,
+    "endMs": 3870,
+    "segmentId": "segment-final-01"
+  },
+  "segments": [
+    {
+      "id": "segment-final-01",
+      "text": "The release candidate passed the smoke test.",
+      "startMs": 1120,
+      "endMs": 3870,
+      "channel": "system",
+      "speaker": "Avery",
+      "final": true,
+      "revision": 47
+    },
+    {
+      "id": "segment-final-02",
+      "text": "I will prepare the deployment checklist.",
+      "startMs": 4110,
+      "endMs": 6640,
+      "channel": "microphone",
+      "speaker": "You",
+      "final": true,
+      "revision": 48
+    }
+  ],
+  "summary": "Release readiness is confirmed; prepare the deployment checklist."
+}

@@ -1,5 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+  assertCompleteInventory,
+  assertLicensePolicy,
+  componentAnnotation,
+  renderLicenseInventory,
+  sha256,
+} from './lib/supply-chain.mjs'
 
 const root = process.cwd()
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8')
@@ -11,7 +18,16 @@ const requireText = (source, expected, label) => {
 
 const platform = read('src-tauri/src/meetings/platform.rs')
 const lockfile = read('src-tauri/Cargo.lock')
+const bunLock = read('bun.lock')
 const notices = read('src-tauri/vendor/THIRD_PARTY_NOTICES.md')
+const licenseInventory = read('src-tauri/vendor/THIRD_PARTY_LICENSES.md')
+const policySource = read('src-tauri/vendor/license-policy.json')
+const policy = JSON.parse(policySource)
+const sbom = JSON.parse(read('src-tauri/vendor/SBOM.spdx.json'))
+assertLicensePolicy(
+  policy,
+  new Set(sbom.packages.map(componentAnnotation).filter(Boolean)),
+)
 const anarlogNotice = read('src-tauri/vendor/anarlog/NOTICE.md')
 const upstream = read('src-tauri/vendor/anarlog/UPSTREAM')
 const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'))
@@ -51,8 +67,38 @@ for (const expected of [
 }
 
 const resources = tauriConfig?.bundle?.resources
-if (!Array.isArray(resources) || !resources.includes('vendor/THIRD_PARTY_NOTICES.md')) {
-  throw new Error('the desktop bundle must include vendor/THIRD_PARTY_NOTICES.md')
+for (const resource of [
+  'vendor/THIRD_PARTY_NOTICES.md',
+  'vendor/THIRD_PARTY_LICENSES.md',
+  'vendor/SBOM.spdx.json',
+]) {
+  if (!Array.isArray(resources) || !resources.includes(resource)) {
+    throw new Error(`the desktop bundle must include ${resource}`)
+  }
+}
+
+assertCompleteInventory(sbom, lockfile, bunLock, policy)
+const lockDigest = sha256(`${lockfile}\0${bunLock}\0${policySource}`)
+if (sbom.documentNamespace !== `https://rs.shoulde.mimir/sbom/${lockDigest}`) {
+  throw new Error('SPDX SBOM is stale for the current lockfiles or license policy')
+}
+if (!sbom.annotations?.some(annotation => (
+  annotation.comment === `mimir-lock-digest:sha256:${lockDigest}`
+))) {
+  throw new Error('SPDX SBOM must carry the current lock digest annotation')
+}
+if (renderLicenseInventory(sbom) !== licenseInventory) {
+  throw new Error('THIRD_PARTY_LICENSES.md is stale for the committed SPDX SBOM')
+}
+const expectedVendor = new Set(policy.vendorComponents.map(component => component.id))
+const actualVendor = new Set(
+  sbom.packages.map(componentAnnotation).filter(id => id.startsWith('vendor:') || id.startsWith('model:')),
+)
+if (
+  expectedVendor.size !== actualVendor.size
+  || [...expectedVendor].some(id => !actualVendor.has(id))
+) {
+  throw new Error('SPDX SBOM vendor/model components are stale for license-policy.json')
 }
 
 const anarlogCommit = '08aad83f0c5cef1317d74a31519ae3190d726504'
@@ -85,4 +131,7 @@ for (const relative of [
   requireText(source, anarlogCommit, relative)
 }
 
-console.log('Scribe supply-chain and attribution contract passed.')
+console.log(
+  `Scribe supply-chain contract passed: ${sbom.packages.length} locked/reviewed components, `
+  + 'complete SPDX and human-readable license inventory packaged.',
+)

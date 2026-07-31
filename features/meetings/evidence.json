@@ -52,7 +52,7 @@
       "feature": "features/meetings/02_capture_lifecycle.feature",
       "idRange": ["MTG-020", "MTG-028"],
       "owner": "meeting-runtime",
-      "verificationScope": ["native lifecycle and single-owner tests", "snapshot and event ordering contracts", "guarded desktop Quit"]
+      "verificationScope": ["native lifecycle and single-owner tests", "ended-worker Stop and transcriber handoff", "snapshot and event ordering contracts", "guarded desktop Quit"]
     },
     {
       "feature": "features/meetings/03_multichannel_capture.feature",
@@ -68,15 +68,15 @@
     },
     {
       "feature": "features/meetings/05_crash_recovery.feature",
-      "idRange": ["MTG-090", "MTG-099"],
+      "idRange": ["MTG-090", "MTG-101"],
       "owner": "meeting-recovery",
-      "verificationScope": ["staged audio and startup recovery", "terminal job boundaries", "content-free diagnostics"]
+      "verificationScope": ["staged-tail and audio-derived startup recovery", "durable capture-failure intent", "terminal job boundaries without redisclosure", "content-free diagnostics"]
     },
     {
       "feature": "features/meetings/06_title_and_summary_finalization.feature",
       "idRange": ["MTG-110", "MTG-118"],
       "owner": "meeting-finalization-jobs",
-      "verificationScope": ["durable summary jobs", "controlled argv and output", "retry and revision identity"]
+      "verificationScope": ["atomic completed-lifecycle summary outbox", "controlled argv and output", "monotonic retry and revision identity"]
     },
     {
       "feature": "features/meetings/07_knowledge_graph_proposals.feature",
@@ -86,9 +86,9 @@
     },
     {
       "feature": "features/meetings/08_retention_privacy_and_security.feature",
-      "idRange": ["MTG-150", "MTG-160"],
+      "idRange": ["MTG-150", "MTG-161"],
       "owner": "meeting-data-governance",
-      "verificationScope": ["native retention and deletion", "safe export and paths", "human-only public tools"]
+      "verificationScope": ["native retention and deletion with repair holds", "safe export and paths", "human-only public tools"]
     },
     {
       "feature": "features/meetings/09_performance_and_backpressure.feature",
@@ -98,9 +98,9 @@
     },
     {
       "feature": "features/meetings/10_accessibility_and_workbench.feature",
-      "idRange": ["MTG-200", "MTG-205"],
+      "idRange": ["MTG-200", "MTG-207"],
       "owner": "meeting-workbench",
-      "verificationScope": ["global Stop and permission-repair tests", "manual keyboard and assistive technology audit", "release visual matrix"]
+      "verificationScope": ["global mute/Stop and permission-repair tests", "ordered settings mutation", "bounded reviewed-tag projection and editing", "manual keyboard and assistive technology audit", "release visual matrix"]
     },
     {
       "feature": "features/meetings/11_packaging_upgrade_and_supply_chain.feature",
@@ -155,7 +155,13 @@
     {
       "kind": "js-test",
       "path": "src/mimir/components/WorkbenchSidebar.test.js",
-      "selector": "keeps an explicit meeting status and one-step Stop available in expanded and rail modes",
+      "selector": "keeps human-only microphone mute and Stop available in expanded and rail modes",
+      "scenarios": ["MTG-008", "MTG-203"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/WorkbenchApp.test.js",
+      "selector": "routes the persistent sidebar microphone control through the human meeting store",
       "scenarios": ["MTG-008", "MTG-203"]
     },
     {
@@ -342,7 +348,7 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "gherkin_restart_recovery_is_durable_conservative_and_idempotent",
-      "scenarios": ["MTG-092"]
+      "scenarios": ["MTG-091", "MTG-092"]
     },
     {
       "kind": "rust-test",
@@ -370,6 +376,30 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "failed_terminal_repair_redelivery_performs_zero_provider_or_audio_work",
+      "scenarios": ["MTG-098", "MTG-101"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/platform.rs",
+      "selector": "hook_configuration_never_reads_the_transcription_credential",
+      "scenarios": ["MTG-098", "MTG-110"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "startup_repairs_a_terminal_transcript_after_promoting_staged_audio_tail",
+      "scenarios": ["MTG-100"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "startup_preserves_capture_failure_intent_across_terminal_crash_window",
+      "scenarios": ["MTG-101"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "repair_reconciliation_is_one_revision_beyond_one_hundred_thousand_segments",
       "scenarios": ["MTG-099", "MTG-181"]
@@ -394,6 +424,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/store.rs",
+      "selector": "completing_a_meeting_and_enqueuing_its_summary_is_one_transaction",
+      "scenarios": ["MTG-110"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/jobs.rs",
       "selector": "gherkin_stop_hook_prompt_marks_transcript_untrusted_and_output_controlled",
       "scenarios": ["MTG-111", "MTG-115", "MTG-131", "MTG-132"]
@@ -411,10 +447,16 @@
       "scenarios": ["MTG-114", "MTG-116"]
     },
     {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "repeated_manual_job_retries_receive_monotonic_idempotency_generations",
+      "scenarios": ["MTG-114"]
+    },
+    {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "lets the user review and edit the generated title and summary",
-      "scenarios": ["MTG-112", "MTG-116"]
+      "selector": "lets the user review and edit the generated title summary and tags",
+      "scenarios": ["MTG-112", "MTG-116", "MTG-207"]
     },
     {
       "kind": "rust-test",
@@ -468,7 +510,19 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/platform.rs",
       "selector": "retention_skips_active_work_and_removes_only_expired_source_audio",
-      "scenarios": ["MTG-150", "MTG-151", "MTG-152"]
+      "scenarios": ["MTG-150", "MTG-151", "MTG-152", "MTG-161"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/store.rs",
+      "selector": "audio_deletion_rejects_collecting_repair_after_job_attempts_are_exhausted",
+      "scenarios": ["MTG-161"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "repair_retry_refuses_to_replace_a_transcript_after_source_audio_is_gone",
+      "scenarios": ["MTG-161"]
     },
     {
       "kind": "rust-test",
@@ -495,6 +549,12 @@
       "scenarios": ["MTG-159"]
     },
     {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/tools.rs",
+      "selector": "update_rejects_live_meetings_before_the_platform_can_write",
+      "scenarios": ["MTG-159"]
+    },
+    {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
       "selector": "requires native confirmation before permanently deleting a meeting",
@@ -502,9 +562,51 @@
     },
     {
       "kind": "js-test",
-      "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "offers a deliberate permission repair action without enabling automatic recording",
+      "path": "src/shared/ui/settings/ScribeSettingsSection.test.js",
+      "selector": "forwards both child permission actions to their narrow native owners",
       "scenarios": ["MTG-205"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/services/meetings.test.js",
+      "selector": "opens only the native system-audio permission repair surface",
+      "scenarios": ["MTG-205"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/commands.rs",
+      "selector": "system_audio_repair_target_is_fixed_to_the_macos_privacy_pane",
+      "scenarios": ["MTG-205"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/stores/meetings.test.js",
+      "selector": "serializes concurrent config mutations without dropping either user intent",
+      "scenarios": ["MTG-206"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
+      "selector": "makes every config mutation visibly unavailable during an ordered save",
+      "scenarios": ["MTG-206"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/services/meetings.test.js",
+      "selector": "normalizes bounded reviewed tags and validates tag updates before IPC",
+      "scenarios": ["MTG-207"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "keeps an oversized reviewed tag local and explains the payload bound",
+      "scenarios": ["MTG-207"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/tools.rs",
+      "selector": "reviewed_tags_are_normalized_and_rejected_at_public_payload_bounds",
+      "scenarios": ["MTG-207"]
     },
     {
       "kind": "static-gate",

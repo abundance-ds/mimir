@@ -413,9 +413,16 @@ pub(crate) fn execute_transcription_repair_with(
     if runtime
         .complete_terminal_recovery(&job.definition.meeting_id)
         .map_err(|error| format!("Could not reconcile terminal Scribe recovery: {error}"))?
-        .is_some()
     {
         return transcription_repair_result(runtime, &job.definition.meeting_id);
+    }
+    if !runtime
+        .has_committed_audio(&job.definition.meeting_id)
+        .map_err(|error| format!("Could not verify Scribe source audio authority: {error}"))?
+    {
+        return Err(
+            "Transcription repair was refused because no committed source audio remains".into(),
+        );
     }
     // Repair is bound to the exact route and model persisted from the native
     // consent grant. Looking at current global settings here would let old
@@ -433,7 +440,7 @@ pub(crate) fn execute_transcription_repair_with(
         repair_generation: Some(capture_generation.to_string()),
     })?;
     let current = runtime
-        .meeting(&job.definition.meeting_id)
+        .durable_meeting(&job.definition.meeting_id)
         .map_err(|error| format!("Could not refresh Scribe recovery state: {error}"))?;
     let batch = transcription.finalize(&TranscriptionFinalize {
         meeting_id: job.definition.meeting_id.clone(),
@@ -456,13 +463,13 @@ fn transcription_repair_result(
     runtime: &MeetingRuntime,
     meeting_id: &str,
 ) -> Result<Value, String> {
-    let repaired = runtime
-        .meeting(meeting_id)
+    let (transcript_revision, segment_count, transcript_final) = runtime
+        .durable_transcript_result(meeting_id)
         .map_err(|error| format!("Could not reload the repaired meeting: {error}"))?;
     Ok(json!({
-        "transcriptRevision": repaired.transcript_revision,
-        "segmentCount": repaired.segment_count,
-        "transcriptFinal": repaired.transcript_final
+        "transcriptRevision": transcript_revision,
+        "segmentCount": segment_count,
+        "transcriptFinal": transcript_final
     }))
 }
 

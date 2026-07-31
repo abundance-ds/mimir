@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "allowedLicenses": [
+    "0BSD",
+    "AFL-2.1",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BlueOak-1.0.0",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "NCSA",
+    "OpenSSL",
+    "Python-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib"
+  ],
+  "allowedExceptions": [
+    "LLVM-exception"
+  ],
+  "deniedLicensePrefixes": [
+    "AGPL-",
+    "BUSL-",
+    "Commons-Clause",
+    "Elastic-",
+    "GPL-",
+    "LGPL-",
+    "SSPL-"
+  ],
+  "firstParty": [
+    "cargo:mimir@0.1.0"
+  ],
+  "overrides": {},
+  "vendorComponents": [
+    {
+      "id": "vendor:anarlog@08aad83f0c5cef1317d74a31519ae3190d726504",
+      "name": "Fastrepl Anarlog adapted sources",
+      "version": "08aad83f0c5cef1317d74a31519ae3190d726504",
+      "license": "MIT",
+      "downloadLocation": "https://github.com/fastrepl/anarlog/tree/08aad83f0c5cef1317d74a31519ae3190d726504",
+      "purl": "pkg:github/fastrepl/anarlog@08aad83f0c5cef1317d74a31519ae3190d726504"
+    },
+    {
+      "id": "vendor:whisper.cpp@1.8.3",
+      "name": "whisper.cpp embedded sources",
+      "version": "1.8.3",
+      "license": "MIT",
+      "downloadLocation": "https://github.com/ggerganov/whisper.cpp/tree/v1.8.3",
+      "purl": "pkg:github/ggerganov/whisper.cpp@v1.8.3"
+    },
+    {
+      "id": "model:ggml-small.bin@c521a4b02f422512d734391fdf08bb08c0862f68",
+      "name": "OpenAI Whisper Small multilingual model",
+      "version": "c521a4b02f422512d734391fdf08bb08c0862f68",
+      "license": "MIT",
+      "downloadLocation": "https://huggingface.co/ggerganov/whisper.cpp/resolve/c521a4b02f422512d734391fdf08bb08c0862f68/ggml-small.bin",
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "purl": "pkg:huggingface/ggerganov/whisper.cpp/ggml-small.bin@c521a4b02f422512d734391fdf08bb08c0862f68"
+    }
+  ]
+}

@@ -139,6 +139,32 @@ The catalog resolves local entries from disk, but
 native protocol can validate the path and inject the SDK/theme. Loading the raw
 file URL skips that contract.
 
+## Scribe
+
+### Classify staged audio before accepting terminal text
+
+A terminal transcript is not sufficient at restart until native recovery has
+classified every staged audio row. A successfully promoted tail means the
+terminal text is stale and must be repaired under the original capture
+generation. Do not move terminal reconciliation ahead of
+`finish_audio_recovery` or derive crash duration from the relaunch clock. The
+full authority order is owned by [meetings.md](meetings.md).
+
+### A collecting repair is an audio-retention hold
+
+The `collecting` repair row survives independent job exhaustion and prevents
+both retention and explicit source-audio deletion. Job state alone is not
+enough to decide that audio is disposable. In the opposite direction, a retry
+must prove committed source audio exists before starting a model or custom
+provider; otherwise it could replace a valid transcript with an empty repair.
+
+### Complete lifecycle and the default hook as one outbox transaction
+
+Do not transition to `Completed` and enqueue the default title/summary job in
+separate writes. The combined store operation is the crash boundary. Stop also
+uses the narrow hook-configuration projection: reading the broader platform
+projection would unnecessarily touch custom-STT credential authority.
+
 ## Editor
 
 ### Comment tags need four protection layers

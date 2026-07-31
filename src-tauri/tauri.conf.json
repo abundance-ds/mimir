@@ -24,7 +24,9 @@
       "icons/icon.png"
     ],
     "resources": [
-      "vendor/THIRD_PARTY_NOTICES.md"
+      "vendor/THIRD_PARTY_NOTICES.md",
+      "vendor/THIRD_PARTY_LICENSES.md",
+      "vendor/SBOM.spdx.json"
     ],
     "fileAssociations": [
       {

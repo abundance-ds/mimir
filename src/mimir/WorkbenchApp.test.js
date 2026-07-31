@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const editorOpen = vi.hoisted(() => vi.fn())
@@ -159,6 +160,7 @@ import * as routinesApi from '../services/routines.js'
 import { useActivitiesStore } from '../stores/activities.js'
 import { useFileStore } from '../stores/files.js'
 import { useLaunchersStore } from '../stores/launchers.js'
+import { useMeetingsStore } from '../stores/meetings.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
 import WorkbenchApp from './WorkbenchApp.vue'
@@ -356,6 +358,55 @@ describe('WorkbenchApp', () => {
     )
     expect(review).toBeTruthy()
     expect(review.querySelector('svg').getAttribute('viewBox')).toBe('0 0 256 260')
+  })
+
+  it('routes the persistent sidebar microphone control through the human meeting store', async () => {
+    const wrapper = await render()
+    const meetings = useMeetingsStore()
+    const active = {
+      id: 'meeting-live',
+      title: 'Architecture review',
+      lifecycle: 'capturing',
+      transcription: 'live',
+      startedAt: '2026-07-31T00:00:00Z',
+      stoppedAt: null,
+      durationMs: 1_000,
+      micMuted: false,
+      channels: ['microphone', 'system'],
+      gaps: [],
+      transcriptRevision: 0,
+      transcriptFinal: false,
+      segments: [],
+      jobs: [],
+    }
+    const state = {
+      revision: 20,
+      meetings: [active],
+      meetingsTruncated: false,
+      nextMeetingsBefore: null,
+      activeMeetingId: active.id,
+      candidates: [],
+      config: meetings.config,
+      permissions: { microphone: 'granted', systemAudio: 'granted' },
+      models: [],
+      diagnostic: null,
+    }
+    meetings.applySnapshot(state)
+    await nextTick()
+    vi.mocked(invoke).mockResolvedValueOnce({
+      ...state,
+      revision: 21,
+      meetings: [{ ...active, micMuted: true }],
+    })
+
+    await wrapper.get('[data-sidebar-meeting-microphone]').trigger('click')
+    await flushPromises()
+
+    expect(invoke).toHaveBeenCalledWith('meetings_set_mic_muted', {
+      meetingId: active.id,
+      muted: true,
+    })
+    expect(meetings.activeMeeting.micMuted).toBe(true)
   })
 
   it('places singleton apps in Tools and process apps in the compact plus menu', async () => {

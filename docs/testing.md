@@ -57,14 +57,14 @@ helper/runtime must carry the behavior test.
 | Renderer unit/component | `bun run test` | JS/Vue state, DOM contracts, mocked IPC | desktop integration or Rust |
 | Renderer production build | `bun run build` | module graph, Vue/Tailwind/Rollup output | native behavior |
 | Documentation integrity | `bun run docs:check` | local links/paths, `_MAP` coverage, version agreement | semantic accuracy |
-| Scribe specification/packaging | `bun run check:meetings` | stable Gherkin contract, evidence manifest, purpose strings, entitlement, deployment target | actual TCC grant, hardware capture, or transcript accuracy |
+| Scribe specification/packaging | `bun run check:meetings` | stable Gherkin contract, evidence manifest, purpose strings, entitlement, deployment target, complete lock/SBOM identity, license policy, release-artifact selection helpers | actual TCC grant, hardware capture, transcript accuracy, or a signed artifact |
 | Rust format | `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | formatting only | compilation |
 | Rust unit/integration | `cargo test --manifest-path src-tauri/Cargo.toml` | native helpers/runtimes | real packaged webview |
 | Rust compile | `cargo check --manifest-path src-tauri/Cargo.toml` | Linux-compilable command graph | macOS-only execution |
 | Rust lint | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | lint-clean Rust | runtime behavior |
 | Desktop runtime | `bun tauri dev` | actual IPC, PTY, window, keychain, dialogs | packaged bundle |
 | Signing inputs | `bun run check:signing` | local `.env` completeness, aliases, permissions, Apple keychain identity | remote signing services |
-| Release package | `bun tauri build` | macOS signed/notarized DMG | behavior on another machine |
+| Release package | `bun tauri build` | one exact macOS arm64 signed/notarized DMG plus a clean-commit/source-tree manifest and staged SBOM/notices | behavior on another machine |
 
 `.github/workflows/build.yml` runs frontend test/build and Rust
 format/test/check/clippy on Ubuntu. Its manual packaging job produces the
@@ -89,6 +89,9 @@ and signing launcher.
 | Settings/persistence | native persistence/settings test and renderer store test, including cross-window mock |
 | AI model/provider transport | Rust model/provider/usage tests and renderer model/transport/InlineAI tests |
 | Scribe domain/IPC/UI | `bun run check:meetings`; native meeting/audio/detection tests; meeting service/store/Scribe app tests; packaged hardware smoke |
+| Scribe lifecycle/recovery/finalization | meeting runtime/store tests for ended-worker Stop ordering, staged-tail promotion, failure-intent restart, audio-derived stop time, terminal redelivery, atomic summary outbox, and retry generations |
+| Scribe repair retention/deletion | meeting store/platform/runtime tests for collecting-repair holds, explicit and retention deletion, and missing-source retry refusal |
+| Dependency, license, signing, or artifact selection | `bun run check:meetings`; `node --test scripts/supply-chain.test.mjs scripts/release-artifacts.test.mjs`; inspect generated vendor diff; clean-tree `bun tauri build` |
 
 ## Test seams that encode architecture
 
@@ -136,6 +139,18 @@ cargo test --manifest-path src-tauri/crates/mimir-meeting-audio/Cargo.toml
 cargo test --manifest-path src-tauri/crates/mimir-meeting-detect/Cargo.toml
 ```
 
+For crash-boundary changes, run the full `meetings::runtime::tests` and
+`meetings::store::tests` groups rather than filtering to one happy path.
+Lifecycle recovery, transcript repair, default-hook outbox, retention holds,
+and deletion intentionally share invariants across those two authorities.
+
+The focused checker fails closed when a Cargo/Bun lock identity is absent from
+the committed SPDX file, a generated inventory is stale, a third-party license
+is unknown or has no permitted policy choice, or release selection could fall
+back to an arbitrary DMG. These are static and deterministic claims. They do
+not replace the manual review of license obligations or prove that an artifact
+was built, signed, notarized, or run.
+
 Before a release, the evidence manifest must also point to current macOS arm64
 results for: clean-install microphone and system-audio prompts, denial and
 repair, real dual-channel call, route/device change, sleep/wake, forced kill
@@ -164,6 +179,13 @@ mocks, so a rename on either side fails a test instead of drifting silently.
 When adding or reshaping a high-traffic command with a stable struct response,
 add a fixture and consume it from the renderer tests; commands returning unit,
 streams, or trivial scalars do not need one.
+
+Scribe pins its bounded public projections with fixtures for
+`meetings_snapshot`, `meetings_library_page`, `meetings_transcript_page`,
+`meetings_issue_start_consent`, `meetings_start`, and `meetings_export`.
+`src/services/meetings.ipc-contract.test.js` consumes all six and asserts the
+renderer normalization plus consent, pagination, start, and export call
+contracts.
 
 ## Release behavior
 

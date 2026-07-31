@@ -19,6 +19,12 @@
       @clear-api-key="run('API key removed.', meetings.clearApiKey)"
       @install-model="run('Model installation started.', meetings.installModel, $event)"
       @delete-model="run('Model removed.', meetings.deleteModel, $event)"
+      @request-microphone-permission="
+        run('Microphone access granted.', meetings.requestMicrophonePermission)
+      "
+      @open-system-audio-settings="
+        run('System Settings opened to Screen & System Audio Recording.', meetings.openSystemAudioSettings)
+      "
     />
   </div>
 </template>

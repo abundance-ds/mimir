@@ -19,7 +19,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, MutexGuard, Weak,
@@ -170,6 +170,25 @@ impl Default for MeetingConfig {
             kg_prompt: "ask".into(),
             kg_preset: String::new(),
             retention_days: Some(30),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingHookConfig {
+    pub summary_enabled: bool,
+    pub summary_preset: String,
+    pub kg_prompt: String,
+    pub kg_preset: String,
+}
+
+impl From<&MeetingConfig> for MeetingHookConfig {
+    fn from(config: &MeetingConfig) -> Self {
+        Self {
+            summary_enabled: config.summary_enabled,
+            summary_preset: config.summary_preset.clone(),
+            kg_prompt: config.kg_prompt.clone(),
+            kg_preset: config.kg_preset.clone(),
         }
     }
 }
@@ -358,6 +377,12 @@ pub trait MeetingTranscriptionPort: Send + Sync {
 /// model, Activity, file/export, and review systems keep their own authority.
 pub trait MeetingPlatformPort: Send + Sync {
     fn projection(&self) -> Result<MeetingPlatformProjection, String>;
+    /// Read post-meeting policy without touching credential authority,
+    /// devices, models, candidate detection, or other live projections.
+    fn hook_config(&self) -> Result<MeetingHookConfig, String> {
+        self.projection()
+            .map(|projection| MeetingHookConfig::from(&projection.config))
+    }
     fn dismiss_candidate(&self, _candidate_id: &str) -> Result<(), String> {
         Ok(())
     }
@@ -443,6 +468,8 @@ pub struct MeetingView {
     pub workspace_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_app: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub mic_muted: bool,
     #[serde(default)]
     pub channels: Vec<String>,
@@ -630,33 +657,56 @@ impl MeetingRuntime {
                 diagnostic: Mutex::new(None),
             }),
         };
-        // Recovery is driven from every durable interrupted record, not only
-        // meetings that happened to cross the live -> interrupted transition
-        // during this launch. Repeated restarts therefore reuse one stable
-        // capture-generation job instead of minting revision-derived owners.
-        for meeting_id in runtime.inner.store.interrupted_meeting_ids()? {
-            let meeting = runtime.inner.store.get_meeting(&meeting_id)?;
-            if runtime.complete_terminal_recovery_unlocked(&meeting)? {
-                continue;
+        let recovered_tail_meetings = recovery
+            .staged_audio_chunks
+            .iter()
+            .map(|chunk| chunk.definition.meeting_id.clone())
+            .collect::<HashSet<_>>();
+        // Staged audio is authority that may have crossed the file durability
+        // boundary immediately before the process died. Verify/promote it
+        // before deciding whether an existing terminal transcript is complete.
+        let audio_recovery_ready = match runtime.inner.capture.recover(&recovery) {
+            Ok(()) => runtime.inner.store.finish_audio_recovery(&recovery)?,
+            Err(error) => {
+                runtime
+                    .set_diagnostic(format!("Meeting audio recovery needs attention: {error}"))?;
+                false
             }
-            if let Err(error) = runtime.enqueue_transcription_retry(
-                &meeting.id,
-                meeting.transcript_revision,
-                "application restarted before transcript finalization",
-            ) {
-                // Recovery must never substitute today's provider selection
-                // for the route the human originally approved. Legacy or
-                // damaged records without that immutable disclosure remain
-                // safely interrupted and can still retain/export their audio.
-                runtime.set_diagnostic(format!(
-                    "Meeting '{}' needs transcription recovery, but its original consented route is unavailable: {}",
-                    meeting.id,
-                    bounded_error(&error.to_string())
-                ))?;
+        };
+        if audio_recovery_ready {
+            // Recovery is driven from every durable interrupted record, not
+            // only meetings that crossed the live -> interrupted transition
+            // during this launch. Repeated restarts therefore reuse one stable
+            // capture-generation job instead of minting revision-derived
+            // owners.
+            for meeting_id in runtime.inner.store.interrupted_meeting_ids()? {
+                let meeting = runtime.inner.store.get_meeting(&meeting_id)?;
+                if !recovered_tail_meetings.contains(&meeting.id)
+                    && runtime.complete_terminal_recovery_unlocked(&meeting)?
+                {
+                    continue;
+                }
+                if let Err(error) = runtime.enqueue_transcription_retry(
+                    &meeting.id,
+                    meeting.transcript_revision,
+                    "application restarted before transcript finalization",
+                ) {
+                    // Recovery must never substitute today's provider selection
+                    // for the route the human originally approved. Legacy or
+                    // damaged records without that immutable disclosure remain
+                    // safely interrupted and can still retain/export their audio.
+                    runtime.set_diagnostic(format!(
+                        "Meeting '{}' needs transcription recovery, but its original consented route is unavailable: {}",
+                        meeting.id,
+                        bounded_error(&error.to_string())
+                    ))?;
+                }
             }
-        }
-        if let Err(error) = runtime.inner.capture.recover(&recovery) {
-            runtime.set_diagnostic(format!("Meeting audio recovery needs attention: {error}"))?;
+        } else if !recovery.staged_audio_chunks.is_empty() {
+            runtime.set_diagnostic(
+                "Meeting audio recovery remains unresolved; transcript finalization is paused"
+                    .into(),
+            )?;
         }
         Ok(runtime)
     }
@@ -699,7 +749,8 @@ impl MeetingRuntime {
             )));
         }
         let active = self.active()?.clone();
-        self.meeting_view(&record, &content, active.as_ref())
+        let hook_config = self.hook_config()?;
+        self.meeting_view(&record, &content, active.as_ref(), &hook_config.kg_prompt)
     }
 
     pub fn transcript_page(
@@ -891,6 +942,7 @@ impl MeetingRuntime {
         }
 
         let active = self.active()?.clone();
+        let hook_config = self.hook_config()?;
         let mut hits = Vec::with_capacity(candidates.len());
         for (meeting_id, matched) in candidates {
             let record = self.inner.store.get_meeting(&meeting_id)?;
@@ -907,7 +959,8 @@ impl MeetingRuntime {
             {
                 continue;
             }
-            let view = self.meeting_view(&record, &content, active.as_ref())?;
+            let view =
+                self.meeting_view(&record, &content, active.as_ref(), &hook_config.kg_prompt)?;
             hits.push((
                 record.created_at,
                 record.id,
@@ -1163,6 +1216,10 @@ impl MeetingRuntime {
                 meeting_id: meeting_id.into(),
             });
         }
+        // Resolve non-secret hook policy before stopping native capture. If
+        // settings authority is temporarily unavailable, no irreversible
+        // lifecycle boundary has been crossed and Stop can be retried safely.
+        let hook_config = self.hook_config()?;
 
         let recording = self.inner.store.get_meeting(meeting_id)?;
         let stopping = if recording.status == MeetingStatus::Recording {
@@ -1190,25 +1247,66 @@ impl MeetingRuntime {
             Err(message) => {
                 // A native worker can fail just before Stop acquires the
                 // operation lock. Its retained handle then reports that
-                // terminal error here, before the asynchronous failure
-                // callback is delivered. Bind recovery to the immutable
-                // capture generation now; the later callback becomes an
-                // idempotent no-op after `interrupt_after_stop_failure`
-                // clears active ownership.
+                // terminal error here, before the asynchronous callback is
+                // delivered. Persist failure intent first, then drain/remove
+                // the live transcriber session before recovery can be claimed
+                // in this same process.
                 let after_capture_failure = self.inner.store.get_meeting(meeting_id)?;
-                let repair = self.enqueue_transcription_retry(
+                let failure = MeetingFailure {
+                    code: "capture-stop-failed".into(),
+                    message: bounded_error(&message),
+                    retryable: true,
+                };
+                let interrupted = self.inner.store.transition_meeting(
                     meeting_id,
-                    after_capture_failure.transcript_revision,
-                    &message,
-                );
-                self.interrupt_after_stop_failure(
-                    meeting_id,
-                    &active.run_id,
                     after_capture_failure.revision,
-                    "capture-stop-failed",
-                    &message,
+                    MeetingStatus::Interrupted,
+                    &self.inner.clock.now(),
+                    Some(&failure),
                 )?;
-                repair?;
+                *self.active()? = None;
+                self.set_diagnostic(format!("capture-stop-failed: {}", bounded_error(&message)))?;
+                if let Err(error) = self.publish_unlocked(
+                    "meeting-interrupted",
+                    Some(meeting_id.into()),
+                    Some(active.run_id.clone()),
+                ) {
+                    log::error!("Could not publish the durable Scribe stop failure: {error}");
+                }
+
+                let finalize = self.inner.transcription.finalize(&TranscriptionFinalize {
+                    meeting_id: meeting_id.into(),
+                    run_id: active.run_id.clone(),
+                    base_revision: interrupted.transcript_revision,
+                    observed_at: self.inner.clock.now(),
+                });
+                let after_provider_drain = self.inner.store.get_meeting(meeting_id)?;
+                let terminal_applied = match finalize {
+                    Ok(batch)
+                        if batch.meeting_id == meeting_id
+                            && batch.base_revision == after_provider_drain.transcript_revision
+                            && batch.marks_final =>
+                    {
+                        self.inner.store.apply_transcript_batch(&batch).is_ok()
+                    }
+                    _ => false,
+                };
+                let current = self.inner.store.get_meeting(meeting_id)?;
+                if terminal_applied {
+                    self.inner.store.transition_meeting(
+                        meeting_id,
+                        current.revision,
+                        MeetingStatus::Failed,
+                        &self.inner.clock.now(),
+                        Some(&failure),
+                    )?;
+                } else {
+                    self.enqueue_transcription_retry(
+                        meeting_id,
+                        current.transcript_revision,
+                        &message,
+                    )?;
+                }
                 return Err(port_error("meeting capture stop", message));
             }
         };
@@ -1316,29 +1414,24 @@ impl MeetingRuntime {
             }
         };
         let after_transcript = self.inner.store.get_meeting(meeting_id)?;
-        let has_final_speech = self
-            .inner
-            .store
-            .transcript_overview(meeting_id, 1)?
-            .segment_count
-            > 0;
-        let completed = self.inner.store.transition_meeting(
+        let overview = self.inner.store.transcript_overview(meeting_id, 1)?;
+        let completed_at = self.inner.clock.now();
+        let summary_job = (hook_config.summary_enabled && overview.segment_count > 0).then(|| {
+            self.summary_job_draft(
+                meeting_id,
+                applied.revision,
+                &hook_config.summary_preset,
+                &completed_at,
+            )
+        });
+        let (completed, _) = self.inner.store.complete_meeting_with_job(
             meeting_id,
             after_transcript.revision,
-            MeetingStatus::Completed,
-            &self.inner.clock.now(),
-            None,
+            &completed_at,
+            summary_job.as_ref(),
         )?;
         *self.active()? = None;
 
-        let projection = self.platform_projection()?;
-        if projection.config.summary_enabled && has_final_speech {
-            self.enqueue_summary_job(
-                meeting_id,
-                applied.revision,
-                &projection.config.summary_preset,
-            )?;
-        }
         debug_assert_eq!(completed.status, MeetingStatus::Completed);
         self.publish_unlocked(
             "meeting-finalized",
@@ -1416,7 +1509,7 @@ impl MeetingRuntime {
             recording.revision,
             MeetingStatus::Interrupted,
             &self.inner.clock.now(),
-            None,
+            Some(&failure),
         )?;
         *self.active()? = None;
         let _ = self.set_diagnostic(format!(
@@ -1441,10 +1534,11 @@ impl MeetingRuntime {
             observed_at: self.inner.clock.now(),
         });
 
+        let after_provider_drain = self.inner.store.get_meeting(meeting_id)?;
         let transcript_final = match finalize {
             Ok(batch)
                 if batch.meeting_id == meeting_id
-                    && batch.base_revision == interrupted.transcript_revision
+                    && batch.base_revision == after_provider_drain.transcript_revision
                     && batch.marks_final =>
             {
                 self.inner.store.apply_transcript_batch(&batch).is_ok()
@@ -1525,15 +1619,40 @@ impl MeetingRuntime {
     pub fn complete_terminal_recovery(
         &self,
         meeting_id: &str,
-    ) -> Result<Option<MeetingSnapshot>, MeetingRuntimeError> {
+    ) -> Result<bool, MeetingRuntimeError> {
         let _operation = self.operation()?;
         let meeting = self.inner.store.get_meeting(meeting_id)?;
-        if self.complete_terminal_recovery_unlocked(&meeting)? {
-            return self
-                .snapshot_unlocked(self.inner.revision.load(Ordering::Acquire))
-                .map(Some);
-        }
-        Ok(None)
+        self.complete_terminal_recovery_unlocked(&meeting)
+    }
+
+    pub(crate) fn durable_meeting(
+        &self,
+        meeting_id: &str,
+    ) -> Result<MeetingRecord, MeetingRuntimeError> {
+        self.inner.store.get_meeting(meeting_id).map_err(Into::into)
+    }
+
+    pub(crate) fn durable_transcript_result(
+        &self,
+        meeting_id: &str,
+    ) -> Result<(u64, u64, bool), MeetingRuntimeError> {
+        let meeting = self.inner.store.get_meeting(meeting_id)?;
+        let overview = self.inner.store.transcript_overview(meeting_id, 0)?;
+        Ok((
+            meeting.transcript_revision,
+            overview.segment_count,
+            overview.is_final && overview.non_final_segment_count == 0,
+        ))
+    }
+
+    pub(crate) fn has_committed_audio(
+        &self,
+        meeting_id: &str,
+    ) -> Result<bool, MeetingRuntimeError> {
+        self.inner
+            .store
+            .has_committed_audio(meeting_id)
+            .map_err(Into::into)
     }
 
     fn complete_terminal_recovery_unlocked(
@@ -1544,8 +1663,26 @@ impl MeetingRuntime {
         if !overview.is_final || overview.non_final_segment_count != 0 {
             return Ok(false);
         }
+        if matches!(
+            meeting.status,
+            MeetingStatus::Completed | MeetingStatus::Failed
+        ) {
+            return Ok(true);
+        }
+        if meeting.status == MeetingStatus::Interrupted {
+            if let Some(failure) = meeting.failure.as_ref() {
+                self.inner.store.transition_meeting(
+                    &meeting.id,
+                    meeting.revision,
+                    MeetingStatus::Failed,
+                    &self.inner.clock.now(),
+                    Some(failure),
+                )?;
+                return Ok(true);
+            }
+        }
+        let config = self.hook_config()?;
         let mut current = meeting.clone();
-        let mut completed_now = false;
         if current.status == MeetingStatus::Interrupted {
             current = self.inner.store.transition_meeting(
                 &current.id,
@@ -1556,23 +1693,28 @@ impl MeetingRuntime {
             )?;
         }
         if current.status == MeetingStatus::Finalizing {
-            current = self.inner.store.transition_meeting(
-                &current.id,
-                current.revision,
-                MeetingStatus::Completed,
-                &self.inner.clock.now(),
-                None,
-            )?;
-            completed_now = true;
+            let completed_at = self.inner.clock.now();
+            let summary_job = (config.summary_enabled && overview.segment_count > 0).then(|| {
+                self.summary_job_draft(
+                    &current.id,
+                    overview.revision,
+                    &config.summary_preset,
+                    &completed_at,
+                )
+            });
+            current = self
+                .inner
+                .store
+                .complete_meeting_with_job(
+                    &current.id,
+                    current.revision,
+                    &completed_at,
+                    summary_job.as_ref(),
+                )?
+                .0;
         }
         if current.status != MeetingStatus::Completed {
             return Ok(false);
-        }
-        if completed_now {
-            let config = self.platform_projection()?.config;
-            if config.summary_enabled && overview.segment_count > 0 {
-                self.enqueue_summary_job(&current.id, overview.revision, &config.summary_preset)?;
-            }
         }
         Ok(true)
     }
@@ -1594,7 +1736,9 @@ impl MeetingRuntime {
         if meeting.status == MeetingStatus::Completed && self.transcript_is_final(&meeting)? {
             return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
         }
+        let recovery_failure = meeting.failure.clone();
         let finalizing = match meeting.status {
+            MeetingStatus::Interrupted if recovery_failure.is_some() => meeting,
             MeetingStatus::Interrupted => self.inner.store.transition_meeting(
                 meeting_id,
                 meeting.revision,
@@ -1618,6 +1762,10 @@ impl MeetingRuntime {
                     .into(),
             ));
         }
+        let config = recovery_failure
+            .is_none()
+            .then(|| self.hook_config())
+            .transpose()?;
         let applied = self.inner.store.commit_transcript_repair(
             capture_generation,
             provider_run_id,
@@ -1630,17 +1778,31 @@ impl MeetingRuntime {
                 "transcription repair did not produce an all-final terminal transcript".into(),
             ));
         }
-        let has_final_speech = overview.segment_count > 0;
-        self.inner.store.transition_meeting(
-            meeting_id,
-            persisted.revision,
-            MeetingStatus::Completed,
-            &self.inner.clock.now(),
-            None,
-        )?;
-        let config = self.platform_projection()?.config;
-        if config.summary_enabled && has_final_speech {
-            self.enqueue_summary_job(meeting_id, applied.revision, &config.summary_preset)?;
+        let completed_at = self.inner.clock.now();
+        if let Some(failure) = recovery_failure.as_ref() {
+            self.inner.store.transition_meeting(
+                meeting_id,
+                persisted.revision,
+                MeetingStatus::Failed,
+                &completed_at,
+                Some(failure),
+            )?;
+        } else {
+            let config = config.expect("successful recovery must resolve hook configuration");
+            let summary_job = (config.summary_enabled && overview.segment_count > 0).then(|| {
+                self.summary_job_draft(
+                    meeting_id,
+                    applied.revision,
+                    &config.summary_preset,
+                    &completed_at,
+                )
+            });
+            self.inner.store.complete_meeting_with_job(
+                meeting_id,
+                persisted.revision,
+                &completed_at,
+                summary_job.as_ref(),
+            )?;
         }
         self.publish_unlocked("meeting-recovered", Some(meeting_id.into()), None)
     }
@@ -1861,13 +2023,24 @@ impl MeetingRuntime {
                     "reviewRequired": true,
                 })
             });
-        let retry_number = latest.map(|job| job.attempts + 1).unwrap_or(1);
+        let retry_prefix = format!("{meeting_id}:{job_kind}:retry:");
+        let retry_number = jobs
+            .iter()
+            .filter_map(|job| {
+                job.definition
+                    .idempotency_key
+                    .strip_prefix(&retry_prefix)
+                    .and_then(|suffix| suffix.parse::<u64>().ok())
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         let now = self.inner.clock.now();
         let draft = FollowUpJobDraft {
             id: format!("job-retry-{}", Uuid::new_v4()),
             meeting_id: meeting_id.into(),
             kind,
-            idempotency_key: format!("{meeting_id}:{job_kind}:retry:{retry_number}"),
+            idempotency_key: format!("{retry_prefix}{retry_number}"),
             payload,
             max_attempts: DEFAULT_JOB_ATTEMPTS,
             not_before: now.clone(),
@@ -1983,6 +2156,7 @@ impl MeetingRuntime {
             .inner
             .store
             .list_meetings_page(before.as_ref(), limit.clamp(1, DEFAULT_MEETING_LIMIT))?;
+        let hook_config = self.hook_config()?;
         let mut meetings = Vec::with_capacity(page.meetings.len());
         for record in page.meetings {
             let content = self
@@ -1991,7 +2165,12 @@ impl MeetingRuntime {
                 .content(&record.id)
                 .map_err(|message| port_error("meeting content projection", message))?;
             if !content.deleted {
-                meetings.push(self.meeting_view(&record, &content, active.as_ref())?);
+                meetings.push(self.meeting_view(
+                    &record,
+                    &content,
+                    active.as_ref(),
+                    &hook_config.kg_prompt,
+                )?);
             }
         }
         Ok(MeetingLibraryPage {
@@ -2009,6 +2188,7 @@ impl MeetingRuntime {
         record: &MeetingRecord,
         content: &MeetingContentProjection,
         active: Option<&ActiveCapture>,
+        kg_prompt: &str,
     ) -> Result<MeetingView, MeetingRuntimeError> {
         let transcript = self
             .inner
@@ -2037,7 +2217,7 @@ impl MeetingRuntime {
             &jobs,
             &summary_state,
             content.kg_decision.as_deref(),
-            &self.platform_projection()?.config.kg_prompt,
+            kg_prompt,
         );
         let channels = record
             .channels
@@ -2088,6 +2268,7 @@ impl MeetingRuntime {
                 .source_app
                 .clone()
                 .or_else(|| metadata_string(&record.metadata, "sourceApp")),
+            tags: content.tags.clone(),
             mic_muted: active.is_some_and(|value| value.mic_muted),
             channels,
             gaps: transcript
@@ -2186,24 +2367,15 @@ impl MeetingRuntime {
         Ok(())
     }
 
-    fn enqueue_summary_job(
+    fn summary_job_draft(
         &self,
         meeting_id: &str,
         transcript_revision: u64,
         preset: &str,
-    ) -> Result<FollowUpJob, MeetingRuntimeError> {
-        let now = self.inner.clock.now();
+        not_before: &str,
+    ) -> FollowUpJobDraft {
         let idempotency_key = format!("{meeting_id}:title-summary:{transcript_revision}");
-        if let Some(existing) = self
-            .inner
-            .store
-            .list_jobs(meeting_id)?
-            .into_iter()
-            .find(|job| job.definition.idempotency_key == idempotency_key)
-        {
-            return Ok(existing);
-        }
-        let job = FollowUpJobDraft {
+        FollowUpJobDraft {
             id: format!("job-summary-{}", Uuid::new_v4()),
             meeting_id: meeting_id.into(),
             kind: FollowUpJobKind::Summary,
@@ -2219,9 +2391,8 @@ impl MeetingRuntime {
                 "transcriptIsUntrusted": true
             }),
             max_attempts: DEFAULT_JOB_ATTEMPTS,
-            not_before: now.clone(),
-        };
-        Ok(self.inner.store.enqueue_job(&job, &now)?.0)
+            not_before: not_before.into(),
+        }
     }
 
     fn enqueue_kg_job(
@@ -2335,6 +2506,13 @@ impl MeetingRuntime {
             .platform
             .projection()
             .map_err(|message| port_error("meeting platform projection", message))
+    }
+
+    fn hook_config(&self) -> Result<MeetingHookConfig, MeetingRuntimeError> {
+        self.inner
+            .platform
+            .hook_config()
+            .map_err(|message| port_error("meeting hook configuration", message))
     }
 
     fn operation(&self) -> Result<MutexGuard<'_, ()>, MeetingRuntimeError> {
@@ -2516,13 +2694,17 @@ fn validate_update_patch(patch: &MeetingUpdatePatch) -> Result<(), MeetingRuntim
         }
     }
     if let Some(tags) = &patch.tags {
-        if tags.len() > 100
-            || tags
-                .iter()
-                .any(|tag| tag.trim().is_empty() || tag.len() > 160)
+        if tags.len() > 64
+            || tags.iter().any(|tag| {
+                tag.trim().is_empty()
+                    || tag.chars().count() > 80
+                    || tag.len() > 160
+                    || tag.chars().any(char::is_control)
+            })
         {
             return Err(MeetingRuntimeError::Validation(
-                "meeting tags must contain at most 100 non-empty bounded values".into(),
+                "meeting tags must contain at most 64 values of 1 to 80 characters and 160 UTF-8 bytes"
+                    .into(),
             ));
         }
     }
@@ -2821,6 +3003,38 @@ mod tests {
         }
     }
 
+    struct PromotingRecoveryCapture {
+        store: Arc<MeetingStore>,
+    }
+
+    impl MeetingCapturePort for PromotingRecoveryCapture {
+        fn recover(&self, report: &RecoveryReport) -> Result<(), String> {
+            for chunk in &report.staged_audio_chunks {
+                self.store
+                    .commit_audio_chunk(&chunk.definition.id, NOW)
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        }
+
+        fn start(&self, _request: &CaptureStart) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn stop(&self, _request: &CaptureStop) -> Result<CaptureStopResult, String> {
+            Ok(CaptureStopResult::default())
+        }
+
+        fn set_microphone_muted(
+            &self,
+            _meeting_id: &str,
+            _run_id: &str,
+            _muted: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     #[derive(Default)]
     struct EndedWorkerCapture {
         starts: Mutex<Vec<CaptureStart>>,
@@ -2954,6 +3168,31 @@ mod tests {
     struct AlwaysFailTranscription {
         starts: Mutex<Vec<TranscriptionStart>>,
         finalizes: Mutex<Vec<TranscriptionFinalize>>,
+    }
+
+    #[derive(Default)]
+    struct SessionOwningFailTranscription {
+        active: Mutex<bool>,
+        starts: Mutex<Vec<TranscriptionStart>>,
+        finalizes: Mutex<Vec<TranscriptionFinalize>>,
+    }
+
+    impl MeetingTranscriptionPort for SessionOwningFailTranscription {
+        fn start(&self, request: &TranscriptionStart) -> Result<(), String> {
+            let mut active = self.active.lock().unwrap();
+            if *active {
+                return Err("meeting already owns a transcription worker".into());
+            }
+            *active = true;
+            self.starts.lock().unwrap().push(request.clone());
+            Ok(())
+        }
+
+        fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
+            self.finalizes.lock().unwrap().push(request.clone());
+            *self.active.lock().unwrap() = false;
+            Err("provider worker ended before its terminal batch".into())
+        }
     }
 
     impl MeetingTranscriptionPort for AlwaysFailTranscription {
@@ -3713,6 +3952,49 @@ mod tests {
     }
 
     #[test]
+    fn repeated_manual_job_retries_receive_monotonic_idempotency_generations() {
+        let fixture = make_fixture();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "manual-retry-generations"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        fixture.runtime.stop(&meeting_id).unwrap();
+
+        for expected_generation in 1..=2 {
+            let claimed = fixture
+                .store
+                .claim_next_job("retry-worker", NOW, LEASE_END)
+                .unwrap()
+                .unwrap();
+            fixture
+                .store
+                .finish_job(
+                    &claimed.definition.id,
+                    claimed.lease_token.as_deref().unwrap(),
+                    &JobFinish::Failed {
+                        error: "agent unavailable".into(),
+                        retryable: false,
+                        retry_at: None,
+                    },
+                    NOW,
+                )
+                .unwrap();
+            fixture
+                .runtime
+                .retry_job(&meeting_id, "title-summary")
+                .unwrap();
+            let retry_key = format!("{meeting_id}:title-summary:retry:{expected_generation}");
+            assert!(fixture
+                .store
+                .list_jobs(&meeting_id)
+                .unwrap()
+                .iter()
+                .any(|job| job.definition.idempotency_key == retry_key));
+        }
+    }
+
+    #[test]
     fn silent_terminal_meeting_completes_without_summary_job() {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let runtime = MeetingRuntime::new(
@@ -4207,6 +4489,201 @@ mod tests {
     }
 
     #[test]
+    fn startup_preserves_capture_failure_intent_across_terminal_crash_window() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "meeting-failed-terminal-crash".into(),
+                    title: "Failure terminal crash".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: capture_channels(&MeetingPermissions {
+                        microphone: "granted".into(),
+                        system_audio: "denied".into(),
+                    }),
+                    metadata: json!({
+                        "transcriptionRoute": "local://whisper-small",
+                        "transcriptionModel": "whisper-small",
+                        "runId": "run-failed-terminal-crash"
+                    }),
+                },
+                NOW,
+            )
+            .unwrap();
+        let recording = store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Recording,
+                NOW,
+                None,
+            )
+            .unwrap();
+        let failure = MeetingFailure {
+            code: "capture-runtime-failed".into(),
+            message: "disk writer failed".into(),
+            retryable: true,
+        };
+        let interrupted = store
+            .transition_meeting(
+                &created.id,
+                recording.revision,
+                MeetingStatus::Interrupted,
+                NOW,
+                Some(&failure),
+            )
+            .unwrap();
+        store
+            .apply_transcript_batch(&TranscriptBatch {
+                meeting_id: created.id.clone(),
+                batch_id: "failed-terminal-before-lifecycle".into(),
+                base_revision: interrupted.transcript_revision,
+                source: "live-local".into(),
+                observed_at: NOW.into(),
+                marks_final: true,
+                changes: Vec::new(),
+            })
+            .unwrap();
+        let transcription = Arc::new(FakeTranscription::default());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            transcription.clone(),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+
+        let recovered = store.get_meeting(&created.id).unwrap();
+        assert_eq!(recovered.status, MeetingStatus::Failed);
+        assert_eq!(
+            recovered
+                .failure
+                .as_ref()
+                .map(|failure| failure.code.as_str()),
+            Some("capture-runtime-failed")
+        );
+        assert!(store.list_jobs(&created.id).unwrap().is_empty());
+        assert!(transcription.starts.lock().unwrap().is_empty());
+        assert_eq!(runtime.meeting(&created.id).unwrap().lifecycle, "failed");
+    }
+
+    #[test]
+    fn startup_repairs_a_terminal_transcript_after_promoting_staged_audio_tail() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "meeting-staged-tail".into(),
+                    title: "Staged audio tail".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: capture_channels(&MeetingPermissions {
+                        microphone: "granted".into(),
+                        system_audio: "denied".into(),
+                    }),
+                    metadata: json!({
+                        "transcriptionRoute": "local://whisper-small",
+                        "transcriptionModel": "whisper-small",
+                        "runId": "run-staged-tail"
+                    }),
+                },
+                NOW,
+            )
+            .unwrap();
+        let recording = store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Recording,
+                NOW,
+                None,
+            )
+            .unwrap();
+        let stopping = store
+            .transition_meeting(
+                &created.id,
+                recording.revision,
+                MeetingStatus::Stopping,
+                NOW,
+                None,
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                stopping.revision,
+                MeetingStatus::Finalizing,
+                NOW,
+                None,
+            )
+            .unwrap();
+        store
+            .stage_audio_chunk(
+                &crate::meetings::AudioChunkDraft {
+                    id: "staged-tail-chunk".into(),
+                    meeting_id: created.id.clone(),
+                    channel_id: "microphone".into(),
+                    sequence: 0,
+                    start_ms: 0,
+                    end_ms: 1_000,
+                    sample_count: 48_000,
+                    byte_len: 192_000,
+                    sha256: "a".repeat(64),
+                    relative_path: format!("{}/audio/microphone/00000000.f32le", created.id),
+                },
+                NOW,
+            )
+            .unwrap();
+        store
+            .apply_transcript_batch(&TranscriptBatch {
+                meeting_id: created.id.clone(),
+                batch_id: "terminal-before-staged-promotion".into(),
+                base_revision: 0,
+                source: "live-local".into(),
+                observed_at: NOW.into(),
+                marks_final: true,
+                changes: Vec::new(),
+            })
+            .unwrap();
+        let transcription = Arc::new(FakeTranscription::default());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(PromotingRecoveryCapture {
+                store: Arc::clone(&store),
+            }),
+            transcription.clone(),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            store.get_meeting(&created.id).unwrap().status,
+            MeetingStatus::Interrupted
+        );
+        assert!(store.has_committed_audio(&created.id).unwrap());
+        let jobs = store.list_jobs(&created.id).unwrap();
+        assert_eq!(
+            jobs.iter()
+                .filter(|job| {
+                    job.definition.kind == FollowUpJobKind::Custom("transcription".into())
+                })
+                .count(),
+            1
+        );
+        assert!(!jobs
+            .iter()
+            .any(|job| job.definition.kind == FollowUpJobKind::Summary));
+        assert!(transcription.starts.lock().unwrap().is_empty());
+        assert_eq!(
+            runtime.meeting(&created.id).unwrap().lifecycle,
+            "interrupted"
+        );
+    }
+
+    #[test]
     fn completed_repair_job_redelivery_performs_zero_provider_work() {
         let fixture = make_fixture();
         let started = fixture
@@ -4259,6 +4736,111 @@ mod tests {
             finalizes_before
         );
         assert_eq!(fixture.store.list_jobs(&meeting_id).unwrap(), jobs_before);
+    }
+
+    #[test]
+    fn repair_retry_refuses_to_replace_a_transcript_after_source_audio_is_gone() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let transcription = Arc::new(AlwaysFailTranscription::default());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            transcription.clone(),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+        let started = runtime
+            .start(start_request(&runtime, "repair-without-source"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        let run_id = transcription.starts.lock().unwrap()[0].run_id.clone();
+        runtime
+            .handle_capture_failure(&meeting_id, &run_id, "capture failed")
+            .unwrap();
+        let repair = store
+            .list_jobs(&meeting_id)
+            .unwrap()
+            .into_iter()
+            .find(|job| job.definition.kind == FollowUpJobKind::Custom("transcription".into()))
+            .unwrap();
+        let starts_before = transcription.starts.lock().unwrap().len();
+
+        let error = crate::meetings::jobs::execute_transcription_repair_with(
+            &runtime,
+            transcription.as_ref(),
+            &repair,
+        )
+        .unwrap_err();
+        assert!(error.contains("no committed source audio"));
+        assert_eq!(transcription.starts.lock().unwrap().len(), starts_before);
+    }
+
+    #[test]
+    fn failed_terminal_repair_redelivery_performs_zero_provider_or_audio_work() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let transcription = Arc::new(FakeTranscription::default());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            transcription.clone(),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+        let started = runtime
+            .start(start_request(&runtime, "failed-repair-redelivery"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        let run_id = transcription.starts.lock().unwrap()[0].run_id.clone();
+        runtime
+            .handle_capture_failure(&meeting_id, &run_id, "capture failed")
+            .unwrap();
+        let starts_before = transcription.starts.lock().unwrap().len();
+        let finalizes_before = transcription.finalizes.lock().unwrap().len();
+        let repair = FollowUpJob {
+            definition: FollowUpJobDraft {
+                id: "failed-terminal-redelivery".into(),
+                meeting_id: meeting_id.clone(),
+                kind: FollowUpJobKind::Custom("transcription".into()),
+                idempotency_key: format!("{meeting_id}:transcription:{run_id}"),
+                payload: json!({
+                    "captureGeneration": run_id,
+                    "transcriptionRoute": "https://must-not-contact.example/listen",
+                    "transcriptionModel": "must-not-load"
+                }),
+                max_attempts: 3,
+                not_before: NOW.into(),
+            },
+            state: JobState::Running,
+            attempts: 2,
+            created_at: NOW.into(),
+            updated_at: NOW.into(),
+            lease_owner: Some("redelivery-worker".into()),
+            lease_token: Some("redelivery-lease".into()),
+            lease_expires_at: Some(LEASE_END.into()),
+            last_error: None,
+            result: None,
+        };
+
+        let result = crate::meetings::jobs::execute_transcription_repair_with(
+            &runtime,
+            transcription.as_ref(),
+            &repair,
+        )
+        .unwrap();
+        assert_eq!(result["transcriptFinal"], true);
+        assert_eq!(transcription.starts.lock().unwrap().len(), starts_before);
+        assert_eq!(
+            transcription.finalizes.lock().unwrap().len(),
+            finalizes_before
+        );
+        assert_eq!(
+            store.get_meeting(&meeting_id).unwrap().status,
+            MeetingStatus::Failed
+        );
     }
 
     #[test]
@@ -4327,11 +4909,11 @@ mod tests {
     fn stop_winning_failed_worker_race_enqueues_repair_before_delayed_callback() {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let capture = Arc::new(EndedWorkerCapture::default());
-        let transcription = Arc::new(AlwaysFailTranscription::default());
+        let transcription = Arc::new(SessionOwningFailTranscription::default());
         let runtime = MeetingRuntime::new(
             Arc::clone(&store),
             capture.clone(),
-            transcription,
+            transcription.clone(),
             Arc::new(FakePlatform::default()),
             Arc::new(FakeClock),
             Arc::new(FakeEvents::default()),
@@ -4371,6 +4953,23 @@ mod tests {
         assert_eq!(repairs.len(), 1);
         assert_eq!(repairs[0].state, JobState::Pending);
         assert_eq!(repairs[0].definition.payload["captureGeneration"], run_id);
+        transcription
+            .start(&TranscriptionStart {
+                meeting_id: meeting_id.clone(),
+                run_id: format!("repair-{run_id}"),
+                route: repairs[0].definition.payload["transcriptionRoute"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+                model: repairs[0].definition.payload["transcriptionModel"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+                repair_generation: Some(run_id.clone()),
+            })
+            .expect("Stop must remove the live transcription session before repair");
+        assert_eq!(transcription.finalizes.lock().unwrap().len(), 1);
+        assert_eq!(transcription.starts.lock().unwrap().len(), 2);
     }
 
     #[test]

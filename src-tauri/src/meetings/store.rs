@@ -372,9 +372,10 @@ impl MeetingStore {
                 "failed meetings require failure detail".into(),
             ));
         }
-        if next != MeetingStatus::Failed && failure.is_some() {
+        if !matches!(next, MeetingStatus::Failed | MeetingStatus::Interrupted) && failure.is_some()
+        {
             return Err(MeetingStoreError::Validation(
-                "failure detail is valid only for the failed status".into(),
+                "failure detail is valid only for failed or interrupted recovery intent".into(),
             ));
         }
         let mut connection = self.lock()?;
@@ -431,6 +432,118 @@ impl MeetingStore {
         let meeting = load_meeting_tx(&transaction, meeting_id)?;
         transaction.commit()?;
         Ok(meeting)
+    }
+
+    /// Commit terminal lifecycle and its optional default follow-up outbox
+    /// entry under one SQLite write lock.
+    ///
+    /// This closes the crash boundary where a meeting could previously become
+    /// `completed` before its required title/summary job was durable.
+    pub fn complete_meeting_with_job(
+        &self,
+        meeting_id: &str,
+        expected_revision: u64,
+        observed_at: &str,
+        job: Option<&FollowUpJobDraft>,
+    ) -> Result<(MeetingRecord, Option<FollowUpJob>), MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let prepared_job = job
+            .map(|job| {
+                validate_job_draft(job).map_err(MeetingStoreError::Validation)?;
+                if job.meeting_id != meeting_id {
+                    return Err(MeetingStoreError::Validation(
+                        "completion follow-up must belong to the completed meeting".into(),
+                    ));
+                }
+                let not_before = timestamp(&job.not_before)?;
+                let request_hash = job_fingerprint(job, &not_before)?;
+                let payload = json(job.payload.clone())?;
+                Ok((
+                    job,
+                    not_before,
+                    request_hash,
+                    payload,
+                    job.kind.as_storage_key(),
+                ))
+            })
+            .transpose()?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_meeting_tx(&transaction, meeting_id)?;
+        if current.revision != expected_revision {
+            return Err(MeetingStoreError::RevisionConflict {
+                meeting_id: meeting_id.into(),
+                expected: expected_revision,
+                actual: current.revision,
+            });
+        }
+        if current.status != MeetingStatus::Completed
+            && !current.status.can_transition_to(MeetingStatus::Completed)
+        {
+            return Err(MeetingStoreError::InvalidTransition {
+                meeting_id: meeting_id.into(),
+                from: current.status,
+                to: MeetingStatus::Completed,
+            });
+        }
+
+        if current.status != MeetingStatus::Completed {
+            transaction.execute(
+                "UPDATE meetings SET
+                   status='completed',
+                   updated_at=?2,
+                   revision=revision+1,
+                   stopped_at=COALESCE(stopped_at,?2),
+                   finalized_at=?2,
+                   failure_code=NULL,
+                   failure_message=NULL,
+                   failure_retryable=NULL
+                 WHERE id=?1",
+                params![meeting_id, observed_at],
+            )?;
+        }
+
+        let stored_job = if let Some((job, not_before, request_hash, payload, kind)) = prepared_job
+        {
+            if deletion_blocks_job_tx(&transaction, meeting_id, &job.kind)? {
+                return Err(deletion_in_progress_tx(&transaction, meeting_id)?);
+            }
+            if let Some((existing, existing_hash)) =
+                load_job_by_idempotency_tx(&transaction, meeting_id, &job.idempotency_key)?
+            {
+                if existing_hash != request_hash {
+                    return Err(MeetingStoreError::IdempotencyConflict {
+                        key: job.idempotency_key.clone(),
+                    });
+                }
+                Some(existing)
+            } else {
+                transaction.execute(
+                    "INSERT INTO follow_up_jobs (
+                       id,meeting_id,kind,idempotency_key,request_hash,payload_json,state,
+                       attempts,max_attempts,not_before,created_at,updated_at
+                     ) VALUES (?1,?2,?3,?4,?5,?6,'pending',0,?7,?8,?9,?9)",
+                    params![
+                        job.id,
+                        job.meeting_id,
+                        kind,
+                        job.idempotency_key,
+                        request_hash,
+                        payload,
+                        job.max_attempts,
+                        not_before,
+                        observed_at
+                    ],
+                )?;
+                Some(load_job_tx(&transaction, &job.id)?)
+            }
+        } else {
+            None
+        };
+        let completed = load_meeting_tx(&transaction, meeting_id)?;
+        transaction.commit()?;
+        Ok((completed, stored_job))
     }
 
     pub fn stage_audio_chunk(
@@ -647,6 +760,22 @@ impl MeetingStore {
             .map(|result| result.map(|(chunk, _)| chunk))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(chunks)
+    }
+
+    pub fn has_committed_audio(&self, meeting_id: &str) -> Result<bool, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        require_meeting(&connection, meeting_id)?;
+        connection
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM audio_chunks
+                   WHERE meeting_id=?1 AND status='committed'
+                 )",
+                [meeting_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
     }
 
     pub fn apply_transcript_batch(
@@ -1618,6 +1747,10 @@ impl MeetingStore {
                OR EXISTS(
                  SELECT 1 FROM audio_chunks
                  WHERE meeting_id=?1 AND status='staged'
+               )
+               OR EXISTS(
+                 SELECT 1 FROM transcript_repair_runs
+                 WHERE meeting_id=?1 AND state='collecting'
                )",
             [meeting_id],
             |row| row.get::<_, bool>(0),
@@ -1686,7 +1819,15 @@ impl MeetingStore {
                 [meeting_id],
                 |row| row.get(0),
             )?;
-            if staged_chunks || transcription_jobs {
+            let collecting_repair: bool = transaction.query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM transcript_repair_runs
+                   WHERE meeting_id=?1 AND state='collecting'
+                 )",
+                [meeting_id],
+                |row| row.get(0),
+            )?;
+            if staged_chunks || transcription_jobs || collecting_repair {
                 return Err(MeetingStoreError::Validation(
                     "source audio is held by transcription recovery; finish or resolve recovery before deleting it"
                         .into(),
@@ -2179,6 +2320,60 @@ impl MeetingStore {
             "SELECT id FROM meetings
              WHERE status IN ('recording','stopping','finalizing') ORDER BY id",
         )?;
+        let recovery_stops = {
+            let mut statement = transaction.prepare(
+                "SELECT m.id,m.started_at,m.stopped_at,MAX(a.end_ms)
+                 FROM meetings m
+                 LEFT JOIN audio_chunks a
+                   ON a.meeting_id=m.id AND a.status='committed'
+                 WHERE m.status IN ('recording','stopping','finalizing')
+                 GROUP BY m.id,m.started_at,m.stopped_at
+                 ORDER BY m.id",
+            )?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (meeting_id, started_at, stopped_at, last_committed_end_ms) in recovery_stops {
+            if stopped_at.is_some() {
+                continue;
+            }
+            let recovered_stop = if let Some(started_at) = started_at {
+                let started = DateTime::parse_from_rfc3339(&started_at).map_err(|error| {
+                    MeetingStoreError::Validation(format!(
+                        "meeting '{meeting_id}' has an invalid start timestamp: {error}"
+                    ))
+                })?;
+                started
+                    .checked_add_signed(chrono::Duration::milliseconds(
+                        last_committed_end_ms.unwrap_or(0),
+                    ))
+                    .ok_or_else(|| {
+                        MeetingStoreError::Validation(format!(
+                            "meeting '{meeting_id}' committed audio duration overflows its timestamp"
+                        ))
+                    })?
+                    .with_timezone(&Utc)
+                    .to_rfc3339_opts(SecondsFormat::Millis, true)
+            } else {
+                // A live meeting should always have a start timestamp. Keep a
+                // corrupt legacy row recoverable without inventing an earlier
+                // wall-clock time than the only durable observation.
+                observed_at.clone()
+            };
+            transaction.execute(
+                "UPDATE meetings SET stopped_at=?2 WHERE id=?1 AND stopped_at IS NULL",
+                params![meeting_id, recovered_stop],
+            )?;
+        }
         transaction.execute(
             "UPDATE meetings SET
                status='interrupted',interrupted_at=?1,
@@ -2252,6 +2447,87 @@ impl MeetingStore {
             failed_job_ids,
             staged_audio_chunks,
         })
+    }
+
+    /// Reconcile the staged audio authority returned by
+    /// [`recover_after_restart`] after the native capture adapter has verified
+    /// its private files.
+    ///
+    /// `true` means every originally staged chunk is now committed. Corrupt or
+    /// still-staged chunks fail closed so lifecycle recovery cannot bless a
+    /// terminal transcript that omitted durable tail audio.
+    pub fn finish_audio_recovery(
+        &self,
+        report: &RecoveryReport,
+    ) -> Result<bool, MeetingStoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut all_committed = true;
+        for chunk in &report.staged_audio_chunks {
+            let current = load_audio_chunk_optional_tx(&transaction, &chunk.definition.id)?
+                .map(|(chunk, _)| chunk)
+                .ok_or_else(|| not_found("audio chunk", &chunk.definition.id))?;
+            all_committed &= current.status == AudioChunkStatus::Committed;
+        }
+
+        for meeting_id in &report.interrupted_meeting_ids {
+            validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+            let (started_at, stopped_at, last_committed_end_ms) = transaction.query_row(
+                "SELECT m.started_at,m.stopped_at,MAX(a.end_ms)
+                 FROM meetings m
+                 LEFT JOIN audio_chunks a
+                   ON a.meeting_id=m.id AND a.status='committed'
+                 WHERE m.id=?1
+                 GROUP BY m.id,m.started_at,m.stopped_at",
+                [meeting_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
+                },
+            )?;
+            let Some(started_at) = started_at else {
+                continue;
+            };
+            let candidate = DateTime::parse_from_rfc3339(&started_at)
+                .map_err(|error| {
+                    MeetingStoreError::Validation(format!(
+                        "meeting '{meeting_id}' has an invalid start timestamp: {error}"
+                    ))
+                })?
+                .checked_add_signed(chrono::Duration::milliseconds(
+                    last_committed_end_ms.unwrap_or(0),
+                ))
+                .ok_or_else(|| {
+                    MeetingStoreError::Validation(format!(
+                        "meeting '{meeting_id}' committed audio duration overflows its timestamp"
+                    ))
+                })?
+                .with_timezone(&Utc);
+            let should_advance = stopped_at
+                .as_deref()
+                .map(DateTime::parse_from_rfc3339)
+                .transpose()
+                .map_err(|error| {
+                    MeetingStoreError::Validation(format!(
+                        "meeting '{meeting_id}' has an invalid stop timestamp: {error}"
+                    ))
+                })?
+                .is_none_or(|stopped| candidate > stopped);
+            if should_advance {
+                transaction.execute(
+                    "UPDATE meetings SET stopped_at=?2 WHERE id=?1",
+                    params![
+                        meeting_id,
+                        candidate.to_rfc3339_opts(SecondsFormat::Millis, true)
+                    ],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(all_committed)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, MeetingStoreError> {
@@ -3783,6 +4059,55 @@ mod tests {
     }
 
     #[test]
+    fn completing_a_meeting_and_enqueuing_its_summary_is_one_transaction() {
+        let store = store();
+        let recording = start_recording(&store);
+        let stopping = store
+            .transition_meeting(
+                "meeting-1",
+                recording.revision,
+                MeetingStatus::Stopping,
+                T2,
+                None,
+            )
+            .unwrap();
+        let finalizing = store
+            .transition_meeting(
+                "meeting-1",
+                stopping.revision,
+                MeetingStatus::Finalizing,
+                T2,
+                None,
+            )
+            .unwrap();
+        let mut invalid_summary = job("summary-invalid", "summary:1", 3);
+        invalid_summary.meeting_id = "another-meeting".into();
+        assert!(
+            store
+                .complete_meeting_with_job(
+                    "meeting-1",
+                    finalizing.revision,
+                    T3,
+                    Some(&invalid_summary),
+                )
+                .is_err()
+        );
+        assert_eq!(
+            store.get_meeting("meeting-1").unwrap().status,
+            MeetingStatus::Finalizing
+        );
+        assert!(store.list_jobs("meeting-1").unwrap().is_empty());
+
+        let summary = job("summary-valid", "summary:1", 3);
+        let (completed, enqueued) = store
+            .complete_meeting_with_job("meeting-1", finalizing.revision, T3, Some(&summary))
+            .unwrap();
+        assert_eq!(completed.status, MeetingStatus::Completed);
+        assert_eq!(enqueued.unwrap().definition.id, summary.id);
+        assert_eq!(store.list_jobs("meeting-1").unwrap().len(), 1);
+    }
+
+    #[test]
     fn schema_v5_backfills_existing_meeting_titles_into_private_search() {
         let mut connection = Connection::open_in_memory().unwrap();
         {
@@ -4629,6 +4954,35 @@ mod tests {
     }
 
     #[test]
+    fn audio_deletion_rejects_collecting_repair_after_job_attempts_are_exhausted() {
+        let store = store();
+        let recording = start_recording(&store);
+        let interrupted = store
+            .transition_meeting(
+                "meeting-1",
+                recording.revision,
+                MeetingStatus::Interrupted,
+                T2,
+                None,
+            )
+            .unwrap();
+        assert_eq!(interrupted.status, MeetingStatus::Interrupted);
+        assert_eq!(
+            store
+                .begin_transcript_repair("meeting-1", "capture-generation", "provider-run", T2)
+                .unwrap(),
+            TranscriptRepairBegin::Collecting
+        );
+        assert!(store.has_retention_hold("meeting-1").unwrap());
+
+        assert!(store
+            .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T3)
+            .unwrap_err()
+            .to_string()
+            .contains("transcription recovery"));
+    }
+
+    #[test]
     fn deletion_journal_survives_every_database_boundary_and_meeting_cascade() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("meetings.sqlite");
@@ -5089,6 +5443,20 @@ mod tests {
             relative_path: "meeting-1/system/000000.flac".into(),
         };
         store.stage_audio_chunk(&chunk, T1).unwrap();
+        let committed_chunk = AudioChunkDraft {
+            id: "chunk-committed".into(),
+            meeting_id: "meeting-1".into(),
+            channel_id: "mic".into(),
+            sequence: 0,
+            start_ms: 0,
+            end_ms: 42_000,
+            sample_count: 2_016_000,
+            byte_len: 8_064_000,
+            sha256: "b".repeat(64),
+            relative_path: "meeting-1/mic/000000.f32le".into(),
+        };
+        store.stage_audio_chunk(&committed_chunk, T1).unwrap();
+        store.commit_audio_chunk(&committed_chunk.id, T1).unwrap();
         store
             .enqueue_job(&job("job-1", "summary:on-stop", 3), T1)
             .unwrap();
@@ -5101,6 +5469,10 @@ mod tests {
         let recovered = store.get_meeting("meeting-1").unwrap();
         assert_eq!(recovered.status, MeetingStatus::Interrupted);
         assert_eq!(recovered.recovery_count, 1);
+        assert_eq!(
+            recovered.stopped_at.as_deref(),
+            Some("2026-07-30T10:01:42.000Z")
+        );
         assert_eq!(
             store.list_jobs("meeting-1").unwrap()[0].state,
             JobState::Pending

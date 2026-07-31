@@ -48,7 +48,7 @@ resizing, rails, widths, and Activity navigation history.
 | Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
-| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, `scripts/check-tauri-commands.mjs` | full verification set; `src-tauri/tests/mimir_cli_contract.rs` |
+| Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, command drift, supply-chain inventory, and source-bound release helpers | full verification set; script unit checks; `src-tauri/tests/mimir_cli_contract.rs` |
 
 ## Frontend map
 
@@ -154,7 +154,7 @@ ordering: [ipc.md](ipc.md).
 | `deploy/chat/` | team chat server stack; ops runbook `deploy/chat/README.md` |
 | `harness/` | standalone HTML/JS harnesses for Business graph views |
 | `skills/` | repo-local agent skills (`skills/mimir-config`, `skills/mimir-graph`) |
-| `scripts/` | build/test/release/check scripts (`scripts/test.mjs`, `scripts/build.mjs`, `scripts/check-docs.mjs`, `scripts/check-tauri-commands.mjs`, `scripts/release-env.mjs`) |
+| `scripts/` | build/test/release/check scripts, including SPDX/license generation and exact source-bound artifact staging |
 | `.github/workflows/build.yml` | CI |
 
 ## Local data

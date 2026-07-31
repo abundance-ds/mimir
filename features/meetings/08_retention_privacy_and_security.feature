@@ -74,6 +74,7 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
     When meeting capabilities are registered
     Then recording, stop, deletion, and retention operations are absent from the public projection
     And bounded list, get, search, and metadata update operations remain available
+    And a live meeting update is rejected before the content projection can be written
 
   @MTG-160 @automated @desktop @legal
   Scenario: Deletion explains recoverability boundaries
@@ -81,3 +82,10 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
     When Mimir presents the confirmation
     Then it identifies the native delete mode as permanent and irreversible
     And native deletion applies only after explicit confirmation
+
+  @MTG-161 @automated @native @security @recovery
+  Scenario: Unresolved transcript repair retains its source audio
+    Given transcript repair is collecting or a retry no longer has committed source audio
+    When explicit deletion, retention, or repair retry evaluates that meeting
+    Then collecting repair blocks source-audio removal even after job attempts are exhausted
+    And a retry with no committed source audio fails before any provider is started

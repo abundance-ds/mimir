@@ -13,6 +13,7 @@ import {
   loadMeetingLibraryPage,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
+  openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
   retryMeetingJob,
   setMeetingMicMuted,
@@ -43,6 +44,8 @@ export const useMeetingsStore = defineStore('meetings', () => {
   let initializing = null
   let refreshQueued = false
   let transcriptRefreshTimer = null
+  let configMutationTail = Promise.resolve()
+  let queuedConfigMutations = 0
   const transcriptRefreshIds = new Set()
 
   const selectedMeeting = computed(() => {
@@ -206,10 +209,34 @@ export const useMeetingsStore = defineStore('meetings', () => {
     return runPending(`export:${id}:${format}`, () => exportMeeting(id, format))
   }
 
-  async function saveConfig(patch) {
-    return runPending('config', async () => {
-      applySnapshot(await updateMeetingsConfig(patch))
-      return config.value
+  function saveConfig(patch) {
+    const queuedPatch = { ...patch }
+    queuedConfigMutations += 1
+    pending.value = { ...pending.value, config: true }
+    const operation = configMutationTail.then(async () => {
+      error.value = ''
+      try {
+        applySnapshot(await updateMeetingsConfig(queuedPatch))
+        return config.value
+      } catch (cause) {
+        error.value = message(cause)
+        throw cause
+      }
+    })
+    configMutationTail = operation.catch(() => undefined)
+    return operation.finally(() => {
+      queuedConfigMutations -= 1
+      if (queuedConfigMutations > 0) return
+      const nextPending = { ...pending.value }
+      delete nextPending.config
+      pending.value = nextPending
+    })
+  }
+
+  async function openSystemAudioSettings() {
+    return runPending('system-audio-settings', async () => {
+      await openMeetingSystemAudioSettings()
+      return true
     })
   }
 
@@ -463,6 +490,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     initialize,
     refresh,
     requestMicrophonePermission,
+    openSystemAudioSettings,
     dismissCandidate,
     start,
     stop,

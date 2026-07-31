@@ -9,6 +9,7 @@
       :aria-expanded="open"
       :aria-controls="open ? listboxId : undefined"
       :aria-activedescendant="open ? optionId(activeIndex) : undefined"
+      :disabled="disabled"
       class="scribe-select-trigger"
       @click="toggle"
       @keydown="onTriggerKeydown"
@@ -62,6 +63,7 @@ const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
   options: { type: Array, default: () => [] },
   ariaLabel: { type: String, required: true },
+  disabled: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -85,6 +87,7 @@ function setOptionRef(element, index) {
 }
 
 function toggle() {
+  if (props.disabled) return
   if (open.value) {
     close()
     return
@@ -93,6 +96,7 @@ function toggle() {
 }
 
 function show(focus = false) {
+  if (props.disabled) return
   activeIndex.value = Math.max(
     0,
     props.options.findIndex(option => option.value === props.modelValue),
@@ -127,6 +131,7 @@ function move(delta) {
 }
 
 function onTriggerKeydown(event) {
+  if (props.disabled) return
   if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
     event.preventDefault()
     show(true)
@@ -190,8 +195,13 @@ onBeforeUnmount(() => close())
   font-size: 10px;
 }
 
-.scribe-select-trigger:hover {
+.scribe-select-trigger:hover:not(:disabled) {
   background: var(--color-chrome-mid);
+}
+
+.scribe-select-trigger:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .scribe-select-trigger:focus-visible,

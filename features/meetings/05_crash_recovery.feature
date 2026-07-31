@@ -15,6 +15,7 @@ Feature: Recover meeting data and work after interruption
     Given a durable in-progress marker exists for active capture
     When Mimir restarts after the process was terminated
     Then every committed audio chunk is attached to a recoverable meeting
+    And the recovered stop time and duration end at the last committed audio boundary rather than the relaunch clock
     And any interval after the last durable boundary is reported as uncertain
 
   @MTG-092 @automated @native @recovery
@@ -62,10 +63,10 @@ Feature: Recover meeting data and work after interruption
 
   @MTG-098 @automated @native @security @recovery
   Scenario: A durable terminal transcript is never disclosed again after a lifecycle crash
-    Given an all-final terminal transcript reached durable storage before lifecycle completion
+    Given an all-final terminal transcript reached durable storage before lifecycle completion or repair-job acknowledgement
     When startup recovery or completed-job redelivery inspects the meeting
     Then the lifecycle completes locally and downstream work remains idempotent
-    And no model, credential, provider connection, or audio disclosure starts
+    And no model load, credential read, provider connection, or audio disclosure starts
 
   @MTG-099 @automated @native @performance @recovery
   Scenario: Large repair reconciliation commits as one bounded authority change
@@ -73,3 +74,17 @@ Feature: Recover meeting data and work after interruption
     When its terminal marker is committed
     Then set-based reconciliation creates exactly one transcript revision
     And no staged partial is searchable or visible before that atomic commit
+
+  @MTG-100 @automated @native @recovery
+  Scenario: A promoted staged audio tail invalidates earlier terminal completeness
+    Given an all-final transcript was committed before a durable staged audio tail was classified
+    When restart recovery verifies and promotes that tail into committed audio
+    Then the earlier transcript is not accepted as complete
+    And one repair remains bound to the original capture generation before summary work can start
+
+  @MTG-101 @automated @native @recovery
+  Scenario: Capture failure intent survives the terminal transcript crash window
+    Given capture failure intent and an all-final transcript were durable before lifecycle completion
+    When Mimir restarts inside that crash window
+    Then the meeting becomes Failed with the original capture failure
+    And no summary job or provider disclosure rewrites the failure as a successful meeting

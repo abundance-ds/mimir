@@ -1,0 +1,12 @@
+{
+  "token": "fixture-consent-token-never-valid",
+  "requestId": "scribe-start-fixture-01",
+  "expiresInMs": 45000,
+  "disclosure": {
+    "candidateId": "candidate-teams-01",
+    "candidateAppName": "Microsoft Teams",
+    "transcriptionMode": "custom",
+    "destination": "https://speech.example.test/v1/listen",
+    "model": "nova-3"
+  }
+}

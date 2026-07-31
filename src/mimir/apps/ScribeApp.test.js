@@ -9,6 +9,7 @@ import {
   listenToMeetingEvents,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
+  openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
   startMeeting,
   stopMeeting,
@@ -30,6 +31,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
   loadMeetingTranscriptPage: vi.fn(),
+  openMeetingSystemAudioSettings: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
   retryMeetingJob: vi.fn(),
   setMeetingMicMuted: vi.fn(),
@@ -89,6 +91,7 @@ function meeting(overrides = {}) {
     summaryState: 'not-started',
     kgState: 'not-offered',
     jobs: [],
+    tags: [],
     error: null,
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -110,6 +113,7 @@ describe('ScribeApp', () => {
       summary: null,
     }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(openMeetingSystemAudioSettings).mockReset().mockResolvedValue()
     vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
       token: 'native-secret',
       requestId: 'scribe-start-native',
@@ -282,7 +286,7 @@ describe('ScribeApp', () => {
 
   it('offers a deliberate permission repair action without enabling automatic recording', async () => {
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
-      permissions: { microphone: 'denied', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'denied', systemAudio: 'denied' },
     }))
     vi.mocked(requestMeetingMicrophonePermission).mockResolvedValue(snapshot({
       revision: 2,
@@ -296,6 +300,8 @@ describe('ScribeApp', () => {
     await wrapper.get('[data-scribe-grant-microphone]').trigger('click')
 
     await vi.waitFor(() => expect(requestMeetingMicrophonePermission).toHaveBeenCalledTimes(1))
+    await wrapper.get('[data-scribe-open-system-audio-settings]').trigger('click')
+    await vi.waitFor(() => expect(openMeetingSystemAudioSettings).toHaveBeenCalledTimes(1))
   })
 
   it('uses explicit route choices and keyboard listboxes in settings', async () => {
@@ -335,13 +341,14 @@ describe('ScribeApp', () => {
       .toHaveBeenCalledWith('m1', 'create-draft'))
   })
 
-  it('lets the user review and edit the generated title and summary', async () => {
+  it('lets the user review and edit the generated title summary and tags', async () => {
     const complete = meeting({
       lifecycle: 'ready',
       transcription: 'final',
       transcriptFinal: true,
       summary: 'Initial summary.',
       summaryState: 'succeeded',
+      tags: ['release', 'customer'],
     })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
     vi.mocked(updateMeeting).mockResolvedValue(snapshot({
@@ -350,21 +357,47 @@ describe('ScribeApp', () => {
         ...complete,
         title: 'Reviewed planning outcome',
         summary: 'Reviewed summary.',
+        tags: ['release', 'decision'],
       }],
     }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting]').exists()).toBe(true))
 
+    expect(wrapper.get('[data-scribe-reviewed-tags]').text()).toContain('release')
+    expect(wrapper.get('[data-scribe-reviewed-tags]').text()).toContain('customer')
     await wrapper.findAll('button').find(button => button.text() === 'Edit').trigger('click')
     await wrapper.get('[data-scribe-edit-title]').setValue('Reviewed planning outcome')
     await wrapper.get('[data-scribe-edit-summary]').setValue('Reviewed summary.')
+    await wrapper.get('[data-scribe-edit-tags]').setValue('release, decision, release')
     await wrapper.get('[data-scribe-save-review]').element.closest('form')
       .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
 
     await vi.waitFor(() => expect(updateMeeting).toHaveBeenCalledWith('m1', {
       title: 'Reviewed planning outcome',
       summary: 'Reviewed summary.',
+      tags: ['release', 'decision'],
     }))
+  })
+
+  it('keeps an oversized reviewed tag local and explains the payload bound', async () => {
+    const complete = meeting({
+      lifecycle: 'ready',
+      transcription: 'final',
+      transcriptFinal: true,
+      summary: 'Initial summary.',
+      summaryState: 'succeeded',
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting]').exists()).toBe(true))
+
+    await wrapper.findAll('button').find(button => button.text() === 'Edit').trigger('click')
+    await wrapper.get('[data-scribe-edit-tags]').setValue(`release, ${'x'.repeat(81)}`)
+
+    expect(wrapper.get('[data-scribe-edit-tags-error]').attributes('role')).toBe('alert')
+    expect(wrapper.get('[data-scribe-edit-tags-error]').text()).toContain('80 characters')
+    expect(wrapper.get('[data-scribe-save-review]').attributes('disabled')).toBeDefined()
+    expect(updateMeeting).not.toHaveBeenCalled()
   })
 
   it('requires native confirmation before permanently deleting a meeting', async () => {

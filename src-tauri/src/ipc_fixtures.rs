@@ -35,6 +35,12 @@ use crate::launchers::{
     AgentDefinition, DetectedAgent, LauncherConfigResponse, LauncherKind, LauncherPreset,
     ResolvedLaunch, ResumeStrategy, WorkingDirectory,
 };
+use crate::meetings::commands::{MeetingStartConsentDisclosure, MeetingStartConsentGrant};
+use crate::meetings::runtime::{
+    MeetingCandidate, MeetingConfig, MeetingExport, MeetingGapView, MeetingJobView,
+    MeetingLibraryCursor, MeetingLibraryPage, MeetingModel, MeetingPermissions, MeetingSegmentView,
+    MeetingSnapshot, MeetingTranscriptCursor, MeetingTranscriptPage, MeetingView,
+};
 use crate::routine_runtime::{RoutineRuntimeCatalog, RoutineRuntimeEntry};
 use crate::routines::{
     MissedFirePolicy, RoutineDefinition, RoutineDiagnostic, RoutineFire, RoutineFireReason,
@@ -576,6 +582,212 @@ fn workspace_file_list_directory() -> Vec<WorkspaceEntry> {
     ]
 }
 
+fn live_meeting() -> MeetingView {
+    MeetingView {
+        id: "meeting-live-01".into(),
+        title: "Architecture sync".into(),
+        lifecycle: "capturing".into(),
+        transcription: "live".into(),
+        started_at: Some("2026-07-31T08:00:00.000Z".into()),
+        stopped_at: None,
+        duration_ms: 754_321,
+        // Native workspace paths are intentionally absent from this renderer
+        // contract. The meeting ID is the public capability boundary.
+        workspace_path: None,
+        source_app: Some("Zoom".into()),
+        tags: vec!["architecture".into()],
+        mic_muted: false,
+        channels: vec!["microphone".into(), "system".into()],
+        gaps: vec![],
+        gap_count: 0,
+        transcript_revision: 12,
+        transcript_final: false,
+        segment_count: 2,
+        transcript_all_final: false,
+        // Snapshot/library projections stay bounded; transcript bodies are
+        // available only through `meetings_transcript_page`.
+        segments: vec![],
+        summary: None,
+        summary_truncated: false,
+        summary_state: "not-started".into(),
+        kg_state: "not-offered".into(),
+        jobs: vec![],
+        error: None,
+        updated_at: Some("2026-07-31T08:12:34.321Z".into()),
+    }
+}
+
+fn finalized_meeting() -> MeetingView {
+    MeetingView {
+        id: "meeting-final-01".into(),
+        title: "Launch readiness".into(),
+        lifecycle: "ready".into(),
+        transcription: "final".into(),
+        started_at: Some("2026-07-30T14:00:00.000Z".into()),
+        stopped_at: Some("2026-07-30T14:42:17.000Z".into()),
+        duration_ms: 2_537_000,
+        workspace_path: None,
+        source_app: Some("Google Meet".into()),
+        tags: vec!["launch".into(), "reviewed".into()],
+        mic_muted: false,
+        channels: vec!["microphone".into(), "system".into()],
+        gaps: vec![MeetingGapView {
+            channel: "system".into(),
+            start_ms: 1_201_000,
+            end_ms: 1_204_500,
+            reason: "device-change".into(),
+        }],
+        gap_count: 1,
+        transcript_revision: 48,
+        transcript_final: true,
+        segment_count: 2,
+        transcript_all_final: true,
+        segments: vec![],
+        summary: Some("Release readiness is confirmed; prepare the deployment checklist.".into()),
+        summary_truncated: false,
+        summary_state: "succeeded".into(),
+        kg_state: "awaiting-decision".into(),
+        jobs: vec![
+            MeetingJobView {
+                id: "job-summary-01".into(),
+                kind: "title-summary".into(),
+                status: "succeeded".into(),
+                activity_id: Some("agent:summary-01".into()),
+                attempt: 1,
+                error: None,
+            },
+            MeetingJobView {
+                id: "job-kg-01".into(),
+                kind: "kg-proposal".into(),
+                status: "failed".into(),
+                activity_id: Some("agent:kg-01".into()),
+                attempt: 2,
+                error: Some("Agent exited before writing a proposal.".into()),
+            },
+        ],
+        error: None,
+        updated_at: Some("2026-07-30T14:43:02.000Z".into()),
+    }
+}
+
+fn meetings_snapshot() -> MeetingSnapshot {
+    MeetingSnapshot {
+        revision: 73,
+        meetings: vec![live_meeting(), finalized_meeting()],
+        meetings_truncated: true,
+        next_meetings_before: Some(MeetingLibraryCursor {
+            created_at: "2026-07-30T14:00:00.000Z".into(),
+            meeting_id: "meeting-final-01".into(),
+        }),
+        active_meeting_id: Some("meeting-live-01".into()),
+        candidates: vec![MeetingCandidate {
+            id: "candidate-teams-01".into(),
+            app_id: "com.microsoft.teams2".into(),
+            app_name: "Microsoft Teams".into(),
+            detected_at: Some("2026-07-31T08:13:00.000Z".into()),
+            confidence: 0.98,
+        }],
+        config: MeetingConfig {
+            detection_enabled: true,
+            auto_record: false,
+            transcription_mode: "custom".into(),
+            custom_url: "https://speech.example.test/v1/listen".into(),
+            custom_model: "nova-3".into(),
+            api_key_configured: true,
+            local_model: "whisper-small".into(),
+            summary_enabled: true,
+            summary_preset: "meeting-follow-up".into(),
+            kg_prompt: "ask".into(),
+            kg_preset: "meeting-kg-draft".into(),
+            retention_days: Some(30),
+        },
+        permissions: MeetingPermissions {
+            microphone: "granted".into(),
+            system_audio: "granted".into(),
+        },
+        models: vec![MeetingModel {
+            id: "whisper-small".into(),
+            title: "Whisper Small".into(),
+            status: "installed".into(),
+            bytes: 466_000_000,
+            downloaded_bytes: 466_000_000,
+            checksum: Some("sha256:fixture-checksum".into()),
+            error: None,
+        }],
+        diagnostic: Some("Custom STT is available; local fallback is installed.".into()),
+    }
+}
+
+fn meetings_library_page() -> MeetingLibraryPage {
+    MeetingLibraryPage {
+        meetings: vec![finalized_meeting()],
+        has_more: true,
+        next_before: Some(MeetingLibraryCursor {
+            created_at: "2026-07-30T14:00:00.000Z".into(),
+            meeting_id: "meeting-final-01".into(),
+        }),
+    }
+}
+
+fn meetings_transcript_page() -> MeetingTranscriptPage {
+    MeetingTranscriptPage {
+        meeting_id: "meeting-final-01".into(),
+        revision: 48,
+        total_segments: 482,
+        has_more: true,
+        next_before: Some(MeetingTranscriptCursor {
+            start_ms: 1_120,
+            end_ms: 3_870,
+            segment_id: "segment-final-01".into(),
+        }),
+        segments: vec![
+            MeetingSegmentView {
+                id: "segment-final-01".into(),
+                text: "The release candidate passed the smoke test.".into(),
+                start_ms: 1_120,
+                end_ms: 3_870,
+                channel: "system".into(),
+                speaker: Some("Avery".into()),
+                is_final: true,
+                revision: 47,
+            },
+            MeetingSegmentView {
+                id: "segment-final-02".into(),
+                text: "I will prepare the deployment checklist.".into(),
+                start_ms: 4_110,
+                end_ms: 6_640,
+                channel: "microphone".into(),
+                speaker: Some("You".into()),
+                is_final: true,
+                revision: 48,
+            },
+        ],
+        summary: Some("Release readiness is confirmed; prepare the deployment checklist.".into()),
+    }
+}
+
+fn meetings_issue_start_consent() -> MeetingStartConsentGrant {
+    MeetingStartConsentGrant::fixture(
+        "fixture-consent-token-never-valid",
+        "scribe-start-fixture-01",
+        45_000,
+        MeetingStartConsentDisclosure {
+            candidate_id: Some("candidate-teams-01".into()),
+            candidate_app_name: Some("Microsoft Teams".into()),
+            transcription_mode: "custom".into(),
+            destination: Some("https://speech.example.test/v1/listen".into()),
+            model: "nova-3".into(),
+        },
+    )
+}
+
+fn meetings_export() -> MeetingExport {
+    MeetingExport {
+        format: "markdown".into(),
+        path: "/Users/me/Exports/Launch readiness.md".into(),
+    }
+}
+
 /// Every golden fixture, keyed by the registered Tauri command name and
 /// pre-rendered as pretty JSON. Rendering straight from the typed value keeps
 /// serde's struct field order (a `Value` round-trip would sort keys).
@@ -604,6 +816,15 @@ fn fixtures() -> Vec<(&'static str, String)> {
             "workspace_file_list_directory",
             workspace_file_list_directory(),
         ),
+        entry("meetings_snapshot", meetings_snapshot()),
+        entry("meetings_library_page", meetings_library_page()),
+        entry("meetings_transcript_page", meetings_transcript_page()),
+        entry(
+            "meetings_issue_start_consent",
+            meetings_issue_start_consent(),
+        ),
+        entry("meetings_start", meetings_snapshot()),
+        entry("meetings_export", meetings_export()),
     ]
 }
 

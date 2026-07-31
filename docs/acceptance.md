@@ -292,6 +292,11 @@ requirements; they do not replace runtime verification.
   begin without the explicit acknowledgement and a deliberate user action.
 - Recording exposes a persistent elapsed-time, mute, and Stop control outside
   the Scribe surface. Only one recording can be active.
+- Settings forwards microphone repair to the native permission request and
+  opens system-audio repair only at the fixed macOS Screen & System Audio
+  Recording privacy pane. While a configuration save is pending, mutation
+  controls are visibly disabled and accepted overlapping changes commit in
+  request order.
 - Microphone and system audio commit as separate lossless timelines. Mute
   writes microphone silence; route/device interruption reopens both streams
   with aligned gap evidence and monotonic timestamps.
@@ -311,10 +316,13 @@ requirements; they do not replace runtime verification.
   restores an interrupted, honest record and reuses one immutable
   capture-generation transcript repair. Incomplete repair output stays
   private; one all-final pass atomically replaces stale STT rows while
-  preserving gaps and history. A terminal transcript/lifecycle crash boundary
-  completes without disclosing audio again. Dock/system Quit with no renderer
-  window still performs native durable Stop, or restores Mimir and fails
-  closed.
+  preserving gaps and history. Crash duration ends at the final committed
+  audio coordinate. A promoted staged tail invalidates earlier transcript
+  completeness; durable capture-failure intent restores Failed. A terminal
+  transcript/lifecycle or job-acknowledgement crash boundary completes without
+  loading a model, reading credentials, connecting a provider, or disclosing
+  audio again. Dock/system Quit with no renderer window still performs native
+  durable Stop, or restores Mimir and fails closed.
 - Capture worker disk/device/driver failure becomes a durable visible
   failed/interrupted state immediately; it is not deferred until the user
   presses Stop.
@@ -322,8 +330,10 @@ requirements; they do not replace runtime verification.
   the exact route/model approved for that meeting, even if provider settings
   later change.
 - Stop finalizes durable audio and transcript before enqueuing a visible
-  title-and-summary Activity. The Activity uses exact argv and controlled,
-  immutable transcript input; failures remain retryable.
+  title-and-summary Activity. Completed lifecycle and the default summary
+  outbox commit atomically; Stop reads hook policy without reading the STT
+  credential. The Activity uses exact argv and controlled, immutable transcript
+  input; failures remain retryable under monotonic manual-retry generations.
 - A successful summary offers a separate knowledge-graph choice. “Create”
   produces a reviewable proposal; “Not now” and “Never” do not mutate graph
   data.
@@ -332,9 +342,15 @@ requirements; they do not replace runtime verification.
   permission, configure a provider, or publish a graph mutation. Search terms
   are at least three characters and cover full reviewed title/summary/tags
   plus terminal transcript across the complete library, not only the latest
-  renderer page.
+  renderer page. Update rejects live/private records before invoking the
+  platform content writer. Reviewed tags remain visible in native detail,
+  agent list/search metadata, and the keyboard-editable Scribe review surface;
+  public writes are bounded to 64 tags of 80 characters each and the native
+  per-tag byte limit.
 - Delete audio preserves the reviewed record. Delete meeting removes owned
-  local data. Retention never removes active or recovery-held audio.
+  local data. Retention never removes active or recovery-held audio, including
+  a collecting repair whose job attempts are exhausted. Repair cannot start a
+  provider after committed source audio is gone.
 - Packaged macOS arm64 release evidence covers TCC prompts, real two-channel
   capture, model inference, custom WSS, crash recovery, long-run budgets,
   signing, notarization, and clean install.

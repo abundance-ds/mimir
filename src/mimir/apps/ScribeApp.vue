@@ -292,6 +292,7 @@
           @install-model="installModel"
           @delete-model="deleteModel"
           @request-microphone-permission="requestMicrophonePermission"
+          @open-system-audio-settings="openSystemAudioSettings"
         />
 
         <div
@@ -435,6 +436,21 @@
                   · {{ formatDuration(meetings.selectedMeeting.durationMs) }}
                   · transcript r{{ meetings.selectedMeeting.transcriptRevision }}
                 </p>
+                <ul
+                  v-if="meetings.selectedMeeting.tags?.length"
+                  data-scribe-reviewed-tags
+                  aria-label="Reviewed tags"
+                  class="mt-1.5 flex flex-wrap gap-x-1.5 font-mono text-[9px] text-ink-3"
+                >
+                  <li
+                    v-for="(tag, index) in meetings.selectedMeeting.tags"
+                    :key="tag"
+                    class="min-w-0"
+                  >
+                    <span v-if="index" class="mr-1.5" aria-hidden="true">·</span>
+                    <span>{{ tag }}</span>
+                  </li>
+                </ul>
               </div>
               <button
                 type="button"
@@ -667,6 +683,34 @@
                     maxlength="100000"
                   />
                 </label>
+                <label class="block">
+                  <span class="scribe-settings-label">Reviewed tags</span>
+                  <input
+                    v-model="editedTags"
+                    data-scribe-edit-tags
+                    class="scribe-settings-input"
+                    maxlength="5248"
+                    :aria-invalid="reviewedTagsError ? 'true' : undefined"
+                    :aria-describedby="reviewedTagsError
+                      ? 'scribe-reviewed-tags-help scribe-reviewed-tags-error'
+                      : 'scribe-reviewed-tags-help'"
+                  />
+                  <span
+                    id="scribe-reviewed-tags-help"
+                    class="mt-1 block text-[9px] leading-relaxed text-ink-3"
+                  >
+                    Comma-separated. Up to 64 tags; 80 characters each.
+                  </span>
+                  <span
+                    v-if="reviewedTagsError"
+                    id="scribe-reviewed-tags-error"
+                    data-scribe-edit-tags-error
+                    role="alert"
+                    class="mt-1 block text-[9px] leading-relaxed text-rem"
+                  >
+                    {{ reviewedTagsError }}
+                  </span>
+                </label>
                 <div class="flex gap-2">
                   <button type="button" class="scribe-button" @click="cancelEdit">
                     Cancel
@@ -675,7 +719,7 @@
                     type="submit"
                     data-scribe-save-review
                     class="scribe-primary-button"
-                    :disabled="!editedTitle.trim() || Boolean(
+                    :disabled="!editedTitle.trim() || reviewedTagsError || Boolean(
                       meetings.pending[`update:${meetings.selectedMeeting.id}`],
                     )"
                   >
@@ -849,6 +893,10 @@ import { confirm } from '@tauri-apps/plugin-dialog'
 import { useMeetingsStore } from '../../stores/meetings.js'
 import ScribeSettings from './scribe/ScribeSettings.vue'
 
+const MAX_REVIEWED_TAGS = 64
+const MAX_REVIEWED_TAG_CHARS = 80
+const MAX_REVIEWED_TAG_BYTES = 160
+
 const props = defineProps({
   workspacePath: { type: String, default: '' },
   active: { type: Boolean, default: false },
@@ -872,6 +920,7 @@ const detailTab = ref('transcript')
 const editingMeeting = ref(false)
 const editedTitle = ref('')
 const editedSummary = ref('')
+const editedTags = ref('')
 const now = ref(Date.now())
 const liveAnnouncement = ref('')
 let startOpener = null
@@ -902,6 +951,8 @@ const consentDescriptionIds = computed(() => [
   'scribe-consent-route',
   candidateAppName.value ? 'scribe-consent-candidate' : null,
 ].filter(Boolean).join(' '))
+const reviewedTags = computed(() => parseReviewedTags(editedTags.value))
+const reviewedTagsError = computed(() => reviewedTags.value.error)
 
 watch(
   () => meetings.activeMeeting?.lifecycle,
@@ -1067,6 +1118,7 @@ function beginEdit() {
   if (!selected) return
   editedTitle.value = selected.title
   editedSummary.value = selected.summary || ''
+  editedTags.value = (selected.tags || []).join(', ')
   detailTab.value = 'summary'
   editingMeeting.value = true
 }
@@ -1077,11 +1129,12 @@ function cancelEdit() {
 
 async function saveMeetingEdits() {
   const selected = meetings.selectedMeeting
-  if (!selected) return
+  if (!selected || reviewedTagsError.value) return
   try {
     await meetings.saveMeeting(selected.id, {
       title: editedTitle.value,
       summary: editedSummary.value,
+      tags: reviewedTags.value.tags,
     })
     editingMeeting.value = false
     liveAnnouncement.value = 'Meeting review saved'
@@ -1167,6 +1220,15 @@ async function requestMicrophonePermission() {
     liveAnnouncement.value = `Microphone permission ${permissionLabel(permission)}`
   } catch {
     // The store owns the actionable native permission diagnostic.
+  }
+}
+
+async function openSystemAudioSettings() {
+  try {
+    await meetings.openSystemAudioSettings()
+    liveAnnouncement.value = 'System Settings opened to Screen and System Audio Recording'
+  } catch (error) {
+    emit('diagnostic', message(error))
   }
 }
 
@@ -1395,6 +1457,45 @@ function permissionLabel(value) {
     'prompt-on-start': 'requested when capture starts',
     unknown: 'not determined',
   })[value] || humanize(value)
+}
+
+function parseReviewedTags(value) {
+  const candidates = String(value || '')
+    .split(',')
+    .map(tag => tag.trim())
+    .filter(Boolean)
+  if (candidates.length > MAX_REVIEWED_TAGS) {
+    return {
+      tags: [],
+      error: `Use at most ${MAX_REVIEWED_TAGS} reviewed tags.`,
+    }
+  }
+  const tags = []
+  const seen = new Set()
+  for (const tag of candidates) {
+    if (tag.length > MAX_REVIEWED_TAG_CHARS) {
+      return {
+        tags: [],
+        error: `Each reviewed tag must be at most ${MAX_REVIEWED_TAG_CHARS} characters.`,
+      }
+    }
+    if (new TextEncoder().encode(tag).byteLength > MAX_REVIEWED_TAG_BYTES) {
+      return {
+        tags: [],
+        error: `Each reviewed tag must be at most ${MAX_REVIEWED_TAG_BYTES} UTF-8 bytes.`,
+      }
+    }
+    if (/[\u0000-\u001f\u007f]/u.test(tag)) {
+      return {
+        tags: [],
+        error: 'Reviewed tags cannot contain control characters.',
+      }
+    }
+    if (seen.has(tag)) continue
+    seen.add(tag)
+    tags.push(tag)
+  }
+  return { tags, error: '' }
 }
 
 function humanize(value) {

@@ -14,6 +14,7 @@ use crate::tool_registry::{
     ToolRegistry, ToolResult, ToolSource,
 };
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 use tauri::Manager;
 
 const DEFAULT_LIST_LIMIT: usize = 50;
@@ -21,6 +22,9 @@ const MAX_LIST_LIMIT: usize = 100;
 const DEFAULT_TRANSCRIPT_LIMIT: usize = 100;
 const MAX_TRANSCRIPT_LIMIT: usize = 250;
 const MAX_QUERY_BYTES: usize = 512;
+const MAX_TAGS: usize = 64;
+const MAX_TAG_CHARS: usize = 80;
+const MAX_TAG_BYTES: usize = 160;
 
 pub(crate) fn register_native_tools(
     registry: &ToolRegistry,
@@ -102,10 +106,12 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
         }
         "meetings.update" => {
             let meeting_id = required_string(&input, "meeting_id")?;
+            let meeting = runtime.meeting(meeting_id).map_err(runtime_error)?;
+            require_public_meeting(&meeting)?;
             let patch = MeetingUpdatePatch {
                 title: optional_string(&input, "title")?,
                 summary: optional_string(&input, "summary")?,
-                tags: optional_strings(&input, "tags")?,
+                tags: optional_tags(&input, "tags")?,
             };
             runtime
                 .update_meeting(meeting_id, patch)
@@ -286,15 +292,14 @@ fn meeting_metadata(meeting: &MeetingView) -> Result<Value, ToolError> {
         "startedAt",
         "stoppedAt",
         "durationMs",
-        "workspacePath",
         "sourceApp",
         "channels",
+        "tags",
         "transcriptRevision",
         "transcriptFinal",
         "summary",
         "summaryState",
         "kgState",
-        "error",
         "updatedAt",
     ] {
         if let Some(value) = serialized.get(key) {
@@ -340,22 +345,50 @@ fn optional_string(input: &Value, field: &str) -> Result<Option<String>, ToolErr
     Ok(Some(value.to_string()))
 }
 
-fn optional_strings(input: &Value, field: &str) -> Result<Option<Vec<String>>, ToolError> {
+fn optional_tags(input: &Value, field: &str) -> Result<Option<Vec<String>>, ToolError> {
     let Some(value) = input.get(field) else {
         return Ok(None);
     };
     let values = value
         .as_array()
-        .ok_or_else(|| invalid_input(format!("{field} must be an array of strings")))?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| invalid_input(format!("{field} must contain only strings")))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Some(values))
+        .ok_or_else(|| invalid_input(format!("{field} must be an array of strings")))?;
+    if values.len() > MAX_TAGS {
+        return Err(invalid_input(format!(
+            "{field} cannot contain more than {MAX_TAGS} values"
+        )));
+    }
+    let mut tags = Vec::with_capacity(values.len());
+    let mut seen = HashSet::with_capacity(values.len());
+    for value in values {
+        let tag = value
+            .as_str()
+            .ok_or_else(|| invalid_input(format!("{field} must contain only strings")))?
+            .trim();
+        if tag.is_empty() {
+            return Err(invalid_input(format!(
+                "{field} cannot contain empty values"
+            )));
+        }
+        if tag.chars().count() > MAX_TAG_CHARS {
+            return Err(invalid_input(format!(
+                "{field} values cannot exceed {MAX_TAG_CHARS} characters"
+            )));
+        }
+        if tag.len() > MAX_TAG_BYTES {
+            return Err(invalid_input(format!(
+                "{field} values cannot exceed {MAX_TAG_BYTES} UTF-8 bytes"
+            )));
+        }
+        if tag.chars().any(char::is_control) {
+            return Err(invalid_input(format!(
+                "{field} cannot contain control characters"
+            )));
+        }
+        if seen.insert(tag.to_string()) {
+            tags.push(tag.to_string());
+        }
+    }
+    Ok(Some(tags))
 }
 
 fn optional_library_cursor(input: &Value) -> Result<Option<MeetingLibraryCursor>, ToolError> {
@@ -506,6 +539,7 @@ mod tests {
         MeetingStore, TranscriptBatch, TranscriptChange, TranscriptSegmentInput,
     };
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     struct TestCapture;
@@ -544,6 +578,7 @@ mod tests {
     #[derive(Default)]
     struct TestPlatform {
         contents: Mutex<BTreeMap<String, MeetingContentProjection>>,
+        content_updates: AtomicUsize,
     }
 
     impl MeetingPlatformPort for TestPlatform {
@@ -582,6 +617,7 @@ mod tests {
             meeting_id: &str,
             patch: &MeetingUpdatePatch,
         ) -> Result<(), String> {
+            self.content_updates.fetch_add(1, Ordering::SeqCst);
             let mut contents = self.contents.lock().unwrap();
             let content = contents.entry(meeting_id.into()).or_default();
             if let Some(title) = &patch.title {
@@ -683,6 +719,67 @@ mod tests {
     fn platform_projection_type_remains_serializable_for_tool_bootstrap() {
         let projection = MeetingPlatformProjection::default();
         assert!(serde_json::to_value(projection).is_ok());
+    }
+
+    #[test]
+    fn update_rejects_live_meetings_before_the_platform_can_write() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let platform = Arc::new(TestPlatform::default());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(TestCapture),
+            Arc::new(TestTranscription),
+            platform.clone(),
+            Arc::new(TestClock),
+            Arc::new(TestEvents),
+        )
+        .unwrap();
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "live-private".into(),
+                    title: "Live private meeting".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: Vec::new(),
+                    metadata: json!({}),
+                },
+                "2026-07-31T00:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Recording,
+                "2026-07-31T00:00:01Z",
+                None,
+            )
+            .unwrap();
+        platform.contents.lock().unwrap().insert(
+            created.id.clone(),
+            MeetingContentProjection {
+                title: Some(created.title.clone()),
+                ..MeetingContentProjection::default()
+            },
+        );
+        let error = execute(
+            &runtime,
+            "meetings.update",
+            json!({"meeting_id": created.id, "title": "Agent-authored live title"}),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, ToolErrorCode::Unavailable);
+        assert_eq!(platform.content_updates.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            platform
+                .contents
+                .lock()
+                .unwrap()
+                .get("live-private")
+                .and_then(|content| content.title.as_deref()),
+            Some("Live private meeting")
+        );
     }
 
     #[test]
@@ -789,10 +886,15 @@ mod tests {
         let updated = execute(
             &runtime,
             "meetings.update",
-            json!({"meeting_id": "meeting-000", "title": "Reviewed oldest meeting"}),
+            json!({
+                "meeting_id": "meeting-000",
+                "title": "Reviewed oldest meeting",
+                "tags": ["release", "customer"]
+            }),
         )
         .unwrap();
         assert_eq!(updated["title"], "Reviewed oldest meeting");
+        assert_eq!(updated["tags"], json!(["release", "customer"]));
 
         // Keep the durable index aligned with this fake platform's update;
         // the production NativeMeetingPlatform performs this in one owned
@@ -934,6 +1036,28 @@ mod tests {
             )
             .unwrap();
             assert_eq!(result["returned"], 0, "query '{query}' leaked a record");
+        }
+    }
+
+    #[test]
+    fn reviewed_tags_are_normalized_and_rejected_at_public_payload_bounds() {
+        assert_eq!(
+            optional_tags(
+                &json!({"tags": [" release ", "customer", "release"]}),
+                "tags"
+            )
+            .unwrap(),
+            Some(vec!["release".into(), "customer".into()])
+        );
+
+        for input in [
+            json!({"tags": (0..=MAX_TAGS).map(|index| format!("tag-{index}")).collect::<Vec<_>>()}),
+            json!({"tags": ["x".repeat(MAX_TAG_CHARS + 1)]}),
+            json!({"tags": ["🦀".repeat((MAX_TAG_BYTES / 4) + 1)]}),
+            json!({"tags": ["line\nbreak"]}),
+        ] {
+            let error = optional_tags(&input, "tags").unwrap_err();
+            assert_eq!(error.code, ToolErrorCode::InvalidInput);
         }
     }
 }

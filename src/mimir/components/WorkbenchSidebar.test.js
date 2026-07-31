@@ -93,7 +93,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-row="tool:files"]').exists()).toBe(true)
   })
 
-  it('keeps an explicit meeting status and one-step Stop available in expanded and rail modes', async () => {
+  it('keeps human-only microphone mute and Stop available in expanded and rail modes', async () => {
     const wrapper = render()
     await wrapper.setProps({
       meetingCapture: {
@@ -108,14 +108,29 @@ describe('WorkbenchSidebar', () => {
 
     expect(wrapper.get('[data-sidebar-meeting-capture]').text()).toContain('Recording')
     expect(wrapper.get('[data-sidebar-meeting-capture]').text()).toContain('Architecture review')
+    expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
+      .toBe('Mute meeting microphone')
+    await wrapper.get('[data-sidebar-meeting-microphone]').trigger('click')
+    expect(wrapper.emitted('setMeetingMicMuted')).toEqual([[true]])
     await wrapper.get('[data-sidebar-meeting-stop]').trigger('click')
     expect(wrapper.emitted('stopMeeting')).toHaveLength(1)
 
     await wrapper.setProps({ collapsed: true })
+    expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
+      .toBe('Mute meeting microphone')
     expect(wrapper.get('[data-sidebar-meeting-stop]').attributes('aria-label'))
       .toBe('Stop meeting recording')
     await wrapper.get('[data-sidebar-meeting-open]').trigger('click')
     expect(wrapper.emitted('openMeeting')).toHaveLength(1)
+
+    await wrapper.setProps({
+      meetingCapture: {
+        ...wrapper.props('meetingCapture'),
+        micMuted: true,
+      },
+    })
+    expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
+      .toBe('Unmute meeting microphone')
   })
 
   it('keeps the same rows and exposes source identity in rail mode', async () => {

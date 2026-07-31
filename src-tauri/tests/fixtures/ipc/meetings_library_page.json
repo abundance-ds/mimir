@@ -1,0 +1,64 @@
+{
+  "meetings": [
+    {
+      "id": "meeting-final-01",
+      "title": "Launch readiness",
+      "lifecycle": "ready",
+      "transcription": "final",
+      "startedAt": "2026-07-30T14:00:00.000Z",
+      "stoppedAt": "2026-07-30T14:42:17.000Z",
+      "durationMs": 2537000,
+      "sourceApp": "Google Meet",
+      "tags": [
+        "launch",
+        "reviewed"
+      ],
+      "micMuted": false,
+      "channels": [
+        "microphone",
+        "system"
+      ],
+      "gaps": [
+        {
+          "channel": "system",
+          "startMs": 1201000,
+          "endMs": 1204500,
+          "reason": "device-change"
+        }
+      ],
+      "gapCount": 1,
+      "transcriptRevision": 48,
+      "transcriptFinal": true,
+      "segmentCount": 2,
+      "transcriptAllFinal": true,
+      "segments": [],
+      "summary": "Release readiness is confirmed; prepare the deployment checklist.",
+      "summaryTruncated": false,
+      "summaryState": "succeeded",
+      "kgState": "awaiting-decision",
+      "jobs": [
+        {
+          "id": "job-summary-01",
+          "kind": "title-summary",
+          "status": "succeeded",
+          "activityId": "agent:summary-01",
+          "attempt": 1
+        },
+        {
+          "id": "job-kg-01",
+          "kind": "kg-proposal",
+          "status": "failed",
+          "activityId": "agent:kg-01",
+          "attempt": 2,
+          "error": "Agent exited before writing a proposal."
+        }
+      ],
+      "updatedAt": "2026-07-30T14:43:02.000Z"
+    }
+  ],
+  "hasMore": true,
+  "nextBefore": {
+    "createdAt": "2026-07-30T14:00:00.000Z",
+    "meetingId": "meeting-final-01"
+  }
+}

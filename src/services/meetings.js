@@ -4,6 +4,9 @@ import { listen } from '@tauri-apps/api/event'
 export const MEETING_EVENT = 'mimir://meeting-event'
 export const MEETING_PLATFORM_CHANGED_EVENT = 'mimir://meeting-platform-changed'
 export const TRANSCRIPT_PAGE_SIZE = 250
+const MAX_MEETING_TAGS = 64
+const MAX_MEETING_TAG_CHARS = 80
+const MAX_MEETING_TAG_BYTES = 160
 
 export async function loadMeetingSnapshot() {
   return normalizeMeetingSnapshot(await invoke('meetings_snapshot'))
@@ -30,6 +33,10 @@ export async function loadMeetingLibraryPage(before, limit = 200) {
 
 export async function requestMeetingMicrophonePermission() {
   return normalizeMeetingSnapshot(await invoke('meetings_request_microphone_permission'))
+}
+
+export async function openMeetingSystemAudioSettings() {
+  return invoke('meetings_open_system_audio_settings')
 }
 
 export async function dismissMeetingCandidate(candidateId) {
@@ -93,7 +100,7 @@ export async function updateMeeting(meetingId, patch = {}) {
       ...(patch.title == null ? {} : { title: String(patch.title).trim() }),
       ...(patch.summary == null ? {} : { summary: String(patch.summary) }),
       ...(patch.tags == null ? {} : {
-        tags: uniqueStrings(patch.tags),
+        tags: serializeMeetingTags(patch.tags),
       }),
     },
   }))
@@ -283,6 +290,7 @@ function normalizeMeeting(value) {
     sourceApp: optionalString(meeting.sourceApp ?? meeting.source_app),
     micMuted: Boolean(meeting.micMuted ?? meeting.mic_muted),
     channels: uniqueStrings(meeting.channels),
+    tags: normalizeMeetingTags(meeting.tags),
     gaps: (Array.isArray(meeting.gaps) ? meeting.gaps : [])
       .filter(isPlainObject)
       .map(gap => ({
@@ -463,6 +471,69 @@ function requiredId(value, label) {
 
 function uniqueStrings(value) {
   return [...new Set((Array.isArray(value) ? value : []).map(String).filter(Boolean))]
+}
+
+function normalizeMeetingTags(value) {
+  if (!Array.isArray(value)) return []
+  const tags = []
+  const seen = new Set()
+  for (const candidate of value.slice(0, MAX_MEETING_TAGS)) {
+    if (typeof candidate !== 'string') continue
+    const tag = candidate.trim()
+    if (
+      !tag
+      || tag.length > MAX_MEETING_TAG_CHARS
+      || utf8Bytes(tag) > MAX_MEETING_TAG_BYTES
+      || hasControlCharacter(tag)
+      || seen.has(tag)
+    ) continue
+    seen.add(tag)
+    tags.push(tag)
+  }
+  return tags
+}
+
+function serializeMeetingTags(value) {
+  if (!Array.isArray(value)) {
+    throw new Error('Reviewed tags must be an array.')
+  }
+  if (value.length > MAX_MEETING_TAGS) {
+    throw new Error(`Reviewed tags cannot contain more than ${MAX_MEETING_TAGS} entries.`)
+  }
+  const tags = []
+  const seen = new Set()
+  for (const candidate of value) {
+    if (typeof candidate !== 'string') {
+      throw new Error('Every reviewed tag must be text.')
+    }
+    const tag = candidate.trim()
+    if (!tag) throw new Error('Reviewed tags cannot be empty.')
+    if (tag.length > MAX_MEETING_TAG_CHARS) {
+      throw new Error(
+        `Reviewed tags cannot exceed ${MAX_MEETING_TAG_CHARS} characters each.`,
+      )
+    }
+    if (utf8Bytes(tag) > MAX_MEETING_TAG_BYTES) {
+      throw new Error(
+        `Reviewed tags cannot exceed ${MAX_MEETING_TAG_BYTES} UTF-8 bytes each.`,
+      )
+    }
+    if (hasControlCharacter(tag)) {
+      throw new Error('Reviewed tags cannot contain control characters.')
+    }
+    if (seen.has(tag)) continue
+    seen.add(tag)
+    tags.push(tag)
+  }
+  return tags
+}
+
+function utf8Bytes(value) {
+  return new TextEncoder().encode(value).byteLength
+}
+
+function hasControlCharacter(value) {
+  return /[\u0000-\u001f\u007f]/u.test(value)
 }
 
 function optionalString(value) {

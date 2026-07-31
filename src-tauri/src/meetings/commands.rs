@@ -25,6 +25,8 @@ const TRANSCRIPT_EVENT_INTERVAL: Duration = Duration::from_millis(100);
 const MAIN_WINDOW_LABEL: &str = "main";
 const START_CONSENT_TTL: Duration = Duration::from_secs(45);
 const MAX_CONSENT_RECORDS: usize = 32;
+const SYSTEM_AUDIO_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
 
 /// Renderer declaration of the disclosure currently on screen.
 ///
@@ -75,6 +77,23 @@ impl std::fmt::Debug for MeetingStartConsentGrant {
             .field("expires_in_ms", &self.expires_in_ms)
             .field("disclosure", &self.disclosure)
             .finish()
+    }
+}
+
+#[cfg(test)]
+impl MeetingStartConsentGrant {
+    pub(crate) fn fixture(
+        token: impl Into<String>,
+        request_id: impl Into<String>,
+        expires_in_ms: u64,
+        disclosure: MeetingStartConsentDisclosure,
+    ) -> Self {
+        Self {
+            token: token.into(),
+            request_id: request_id.into(),
+            expires_in_ms,
+            disclosure,
+        }
     }
 }
 
@@ -562,6 +581,39 @@ pub async fn meetings_request_microphone_permission(
     .await
 }
 
+/// Open the one macOS privacy pane that can repair process-tap permission.
+///
+/// This command deliberately takes no URL or pane identifier from the
+/// renderer, so it cannot become a general-purpose process launcher.
+#[tauri::command]
+pub async fn meetings_open_system_audio_settings() -> Result<(), String> {
+    run_blocking(
+        "system audio permission settings",
+        open_system_audio_settings,
+    )
+    .await
+}
+
+#[cfg(target_os = "macos")]
+fn open_system_audio_settings() -> Result<(), String> {
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg(SYSTEM_AUDIO_SETTINGS_URL)
+        .status()
+        .map_err(|error| format!("Could not open macOS System Settings: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "macOS System Settings exited before opening Screen & System Audio Recording ({status})"
+        ))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_system_audio_settings() -> Result<(), String> {
+    Err("Screen & System Audio Recording settings are available only on macOS".into())
+}
+
 #[tauri::command]
 pub async fn meetings_dismiss_candidate(
     runtime: tauri::State<'_, MeetingRuntime>,
@@ -1018,5 +1070,15 @@ mod consent_tests {
             grant.disclosure.destination.as_deref(),
             Some("https://speech.example.test/v1/listen")
         );
+    }
+
+    #[test]
+    fn system_audio_repair_target_is_fixed_to_the_macos_privacy_pane() {
+        assert_eq!(
+            SYSTEM_AUDIO_SETTINGS_URL,
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        );
+        assert!(!SYSTEM_AUDIO_SETTINGS_URL.contains(' '));
+        assert!(!SYSTEM_AUDIO_SETTINGS_URL.contains("://"));
     }
 }

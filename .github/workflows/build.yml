@@ -110,10 +110,13 @@ jobs:
       - name: Build desktop bundle
         run: bun tauri build --target aarch64-apple-darwin
 
+      - name: Verify source-bound release staging
+        run: node scripts/check-release-stage.mjs --target aarch64-apple-darwin
+
       - uses: actions/upload-artifact@v4
         with:
           name: mimir-macos-arm64
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          path: src-tauri/target/release-artifacts
           if-no-files-found: error
 
   package-linux:

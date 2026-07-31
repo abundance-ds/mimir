@@ -10,6 +10,7 @@ import {
   requestMeetingMicrophonePermission,
   startMeeting,
   stopMeeting,
+  updateMeetingsConfig,
 } from '../services/meetings.js'
 import { useMeetingsStore } from './meetings.js'
 
@@ -93,6 +94,7 @@ describe('meetings store', () => {
     })
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
+    vi.mocked(updateMeetingsConfig).mockReset()
   })
 
   it('installs the event listener before the first authoritative snapshot', async () => {
@@ -201,6 +203,48 @@ describe('meetings store', () => {
       microphone: 'granted',
       systemAudio: 'prompt-on-start',
     })
+  })
+
+  it('serializes concurrent config mutations without dropping either user intent', async () => {
+    let releaseFirst
+    const first = new Promise(resolve => { releaseFirst = resolve })
+    vi.mocked(updateMeetingsConfig)
+      .mockImplementationOnce(() => first)
+      .mockResolvedValueOnce({
+        ...emptySnapshot,
+        revision: 3,
+        config: {
+          ...emptySnapshot.config,
+          detectionEnabled: true,
+          summaryEnabled: false,
+        },
+      })
+    const store = useMeetingsStore()
+    await store.initialize()
+
+    const detecting = store.saveConfig({ detectionEnabled: true })
+    const summary = store.saveConfig({ summaryEnabled: false })
+
+    expect(store.pending.config).toBe(true)
+    await vi.waitFor(() => expect(updateMeetingsConfig).toHaveBeenCalledTimes(1))
+    releaseFirst({
+      ...emptySnapshot,
+      revision: 2,
+      config: {
+        ...emptySnapshot.config,
+        detectionEnabled: true,
+      },
+    })
+    await detecting
+    await summary
+
+    expect(updateMeetingsConfig).toHaveBeenNthCalledWith(1, { detectionEnabled: true })
+    expect(updateMeetingsConfig).toHaveBeenNthCalledWith(2, { summaryEnabled: false })
+    expect(store.config).toMatchObject({
+      detectionEnabled: true,
+      summaryEnabled: false,
+    })
+    expect(store.pending.config).toBeUndefined()
   })
 
   it('removes a dismissed meeting candidate from the authoritative snapshot', async () => {

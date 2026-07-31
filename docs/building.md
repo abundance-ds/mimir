@@ -78,6 +78,10 @@ bun tauri build
 - The bundle targets macOS 14.2+, includes microphone/system-audio purpose
   strings, and signs with the audio-input entitlement. `bun run
   check:meetings` statically verifies these inputs before packaging.
+- A signed build must start and finish on the same clean Git commit. The
+  wrapper removes only that version's exact expected DMG before Tauri runs,
+  notarizes that exact path, and refuses macOS architectures other than arm64.
+  It never selects the newest file from a bundle directory.
 
 The `.env` (gitignored, `0600`) holds Apple credentials. Use the Bun launcher (`bun tauri build`), not `source .env` -- avoids shell interpolation of base64 values. `.env.example` records variable names.
 
@@ -86,6 +90,36 @@ The `.env` (gitignored, `0600`) holds Apple credentials. Use the Bun launcher (`
 | macOS | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` |
 
 GitHub Actions reads these from repository secrets; it never receives the local `.env`.
+
+### Dependency inventory and license policy
+
+The complete locked Cargo and Bun component inventory is committed as
+`src-tauri/vendor/SBOM.spdx.json` (SPDX 2.3) and the release-readable
+`src-tauri/vendor/THIRD_PARTY_LICENSES.md`. Both files, plus the full-text
+Scribe asset notices, are bundled into the app and staged beside the release
+DMG.
+
+`src-tauri/vendor/license-policy.json` is the review authority. Every
+third-party lock identity needs a declared license expression with at least one
+permitted choice. Unknown license identifiers and expressions with only denied
+choices fail `bun run check:meetings`. Metadata omissions require a narrow,
+component-version-specific override with public evidence and a reason; adding
+a broad default is not allowed.
+
+After changing `Cargo.lock`, `bun.lock`, the policy, or a reviewed embedded
+asset:
+
+```bash
+bun run supply-chain:generate
+bun run check:meetings
+git diff -- src-tauri/vendor
+```
+
+Generation reads Cargo metadata and the public npm registry. The release gate
+itself is offline and verifies exact lock identities, the lock/policy digest,
+the human-readable inventory, model/vendor pins, packaged resources, and the
+license policy. Review the generated diff before committing; generated files
+are never an excuse to skip license review.
 
 Verify final artifacts:
 
@@ -96,7 +130,16 @@ spctl --assess --type execute --verbose=2 Mimir.app
 xcrun stapler validate Mimir.app
 ```
 
-A local macOS build produces **Mimir.app** and a versioned disk image under Tauri's release bundle output.
+A successful macOS release stages exactly five files in a clean
+`release-artifacts` directory under Tauri's target directory: the notarized
+versioned DMG, its source-bound manifest, SPDX SBOM, license inventory, and
+third-party notices.
+The manifest records the immutable Git commit and tree, target, exact release
+materials, byte sizes, and SHA-256 digests without local absolute paths.
+GitHub Actions uploads this directory as one artifact instead of using a DMG
+glob. Before publishing, compare the staged DMG digest with the manifest and
+record the manifest, signing, Gatekeeper, stapler, and functional smoke results
+in the release evidence.
 
 ### Parked Windows release
 

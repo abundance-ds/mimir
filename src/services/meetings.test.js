@@ -10,8 +10,10 @@ import {
   loadMeetingTranscriptPage,
   normalizeMeetingTranscriptPage,
   normalizeMeetingSnapshot,
+  openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
   startMeeting,
+  updateMeeting,
   updateMeetingsConfig,
 } from './meetings.js'
 
@@ -47,6 +49,35 @@ describe('meetings service', () => {
       config: { transcriptionMode: 'custom', retentionDays: 30 },
       permissions: { microphone: 'granted', systemAudio: 'denied' },
     })
+  })
+
+  it('normalizes bounded reviewed tags and validates tag updates before IPC', async () => {
+    const normalized = normalizeMeetingSnapshot({
+      revision: 1,
+      meetings: [{
+        id: 'reviewed',
+        tags: [' release ', 'customer', 'release', '', 'x'.repeat(81)],
+      }],
+    })
+    expect(normalized.meetings[0].tags).toEqual(['release', 'customer'])
+
+    vi.mocked(invoke).mockResolvedValue({ revision: 2, meetings: [] })
+    await updateMeeting('reviewed', {
+      tags: [' release ', 'customer', 'release'],
+    })
+    expect(invoke).toHaveBeenCalledWith('meetings_update', {
+      meetingId: 'reviewed',
+      patch: { tags: ['release', 'customer'] },
+    })
+
+    vi.mocked(invoke).mockClear()
+    await expect(updateMeeting('reviewed', {
+      tags: Array.from({ length: 65 }, (_, index) => `tag-${index}`),
+    })).rejects.toThrow('64')
+    await expect(updateMeeting('reviewed', {
+      tags: ['x'.repeat(81)],
+    })).rejects.toThrow('80')
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('acquires native consent authority and starts only with its opaque grant', async () => {
@@ -101,6 +132,15 @@ describe('meetings service', () => {
     })
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(invoke).toHaveBeenCalledWith('meetings_request_microphone_permission')
+  })
+
+  it('opens only the native system-audio permission repair surface', async () => {
+    vi.mocked(invoke).mockResolvedValue()
+
+    await expect(openMeetingSystemAudioSettings()).resolves.toBeUndefined()
+
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith('meetings_open_system_audio_settings')
   })
 
   it('dismisses a detector suggestion through a human-only native command', async () => {

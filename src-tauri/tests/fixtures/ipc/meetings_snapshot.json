@@ -1,0 +1,133 @@
+{
+  "revision": 73,
+  "meetings": [
+    {
+      "id": "meeting-live-01",
+      "title": "Architecture sync",
+      "lifecycle": "capturing",
+      "transcription": "live",
+      "startedAt": "2026-07-31T08:00:00.000Z",
+      "durationMs": 754321,
+      "sourceApp": "Zoom",
+      "tags": [
+        "architecture"
+      ],
+      "micMuted": false,
+      "channels": [
+        "microphone",
+        "system"
+      ],
+      "gaps": [],
+      "gapCount": 0,
+      "transcriptRevision": 12,
+      "transcriptFinal": false,
+      "segmentCount": 2,
+      "transcriptAllFinal": false,
+      "segments": [],
+      "summaryTruncated": false,
+      "summaryState": "not-started",
+      "kgState": "not-offered",
+      "jobs": [],
+      "updatedAt": "2026-07-31T08:12:34.321Z"
+    },
+    {
+      "id": "meeting-final-01",
+      "title": "Launch readiness",
+      "lifecycle": "ready",
+      "transcription": "final",
+      "startedAt": "2026-07-30T14:00:00.000Z",
+      "stoppedAt": "2026-07-30T14:42:17.000Z",
+      "durationMs": 2537000,
+      "sourceApp": "Google Meet",
+      "tags": [
+        "launch",
+        "reviewed"
+      ],
+      "micMuted": false,
+      "channels": [
+        "microphone",
+        "system"
+      ],
+      "gaps": [
+        {
+          "channel": "system",
+          "startMs": 1201000,
+          "endMs": 1204500,
+          "reason": "device-change"
+        }
+      ],
+      "gapCount": 1,
+      "transcriptRevision": 48,
+      "transcriptFinal": true,
+      "segmentCount": 2,
+      "transcriptAllFinal": true,
+      "segments": [],
+      "summary": "Release readiness is confirmed; prepare the deployment checklist.",
+      "summaryTruncated": false,
+      "summaryState": "succeeded",
+      "kgState": "awaiting-decision",
+      "jobs": [
+        {
+          "id": "job-summary-01",
+          "kind": "title-summary",
+          "status": "succeeded",
+          "activityId": "agent:summary-01",
+          "attempt": 1
+        },
+        {
+          "id": "job-kg-01",
+          "kind": "kg-proposal",
+          "status": "failed",
+          "activityId": "agent:kg-01",
+          "attempt": 2,
+          "error": "Agent exited before writing a proposal."
+        }
+      ],
+      "updatedAt": "2026-07-30T14:43:02.000Z"
+    }
+  ],
+  "meetingsTruncated": true,
+  "nextMeetingsBefore": {
+    "createdAt": "2026-07-30T14:00:00.000Z",
+    "meetingId": "meeting-final-01"
+  },
+  "activeMeetingId": "meeting-live-01",
+  "candidates": [
+    {
+      "id": "candidate-teams-01",
+      "appId": "com.microsoft.teams2",
+      "appName": "Microsoft Teams",
+      "detectedAt": "2026-07-31T08:13:00.000Z",
+      "confidence": 0.98
+    }
+  ],
+  "config": {
+    "detectionEnabled": true,
+    "autoRecord": false,
+    "transcriptionMode": "custom",
+    "customUrl": "https://speech.example.test/v1/listen",
+    "customModel": "nova-3",
+    "apiKeyConfigured": true,
+    "localModel": "whisper-small",
+    "summaryEnabled": true,
+    "summaryPreset": "meeting-follow-up",
+    "kgPrompt": "ask",
+    "kgPreset": "meeting-kg-draft",
+    "retentionDays": 30
+  },
+  "permissions": {
+    "microphone": "granted",
+    "systemAudio": "granted"
+  },
+  "models": [
+    {
+      "id": "whisper-small",
+      "title": "Whisper Small",
+      "status": "installed",
+      "bytes": 466000000,
+      "downloadedBytes": 466000000,
+      "checksum": "sha256:fixture-checksum"
+    }
+  ],
+  "diagnostic": "Custom STT is available; local fallback is installed."
+}

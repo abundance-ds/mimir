@@ -43,6 +43,7 @@
         @toggle-chat-collapse="settings.set('sidebarChatsCollapsed', !settings.sidebarChatsCollapsed)"
         @settings="openSettings"
         @open-meeting="onLaunch('app:scribe')"
+        @set-meeting-mic-muted="setMeetingMicrophoneMuted"
         @stop-meeting="stopMeetingCapture"
       />
     </template>
@@ -415,6 +416,8 @@ const meetingCapture = computed(() => {
     startedAt: meeting.startedAt,
     durationMs: meeting.durationMs,
     micMuted: meeting.micMuted,
+    micPending: Boolean(meetings.pending.mic),
+    stopPending: Boolean(meetings.pending.stop),
   }
 })
 const recentWorkspaces = computed(() => (
@@ -671,6 +674,14 @@ async function stopMeetingCapture() {
     await meetings.stop()
   } catch (cause) {
     diagnostic.value = `Scribe could not stop recording: ${errorMessage(cause)}`
+  }
+}
+
+async function setMeetingMicrophoneMuted(muted) {
+  try {
+    await meetings.setMicMuted(muted)
+  } catch (cause) {
+    diagnostic.value = `Scribe could not ${muted ? 'mute' : 'unmute'} the microphone: ${errorMessage(cause)}`
   }
 }
 

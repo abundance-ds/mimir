@@ -25,10 +25,10 @@ Feature: Keep recording state operable and understandable throughout Mimir
     And contrast and focus relationships use the design-system tokens
 
   @MTG-203 @automated @desktop @accessibility
-  Scenario: Pane collapse cannot hide the only Stop control
+  Scenario: Pane collapse cannot hide the recording controls
     Given capture is active in a meeting Activity or Tool
     When the Activity or Editor pane is collapsed or the meeting surface is hidden
-    Then another mounted visible surface retains the named Stop control
+    Then another mounted visible surface retains named microphone mute and Stop controls
     And focus is transferred away from hidden content
 
   @MTG-204 @manual @desktop @accessibility @release
@@ -44,3 +44,17 @@ Feature: Keep recording state operable and understandable throughout Mimir
     When the user inspects the failed capture attempt
     Then Mimir identifies the denied capability in text
     And exposes a keyboard-operable system-settings and retry path
+
+  @MTG-206 @automated @renderer @accessibility
+  Scenario: Overlapping settings changes are never silently dropped
+    Given one native Scribe configuration mutation is still pending
+    When the user attempts another configuration change
+    Then every configuration control exposes the pending state
+    And accepted mutations commit in request order without returning an empty success
+
+  @MTG-207 @automated @renderer @contract
+  Scenario: Reviewed tags remain visible and editable
+    Given a terminal meeting has reviewed tags
+    When the meeting appears in native detail, agent metadata, and the Scribe review surface
+    Then the same bounded tags are visible instead of becoming write-only metadata
+    And the user can keyboard-edit at most 64 tags of at most 80 characters each

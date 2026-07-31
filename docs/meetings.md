@@ -1,6 +1,7 @@
 # Scribe meetings
 
-Status: implemented for the macOS arm64 release, 2026-07-30
+Status: implementation complete for macOS arm64; release qualification remains
+pending until every required manual evidence record is populated
 
 Scribe is Mimir's native, local-first meeting recorder and transcription app.
 It detects likely calls, asks the user to start, records microphone and system
@@ -21,6 +22,10 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   informed. Mimir cannot determine the applicable consent law.
 - A persistent workbench indicator exposes elapsed time, microphone mute, and
   Stop while capture is active, including when the Scribe app is not selected.
+- Settings exposes deliberate permission repair: microphone access re-enters
+  the native TCC request path, while system-audio repair opens the fixed macOS
+  **Privacy & Security → Screen & System Audio Recording** pane. The native
+  command accepts no renderer-controlled URL or process arguments.
 - Microphone mute writes aligned silence to that channel. There is no pause
   state that could make channel clocks disagree.
 - Microphone and system audio are separate, lossless 16 kHz mono `f32le`
@@ -84,7 +89,9 @@ committed database rows, revalidates their canonical path, bounds, byte length,
 and SHA-256, and opens every path component without following links. Recovery verifies staged files,
 quarantines corrupt state through the shared persistence helpers, releases
 expired job leases, and converts an abandoned live lifecycle into an honest
-interrupted record.
+interrupted record. Its recovered stop time is derived from the final committed
+audio coordinate, not from the later relaunch wall clock; a staged chunk that
+is promoted during recovery can advance that boundary.
 
 Transcription repair is keyed to the immutable capture `runId`, never to the
 mutable transcript revision. A retry reads only verified committed audio from
@@ -94,8 +101,14 @@ same owner. The terminal pass is reconciled with set-based SQL as exactly one
 new transcript revision: stale live STT rows and partials are replaced while
 capture gaps and revision history remain intact. A crash after the terminal
 revision but before lifecycle or job acknowledgement completes locally on the
-next delivery without reopening a model, Keychain credential, provider
-connection, or audio reader.
+next delivery without reopening a model, reading a Keychain credential,
+connecting to a provider, or opening audio. Recovery classifies and promotes
+staged audio before applying that shortcut: if a durable tail appears beyond
+the earlier terminal transcript, Mimir keeps the meeting interrupted and
+queues one new repair for the original capture generation instead of launching
+summary work. Durable capture-failure intent likewise wins over an all-final
+transcript in the same crash window, so restart restores `Failed` with the
+original failure rather than relabelling the meeting successful.
 
 The renderer treats events as invalidation notices: install listeners first,
 then read an authoritative snapshot. Correctness never depends on delivery to
@@ -112,6 +125,10 @@ evidence. Exhausted bounded retries fail actionably after finalizing everything
 already committed. The worker reports a terminal disk/device/driver failure to
 the durable runtime even without a renderer, which immediately leaves the
 meeting visibly failed or interrupted for repair instead of waiting for Stop.
+When Stop discovers that the capture worker already ended, it durably records
+the interruption, drains and removes the live transcriber, and only then makes
+same-process repair claimable. A delayed failure callback is an idempotent
+redelivery and cannot create a second recovery owner.
 
 ## Transcription routes
 
@@ -168,6 +185,14 @@ and controlled paths are recorded as Activity provenance. Prompts treat the
 transcript as untrusted quoted data, and outputs are bounded, schema-validated
 JSON files under the meeting directory.
 
+Terminal lifecycle and the optional default title/summary outbox row commit in
+one SQLite transaction. A job validation or insert failure leaves the meeting
+`Finalizing`; it cannot produce a completed meeting with missing required
+follow-up. Reading stop-hook policy uses a narrow non-secret configuration
+projection and never reads the custom-STT credential. Manual retries receive
+monotonic idempotency generations, while lease ownership still prevents more
+than one live attempt in a generation.
+
 The default successful flow is:
 
 1. generate a concise title and Markdown summary from the terminal transcript;
@@ -190,6 +215,18 @@ user export: hook execution never creates a copy in `meetings/exports/`.
 consent gate, live ledger, transcript, summary, job diagnostics, KG decision,
 exports, deletion, and settings. `src/stores/meetings.js` is an independent
 workspace bootstrap initializer; it does not wait for MCP or Activities.
+Configuration mutations share one ordered renderer queue. While it is nonempty,
+every configuration control exposes and disables for the pending state; a
+second accepted mutation runs after the first instead of returning an empty
+success or silently discarding user intent.
+
+Reviewed tags use the same projection in native meeting detail, list/search
+agent metadata, and the Scribe review surface, so they cannot become
+write-only metadata. The renderer presents tags as restrained inline text and
+offers one keyboard-editable comma-separated field. Public inputs are trimmed,
+deduplicated, and rejected before IPC above 64 entries, 80 characters, or the
+native 160-byte per-tag storage bound; malformed native payloads are discarded
+at renderer normalization rather than entering application state.
 
 The public agent projection is intentionally post-recording and bounded:
 
@@ -200,8 +237,10 @@ The public agent projection is intentionally post-recording and bounded:
 
 Live meetings are unavailable to these tools. No start, mute, stop,
 permission, credential, model-install, export, delete, or KG-mutation tool is
-published. Granola remains a separate connection for externally recorded
-meetings.
+published. `meetings_update` loads and validates the same post-recording public
+projection before asking the platform content owner to write, so a live or
+otherwise private record cannot be mutated through a timing race. Granola
+remains a separate connection for externally recorded meetings.
 
 `meetings_search` requires at least three characters and queries private
 SQLite trigram indexes for the complete reviewed title, full summary, tags,
@@ -231,6 +270,11 @@ all owned files, including managed hook inputs and outputs. Files under
 `meetings/exports/` exist only after an explicit user export and are
 deliberately outside whole-record deletion; the user manages those copies
 separately.
+An unresolved `collecting` transcript-repair generation is itself an audio
+hold, even after its job attempts are exhausted; both explicit audio deletion
+and retention skip it. Conversely, retry refuses before provider startup when
+no committed source audio remains, so an empty source can never replace a
+previous transcript.
 Deletion is best-effort local erasure and does not promise removal from
 filesystem snapshots, backups, synced exports, or a custom provider that
 already processed audio.

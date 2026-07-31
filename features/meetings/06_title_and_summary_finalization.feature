@@ -7,7 +7,8 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
   Scenario: One finalization job follows a terminal transcript revision
     Given recording is finalized and a transcript revision is terminal
     When post-stop finalization is enabled for the meeting
-    Then one job is enqueued for that meeting and transcript revision
+    Then completed lifecycle and its one default summary outbox entry commit in one transaction
+    And a failed outbox insert leaves lifecycle finalizing without an orphaned job
     And capture readiness does not depend on the job succeeding
 
   @MTG-111 @automated @native @contract
@@ -34,8 +35,9 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
   @MTG-114 @automated @native @recovery
   Scenario: Finalization retries are idempotent
     Given a title and summary job has idempotency identity for one transcript revision
-    When the Activity fails, Mimir restarts, or the retry is requested twice
-    Then at most one active attempt owns that identity
+    When the Activity fails, Mimir restarts, or manual retry is requested repeatedly
+    Then at most one active attempt owns each retry generation
+    And repeated manual retries receive monotonic idempotency generations
     And a completed result is never generated twice
 
   @MTG-115 @automated @domain @security

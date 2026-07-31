@@ -72,13 +72,16 @@
         v-if="meetingCapture"
         data-sidebar-meeting-capture
         class="mx-1 mt-1 flex min-h-9 items-center border-y border-rule bg-surface"
-        role="status"
+        :class="{ 'flex-col py-1': collapsed }"
+        role="group"
         aria-label="Meeting recording controls"
       >
+        <span class="sr-only" aria-live="polite">{{ meetingCaptureLabel }}</span>
         <button
           type="button"
           data-sidebar-meeting-open
-          class="flex min-w-0 flex-1 items-center text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class="flex min-w-0 items-center text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          :class="collapsed ? 'size-8 shrink-0' : 'flex-1'"
           :title="`${meetingCapture.title} — ${meetingCaptureLabel}`"
           @click="$emit('openMeeting')"
         >
@@ -107,11 +110,31 @@
         </button>
         <button
           type="button"
+          data-sidebar-meeting-microphone
+          class="grid size-8 shrink-0 place-items-center hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+          :class="meetingCapture.micMuted ? 'text-rem' : 'text-ink-3'"
+          :title="meetingCapture.micMuted ? 'Unmute meeting microphone' : 'Mute meeting microphone'"
+          :aria-label="meetingCapture.micMuted ? 'Unmute meeting microphone' : 'Mute meeting microphone'"
+          :aria-pressed="meetingCapture.micMuted"
+          :disabled="
+            meetingCapture.lifecycle !== 'capturing'
+              || Boolean(meetingCapture.micPending)
+          "
+          @click="$emit('setMeetingMicMuted', !meetingCapture.micMuted)"
+        >
+          <IconMicrophoneOff v-if="meetingCapture.micMuted" :size="13" />
+          <IconMicrophone v-else :size="13" />
+        </button>
+        <button
+          type="button"
           data-sidebar-meeting-stop
           class="grid size-8 shrink-0 place-items-center text-rem hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
           title="Stop meeting recording"
           aria-label="Stop meeting recording"
-          :disabled="meetingCapture.lifecycle !== 'capturing'"
+          :disabled="
+            meetingCapture.lifecycle !== 'capturing'
+              || Boolean(meetingCapture.stopPending)
+          "
           @click="$emit('stopMeeting')"
         >
           <IconPlayerStopFilled :size="12" />
@@ -441,6 +464,7 @@ import {
   IconMathPi,
   IconLoader2,
   IconMicrophone,
+  IconMicrophoneOff,
   IconPlus,
   IconSettings,
   IconRobot,
@@ -499,6 +523,7 @@ const emit = defineEmits([
   'sortActivities',
   'toggleChatCollapse',
   'openMeeting',
+  'setMeetingMicMuted',
   'stopMeeting',
   'settings',
 ])

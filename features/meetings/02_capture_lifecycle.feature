@@ -64,5 +64,6 @@ Feature: Own meeting capture as one durable native lifecycle
     Given the native capture worker has ended and its failure callback is waiting behind Stop
     When Stop receives the ended-worker error first
     Then the meeting becomes durably interrupted and releases active ownership
+    And Stop drains and removes the live transcriber before same-process repair can be claimed
     And exactly one repair job remains bound to the original capture generation
     And the delayed failure callback cannot duplicate or replace that recovery owner

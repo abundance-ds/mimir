@@ -29,14 +29,24 @@
           Detection suggests a recording after sustained meeting activity. Starting capture
           always remains a deliberate human action.
         </p>
+        <p
+          v-if="configPending"
+          data-scribe-config-pending
+          class="mt-2 border-y border-rule-light py-2 font-mono text-[9px] text-ink-3"
+          role="status"
+        >
+          Saving settings… further changes will follow in order.
+        </p>
         <label class="scribe-setting-row">
           <span>
             <strong>Detect meeting apps</strong>
             <small>Show a local recording suggestion after sustained meeting activity.</small>
           </span>
           <input
+            data-scribe-detection
             type="checkbox"
             :checked="config.detectionEnabled"
+            :disabled="configPending"
             @change="save({ detectionEnabled: $event.target.checked })"
           />
         </label>
@@ -60,6 +70,20 @@
         >
           Grant microphone access
         </button>
+        <button
+          v-if="permissions.systemAudio !== 'granted'"
+          type="button"
+          data-scribe-open-system-audio-settings
+          class="scribe-settings-button mt-3"
+          :disabled="Boolean(pending['system-audio-settings'])"
+          @click="$emit('openSystemAudioSettings')"
+        >
+          {{
+            pending['system-audio-settings']
+              ? 'Opening System Settings…'
+              : 'Open system audio settings'
+          }}
+        </button>
       </section>
 
       <section class="py-4">
@@ -72,12 +96,13 @@
           <button
             type="button"
             role="radio"
-            class="h-9 border-r border-rule text-[10px]"
+            class="h-9 border-r border-rule text-[10px] disabled:pointer-events-none disabled:opacity-45"
             :class="config.transcriptionMode === 'local'
               ? 'bg-accent-soft text-ink'
               : 'bg-chrome-high text-ink-3 hover:bg-chrome-mid'"
             :aria-checked="config.transcriptionMode === 'local'"
             :tabindex="config.transcriptionMode === 'local' ? 0 : -1"
+            :disabled="configPending"
             @click="save({ transcriptionMode: 'local' })"
             @keydown="onModeKeydown"
           >
@@ -86,12 +111,13 @@
           <button
             type="button"
             role="radio"
-            class="h-9 text-[10px]"
+            class="h-9 text-[10px] disabled:pointer-events-none disabled:opacity-45"
             :class="config.transcriptionMode === 'custom'
               ? 'bg-accent-soft text-ink'
               : 'bg-chrome-high text-ink-3 hover:bg-chrome-mid'"
             :aria-checked="config.transcriptionMode === 'custom'"
             :tabindex="config.transcriptionMode === 'custom' ? 0 : -1"
+            :disabled="configPending"
             @click="save({ transcriptionMode: 'custom' })"
             @keydown="onModeKeydown"
           >
@@ -155,6 +181,7 @@
               class="scribe-settings-input"
               placeholder="https://stt.example.com/v1/listen"
               aria-describedby="scribe-custom-route-help"
+              :disabled="configPending"
               @change="save({ customUrl })"
             />
           </label>
@@ -164,6 +191,7 @@
               v-model="customModel"
               class="scribe-settings-input"
               placeholder="Provider model name"
+              :disabled="configPending"
               @change="save({ customModel })"
             />
           </label>
@@ -211,8 +239,10 @@
             <small>Runs after the transcript reaches a terminal revision.</small>
           </span>
           <input
+            data-scribe-summary-enabled
             type="checkbox"
             :checked="config.summaryEnabled"
+            :disabled="configPending"
             @change="save({ summaryEnabled: $event.target.checked })"
           />
         </label>
@@ -221,6 +251,7 @@
           <ScribeSelect
             :model-value="config.kgPrompt"
             :options="kgPromptOptions"
+            :disabled="configPending"
             aria-label="Knowledge-graph follow-up"
             @update:model-value="save({ kgPrompt: $event })"
           />
@@ -234,6 +265,7 @@
           <ScribeSelect
             :model-value="retentionValue"
             :options="retentionOptions"
+            :disabled="configPending"
             aria-label="Keep source audio"
             @update:model-value="saveRetention"
           />
@@ -266,12 +298,14 @@ const emit = defineEmits([
   'installModel',
   'deleteModel',
   'requestMicrophonePermission',
+  'openSystemAudioSettings',
 ])
 
 const settingsRoot = ref(null)
 const customUrl = ref(props.config.customUrl)
 const customModel = ref(props.config.customModel)
 const apiKey = ref('')
+const configPending = computed(() => Boolean(props.pending.config))
 const retentionValue = computed(() => (
   props.config.retentionDays == null ? 'forever' : String(props.config.retentionDays)
 ))
@@ -351,7 +385,7 @@ function modelProgress(model) {
 function permissionLabel(value) {
   return ({
     granted: 'Granted',
-    denied: 'Denied — use the button below to open the system prompt',
+    denied: 'Denied — use the repair action below',
     'prompt-on-start': 'Requested when recording starts',
     restricted: 'Restricted by macOS',
     unknown: 'Not checked',

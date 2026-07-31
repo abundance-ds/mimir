@@ -1,9 +1,11 @@
 # Mimir Scribe third-party notices
 
-This file covers the third-party code and model assets added specifically for
-Mimir Scribe. It is packaged with the desktop application. The complete Rust
-and JavaScript dependency lockfiles remain the authoritative version
-inventory for the rest of Mimir.
+This file carries the full-text and attribution notices for third-party code
+and model assets added specifically for Mimir Scribe. It is packaged with the
+desktop application. The complete locked Rust and JavaScript component
+inventory and declared license expressions are packaged beside it as
+`SBOM.spdx.json` and `THIRD_PARTY_LICENSES.md`; `Cargo.lock` and `bun.lock`
+remain the resolution authorities checked against that inventory.
 
 ## Fastrepl Anarlog
 

@@ -14,8 +14,8 @@ use super::{
     },
     runtime::{
         MeetingCandidate, MeetingConfig, MeetingConfigPatch, MeetingContentProjection,
-        MeetingDeleteMode, MeetingExport, MeetingExportFormat, MeetingModel, MeetingPermissions,
-        MeetingPlatformPort, MeetingPlatformProjection, MeetingUpdatePatch,
+        MeetingDeleteMode, MeetingExport, MeetingExportFormat, MeetingHookConfig, MeetingModel,
+        MeetingPermissions, MeetingPlatformPort, MeetingPlatformProjection, MeetingUpdatePatch,
     },
     MeetingDeletionMode as StoreDeletionMode, MeetingDeletionStage, MeetingStore,
 };
@@ -49,6 +49,7 @@ const KEYCHAIN_ACCOUNT: &str = "meetings.custom-stt";
 const MAX_API_KEY_BYTES: usize = 64 * 1024;
 const MAX_SUMMARY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TAGS: usize = 64;
+const MAX_TAG_CHARS: usize = 80;
 const MAX_TAG_BYTES: usize = 160;
 const MODEL_PROGRESS_CHECKPOINT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS: usize = 5;
@@ -2001,6 +2002,11 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         })
     }
 
+    fn hook_config(&self) -> Result<MeetingHookConfig, String> {
+        self.load_config()
+            .map(|config| MeetingHookConfig::from(&config))
+    }
+
     fn dismiss_candidate(&self, candidate_id: &str) -> Result<(), String> {
         self.inner.environment.dismiss_candidate(candidate_id)?;
         self.inner.changes.changed("detection");
@@ -2307,7 +2313,10 @@ fn validate_content_fields(
     }
     if tags.len() > MAX_TAGS
         || tags.iter().any(|tag| {
-            tag.trim().is_empty() || tag.len() > MAX_TAG_BYTES || tag.chars().any(char::is_control)
+            tag.trim().is_empty()
+                || tag.chars().count() > MAX_TAG_CHARS
+                || tag.len() > MAX_TAG_BYTES
+                || tag.chars().any(char::is_control)
         })
     {
         return Err("Meeting tags exceed the count, length, or character safety limit".into());
@@ -2685,7 +2694,10 @@ mod tests {
     use serde_json::json;
     use std::{
         io::Cursor,
-        sync::{Condvar, Mutex},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Condvar, Mutex,
+        },
         time::Duration as StdDuration,
     };
     use tempfile::TempDir;
@@ -2693,12 +2705,16 @@ mod tests {
     const NOW: &str = "2026-07-30T10:00:00Z";
 
     #[derive(Default)]
-    struct FakeSecrets(Mutex<Option<(String, String)>>);
+    struct FakeSecrets {
+        value: Mutex<Option<(String, String)>>,
+        reads: AtomicUsize,
+    }
 
     impl MeetingSecretStore for FakeSecrets {
         fn read(&self, endpoint: &CustomSttEndpoint) -> Result<Option<String>, String> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
             Ok(self
-                .0
+                .value
                 .lock()
                 .unwrap()
                 .as_ref()
@@ -2707,12 +2723,12 @@ mod tests {
         }
 
         fn set(&self, endpoint: &CustomSttEndpoint, secret: &str) -> Result<(), String> {
-            *self.0.lock().unwrap() = Some((endpoint.credential_binding(), secret.to_string()));
+            *self.value.lock().unwrap() = Some((endpoint.credential_binding(), secret.to_string()));
             Ok(())
         }
 
         fn clear(&self) -> Result<(), String> {
-            *self.0.lock().unwrap() = None;
+            *self.value.lock().unwrap() = None;
             Ok(())
         }
     }
@@ -2812,6 +2828,7 @@ mod tests {
         paths: MeetingPlatformPaths,
         store: Arc<MeetingStore>,
         platform: NativeMeetingPlatform,
+        secrets: Arc<FakeSecrets>,
         completion: Arc<(Mutex<bool>, Condvar)>,
     }
 
@@ -2827,6 +2844,7 @@ mod tests {
             Arc::new(MeetingStore::open(paths.meetings_root.join("meetings.sqlite")).unwrap());
         let model_bytes = b"verified managed model".to_vec();
         let completion = Arc::new((Mutex::new(false), Condvar::new()));
+        let secrets = Arc::new(FakeSecrets::default());
         let platform = NativeMeetingPlatform::new(
             paths.clone(),
             store.clone(),
@@ -2834,7 +2852,7 @@ mod tests {
                 title: "Whisper Small".into(),
                 manifest: manifest(&model_bytes),
             }],
-            Arc::new(FakeSecrets::default()),
+            secrets.clone(),
             environment,
             Arc::new(FakeDisk),
             Arc::new(FakeDownloader {
@@ -2849,6 +2867,7 @@ mod tests {
             paths,
             store,
             platform,
+            secrets,
             completion,
         }
     }
@@ -3064,6 +3083,30 @@ mod tests {
             .filter_map(Result::ok)
             .any(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"));
         assert!(quarantined);
+    }
+
+    #[test]
+    fn hook_configuration_never_reads_the_transcription_credential() {
+        let fixture = fixture();
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                transcription_mode: Some("custom".into()),
+                custom_url: Some("https://stt.example.com/v1/listen".into()),
+                custom_model: Some("nova-3".into()),
+                summary_enabled: Some(true),
+                summary_preset: Some("concise".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+
+        let hooks = fixture.platform.hook_config().unwrap();
+        assert!(hooks.summary_enabled);
+        assert_eq!(hooks.summary_preset, "concise");
+        assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 0);
+
+        fixture.platform.projection().unwrap();
+        assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 1);
     }
 
     #[test]

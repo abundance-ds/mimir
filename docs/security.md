@@ -173,6 +173,10 @@ application identity; it does not capture audio. Recording requires a
 deliberate renderer confirmation and is not present in the public MCP
 projection. This matters because `/mcp` is unauthenticated loopback: exporting
 recording controls would let any local process exercise Mimir's TCC grants.
+The system-audio permission repair command has no input and opens only the
+fixed macOS Screen & System Audio Recording privacy pane; it is not a general
+URL or process launcher. Public metadata updates validate post-recording
+visibility before the platform content writer is invoked.
 
 The recorder writes independent microphone and system tracks under
 `~/.mimir/meetings/`. Those bytes and SQLite transcripts are readable to the
