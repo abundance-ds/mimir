@@ -86,6 +86,17 @@ quarantines corrupt state through the shared persistence helpers, releases
 expired job leases, and converts an abandoned live lifecycle into an honest
 interrupted record.
 
+Transcription repair is keyed to the immutable capture `runId`, never to the
+mutable transcript revision. A retry reads only verified committed audio from
+sequence zero and writes provider batches into private SQLite staging that is
+neither rendered nor indexed. Restart clears an incomplete pass under that
+same owner. The terminal pass is reconciled with set-based SQL as exactly one
+new transcript revision: stale live STT rows and partials are replaced while
+capture gaps and revision history remain intact. A crash after the terminal
+revision but before lifecycle or job acknowledgement completes locally on the
+next delivery without reopening a model, Keychain credential, provider
+connection, or audio reader.
+
 The renderer treats events as invalidation notices: install listeners first,
 then read an authoritative snapshot. Correctness never depends on delivery to
 a particular window. Dock/system Quit asks the user, performs the durable Stop

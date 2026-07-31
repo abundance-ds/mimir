@@ -50,7 +50,7 @@
     },
     {
       "feature": "features/meetings/02_capture_lifecycle.feature",
-      "idRange": ["MTG-020", "MTG-027"],
+      "idRange": ["MTG-020", "MTG-028"],
       "owner": "meeting-runtime",
       "verificationScope": ["native lifecycle and single-owner tests", "snapshot and event ordering contracts", "guarded desktop Quit"]
     },
@@ -68,7 +68,7 @@
     },
     {
       "feature": "features/meetings/05_crash_recovery.feature",
-      "idRange": ["MTG-090", "MTG-097"],
+      "idRange": ["MTG-090", "MTG-099"],
       "owner": "meeting-recovery",
       "verificationScope": ["staged audio and startup recovery", "terminal job boundaries", "content-free diagnostics"]
     },
@@ -202,6 +202,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "stop_winning_failed_worker_race_enqueues_repair_before_delayed_callback",
+      "scenarios": ["MTG-028"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/model.rs",
       "selector": "gherkin_terminal_meetings_never_reopen",
       "scenarios": ["MTG-026"]
@@ -287,6 +293,12 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "repeated_restarts_reuse_one_capture_generation_repair_owner",
+      "scenarios": ["MTG-070", "MTG-092"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
       "selector": "recovery_keeps_the_original_consented_route_after_global_provider_changes",
       "scenarios": ["MTG-070"]
     },
@@ -331,6 +343,36 @@
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "gherkin_restart_recovery_is_durable_conservative_and_idempotent",
       "scenarios": ["MTG-092"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/store.rs",
+      "selector": "repair_replaces_partial_and_final_stt_rows_but_preserves_gaps_and_history",
+      "scenarios": ["MTG-092"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "repair_worker_stages_privately_then_reconciles_from_audio_zero",
+      "scenarios": ["MTG-092", "MTG-099"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "startup_completes_terminal_batch_before_lifecycle_without_stt_disclosure",
+      "scenarios": ["MTG-098"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "completed_repair_job_redelivery_performs_zero_provider_work",
+      "scenarios": ["MTG-098"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/store.rs",
+      "selector": "repair_reconciliation_is_one_revision_beyond_one_hundred_thousand_segments",
+      "scenarios": ["MTG-099", "MTG-181"]
     },
     {
       "kind": "rust-test",
@@ -475,6 +517,12 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "gherkin_new_database_migrates_atomically_and_reopens",
+      "scenarios": ["MTG-222"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/store.rs",
+      "selector": "schema_v6_cancels_mutable_revision_repairs_before_fresh_generation_ownership",
       "scenarios": ["MTG-222"]
     },
     {

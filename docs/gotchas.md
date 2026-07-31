@@ -283,6 +283,18 @@ would hold the serialized meeting runtime for unbounded time. Content-file
 fingerprints repair interrupted index synchronization without rereading every
 summary on every launch.
 
+### Scribe repair output is private until one terminal reconciliation
+
+Never key transcription repair to `transcript_revision`; live or partial repair
+output changes that value and can mint competing jobs after a crash. The
+capture `runId` is the stable generation. Repair replays verified committed
+audio from sequence zero into private staging, emits no renderer transcript
+events, and atomically replaces the STT projection only after every staged
+segment is final. Preserve capture-owned gaps and revision history. If a
+terminal transcript is already authoritative, complete lifecycle or job
+redelivery locally and do not resolve credentials, load a model, reconnect a
+provider, or read audio again.
+
 ### Silence is a valid terminal transcript
 
 A provider that drains with zero final segments and zero unresolved partials

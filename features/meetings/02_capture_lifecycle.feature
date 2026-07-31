@@ -58,3 +58,11 @@ Feature: Own meeting capture as one durable native lifecycle
     When the renderer later installs the listener and drains the native snapshot
     Then it observes the committed transition exactly once
     And correctness does not depend on replaying a lost event payload
+
+  @MTG-028 @automated @native @recovery
+  Scenario: Stop racing an ended capture worker keeps one recovery owner
+    Given the native capture worker has ended and its failure callback is waiting behind Stop
+    When Stop receives the ended-worker error first
+    Then the meeting becomes durably interrupted and releases active ownership
+    And exactly one repair job remains bound to the original capture generation
+    And the delayed failure callback cannot duplicate or replace that recovery owner

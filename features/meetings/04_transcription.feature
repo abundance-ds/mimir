@@ -78,8 +78,8 @@ Feature: Produce live and batch transcripts through local or custom routes
   Scenario: Delayed transcription repair resumes from durable meeting state
     Given transcription repair was running when Mimir exited
     When Mimir relaunches and recovers the meeting
-    Then one idempotent repair job is requeued for the terminal transcript revision
-    And only integrity-verified committed chunks cross the original consented route and model
+    Then one idempotent repair job is requeued for the immutable capture generation
+    And repair restarts from integrity-verified committed audio under the original consented route and model
 
   @MTG-071 @automated @domain @contract
   Scenario: Stale transcript writers cannot overwrite a terminal revision

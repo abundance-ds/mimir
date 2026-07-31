@@ -308,9 +308,13 @@ requirements; they do not replace runtime verification.
   unresolved partial completes with an empty terminal transcript and no
   fabricated title/summary job.
 - Forced renderer loss leaves native capture running. Forced process loss
-  restores an interrupted, honest record and completes staged-chunk and
-  transcript recovery on relaunch. Dock/system Quit with no renderer window
-  still performs native durable Stop, or restores Mimir and fails closed.
+  restores an interrupted, honest record and reuses one immutable
+  capture-generation transcript repair. Incomplete repair output stays
+  private; one all-final pass atomically replaces stale STT rows while
+  preserving gaps and history. A terminal transcript/lifecycle crash boundary
+  completes without disclosing audio again. Dock/system Quit with no renderer
+  window still performs native durable Stop, or restores Mimir and fails
+  closed.
 - Capture worker disk/device/driver failure becomes a durable visible
   failed/interrupted state immediately; it is not deferred until the user
   presses Stop.

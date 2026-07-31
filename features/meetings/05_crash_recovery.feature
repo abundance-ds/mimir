@@ -21,8 +21,9 @@ Feature: Recover meeting data and work after interruption
   Scenario: Recovery is idempotent across repeated launches
     Given an interrupted meeting has already entered recovery
     When Mimir is relaunched repeatedly before recovery finishes
-    Then one recovery owner continues from the committed checkpoint
-    And no audio, transcript segment, or finalization job is duplicated
+    Then one capture-generation recovery owner restarts from verified committed audio
+    And incomplete repair output remains private until one terminal revision atomically replaces stale STT rows
+    And capture gaps and transcript history remain intact without duplicate jobs or segments
 
   @MTG-093 @automated @native @security
   Scenario: Corrupt sidecar configuration is quarantined without touching meetings
@@ -58,3 +59,17 @@ Feature: Recover meeting data and work after interruption
     When structured diagnostics are recorded
     Then they include bounded operation, route, attempt, state, and error identifiers
     And they exclude audio, transcript text, titles, participant data, paths, and credentials
+
+  @MTG-098 @automated @native @security @recovery
+  Scenario: A durable terminal transcript is never disclosed again after a lifecycle crash
+    Given an all-final terminal transcript reached durable storage before lifecycle completion
+    When startup recovery or completed-job redelivery inspects the meeting
+    Then the lifecycle completes locally and downstream work remains idempotent
+    And no model, credential, provider connection, or audio disclosure starts
+
+  @MTG-099 @automated @native @performance @recovery
+  Scenario: Large repair reconciliation commits as one bounded authority change
+    Given a private repair generation contains more than one hundred thousand final segments
+    When its terminal marker is committed
+    Then set-based reconciliation creates exactly one transcript revision
+    And no staged partial is searchable or visible before that atomic commit
