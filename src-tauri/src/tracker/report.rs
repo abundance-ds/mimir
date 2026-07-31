@@ -18,7 +18,6 @@ pub fn build_report(
     let timezone = timezone
         .parse::<Tz>()
         .map_err(|_| format!("Tracker timezone '{timezone}' is invalid."))?;
-    let blocks = store.blocks_in_range(start_ms, end_ms)?;
     let mut totals = ActivityCategory::ALL
         .into_iter()
         .map(|category| (category.as_str().to_string(), 0))
@@ -31,11 +30,11 @@ pub fn build_report(
     let mut current_work_streak_seconds = 0;
     let mut previous_work_end: Option<i64> = None;
 
-    for block in &blocks {
+    let total_blocks = store.visit_blocks_in_range(start_ms, end_ms, |block| {
         let clipped_start = block.start_ms.max(start_ms);
         let clipped_end = block.end_ms.min(end_ms);
         if clipped_end <= clipped_start {
-            continue;
+            return Ok(());
         }
         let seconds = (clipped_end - clipped_start) / 1000;
         *totals.entry(block.activity.as_str().into()).or_default() += seconds;
@@ -106,7 +105,8 @@ pub fn build_report(
                     .or_default() += segment.seconds;
             }
         })?;
-    }
+        Ok(())
+    })?;
     longest_work_streak_seconds = longest_work_streak_seconds.max(current_work_streak_seconds);
 
     let work = *totals.get(ActivityCategory::Work.as_str()).unwrap_or(&0);
@@ -193,7 +193,7 @@ pub fn build_report(
         subcategories,
         days,
         heatmap,
-        total_blocks: blocks.len() as u64,
+        total_blocks,
     })
 }
 

@@ -45,6 +45,7 @@ irc-proto = { version = "1.1", default-features = false }
 dirs = "5"
 chrono = "0.4"
 chrono-tz = "0.10"
+iana-time-zone = "0.1"
 cron = "0.17"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "https"] }
 tauri-plugin-dialog = "2"

@@ -46,6 +46,87 @@ impl Default for TrackerRuntimeConfig {
 }
 
 #[derive(Clone)]
+pub struct TrackerRuntimeState {
+    runtime: Option<TrackerRuntime>,
+    unavailable: Option<String>,
+}
+
+impl TrackerRuntimeState {
+    pub fn new(config: TrackerRuntimeConfig) -> Self {
+        let path = config.database_path.clone();
+        match TrackerRuntime::new(config) {
+            Ok(runtime) => Self {
+                runtime: Some(runtime),
+                unavailable: None,
+            },
+            Err(error) => {
+                let diagnostic = format!(
+                    "Tracker storage is unavailable at {}. Tracker remains off and Mimir can continue: {error}",
+                    path.display()
+                );
+                log::error!("{diagnostic}");
+                Self {
+                    runtime: None,
+                    unavailable: Some(diagnostic),
+                }
+            }
+        }
+    }
+
+    pub fn install(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Ok(());
+        };
+        runtime.install(app).map_err(|error| {
+            runtime.set_diagnostic(format!("Tracker could not start: {error}"));
+            error
+        })
+    }
+
+    pub fn shutdown(&self) -> Result<(), String> {
+        match self.runtime.as_ref() {
+            Some(runtime) => runtime.shutdown(),
+            None => Ok(()),
+        }
+    }
+
+    pub fn background_launch_enabled(&self) -> bool {
+        self.runtime.as_ref().is_some_and(|runtime| {
+            let config = lock(&runtime.inner.config);
+            config.enabled && config.launch_at_login
+        })
+    }
+
+    fn runtime(&self) -> Result<&TrackerRuntime, String> {
+        self.runtime.as_ref().ok_or_else(|| {
+            self.unavailable
+                .clone()
+                .unwrap_or_else(|| "Tracker is unavailable.".into())
+        })
+    }
+
+    fn status(&self) -> Result<TrackerStatus, String> {
+        if let Some(runtime) = self.runtime.as_ref() {
+            return runtime.status();
+        }
+        let config = TrackerConfig::default();
+        Ok(TrackerStatus {
+            mode: TrackerMode::Error,
+            permissions: platform::permission_status(&config),
+            config,
+            current: None,
+            break_remaining_seconds: None,
+            queued_classifications: 0,
+            today_cost_usd: 0.0,
+            launch_at_login_active: false,
+            autostart_diagnostic: None,
+            diagnostic: self.unavailable.clone(),
+            revision: 1,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct TrackerRuntime {
     inner: Arc<TrackerRuntimeInner>,
 }
@@ -66,6 +147,7 @@ struct TrackerRuntimeInner {
     last_classification_ms: AtomicI64,
     classification_running: AtomicBool,
     nudge_running: AtomicBool,
+    sampling_allowed: AtomicBool,
 }
 
 struct TrackerWorker {
@@ -97,7 +179,12 @@ impl TrackerRuntime {
     pub fn new(config: TrackerRuntimeConfig) -> Result<Self, String> {
         let store = TrackerStore::open(&config.database_path)?;
         let startup_diagnostic = store.startup_diagnostic().map(str::to_string);
-        let tracker_config = store.config()?;
+        let stored_config = store.config()?;
+        let tracker_config = stored_config.clone().with_system_timezone();
+        if tracker_config != stored_config {
+            store.save_config(&tracker_config)?;
+        }
+        let sampling_allowed = tracker_config.enabled && tracker_config.armed;
         let runtime_state = store.runtime_state()?;
         Ok(Self {
             inner: Arc::new(TrackerRuntimeInner {
@@ -118,6 +205,7 @@ impl TrackerRuntime {
                 last_classification_ms: AtomicI64::new(0),
                 classification_running: AtomicBool::new(false),
                 nudge_running: AtomicBool::new(false),
+                sampling_allowed: AtomicBool::new(sampling_allowed),
             }),
         })
     }
@@ -131,12 +219,21 @@ impl TrackerRuntime {
         self.recover_gap_if_needed()?;
         self.sync_autostart();
         if lock(&self.inner.config).enabled {
-            self.ensure_tray()?;
+            if let Err(error) = self.ensure_tray() {
+                self.set_diagnostic(format!("Tracker menu-bar control is unavailable: {error}"));
+            }
+            if lock(&self.inner.config).nudges_enabled {
+                self.request_notification_permission();
+            }
+            self.start()?;
         }
-        self.start()
+        Ok(())
     }
 
     pub fn start(&self) -> Result<(), String> {
+        if !lock(&self.inner.config).enabled {
+            return Ok(());
+        }
         let (stop_tx, stop_rx) = mpsc::channel();
         {
             let mut worker = lock(&self.inner.worker);
@@ -156,15 +253,16 @@ impl TrackerRuntime {
         Ok(())
     }
 
+    fn start_with_diagnostic(&self) -> Result<(), String> {
+        self.start().map_err(|error| {
+            self.set_diagnostic(format!("Tracker could not start: {error}"));
+            error
+        })
+    }
+
     pub fn shutdown(&self) -> Result<(), String> {
-        let worker = lock(&self.inner.worker).take();
-        if let Some(worker) = worker {
-            let _ = worker.stop.send(());
-            worker
-                .join
-                .join()
-                .map_err(|_| "Tracker runtime worker panicked during shutdown.".to_string())?;
-        }
+        self.inner.sampling_allowed.store(false, Ordering::Release);
+        self.stop_worker()?;
         let now = now_ms();
         {
             let store = lock(&self.inner.store);
@@ -177,13 +275,29 @@ impl TrackerRuntime {
         Ok(())
     }
 
+    fn stop_worker(&self) -> Result<(), String> {
+        let worker = lock(&self.inner.worker).take();
+        if let Some(worker) = worker {
+            let _ = worker.stop.send(());
+            worker
+                .join
+                .join()
+                .map_err(|_| "Tracker runtime worker panicked during shutdown.".to_string())?;
+        }
+        Ok(())
+    }
+
     pub fn status(&self) -> Result<TrackerStatus, String> {
         let config = lock(&self.inner.config).clone();
-        let permissions = platform::permission_status(&config);
+        let mut permissions = platform::permission_status(&config);
+        permissions.notifications = self.notification_permission();
         let now = now_ms();
-        let state = lock(&self.inner.runtime_state).clone();
         let diagnostic = lock(&self.inner.diagnostic).clone();
+        let day_start = local_day_start_ms(now, &config.timezone)?;
         let store = lock(&self.inner.store);
+        // Runtime mutations persist while holding the store and then update
+        // runtime_state. Preserve that ordering here as well.
+        let state = lock(&self.inner.runtime_state).clone();
         let current = store.current_block()?;
         let mode = if !config.enabled {
             TrackerMode::Disabled
@@ -210,8 +324,7 @@ impl TrackerRuntime {
                 .filter(|end| *end > now)
                 .map(|end| (end - now + 999) / 1000),
             queued_classifications: store.queued_classification_count()?,
-            today_cost_usd: store
-                .ai_cost_since(local_day_start_ms(now, &lock(&self.inner.config).timezone)?)?,
+            today_cost_usd: store.ai_cost_since(day_start)?,
             launch_at_login_active: self.autostart_active(),
             autostart_diagnostic: lock(&self.inner.autostart_diagnostic).clone(),
             diagnostic,
@@ -221,11 +334,25 @@ impl TrackerRuntime {
 
     pub fn update_config(&self, config: TrackerConfig) -> Result<TrackerStatus, String> {
         let previous = lock(&self.inner.config).clone();
-        let config = {
-            let store = lock(&self.inner.store);
-            store.save_config(&config)?
+        let config = config.with_system_timezone();
+        let should_sample = config.enabled && config.armed;
+        if !should_sample {
+            self.inner.sampling_allowed.store(false, Ordering::Release);
+        }
+        let config = match lock(&self.inner.store).save_config(&config) {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.inner
+                    .sampling_allowed
+                    .store(previous.enabled && previous.armed, Ordering::Release);
+                return Err(error);
+            }
         };
         *lock(&self.inner.config) = config.clone();
+        self.inner
+            .sampling_allowed
+            .store(should_sample, Ordering::Release);
+        self.clear_diagnostic();
         let should_prompt_for_accessibility = config.enabled
             && config.collect_window_titles
             && (!previous.enabled || !previous.collect_window_titles)
@@ -233,15 +360,30 @@ impl TrackerRuntime {
         if should_prompt_for_accessibility {
             platform::prompt_accessibility();
         }
+        if config.enabled
+            && config.nudges_enabled
+            && (!previous.enabled || !previous.nudges_enabled)
+        {
+            self.request_notification_permission();
+        }
         self.sync_autostart();
         if previous.enabled && !config.enabled {
+            self.stop_worker()?;
+            self.clear_break_state()?;
             self.pause_at(now_ms(), "disabled")?;
             self.remove_tray();
         } else if !previous.enabled && config.enabled {
             self.recover_gap_if_needed()?;
-            self.ensure_tray()?;
+            if let Err(error) = self.ensure_tray() {
+                self.set_diagnostic(format!("Tracker menu-bar control is unavailable: {error}"));
+            }
+            self.start_with_diagnostic()?;
+        } else if config.enabled {
+            self.start_with_diagnostic()?;
+            if previous.armed && !config.armed {
+                self.pause_at(now_ms(), "paused")?;
+            }
         }
-        self.clear_diagnostic();
         self.publish();
         self.status()
     }
@@ -290,11 +432,9 @@ impl TrackerRuntime {
         &self,
         start_ms: i64,
         end_ms: i64,
-        timezone: Option<String>,
+        _timezone: Option<String>,
     ) -> Result<TrackerReport, String> {
-        let timezone = timezone
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| lock(&self.inner.config).timezone.clone());
+        let timezone = lock(&self.inner.config).timezone.clone();
         report::build_report(&lock(&self.inner.store), start_ms, end_ms, &timezone)
     }
 
@@ -349,17 +489,13 @@ impl TrackerRuntime {
     fn worker_loop(&self, stop: mpsc::Receiver<()>) {
         loop {
             let config = lock(&self.inner.config).clone();
-            let wait = if config.enabled {
-                Duration::from_secs(config.poll_interval_seconds)
-            } else {
-                Duration::from_secs(1)
-            };
-            if config.enabled {
-                if let Err(error) = self.tick(&config) {
-                    self.set_diagnostic(format!("Tracker collection is waiting to retry: {error}"));
-                }
+            if !config.enabled {
+                break;
             }
-            match stop.recv_timeout(wait) {
+            if let Err(error) = self.tick(&config) {
+                self.set_diagnostic(format!("Tracker collection is waiting to retry: {error}"));
+            }
+            match stop.recv_timeout(Duration::from_secs(config.poll_interval_seconds)) {
                 Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
@@ -382,16 +518,25 @@ impl TrackerRuntime {
             }
             self.finish_break(true)?;
         }
-        if !config.armed {
-            self.pause_at(now, "paused")?;
+        if !self.inner.sampling_allowed.load(Ordering::Acquire) {
             return Ok(());
         }
         let permissions = platform::permission_status(config);
         if permissions.accessibility_required && !permissions.accessibility {
+            self.pause_at(now, "accessibility-unavailable")?;
             return Ok(());
         }
         let context = lock(&self.inner.mimir_context).clone();
-        let observation = platform::sample(config, context.as_deref())?;
+        let observation = match platform::sample(config, context.as_deref()) {
+            Ok(observation) => observation,
+            Err(error) => {
+                self.pause_at(now, "sampling-unavailable")?;
+                return Err(error);
+            }
+        };
+        if !self.inner.sampling_allowed.load(Ordering::Acquire) {
+            return Ok(());
+        }
         let changed = {
             let store = lock(&self.inner.store);
             lock(&self.inner.engine).observe(&store, config, observation)?
@@ -434,6 +579,15 @@ impl TrackerRuntime {
         Ok(())
     }
 
+    fn clear_break_state(&self) -> Result<(), String> {
+        let store = lock(&self.inner.store);
+        let mut state = lock(&self.inner.runtime_state);
+        state.break_started_ms = None;
+        state.break_end_ms = None;
+        state.break_duration_minutes = None;
+        store.save_runtime_state(&state)
+    }
+
     fn recover_gap_if_needed(&self) -> Result<(), String> {
         let config = lock(&self.inner.config).clone();
         if !config.enabled {
@@ -444,9 +598,35 @@ impl TrackerRuntime {
             .current_block()?
             .map(|block| block.end_ms)
             .or_else(|| lock(&self.inner.runtime_state).last_shutdown_ms);
-        if let Some(last_end) = last_end.filter(|last| *last < now) {
-            let store = lock(&self.inner.store);
-            lock(&self.inner.engine).recover_off_gap(&store, last_end, now, "app-not-running")?;
+        let Some(last_end) = last_end.filter(|last| *last <= now) else {
+            return Ok(());
+        };
+        let state = lock(&self.inner.runtime_state).clone();
+        let store = lock(&self.inner.store);
+        let mut engine = lock(&self.inner.engine);
+        if let Some(break_end) = state.break_end_ms {
+            let break_minutes = state.break_duration_minutes.unwrap_or(20);
+            let break_until = break_end.min(now);
+            engine.recover_break(
+                &store,
+                last_end.min(break_until),
+                break_until,
+                break_minutes,
+            )?;
+            if break_end > now {
+                return Ok(());
+            }
+            let mut next_state = state;
+            next_state.break_started_ms = None;
+            next_state.break_end_ms = None;
+            next_state.break_duration_minutes = None;
+            store.save_runtime_state(&next_state)?;
+            *lock(&self.inner.runtime_state) = next_state;
+            if break_until < now {
+                engine.recover_off_gap(&store, break_until, now, "app-not-running")?;
+            }
+        } else if last_end < now {
+            engine.recover_off_gap(&store, last_end, now, "app-not-running")?;
         }
         Ok(())
     }
@@ -579,14 +759,16 @@ impl TrackerRuntime {
             .iter()
             .map(|job| job.key.as_str())
             .collect::<std::collections::HashSet<_>>();
-        let mut saved = 0;
+        let mut saved_keys = std::collections::HashSet::new();
         {
             let store = lock(&self.inner.store);
             for answer in batch.classifications {
                 if !valid_keys.contains(answer.key.as_str()) {
                     continue;
                 }
-                let activity = answer.activity.parse::<ActivityCategory>()?;
+                let Ok(activity) = answer.activity.parse::<ActivityCategory>() else {
+                    continue;
+                };
                 if !matches!(
                     activity,
                     ActivityCategory::Work | ActivityCategory::Leisure | ActivityCategory::Other
@@ -601,7 +783,7 @@ impl TrackerRuntime {
                     false,
                     true,
                 )?;
-                saved += 1;
+                saved_keys.insert(answer.key);
             }
             store.record_ai_usage(AiUsageRecord {
                 feature: "tracker-classification",
@@ -612,8 +794,20 @@ impl TrackerRuntime {
                 output_tokens: response.usage.output_tokens,
                 created_at_ms: now_ms(),
             })?;
+            if !saved_keys.is_empty() {
+                let unresolved = jobs
+                    .iter()
+                    .filter(|job| !saved_keys.contains(&job.key))
+                    .map(|job| job.key.clone())
+                    .collect::<Vec<_>>();
+                if !unresolved.is_empty() {
+                    let retry = now_ms()
+                        .saturating_add((config.classification_retry_seconds as i64) * 1000);
+                    store.defer_classification_jobs(&unresolved, retry)?;
+                }
+            }
         }
-        if saved == 0 {
+        if saved_keys.is_empty() {
             return Err("The model returned no usable classifications.".into());
         }
         Ok(())
@@ -635,7 +829,7 @@ impl TrackerRuntime {
 
         let session_key = format!("block:{}", current.id);
         let nudges = lock(&self.inner.store).session_nudges(&session_key)?;
-        let history_start = now.saturating_sub(6 * 60 * 60 * 1000);
+        let history_start = local_day_start_ms(now, &config.timezone)?;
         let history = lock(&self.inner.store).blocks_in_range(history_start, now)?;
         let Some(window) = eligible_nudge_window(config, now, &current, &nudges, &history)? else {
             return Ok(());
@@ -775,6 +969,31 @@ impl TrackerRuntime {
         }
     }
 
+    fn notification_permission(&self) -> Option<String> {
+        lock(&self.inner.app).as_ref().and_then(|app| {
+            app.notification()
+                .permission_state()
+                .ok()
+                .map(|state| state.to_string())
+        })
+    }
+
+    fn request_notification_permission(&self) {
+        let Some(app) = lock(&self.inner.app).clone() else {
+            return;
+        };
+        match app.notification().request_permission() {
+            Ok(tauri::plugin::PermissionState::Denied) => self.set_diagnostic(
+                "Tracker nudges are enabled, but notifications are denied in system settings."
+                    .into(),
+            ),
+            Ok(_) => {}
+            Err(error) => self.set_diagnostic(format!(
+                "Tracker could not check notification permission: {error}"
+            )),
+        }
+    }
+
     fn sync_autostart(&self) {
         use tauri_plugin_autostart::ManagerExt;
 
@@ -857,14 +1076,19 @@ impl TrackerRuntime {
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "tracker-open" => open_tracker(app),
                 "tracker-toggle" => {
-                    let runtime = app.state::<TrackerRuntime>();
+                    let state = app.state::<TrackerRuntimeState>();
+                    let Ok(runtime) = state.runtime() else {
+                        return;
+                    };
                     let armed = lock(&runtime.inner.config).armed;
                     if let Err(error) = runtime.set_armed(!armed) {
                         log::error!("Could not toggle Tracker from the menu bar: {error}");
                     }
                 }
                 "tracker-break" => {
-                    if let Err(error) = app.state::<TrackerRuntime>().start_break(20) {
+                    let state = app.state::<TrackerRuntimeState>();
+                    let result = state.runtime().and_then(|runtime| runtime.start_break(20));
+                    if let Err(error) = result {
                         log::error!("Could not start Tracker break from the menu bar: {error}");
                     }
                 }
@@ -1091,108 +1315,114 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[tauri::command]
-pub fn tracker_status(runtime: tauri::State<'_, TrackerRuntime>) -> Result<TrackerStatus, String> {
-    runtime.status()
+pub fn tracker_status(
+    state: tauri::State<'_, TrackerRuntimeState>,
+) -> Result<TrackerStatus, String> {
+    state.status()
 }
 
 #[tauri::command]
 pub fn tracker_config_update(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     config: TrackerConfig,
 ) -> Result<TrackerStatus, String> {
-    runtime.update_config(config)
+    state.runtime()?.update_config(config)
 }
 
 #[tauri::command]
 pub fn tracker_set_enabled(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     enabled: bool,
 ) -> Result<TrackerStatus, String> {
-    runtime.set_enabled(enabled)
+    state.runtime()?.set_enabled(enabled)
 }
 
 #[tauri::command]
 pub fn tracker_set_armed(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     armed: bool,
 ) -> Result<TrackerStatus, String> {
-    runtime.set_armed(armed)
+    state.runtime()?.set_armed(armed)
 }
 
 #[tauri::command]
 pub fn tracker_start_break(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     minutes: u64,
 ) -> Result<TrackerStatus, String> {
-    runtime.start_break(minutes)
+    state.runtime()?.start_break(minutes)
 }
 
 #[tauri::command]
 pub fn tracker_end_break(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
 ) -> Result<TrackerStatus, String> {
-    runtime.end_break()
+    state.runtime()?.end_break()
 }
 
 #[tauri::command]
 pub fn tracker_query(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     query: TrackerQuery,
 ) -> Result<ActivityPage, String> {
-    runtime.query(query)
+    state.runtime()?.query(query)
 }
 
 #[tauri::command]
 pub fn tracker_report(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     start_ms: i64,
     end_ms: i64,
     timezone: Option<String>,
 ) -> Result<TrackerReport, String> {
-    runtime.report(start_ms, end_ms, timezone)
+    state.runtime()?.report(start_ms, end_ms, timezone)
 }
 
 #[tauri::command]
 pub fn tracker_classifications(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
 ) -> Result<Vec<Classification>, String> {
-    runtime.classifications()
+    state.runtime()?.classifications()
 }
 
 #[tauri::command]
 pub fn tracker_classification_update(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     update: ClassificationUpdate,
 ) -> Result<Classification, String> {
-    runtime.update_classification(update)
+    state.runtime()?.update_classification(update)
 }
 
 #[tauri::command]
 pub fn tracker_import_preview(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     request: ArgusImportRequest,
 ) -> Result<ImportPreview, String> {
-    runtime.import_preview(request)
+    state.runtime()?.import_preview(request)
 }
 
 #[tauri::command]
 pub fn tracker_import_argus(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
     request: ArgusImportRequest,
 ) -> Result<ImportReport, String> {
-    runtime.import_argus(request)
+    state.runtime()?.import_argus(request)
 }
 
 #[tauri::command]
 pub fn tracker_accessibility_request(
-    runtime: tauri::State<'_, TrackerRuntime>,
+    state: tauri::State<'_, TrackerRuntimeState>,
 ) -> Result<TrackerStatus, String> {
-    runtime.request_accessibility()
+    state.runtime()?.request_accessibility()
 }
 
 #[tauri::command]
-pub fn tracker_context_update(runtime: tauri::State<'_, TrackerRuntime>, context: Option<String>) {
-    runtime.set_mimir_context(context);
+pub fn tracker_context_update(
+    state: tauri::State<'_, TrackerRuntimeState>,
+    context: Option<String>,
+) -> Result<(), String> {
+    state.runtime()?.set_mimir_context(context);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1218,6 +1448,62 @@ mod tests {
         assert!(status.current.is_none());
         assert!(runtime.start_break(20).is_err());
         assert!(runtime.request_accessibility().is_err());
+        runtime.start().unwrap();
+        assert!(lock(&runtime.inner.worker).is_none());
+    }
+
+    #[test]
+    fn unavailable_tracker_storage_does_not_prevent_managed_state_construction() {
+        let directory = TempDir::new().unwrap();
+        let blocker = directory.path().join("not-a-directory");
+        std::fs::write(&blocker, b"keep me").unwrap();
+
+        let state = TrackerRuntimeState::new(TrackerRuntimeConfig {
+            database_path: blocker.join("tracker.sqlite"),
+        });
+        let status = state.status().unwrap();
+
+        assert!(state.runtime.is_none());
+        assert!(!state.background_launch_enabled());
+        assert_eq!(status.mode, TrackerMode::Error);
+        assert!(!status.config.enabled);
+        assert!(status
+            .diagnostic
+            .as_deref()
+            .is_some_and(|value| value.contains("Mimir can continue")));
+        assert_eq!(std::fs::read(&blocker).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn newer_tracker_schema_stays_untouched_while_mimir_can_continue() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("tracker.sqlite");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .pragma_update(
+                None,
+                "user_version",
+                super::super::model::TRACKER_SCHEMA_VERSION + 1,
+            )
+            .unwrap();
+        drop(connection);
+
+        let state = TrackerRuntimeState::new(TrackerRuntimeConfig {
+            database_path: path.clone(),
+        });
+
+        assert!(state.runtime.is_none());
+        assert!(state
+            .status()
+            .unwrap()
+            .diagnostic
+            .unwrap()
+            .contains("newer"));
+        let version = rusqlite::Connection::open(path)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap();
+        assert_eq!(version, super::super::model::TRACKER_SCHEMA_VERSION + 1);
     }
 
     #[test]
@@ -1234,6 +1520,56 @@ mod tests {
         })
         .unwrap();
         assert!(lock(&reopened.inner.runtime_state).break_end_ms.is_some());
+    }
+
+    #[test]
+    fn active_break_gap_reopens_as_break_instead_of_off() {
+        let directory = TempDir::new().unwrap();
+        let path = directory.path().join("tracker.sqlite");
+        let now = now_ms();
+        {
+            let store = TrackerStore::open(&path).unwrap();
+            store
+                .save_config(&TrackerConfig {
+                    enabled: true,
+                    timezone: "UTC".into(),
+                    ..TrackerConfig::default()
+                })
+                .unwrap();
+            store
+                .insert_block(super::super::store::NewActivityBlock {
+                    start_ms: now - 120_000,
+                    end_ms: now - 60_000,
+                    activity: ActivityCategory::Break,
+                    subcategory: Some("20min break"),
+                    app_name: None,
+                    bundle_id: None,
+                    domain: None,
+                    window_title: None,
+                    classification_key: None,
+                    source: "manual",
+                    off_reason: None,
+                })
+                .unwrap();
+            store
+                .save_runtime_state(&RuntimeState {
+                    break_started_ms: Some(now - 120_000),
+                    break_end_ms: Some(now + 600_000),
+                    break_duration_minutes: Some(20),
+                    last_shutdown_ms: Some(now - 60_000),
+                })
+                .unwrap();
+        }
+        let runtime = TrackerRuntime::new(TrackerRuntimeConfig {
+            database_path: path,
+        })
+        .unwrap();
+        runtime.recover_gap_if_needed().unwrap();
+
+        let current = lock(&runtime.inner.store).current_block().unwrap().unwrap();
+        assert_eq!(current.activity, ActivityCategory::Break);
+        assert_eq!(current.source, "recovery");
+        assert!(current.end_ms >= now);
     }
 
     #[test]

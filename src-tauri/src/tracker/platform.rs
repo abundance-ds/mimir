@@ -344,6 +344,98 @@ fn browser_domain(app_name: &str) -> Result<Option<String>, String> {
 
 #[cfg(target_os = "macos")]
 fn idle_seconds() -> u64 {
+    idle_seconds_iokit().unwrap_or_else(idle_seconds_command)
+}
+
+#[cfg(target_os = "macos")]
+fn idle_seconds_iokit() -> Option<u64> {
+    use std::ffi::{c_char, c_void};
+
+    type CfRef = *const c_void;
+
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
+        fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> u32;
+        fn IORegistryEntryCreateCFProperty(
+            entry: u32,
+            key: CfRef,
+            allocator: CfRef,
+            options: u32,
+        ) -> CfRef;
+        fn IOObjectRelease(object: u32) -> i32;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFStringCreateWithCString(
+            allocator: CfRef,
+            value: *const c_char,
+            encoding: u32,
+        ) -> CfRef;
+        fn CFNumberGetValue(number: CfRef, number_type: i32, value: *mut c_void) -> bool;
+        fn CFGetTypeID(value: CfRef) -> usize;
+        fn CFNumberGetTypeID() -> usize;
+        fn CFRelease(value: CfRef);
+    }
+
+    struct OwnedIo(u32);
+    impl Drop for OwnedIo {
+        fn drop(&mut self) {
+            // SAFETY: the handle was returned by IOKit with one owned reference.
+            unsafe { IOObjectRelease(self.0) };
+        }
+    }
+    struct OwnedCf(CfRef);
+    impl Drop for OwnedCf {
+        fn drop(&mut self) {
+            // SAFETY: the value came from a Core Foundation create/copy rule.
+            unsafe { CFRelease(self.0) };
+        }
+    }
+
+    const UTF8: u32 = 0x0800_0100;
+    const CF_NUMBER_SINT64: i32 = 4;
+    // SAFETY: both C strings are static and NUL-terminated. IOKit consumes the
+    // matching dictionary, while the returned service and created CF values are
+    // released exactly once by the guards above.
+    unsafe {
+        let matching = IOServiceMatching(c"IOHIDSystem".as_ptr());
+        if matching.is_null() {
+            return None;
+        }
+        let service = IOServiceGetMatchingService(0, matching);
+        if service == 0 {
+            return None;
+        }
+        let service = OwnedIo(service);
+        let key = CFStringCreateWithCString(std::ptr::null(), c"HIDIdleTime".as_ptr(), UTF8);
+        if key.is_null() {
+            return None;
+        }
+        let key = OwnedCf(key);
+        let property = IORegistryEntryCreateCFProperty(service.0, key.0, std::ptr::null(), 0);
+        if property.is_null() {
+            return None;
+        }
+        let property = OwnedCf(property);
+        if CFGetTypeID(property.0) != CFNumberGetTypeID() {
+            return None;
+        }
+        let mut nanoseconds = 0_i64;
+        if !CFNumberGetValue(
+            property.0,
+            CF_NUMBER_SINT64,
+            std::ptr::addr_of_mut!(nanoseconds).cast(),
+        ) || nanoseconds < 0
+        {
+            return None;
+        }
+        Some(nanoseconds as u64 / 1_000_000_000)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn idle_seconds_command() -> u64 {
     let output = run_with_timeout(
         "/usr/sbin/ioreg",
         &["-c", "IOHIDSystem"],
@@ -368,12 +460,38 @@ fn run_with_timeout(
 ) -> Result<String, String> {
     use std::io::Read;
 
+    fn drain(
+        pipe: impl Read + Send + 'static,
+    ) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let mut pipe = pipe;
+            pipe.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
+    }
+
+    fn finish(
+        reader: Option<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>,
+        stream: &str,
+        program: &str,
+    ) -> Result<String, String> {
+        let bytes = reader
+            .ok_or_else(|| format!("Could not capture {program} {stream}."))?
+            .join()
+            .map_err(|_| format!("The {program} {stream} reader panicked."))?
+            .map_err(|error| format!("Could not read {program} {stream}: {error}"))?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
     let mut child = std::process::Command::new(program)
         .args(arguments)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start {}: {error}", program))?;
+    let mut stdout_reader = child.stdout.take().map(drain);
+    let mut stderr_reader = child.stderr.take().map(drain);
     let started = std::time::Instant::now();
     loop {
         match child
@@ -381,17 +499,10 @@ fn run_with_timeout(
             .map_err(|error| format!("Could not poll {}: {error}", program))?
         {
             Some(status) => {
-                let mut stdout = String::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    pipe.read_to_string(&mut stdout)
-                        .map_err(|error| format!("Could not read {} output: {error}", program))?;
-                }
+                let stdout = finish(stdout_reader.take(), "output", program)?;
+                let stderr = finish(stderr_reader.take(), "error output", program)?;
                 if status.success() {
                     return Ok(stdout);
-                }
-                let mut stderr = String::new();
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_string(&mut stderr);
                 }
                 return Err(format!(
                     "{} failed: {}",
@@ -402,6 +513,8 @@ fn run_with_timeout(
             None if started.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
+                let _ = finish(stdout_reader.take(), "output", program);
+                let _ = finish(stderr_reader.take(), "error output", program);
                 return Err(format!("{} timed out.", program));
             }
             None => std::thread::sleep(std::time::Duration::from_millis(20)),

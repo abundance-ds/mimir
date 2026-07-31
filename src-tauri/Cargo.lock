@@ -2798,6 +2798,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "git2",
+ "iana-time-zone",
  "ignore",
  "irc-proto",
  "keyring",

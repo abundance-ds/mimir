@@ -821,6 +821,7 @@ fn tracker_block() -> TrackerActivityBlock {
 fn tracker_status() -> TrackerStatus {
     let config = TrackerConfig {
         enabled: true,
+        timezone: "Europe/Berlin".into(),
         ..TrackerConfig::default()
     };
     TrackerStatus {

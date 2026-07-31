@@ -1,10 +1,10 @@
 <template>
   <div data-tracker-overview>
-    <section class="grid border-b border-rule sm:grid-cols-2 xl:grid-cols-4">
+    <section class="tracker-metrics grid border-b border-rule">
       <article
         v-for="metric in metrics"
         :key="metric.label"
-        class="min-h-[74px] border-b border-rule-light px-3 py-2 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:border-b-0 xl:[&:nth-child(2n)]:border-r xl:last:border-r-0"
+        class="tracker-metric min-h-[74px] border-b border-rule-light px-3 py-2"
       >
         <p class="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">{{ metric.label }}</p>
         <p class="mt-1 font-mono text-[18px] font-semibold tabular-nums text-ink">{{ metric.value }}</p>
@@ -12,8 +12,8 @@
       </article>
     </section>
 
-    <section class="grid border-b border-rule xl:grid-cols-[minmax(0,1.35fr)_minmax(260px,.65fr)]">
-      <div class="border-b border-rule xl:border-b-0 xl:border-r">
+    <section class="tracker-shape grid border-b border-rule">
+      <div class="tracker-shape-days border-b border-rule">
         <header class="flex h-8 items-center border-b border-rule-light px-3">
           <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Day shape</h2>
           <span class="ml-auto font-mono text-[9px] text-ink-4">{{ report.days.length }} day{{ report.days.length === 1 ? '' : 's' }}</span>
@@ -25,7 +25,7 @@
             class="grid grid-cols-[76px_minmax(0,1fr)_54px] items-center gap-2 border-b border-rule-light px-3 py-2 last:border-b-0"
           >
             <span class="font-mono text-[10px] text-ink-3">{{ compactDate(day.date) }}</span>
-            <div class="flex h-4 border border-rule-light bg-chrome-high" :aria-label="dayLabel(day)">
+            <div class="day-shape flex h-4 items-end border border-rule-light bg-chrome-high" :aria-label="dayLabel(day)">
               <span
                 v-for="part in dayParts(day)"
                 :key="part.category"
@@ -58,8 +58,8 @@
       </div>
     </section>
 
-    <section class="grid border-b border-rule lg:grid-cols-2">
-      <div class="border-b border-rule lg:border-b-0 lg:border-r">
+    <section class="tracker-rankings grid border-b border-rule">
+      <div class="tracker-rankings-apps border-b border-rule">
         <header class="flex h-8 items-center border-b border-rule-light px-3">
           <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Top applications</h2>
         </header>
@@ -78,8 +78,8 @@
         <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Weekly rhythm</h2>
         <span class="ml-auto font-mono text-[9px] text-ink-4">Mon–Sun · local hour</span>
       </header>
-      <div class="overflow-x-auto px-3 py-3">
-        <div class="grid min-w-[620px] grid-cols-[28px_repeat(24,minmax(16px,1fr))] gap-px">
+      <div class="px-3 py-3">
+        <div class="heatmap-grid grid gap-px">
           <span />
           <span v-for="hour in 24" :key="`h-${hour}`" class="text-center font-mono text-[9px] text-ink-4">
             {{ hour % 3 === 1 ? hour - 1 : '' }}
@@ -231,6 +231,43 @@ function slug(value) {
 </script>
 
 <style scoped>
+.tracker-metrics { grid-template-columns: minmax(0, 1fr); }
+.tracker-metric:last-child { border-bottom-width: 0; }
+.tracker-shape { grid-template-columns: minmax(0, 1fr); }
+.tracker-rankings { grid-template-columns: minmax(0, 1fr); }
+.heatmap-grid { grid-template-columns: 24px repeat(24, minmax(9px, 1fr)); }
+.day-part { min-width: 1px; }
+.day-part-work { height: 100%; }
+.day-part-leisure { height: 75%; }
+.day-part-other { height: 55%; }
+.day-part-break, .day-part-unknown { height: 100%; }
+.day-part-afk { height: 30%; }
+
+@container tracker (min-width: 420px) {
+  .tracker-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-metric:nth-child(odd) { border-right-width: 1px; }
+  .tracker-metric:nth-last-child(-n + 2) { border-bottom-width: 0; }
+}
+
+@container tracker (min-width: 560px) {
+  .tracker-rankings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-rankings-apps {
+    border-right-width: 1px;
+    border-bottom-width: 0;
+  }
+}
+
+@container tracker (min-width: 720px) {
+  .tracker-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tracker-metric { border-right-width: 1px; border-bottom-width: 0; }
+  .tracker-metric:last-child { border-right-width: 0; }
+  .tracker-shape { grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr); }
+  .tracker-shape-days {
+    border-right-width: 1px;
+    border-bottom-width: 0;
+  }
+}
+
 .day-part-work, .category-mark-work { background: var(--color-accent); }
 .day-part-leisure, .category-mark-leisure { background: var(--color-ink-2); }
 .day-part-other, .category-mark-other { background: var(--color-add); }

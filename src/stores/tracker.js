@@ -46,7 +46,7 @@ export const DEFAULT_TRACKER_CONFIG = Object.freeze({
   earnedBreakMinutes: 20,
   endOfDayMinutes: 1020,
   endOfDayWorkMinutes: 300,
-  timezone: 'Europe/Berlin',
+  timezone: systemTimezone(),
 })
 
 export const DEFAULT_TRACKER_STATUS = Object.freeze({
@@ -192,6 +192,10 @@ export const useTrackerStore = defineStore('tracker', () => {
     initialized.value = false
   }
 
+  function clearError() {
+    error.value = ''
+  }
+
   return {
     status,
     initialized,
@@ -216,6 +220,7 @@ export const useTrackerStore = defineStore('tracker', () => {
     previewImport: previewArgusImport,
     importArgus,
     setContext: updateTrackerContext,
+    clearError,
     dispose,
   }
 })
@@ -230,4 +235,8 @@ function cloneStatus(status) {
 
 function message(error) {
   return error instanceof Error ? error.message : String(error || 'Tracker is unavailable.')
+}
+
+function systemTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }

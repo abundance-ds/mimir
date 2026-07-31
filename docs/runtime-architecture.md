@@ -45,6 +45,13 @@ exist before the renderer, but `src/services/toolRuntime.js` starts the socket
 only after its relay listeners exist. This prevents an accepted tool call from
 arriving before the renderer can handle it.
 
+Tracker is an optional bootstrap boundary. Failure to open its database,
+including a deliberately unsupported newer schema, creates a managed
+unavailable state instead of aborting `run()`. Tracker commands then expose a
+disabled error projection or reject mutations, while the rest of Mimir starts
+normally. Tracker installation errors are logged and projected but never
+returned from Tauri setup. A disabled Tracker owns no polling thread.
+
 Tauri state construction must remain independent of renderer mount/HMR.
 Window destruction calls `ToolRuntime::disconnect_window`; destruction of
 `main` additionally closes every tool-server lease.

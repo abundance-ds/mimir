@@ -61,11 +61,11 @@
               <button
                 type="button"
                 data-tracker-classification-save
-                :disabled="saving === rule.key || !changed(rule)"
+                :disabled="saving.has(rule.key) || !changed(rule)"
                 class="h-7 w-full border border-accent/40 px-1.5 text-[9px] font-semibold text-accent hover:bg-accent-soft disabled:border-rule disabled:text-ink-4 disabled:opacity-50"
                 @click="save(rule)"
               >
-                {{ saving === rule.key ? '…' : 'Save' }}
+                {{ saving.has(rule.key) ? '…' : 'Save' }}
               </button>
             </td>
           </tr>
@@ -98,7 +98,7 @@ const emit = defineEmits(['saved'])
 const categories = ['Work', 'Leisure', 'Other', 'UNKNOWN']
 const query = ref('')
 const drafts = reactive({})
-const saving = ref('')
+const saving = reactive(new Set())
 const error = ref('')
 const filtered = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -137,8 +137,8 @@ function changed(rule) {
 }
 
 async function save(rule) {
-  if (!changed(rule) || saving.value) return
-  saving.value = rule.key
+  if (!changed(rule) || saving.has(rule.key)) return
+  saving.add(rule.key)
   error.value = ''
   const value = draft(rule)
   try {
@@ -153,7 +153,7 @@ async function save(rule) {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
-    saving.value = ''
+    saving.delete(rule.key)
   }
 }
 </script>

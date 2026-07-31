@@ -523,6 +523,7 @@ import {
   IconTerminal2,
   IconTopologyStar3,
   IconClockPlay,
+  IconTimeline,
   IconSparkles,
   IconPencil,
   IconPlayerStop,
@@ -686,7 +687,7 @@ const icons = {
   today: IconFocus2,
   graph: IconTopologyStar3,
   scribe: IconMicrophone,
-  tracker: IconClockPlay,
+  tracker: IconTimeline,
   routines: IconClockPlay,
   default: IconSparkles,
 }

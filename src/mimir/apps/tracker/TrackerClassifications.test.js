@@ -57,4 +57,31 @@ describe('TrackerClassifications', () => {
     expect(wrapper.emitted('saved')).toHaveLength(1)
     wrapper.unmount()
   })
+
+  it('allows independent rules to save concurrently', async () => {
+    const pending = []
+    const saveRule = vi.fn().mockImplementation(() => new Promise(resolve => pending.push(resolve)))
+    const wrapper = mount(TrackerClassifications, {
+      props: {
+        saveRule,
+        rules: [
+          { key: 'App A', activity: 'Work', subcategory: 'Writing', classifiedBy: 'ai', manual: false },
+          { key: 'App B', activity: 'Work', subcategory: 'Coding', classifiedBy: 'ai', manual: false },
+        ],
+      },
+    })
+    const first = wrapper.get('[data-tracker-classification="App A"]')
+    const second = wrapper.get('[data-tracker-classification="App B"]')
+    await first.get('input').setValue('Research')
+    await second.get('input').setValue('Planning')
+
+    void first.get('[data-tracker-classification-save]').trigger('click')
+    void second.get('[data-tracker-classification-save]').trigger('click')
+    await Promise.resolve()
+
+    expect(saveRule).toHaveBeenCalledTimes(2)
+    pending.forEach(resolve => resolve({}))
+    await flushPromises()
+    wrapper.unmount()
+  })
 })

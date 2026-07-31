@@ -905,8 +905,8 @@ pub fn run() {
         activity_supervisor.clone(),
     )
     .expect("routine runtime must initialize");
-    let tracker_runtime = tracker::TrackerRuntime::new(tracker::TrackerRuntimeConfig::default())
-        .expect("tracker runtime must initialize");
+    let tracker_runtime =
+        tracker::TrackerRuntimeState::new(tracker::TrackerRuntimeConfig::default());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -955,8 +955,11 @@ pub fn run() {
                 )
                 .into());
             }
-            let background_launch =
-                std::env::args().any(|argument| argument == "--mimir-tracker-background");
+            let background_launch = std::env::args()
+                .any(|argument| argument == "--mimir-tracker-background")
+                && app
+                    .state::<tracker::TrackerRuntimeState>()
+                    .background_launch_enabled();
             create_main_window(app, !background_launch)?;
             let supervisor = app.state::<activities::ActivitySupervisor>();
             activity_commands::TauriActivitySink::install(app.handle(), &supervisor);
@@ -977,9 +980,18 @@ pub fn run() {
                 )
                 .into());
             }
-            app.state::<tracker::TrackerRuntime>()
+            if let Err(error) = app
+                .state::<tracker::TrackerRuntimeState>()
                 .install(app.handle())
-                .map_err(std::io::Error::other)?;
+            {
+                log::error!(
+                    "Tracker could not install; Mimir will continue without collection: {error}"
+                );
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
+            }
             app.state::<tool_runtime::ToolRuntime>()
                 .initialize(app.handle())
                 .map_err(std::io::Error::other)?;
@@ -1300,7 +1312,10 @@ pub fn run() {
             }
             tauri::RunEvent::Exit => {
                 app_handle.state::<chat::ChatRuntime>().disconnect();
-                if let Err(error) = app_handle.state::<tracker::TrackerRuntime>().shutdown() {
+                if let Err(error) = app_handle
+                    .state::<tracker::TrackerRuntimeState>()
+                    .shutdown()
+                {
                     log::error!("Could not flush Tracker before exit: {error}");
                 }
                 app_handle

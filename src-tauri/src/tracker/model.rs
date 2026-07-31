@@ -138,7 +138,7 @@ impl Default for TrackerConfig {
             earned_break_minutes: 20,
             end_of_day_minutes: 17 * 60,
             end_of_day_work_minutes: 300,
-            timezone: "Europe/Berlin".into(),
+            timezone: system_timezone(),
         }
     }
 }
@@ -167,10 +167,22 @@ impl TrackerConfig {
             self.nudge_model = "auto".into();
         }
         if self.timezone.trim().is_empty() || self.timezone.parse::<chrono_tz::Tz>().is_err() {
-            self.timezone = "UTC".into();
+            self.timezone = system_timezone();
         }
         self
     }
+
+    pub fn with_system_timezone(mut self) -> Self {
+        self.timezone = system_timezone();
+        self
+    }
+}
+
+pub fn system_timezone() -> String {
+    iana_time_zone::get_timezone()
+        .ok()
+        .filter(|value| value.parse::<chrono_tz::Tz>().is_ok())
+        .unwrap_or_else(|| "UTC".into())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -415,4 +427,19 @@ pub struct RuntimeState {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracker_defaults_to_a_valid_system_timezone() {
+        let timezone = TrackerConfig::default().timezone;
+        assert!(timezone.parse::<chrono_tz::Tz>().is_ok());
+        assert_eq!(
+            TrackerConfig::default().with_system_timezone().timezone,
+            timezone
+        );
+    }
 }

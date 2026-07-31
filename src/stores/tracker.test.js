@@ -92,4 +92,13 @@ describe('tracker store', () => {
       pollIntervalSeconds: 15,
     }))
   })
+
+  it('lets a surface dismiss the authoritative store error', () => {
+    const tracker = useTrackerStore()
+    tracker.error = 'temporary failure'
+
+    tracker.clearError()
+
+    expect(tracker.error).toBe('')
+  })
 })

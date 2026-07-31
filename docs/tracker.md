@@ -72,6 +72,12 @@ log remains the inspectable evidence layer, and Classifications is the manual
 correction surface. All geometry is SVG/CSS using Mimir theme tokens; no
 localhost server or bundled Argus dashboard is involved.
 
+Tracker layout responds to the Activity pane's named CSS container, never to
+window breakpoints. The ordinary 336–560px pane is the primary layout: metrics,
+inspectors, report columns, and heatmap density widen only when that container
+does. Timeline SVG coordinates use percentages without a stretching viewBox,
+so glyphs keep their native proportions at every pane width.
+
 ## Evidence collection and privacy
 
 Tracker stores only evidence needed to reproduce the timeline:
@@ -81,7 +87,7 @@ Tracker stores only evidence needed to reproduce the timeline:
 | frontmost app and bundle id | on while enabled | native `NSWorkspace`; no Accessibility permission |
 | window title | on while enabled | native macOS Accessibility API query; capped at 512 characters |
 | browser domain | off | per-browser AppleScript Automation; URL is parsed immediately and only the normalized host is retained |
-| input idle time | on while enabled | `IOHIDSystem` idle duration; converted to an AFK boundary |
+| input idle time | on while enabled | direct `IOHIDSystem`/IOKit idle duration, with a bounded `ioreg` fallback; converted to an AFK boundary |
 | Mimir pane context | on for Mimir itself | renderer sends only a bounded context label such as editor, terminal, or agent |
 | screenshot or screen pixels | never | not implemented or requested |
 
@@ -128,8 +134,11 @@ transport, and keychain-backed credentials. `auto` uses Mimir's configured
 model policy; a concrete stored id pins that model. The prompt receives
 app/bundle and optional domain, plus title only after the separate opt-in.
 Usage and estimated cost are recorded in Tracker's database, retries are
-durable, and the combined classification/nudge daily cost cap is enforced
-before a new call. Manual corrections supersede both imported and AI rules.
+durable and stop after five failed attempts, and the combined
+classification/nudge daily cost cap is enforced before a new call. A malformed
+answer defers only unresolved keys rather than discarding usable answers.
+Manual corrections—including an intentional manual `UNKNOWN`—supersede both
+imported and AI rules and remove matching queued work.
 
 ## Nudges and breaks
 
@@ -143,7 +152,9 @@ or Other when `nudgeOther` is explicitly enabled. The state machine enforces:
 - no end-of-day nudge after the configured daily Work threshold;
 - the same daily AI cost cap as classification.
 
-Mimir asks the selected model for a short, non-judgmental notification. Missing
+Mimir requests notification permission lazily when enabled and surfaces the
+reported permission state in Settings. It asks the selected model for a short,
+non-judgmental notification. Missing
 credentials, provider failure, an invalid response, or a reached cost cap uses
 a local bounded fallback message instead. Nudge session/time/source records are
 durable so restarting the renderer cannot reset the maximum.
@@ -170,8 +181,26 @@ defaults. Invalid values recover to defaults with a diagnostic. A database
 that cannot be opened or passes neither schema initialization nor integrity
 handling is moved, with its WAL/SHM sidecars, to a
 `tracker.corrupt-<timestamp>.sqlite` sibling before a clean database is
-created. A database from a newer schema version fails closed instead of being
-overwritten. Normal shutdown closes the live block and runs a WAL checkpoint.
+created and the recovery is surfaced diagnostically. A database from a newer
+schema version fails closed instead of being overwritten. An unrecoverable open
+or schema failure leaves Tracker unavailable with a visible diagnostic but does
+not abort Mimir startup; a background launch that cannot initialize Tracker
+shows the main window so the failure is recoverable. Normal shutdown closes the
+live block and runs a WAL checkpoint.
+
+Activity-log filters, counts, ordering, limits, and offsets execute in SQLite;
+the complete range is never materialized merely to return one page. Reports
+aggregate through a streaming row visitor instead of allocating the requested
+history. The Day timeline follows the bounded native page contract until every
+page is loaded, so a busy day cannot silently lose its earliest blocks.
+Historical reports refresh when opened, navigated, or explicitly requested;
+live sampling revisions refresh only Day and Classifications.
+
+Tracker derives its reporting and nudge timezone from the operating system at
+native startup. Settings presents that resolved timezone as information, not an
+editable IANA identifier, keeping renderer day bounds and native report buckets
+on the same clock. The Argus import IPC retains an explicit timezone solely for
+interpreting legacy timestamps.
 
 Disabling never deletes history. To deliberately remove all Tracker data, quit
 Mimir first and remove `~/.mimir/tracker/`; this is intentionally not combined

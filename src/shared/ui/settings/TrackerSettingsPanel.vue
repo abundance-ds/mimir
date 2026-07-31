@@ -1,10 +1,10 @@
 <template>
-  <section data-tracker-settings class="border-b border-rule-light bg-surface">
-    <div class="grid gap-0 min-[560px]:grid-cols-[minmax(0,1fr)_190px]">
+  <section data-tracker-settings class="tracker-settings border-b border-rule-light bg-surface">
+    <div class="tracker-settings-runtime grid gap-0">
       <div class="px-3 py-3">
         <div class="flex items-start gap-3">
           <span
-            class="mt-1 size-2 shrink-0 rounded-full"
+            class="mt-1 size-2 shrink-0 border border-rule"
             :class="tracker.enabled ? 'bg-add' : 'bg-ink-4'"
             aria-hidden="true"
           />
@@ -69,7 +69,7 @@
         </p>
       </div>
 
-      <div class="border-t border-rule-light px-3 py-3 min-[560px]:border-l min-[560px]:border-t-0">
+      <div class="tracker-settings-runtime-side border-t border-rule-light px-3 py-3">
         <p class="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">Runtime</p>
         <p class="mt-1 font-mono text-[10px] text-ink">{{ modeLabel }}</p>
         <p v-if="tracker.enabled && config.launchAtLogin" class="mt-1 text-[9px] text-ink-4">
@@ -77,6 +77,9 @@
         </p>
         <p v-if="tracker.enabled && tracker.status.permissions.accessibilityRequired" class="mt-1 text-[9px] text-ink-4">
           Window access {{ tracker.status.permissions.accessibility ? 'granted' : 'waiting for approval' }}
+        </p>
+        <p v-if="tracker.enabled && tracker.status.permissions.notifications" class="mt-1 text-[9px] text-ink-4">
+          Notifications {{ tracker.status.permissions.notifications }}
         </p>
         <button
           v-if="tracker.enabled"
@@ -94,7 +97,7 @@
       <summary class="cursor-pointer px-3 py-2 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-3 hover:bg-chrome-mid">
         Privacy, classification, and nudges
       </summary>
-      <div class="grid border-t border-rule-light min-[620px]:grid-cols-2">
+      <div class="tracker-settings-grid grid border-t border-rule-light">
         <div class="divide-y divide-rule-light">
           <SettingToggle
             label="Launch Mimir at login"
@@ -127,25 +130,22 @@
             @update:model-value="save({ includeWindowTitlesInAi: $event })"
           />
         </div>
-        <div class="divide-y divide-rule-light border-t border-rule-light min-[620px]:border-l min-[620px]:border-t-0">
+        <div class="tracker-settings-grid-side divide-y divide-rule-light border-t border-rule-light">
           <SettingToggle
             label="Drift nudges"
             detail="Notification after the grace period, with lunch and deep-work protection."
             :model-value="config.nudgesEnabled"
             @update:model-value="save({ nudgesEnabled: $event })"
           />
-          <label class="grid grid-cols-[1fr_78px] items-center gap-3 px-3 py-2">
+          <div class="grid grid-cols-[1fr_auto] items-center gap-3 px-3 py-2" data-tracker-timezone>
             <span>
-              <span class="block text-[9px] font-semibold text-ink-2">Timezone</span>
-              <span class="mt-0.5 block text-[9px] text-ink-4">Reports, lunch, and end-of-day rules.</span>
+              <span class="block text-[9px] font-semibold text-ink-2">System timezone</span>
+              <span class="mt-0.5 block text-[9px] text-ink-4">Automatically follows this Mac for reports and nudge windows.</span>
             </span>
-            <input
-              :value="config.timezone"
-              data-tracker-timezone
-              class="h-7 border border-rule bg-surface px-1.5 font-mono text-[9px] text-ink outline-none focus:border-accent"
-              @change="save({ timezone: $event.target.value })"
-            >
-          </label>
+            <output class="max-w-[150px] truncate font-mono text-[9px] text-ink-2" :title="config.timezone">
+              {{ config.timezone }}
+            </output>
+          </div>
           <label class="grid grid-cols-[1fr_78px] items-center gap-3 px-3 py-2">
             <span>
               <span class="block text-[9px] font-semibold text-ink-2">Nudge grace</span>
@@ -158,7 +158,7 @@
               min="0"
               max="240"
               class="h-7 border border-rule bg-surface px-1.5 font-mono text-[9px] text-ink outline-none focus:border-accent"
-              @change="save({ nudgeGraceMinutes: Number($event.target.value) })"
+              @change="saveNumeric('nudgeGraceMinutes', $event, 0, 240)"
             >
           </label>
           <label class="grid grid-cols-[1fr_78px] items-center gap-3 px-3 py-2">
@@ -174,7 +174,7 @@
               max="100"
               step="0.05"
               class="h-7 border border-rule bg-surface px-1.5 font-mono text-[9px] text-ink outline-none focus:border-accent"
-              @change="save({ dailyCostCapUsd: Number($event.target.value) })"
+              @change="saveNumeric('dailyCostCapUsd', $event, 0, 100)"
             >
           </label>
         </div>
@@ -242,19 +242,29 @@ const SettingToggle = defineComponent({
   },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
-    return () => h('label', {
-      class: 'flex cursor-pointer items-start gap-3 px-3 py-2 hover:bg-chrome-mid',
+    return () => h('button', {
+      type: 'button',
+      role: 'switch',
+      'aria-checked': props.modelValue,
+      class: 'flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
+      onClick: () => emit('update:modelValue', !props.modelValue),
     }, [
       h('span', { class: 'min-w-0 flex-1' }, [
         h('span', { class: 'block text-[9px] font-semibold text-ink-2' }, props.label),
         h('span', { class: 'mt-0.5 block text-[9px] leading-relaxed text-ink-4' }, props.detail),
       ]),
-      h('input', {
-        type: 'checkbox',
-        checked: props.modelValue,
-        class: 'mt-0.5 size-3.5 accent-accent',
-        onChange: event => emit('update:modelValue', event.target.checked),
-      }),
+      h('span', {
+        class: [
+          'relative mt-0.5 h-5 w-9 shrink-0 border bg-chrome-mid',
+          props.modelValue ? 'border-accent bg-accent-soft' : 'border-rule',
+        ],
+        'aria-hidden': 'true',
+      }, [h('span', {
+        class: [
+          'absolute top-[2px] size-3.5 border bg-surface',
+          props.modelValue ? 'left-[17px] border-accent' : 'left-[2px] border-rule',
+        ],
+      })]),
     ])
   },
 })
@@ -297,6 +307,16 @@ async function save(patch) {
   await act(() => tracker.updateConfig(patch))
 }
 
+async function saveNumeric(key, event, minimum, maximum) {
+  const raw = String(event.target.value || '').trim()
+  const value = Number(raw)
+  if (!raw || !Number.isFinite(value)) {
+    event.target.value = String(config.value[key])
+    return
+  }
+  await save({ [key]: Math.min(maximum, Math.max(minimum, value)) })
+}
+
 async function previewImport() {
   importBusy.value = true
   error.value = ''
@@ -337,6 +357,24 @@ function message(cause) {
 </script>
 
 <style scoped>
+.tracker-settings { container-type: inline-size; }
+
+@container (min-width: 560px) {
+  .tracker-settings-runtime { grid-template-columns: minmax(0, 1fr) 190px; }
+  .tracker-settings-runtime-side {
+    border-top-width: 0;
+    border-left-width: 1px;
+  }
+}
+
+@container (min-width: 620px) {
+  .tracker-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-settings-grid-side {
+    border-top-width: 0;
+    border-left-width: 1px;
+  }
+}
+
 button:focus-visible,
 summary:focus-visible {
   outline: 1px solid var(--color-accent);

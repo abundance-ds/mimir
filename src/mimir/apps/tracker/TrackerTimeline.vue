@@ -12,13 +12,11 @@
       </span>
     </header>
 
-    <div class="overflow-x-auto px-3 pb-3 pt-2">
+    <div class="px-3 pb-3 pt-2">
       <svg
-        class="block h-[92px] min-w-[620px] w-full"
-        viewBox="0 0 1200 92"
+        class="block h-[92px] w-full"
         role="img"
         :aria-label="`Activity timeline for ${rangeLabel}`"
-        preserveAspectRatio="none"
       >
         <defs>
           <pattern id="tracker-break-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
@@ -31,19 +29,27 @@
           <pattern id="tracker-unknown-pattern" width="7" height="7" patternUnits="userSpaceOnUse">
             <circle cx="3.5" cy="3.5" r="1" class="timeline-unknown-dot" />
           </pattern>
+          <clipPath v-for="segment in segments" :id="segment.clipId" :key="segment.clipId">
+            <rect
+              :x="percent(segment.x)"
+              :y="segment.y"
+              :width="percent(segment.width)"
+              :height="segment.height"
+            />
+          </clipPath>
         </defs>
 
-        <line x1="0" x2="1200" y1="66" y2="66" class="timeline-axis" />
+        <line x1="0" x2="100%" y1="66" y2="66" class="timeline-axis" />
         <g v-for="tick in ticks" :key="tick.position">
           <line
-            :x1="tick.position * 1200"
-            :x2="tick.position * 1200"
+            :x1="percent(tick.position)"
+            :x2="percent(tick.position)"
             y1="13"
             y2="72"
             class="timeline-tick"
           />
           <text
-            :x="tick.position * 1200"
+            :x="percent(tick.position)"
             y="87"
             :text-anchor="tick.anchor"
             class="timeline-label"
@@ -61,32 +67,36 @@
           @keydown.enter.prevent="$emit('select', segment.block)"
         >
           <rect
-            :x="segment.x"
-            y="20"
-            :width="segment.width"
-            height="39"
+            :x="percent(segment.x)"
+            :y="segment.y"
+            :width="percent(segment.width)"
+            :height="segment.height"
             :class="`timeline-fill timeline-fill-${slug(segment.block.activity)}`"
           >
             <title>{{ segment.label }}</title>
           </rect>
           <text
-            v-if="segment.width >= 68"
-            :x="segment.x + 6"
-            y="44"
+            v-if="segment.width >= 0.12"
+            :x="percent(segment.x)"
+            dx="6"
+            :y="segment.labelY"
+            :clip-path="`url(#${segment.clipId})`"
             class="timeline-segment-label"
           >{{ segment.shortLabel }}</text>
         </g>
 
         <g v-if="nowPosition !== null" aria-label="Now">
           <line
-            :x1="nowPosition * 1200"
-            :x2="nowPosition * 1200"
+            :x1="percent(nowPosition)"
+            :x2="percent(nowPosition)"
             y1="8"
             y2="68"
             class="timeline-now"
           />
-          <path
-            :d="`M${nowPosition * 1200 - 4},8 h8 l-4,6 z`"
+          <circle
+            :cx="percent(nowPosition)"
+            cy="9"
+            r="3.5"
             class="timeline-now-marker"
           />
         </g>
@@ -129,20 +139,23 @@ const segments = computed(() => props.blocks
     const start = Math.max(props.startMs, Number(block.startMs))
     const end = Math.min(props.endMs, Number(block.endMs))
     if (end <= start) return null
-    const x = ((start - props.startMs) / duration.value) * 1200
-    const width = Math.max(1, ((end - start) / duration.value) * 1200)
+    const x = (start - props.startMs) / duration.value
+    const width = Math.max(0.001, (end - start) / duration.value)
     const app = block.domain || block.appName || block.subcategory || block.activity
+    const lane = laneGeometry(block.activity)
     return {
       block,
       x,
       width,
+      ...lane,
+      clipId: `tracker-segment-${block.id}`,
       shortLabel: String(app || block.activity).slice(0, 28),
       label: `${block.activity}, ${formatClock(start)}–${formatClock(end)}, ${formatDuration((end - start) / 1000)}${app ? `, ${app}` : ''}`,
     }
   })
   .filter(Boolean))
 const ticks = computed(() => {
-  const count = duration.value <= 36 * 60 * 60 * 1000 ? 7 : 5
+  const count = 5
   return Array.from({ length: count }, (_, index) => {
     const position = index / (count - 1)
     return {
@@ -189,6 +202,22 @@ function formatDuration(seconds) {
 
 function slug(value) {
   return String(value || 'unknown').toLowerCase()
+}
+
+function percent(value) {
+  return `${Math.max(0, Math.min(1, Number(value || 0))) * 100}%`
+}
+
+function laneGeometry(activity) {
+  return {
+    Work: { y: 20, height: 39, labelY: 44 },
+    Leisure: { y: 24, height: 35, labelY: 46 },
+    Other: { y: 29, height: 30, labelY: 48 },
+    Break: { y: 20, height: 39, labelY: 44 },
+    AFK: { y: 34, height: 25, labelY: 50 },
+    OFF: { y: 40, height: 19, labelY: 53 },
+    UNKNOWN: { y: 20, height: 39, labelY: 44 },
+  }[activity] || { y: 29, height: 30, labelY: 48 }
 }
 </script>
 

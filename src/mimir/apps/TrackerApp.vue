@@ -111,7 +111,7 @@
     >
       <IconAlertTriangle :size="12" class="mt-px shrink-0" />
       <span class="min-w-0 flex-1">{{ error || tracker.error }}</span>
-      <button type="button" class="font-semibold" @click="error = ''">Dismiss</button>
+      <button type="button" class="font-semibold" @click="dismissError">Dismiss</button>
     </div>
 
     <div
@@ -135,7 +135,7 @@
 
     <div v-if="!tracker.enabled" class="grid min-h-0 flex-1 place-items-center px-6 text-center">
       <div class="max-w-md border-y border-rule py-8">
-        <IconClockPlay :size="24" class="mx-auto text-ink-4" />
+        <IconTimeline :size="24" class="mx-auto text-ink-4" />
         <h2 class="mt-3 text-[12px] font-semibold">Tracker is off</h2>
         <p class="mt-1 text-[9px] leading-relaxed text-ink-3">
           Enabling starts the native collector and adds its menu-bar control. Nothing is sampled while off.
@@ -152,13 +152,19 @@
     </div>
 
     <TrackerClassifications
-      v-else-if="selectedTab === 'classifications'"
+      v-if="tracker.enabled"
+      v-show="selectedTab === 'classifications'"
       :rules="rules"
       :save-rule="saveClassification"
       @saved="loadClassifications"
     />
 
-    <main v-else class="min-h-0 flex-1 overflow-y-auto" data-tracker-report>
+    <main
+      v-if="tracker.enabled"
+      v-show="selectedTab !== 'classifications'"
+      class="min-h-0 flex-1 overflow-y-auto"
+      data-tracker-report
+    >
       <TrackerTimeline
         v-if="selectedTab === 'day'"
         :blocks="timelineBlocks"
@@ -171,9 +177,9 @@
       <aside
         v-if="selectedBlock"
         data-tracker-block-inspector
-        class="grid border-b border-rule bg-accent-soft/40 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+        class="tracker-inspector relative grid border-b border-rule bg-accent-soft/40 px-3 py-2"
       >
-        <div class="min-w-0">
+        <div class="min-w-0 pr-7">
           <p class="truncate text-[9px] font-semibold text-ink">
             {{ selectedBlock.appName || selectedBlock.activity }}
             <span class="font-normal text-ink-3">· {{ selectedBlock.subcategory || selectedBlock.domain || selectedBlock.offReason || 'No detail' }}</span>
@@ -186,7 +192,7 @@
         <button
           type="button"
           aria-label="Close block detail"
-          class="absolute right-2 grid size-6 place-items-center text-ink-3 hover:bg-chrome-mid sm:static"
+          class="tracker-inspector-close absolute right-2 top-2 grid size-6 place-items-center text-ink-3 hover:bg-chrome-mid"
           @click="selectedBlock = null"
         >
           <IconX :size="12" />
@@ -211,7 +217,7 @@ import {
   IconAlertTriangle,
   IconChevronLeft,
   IconChevronRight,
-  IconClockPlay,
+  IconTimeline,
   IconLockAccess,
   IconRefresh,
   IconX,
@@ -221,6 +227,7 @@ import TrackerClassifications from './tracker/TrackerClassifications.vue'
 import TrackerLog from './tracker/TrackerLog.vue'
 import TrackerOverview from './tracker/TrackerOverview.vue'
 import TrackerTimeline from './tracker/TrackerTimeline.vue'
+import { moveRangeAnchor, reportRange } from './tracker/trackerDateRange.js'
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -277,7 +284,6 @@ watch(
   [
     () => range.value.startMs,
     () => range.value.endMs,
-    () => tracker.status.revision,
   ],
   () => {
     if (!ready.value || !props.active) return
@@ -285,6 +291,11 @@ watch(
     else void refreshData()
   },
 )
+watch(() => tracker.status.revision, () => {
+  if (!ready.value || !props.active) return
+  if (selectedTab.value === 'day') void refreshData({ quiet: true })
+  else if (selectedTab.value === 'classifications') void loadClassifications()
+})
 watch(() => props.active, (active) => {
   if (ready.value && active) void refreshAll()
 })
@@ -296,7 +307,7 @@ onMounted(async () => {
   else await refreshData()
   tickTimer = window.setInterval(() => {
     now.value = Date.now()
-    if (props.active && tracker.enabled && selectedTab.value !== 'classifications') {
+    if (props.active && tracker.enabled && selectedTab.value === 'day') {
       void refreshData({ quiet: true })
     }
   }, 30_000)
@@ -342,23 +353,17 @@ async function refreshData({ quiet = false } = {}) {
       tracker.query(query),
     ]
     if (selectedTab.value === 'day') {
-      requests.push(tracker.query({
-        startMs: range.value.startMs,
-        endMs: range.value.endMs,
-        categories: [],
-        search: null,
-        offset: 0,
-        limit: 500,
-      }))
+      requests.push(loadTimeline(range.value))
     }
     const [nextReport, nextPage, timelinePage] = await Promise.all(requests)
     if (generation !== refreshGeneration) return
     report.value = nextReport
     page.value = nextPage
-    timelineBlocks.value = timelinePage?.blocks || []
-    selectedBlock.value = selectedBlock.value
-      ? nextPage.blocks.find(block => block.id === selectedBlock.value.id) || null
-      : null
+    timelineBlocks.value = timelinePage || []
+    if (selectedBlock.value) {
+      selectedBlock.value = [...nextPage.blocks, ...timelineBlocks.value]
+        .find(block => block.id === selectedBlock.value.id) || selectedBlock.value
+    }
   } catch (cause) {
     if (generation === refreshGeneration) error.value = message(cause)
   } finally {
@@ -387,11 +392,7 @@ function selectTab(tab) {
 }
 
 function moveRange(direction) {
-  const value = new Date(anchor.value)
-  if (selectedTab.value === 'day') value.setDate(value.getDate() + direction)
-  else if (selectedTab.value === 'week') value.setDate(value.getDate() + direction * 7)
-  else if (selectedTab.value === 'month') value.setMonth(value.getMonth() + direction)
-  anchor.value = value
+  anchor.value = moveRangeAnchor(anchor.value, selectedTab.value, direction)
   offset.value = 0
 }
 
@@ -414,7 +415,29 @@ function setOffset(value) {
 
 async function saveClassification(update) {
   await tracker.updateClassification(update)
-  await Promise.all([loadClassifications(), refreshData({ quiet: true })])
+  await loadClassifications()
+  if (selectedTab.value !== 'classifications') await refreshData({ quiet: true })
+}
+
+async function loadTimeline(value) {
+  const blocks = []
+  let nextOffset = 0
+  let total = 0
+  do {
+    const next = await tracker.query({
+      startMs: value.startMs,
+      endMs: value.endMs,
+      categories: [],
+      search: null,
+      offset: nextOffset,
+      limit: 500,
+    })
+    blocks.push(...next.blocks)
+    total = next.total
+    if (!next.blocks.length) break
+    nextOffset += next.blocks.length
+  } while (nextOffset < total)
+  return blocks.sort((left, right) => left.startMs - right.startMs || left.id - right.id)
 }
 
 async function toggleArmed() {
@@ -447,43 +470,9 @@ async function act(operation) {
   }
 }
 
-function reportRange(tab, date) {
-  const anchorDate = new Date(date)
-  if (tab === 'all') {
-    return {
-      startMs: new Date(2000, 0, 1).getTime(),
-      endMs: startOfTomorrow().getTime(),
-    }
-  }
-  let start
-  let end
-  if (tab === 'month') {
-    start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1)
-    end = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 1)
-  } else if (tab === 'week') {
-    start = startOfDay(anchorDate)
-    const weekday = (start.getDay() + 6) % 7
-    start.setDate(start.getDate() - weekday)
-    end = new Date(start)
-    end.setDate(end.getDate() + 7)
-  } else {
-    start = startOfDay(anchorDate)
-    end = new Date(start)
-    end.setDate(end.getDate() + 1)
-  }
-  return { startMs: start.getTime(), endMs: end.getTime() }
-}
-
-function startOfDay(value) {
-  const date = new Date(value)
-  date.setHours(0, 0, 0, 0)
-  return date
-}
-
-function startOfTomorrow() {
-  const date = startOfDay(new Date())
-  date.setDate(date.getDate() + 1)
-  return date
+function dismissError() {
+  error.value = ''
+  tracker.clearError()
 }
 
 function formatRangeTitle(tab, value) {
@@ -548,6 +537,16 @@ function message(cause) {
 .status-paused, .status-unsupported { background: var(--color-rule); }
 .status-armed { background: var(--color-add); }
 .status-break { background: var(--color-accent); }
+
+@container tracker (min-width: 520px) {
+  .tracker-inspector {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .tracker-inspector > div { padding-right: 0; }
+  .tracker-inspector-close { position: static; }
+}
+
 button:focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;

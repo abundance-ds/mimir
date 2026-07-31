@@ -3,7 +3,9 @@ use super::model::{
     TrackerConfig, TrackerQuery, TRACKER_SCHEMA_VERSION,
 };
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
+use rusqlite::{
+    params, params_from_iter, types::Value, Connection, OptionalExtension, Row, Transaction,
+};
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
@@ -380,8 +382,22 @@ impl TrackerStore {
         start_ms: i64,
         end_ms: i64,
     ) -> Result<Vec<ActivityBlock>, String> {
+        let mut blocks = Vec::new();
+        self.visit_blocks_in_range(start_ms, end_ms, |block| {
+            blocks.push(block.clone());
+            Ok(())
+        })?;
+        Ok(blocks)
+    }
+
+    pub fn visit_blocks_in_range(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        mut visitor: impl FnMut(&ActivityBlock) -> Result<(), String>,
+    ) -> Result<u64, String> {
         if end_ms <= start_ms {
-            return Ok(Vec::new());
+            return Ok(0);
         }
         let mut statement = self
             .connection
@@ -394,17 +410,47 @@ impl TrackerStore {
                  ORDER BY start_ms ASC, id ASC",
             )
             .map_err(|error| format!("Could not prepare Tracker range query: {error}"))?;
-        let rows = statement
-            .query_map(params![start_ms, end_ms], block_from_row)
+        let mut rows = statement
+            .query(params![start_ms, end_ms])
             .map_err(|error| format!("Could not query Tracker blocks: {error}"))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("Could not read Tracker blocks: {error}"))
+        let mut count = 0_u64;
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| format!("Could not read Tracker block row: {error}"))?
+        {
+            let block = block_from_row(row)
+                .map_err(|error| format!("Could not decode Tracker block: {error}"))?;
+            visitor(&block)?;
+            count = count.saturating_add(1);
+        }
+        Ok(count)
     }
 
     pub fn query(&self, query: &TrackerQuery) -> Result<ActivityPage, String> {
-        let mut blocks = self.blocks_in_range(query.start_ms, query.end_ms)?;
+        if query.end_ms <= query.start_ms {
+            return Ok(ActivityPage {
+                blocks: Vec::new(),
+                total: 0,
+                offset: 0,
+                limit: query.limit.unwrap_or(200).clamp(1, 500),
+            });
+        }
+
+        let mut clauses = vec!["end_ms > ?".to_string(), "start_ms < ?".to_string()];
+        let mut values = vec![Value::Integer(query.start_ms), Value::Integer(query.end_ms)];
         if !query.categories.is_empty() {
-            blocks.retain(|block| query.categories.contains(&block.activity));
+            clauses.push(format!(
+                "activity IN ({})",
+                std::iter::repeat_n("?", query.categories.len())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            values.extend(
+                query
+                    .categories
+                    .iter()
+                    .map(|category| Value::Text(category.as_str().into())),
+            );
         }
         if let Some(search) = query
             .search
@@ -412,34 +458,49 @@ impl TrackerStore {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let search = search.to_ascii_lowercase();
-            blocks.retain(|block| {
-                [
-                    Some(block.activity.as_str()),
-                    block.subcategory.as_deref(),
-                    block.app_name.as_deref(),
-                    block.domain.as_deref(),
-                    block.window_title.as_deref(),
-                ]
-                .into_iter()
-                .flatten()
-                .any(|value| value.to_ascii_lowercase().contains(&search))
-            });
+            clauses.push(
+                "(LOWER(activity) LIKE ? ESCAPE '\\' \
+                  OR LOWER(COALESCE(subcategory, '')) LIKE ? ESCAPE '\\' \
+                  OR LOWER(COALESCE(app_name, '')) LIKE ? ESCAPE '\\' \
+                  OR LOWER(COALESCE(domain, '')) LIKE ? ESCAPE '\\' \
+                  OR LOWER(COALESCE(window_title, '')) LIKE ? ESCAPE '\\')"
+                    .into(),
+            );
+            let pattern = Value::Text(format!("%{}%", escape_like(&search.to_ascii_lowercase())));
+            values.extend(std::iter::repeat_n(pattern, 5));
         }
-        blocks.sort_by(|left, right| {
-            right
-                .start_ms
-                .cmp(&left.start_ms)
-                .then_with(|| right.id.cmp(&left.id))
-        });
-        let total = blocks.len() as u64;
+        let predicate = clauses.join(" AND ");
+        let count_sql = format!("SELECT COUNT(*) FROM activity_blocks WHERE {predicate}");
+        let total = self
+            .connection
+            .query_row(&count_sql, params_from_iter(values.iter()), |row| {
+                row.get::<_, u64>(0)
+            })
+            .map_err(|error| format!("Could not count Tracker blocks: {error}"))?;
         let offset = query.offset.unwrap_or(0).min(total);
         let limit = query.limit.unwrap_or(200).clamp(1, 500);
-        let blocks = blocks
-            .into_iter()
-            .skip(offset as usize)
-            .take(limit as usize)
-            .collect();
+        let sql = format!(
+            "SELECT id, start_ms, end_ms, activity, subcategory, app_name,
+                    bundle_id, domain, window_title, classification_key,
+                    source, off_reason
+             FROM activity_blocks
+             WHERE {predicate}
+             ORDER BY start_ms DESC, id DESC
+             LIMIT ? OFFSET ?"
+        );
+        let mut page_values = values;
+        page_values.push(Value::Integer(limit as i64));
+        page_values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
+        let mut statement = self
+            .connection
+            .prepare(&sql)
+            .map_err(|error| format!("Could not prepare Tracker page query: {error}"))?;
+        let rows = statement
+            .query_map(params_from_iter(page_values.iter()), block_from_row)
+            .map_err(|error| format!("Could not query Tracker page: {error}"))?;
+        let blocks = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not read Tracker page: {error}"))?;
         Ok(ActivityPage {
             blocks,
             total,
@@ -497,8 +558,11 @@ impl TrackerStore {
             .prepare(
                 "SELECT jobs.key, jobs.first_seen_ms, jobs.last_seen_ms
                  FROM classification_jobs AS jobs
-                 LEFT JOIN classifications AS rules ON rules.key = jobs.key
-                 WHERE rules.key IS NULL",
+                 WHERE NOT EXISTS (
+                   SELECT 1 FROM classifications AS rules
+                   WHERE rules.key = jobs.key
+                      OR instr(jobs.key, rules.key || ' | ') = 1
+                 )",
             )
             .map_err(|error| format!("Could not prepare pending classification query: {error}"))?;
         let pending = pending_statement
@@ -539,6 +603,7 @@ impl TrackerStore {
         let now = now_ms();
         let existing = self.classification(key)?;
         if existing.as_ref().is_some_and(|value| value.manual) && !manual {
+            self.clear_classification_jobs_for_rule(key)?;
             return existing.ok_or_else(|| "Classification disappeared.".into());
         }
         self.connection
@@ -585,11 +650,22 @@ impl TrackerStore {
                 )
                 .map_err(|error| format!("Could not reclassify Tracker history: {error}"))?;
         }
-        self.connection
-            .execute("DELETE FROM classification_jobs WHERE key = ?1", [key])
-            .map_err(|error| format!("Could not clear classification job: {error}"))?;
+        self.clear_classification_jobs_for_rule(key)?;
         self.classification(key)?
             .ok_or_else(|| "Saved Tracker classification could not be reloaded.".into())
+    }
+
+    fn clear_classification_jobs_for_rule(&self, key: &str) -> Result<(), String> {
+        let app_scope = !key.contains(" | ");
+        self.connection
+            .execute(
+                "DELETE FROM classification_jobs
+                 WHERE key = ?1
+                    OR (?2 = 1 AND instr(key, ?1 || ' | ') = 1)",
+                params![key, app_scope],
+            )
+            .map_err(|error| format!("Could not clear classification job: {error}"))?;
+        Ok(())
     }
 
     pub fn queue_classification(
@@ -630,8 +706,14 @@ impl TrackerStore {
             .prepare(
                 "SELECT key, app_name, domain, window_title, first_seen_ms,
                         last_seen_ms, attempts, retry_after_ms
-                 FROM classification_jobs
+                 FROM classification_jobs AS jobs
                  WHERE retry_after_ms <= ?1
+                   AND attempts < 5
+                   AND NOT EXISTS (
+                     SELECT 1 FROM classifications AS rules
+                     WHERE rules.key = jobs.key
+                        OR instr(jobs.key, rules.key || ' | ') = 1
+                   )
                  ORDER BY first_seen_ms ASC
                  LIMIT ?2",
             )
@@ -901,6 +983,13 @@ fn clean(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 fn quarantine_database(path: &Path) -> Result<PathBuf, String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let stem = path
@@ -991,6 +1080,60 @@ mod tests {
     }
 
     #[test]
+    fn page_filters_count_and_limit_inside_sql_with_literal_search_wildcards() {
+        let (_directory, store) = store();
+        for (index, activity, title) in [
+            (0, ActivityCategory::Work, "Write 100% coverage"),
+            (1, ActivityCategory::Leisure, "Video"),
+            (2, ActivityCategory::Work, "Review"),
+        ] {
+            store
+                .insert_block(NewActivityBlock {
+                    start_ms: index * 10_000,
+                    end_ms: index * 10_000 + 5_000,
+                    activity,
+                    subcategory: None,
+                    app_name: Some("Example"),
+                    bundle_id: Some("com.example.App"),
+                    domain: None,
+                    window_title: Some(title),
+                    classification_key: Some("com.example.App"),
+                    source: "test",
+                    off_reason: None,
+                })
+                .unwrap();
+        }
+
+        let work = store
+            .query(&TrackerQuery {
+                start_ms: 0,
+                end_ms: 100_000,
+                categories: vec![ActivityCategory::Work],
+                offset: Some(1),
+                limit: Some(1),
+                ..TrackerQuery::default()
+            })
+            .unwrap();
+        assert_eq!(work.total, 2);
+        assert_eq!(work.blocks.len(), 1);
+        assert_eq!(work.offset, 1);
+
+        let literal_percent = store
+            .query(&TrackerQuery {
+                start_ms: 0,
+                end_ms: 100_000,
+                search: Some("%".into()),
+                ..TrackerQuery::default()
+            })
+            .unwrap();
+        assert_eq!(literal_percent.total, 1);
+        assert_eq!(
+            literal_percent.blocks[0].window_title.as_deref(),
+            Some("Write 100% coverage")
+        );
+    }
+
+    #[test]
     fn manual_classifications_win_and_can_reclassify_history() {
         let (_directory, store) = store();
         for (index, key) in ["com.example.App", "com.example.App | docs.example"]
@@ -1042,6 +1185,42 @@ mod tests {
             .iter()
             .all(|block| block.activity == ActivityCategory::Leisure));
         assert!(blocks.iter().all(|block| block.source == "manual"));
+    }
+
+    #[test]
+    fn manual_rules_clear_stale_jobs_and_retry_exhaustion_stops_ai_work() {
+        let (_directory, store) = store();
+        let observation = super::super::model::Observation {
+            observed_at_ms: 1_000,
+            idle_seconds: 0,
+            app_name: "Ghostty".into(),
+            bundle_id: Some("com.example.Ghostty".into()),
+            domain: None,
+            window_title: None,
+            mimir_context: None,
+        };
+        store.queue_classification(&observation).unwrap();
+        for attempt in 0..5 {
+            store
+                .defer_classification_jobs(&["com.example.Ghostty".into()], attempt)
+                .unwrap();
+        }
+        assert!(store
+            .due_classification_jobs(10_000, 25)
+            .unwrap()
+            .is_empty());
+
+        store
+            .save_classification(
+                "com.example.Ghostty",
+                ActivityCategory::Unknown,
+                None,
+                "manual",
+                true,
+                false,
+            )
+            .unwrap();
+        assert_eq!(store.queued_classification_count().unwrap(), 0);
     }
 
     #[test]

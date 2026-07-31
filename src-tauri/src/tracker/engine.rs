@@ -182,6 +182,26 @@ impl TrackerEngine {
         )
     }
 
+    pub fn recover_break(
+        &mut self,
+        store: &TrackerStore,
+        start_ms: i64,
+        end_ms: i64,
+        minutes: u64,
+    ) -> Result<bool, String> {
+        self.candidate = None;
+        self.transition_system(
+            store,
+            "__break__",
+            ActivityCategory::Break,
+            Some(&format!("{minutes}min break")),
+            start_ms,
+            end_ms,
+            "recovery",
+            None,
+        )
+    }
+
     fn start_observation(
         &mut self,
         store: &TrackerStore,
@@ -190,7 +210,7 @@ impl TrackerEngine {
     ) -> Result<bool, String> {
         let classification_key = observation.classification_key();
         let (activity, subcategory, source) = classification_for_observation(store, &observation)?;
-        if activity == ActivityCategory::Unknown {
+        if activity == ActivityCategory::Unknown && source == "unclassified" {
             store.queue_classification(&observation)?;
         }
         let transition_ms = self
@@ -442,5 +462,27 @@ mod tests {
         assert_eq!(classifications.len(), 1);
         assert_eq!(classifications[0].activity, ActivityCategory::Unknown);
         assert_eq!(classifications[0].classified_by, "pending");
+    }
+
+    #[test]
+    fn manual_unknown_is_intentional_and_is_not_requeued_for_ai() {
+        let (_directory, store, mut engine, config) = harness();
+        store
+            .save_classification(
+                "com.example.ghostty",
+                ActivityCategory::Unknown,
+                None,
+                "manual",
+                true,
+                false,
+            )
+            .unwrap();
+
+        engine
+            .observe(&store, &config, observation(1_000, 0, "Ghostty"))
+            .unwrap();
+
+        assert_eq!(store.queued_classification_count().unwrap(), 0);
+        assert_eq!(store.current_block().unwrap().unwrap().source, "manual");
     }
 }
