@@ -370,8 +370,8 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/persistence.rs",
-      "selector": "ordinary_replacement_preserves_mode_and_secret_replacement_enforces_owner_only",
+      "path": "src-tauri/src/meetings/platform.rs",
+      "selector": "platform_startup_repairs_legacy_private_trees_and_refuses_symlink_components",
       "scenarios": ["MTG-155"]
     },
     {
