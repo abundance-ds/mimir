@@ -48,6 +48,12 @@ export async function checkMeetingAudio() {
   return {
     microphone: status(value.microphone),
     systemAudio: status(value.systemAudio ?? value.system_audio),
+    microphoneLevel: Math.min(100, nonnegativeInteger(
+      value.microphoneLevel ?? value.microphone_level,
+    )),
+    systemAudioLevel: Math.min(100, nonnegativeInteger(
+      value.systemAudioLevel ?? value.system_audio_level,
+    )),
     runtimeIdentity: (value.runtimeIdentity ?? value.runtime_identity) === 'mimir'
       ? 'mimir'
       : 'development-host',
@@ -410,6 +416,7 @@ function normalizeMeetingsConfig(value) {
     apiKeyConfigured: Boolean(config.apiKeyConfigured ?? config.api_key_configured),
     localModel: String(config.localModel ?? config.local_model ?? 'whisper-small'),
     summaryEnabled: config.summaryEnabled ?? config.summary_enabled ?? true,
+    summaryTemplate: String(config.summaryTemplate ?? config.summary_template ?? 'standard'),
     summaryPreset: String(config.summaryPreset ?? config.summary_preset ?? ''),
     kgPrompt: String(config.kgPrompt ?? config.kg_prompt ?? 'ask'),
     kgPreset: String(config.kgPreset ?? config.kg_preset ?? ''),
@@ -456,6 +463,13 @@ function serializeConfigPatch(patch) {
   if ('customModel' in source) serialized.customModel = String(source.customModel || '').trim()
   if ('localModel' in source) serialized.localModel = requiredId(source.localModel, 'model')
   if ('summaryEnabled' in source) serialized.summaryEnabled = Boolean(source.summaryEnabled)
+  if ('summaryTemplate' in source) {
+    const template = String(source.summaryTemplate || '').trim()
+    if (!['standard', 'brief', 'decisions-actions', 'detailed'].includes(template)) {
+      throw new Error('Choose a valid summary format.')
+    }
+    serialized.summaryTemplate = template
+  }
   if ('summaryPreset' in source) serialized.summaryPreset = String(source.summaryPreset || '').trim()
   if ('kgPrompt' in source) {
     const behavior = String(source.kgPrompt || '').trim()

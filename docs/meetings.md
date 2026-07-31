@@ -34,7 +34,8 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   the public Core Audio process tap before opening the fixed macOS **Privacy &
   Security → Screen & System Audio Recording** pane, which registers signed
   Mimir with TCC. A separate four-second audio check reports microphone and
-  system signal independently, discards all samples, and creates no meeting.
+  system signal plus a normalized peak-strength value independently, discards
+  all samples, and creates no meeting.
 - Microphone mute writes aligned silence to that channel. There is no pause
   state that could make channel clocks disagree.
 - Microphone and system audio are separate, lossless 16 kHz mono `f32le`
@@ -187,6 +188,10 @@ The bearer secret is stored only in macOS Keychain under service
 `rs.shoulde.mimir`, account `meetings.custom-stt`. The resolver releases it
 only for the exact currently configured endpoint and never returns it through
 IPC, diagnostics, files, or Activity arguments.
+Saving reports success only after an endpoint-bound Keychain read-back matches
+the submitted secret. Scribe then shows a persistent configured state with
+separate replace and remove actions; it retains the typed value and renders the
+native failure beside the field when Keychain does not confirm the write.
 
 The route and model approved at Start are persisted as immutable meeting
 provenance. Delayed or restart recovery uses that exact pair and fails closed
@@ -235,6 +240,13 @@ The default successful flow is:
 3. show “Create reviewable knowledge-graph draft?”, “Not now”, and “Never”;
 4. if chosen, run a separate proposal-only Activity and expose its result for
    normal review.
+
+The summary recipe has two independent controls. A system-owned format selects
+`standard`, `brief`, `decisions-actions`, or `detailed` instructions; an
+optional launcher preset selects the exact installed CLI agent configuration.
+Both identities are copied into the durable job payload. A completed meeting
+can deliberately enqueue a new title-and-summary generation using the current
+recipe; ordinary retry and regeneration remain separate from capture state.
 
 Failures do not change a completed meeting into a recording failure. They
 remain visible in both Scribe and the Activity tray and can be retried.

@@ -580,6 +580,7 @@ function defaultConfig() {
     apiKeyConfigured: false,
     localModel: 'whisper-small',
     summaryEnabled: true,
+    summaryTemplate: 'standard',
     summaryPreset: '',
     kgPrompt: 'ask',
     kgPreset: '',

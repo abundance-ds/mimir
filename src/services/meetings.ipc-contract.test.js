@@ -116,6 +116,7 @@ const expectedSnapshot = {
     apiKeyConfigured: true,
     localModel: 'whisper-small',
     summaryEnabled: true,
+    summaryTemplate: 'standard',
     summaryPreset: 'meeting-follow-up',
     kgPrompt: 'ask',
     kgPreset: 'meeting-kg-draft',

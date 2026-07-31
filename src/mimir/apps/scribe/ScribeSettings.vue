@@ -90,9 +90,35 @@
             role="status"
           >
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
-            <dd class="border-b border-rule-light py-2">{{ signalLabel(audioCheck.microphone) }}</dd>
+            <dd class="border-b border-rule-light py-2">
+              <span>{{ signalLabel(audioCheck.microphone) }}</span>
+              <span
+                data-scribe-audio-level="microphone"
+                class="scribe-audio-level"
+                role="progressbar"
+                aria-label="Microphone input level"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="audioCheck.microphoneLevel"
+              >
+                <span :style="{ width: `${audioCheck.microphoneLevel}%` }" />
+              </span>
+            </dd>
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
-            <dd class="border-b border-rule-light py-2">{{ signalLabel(audioCheck.systemAudio) }}</dd>
+            <dd class="border-b border-rule-light py-2">
+              <span>{{ signalLabel(audioCheck.systemAudio) }}</span>
+              <span
+                data-scribe-audio-level="system"
+                class="scribe-audio-level"
+                role="progressbar"
+                aria-label="System-audio input level"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="audioCheck.systemAudioLevel"
+              >
+                <span :style="{ width: `${audioCheck.systemAudioLevel}%` }" />
+              </span>
+            </dd>
           </dl>
           <p
             v-if="audioCheck?.runtimeIdentity === 'development-host'"
@@ -216,34 +242,60 @@
 
         <div v-else class="mt-3 space-y-3">
           <p class="text-[10px] leading-relaxed text-ink-3">{{ hostedDescription }}</p>
+          <p
+            data-scribe-api-key-state
+            class="border-y border-rule-light py-2 text-[10px]"
+            role="status"
+          >
+            {{ config.apiKeyConfigured ? 'Saved in Keychain · ready to use' : 'API key required' }}
+          </p>
           <form class="block" @submit.prevent="saveKey">
             <span class="scribe-settings-label">{{ hostedKeyLabel }}</span>
             <span class="flex gap-2">
               <input
                 v-model="apiKey"
+                data-scribe-api-key
                 type="password"
                 autocomplete="new-password"
                 class="scribe-settings-input min-w-0 flex-1"
-                :placeholder="config.apiKeyConfigured ? 'Stored in Keychain' : 'Enter API key'"
+                :placeholder="config.apiKeyConfigured ? 'Enter replacement key' : 'Enter API key'"
               />
               <button
                 type="submit"
+                data-scribe-save-api-key
                 class="scribe-settings-button"
                 :disabled="!apiKey.trim() || Boolean(pending['api-key'])"
               >
-                {{ pending['api-key'] ? 'Saving…' : 'Save key' }}
+                {{ pending['api-key'] ? 'Saving…' : config.apiKeyConfigured ? 'Replace key' : 'Save key' }}
               </button>
               <button
                 v-if="config.apiKeyConfigured"
                 type="button"
+                data-scribe-clear-api-key
                 class="scribe-settings-button text-rem"
                 :disabled="Boolean(pending['api-key'])"
                 @click="$emit('clearApiKey')"
               >
-                {{ pending['api-key'] ? 'Clearing…' : 'Clear' }}
+                {{ pending['api-key'] ? 'Removing…' : 'Remove key' }}
               </button>
             </span>
           </form>
+          <p
+            v-if="credentialNotice"
+            data-scribe-api-key-feedback
+            class="text-[9px] leading-relaxed text-add"
+            role="status"
+          >
+            {{ credentialNotice }}
+          </p>
+          <p
+            v-if="credentialError"
+            data-scribe-api-key-error
+            class="text-[9px] leading-relaxed text-rem"
+            role="alert"
+          >
+            {{ credentialError }}
+          </p>
           <p class="text-[9px] leading-relaxed text-ink-3">
             Stored in Keychain and never returned to this screen.
           </p>
@@ -299,6 +351,31 @@
             @change="save({ summaryEnabled: $event.target.checked })"
           />
         </label>
+        <div v-if="config.summaryEnabled" class="mt-3 grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="scribe-settings-label">Summary format</span>
+            <ScribeSelect
+              :model-value="config.summaryTemplate || 'standard'"
+              :options="summaryTemplateOptions"
+              :disabled="configPending"
+              aria-label="Summary format"
+              @update:model-value="save({ summaryTemplate: $event })"
+            />
+          </label>
+          <label class="block">
+            <span class="scribe-settings-label">CLI agent</span>
+            <ScribeSelect
+              :model-value="config.summaryPreset || ''"
+              :options="summaryAgentOptions"
+              :disabled="configPending"
+              aria-label="Summary CLI agent"
+              @update:model-value="save({ summaryPreset: $event })"
+            />
+          </label>
+        </div>
+        <p v-if="config.summaryEnabled" class="mt-2 text-[9px] leading-relaxed text-ink-3">
+          This recipe is used after future meetings and when you deliberately create a summary again.
+        </p>
         <label class="mt-3 block">
           <span class="scribe-settings-label">Knowledge-graph follow-up</span>
           <ScribeSelect
@@ -335,6 +412,7 @@
 import { computed, ref, watch } from 'vue'
 import { IconX } from '@tabler/icons-vue'
 import ScribeSelect from './ScribeSelect.vue'
+import { SUMMARY_TEMPLATE_OPTIONS, summaryAgentOptions as buildSummaryAgentOptions } from './summaryRecipes.js'
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -343,6 +421,9 @@ const props = defineProps({
   audioCheck: { type: Object, default: null },
   pending: { type: Object, default: () => ({}) },
   embedded: { type: Boolean, default: false },
+  credentialNotice: { type: String, default: '' },
+  credentialError: { type: String, default: '' },
+  summaryAgents: { type: Array, default: () => [] },
 })
 const emit = defineEmits([
   'close',
@@ -384,6 +465,17 @@ const hostedKeyLabel = computed(() => (
 const retentionValue = computed(() => (
   props.config.retentionDays == null ? 'forever' : String(props.config.retentionDays)
 ))
+const summaryTemplateOptions = SUMMARY_TEMPLATE_OPTIONS
+const summaryAgentOptions = computed(() => buildSummaryAgentOptions(
+  props.summaryAgents.map(option => ({
+    id: option.id ?? option.value,
+    title: option.title ?? option.label,
+    kind: 'agent',
+    enabled: option.enabled !== false,
+    available: option.available !== false,
+  })),
+  props.config.summaryPreset,
+))
 const kgPromptOptions = [
   { value: 'ask', label: 'Ask every time' },
   { value: 'always-draft', label: 'Always create a reviewable draft' },
@@ -399,6 +491,9 @@ const retentionOptions = [
 
 watch(() => props.config.customUrl, value => { customUrl.value = value })
 watch(() => props.config.customModel, value => { customModel.value = value })
+watch(() => props.credentialNotice, value => {
+  if (value) apiKey.value = ''
+})
 
 function save(patch) {
   emit('save', patch)
@@ -419,7 +514,6 @@ function selectMode(mode) {
 function saveKey() {
   if (!apiKey.value.trim()) return
   emit('saveApiKey', apiKey.value)
-  apiKey.value = ''
 }
 
 function saveRetention(value) {
@@ -574,5 +668,26 @@ input[type='checkbox']:focus-visible {
 .scribe-settings-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.scribe-audio-level {
+  display: block;
+  height: 3px;
+  margin-top: 5px;
+  overflow: hidden;
+  background: var(--color-rule-light);
+}
+
+.scribe-audio-level > span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scribe-audio-level > span {
+    transition: none;
+  }
 }
 </style>

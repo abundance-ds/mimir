@@ -21,6 +21,9 @@
           :models="meetings.models"
           :audio-check="meetings.audioCheck"
           :pending="meetings.pending"
+          :credential-notice="credentialNotice"
+          :credential-error="credentialError"
+          :summary-agents="availableSummaryAgents"
           @save="saveConfig"
           @save-api-key="saveApiKey"
           @clear-api-key="clearApiKey"
@@ -280,6 +283,51 @@
                 {{ summaryStatus(detailMeeting) }}
               </p>
               <div
+                v-if="detailMeeting.transcriptFinal && detailMeeting.segmentCount > 0"
+                data-scribe-summary-recipe
+                class="mt-6 border-y border-rule py-4"
+              >
+                <p class="text-[10px] font-semibold">Create summary again</p>
+                <p class="mt-1 text-[9px] leading-relaxed text-ink-3">
+                  Choose the format and CLI agent for this run. The new result remains editable.
+                </p>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label class="block">
+                    <span class="scribe-field-label">Summary format</span>
+                    <ScribeSelect
+                      :model-value="meetings.config.summaryTemplate || 'standard'"
+                      :options="summaryTemplateOptions"
+                      :disabled="Boolean(meetings.pending.config)"
+                      aria-label="Summary format for create again"
+                      @update:model-value="saveConfig({ summaryTemplate: $event })"
+                    />
+                  </label>
+                  <label class="block">
+                    <span class="scribe-field-label">CLI agent</span>
+                    <ScribeSelect
+                      :model-value="meetings.config.summaryPreset || ''"
+                      :options="summaryAgentOptions"
+                      :disabled="Boolean(meetings.pending.config)"
+                      aria-label="Summary CLI agent for create again"
+                      @update:model-value="saveConfig({ summaryPreset: $event })"
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  data-scribe-regenerate-summary
+                  class="scribe-primary-button mt-3"
+                  :disabled="Boolean(meetings.pending.config)
+                    || Boolean(meetings.pending[`retry:${detailMeeting.id}:title-summary`])
+                    || ['queued', 'running'].includes(detailMeeting.summaryState)"
+                  @click="regenerateSummary"
+                >
+                  {{ ['queued', 'running'].includes(detailMeeting.summaryState)
+                    ? 'Summary in progress…'
+                    : 'Create again' }}
+                </button>
+              </div>
+              <div
                 v-if="meetings.kgOffer?.id === detailMeeting.id"
                 data-scribe-kg-offer
                 class="mt-6 border-y border-rule py-4"
@@ -375,13 +423,13 @@
             <div
               v-for="candidate in meetings.candidates"
               :key="candidate.id"
-              class="flex items-center gap-3 py-1"
+              class="flex w-full min-w-0 items-center gap-3 py-1 pr-1"
             >
               <IconPhone :size="14" class="shrink-0 text-ink-2" />
               <p class="min-w-0 flex-1 truncate text-[11px]">
                 {{ candidate.appName }} may be a meeting
               </p>
-              <button type="button" class="scribe-quiet-button" @click="start(candidate)">Record</button>
+              <button type="button" class="scribe-quiet-button shrink-0" @click="start(candidate)">Record</button>
               <button
                 type="button"
                 class="scribe-icon-button"
@@ -459,7 +507,10 @@ import {
 } from '@tabler/icons-vue'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useMeetingsStore } from '../../stores/meetings.js'
+import { useLaunchersStore } from '../../stores/launchers.js'
 import ScribeSettings from './scribe/ScribeSettings.vue'
+import ScribeSelect from './scribe/ScribeSelect.vue'
+import { SUMMARY_TEMPLATE_OPTIONS, summaryAgentOptions as buildSummaryAgentOptions } from './scribe/summaryRecipes.js'
 
 const MAX_REVIEWED_TAGS = 64
 const MAX_REVIEWED_TAG_CHARS = 80
@@ -471,6 +522,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['openFile', 'openActivity', 'diagnostic'])
 const meetings = useMeetingsStore()
+const launchers = useLaunchersStore()
 const scribeRoot = ref(null)
 const settingsPanel = ref(null)
 const settingsOpen = ref(false)
@@ -484,10 +536,20 @@ const actionError = ref('')
 const dismissedNativeNotice = ref('')
 const now = ref(Date.now())
 const liveAnnouncement = ref('')
+const credentialNotice = ref('')
+const credentialError = ref('')
 const detailTabs = [
   { id: 'transcript', label: 'Transcript' },
   { id: 'summary', label: 'Summary' },
 ]
+const summaryTemplateOptions = SUMMARY_TEMPLATE_OPTIONS
+const availableSummaryAgents = computed(() => launchers.availablePresets.filter(
+  preset => preset.kind === 'agent',
+))
+const summaryAgentOptions = computed(() => buildSummaryAgentOptions(
+  availableSummaryAgents.value,
+  meetings.config.summaryPreset,
+))
 let timer = null
 let lastActiveMeetingId = null
 
@@ -766,17 +828,40 @@ async function saveConfig(patch) {
 }
 
 async function saveApiKey(value) {
+  credentialNotice.value = ''
+  credentialError.value = ''
   try {
-    await meetings.saveApiKey(value)
-    liveAnnouncement.value = 'Hosted transcription API key saved in Keychain'
+    const replacing = meetings.config.apiKeyConfigured
+    const configured = await meetings.saveApiKey(value)
+    if (!configured) throw new Error('Keychain did not confirm the saved API key.')
+    credentialNotice.value = replacing
+      ? 'API key replaced and verified in Keychain.'
+      : 'API key saved and verified in Keychain.'
+    liveAnnouncement.value = credentialNotice.value
   } catch (error) {
-    actionError.value = message(error)
+    credentialError.value = message(error)
   }
 }
 
 async function clearApiKey() {
+  credentialNotice.value = ''
+  credentialError.value = ''
   try {
-    await meetings.clearApiKey()
+    const configured = await meetings.clearApiKey()
+    if (configured) throw new Error('Keychain still reports an API key after removal.')
+    credentialNotice.value = 'API key removed from Keychain.'
+    liveAnnouncement.value = credentialNotice.value
+  } catch (error) {
+    credentialError.value = message(error)
+  }
+}
+
+async function regenerateSummary() {
+  if (!detailMeeting.value) return
+  actionError.value = ''
+  try {
+    await meetings.retryJob(detailMeeting.value.id, 'title-summary')
+    liveAnnouncement.value = 'A new title and summary run is queued.'
   } catch (error) {
     actionError.value = message(error)
   }

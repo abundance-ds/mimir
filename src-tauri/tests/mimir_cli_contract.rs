@@ -161,6 +161,9 @@ struct TestServer {
 
 impl TestServer {
     async fn boot() -> Self {
+        // Contract tests must never touch or prompt for the developer's real
+        // OS keychain now that production macOS builds use the native backend.
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
         let (shutdown_tx, task, port) = start_server(test_registry(), 0, TEST_TOKEN.into())
             .await
             .expect("tool server boots on an ephemeral port");

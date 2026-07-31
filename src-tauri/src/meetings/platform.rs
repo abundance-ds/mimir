@@ -523,6 +523,8 @@ struct StoredMeetingConfig {
     custom_model: String,
     local_model: String,
     summary_enabled: bool,
+    #[serde(default = "default_summary_template")]
+    summary_template: String,
     summary_preset: String,
     kg_prompt: String,
     kg_preset: String,
@@ -539,6 +541,7 @@ impl From<MeetingConfig> for StoredMeetingConfig {
             custom_model: config.custom_model,
             local_model: config.local_model,
             summary_enabled: config.summary_enabled,
+            summary_template: config.summary_template,
             summary_preset: config.summary_preset,
             kg_prompt: config.kg_prompt,
             kg_preset: config.kg_preset,
@@ -558,12 +561,17 @@ impl From<StoredMeetingConfig> for MeetingConfig {
             api_key_configured: false,
             local_model: config.local_model,
             summary_enabled: config.summary_enabled,
+            summary_template: config.summary_template,
             summary_preset: config.summary_preset,
             kg_prompt: config.kg_prompt,
             kg_preset: config.kg_preset,
             retention_days: config.retention_days,
         }
     }
+}
+
+fn default_summary_template() -> String {
+    "standard".into()
 }
 
 impl<'de> Deserialize<'de> for PersistedMeetingConfig {
@@ -2050,6 +2058,9 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         if let Some(value) = patch.summary_enabled {
             config.summary_enabled = value;
         }
+        if let Some(value) = &patch.summary_template {
+            config.summary_template = value.trim().to_string();
+        }
         if let Some(value) = &patch.summary_preset {
             config.summary_preset = value.trim().to_string();
         }
@@ -2112,7 +2123,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         let endpoint = configured_custom_stt_endpoint(&config)?.ok_or_else(|| {
             "Select a valid custom transcription endpoint before saving its API key".to_string()
         })?;
-        self.inner.secrets.set(&endpoint, secret)
+        store_and_verify_secret(self.inner.secrets.as_ref(), &endpoint, secret)
     }
 
     fn clear_api_key(&self) -> Result<(), String> {
@@ -2237,6 +2248,9 @@ fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
         ConfigIdentifier::new(config.custom_model.clone(), "custom model id")
             .map_err(|error| error.to_string())?;
     }
+    super::runtime::summary_template_instructions(&config.summary_template).ok_or_else(|| {
+        "Summary format must be standard, brief, decisions-actions, or detailed".to_string()
+    })?;
     for (label, value) in [
         ("summary preset", config.summary_preset.as_str()),
         ("knowledge-graph preset", config.kg_preset.as_str()),
@@ -2255,6 +2269,27 @@ fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
         return Err("Meeting retention must be between 1 and 3650 days".into());
     }
     Ok(())
+}
+
+fn store_and_verify_secret(
+    secrets: &dyn MeetingSecretStore,
+    endpoint: &CustomSttEndpoint,
+    secret: &str,
+) -> Result<(), String> {
+    secrets.set(endpoint, secret)?;
+    match secrets.read(endpoint) {
+        Ok(Some(stored)) if stored == secret => Ok(()),
+        Ok(_) => {
+            let _ = secrets.clear();
+            Err("The OS keychain did not confirm the saved meeting transcription credential".into())
+        }
+        Err(error) => {
+            let _ = secrets.clear();
+            Err(format!(
+                "The OS keychain could not confirm the saved meeting transcription credential: {error}"
+            ))
+        }
+    }
 }
 
 fn validate_custom_https_url(raw: &str) -> Result<(), String> {
@@ -3118,6 +3153,7 @@ mod tests {
                 custom_url: Some("https://stt.example.com/v1/listen".into()),
                 custom_model: Some("nova-3".into()),
                 summary_enabled: Some(true),
+                summary_template: Some("decisions-actions".into()),
                 summary_preset: Some("concise".into()),
                 ..MeetingConfigPatch::default()
             })
@@ -3125,6 +3161,7 @@ mod tests {
 
         let hooks = fixture.platform.hook_config().unwrap();
         assert!(hooks.summary_enabled);
+        assert_eq!(hooks.summary_template, "decisions-actions");
         assert_eq!(hooks.summary_preset, "concise");
         assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 0);
 
@@ -3204,6 +3241,63 @@ mod tests {
                 .config
                 .api_key_configured
         );
+    }
+
+    #[test]
+    fn credential_save_succeeds_only_after_endpoint_bound_readback() {
+        struct DiscardedSecret;
+        impl MeetingSecretStore for DiscardedSecret {
+            fn read(&self, _endpoint: &CustomSttEndpoint) -> Result<Option<String>, String> {
+                Ok(None)
+            }
+
+            fn set(&self, _endpoint: &CustomSttEndpoint, _secret: &str) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn clear(&self) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let endpoint =
+            custom_stt_endpoint_from_https_url("https://stt.example.com/v1/listen").unwrap();
+        let error =
+            store_and_verify_secret(&DiscardedSecret, &endpoint, "transient-secret").unwrap_err();
+        assert!(error.contains("did not confirm"));
+    }
+
+    #[test]
+    fn credential_save_clears_an_unconfirmed_write_when_readback_errors() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct ReadbackFailure {
+            cleared: AtomicBool,
+        }
+        impl MeetingSecretStore for ReadbackFailure {
+            fn read(&self, _endpoint: &CustomSttEndpoint) -> Result<Option<String>, String> {
+                Err("Keychain access denied".into())
+            }
+
+            fn set(&self, _endpoint: &CustomSttEndpoint, _secret: &str) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn clear(&self) -> Result<(), String> {
+                self.cleared.store(true, Ordering::Release);
+                Ok(())
+            }
+        }
+
+        let secrets = ReadbackFailure {
+            cleared: AtomicBool::new(false),
+        };
+        let endpoint =
+            custom_stt_endpoint_from_https_url("https://stt.example.com/v1/listen").unwrap();
+        let error = store_and_verify_secret(&secrets, &endpoint, "transient-secret").unwrap_err();
+
+        assert!(error.contains("could not confirm"));
+        assert!(secrets.cleared.load(Ordering::Acquire));
     }
 
     #[test]

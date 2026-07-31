@@ -85,6 +85,7 @@ Feature: Capture microphone and system audio without sacrificing durability
     Given microphone and system-audio test frames are available
     When Scribe checks each source for a bounded interval
     Then it reports signal, silence, or missing data independently for each source
+    And it reports a bounded input-strength value without retaining a waveform
     And the checker retains no audio samples or transcript content
 
   @MTG-052 @manual @native @hardware @release

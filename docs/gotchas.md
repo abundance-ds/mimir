@@ -141,6 +141,24 @@ file URL skips that contract.
 
 ## Scribe
 
+### Keychain success requires endpoint-bound read-back
+
+The hosted transcription key field must not clear merely because an IPC call
+was issued. Native storage writes the endpoint-bound payload and reads it back
+before returning success. Settings owns the visible saved/replace/remove state
+and retains entered text on failure.
+
+Keep the `keyring` dependency's `apple-native` Cargo feature enabled. Without
+it, the crate selects an in-memory mock on macOS: writes appear successful but
+disappear before read-back and never reach Keychain.
+
+### Summary format and launcher preset are different controls
+
+`summaryTemplate` chooses one system-owned prompt format; `summaryPreset`
+chooses an exact launcher preset and therefore the CLI agent/model flags. Both
+are frozen into each durable summary job. “Create again” intentionally uses
+the current pair and receives a new retry-generation identity.
+
 ### Classify staged audio before accepting terminal text
 
 A terminal transcript is not sufficient at restart until native recovery has

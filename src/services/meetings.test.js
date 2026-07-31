@@ -56,12 +56,16 @@ describe('meetings service', () => {
     vi.mocked(invoke).mockResolvedValue({
       microphone: 'signal',
       system_audio: 'unexpected-provider-detail',
+      microphone_level: 72,
+      system_audio_level: 140,
       runtime_identity: 'mimir',
       observed_ms: 4_000,
     })
     await expect(checkMeetingAudio()).resolves.toEqual({
       microphone: 'signal',
       systemAudio: 'no-data',
+      microphoneLevel: 72,
+      systemAudioLevel: 100,
       runtimeIdentity: 'mimir',
       observedMs: 4_000,
     })
@@ -171,6 +175,8 @@ describe('meetings service', () => {
   it('rejects unsupported routing and KG decisions before IPC', async () => {
     await expect(updateMeetingsConfig({ transcriptionMode: 'surprise-cloud' }))
       .rejects.toThrow('local or custom')
+    await expect(updateMeetingsConfig({ summaryTemplate: 'write-anything' }))
+      .rejects.toThrow('summary format')
     await expect(decideMeetingKgProposal('meeting-1', 'publish-everywhere'))
       .rejects.toThrow('knowledge-graph draft')
     expect(invoke).not.toHaveBeenCalled()

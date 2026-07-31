@@ -125,6 +125,8 @@ pub struct MeetingConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_preset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kg_prompt: Option<String>,
@@ -149,6 +151,7 @@ pub struct MeetingConfig {
     pub api_key_configured: bool,
     pub local_model: String,
     pub summary_enabled: bool,
+    pub summary_template: String,
     pub summary_preset: String,
     pub kg_prompt: String,
     pub kg_preset: String,
@@ -166,6 +169,7 @@ impl Default for MeetingConfig {
             api_key_configured: false,
             local_model: "whisper-small".into(),
             summary_enabled: true,
+            summary_template: "standard".into(),
             summary_preset: String::new(),
             kg_prompt: "ask".into(),
             kg_preset: String::new(),
@@ -177,6 +181,7 @@ impl Default for MeetingConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeetingHookConfig {
     pub summary_enabled: bool,
+    pub summary_template: String,
     pub summary_preset: String,
     pub kg_prompt: String,
     pub kg_preset: String,
@@ -186,6 +191,7 @@ impl From<&MeetingConfig> for MeetingHookConfig {
     fn from(config: &MeetingConfig) -> Self {
         Self {
             summary_enabled: config.summary_enabled,
+            summary_template: config.summary_template.clone(),
             summary_preset: config.summary_preset.clone(),
             kg_prompt: config.kg_prompt.clone(),
             kg_preset: config.kg_preset.clone(),
@@ -1454,6 +1460,7 @@ impl MeetingRuntime {
             self.summary_job_draft(
                 meeting_id,
                 applied.revision,
+                &hook_config.summary_template,
                 &hook_config.summary_preset,
                 &completed_at,
             )
@@ -1732,6 +1739,7 @@ impl MeetingRuntime {
                 self.summary_job_draft(
                     &current.id,
                     overview.revision,
+                    &config.summary_template,
                     &config.summary_preset,
                     &completed_at,
                 )
@@ -1827,6 +1835,7 @@ impl MeetingRuntime {
                 self.summary_job_draft(
                     meeting_id,
                     applied.revision,
+                    &config.summary_template,
                     &config.summary_preset,
                     &completed_at,
                 )
@@ -2040,23 +2049,14 @@ impl MeetingRuntime {
         }) {
             return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
         }
-        if jobs
-            .iter()
-            .any(|job| job.definition.kind == kind && job.state == JobState::Succeeded)
+        if kind != FollowUpJobKind::Summary
+            && jobs
+                .iter()
+                .any(|job| job.definition.kind == kind && job.state == JobState::Succeeded)
         {
             return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
         }
 
-        let latest = jobs.iter().rev().find(|job| job.definition.kind == kind);
-        let payload = latest
-            .map(|job| job.definition.payload.clone())
-            .unwrap_or_else(|| {
-                json!({
-                    "meetingId": meeting_id,
-                    "transcriptRevision": meeting.transcript_revision,
-                    "reviewRequired": true,
-                })
-            });
         let retry_prefix = format!("{meeting_id}:{job_kind}:retry:");
         let retry_number = jobs
             .iter()
@@ -2070,15 +2070,49 @@ impl MeetingRuntime {
             .unwrap_or(0)
             .saturating_add(1);
         let now = self.inner.clock.now();
-        let draft = FollowUpJobDraft {
-            id: format!("job-retry-{}", Uuid::new_v4()),
-            meeting_id: meeting_id.into(),
-            kind,
-            idempotency_key: format!("{retry_prefix}{retry_number}"),
-            payload,
-            max_attempts: DEFAULT_JOB_ATTEMPTS,
-            not_before: now.clone(),
+        let mut draft = if kind == FollowUpJobKind::Summary {
+            let overview = self.inner.store.transcript_overview(meeting_id, 1)?;
+            if meeting.status != MeetingStatus::Completed
+                || !overview.is_final
+                || overview.non_final_segment_count != 0
+                || overview.segment_count == 0
+            {
+                return Err(MeetingRuntimeError::Validation(
+                    "creating the summary again requires a completed, non-empty terminal transcript"
+                        .into(),
+                ));
+            }
+            let config = self.hook_config()?;
+            self.summary_job_draft(
+                meeting_id,
+                meeting.transcript_revision,
+                &config.summary_template,
+                &config.summary_preset,
+                &now,
+            )
+        } else {
+            let latest = jobs.iter().rev().find(|job| job.definition.kind == kind);
+            let payload = latest
+                .map(|job| job.definition.payload.clone())
+                .unwrap_or_else(|| {
+                    json!({
+                        "meetingId": meeting_id,
+                        "transcriptRevision": meeting.transcript_revision,
+                        "reviewRequired": true,
+                    })
+                });
+            FollowUpJobDraft {
+                id: format!("job-retry-{}", Uuid::new_v4()),
+                meeting_id: meeting_id.into(),
+                kind,
+                idempotency_key: String::new(),
+                payload,
+                max_attempts: DEFAULT_JOB_ATTEMPTS,
+                not_before: now.clone(),
+            }
         };
+        draft.id = format!("job-retry-{}", Uuid::new_v4());
+        draft.idempotency_key = format!("{retry_prefix}{retry_number}");
         self.inner.store.enqueue_job(&draft, &now)?;
         self.publish_unlocked("meeting-job-retried", Some(meeting_id.into()), None)
     }
@@ -2409,6 +2443,7 @@ impl MeetingRuntime {
         &self,
         meeting_id: &str,
         transcript_revision: u64,
+        template: &str,
         preset: &str,
         not_before: &str,
     ) -> FollowUpJobDraft {
@@ -2421,6 +2456,7 @@ impl MeetingRuntime {
             payload: json!({
                 "meetingId": meeting_id,
                 "transcriptRevision": transcript_revision,
+                "template": template,
                 "preset": preset,
                 "output": {
                     "title": "reviewable",
@@ -2678,6 +2714,7 @@ fn consent_context_for_projection(
 }
 
 fn validate_config(config: &MeetingConfig) -> Result<(), MeetingRuntimeError> {
+    require_summary_template(&config.summary_template)?;
     match config.transcription_mode.as_str() {
         "local" => require_nonempty(&config.local_model, "local transcription model"),
         "custom" => {
@@ -2702,6 +2739,9 @@ fn validate_config(config: &MeetingConfig) -> Result<(), MeetingRuntimeError> {
 }
 
 fn validate_config_patch(patch: &MeetingConfigPatch) -> Result<(), MeetingRuntimeError> {
+    if let Some(template) = &patch.summary_template {
+        require_summary_template(template)?;
+    }
     if let Some(mode) = &patch.transcription_mode {
         if !matches!(mode.as_str(), "local" | "custom") {
             return Err(MeetingRuntimeError::Validation(
@@ -2720,6 +2760,33 @@ fn validate_config_patch(patch: &MeetingConfigPatch) -> Result<(), MeetingRuntim
         require_nonempty(model, "local transcription model")?;
     }
     Ok(())
+}
+
+fn require_summary_template(value: &str) -> Result<(), MeetingRuntimeError> {
+    summary_template_instructions(value).ok_or_else(|| {
+        MeetingRuntimeError::Validation(
+            "summary format must be standard, brief, decisions-actions, or detailed".into(),
+        )
+    })?;
+    Ok(())
+}
+
+pub(crate) fn summary_template_instructions(value: &str) -> Option<&'static str> {
+    match value {
+        "standard" => Some(
+            "Write a balanced meeting summary with context, decisions, action items, and open questions. Use short Markdown sections only when they improve scanning.",
+        ),
+        "brief" => Some(
+            "Write a compact executive summary. Keep only the outcome, key decisions, named action items, and unresolved blockers.",
+        ),
+        "decisions-actions" => Some(
+            "Prioritize decisions and action items. Use explicit Decisions, Actions, and Open questions sections; preserve owners and dates only when the transcript states them.",
+        ),
+        "detailed" => Some(
+            "Write a detailed chronological summary that preserves important reasoning, decisions, action items, risks, disagreements, and open questions without inventing facts.",
+        ),
+        _ => None,
+    }
 }
 
 fn validate_update_patch(patch: &MeetingUpdatePatch) -> Result<(), MeetingRuntimeError> {
@@ -3469,6 +3536,9 @@ mod tests {
             if let Some(value) = patch.summary_enabled {
                 config.summary_enabled = value;
             }
+            if let Some(value) = &patch.summary_template {
+                config.summary_template = value.clone();
+            }
             if let Some(value) = &patch.summary_preset {
                 config.summary_preset = value.clone();
             }
@@ -4118,6 +4188,62 @@ mod tests {
                 .iter()
                 .any(|job| job.definition.idempotency_key == retry_key));
         }
+    }
+
+    #[test]
+    fn completed_summary_can_run_again_with_the_current_template_and_agent_preset() {
+        let fixture = make_fixture();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "regenerate-summary"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        fixture.runtime.stop(&meeting_id).unwrap();
+        let claimed = fixture
+            .store
+            .claim_next_job("summary-worker", NOW, LEASE_END)
+            .unwrap()
+            .unwrap();
+        fixture
+            .store
+            .finish_job(
+                &claimed.definition.id,
+                claimed.lease_token.as_deref().unwrap(),
+                &JobFinish::Succeeded {
+                    result: json!({"title": "Original", "summary": "Original summary"}),
+                },
+                NOW,
+            )
+            .unwrap();
+        fixture
+            .runtime
+            .update_config(MeetingConfigPatch {
+                summary_template: Some("decisions-actions".into()),
+                summary_preset: Some("codex-review".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+
+        fixture
+            .runtime
+            .retry_job(&meeting_id, "title-summary")
+            .unwrap();
+
+        let jobs = fixture.store.list_jobs(&meeting_id).unwrap();
+        let rerun = jobs
+            .iter()
+            .find(|job| {
+                job.definition
+                    .idempotency_key
+                    .ends_with("title-summary:retry:1")
+            })
+            .unwrap();
+        assert_eq!(rerun.definition.payload["template"], "decisions-actions");
+        assert_eq!(rerun.definition.payload["preset"], "codex-review");
+        assert!(rerun
+            .definition
+            .idempotency_key
+            .ends_with("title-summary:retry:1"));
     }
 
     #[test]

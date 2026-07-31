@@ -14,8 +14,9 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
   @MTG-111 @automated @native @contract
   Scenario: A finalization job launches with exact immutable inputs
     Given a queued title and summary job is eligible to run
-    When Mimir launches its configured CLI agent preset
+    When Mimir launches its configured summary format and CLI agent preset
     Then the durable Activity receives exact argv and an immutable transcript snapshot identity
+    And the selected system-owned summary format is part of the immutable job input
     And no shell string is parsed or evaluated
 
   @MTG-112 @automated @domain @native
@@ -53,6 +54,7 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
     When title and summary generation fails
     Then the meeting remains complete with a visible finalization error
     And its durable job state remains independently inspectable and retryable
+    And a completed summary can be deliberately created again with the currently selected format and CLI agent
 
   @MTG-117 @automated @domain @native
   Scenario: A changed transcript creates a new finalization identity

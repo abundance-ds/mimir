@@ -696,6 +696,7 @@ fn meetings_snapshot() -> MeetingSnapshot {
             api_key_configured: true,
             local_model: "whisper-small".into(),
             summary_enabled: true,
+            summary_template: "standard".into(),
             summary_preset: "meeting-follow-up".into(),
             kg_prompt: "ask".into(),
             kg_preset: "meeting-kg-draft".into(),

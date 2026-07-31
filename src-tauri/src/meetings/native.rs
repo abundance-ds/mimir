@@ -279,14 +279,12 @@ fn handle_detection_notification(
             if !notified.insert(candidate.id.clone()) {
                 return;
             }
-            let app_name = candidate.app_name.chars().take(120).collect::<String>();
+            let body = detection_notification_body(&candidate.app_name);
             if let Err(error) = app
                 .notification()
                 .builder()
                 .title("Meeting detected")
-                .body(format!(
-                    "{app_name} is using the microphone. Open Scribe to record."
-                ))
+                .body(body)
                 .show()
             {
                 // Notification permission is independent of capture permission.
@@ -295,6 +293,15 @@ fn handle_detection_notification(
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn detection_notification_body(app_name: &str) -> String {
+    let mut name = app_name.trim().chars().take(48).collect::<String>();
+    if app_name.trim().chars().count() > 48 {
+        name.push('…');
+    }
+    format!("Open Scribe to record {name}.")
 }
 
 #[cfg(target_os = "macos")]

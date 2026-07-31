@@ -127,7 +127,8 @@ Feature: Produce live and batch transcripts through local or custom routes
   @MTG-077 @automated @native @security
   Scenario: OpenAI credentials remain endpoint-bound in Keychain
     Given the OpenAI Realtime endpoint is selected
-    When the native WebSocket handshake is created
+    When the credential is saved and the native WebSocket handshake is created
+    Then native storage confirms an endpoint-bound Keychain read-back before reporting success
     Then the API key is injected only as an Authorization bearer header
     And the key never appears in renderer state, meeting provenance, diagnostics, or URLs
 
@@ -137,6 +138,7 @@ Feature: Produce live and batch transcripts through local or custom routes
     When the user selects OpenAI transcription
     Then one ordered settings mutation supplies the OpenAI URL and model with the route
     And the API-key field becomes the only required next action
+    And confirmed credentials can be visibly replaced or removed
 
   @MTG-079 @automated @frontend @contract
   Scenario: Review retains the transcript that was visible during recording

@@ -11,6 +11,7 @@ import {
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  retryMeetingJob,
   startMeeting,
   stopMeeting,
   updateMeeting,
@@ -58,6 +59,7 @@ function snapshot(overrides = {}) {
       apiKeyConfigured: false,
       localModel: 'whisper-small',
       summaryEnabled: true,
+      summaryTemplate: 'standard',
       summaryPreset: '',
       kgPrompt: 'ask',
       kgPreset: '',
@@ -87,6 +89,7 @@ function meeting(overrides = {}) {
     gapCount: 0,
     transcriptRevision: 2,
     transcriptFinal: true,
+    segmentCount: 1,
     segments: [],
     summary: null,
     summaryState: 'not-started',
@@ -131,6 +134,7 @@ describe('ScribeApp', () => {
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
     vi.mocked(decideMeetingKgProposal).mockReset()
+    vi.mocked(retryMeetingJob).mockReset()
   })
 
   it('starts recording with one action and no participant attestation gate', async () => {
@@ -270,6 +274,27 @@ describe('ScribeApp', () => {
       .toContain('Approved.'))
     await wrapper.get('#scribe-detail-tab-summary').trigger('click')
     expect(wrapper.get('#scribe-detail-panel-summary').text()).toContain('Decision captured')
+  })
+
+  it('lets a completed summary run again with the currently selected recipe', async () => {
+    const reviewed = meeting({ summary: 'Decision captured.', summaryState: 'succeeded' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
+      totalSegments: 1,
+      segments: [{ id: 's1', text: 'Approved.', startMs: 0, endMs: 1_000, channel: 'microphone', final: true, revision: 1 }],
+      summary: reviewed.summary,
+    }))
+    vi.mocked(retryMeetingJob).mockResolvedValue(snapshot({
+      revision: 2,
+      meetings: [{ ...reviewed, summaryState: 'queued' }],
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+    await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
+
+    await vi.waitFor(() => expect(retryMeetingJob).toHaveBeenCalledWith('m1', 'title-summary'))
   })
 
   it('offers a reviewable KG draft only in the completed meeting review', async () => {

@@ -405,9 +405,21 @@
       "scenarios": ["MTG-076", "MTG-077"]
     },
     {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/platform.rs",
+      "selector": "credential_save_succeeds_only_after_endpoint_bound_readback",
+      "scenarios": ["MTG-077"]
+    },
+    {
       "kind": "js-test",
       "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
       "selector": "selects OpenAI with a valid endpoint and model in one mutation",
+      "scenarios": ["MTG-078"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
+      "selector": "keeps credential state visible and does not erase a replacement before confirmation",
       "scenarios": ["MTG-078"]
     },
     {
@@ -517,6 +529,18 @@
       "path": "src-tauri/src/meetings/jobs.rs",
       "selector": "gherkin_stop_hook_prompt_marks_transcript_untrusted_and_output_controlled",
       "scenarios": ["MTG-111", "MTG-115", "MTG-131", "MTG-132"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "completed_summary_can_run_again_with_the_current_template_and_agent_preset",
+      "scenarios": ["MTG-111", "MTG-116"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "lets a completed summary run again with the currently selected recipe",
+      "scenarios": ["MTG-116"]
     },
     {
       "kind": "rust-test",
@@ -766,6 +790,13 @@
           "recordedAt": "2026-07-31T14:43:00+02:00",
           "outcome": "pass",
           "artifact": "features/meetings/evidence/2026-07-31-signed-local-smoke.md",
+          "environment": "macOS 15.7.1 arm64, Apple M1 Pro, installed Developer ID-signed Mimir.app",
+          "operator": "Codex"
+        },
+        {
+          "recordedAt": "2026-08-01T00:35:00+02:00",
+          "outcome": "pass",
+          "artifact": "features/meetings/evidence/2026-08-01-signed-settings-smoke.md",
           "environment": "macOS 15.7.1 arm64, Apple M1 Pro, installed Developer ID-signed Mimir.app",
           "operator": "Codex"
         }

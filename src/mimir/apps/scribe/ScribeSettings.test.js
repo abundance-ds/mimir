@@ -9,6 +9,8 @@ const config = {
   customModel: '',
   localModel: 'whisper-small',
   summaryEnabled: true,
+  summaryTemplate: 'standard',
+  summaryPreset: '',
   kgPrompt: 'ask',
   retentionDays: 30,
 }
@@ -88,6 +90,8 @@ describe('ScribeSettings', () => {
         audioCheck: {
           microphone: 'signal',
           systemAudio: 'silent',
+          microphoneLevel: 78,
+          systemAudioLevel: 12,
           runtimeIdentity: 'development-host',
           observedMs: 4_000,
         },
@@ -96,9 +100,65 @@ describe('ScribeSettings', () => {
 
     expect(wrapper.get('[data-scribe-audio-check-result]').text()).toContain('Signal detected')
     expect(wrapper.get('[data-scribe-audio-check-result]').text()).toContain('play audio and retry')
+    expect(wrapper.get('[data-scribe-audio-level="microphone"]').attributes('aria-valuenow'))
+      .toBe('78')
+    expect(wrapper.get('[data-scribe-audio-level="system"]').attributes('aria-valuenow'))
+      .toBe('12')
     expect(wrapper.text()).toContain('discarded immediately')
     expect(wrapper.text()).toContain('development host, not the installed Mimir app')
     await wrapper.get('[data-scribe-check-audio]').trigger('click')
     expect(wrapper.emitted('checkAudio')).toHaveLength(1)
+  })
+
+  it('keeps credential state visible and does not erase a replacement before confirmation', async () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true,
+        config: {
+          ...config,
+          transcriptionMode: 'custom',
+          customUrl: 'https://api.openai.com/v1/realtime',
+          customModel: 'gpt-live-transcribe',
+          apiKeyConfigured: true,
+        },
+        permissions: { microphone: 'granted', systemAudio: 'granted' },
+      },
+    })
+
+    expect(wrapper.get('[data-scribe-api-key-state]').text()).toContain('Saved in Keychain')
+    expect(wrapper.get('[data-scribe-api-key]').attributes('placeholder')).toBe('Enter replacement key')
+    expect(wrapper.get('[data-scribe-save-api-key]').text()).toBe('Replace key')
+    expect(wrapper.get('[data-scribe-clear-api-key]').text()).toBe('Remove key')
+
+    await wrapper.get('[data-scribe-api-key]').setValue('replacement-secret')
+    await wrapper.get('[data-scribe-save-api-key]').trigger('submit')
+    expect(wrapper.emitted('saveApiKey')).toEqual([['replacement-secret']])
+    expect(wrapper.get('[data-scribe-api-key]').element.value).toBe('replacement-secret')
+
+    await wrapper.setProps({ credentialNotice: 'API key replaced and verified in Keychain.' })
+    expect(wrapper.get('[data-scribe-api-key]').element.value).toBe('')
+    expect(wrapper.get('[data-scribe-api-key-feedback]').text()).toContain('replaced and verified')
+  })
+
+  it('shows credential failures beside the key and exposes summary format and agent', () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true,
+        config: {
+          ...config,
+          transcriptionMode: 'custom',
+          customUrl: 'https://api.openai.com/v1/realtime',
+          customModel: 'gpt-live-transcribe',
+          summaryPreset: 'codex-review',
+        },
+        permissions: { microphone: 'granted', systemAudio: 'granted' },
+        credentialError: 'Keychain refused the write.',
+        summaryAgents: [{ value: 'codex-review', label: 'Codex · Review preset' }],
+      },
+    })
+
+    expect(wrapper.get('[data-scribe-api-key-error]').text()).toContain('Keychain refused')
+    expect(wrapper.get('[aria-label="Summary format"]').exists()).toBe(true)
+    expect(wrapper.get('[aria-label="Summary CLI agent"]').text()).toContain('Codex')
   })
 })

@@ -91,6 +91,8 @@ describe('meetings store', () => {
     vi.mocked(checkMeetingAudio).mockReset().mockResolvedValue({
       microphone: 'signal',
       systemAudio: 'signal',
+      microphoneLevel: 74,
+      systemAudioLevel: 61,
       runtimeIdentity: 'mimir',
       observedMs: 4_000,
     })
@@ -128,6 +130,8 @@ describe('meetings store', () => {
     expect(store.audioCheck).toEqual({
       microphone: 'signal',
       systemAudio: 'signal',
+      microphoneLevel: 74,
+      systemAudioLevel: 61,
       runtimeIdentity: 'mimir',
       observedMs: 4_000,
     })

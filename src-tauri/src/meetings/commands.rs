@@ -77,6 +77,8 @@ pub struct MeetingStartConsentGrant {
 pub struct MeetingAudioCheck {
     microphone: String,
     system_audio: String,
+    microphone_level: u8,
+    system_audio_level: u8,
     runtime_identity: String,
     observed_ms: u64,
 }
@@ -103,6 +105,16 @@ impl AudioSignalObservation {
         } else {
             "silent"
         }
+    }
+
+    fn level(&self) -> u8 {
+        if self.sample_count == 0 || self.peak <= 0.000_001 {
+            return 0;
+        }
+        let decibels = 20.0 * self.peak.min(1.0).log10();
+        (((decibels + 60.0) / 60.0) * 100.0)
+            .clamp(0.0, 100.0)
+            .round() as u8
     }
 }
 
@@ -755,6 +767,8 @@ fn perform_audio_signal_check() -> Result<MeetingAudioCheck, String> {
     Ok(MeetingAudioCheck {
         microphone: microphone.status().into(),
         system_audio: system.status().into(),
+        microphone_level: microphone.level(),
+        system_audio_level: system.level(),
         runtime_identity: if identity.is_installed_mimir() {
             "mimir"
         } else {
@@ -1357,15 +1371,18 @@ mod consent_tests {
     fn audio_signal_observation_classifies_each_source_without_retaining_samples() {
         let empty = AudioSignalObservation::default();
         assert_eq!(empty.status(), "no-data");
+        assert_eq!(empty.level(), 0);
 
         let mut silent = AudioSignalObservation::default();
         silent.observe_samples(&[0.0, f32::NAN, 0.001]);
         assert_eq!(silent.status(), "silent");
+        assert_eq!(silent.level(), 0);
         assert_eq!(silent.sample_count, 3);
 
         let mut signal = AudioSignalObservation::default();
         signal.observe_samples(&[0.0, -0.25, 0.1]);
         assert_eq!(signal.status(), "signal");
+        assert!(signal.level() >= 75);
         assert_eq!(signal.sample_count, 3);
         assert_eq!(std::mem::size_of::<AudioSignalObservation>(), 16);
     }

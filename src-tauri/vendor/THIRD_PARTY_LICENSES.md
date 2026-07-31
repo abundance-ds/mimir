@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 671 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
+Inventory: 673 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -88,6 +88,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:cookie@0.18.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/cookie/0.18.1/download | 4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747 |
 | cargo:core-foundation-sys@0.8.7 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/core-foundation-sys/0.8.7/download | 773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b |
 | cargo:core-foundation@0.10.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/core-foundation/0.10.1/download | b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6 |
+| cargo:core-foundation@0.9.4 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/core-foundation/0.9.4/download | 91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f |
 | cargo:core-graphics-types@0.2.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/core-graphics-types/0.2.0/download | 3d44a101f213f6c4cdc1853d4b78aef6db6bdfa3468798cc1d9912f4735013eb |
 | cargo:core-graphics@0.25.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/core-graphics/0.25.0/download | 064badf302c3194842cf2c5d61f56cc88e54a759313879cdf03abdd27d0c3b97 |
 | cargo:coreaudio-rs@0.14.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/coreaudio-rs/0.14.2/download | 7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58 |
@@ -426,6 +427,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:schemars@1.2.1 | MIT | https://crates.io/api/v1/crates/schemars/1.2.1/download | a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc |
 | cargo:scopeguard@1.2.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/scopeguard/1.2.0/download | 94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49 |
 | cargo:security-framework-sys@2.17.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/security-framework-sys/2.17.0/download | 6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3 |
+| cargo:security-framework@2.11.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/security-framework/2.11.1/download | 897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02 |
 | cargo:security-framework@3.7.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/security-framework/3.7.0/download | b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d |
 | cargo:selectors@0.36.1 | MPL-2.0 | https://crates.io/api/v1/crates/selectors/0.36.1/download | c5d9c0c92a92d33f08817311cf3f2c29a3538a8240e94a6a3c622ce652d7e00c |
 | cargo:semver@1.0.28 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/semver/1.0.28/download | 8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd |
