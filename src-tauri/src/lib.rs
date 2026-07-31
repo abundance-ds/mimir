@@ -7,6 +7,21 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WindowlessMeetingQuit {
+    Allow,
+    Stop(String),
+    RestoreForInspectionFailure,
+}
+
+fn windowless_meeting_quit(active_meeting_id: Result<Option<String>, ()>) -> WindowlessMeetingQuit {
+    match active_meeting_id {
+        Ok(Some(meeting_id)) => WindowlessMeetingQuit::Stop(meeting_id),
+        Ok(None) => WindowlessMeetingQuit::Allow,
+        Err(()) => WindowlessMeetingQuit::RestoreForInspectionFailure,
+    }
+}
+
 pub mod activities;
 mod activity_commands;
 mod ai;
@@ -1132,18 +1147,17 @@ pub fn run() {
                         // remain guarded by native state even when no window
                         // exists to receive the ordinary editor quit chain.
                         let meetings = app_handle.state::<meetings::runtime::MeetingRuntime>();
-                        let active_meeting_id = meetings
-                            .snapshot()
-                            .map(|snapshot| snapshot.active_meeting_id)
-                            .unwrap_or_else(|error| {
+                        let quit = windowless_meeting_quit(
+                            meetings
+                                .snapshot()
+                                .map(|snapshot| snapshot.active_meeting_id)
+                                .map_err(|error| {
                                 log::error!(
                                     "Could not inspect Scribe before windowless Quit: {error}"
                                 );
-                                // Fail closed: recreate the UI rather than
-                                // silently abandoning potentially live audio.
-                                Some(String::new())
-                            });
-                        if let Some(meeting_id) = active_meeting_id {
+                            }),
+                        );
+                        if quit != WindowlessMeetingQuit::Allow {
                             api.prevent_exit();
                             let app = app_handle.clone();
                             if let Err(error) = create_main_window(app_handle) {
@@ -1154,14 +1168,19 @@ pub fn run() {
                             tauri::async_runtime::spawn_blocking(move || {
                                 let runtime =
                                     app.state::<meetings::runtime::MeetingRuntime>();
-                                let result = if meeting_id.is_empty() {
-                                    Err("native meeting state could not be inspected".to_string())
-                                } else {
-                                    runtime.stop(&meeting_id).map(|_| ()).map_err(|error| {
+                                let result = match quit {
+                                    WindowlessMeetingQuit::Stop(meeting_id) => runtime
+                                        .stop(&meeting_id)
+                                        .map(|_| ())
+                                        .map_err(|error| {
                                         format!(
                                             "Could not durably stop Scribe during windowless Quit: {error}"
                                         )
-                                    })
+                                    }),
+                                    WindowlessMeetingQuit::RestoreForInspectionFailure => Err(
+                                        "native meeting state could not be inspected".to_string(),
+                                    ),
+                                    WindowlessMeetingQuit::Allow => Ok(()),
                                 };
                                 match result {
                                     Ok(()) => app.exit(0),
@@ -1216,4 +1235,25 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod windowless_quit_tests {
+    use super::*;
+
+    #[test]
+    fn windowless_quit_fails_closed_on_active_or_unknown_native_state() {
+        assert_eq!(
+            windowless_meeting_quit(Ok(Some("meeting-live".into()))),
+            WindowlessMeetingQuit::Stop("meeting-live".into())
+        );
+        assert_eq!(
+            windowless_meeting_quit(Err(())),
+            WindowlessMeetingQuit::RestoreForInspectionFailure
+        );
+        assert_eq!(
+            windowless_meeting_quit(Ok(None)),
+            WindowlessMeetingQuit::Allow
+        );
+    }
 }

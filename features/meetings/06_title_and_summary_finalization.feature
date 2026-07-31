@@ -58,3 +58,10 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
     When user correction creates a newer terminal transcript revision
     Then Mimir may enqueue a distinct job for the new revision
     And earlier title, summary, and provenance remain recoverable
+
+  @MTG-118 @automated @domain @native
+  Scenario: A genuinely silent meeting finalizes without fabricated follow-up
+    Given transcription ends with no final speech and no unresolved partial segment
+    When the user stops the meeting
+    Then Mimir commits an empty terminal transcript and completes the meeting
+    And it does not queue title, summary, or graph work for invented content

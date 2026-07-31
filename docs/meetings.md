@@ -29,9 +29,11 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   cannot block an audio callback or prevent durable recording.
 - Transcription is either `local` or `custom`. There is no vendor catalog,
   hidden network route, or automatic provider fallback.
-- Stop drains audio, requests a terminal transcript revision, and then enqueues
-  a durable title-and-summary Activity. A failed transcript remains visibly
-  recoverable; it is never labelled complete.
+- Stop drains audio and requests a terminal transcript revision. A terminal
+  transcript with speech enqueues a durable title-and-summary Activity; a
+  genuinely silent transcript completes without inventing a title, summary,
+  or graph follow-up. A failed or unresolved transcript remains visibly
+  recoverable and is never labelled complete.
 - Knowledge-graph follow-up defaults to a separate user decision. “Create
   reviewable draft” runs a proposal Activity; it never mutates the graph
   invisibly.
@@ -77,7 +79,9 @@ Created → Recording → Stopping → Finalizing → Completed
 Only one meeting may own capture. Lifecycle transitions use optimistic
 revisions in SQLite WAL mode. A one-second channel chunk is first staged in the
 database, written through an atomic replace, and committed only after its byte
-length and SHA-256 identity are durable. Recovery verifies staged files,
+length and SHA-256 identity are durable. Transcription enumerates only these
+committed database rows, revalidates their canonical path, bounds, byte length,
+and SHA-256, and opens every path component without following links. Recovery verifies staged files,
 quarantines corrupt state through the shared persistence helpers, releases
 expired job leases, and converts an abandoned live lifecycle into an honest
 interrupted record.
@@ -85,13 +89,18 @@ interrupted record.
 The renderer treats events as invalidation notices: install listeners first,
 then read an authoritative snapshot. Correctness never depends on delivery to
 a particular window. Dock/system Quit asks the user, performs the durable Stop
-path, and exits only after native finalization returns. Closing or destroying
-the renderer does not stop native capture.
+path, and exits only after native finalization returns. If the renderer window
+was destroyed, the native exit handler still inspects capture, restores the
+window, and durably stops before exit; an inspection or Stop failure fails
+closed with Mimir still running. Closing or destroying the renderer does not
+stop native capture.
 
 Unexpected device loss reopens both capture sources as one generation, keeps
 the canonical sample positions monotonic, and persists aligned silence/gap
 evidence. Exhausted bounded retries fail actionably after finalizing everything
-already committed.
+already committed. The worker reports a terminal disk/device/driver failure to
+the durable runtime even without a renderer, which immediately leaves the
+meeting visibly failed or interrupted for repair instead of waiting for Stop.
 
 ## Transcription routes
 
@@ -125,13 +134,19 @@ The bearer secret is stored only in macOS Keychain under service
 only for the exact currently configured endpoint and never returns it through
 IPC, diagnostics, files, or Activity arguments.
 
+The route and model approved at Start are persisted as immutable meeting
+provenance. Delayed or restart recovery uses that exact pair and fails closed
+when legacy/damaged provenance is unavailable; changing global settings can
+never redirect previously captured audio.
+
 The versioned `mimir.stt.v1` WebSocket session sends model, sample format, and
 ordered `microphone`/`system` channel identifiers. Provider acknowledgements
 advance a bounded replay cursor over committed audio. Disconnects retry with
 backoff; replay is bounded and idempotent, and an exceeded window becomes an
 explicit transcript gap. Partial revisions are durable and visually distinct
 until a final revision replaces them. Stop succeeds only after no unresolved
-partial remains and a terminal revision is committed.
+partial remains and a terminal revision is committed. Zero final segments are
+a valid terminal result when no partial remains.
 
 ## Stop-time Activities
 

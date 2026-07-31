@@ -40,7 +40,7 @@ Feature: Own meeting capture as one durable native lifecycle
 
   @MTG-025 @automated @native @desktop
   Scenario: Quit while recording requires an explicit outcome
-    Given a capture is active when application Quit is requested
+    Given a capture is active when application Quit is requested, even if the renderer window was destroyed
     When Mimir begins its guarded shutdown
     Then the user can return to recording or stop and finalize before quitting
     And native exit is not confirmed while capture ownership is unresolved

@@ -256,12 +256,29 @@ Durable one-second chunks are the handoff to local/custom STT. Do not await
 inference, sockets, renderer events, or SQLite from the callback, and do not
 let an STT failure stop or discard already captured audio.
 
+STT must enumerate committed chunk rows from SQLite, then revalidate the
+canonical path, metadata, length, digest, and no-follow open before disclosure.
+Never rediscover audio by walking a meeting directory. Recovery also stays
+bound to the exact route and model persisted from Start consent; current global
+settings are not authority for older audio.
+
 ### Scribe events are invalidations, not transcript authority
 
 The renderer installs both meeting listeners and then reads a snapshot.
 Destroyed windows can miss events while native recording continues. Keep
 events small and revisioned; correctness belongs to SQLite plus snapshot/page
 reads, not event replay.
+
+Dock/system Quit has a native windowless guard for the same reason. If native
+meeting state cannot be inspected, restore the window and fail closed instead
+of allowing process exit.
+
+### Silence is a valid terminal transcript
+
+A provider that drains with zero final segments and zero unresolved partials
+represents a silent or too-short meeting, not a repair loop. Commit an empty
+terminal revision and complete the meeting without starting title, summary, or
+graph work. Unresolved partials still fail closed.
 
 ### Stop-time agents consume hostile transcript text
 

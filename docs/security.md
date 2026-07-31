@@ -32,8 +32,8 @@ naming the exact boundary it enforces.
 | App HTTP | only `http`/`https`, timeout cap | no host allowlist; Apps may contact arbitrary hosts |
 | AI transport | model registry host allowlist; release rejects localhost | provider receives prompt/context by design |
 | Scribe capture | native human consent gate; no public start/mute/stop tools | macOS grants audio access to the Mimir process, not to an isolated meeting sandbox |
-| Scribe custom STT | exact public HTTPS endpoint upgraded to WSS, pinned DNS/TLS, bounded protocol; endpoint-bound Keychain secret | configured provider receives meeting audio and transcript by design |
-| Scribe local STT | pinned model identity and Metal-only in-process runtime | the model file and readable transcript/audio remain local user data |
+| Scribe custom STT | exact public HTTPS endpoint upgraded to WSS, pinned DNS/TLS, bounded protocol; endpoint-bound Keychain secret; recovery remains bound to the route/model approved at Start | configured provider receives integrity-verified committed meeting audio and transcript by design |
+| Scribe local STT | pinned model identity and Metal-only in-process runtime; only canonical digest-verified committed chunks enter inference | the model file and readable transcript/audio remain local user data |
 | Scribe follow-up | exact-argv durable Activity, terminal revision, bounded schema-validated output | the selected CLI agent has normal user-account filesystem/process authority |
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
 | Launcher/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment |

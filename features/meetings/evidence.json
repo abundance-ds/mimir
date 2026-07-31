@@ -74,7 +74,7 @@
     },
     {
       "feature": "features/meetings/06_title_and_summary_finalization.feature",
-      "idRange": ["MTG-110", "MTG-117"],
+      "idRange": ["MTG-110", "MTG-118"],
       "owner": "meeting-finalization-jobs",
       "verificationScope": ["durable summary jobs", "controlled argv and output", "retry and revision identity"]
     },
@@ -190,6 +190,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/lib.rs",
+      "selector": "windowless_quit_fails_closed_on_active_or_unknown_native_state",
+      "scenarios": ["MTG-025"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/model.rs",
       "selector": "gherkin_terminal_meetings_never_reopen",
       "scenarios": ["MTG-026"]
@@ -198,7 +204,13 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/runtime.rs",
       "selector": "capture_start_failure_is_durable_and_never_reported_as_success",
-      "scenarios": ["MTG-041", "MTG-046"]
+      "scenarios": ["MTG-041"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "mtg_046_mid_session_capture_failure_is_immediately_durable_and_visible",
+      "scenarios": ["MTG-046"]
     },
     {
       "kind": "rust-test",
@@ -268,8 +280,20 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "recovery_keeps_the_original_consented_route_after_global_provider_changes",
+      "scenarios": ["MTG-070"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/transcriber.rs",
       "selector": "unregistered_staged_and_corrupt_files_are_silence_not_stt_input",
+      "scenarios": ["MTG-070"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "tampered_committed_file_fails_sha256_before_stt_disclosure",
       "scenarios": ["MTG-070"]
     },
     {
@@ -349,6 +373,18 @@
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "gherkin_job_idempotency_rejects_same_key_with_different_intent",
       "scenarios": ["MTG-117", "MTG-136"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "silent_local_meeting_emits_an_empty_terminal_batch",
+      "scenarios": ["MTG-118"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "silent_terminal_meeting_completes_without_summary_job",
+      "scenarios": ["MTG-118"]
     },
     {
       "kind": "rust-test",

@@ -304,10 +304,19 @@ requirements; they do not replace runtime verification.
   versioned bounded protocol.
 - Partial transcript revisions are visually distinct and replaced
   idempotently by finals. Stop does not label a transcript final while any
-  provider tail or partial remains unresolved.
+  provider tail or partial remains unresolved. A silent meeting with no
+  unresolved partial completes with an empty terminal transcript and no
+  fabricated title/summary job.
 - Forced renderer loss leaves native capture running. Forced process loss
   restores an interrupted, honest record and completes staged-chunk and
-  transcript recovery on relaunch.
+  transcript recovery on relaunch. Dock/system Quit with no renderer window
+  still performs native durable Stop, or restores Mimir and fails closed.
+- Capture worker disk/device/driver failure becomes a durable visible
+  failed/interrupted state immediately; it is not deferred until the user
+  presses Stop.
+- Delayed transcription reads only integrity-verified committed audio and uses
+  the exact route/model approved for that meeting, even if provider settings
+  later change.
 - Stop finalizes durable audio and transcript before enqueuing a visible
   title-and-summary Activity. The Activity uses exact argv and controlled,
   immutable transcript input; failures remain retryable.

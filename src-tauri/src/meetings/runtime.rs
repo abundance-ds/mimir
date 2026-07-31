@@ -2614,6 +2614,26 @@ mod tests {
         }
     }
 
+    struct EmptyTranscription;
+
+    impl MeetingTranscriptionPort for EmptyTranscription {
+        fn start(&self, _request: &TranscriptionStart) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
+            Ok(TranscriptBatch {
+                meeting_id: request.meeting_id.clone(),
+                batch_id: format!("empty-final-{}", request.run_id),
+                base_revision: request.base_revision,
+                source: "silent-stt".into(),
+                observed_at: request.observed_at.clone(),
+                marks_final: true,
+                changes: Vec::new(),
+            })
+        }
+    }
+
     struct DrainingTranscription {
         store: Arc<MeetingStore>,
     }
@@ -3356,6 +3376,40 @@ mod tests {
             .find(|meeting| meeting.id == meeting_id)
             .unwrap();
         assert_eq!(meeting.jobs.len(), 2);
+    }
+
+    #[test]
+    fn silent_terminal_meeting_completes_without_summary_job() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            Arc::new(EmptyTranscription),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+        let started = runtime
+            .start(start_request(&runtime, "silent-meeting"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+
+        runtime.stop(&meeting_id).unwrap();
+
+        let meeting = runtime.meeting(&meeting_id).unwrap();
+        assert_eq!(meeting.lifecycle, "ready");
+        assert_eq!(
+            store.get_meeting(&meeting_id).unwrap().status,
+            MeetingStatus::Completed
+        );
+        assert!(meeting.transcript_final);
+        assert_eq!(meeting.segment_count, 0);
+        assert!(!store
+            .list_jobs(&meeting_id)
+            .unwrap()
+            .iter()
+            .any(|job| job.definition.kind == FollowUpJobKind::Summary));
     }
 
     #[test]

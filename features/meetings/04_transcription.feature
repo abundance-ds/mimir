@@ -79,7 +79,7 @@ Feature: Produce live and batch transcripts through local or custom routes
     Given transcription repair was running when Mimir exited
     When Mimir relaunches and recovers the meeting
     Then one idempotent repair job is requeued for the terminal transcript revision
-    And committed audio chunks remain the authoritative repair input
+    And only integrity-verified committed chunks cross the original consented route and model
 
   @MTG-071 @automated @domain @contract
   Scenario: Stale transcript writers cannot overwrite a terminal revision
