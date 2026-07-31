@@ -106,15 +106,15 @@
           <div
             v-if="diagnostic"
             data-workbench-diagnostic
-            class="absolute inset-x-2 top-2 z-40 flex items-start gap-2 border border-rem/30 bg-surface px-3 py-2 text-[10px] leading-relaxed text-rem"
+            class="pointer-events-none absolute bottom-2 right-2 z-40 flex max-w-[min(420px,calc(100%-16px))] items-start gap-2 border border-rem/30 bg-surface px-3 py-2 text-[10px] leading-relaxed text-rem"
             role="status"
           >
             <IconAlertTriangle :size="14" :stroke-width="1.7" class="mt-px shrink-0" />
-            <span class="min-w-0 flex-1">{{ diagnostic }}</span>
+            <span class="pointer-events-auto min-w-0 flex-1">{{ diagnostic }}</span>
             <button
               type="button"
               title="Dismiss diagnostic"
-              class="grid size-6 shrink-0 place-items-center hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              class="pointer-events-auto grid size-6 shrink-0 place-items-center hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               @click="diagnostic = ''"
             >
               <IconX :size="13" :stroke-width="1.8" />

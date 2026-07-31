@@ -22,7 +22,7 @@ use super::{
 use crate::persistence::{
     ensure_private_directory, ensure_private_subdirectory, load_json_optional_quarantining,
     prepare_private_file_path, repair_private_file, repair_private_file_if_exists,
-    repair_private_tree, write_private_bytes_atomic, write_private_json_atomic, QuarantinedLoad,
+    write_private_bytes_atomic, write_private_json_atomic, QuarantinedLoad,
 };
 use chrono::{DateTime, Duration, Utc};
 use futures_util::StreamExt;
@@ -729,8 +729,6 @@ impl ModelManager {
     ) -> Result<Arc<Self>, String> {
         ensure_private_directory(&paths.models_root)
             .map_err(|error| format!("Could not secure managed model directory: {error}"))?;
-        repair_private_tree(&paths.models_root)
-            .map_err(|error| format!("Could not repair managed model storage: {error}"))?;
         let mut indexed = BTreeMap::new();
         for entry in catalog {
             entry
@@ -2364,10 +2362,10 @@ fn secure_platform_paths(paths: &MeetingPlatformPaths) -> Result<(), String> {
 
     repair_private_file_if_exists(&paths.config_file)
         .map_err(|error| format!("Could not repair meeting settings permissions: {error}"))?;
-    repair_private_tree(&paths.meetings_root)
-        .map_err(|error| format!("Could not repair private meeting storage: {error}"))?;
-    repair_private_tree(&paths.models_root)
-        .map_err(|error| format!("Could not repair private model storage: {error}"))?;
+    // These roots are mode 0700. Files created below them already use the
+    // private persistence helpers, so recursively chmod/stat-ing every audio
+    // chunk and large model on each launch adds no isolation and makes Scribe
+    // startup grow with recording history.
     Ok(())
 }
 
@@ -2915,7 +2913,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn platform_startup_repairs_legacy_private_trees_and_refuses_symlink_components() {
+    fn platform_startup_secures_roots_without_walking_legacy_artifacts() {
         use std::os::unix::fs::{symlink, PermissionsExt};
 
         let directory = tempfile::tempdir().unwrap();
@@ -2941,24 +2939,38 @@ mod tests {
             directory.path(),
             &paths.meetings_root,
             &paths.content_root,
-            &content_nested,
             &paths.exports_root,
-            &export_nested,
             paths.models_root.parent().unwrap(),
             &paths.models_root,
-            model_nested.parent().unwrap(),
-            &model_nested,
         ] {
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+        for path in [&paths.config_file, &paths.model_state_file] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+
+        // Startup deliberately does not traverse immutable meeting history or
+        // large model trees. Their owner-only managed roots are the access
+        // boundary; individual artifacts are repaired when opened or replaced.
+        for path in [&content_nested, &export_nested, &model_nested] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o755,
+                "{} was unexpectedly visited during startup",
+                path.display()
+            );
+        }
         for path in [
-            &paths.config_file,
             &content_nested.join("meeting.json"),
             &export_nested.join("transcript.md"),
-            &paths.model_state_file,
             &model_nested.join("model.bin"),
         ] {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o644,
+                "{} was unexpectedly visited during startup",
+                path.display()
+            );
         }
 
         let completion = Arc::new((Mutex::new(false), Condvar::new()));
@@ -2981,13 +2993,9 @@ mod tests {
             directory.path(),
             &paths.meetings_root,
             &paths.content_root,
-            &content_nested,
             &paths.exports_root,
-            &export_nested,
             paths.models_root.parent().unwrap(),
             &paths.models_root,
-            model_nested.parent().unwrap(),
-            &model_nested,
         ] {
             assert_eq!(
                 fs::metadata(path).unwrap().permissions().mode() & 0o777,
@@ -2996,17 +3004,32 @@ mod tests {
                 path.display()
             );
         }
-        for path in [
-            &paths.config_file,
-            &content_nested.join("meeting.json"),
-            &export_nested.join("transcript.md"),
-            &paths.model_state_file,
-            &model_nested.join("model.bin"),
-        ] {
+        for path in [&paths.config_file, &paths.model_state_file] {
             assert_eq!(
                 fs::metadata(path).unwrap().permissions().mode() & 0o777,
                 0o600,
                 "{} was not repaired owner-only",
+                path.display()
+            );
+        }
+
+        for path in [&content_nested, &export_nested, &model_nested] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o755,
+                "{} was unexpectedly visited during startup",
+                path.display()
+            );
+        }
+        for path in [
+            &content_nested.join("meeting.json"),
+            &export_nested.join("transcript.md"),
+            &model_nested.join("model.bin"),
+        ] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o644,
+                "{} was unexpectedly visited during startup",
                 path.display()
             );
         }

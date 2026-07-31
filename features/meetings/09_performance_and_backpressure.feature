@@ -51,3 +51,10 @@ Feature: Meet bounded real-time and scale budgets
     When the release transcription suite computes word, timing, and attribution metrics
     Then each metric meets its model-specific baseline and regression tolerance
     And corpus, model, adapter, and scoring versions are recorded with the evidence
+
+  @MTG-187 @automated @native @frontend @performance
+  Scenario: Scribe startup does not grow with recorded audio history
+    Given private meeting and model roots contain many already-owned artifacts
+    When Mimir starts and the Scribe surface initializes
+    Then startup secures the private root and targeted authority files without recursively scanning every artifact
+    And Record is available before transcript windows and older library pages hydrate

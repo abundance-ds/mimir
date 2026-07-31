@@ -44,7 +44,7 @@
   "suites": [
     {
       "feature": "features/meetings/01_detection_and_consent.feature",
-      "idRange": ["MTG-001", "MTG-008"],
+      "idRange": ["MTG-001", "MTG-009"],
       "owner": "meeting-detection-and-consent",
       "verificationScope": ["native fake-clock detection policy", "human consent and hosted-route disclosure", "global recording indicator"]
     },
@@ -56,13 +56,13 @@
     },
     {
       "feature": "features/meetings/03_multichannel_capture.feature",
-      "idRange": ["MTG-040", "MTG-048"],
+      "idRange": ["MTG-040", "MTG-054"],
       "owner": "meeting-audio",
       "verificationScope": ["bounded dual-channel audio primitives", "capture failure and resampling tests", "macOS hardware evidence"]
     },
     {
       "feature": "features/meetings/04_transcription.feature",
-      "idRange": ["MTG-060", "MTG-074"],
+      "idRange": ["MTG-060", "MTG-080"],
       "owner": "meeting-transcription",
       "verificationScope": ["revisioned STT contracts", "custom transport and credentials", "verified in-process local model"]
     },
@@ -92,7 +92,7 @@
     },
     {
       "feature": "features/meetings/09_performance_and_backpressure.feature",
-      "idRange": ["MTG-180", "MTG-186"],
+      "idRange": ["MTG-180", "MTG-187"],
       "owner": "meeting-performance",
       "verificationScope": ["bounded queue policies", "release soak and lifecycle evidence", "versioned accuracy evidence"]
     },
@@ -135,21 +135,27 @@
       "scenarios": ["MTG-004"]
     },
     {
+      "kind": "rust-test",
+      "path": "src-tauri/crates/mimir-meeting-detect/src/worker.rs",
+      "selector": "enabling_detection_synchronously_clears_disabled_snapshot",
+      "scenarios": ["MTG-009"]
+    },
+    {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "lets the user dismiss a detected meeting without recording it",
+      "selector": "shows a detected app as a dismissible inline suggestion",
       "scenarios": ["MTG-005"]
     },
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "discloses the exact hosted destination before custom transcription capture",
+      "selector": "discloses OpenAI processing inline without adding a confirmation step",
       "scenarios": ["MTG-006"]
     },
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "requires the human consent acknowledgement before capture starts",
+      "selector": "starts recording with one action and no participant attestation gate",
       "scenarios": ["MTG-007"]
     },
     {
@@ -250,6 +256,42 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/permissions.rs",
+      "selector": "development_host_permissions_are_never_projected_as_mimir_permissions",
+      "scenarios": ["MTG-049"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/commands.rs",
+      "selector": "system_audio_setup_arms_the_process_tap_before_opening_settings",
+      "scenarios": ["MTG-050"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/commands.rs",
+      "selector": "audio_signal_observation_classifies_each_source_without_retaining_samples",
+      "scenarios": ["MTG-051"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
+      "selector": "checks both audio sources without presenting a recording workflow",
+      "scenarios": ["MTG-051"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/capture.rs",
+      "selector": "normal_stop_alignment_does_not_report_callback_skew_as_missing_audio",
+      "scenarios": ["MTG-053"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/commands.rs",
+      "selector": "microphone_request_returns_the_authoritative_grant_not_a_stale_detector_snapshot",
+      "scenarios": ["MTG-054"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/stt.rs",
       "selector": "provisional_revision_replaces_only_same_segment_then_final_is_terminal",
       "scenarios": ["MTG-060"]
@@ -271,6 +313,12 @@
       "path": "src-tauri/src/meetings/stt.rs",
       "selector": "reconnect_budget_is_bounded_and_only_queues_delayed_repair",
       "scenarios": ["MTG-063", "MTG-072"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "a_worker_failure_after_readiness_cannot_remain_projected_as_live",
+      "scenarios": ["MTG-063"]
     },
     {
       "kind": "rust-test",
@@ -343,6 +391,36 @@
       "path": "src-tauri/src/meetings/stt.rs",
       "selector": "revision_and_provenance_conflicts_are_atomic",
       "scenarios": ["MTG-074"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "slow_local_start_is_owned_immediately_and_stop_never_reports_a_missing_worker",
+      "scenarios": ["MTG-075"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "openai_tls_peer_receives_two_channel_sessions_and_returns_live_revisions",
+      "scenarios": ["MTG-076", "MTG-077"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
+      "selector": "selects OpenAI with a valid endpoint and model in one mutation",
+      "scenarios": ["MTG-078"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "opens one recent meeting into the focused Transcript and Summary review",
+      "scenarios": ["MTG-079"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "shows live partial speech and capture gaps in one ledger",
+      "scenarios": ["MTG-080"]
     },
     {
       "kind": "rust-test",
@@ -461,7 +539,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "lets the user review and edit the generated title summary and tags",
+      "selector": "edits reviewed title summary and bounded tags",
       "scenarios": ["MTG-112", "MTG-116", "MTG-207"]
     },
     {
@@ -539,8 +617,14 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/platform.rs",
-      "selector": "platform_startup_repairs_legacy_private_trees_and_refuses_symlink_components",
-      "scenarios": ["MTG-155"]
+      "selector": "platform_startup_secures_roots_without_walking_legacy_artifacts",
+      "scenarios": ["MTG-155", "MTG-187"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/stores/meetings.test.js",
+      "selector": "makes the recorder usable before transcript detail hydration completes",
+      "scenarios": ["MTG-187"]
     },
     {
       "kind": "rust-test",
@@ -605,7 +689,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "keeps an oversized reviewed tag local and explains the payload bound",
+      "selector": "keeps oversized reviewed tags local",
       "scenarios": ["MTG-207"]
     },
     {
@@ -642,9 +726,17 @@
   ],
   "manualEvidence": {
     "MTG-040": {
-      "procedure": "Record a licensed dual-channel fixture on the release-reference Mac and compare channel identity and timeline markers.",
-      "requiredArtifacts": ["signed build identity", "synthetic fixture digest", "channel and timeline report"],
-      "records": []
+      "procedure": "Record deterministic synthesized system speech with an active microphone on the release-reference Mac and compare channel identity and timeline markers.",
+      "requiredArtifacts": ["signed build identity", "synthetic phrase digest", "channel and timeline report"],
+      "records": [
+        {
+          "recordedAt": "2026-07-31T15:25:53+02:00",
+          "outcome": "pass",
+          "artifact": "features/meetings/evidence/2026-07-31-signed-local-smoke.md",
+          "environment": "macOS 15.7.1 arm64, Apple M1 Pro, installed Developer ID-signed Mimir.app",
+          "operator": "Codex"
+        }
+      ]
     },
     "MTG-042": {
       "procedure": "Mute the microphone during a signed dual-channel capture and verify microphone silence with continuous system-audio timing.",
@@ -666,15 +758,36 @@
       "requiredArtifacts": ["sleep and wake timestamps", "meeting snapshot", "gap manifest"],
       "records": []
     },
+    "MTG-052": {
+      "procedure": "From the signed installed Mimir app, synthesize a known test phrase in another process and run Scribe's four-second audio check.",
+      "requiredArtifacts": ["signed build identity", "TCC state observation", "audio-check result", "meeting-store before and after inventory"],
+      "records": [
+        {
+          "recordedAt": "2026-07-31T14:43:00+02:00",
+          "outcome": "pass",
+          "artifact": "features/meetings/evidence/2026-07-31-signed-local-smoke.md",
+          "environment": "macOS 15.7.1 arm64, Apple M1 Pro, installed Developer ID-signed Mimir.app",
+          "operator": "Codex"
+        }
+      ]
+    },
     "MTG-065": {
       "procedure": "Run local transcription under an outbound network deny policy and inspect connection telemetry for non-loopback egress.",
       "requiredArtifacts": ["network policy", "connection trace", "model and build digests"],
       "records": []
     },
     "MTG-066": {
-      "procedure": "Transcribe the licensed fixture with a verified model in the signed build and confirm the in-process Metal runtime without a listening sidecar.",
+      "procedure": "Transcribe deterministic synthesized speech with a verified model in the signed build and confirm the in-process Metal runtime without a transcription sidecar.",
       "requiredArtifacts": ["signed build identity", "model digest", "process and socket inventory", "transcript report"],
-      "records": []
+      "records": [
+        {
+          "recordedAt": "2026-07-31T15:25:53+02:00",
+          "outcome": "pass",
+          "artifact": "features/meetings/evidence/2026-07-31-signed-local-smoke.md",
+          "environment": "macOS 15.7.1 arm64, Apple M1 Pro, installed Developer ID-signed Mimir.app",
+          "operator": "Codex"
+        }
+      ]
     },
     "MTG-158": {
       "procedure": "Complete a synthetic local capture, local transcription, and local CLI summary under outbound network deny controls.",

@@ -10,34 +10,36 @@
 
 use super::{
     config::CustomSttEndpoint,
-    runtime::{MeetingTranscriptionPort, TranscriptionFinalize, TranscriptionStart},
+    runtime::{
+        MeetingTranscriptionPort, TranscriptionFinalize, TranscriptionStart,
+        TranscriptionWorkerStatus,
+    },
     stt::{
-        AudioEncoding, ClientMessage, NormalizedTranscriptBatch, SegmentState, ServerMessage,
-        SttPreflightRequest, TranscriptAccumulator, TranscriptionOperation, WireId,
+        AudioEncoding, ClientMessage, NormalizedSegment, NormalizedTranscriptBatch, SegmentState,
+        ServerMessage, SttPreflightRequest, TranscriptAccumulator, TranscriptionOperation, WireId,
         STT_WIRE_CONTRACT,
     },
     AudioChunk, AudioChunkStatus, MeetingStore, TranscriptBatch, TranscriptChange,
     TranscriptRepairBegin, TranscriptSegmentInput,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use chrono::{SecondsFormat, Utc};
 use futures_util::{future::BoxFuture, SinkExt, StreamExt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-#[cfg(test)]
-use std::time::Instant;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     fs::{self, File, OpenOptions},
     io::{self, Read},
     net::SocketAddr,
     path::{Component, Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender, SyncSender},
         Arc, Mutex, MutexGuard,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::net::{lookup_host, TcpStream};
 use tokio::time::{sleep, timeout};
@@ -70,7 +72,9 @@ const MAX_CONNECT_ATTEMPTS: u8 = 5;
 const MAX_INITIAL_CONNECT_ATTEMPTS: u8 = 2;
 const BASE_RECONNECT_DELAY: Duration = Duration::from_millis(250);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(4);
-const START_READY_TIMEOUT: Duration = Duration::from_secs(30);
+const OPENAI_SAMPLE_RATE_HZ: u32 = 24_000;
+const OPENAI_COMMIT_CHUNKS: usize = 2;
+const OPENAI_FINALIZE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// A selected provider. The runtime route is resolved once per recording and
 /// reconnects are constrained to the resulting variant.
@@ -161,6 +165,10 @@ pub trait MeetingCredentialResolver: Send + Sync {
 /// an authoritative snapshot refresh.
 pub trait TranscriptionChangeSink: Send + Sync {
     fn changed(&self, meeting_id: &str);
+
+    fn state_changed(&self, meeting_id: &str) {
+        self.changed(meeting_id);
+    }
 }
 
 pub struct NoopTranscriptionChangeSink;
@@ -233,6 +241,15 @@ pub trait NormalizedBatchSink {
 struct TranscriptionSession {
     finalize: Sender<FinalizeCommand>,
     worker: thread::JoinHandle<Result<WorkerCompletion, String>>,
+    readiness: thread::JoinHandle<()>,
+    state: Arc<Mutex<TranscriptionSessionState>>,
+}
+
+#[derive(Debug, Clone)]
+enum TranscriptionSessionState {
+    Initializing,
+    Live,
+    Failed,
 }
 
 #[derive(Debug, Clone)]
@@ -253,7 +270,6 @@ pub struct NativeMeetingTranscriber {
     local: Arc<dyn LocalTranscriber>,
     changes: Arc<dyn TranscriptionChangeSink>,
     sessions: Mutex<HashMap<String, TranscriptionSession>>,
-    startup_cleanup_pending: Arc<AtomicBool>,
 }
 
 impl NativeMeetingTranscriber {
@@ -276,7 +292,6 @@ impl NativeMeetingTranscriber {
             local,
             changes,
             sessions: Mutex::new(HashMap::new()),
-            startup_cleanup_pending: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -305,12 +320,6 @@ impl NativeMeetingTranscriber {
 impl MeetingTranscriptionPort for NativeMeetingTranscriber {
     fn start(&self, request: &TranscriptionStart) -> Result<(), String> {
         let mut sessions = self.sessions()?;
-        if self.startup_cleanup_pending.load(Ordering::Acquire) {
-            return Err(
-                "a timed-out transcription startup is still being reclaimed; retry after it exits"
-                    .into(),
-            );
-        }
         if sessions.contains_key(&request.meeting_id) {
             return Err(format!(
                 "meeting '{}' already owns a transcription worker",
@@ -346,6 +355,10 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         let credentials = Arc::clone(&self.credential_resolver);
         let local = Arc::clone(&self.local);
         let changes = Arc::clone(&self.changes);
+        let state = Arc::new(Mutex::new(TranscriptionSessionState::Initializing));
+        let worker_state = Arc::clone(&state);
+        let worker_changes = Arc::clone(&self.changes);
+        let worker_meeting_id = request.meeting_id.clone();
         let thread_name = format!("mimir-stt-{}", request.meeting_id);
         let worker = thread::Builder::new()
             .name(thread_name)
@@ -368,46 +381,49 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                     // and a later runtime failure cannot masquerade as a
                     // second startup outcome.
                     let _ = startup_error.try_send(Err(message.clone()));
+                    if let Ok(mut state) = worker_state.lock() {
+                        *state = TranscriptionSessionState::Failed;
+                    }
+                    worker_changes.state_changed(&worker_meeting_id);
                 }
                 result
             })
             .map_err(|error| format!("could not spawn transcription worker: {error}"))?;
+        let readiness_state = Arc::clone(&state);
+        let readiness_changes = Arc::clone(&self.changes);
+        let readiness_meeting_id = request.meeting_id.clone();
+        let readiness = thread::Builder::new()
+            .name(format!("mimir-stt-ready-{}", request.meeting_id))
+            .spawn(move || {
+                let next = match ready_rx.recv() {
+                    Ok(Ok(())) => TranscriptionSessionState::Live,
+                    Ok(Err(_)) | Err(_) => TranscriptionSessionState::Failed,
+                };
+                if let Ok(mut state) = readiness_state.lock() {
+                    // A worker can fail immediately after reporting Ready.
+                    // Never let the slower observer overwrite that terminal
+                    // failure with a stale Live projection.
+                    if matches!(*state, TranscriptionSessionState::Initializing) {
+                        *state = next;
+                    }
+                }
+                readiness_changes.state_changed(&readiness_meeting_id);
+            })
+            .map_err(|error| {
+                let _ = finalize_tx.send(FinalizeCommand { observed_at: now() });
+                format!("could not monitor transcription worker startup: {error}")
+            })?;
 
-        match ready_rx.recv_timeout(START_READY_TIMEOUT) {
-            Ok(Ok(())) => {
-                sessions.insert(
-                    request.meeting_id.clone(),
-                    TranscriptionSession {
-                        finalize: finalize_tx,
-                        worker,
-                    },
-                );
-                Ok(())
-            }
-            Ok(Err(message)) => {
-                let _ = finalize_tx.send(FinalizeCommand { observed_at: now() });
-                drop(ready_rx);
-                reap_transcription_startup(
-                    "meeting transcription startup",
-                    worker,
-                    Arc::clone(&self.startup_cleanup_pending),
-                );
-                Err(message)
-            }
-            Err(error) => {
-                let _ = finalize_tx.send(FinalizeCommand { observed_at: now() });
-                drop(ready_rx);
-                reap_transcription_startup(
-                    "timed-out meeting transcription startup",
-                    worker,
-                    Arc::clone(&self.startup_cleanup_pending),
-                );
-                Err(format!(
-                    "transcription provider did not become ready within {} seconds: {error}",
-                    START_READY_TIMEOUT.as_secs()
-                ))
-            }
-        }
+        sessions.insert(
+            request.meeting_id.clone(),
+            TranscriptionSession {
+                finalize: finalize_tx,
+                worker,
+                readiness,
+                state,
+            },
+        );
+        Ok(())
     }
 
     fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
@@ -415,21 +431,30 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             .sessions()?
             .remove(&request.meeting_id)
             .ok_or_else(|| {
-                format!(
-                    "meeting '{}' has no live transcription worker; delayed repair is required",
-                    request.meeting_id
-                )
+                "Transcription is not active. Stored audio remains available for delayed repair."
+                    .to_string()
             })?;
-        session
+        let finalize_sent = session
             .finalize
             .send(FinalizeCommand {
                 observed_at: request.observed_at.clone(),
             })
-            .map_err(|_| "transcription worker stopped before finalization".to_string())?;
+            .is_ok();
         let completion = session
             .worker
             .join()
-            .map_err(|_| "transcription worker panicked".to_string())??;
+            .map_err(|_| "transcription worker panicked".to_string())?;
+        session
+            .readiness
+            .join()
+            .map_err(|_| "transcription startup observer panicked".to_string())?;
+        let completion = completion.map_err(|error| {
+            if finalize_sent {
+                error
+            } else {
+                format!("Transcription stopped; recorded audio is safe for repair. {error}")
+            }
+        })?;
         if completion.unresolved_partial_count != 0 {
             return Err(format!(
                 "transcription provider completed with {} unresolved partial segment(s); delayed repair is required",
@@ -458,6 +483,24 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             marks_final: true,
             changes: Vec::new(),
         })
+    }
+
+    fn status(&self, meeting_id: &str) -> TranscriptionWorkerStatus {
+        let Ok(sessions) = self.sessions() else {
+            return TranscriptionWorkerStatus::Delayed;
+        };
+        let Some(session) = sessions.get(meeting_id) else {
+            return TranscriptionWorkerStatus::Delayed;
+        };
+        let status = match session.state.lock() {
+            Ok(state) => match &*state {
+                TranscriptionSessionState::Initializing => TranscriptionWorkerStatus::Initializing,
+                TranscriptionSessionState::Live => TranscriptionWorkerStatus::Live,
+                TranscriptionSessionState::Failed => TranscriptionWorkerStatus::Delayed,
+            },
+            Err(_) => TranscriptionWorkerStatus::Delayed,
+        };
+        status
     }
 }
 
@@ -498,13 +541,23 @@ fn run_worker(
                 .send(Ok(()))
                 .map_err(|_| "transcription caller stopped during local startup".to_string())?;
             let (local_tx, local_rx) = mpsc::channel();
+            let (bridge_cancel_tx, bridge_cancel_rx) = mpsc::channel();
             let bridge = thread::Builder::new()
                 .name(format!("mimir-stt-finalize-{}", request.meeting_id))
-                .spawn(move || {
-                    if let Ok(command) = finalize.recv() {
-                        let _ = local_tx.send(LocalFinalizeCommand {
-                            observed_at: command.observed_at,
-                        });
+                .spawn(move || loop {
+                    match finalize.recv_timeout(Duration::from_millis(25)) {
+                        Ok(command) => {
+                            let _ = local_tx.send(LocalFinalizeCommand {
+                                observed_at: command.observed_at,
+                            });
+                            break;
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if bridge_cancel_rx.try_recv().is_ok() {
+                                break;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                 })
                 .map_err(|error| format!("could not start local finalization bridge: {error}"))?;
@@ -516,6 +569,7 @@ fn run_worker(
                 finalize: &local_rx,
                 sink: &mut sink,
             });
+            let _ = bridge_cancel_tx.send(());
             let _ = bridge.join();
             run_result?;
         }
@@ -525,44 +579,26 @@ fn run_worker(
                 .enable_all()
                 .build()
                 .map_err(|error| format!("could not initialize transcription runtime: {error}"))?;
-            runtime.block_on(run_custom(
-                CustomRunContext {
-                    request: &request,
-                    endpoint: &endpoint,
-                    model: &model,
-                    credential: credential.as_deref(),
-                    audio: &audio,
-                    finalize: &finalize,
-                    ready: &ready,
-                },
-                &mut sink,
-            ))?;
+            let context = CustomRunContext {
+                request: &request,
+                endpoint: &endpoint,
+                model: &model,
+                credential: credential.as_deref(),
+                audio: &audio,
+                finalize: &finalize,
+                ready: &ready,
+            };
+            if is_openai_realtime_route(&endpoint, &model) {
+                runtime.block_on(run_openai_realtime(context, &mut sink))?;
+            } else {
+                runtime.block_on(run_custom(context, &mut sink))?;
+            }
         }
     }
     Ok(WorkerCompletion {
         source: source.into(),
         unresolved_partial_count: sink.accumulator.unresolved_partial_count(),
     })
-}
-
-fn reap_transcription_startup<T: Send + 'static>(
-    label: &'static str,
-    worker: thread::JoinHandle<T>,
-    pending: Arc<AtomicBool>,
-) {
-    pending.store(true, Ordering::Release);
-    let reaper_pending = Arc::clone(&pending);
-    if let Err(error) = thread::Builder::new()
-        .name("mimir-stt-startup-reaper".into())
-        .spawn(move || {
-            if worker.join().is_err() {
-                log::error!("{label} panicked while being reclaimed");
-            }
-            reaper_pending.store(false, Ordering::Release);
-        })
-    {
-        log::error!("Could not reclaim {label} in the background: {error}");
-    }
 }
 
 fn resolve_custom_credential(
@@ -594,6 +630,7 @@ impl std::fmt::Debug for PersistedAudioChunk {
     }
 }
 
+#[derive(Clone)]
 enum AudioAuthority {
     CommittedStore(Arc<MeetingStore>),
     #[cfg(test)]
@@ -613,6 +650,7 @@ enum AuthorizedAudioChunk {
 /// Production construction requires a [`MeetingStore`]. SQLite's committed
 /// rows are the only authority for which files may cross the STT boundary;
 /// directory contents are never discovered or trusted.
+#[derive(Clone)]
 pub struct PersistedAudioSource {
     root: PathBuf,
     meeting_id: String,
@@ -1198,6 +1236,557 @@ impl NormalizedBatchSink for StoreBatchSink {
     }
 }
 
+fn is_openai_realtime_route(endpoint: &CustomSttEndpoint, model: &str) -> bool {
+    Url::parse(endpoint.as_str()).is_ok_and(|url| {
+        url.path().trim_end_matches('/') == "/v1/realtime" && model.starts_with("gpt-")
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenAiChannel {
+    Microphone,
+    System,
+}
+
+impl OpenAiChannel {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Microphone => "microphone",
+            Self::System => "system",
+        }
+    }
+
+    fn speaker(self) -> &'static str {
+        match self {
+            Self::Microphone => "You",
+            Self::System => "Others",
+        }
+    }
+
+    fn interleaved_index(self) -> usize {
+        match self {
+            Self::Microphone => 0,
+            Self::System => 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OpenAiAudioRange {
+    start_ms: u64,
+    end_ms: u64,
+}
+
+#[derive(Default)]
+struct OpenAiItemState {
+    text: String,
+    revision: u64,
+    range: Option<OpenAiAudioRange>,
+}
+
+struct OpenAiTranscriptState {
+    channel: OpenAiChannel,
+    pending_ranges: VecDeque<OpenAiAudioRange>,
+    item_ranges: HashMap<String, OpenAiAudioRange>,
+    items: HashMap<String, OpenAiItemState>,
+    completed_items: HashSet<String>,
+    provider_sequence: Arc<AtomicU64>,
+}
+
+#[derive(Default)]
+struct OpenAiEventEffect {
+    batches: Vec<NormalizedTranscriptBatch>,
+    completed_turn: bool,
+}
+
+impl OpenAiTranscriptState {
+    fn new(channel: OpenAiChannel, provider_sequence: Arc<AtomicU64>) -> Self {
+        Self {
+            channel,
+            pending_ranges: VecDeque::new(),
+            item_ranges: HashMap::new(),
+            items: HashMap::new(),
+            completed_items: HashSet::new(),
+            provider_sequence,
+        }
+    }
+
+    fn queue_commit(&mut self, range: OpenAiAudioRange) {
+        self.pending_ranges.push_back(range);
+    }
+
+    fn handle(&mut self, value: &serde_json::Value) -> Result<OpenAiEventEffect, String> {
+        let event_type = value
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        match event_type {
+            "input_audio_buffer.committed" => {
+                let item_id = required_openai_string(value, "item_id")?;
+                if let Some(range) = self.pending_ranges.pop_front() {
+                    self.item_ranges.insert(item_id.to_string(), range);
+                }
+                Ok(OpenAiEventEffect::default())
+            }
+            "conversation.item.input_audio_transcription.delta" => {
+                let item_id = required_openai_string(value, "item_id")?;
+                let delta = required_openai_string(value, "delta")?;
+                if delta.is_empty() || self.completed_items.contains(item_id) {
+                    return Ok(OpenAiEventEffect::default());
+                }
+                let range = self.range_for(item_id);
+                let item = self.items.entry(item_id.to_string()).or_default();
+                item.text.push_str(delta);
+                item.revision = item.revision.saturating_add(1);
+                item.range = Some(range);
+                let segment = openai_segment(
+                    self.channel,
+                    item_id,
+                    item.revision,
+                    SegmentState::Partial,
+                    range,
+                    &item.text,
+                )?;
+                Ok(OpenAiEventEffect {
+                    batches: vec![self.batch(segment)?],
+                    completed_turn: false,
+                })
+            }
+            "conversation.item.input_audio_transcription.completed" => {
+                let item_id = required_openai_string(value, "item_id")?;
+                if !self.completed_items.insert(item_id.to_string()) {
+                    return Ok(OpenAiEventEffect::default());
+                }
+                let range = self.range_for(item_id);
+                let completed = value
+                    .get("transcript")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                let item = self.items.entry(item_id.to_string()).or_default();
+                if !completed.is_empty() {
+                    item.text.clear();
+                    item.text.push_str(completed);
+                }
+                item.revision = item.revision.saturating_add(1).max(1);
+                item.range = Some(range);
+                let revision = item.revision;
+                let text = item.text.clone();
+                let batches = if text.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    vec![self.batch(openai_segment(
+                        self.channel,
+                        item_id,
+                        revision,
+                        SegmentState::Final,
+                        range,
+                        &text,
+                    )?)?]
+                };
+                Ok(OpenAiEventEffect {
+                    batches,
+                    completed_turn: true,
+                })
+            }
+            "conversation.item.input_audio_transcription.failed" | "error" => {
+                let code = value
+                    .pointer("/error/code")
+                    .or_else(|| value.pointer("/error/type"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("provider-error");
+                Err(format!(
+                    "OpenAI realtime transcription failed ({})",
+                    opaque_provider_error_code(code)
+                ))
+            }
+            _ => Ok(OpenAiEventEffect::default()),
+        }
+    }
+
+    fn range_for(&mut self, item_id: &str) -> OpenAiAudioRange {
+        if let Some(range) = self.item_ranges.get(item_id).copied() {
+            return range;
+        }
+        let range = self.pending_ranges.pop_front().unwrap_or(OpenAiAudioRange {
+            start_ms: 0,
+            end_ms: 1,
+        });
+        self.item_ranges.insert(item_id.to_string(), range);
+        range
+    }
+
+    fn batch(&self, segment: NormalizedSegment) -> Result<NormalizedTranscriptBatch, String> {
+        let sequence = self.provider_sequence.fetch_add(1, Ordering::Relaxed);
+        Ok(NormalizedTranscriptBatch {
+            provider_sequence: sequence,
+            batch_id: WireId::new(format!("openai-{}-{sequence}", self.channel.id()))
+                .map_err(|error| error.to_string())?,
+            segments: vec![segment],
+        })
+    }
+}
+
+fn required_openai_string<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Result<&'a str, String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("OpenAI realtime event omitted {field}"))
+}
+
+fn openai_segment(
+    channel: OpenAiChannel,
+    item_id: &str,
+    revision: u64,
+    state: SegmentState,
+    range: OpenAiAudioRange,
+    text: &str,
+) -> Result<NormalizedSegment, String> {
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(format!("{}:{item_id}", channel.id()))
+    );
+    Ok(NormalizedSegment {
+        segment_id: WireId::new(format!("oa-{}-{}", channel.id(), &digest[..24]))
+            .map_err(|error| error.to_string())?,
+        revision,
+        state,
+        start_ms: range.start_ms,
+        end_ms: range.end_ms.max(range.start_ms.saturating_add(1)),
+        text: text.to_string(),
+        channel_id: Some(WireId::new(channel.id()).expect("static OpenAI channel id")),
+        speaker: Some(channel.speaker().to_string()),
+        language: None,
+        confidence: None,
+    })
+}
+
+fn openai_pcm16_mono(interleaved_f32le: &[u8], channel: OpenAiChannel) -> Result<Vec<u8>, String> {
+    let frame_bytes = BYTES_PER_SAMPLE * CHANNELS as usize;
+    if interleaved_f32le.is_empty() || !interleaved_f32le.len().is_multiple_of(frame_bytes) {
+        return Err("OpenAI audio frame is not aligned to stereo f32le samples".into());
+    }
+    let input_frames = interleaved_f32le.len() / frame_bytes;
+    let output_frames = input_frames
+        .checked_mul(OPENAI_SAMPLE_RATE_HZ as usize)
+        .ok_or_else(|| "OpenAI audio resample length overflow".to_string())?
+        / SAMPLE_RATE_HZ as usize;
+    let mut input = Vec::with_capacity(input_frames);
+    for frame in interleaved_f32le.chunks_exact(frame_bytes) {
+        let offset = channel.interleaved_index() * BYTES_PER_SAMPLE;
+        let sample = f32::from_le_bytes(
+            frame[offset..offset + BYTES_PER_SAMPLE]
+                .try_into()
+                .expect("validated f32 sample width"),
+        );
+        input.push(if sample.is_finite() { sample } else { 0.0 });
+    }
+    let mut output = Vec::with_capacity(output_frames * size_of::<i16>());
+    for target_index in 0..output_frames {
+        let numerator = target_index * SAMPLE_RATE_HZ as usize;
+        let left = numerator / OPENAI_SAMPLE_RATE_HZ as usize;
+        let remainder = numerator % OPENAI_SAMPLE_RATE_HZ as usize;
+        let right = (left + 1).min(input.len().saturating_sub(1));
+        let fraction = remainder as f32 / OPENAI_SAMPLE_RATE_HZ as f32;
+        let sample = input[left] + (input[right] - input[left]) * fraction;
+        let pcm = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        output.extend_from_slice(&pcm.to_le_bytes());
+    }
+    Ok(output)
+}
+
+async fn run_openai_realtime(
+    context: CustomRunContext<'_>,
+    sink: &mut dyn NormalizedBatchSink,
+) -> Result<(), String> {
+    run_openai_realtime_with_connector(context, sink, &ProductionOpenAiConnector).await
+}
+
+trait OpenAiConnectionFactory: Send + Sync {
+    fn connect<'a>(
+        &'a self,
+        endpoint: &'a CustomSttEndpoint,
+        credential: &'a str,
+    ) -> BoxFuture<'a, Result<(PinnedWebSocket, SocketAddr), String>>;
+}
+
+struct ProductionOpenAiConnector;
+
+impl OpenAiConnectionFactory for ProductionOpenAiConnector {
+    fn connect<'a>(
+        &'a self,
+        endpoint: &'a CustomSttEndpoint,
+        credential: &'a str,
+    ) -> BoxFuture<'a, Result<(PinnedWebSocket, SocketAddr), String>> {
+        Box::pin(connect_openai_pinned(endpoint, credential))
+    }
+}
+
+async fn run_openai_realtime_with_connector(
+    context: CustomRunContext<'_>,
+    sink: &mut dyn NormalizedBatchSink,
+    connector: &dyn OpenAiConnectionFactory,
+) -> Result<(), String> {
+    let credential = context
+        .credential
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "OpenAI transcription requires an API key stored in Keychain".to_string())?;
+    let (microphone, system) = tokio::try_join!(
+        openai_session(context.endpoint, credential, context.model, connector),
+        openai_session(context.endpoint, credential, context.model, connector),
+    )?;
+    context
+        .ready
+        .send(Ok(()))
+        .map_err(|_| "transcription caller stopped during OpenAI startup".to_string())?;
+
+    let (finalize_tx, finalize_rx) = tokio::sync::watch::channel(false);
+    let (batch_tx, mut batch_rx) = tokio::sync::mpsc::unbounded_channel();
+    let sequence = Arc::new(AtomicU64::new(1));
+    let microphone_future = drive_openai_channel(
+        microphone,
+        context.audio.clone(),
+        OpenAiChannel::Microphone,
+        finalize_rx.clone(),
+        batch_tx.clone(),
+        Arc::clone(&sequence),
+    );
+    let system_future = drive_openai_channel(
+        system,
+        context.audio.clone(),
+        OpenAiChannel::System,
+        finalize_rx,
+        batch_tx,
+        sequence,
+    );
+    tokio::pin!(microphone_future);
+    tokio::pin!(system_future);
+    let mut microphone_done = false;
+    let mut system_done = false;
+    let mut finalizing = false;
+    let mut poll = tokio::time::interval(Duration::from_millis(50));
+
+    while !microphone_done || !system_done {
+        tokio::select! {
+            Some(batch) = batch_rx.recv() => sink.ingest(batch)?,
+            result = &mut microphone_future, if !microphone_done => {
+                result?;
+                microphone_done = true;
+            }
+            result = &mut system_future, if !system_done => {
+                result?;
+                system_done = true;
+            }
+            _ = poll.tick() => {
+                if !finalizing {
+                    match context.finalize.try_recv() {
+                        Ok(_) => {
+                            finalizing = true;
+                            let _ = finalize_tx.send(true);
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            return Err("transcription finalization channel closed".into());
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {}
+                    }
+                }
+            }
+        }
+    }
+    while let Ok(batch) = batch_rx.try_recv() {
+        sink.ingest(batch)?;
+    }
+    Ok(())
+}
+
+async fn openai_session(
+    endpoint: &CustomSttEndpoint,
+    credential: &str,
+    model: &str,
+    connector: &dyn OpenAiConnectionFactory,
+) -> Result<PinnedWebSocket, String> {
+    let (mut websocket, _) = connector.connect(endpoint, credential).await?;
+    websocket
+        .send(Message::text(
+            json!({
+                "type": "session.update",
+                "session": {
+                    "type": "transcription",
+                    "audio": {
+                        "input": {
+                            "format": {
+                                "type": "audio/pcm",
+                                "rate": OPENAI_SAMPLE_RATE_HZ
+                            },
+                            "transcription": {
+                                "model": model,
+                                "delay": "low"
+                            },
+                            "turn_detection": null
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        ))
+        .await
+        .map_err(|_| "could not configure OpenAI realtime transcription".to_string())?;
+    loop {
+        let message = timeout(PROVIDER_RESPONSE_TIMEOUT, websocket.next())
+            .await
+            .map_err(|_| "OpenAI realtime session setup timed out".to_string())?
+            .ok_or_else(|| "OpenAI realtime session closed during setup".to_string())?
+            .map_err(|_| "OpenAI realtime session setup failed".to_string())?;
+        let Message::Text(text) = message else {
+            continue;
+        };
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|_| "OpenAI realtime session returned invalid JSON".to_string())?;
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("session.updated") => return Ok(websocket),
+            Some("error") => {
+                let code = value
+                    .pointer("/error/code")
+                    .or_else(|| value.pointer("/error/type"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("session-rejected");
+                return Err(format!(
+                    "OpenAI realtime session was rejected ({})",
+                    opaque_provider_error_code(code)
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn drive_openai_channel(
+    websocket: PinnedWebSocket,
+    audio: PersistedAudioSource,
+    channel: OpenAiChannel,
+    mut finalizing_rx: tokio::sync::watch::Receiver<bool>,
+    batches: tokio::sync::mpsc::UnboundedSender<NormalizedTranscriptBatch>,
+    sequence: Arc<AtomicU64>,
+) -> Result<(), String> {
+    let (mut writer, mut reader) = websocket.split();
+    let mut transcript = OpenAiTranscriptState::new(channel, sequence);
+    let mut next_sequence = 0_u64;
+    let mut turn_start_ms = None;
+    let mut turn_end_ms = 0_u64;
+    let mut turn_chunks = 0_usize;
+    let mut outstanding_turns = 0_usize;
+    let mut finalizing = *finalizing_rx.borrow();
+    let mut finalizing_since = finalizing.then(Instant::now);
+    let mut poll = tokio::time::interval(AUDIO_POLL_INTERVAL);
+
+    loop {
+        tokio::select! {
+            changed = finalizing_rx.changed(), if !finalizing => {
+                if changed.is_err() || *finalizing_rx.borrow() {
+                    finalizing = true;
+                    finalizing_since = Some(Instant::now());
+                }
+            }
+            message = reader.next() => {
+                let message = message
+                    .ok_or_else(|| "OpenAI realtime connection closed before finalization".to_string())?
+                    .map_err(|_| "OpenAI realtime connection failed".to_string())?;
+                match message {
+                    Message::Text(text) => {
+                        let value: serde_json::Value = serde_json::from_str(&text)
+                            .map_err(|_| "OpenAI realtime returned invalid JSON".to_string())?;
+                        let effect = transcript.handle(&value)?;
+                        if effect.completed_turn {
+                            outstanding_turns = outstanding_turns.saturating_sub(1);
+                        }
+                        for batch in effect.batches {
+                            batches.send(batch)
+                                .map_err(|_| "OpenAI transcript consumer stopped".to_string())?;
+                        }
+                    }
+                    Message::Close(_) => {
+                        return Err("OpenAI realtime connection closed before finalization".into());
+                    }
+                    Message::Ping(bytes) => {
+                        writer.send(Message::Pong(bytes)).await
+                            .map_err(|_| "OpenAI realtime keepalive failed".to_string())?;
+                    }
+                    _ => {}
+                }
+            }
+            _ = poll.tick() => {
+                let chunks = audio.chunks_from(next_sequence, finalizing, 1)?;
+                if let Some(chunk) = chunks.first() {
+                    let pcm = openai_pcm16_mono(&chunk.bytes, channel)?;
+                    writer.send(Message::text(json!({
+                        "type": "input_audio_buffer.append",
+                        "audio": BASE64_STANDARD.encode(pcm),
+                    }).to_string())).await
+                        .map_err(|_| "could not stream audio to OpenAI".to_string())?;
+                    turn_start_ms.get_or_insert(chunk.start_ms);
+                    turn_end_ms = chunk.end_ms;
+                    turn_chunks = turn_chunks.saturating_add(1);
+                    next_sequence = chunk.sequence.saturating_add(1);
+                    if turn_chunks >= OPENAI_COMMIT_CHUNKS {
+                        commit_openai_turn(
+                            &mut writer,
+                            &mut transcript,
+                            turn_start_ms.take().unwrap_or(chunk.start_ms),
+                            turn_end_ms,
+                        ).await?;
+                        turn_chunks = 0;
+                        outstanding_turns = outstanding_turns.saturating_add(1);
+                    }
+                    continue;
+                }
+                if finalizing {
+                    if turn_chunks > 0 {
+                        commit_openai_turn(
+                            &mut writer,
+                            &mut transcript,
+                            turn_start_ms.take().unwrap_or(turn_end_ms.saturating_sub(1)),
+                            turn_end_ms,
+                        ).await?;
+                        turn_chunks = 0;
+                        outstanding_turns = outstanding_turns.saturating_add(1);
+                    }
+                    if outstanding_turns == 0 {
+                        let _ = writer.send(Message::Close(None)).await;
+                        return Ok(());
+                    }
+                    if finalizing_since.is_some_and(|started| started.elapsed() > OPENAI_FINALIZE_TIMEOUT) {
+                        return Err("OpenAI realtime transcript did not finish before the recovery deadline".into());
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn commit_openai_turn<S>(
+    writer: &mut S,
+    transcript: &mut OpenAiTranscriptState,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<(), String>
+where
+    S: futures_util::Sink<Message> + Unpin,
+    S::Error: std::fmt::Debug,
+{
+    writer
+        .send(Message::text(
+            json!({ "type": "input_audio_buffer.commit" }).to_string(),
+        ))
+        .await
+        .map_err(|_| "could not commit audio to OpenAI".to_string())?;
+    transcript.queue_commit(OpenAiAudioRange { start_ms, end_ms });
+    Ok(())
+}
+
 struct CustomRunContext<'a> {
     request: &'a TranscriptionStart,
     endpoint: &'a CustomSttEndpoint,
@@ -1548,6 +2137,74 @@ where
 type PinnedWebSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
 
+async fn connect_openai_pinned(
+    endpoint: &CustomSttEndpoint,
+    credential: &str,
+) -> Result<(PinnedWebSocket, SocketAddr), String> {
+    let parsed =
+        Url::parse(endpoint.as_str()).map_err(|_| "approved OpenAI endpoint is invalid")?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "approved OpenAI endpoint has no host".to_string())?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "approved OpenAI endpoint has no port".to_string())?;
+    let addresses = timeout(CONNECT_TIMEOUT, lookup_host((host, port)))
+        .await
+        .map_err(|_| "OpenAI DNS lookup timed out".to_string())?
+        .map_err(|_| "OpenAI DNS lookup failed".to_string())?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() || addresses.len() > MAX_DNS_ADDRESSES {
+        return Err("OpenAI DNS returned an invalid address count".into());
+    }
+    endpoint
+        .validate_resolved_addresses(addresses.iter().map(SocketAddr::ip))
+        .map_err(|error| error.to_string())?;
+
+    let mut last_error = None;
+    for address in addresses {
+        let tcp = match timeout(CONNECT_TIMEOUT, TcpStream::connect(address)).await {
+            Ok(Ok(tcp)) => tcp,
+            Ok(Err(_)) => {
+                last_error = Some("TCP connection failed");
+                continue;
+            }
+            Err(_) => {
+                last_error = Some("TCP connection timed out");
+                continue;
+            }
+        };
+        tcp.set_nodelay(true)
+            .map_err(|_| "could not configure OpenAI connection".to_string())?;
+        let mut request = endpoint
+            .as_str()
+            .into_client_request()
+            .map_err(|_| "could not build OpenAI handshake".to_string())?;
+        let value = HeaderValue::from_str(&format!("Bearer {credential}"))
+            .map_err(|_| "native OpenAI credential contains invalid header bytes".to_string())?;
+        request.headers_mut().insert(AUTHORIZATION, value);
+        let configuration = WebSocketConfig::default()
+            .write_buffer_size(64 * 1024)
+            .max_write_buffer_size(512 * 1024)
+            .max_message_size(Some(MAX_PROVIDER_RESPONSE_BYTES))
+            .max_frame_size(Some(MAX_PROVIDER_FRAME_BYTES));
+        match timeout(
+            CONNECT_TIMEOUT,
+            client_async_tls_with_config(request, tcp, Some(configuration), None),
+        )
+        .await
+        {
+            Ok(Ok((websocket, _))) => return Ok((websocket, address)),
+            Ok(Err(_)) => last_error = Some("TLS/WebSocket handshake failed"),
+            Err(_) => last_error = Some("TLS/WebSocket handshake timed out"),
+        }
+    }
+    Err(format!(
+        "OpenAI connection failed ({})",
+        last_error.unwrap_or("no validated address succeeded")
+    ))
+}
+
 async fn connect_pinned(
     endpoint: &CustomSttEndpoint,
     credential: Option<&str>,
@@ -1886,6 +2543,8 @@ mod tests {
         fn changed(&self, _meeting_id: &str) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
+
+        fn state_changed(&self, _meeting_id: &str) {}
     }
 
     struct SilentLocal;
@@ -1947,6 +2606,49 @@ mod tests {
         }
     }
 
+    struct SlowStartingLocal {
+        release: Mutex<Receiver<()>>,
+    }
+
+    impl LocalTranscriber for SlowStartingLocal {
+        fn verify(&self, model_id: &str) -> Result<VerifiedLocalRuntime, String> {
+            self.release
+                .lock()
+                .map_err(|_| "slow local release mutex was poisoned".to_string())?
+                .recv()
+                .map_err(|_| "slow local release was dropped".to_string())?;
+            Ok(VerifiedLocalRuntime {
+                runtime_id: "slow-test-runtime".into(),
+                runtime_version: "1".into(),
+                model_sha256: format!("verified-{model_id}"),
+            })
+        }
+
+        fn run(&self, context: LocalTranscriptionContext<'_>) -> Result<(), String> {
+            context
+                .finalize
+                .recv()
+                .map_err(|_| "slow local finalization channel closed".to_string())?;
+            Ok(())
+        }
+    }
+
+    struct FailingAfterReadyLocal;
+
+    impl LocalTranscriber for FailingAfterReadyLocal {
+        fn verify(&self, model_id: &str) -> Result<VerifiedLocalRuntime, String> {
+            Ok(VerifiedLocalRuntime {
+                runtime_id: "ready-then-fail-runtime".into(),
+                runtime_version: "1".into(),
+                model_sha256: format!("verified-{model_id}"),
+            })
+        }
+
+        fn run(&self, _context: LocalTranscriptionContext<'_>) -> Result<(), String> {
+            Err("inference worker stopped".into())
+        }
+    }
+
     fn recording_store() -> Arc<MeetingStore> {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let created = store
@@ -1993,6 +2695,96 @@ mod tests {
             )
             .unwrap();
         store
+    }
+
+    #[test]
+    fn slow_local_start_is_owned_immediately_and_stop_never_reports_a_missing_worker() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        let (release_tx, release_rx) = mpsc::channel();
+        let transcriber = NativeMeetingTranscriber::new(
+            Arc::clone(&store),
+            temporary.path(),
+            Arc::new(RuntimeRouteResolver),
+            Arc::new(NoMeetingCredential),
+            Arc::new(SlowStartingLocal {
+                release: Mutex::new(release_rx),
+            }),
+            Arc::new(NoopTranscriptionChangeSink),
+        )
+        .unwrap();
+        let start = TranscriptionStart {
+            meeting_id: "meeting-1".into(),
+            run_id: "slow-run".into(),
+            route: "local".into(),
+            model: "whisper-small".into(),
+            repair_generation: None,
+        };
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            release_tx.send(()).unwrap();
+        });
+
+        let started_at = Instant::now();
+        transcriber.start(&start).unwrap();
+        assert!(
+            started_at.elapsed() < Duration::from_millis(50),
+            "recording start waited for local model preparation"
+        );
+        release.join().unwrap();
+
+        let batch = transcriber
+            .finalize(&TranscriptionFinalize {
+                meeting_id: "meeting-1".into(),
+                run_id: start.run_id,
+                base_revision: 0,
+                observed_at: "2026-07-30T10:05:00Z".into(),
+            })
+            .unwrap();
+        assert!(batch.marks_final);
+    }
+
+    #[test]
+    fn a_worker_failure_after_readiness_cannot_remain_projected_as_live() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        let transcriber = NativeMeetingTranscriber::new(
+            Arc::clone(&store),
+            temporary.path(),
+            Arc::new(RuntimeRouteResolver),
+            Arc::new(NoMeetingCredential),
+            Arc::new(FailingAfterReadyLocal),
+            Arc::new(NoopTranscriptionChangeSink),
+        )
+        .unwrap();
+        let start = TranscriptionStart {
+            meeting_id: "meeting-1".into(),
+            run_id: "ready-then-fail-run".into(),
+            route: "local".into(),
+            model: "whisper-small".into(),
+            repair_generation: None,
+        };
+        transcriber.start(&start).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while transcriber.status("meeting-1") != TranscriptionWorkerStatus::Delayed
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            transcriber.status("meeting-1"),
+            TranscriptionWorkerStatus::Delayed
+        );
+        assert!(transcriber
+            .finalize(&TranscriptionFinalize {
+                meeting_id: "meeting-1".into(),
+                run_id: start.run_id,
+                base_revision: 0,
+                observed_at: "2026-07-31T15:00:00Z".into(),
+            })
+            .unwrap_err()
+            .contains("inference worker stopped"));
     }
 
     #[test]
@@ -2568,35 +3360,85 @@ mod tests {
     }
 
     #[test]
+    fn openai_audio_is_resampled_and_keeps_capture_channels_separate() {
+        let mut interleaved = Vec::new();
+        for (microphone, system) in [(0.5_f32, -0.25_f32), (0.25_f32, -0.5_f32)] {
+            interleaved.extend_from_slice(&microphone.to_le_bytes());
+            interleaved.extend_from_slice(&system.to_le_bytes());
+        }
+
+        let microphone = openai_pcm16_mono(&interleaved, OpenAiChannel::Microphone).unwrap();
+        let system = openai_pcm16_mono(&interleaved, OpenAiChannel::System).unwrap();
+        assert_eq!(microphone.len(), 3 * size_of::<i16>());
+        assert_eq!(system.len(), 3 * size_of::<i16>());
+        assert!(microphone
+            .chunks_exact(2)
+            .map(|sample| i16::from_le_bytes(sample.try_into().unwrap()))
+            .all(|sample| sample > 0));
+        assert!(system
+            .chunks_exact(2)
+            .map(|sample| i16::from_le_bytes(sample.try_into().unwrap()))
+            .all(|sample| sample < 0));
+    }
+
+    #[test]
+    fn openai_events_revise_one_channel_segment_with_mimir_timing() {
+        let mut state =
+            OpenAiTranscriptState::new(OpenAiChannel::System, Arc::new(AtomicU64::new(1)));
+        state.queue_commit(OpenAiAudioRange {
+            start_ms: 2_000,
+            end_ms: 4_000,
+        });
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "item_123"
+            }))
+            .unwrap();
+        let partial = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "item_123",
+                "delta": "Guten "
+            }))
+            .unwrap();
+        let final_event = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "item_123",
+                "transcript": "Guten Morgen"
+            }))
+            .unwrap();
+
+        let partial = &partial.batches[0].segments[0];
+        assert_eq!(partial.state, SegmentState::Partial);
+        assert_eq!(partial.channel_id.as_ref().unwrap().as_str(), "system");
+        assert_eq!(partial.speaker.as_deref(), Some("Others"));
+        assert_eq!((partial.start_ms, partial.end_ms), (2_000, 4_000));
+        let completed = &final_event.batches[0].segments[0];
+        assert_eq!(completed.state, SegmentState::Final);
+        assert_eq!(completed.text, "Guten Morgen");
+        assert_eq!(completed.segment_id, partial.segment_id);
+        assert!(final_event.completed_turn);
+    }
+
+    #[test]
+    fn only_openai_realtime_routes_use_the_openai_wire_contract() {
+        let openai =
+            CustomSttEndpoint::new("wss://api.openai.com/v1/realtime", "api.openai.com").unwrap();
+        let private =
+            CustomSttEndpoint::new("wss://speech.example.com/mimir-stt", "speech.example.com")
+                .unwrap();
+        assert!(is_openai_realtime_route(&openai, "gpt-live-transcribe"));
+        assert!(!is_openai_realtime_route(&private, "meeting-v2"));
+        assert!(!is_openai_realtime_route(&openai, "meeting-v2"));
+    }
+
+    #[test]
     fn reconnect_backoff_is_bounded() {
         assert_eq!(reconnect_delay(1), Duration::from_millis(250));
         assert_eq!(reconnect_delay(2), Duration::from_millis(500));
         assert_eq!(reconnect_delay(20), MAX_RECONNECT_DELAY);
-    }
-
-    #[test]
-    fn timed_out_transcriber_returns_without_joining_and_late_ready_is_rejected() {
-        let (release_tx, release_rx) = mpsc::channel();
-        let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
-        let worker = thread::spawn(move || {
-            release_rx.recv().unwrap();
-            assert!(ready_tx.send(Ok(())).is_err());
-        });
-        let pending = Arc::new(AtomicBool::new(false));
-
-        assert!(ready_rx.recv_timeout(Duration::from_millis(5)).is_err());
-        drop(ready_rx);
-        let returned_at = Instant::now();
-        reap_transcription_startup("test transcription startup", worker, Arc::clone(&pending));
-
-        assert!(returned_at.elapsed() < Duration::from_millis(100));
-        assert!(pending.load(Ordering::Acquire));
-        release_tx.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while pending.load(Ordering::Acquire) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(1));
-        }
-        assert!(!pending.load(Ordering::Acquire));
     }
 
     #[derive(Default)]
@@ -2636,6 +3478,48 @@ mod tests {
             Box::pin(async move {
                 connect_prevalidated_addresses(endpoint, credential, vec![address], Some(connector))
                     .await
+            })
+        }
+    }
+
+    struct InjectedOpenAiTlsConnector {
+        address: SocketAddr,
+        connector: WebSocketConnector,
+    }
+
+    impl OpenAiConnectionFactory for InjectedOpenAiTlsConnector {
+        fn connect<'a>(
+            &'a self,
+            endpoint: &'a CustomSttEndpoint,
+            credential: &'a str,
+        ) -> BoxFuture<'a, Result<(PinnedWebSocket, SocketAddr), String>> {
+            let address = self.address;
+            let connector = self.connector.clone();
+            Box::pin(async move {
+                let tcp = TcpStream::connect(address)
+                    .await
+                    .map_err(|_| "test OpenAI TCP connection failed".to_string())?;
+                let mut request = endpoint
+                    .as_str()
+                    .into_client_request()
+                    .map_err(|_| "could not build test OpenAI handshake".to_string())?;
+                let authorization = HeaderValue::from_str(&format!("Bearer {credential}"))
+                    .map_err(|_| "test OpenAI credential contains invalid bytes".to_string())?;
+                request.headers_mut().insert(AUTHORIZATION, authorization);
+                let configuration = WebSocketConfig::default()
+                    .write_buffer_size(64 * 1024)
+                    .max_write_buffer_size(512 * 1024)
+                    .max_message_size(Some(MAX_PROVIDER_RESPONSE_BYTES))
+                    .max_frame_size(Some(MAX_PROVIDER_FRAME_BYTES));
+                let (websocket, _) = client_async_tls_with_config(
+                    request,
+                    tcp,
+                    Some(configuration),
+                    Some(connector),
+                )
+                .await
+                .map_err(|_| "test OpenAI TLS/WebSocket handshake failed".to_string())?;
+                Ok((websocket, address))
             })
         }
     }
@@ -2711,6 +3595,127 @@ mod tests {
         .unwrap()
     }
 
+    async fn accept_openai_tls_websocket(
+        listener: &TcpListener,
+        acceptor: &TlsAcceptor,
+        expected_authorization: &str,
+        accepted_handshakes: Arc<AtomicUsize>,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<TcpStream>> {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor.accept(tcp).await.unwrap();
+        let expected_authorization = expected_authorization.to_string();
+        accept_hdr_async(tls, move |request: &Request, response: Response| {
+            assert_eq!(request.uri().path(), "/v1/realtime");
+            assert_eq!(
+                request
+                    .headers()
+                    .get(AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some(expected_authorization.as_str())
+            );
+            assert!(request.headers().get("sec-websocket-protocol").is_none());
+            accepted_handshakes.fetch_add(1, Ordering::Relaxed);
+            Ok(response)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn serve_openai_transcription_session<S>(
+        mut websocket: tokio_tungstenite::WebSocketStream<S>,
+    ) -> (&'static str, usize)
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let Message::Text(configuration) = websocket.next().await.unwrap().unwrap() else {
+            panic!("expected OpenAI session.update");
+        };
+        let configuration: serde_json::Value = serde_json::from_str(&configuration).unwrap();
+        assert_eq!(configuration["type"], "session.update");
+        assert_eq!(
+            configuration["session"]["audio"]["input"]["format"]["rate"],
+            OPENAI_SAMPLE_RATE_HZ
+        );
+        assert_eq!(
+            configuration["session"]["audio"]["input"]["transcription"]["model"],
+            "gpt-live-transcribe"
+        );
+        websocket
+            .send(Message::text(
+                json!({ "type": "session.updated" }).to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let mut audio = Vec::new();
+        loop {
+            match websocket.next().await.unwrap().unwrap() {
+                Message::Text(text) => {
+                    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    match value["type"].as_str().unwrap_or_default() {
+                        "input_audio_buffer.append" => {
+                            audio.push(
+                                BASE64_STANDARD
+                                    .decode(value["audio"].as_str().unwrap())
+                                    .unwrap(),
+                            );
+                        }
+                        "input_audio_buffer.commit" => {
+                            assert_eq!(audio.len(), OPENAI_COMMIT_CHUNKS);
+                            let first_sample =
+                                i16::from_le_bytes(audio[0][..2].try_into().expect("PCM16 sample"));
+                            let (channel, transcript) = if first_sample.abs() < 10_000 {
+                                ("microphone", "Microphone live transcript")
+                            } else {
+                                ("system", "System live transcript")
+                            };
+                            let item_id = format!("{channel}-item");
+                            for event in [
+                                json!({
+                                    "type": "input_audio_buffer.committed",
+                                    "item_id": item_id,
+                                }),
+                                json!({
+                                    "type": "conversation.item.input_audio_transcription.delta",
+                                    "item_id": item_id,
+                                    "delta": transcript.split_whitespace().next().unwrap(),
+                                }),
+                                json!({
+                                    "type": "conversation.item.input_audio_transcription.completed",
+                                    "item_id": item_id,
+                                    "transcript": transcript,
+                                }),
+                            ] {
+                                websocket
+                                    .send(Message::text(event.to_string()))
+                                    .await
+                                    .unwrap();
+                            }
+                            let byte_len = audio.iter().map(Vec::len).sum();
+                            loop {
+                                match websocket.next().await {
+                                    Some(Ok(Message::Close(_))) | None => {
+                                        return (channel, byte_len)
+                                    }
+                                    Some(Ok(Message::Ping(bytes))) => {
+                                        websocket.send(Message::Pong(bytes)).await.unwrap();
+                                    }
+                                    Some(Ok(_)) => {}
+                                    Some(Err(error)) => {
+                                        panic!("OpenAI test connection failed: {error}")
+                                    }
+                                }
+                            }
+                        }
+                        unexpected => panic!("unexpected OpenAI client event {unexpected}"),
+                    }
+                }
+                Message::Close(_) => panic!("OpenAI client closed before committing audio"),
+                _ => {}
+            }
+        }
+    }
+
     async fn expect_start<S>(websocket: &mut tokio_tungstenite::WebSocketStream<S>)
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -2784,6 +3789,141 @@ mod tests {
                 confidence: Some(0.98),
             }],
         }
+    }
+
+    #[tokio::test]
+    async fn openai_tls_peer_receives_two_channel_sessions_and_returns_live_revisions() {
+        const HOST: &str = "openai-test.example";
+        const BEARER: &str = "test-openai-bearer";
+
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        for sequence in 0..OPENAI_COMMIT_CHUNKS as u64 {
+            commit_chunk(
+                &store,
+                temporary.path(),
+                "meeting-1",
+                "microphone",
+                sequence,
+                &vec![0.1; SAMPLE_RATE_HZ as usize],
+            );
+            commit_chunk(
+                &store,
+                temporary.path(),
+                "meeting-1",
+                "system",
+                sequence,
+                &vec![0.7; SAMPLE_RATE_HZ as usize],
+            );
+        }
+        let audio =
+            PersistedAudioSource::authoritative(Arc::clone(&store), temporary.path(), "meeting-1")
+                .unwrap();
+        let mut sink = StoreBatchSink::new(
+            Arc::clone(&store),
+            "meeting-1",
+            "openai-run",
+            "custom",
+            None,
+            Arc::new(CountingChanges::default()),
+        )
+        .unwrap();
+
+        let (server_config, client_config) = generated_tls_configs(HOST);
+        let listener = Arc::new(TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap());
+        let address = listener.local_addr().unwrap();
+        let acceptor = Arc::new(TlsAcceptor::from(Arc::new(server_config)));
+        let accepted_handshakes = Arc::new(AtomicUsize::new(0));
+        let server = tokio::spawn({
+            let listener = Arc::clone(&listener);
+            let acceptor = Arc::clone(&acceptor);
+            let accepted_handshakes = Arc::clone(&accepted_handshakes);
+            async move {
+                let expected = format!("Bearer {BEARER}");
+                let first = accept_openai_tls_websocket(
+                    &listener,
+                    &acceptor,
+                    &expected,
+                    Arc::clone(&accepted_handshakes),
+                )
+                .await;
+                let first = tokio::spawn(serve_openai_transcription_session(first));
+                let second = accept_openai_tls_websocket(
+                    &listener,
+                    &acceptor,
+                    &expected,
+                    Arc::clone(&accepted_handshakes),
+                )
+                .await;
+                let second = tokio::spawn(serve_openai_transcription_session(second));
+                (first.await.unwrap(), second.await.unwrap())
+            }
+        });
+
+        let endpoint = CustomSttEndpoint::new(
+            &format!("wss://{HOST}:{}/v1/realtime", address.port()),
+            HOST,
+        )
+        .unwrap();
+        let connector = InjectedOpenAiTlsConnector {
+            address,
+            connector: WebSocketConnector::Rustls(Arc::new(client_config)),
+        };
+        let request = TranscriptionStart {
+            meeting_id: "meeting-1".into(),
+            run_id: "openai-run".into(),
+            route: endpoint.as_str().into(),
+            model: "gpt-live-transcribe".into(),
+            repair_generation: None,
+        };
+        let (finalize_tx, finalize_rx) = mpsc::channel();
+        finalize_tx
+            .send(FinalizeCommand {
+                observed_at: "2026-07-31T12:00:00.000Z".into(),
+            })
+            .unwrap();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        run_openai_realtime_with_connector(
+            CustomRunContext {
+                request: &request,
+                endpoint: &endpoint,
+                model: &request.model,
+                credential: Some(BEARER),
+                audio: &audio,
+                finalize: &finalize_rx,
+                ready: &ready_tx,
+            },
+            &mut sink,
+            &connector,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ready_rx.recv().unwrap(), Ok(()));
+        let sessions = server.await.unwrap();
+        let mut channels = [sessions.0 .0, sessions.1 .0];
+        channels.sort_unstable();
+        assert_eq!(channels, ["microphone", "system"]);
+        assert!(sessions.0 .1 > 0 && sessions.1 .1 > 0);
+        assert_eq!(accepted_handshakes.load(Ordering::Relaxed), 2);
+
+        let transcript = store.transcript_snapshot("meeting-1", None).unwrap();
+        assert_eq!(transcript.segments.len(), 2);
+        let microphone = transcript
+            .segments
+            .iter()
+            .find(|segment| segment.segment.channel_id.as_deref() == Some("microphone"))
+            .unwrap();
+        let system = transcript
+            .segments
+            .iter()
+            .find(|segment| segment.segment.channel_id.as_deref() == Some("system"))
+            .unwrap();
+        assert_eq!(microphone.segment.speaker.as_deref(), Some("You"));
+        assert_eq!(microphone.segment.text, "Microphone live transcript");
+        assert!(microphone.segment.is_final);
+        assert_eq!(system.segment.speaker.as_deref(), Some("Others"));
+        assert_eq!(system.segment.text, "System live transcript");
+        assert!(system.segment.is_final);
     }
 
     #[tokio::test]

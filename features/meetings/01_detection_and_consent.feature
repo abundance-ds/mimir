@@ -42,11 +42,11 @@ Feature: Detect meetings without recording before the user has authority
     And the dismissal does not count as recording consent
 
   @MTG-006 @automated @desktop @legal @security
-  Scenario: Hosted processing is disclosed before recording starts
-    Given a hosted transcription route is selected
-    When the user opens the recording confirmation
-    Then Mimir identifies the hosted destination and the data it will receive
-    And capture cannot start until the user deliberately confirms the route
+  Scenario: Hosted processing is disclosed without a confirmation maze
+    Given the OpenAI transcription route is selected
+    When Scribe presents the ready-to-record state
+    Then Mimir identifies that microphone and system audio are sent to OpenAI
+    And the same deliberate Record action starts capture without another screen
 
   @MTG-007 @automated @desktop @legal
   Scenario: Detection never grants automatic recording authority
@@ -61,3 +61,10 @@ Feature: Detect meetings without recording before the user has authority
     When the user navigates away from the meeting surface
     Then the workbench sidebar and global tool chrome identify the active recording
     And a one-step Stop control remains available until native capture is inactive
+
+  @MTG-009 @automated @native @contract
+  Scenario: Enabling detection clears its disabled state immediately
+    Given meeting detection is disabled in native configuration
+    When the user enables meeting detection
+    Then the returned native snapshot no longer reports detection as disabled
+    And the detector continues initialization without presenting the stale state as an error

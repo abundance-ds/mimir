@@ -109,3 +109,47 @@ Feature: Produce live and batch transcripts through local or custom routes
     When the canonical transcript revision is read
     Then every segment identifies its meeting, run, audio time, channel, revision, source, and finality
     And known gaps remain first-class transcript records
+
+  @MTG-075 @automated @native @recovery @performance
+  Scenario: Cold local model startup remains owned without delaying recording
+    Given a verified local model needs longer than the former startup deadline to initialize
+    When the user starts and later stops recording
+    Then recording starts promptly with transcription shown as initializing
+    And the owned worker either finalizes normally or queues one durable delayed repair without exposing worker internals
+
+  @MTG-076 @automated @native @contract @performance
+  Scenario: OpenAI transcribes both capture channels continuously
+    Given the hosted route uses the OpenAI Realtime transcription contract
+    When committed microphone and system chunks arrive during recording
+    Then Mimir streams each channel through an independently owned session
+    And transcript deltas retain Mimir's You and Others channel provenance
+
+  @MTG-077 @automated @native @security
+  Scenario: OpenAI credentials remain endpoint-bound in Keychain
+    Given the OpenAI Realtime endpoint is selected
+    When the native WebSocket handshake is created
+    Then the API key is injected only as an Authorization bearer header
+    And the key never appears in renderer state, meeting provenance, diagnostics, or URLs
+
+  @MTG-078 @automated @frontend @contract
+  Scenario: Selecting hosted transcription cannot fail on an empty hidden field
+    Given local transcription is selected and no hosted fields were configured
+    When the user selects OpenAI transcription
+    Then one ordered settings mutation supplies the OpenAI URL and model with the route
+    And the API-key field becomes the only required next action
+
+  @MTG-079 @automated @frontend @contract
+  Scenario: Review retains the transcript that was visible during recording
+    Given the library snapshot omits transcript text for fast startup
+    And the selected meeting transcript page contains durable final segments
+    When the user stops or reopens that meeting in Review
+    Then Review renders the paged transcript rather than the empty library projection
+    And final transcript text does not disappear during the recording-to-review handoff
+
+  @MTG-080 @automated @frontend @contract
+  Scenario: Visible live words supersede a lagging readiness label
+    Given durable transcript segments are arriving during capture
+    And the worker readiness projection still says initializing
+    When Scribe renders the live transcript ledger
+    Then the status says transcription is live
+    And it does not tell the user transcription is still being prepared

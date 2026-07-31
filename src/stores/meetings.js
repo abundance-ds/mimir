@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  checkMeetingAudio,
   clearMeetingsApiKey,
   decideMeetingKgProposal,
   deleteMeeting,
@@ -33,6 +34,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   const candidates = ref([])
   const config = ref(defaultConfig())
   const permissions = ref({ microphone: 'unknown', systemAudio: 'unknown' })
+  const audioCheck = ref(null)
   const models = ref([])
   const selectedId = ref('')
   const activeMeetingId = ref(null)
@@ -104,9 +106,12 @@ export const useMeetingsStore = defineStore('meetings', () => {
     loading.value = true
     try {
       applySnapshot(await loadMeetingSnapshot())
-      await refreshVisibleTranscripts()
       error.value = ''
       loaded.value = true
+      // History detail is secondary to the recorder. Do not hold the usable
+      // Scribe surface behind transcript I/O; hydrate the selected/live detail
+      // independently once the authoritative recorder state is visible.
+      void refreshVisibleTranscripts()
     } catch (cause) {
       error.value = message(cause)
       throw cause
@@ -146,7 +151,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
       })
       applySnapshot(snapshot)
       if (snapshot.activeMeetingId) selectedId.value = snapshot.activeMeetingId
-      await refreshVisibleTranscripts()
+      void refreshVisibleTranscripts()
       return activeMeeting.value
     })
   }
@@ -163,7 +168,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     if (!active || pending.value.stop) return null
     return runPending('stop', async () => {
       applySnapshot(await stopMeeting(active.id))
-      await refreshVisibleTranscripts()
+      void refreshVisibleTranscripts()
       return selectedMeeting.value
     })
   }
@@ -247,6 +252,13 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
   }
 
+  async function checkAudio() {
+    return runPending('audio-check', async () => {
+      audioCheck.value = await checkMeetingAudio()
+      return audioCheck.value
+    })
+  }
+
   async function saveApiKey(value) {
     return runPending('api-key', async () => {
       applySnapshot(await setMeetingsApiKey(value))
@@ -297,8 +309,15 @@ export const useMeetingsStore = defineStore('meetings', () => {
       selectedId.value = snapshot.activeMeetingId || meetings.value[0]?.id || ''
     }
     pruneTranscriptWindows()
-    if (snapshot.diagnostic) error.value = snapshot.diagnostic
+    // A later healthy native projection must clear a stale diagnostic. The
+    // previous behavior made normal transient states (notably detector enable)
+    // survive indefinitely as a blocking global error.
+    error.value = snapshot.diagnostic || ''
     return true
+  }
+
+  function dismissError() {
+    error.value = ''
   }
 
   function onEvent(event) {
@@ -463,6 +482,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     transcriptRefreshTimer = null
     transcriptRefreshIds.clear()
     transcriptWindows.value = {}
+    audioCheck.value = null
   }
 
   return {
@@ -474,6 +494,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     candidates,
     config,
     permissions,
+    audioCheck,
     models,
     selectedId,
     activeMeetingId,
@@ -490,6 +511,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     initialize,
     refresh,
     requestMicrophonePermission,
+    checkAudio,
     openSystemAudioSettings,
     dismissCandidate,
     start,
@@ -510,6 +532,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     loadEarlierTranscript,
     loadLatestTranscript,
     applySnapshot,
+    dismissError,
     dispose,
   }
 })

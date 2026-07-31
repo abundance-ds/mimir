@@ -8,8 +8,7 @@ use super::model::{
     TranscriptSegmentInput, TranscriptSegmentRecord, TranscriptSnapshot, MAX_TITLE_CHARS,
 };
 use crate::persistence::{
-    create_private_file, ensure_private_directory, repair_private_file_if_exists,
-    repair_private_tree, PersistenceError,
+    create_private_file, ensure_private_directory, repair_private_file_if_exists, PersistenceError,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
@@ -197,7 +196,6 @@ impl MeetingStore {
         let path = path.as_ref();
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         ensure_private_directory(parent)?;
-        repair_private_tree(parent)?;
         repair_sqlite_files(path)?;
         create_private_file(path)?;
         let store = Self::from_connection(Connection::open(path)?, Some(path.to_path_buf()))?;

@@ -269,11 +269,43 @@ upgrades it to WSS, DNS-validates and pins it, and releases its Keychain secret
 only for that exact configured endpoint. Do not reuse `ai_transport.rs` or add
 a localhost exception.
 
+The OpenAI Realtime route is selected by the `/v1/realtime` path plus a
+`gpt-*` model. It uses OpenAI's JSON event contract over two channel-specific
+WebSockets and no `mimir.stt.v1` subprotocol. Other advanced hosted URLs still
+use Mimir's versioned provider-neutral contract. Do not send the proprietary
+start/audio frames to OpenAI or treat arbitrary URLs as OpenAI-compatible.
+
+### Scribe permissions belong to the application bundle
+
+macOS TCC attributes a decision to the responsible application, so `cargo run`
+can observe a terminal or development host's permission. Never project that as
+Mimir permission. System-audio process taps expose no public non-prompting
+authorization query: create the public tap to register/prompt, label the state
+honestly, and use the bounded known-playback check to verify the signal path.
+The check must retain no samples and must identify development-host results.
+
+### Scribe startup must not scale with meeting history
+
+The owner-only `~/.mimir`, meetings, and model roots are the startup access
+boundary. Repair targeted authority files when opened, but never recursively
+stat/chmod every audio chunk or model artifact at launch. Transcript pages are
+secondary hydration and cannot hold the Record action unavailable.
+
+The raw library rows intentionally contain no transcript text. Live and Review
+surfaces must use the store's selected-meeting projection, which overlays the
+bounded transcript page. Rendering a raw `meetings[]` row makes durable words
+appear to vanish even though SQLite remains correct.
+
 ### Scribe mute is not pause
 
 Microphone mute writes aligned silence while system capture and the canonical
 clock continue. Do not introduce a paused lifecycle or remove muted frames:
 that makes microphone/system timestamps and reconnect replay disagree.
+
+Normal Stop can observe bounded callback skew between otherwise healthy Core
+Audio sources. Pad that scheduling tail without opening a transcript gap; a
+source divergence beyond the audited tolerance is still missing-audio evidence
+and must remain an explicit gap.
 
 ### Capture and transcription must never share backpressure
 

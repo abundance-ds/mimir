@@ -39,6 +39,22 @@ export async function openMeetingSystemAudioSettings() {
   return invoke('meetings_open_system_audio_settings')
 }
 
+export async function checkMeetingAudio() {
+  const value = object(await invoke('meetings_check_audio'))
+  const status = source => {
+    const normalized = String(source || '')
+    return ['signal', 'silent', 'no-data'].includes(normalized) ? normalized : 'no-data'
+  }
+  return {
+    microphone: status(value.microphone),
+    systemAudio: status(value.systemAudio ?? value.system_audio),
+    runtimeIdentity: (value.runtimeIdentity ?? value.runtime_identity) === 'mimir'
+      ? 'mimir'
+      : 'development-host',
+    observedMs: nonnegativeInteger(value.observedMs ?? value.observed_ms),
+  }
+}
+
 export async function dismissMeetingCandidate(candidateId) {
   return normalizeMeetingSnapshot(await invoke('meetings_dismiss_candidate', {
     candidateId: requiredId(candidateId, 'meeting candidate'),

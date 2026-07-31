@@ -5,6 +5,14 @@ task scope.
 
 ## Open
 
+- Scribe is not ready. The signed installed `rs.shoulde.mimir` application has
+  passed first-run TCC registration, known-playback microphone/system signal,
+  dual-channel local live transcription, Stop, and fast historical-library
+  reads on the reference Mac. OpenAI live transcription with a real Keychain
+  credential and interrupted-recording recovery still require signed
+  end-to-end records. Automated contracts are necessary evidence, not a
+  substitute for those provider/recovery paths.
+
 - Business graph: final desktop screenshot critique (narrow/default/wide,
   railed/expanded, reduced-motion states) is a manual runtime release check —
   automated behavior, accessibility, build, and performance verification is

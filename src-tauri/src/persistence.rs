@@ -459,37 +459,6 @@ pub fn ensure_private_subdirectory(
     Ok(resolved)
 }
 
-/// Repair an existing managed tree without following symbolic links.
-///
-/// Directories become `0700` and regular files become `0600` on Unix. Any
-/// symlink or special file fails closed so startup never traverses outside the
-/// managed root while repairing legacy permissions.
-pub fn repair_private_tree(root: impl AsRef<Path>) -> Result<(), PersistenceError> {
-    let root = root.as_ref();
-    ensure_private_directory(root)?;
-    let entries = fs::read_dir(root)
-        .map_err(|source| io_error("read private managed directory", root, source))?;
-    for entry in entries {
-        let entry = entry
-            .map_err(|source| io_error("read private managed directory entry", root, source))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|source| io_error("inspect private managed entry", &path, source))?;
-        if file_type.is_symlink() {
-            return Err(unsafe_managed_path(&path, "directory or regular file"));
-        }
-        if file_type.is_dir() {
-            repair_private_tree(&path)?;
-        } else if file_type.is_file() {
-            repair_private_file(&path)?;
-        } else {
-            return Err(unsafe_managed_path(&path, "directory or regular file"));
-        }
-    }
-    Ok(())
-}
-
 /// Resolve a contained private-file path, creating/repairing every parent
 /// directory and refusing an existing symlink or non-regular target.
 ///

@@ -341,6 +341,23 @@ pub struct TranscriptionFinalize {
     pub observed_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptionWorkerStatus {
+    Initializing,
+    Live,
+    Delayed,
+}
+
+impl TranscriptionWorkerStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Initializing => "initializing",
+            Self::Live => "live",
+            Self::Delayed => "delayed",
+        }
+    }
+}
+
 pub trait MeetingCapturePort: Send + Sync {
     fn recover(&self, report: &RecoveryReport) -> Result<(), String>;
 
@@ -368,6 +385,13 @@ pub trait MeetingTranscriptionPort: Send + Sync {
     fn start(&self, request: &TranscriptionStart) -> Result<(), String>;
 
     fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String>;
+
+    /// Current best-effort state of an owned live worker. Implementations that
+    /// start synchronously retain the historical live default; native local
+    /// model startup overrides this while Metal preparation is still running.
+    fn status(&self, _meeting_id: &str) -> TranscriptionWorkerStatus {
+        TranscriptionWorkerStatus::Live
+    }
 }
 
 /// Native settings/content/artifact projection.
@@ -1024,7 +1048,10 @@ impl MeetingRuntime {
             }
             Some(_) => {}
         }
-        if projection.permissions.microphone != "granted" {
+        if !matches!(
+            projection.permissions.microphone.as_str(),
+            "granted" | "development-host"
+        ) {
             return Err(MeetingRuntimeError::MicrophonePermissionRequired);
         }
 
@@ -1162,7 +1189,7 @@ impl MeetingRuntime {
             repair_generation: None,
         };
         let transcription = match self.inner.transcription.start(&transcription_request) {
-            Ok(()) => "live".into(),
+            Ok(()) => self.inner.transcription.status(&meeting_id).as_str().into(),
             Err(error) => {
                 self.set_diagnostic(format!(
                     "Recording continues; live transcription is delayed: {}",
@@ -2244,7 +2271,11 @@ impl MeetingRuntime {
         let transcription = if transcript_final {
             "final".into()
         } else if let Some(active) = active {
-            active.transcription.clone()
+            if active.transcription == "delayed" {
+                active.transcription.clone()
+            } else {
+                self.inner.transcription.status(&record.id).as_str().into()
+            }
         } else if jobs.iter().any(|job| {
             job.definition.kind == FollowUpJobKind::Custom("transcription".into())
                 && matches!(job.state, JobState::Pending | JobState::Running)

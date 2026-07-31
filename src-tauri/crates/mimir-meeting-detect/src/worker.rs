@@ -121,7 +121,20 @@ impl DetectionMonitor {
     }
 
     pub fn set_enabled(&self, enabled: bool) {
-        self.shared.enabled.store(enabled, Ordering::Release);
+        let previous = self.shared.enabled.swap(enabled, Ordering::AcqRel);
+        if enabled && !previous {
+            // Configuration commands return a snapshot immediately after this
+            // call. Do not let that reply carry the worker's previous normal
+            // Disabled state as an application error while the wake is still
+            // crossing threads.
+            let mut snapshot = rw_write(&self.shared.snapshot);
+            snapshot.status = status_for(&snapshot.permission, None);
+            if snapshot.diagnostic.as_deref() == Some("Meeting detection is disabled in settings") {
+                snapshot.diagnostic = None;
+            }
+            snapshot.generation = snapshot.generation.saturating_add(1);
+            snapshot.observed_at_unix_millis = Some(unix_millis());
+        }
         self.shared.wake.wake();
     }
 
@@ -526,6 +539,34 @@ mod tests {
         }
         assert_eq!(monitor.snapshot().status, DetectorStatus::Disabled);
         assert!(monitor.snapshot().candidates.is_empty());
+        monitor.stop().unwrap();
+    }
+
+    #[test]
+    fn enabling_detection_synchronously_clears_disabled_snapshot() {
+        let monitor = DetectionMonitor::start_with_factory(
+            DetectionConfig {
+                enabled: false,
+                poll_interval: Duration::from_millis(100),
+                ..DetectionConfig::default()
+            },
+            |_| {},
+            |_| FakeSource {
+                shutdowns: Arc::new(AtomicUsize::new(0)),
+                drops: Arc::new(AtomicUsize::new(0)),
+            },
+        )
+        .unwrap();
+        assert_eq!(monitor.snapshot().status, DetectorStatus::Disabled);
+
+        monitor.set_enabled(true);
+
+        let snapshot = monitor.snapshot();
+        assert_ne!(snapshot.status, DetectorStatus::Disabled);
+        assert!(!snapshot
+            .diagnostic
+            .as_deref()
+            .is_some_and(|message| message.contains("disabled in settings")));
         monitor.stop().unwrap();
     }
 

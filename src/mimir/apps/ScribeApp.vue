@@ -2,290 +2,25 @@
   <section
     ref="scribeRoot"
     data-scribe-app
-    class="scribe-root flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
-    :aria-busy="meetings.loading || undefined"
-    @keydown="onKeydown"
+    class="flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
   >
-    <header class="scribe-app-header flex min-h-11 shrink-0 items-center border-b border-rule px-3">
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <IconMicrophone :size="15" :stroke-width="1.8" class="text-ink-2" />
-          <h1 class="truncate text-[12px] font-semibold">Scribe</h1>
-          <span
-            v-if="meetings.recording"
-            data-scribe-recording-label
-            role="status"
-            class="font-mono text-[9px] uppercase tracking-[0.12em] text-rem"
-          >
-            Recording {{ formattedElapsed }}
-          </span>
-          <span
-            v-else-if="meetings.stopping"
-            role="status"
-            class="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3"
-          >
-            Finalizing
-          </span>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-1">
-        <button
-          v-if="meetings.recording"
-          type="button"
-          data-scribe-mute
-          class="scribe-button"
-          :aria-pressed="meetings.activeMeeting?.micMuted"
-          :disabled="Boolean(meetings.pending.mic)"
-          @click="toggleMute"
-        >
-          <IconMicrophoneOff v-if="meetings.activeMeeting?.micMuted" :size="14" />
-          <IconMicrophone v-else :size="14" />
-          {{ meetings.activeMeeting?.micMuted ? 'Unmute' : 'Mute' }}
+    <template v-if="settingsOpen">
+      <header class="scribe-bar">
+        <button type="button" class="scribe-quiet-button" @click="closeSettings">
+          <IconChevronLeft :size="14" />
+          Back
         </button>
-        <button
-          v-if="meetings.activeMeeting"
-          type="button"
-          data-scribe-stop
-          class="scribe-stop"
-          :disabled="!meetings.recording || Boolean(meetings.pending.stop)"
-          @click="stop"
-        >
-          <IconPlayerStopFilled :size="13" />
-          {{ meetings.pending.stop ? 'Stopping…' : 'Stop' }}
-        </button>
-        <button
-          type="button"
-          data-scribe-settings
-          ref="settingsButton"
-          class="scribe-icon-button"
-          :aria-expanded="settingsOpen"
-          aria-controls="scribe-settings-panel"
-          title="Scribe settings"
-          aria-label="Scribe settings"
-          @click="toggleSettings"
-        >
-          <IconSettings :size="14" />
-        </button>
-      </div>
-    </header>
-
-    <div
-      v-if="meetings.activeMeeting"
-      data-scribe-ledger
-      class="grid min-h-9 shrink-0 grid-cols-[auto_auto_auto_1fr] items-center gap-x-4 border-b border-rule-light px-3 font-mono text-[9px]"
-    >
-      <span class="text-ink-2">
-        {{ lifecycleLabel(meetings.activeMeeting.lifecycle) }}
-      </span>
-      <span class="text-ink-3">
-        Mic {{ channelLabel('microphone') }}
-      </span>
-      <span class="text-ink-3">
-        System {{ channelLabel('system') }}
-      </span>
-      <span class="truncate text-right text-ink-3">
-        Transcript {{ transcriptionLabel(meetings.activeMeeting.transcription) }}
-        <template v-if="meetings.activeMeeting.gapCount">
-          · {{ meetings.activeMeeting.gapCount }}
-          {{ meetings.activeMeeting.gapCount === 1 ? 'gap' : 'gaps' }}
-        </template>
-      </span>
-    </div>
-
-    <div v-if="meetings.error" data-scribe-error role="alert" class="scribe-alert">
-      <IconAlertTriangle :size="14" class="shrink-0" />
-      <span class="min-w-0 flex-1">{{ meetings.error }}</span>
-      <button type="button" @click="refresh">Retry</button>
-    </div>
-
-    <div
-      v-if="meetings.kgOffer"
-      data-scribe-kg-offer
-      role="region"
-      aria-labelledby="scribe-kg-offer-title"
-      class="scribe-kg-offer flex shrink-0 items-center gap-3 border-b border-rule bg-surface px-3 py-2"
-    >
-      <IconTopologyStar3 :size="15" class="shrink-0 text-ink-2" />
-      <p class="min-w-0 flex-1 text-[11px] text-ink-2">
-        <strong id="scribe-kg-offer-title" class="font-semibold text-ink">
-          {{ meetings.kgOffer.title }}
-        </strong>
-        has a title and summary. Create reviewable knowledge-graph entries?
-      </p>
-      <button
-        type="button"
-        class="scribe-button"
-        :disabled="Boolean(meetings.pending[`kg:${meetings.kgOffer.id}`])"
-        @click="decideKg(meetings.kgOffer.id, 'not-now')"
-      >
-        Not now
-      </button>
-      <button
-        type="button"
-        class="scribe-button"
-        :disabled="Boolean(meetings.pending[`kg:${meetings.kgOffer.id}`])"
-        @click="decideKg(meetings.kgOffer.id, 'never')"
-      >
-        Never ask
-      </button>
-      <button
-        type="button"
-        class="scribe-primary-button"
-        :disabled="Boolean(meetings.pending[`kg:${meetings.kgOffer.id}`])"
-        @click="decideKg(meetings.kgOffer.id, 'create-draft')"
-      >
-        Create KG draft
-      </button>
-    </div>
-
-    <div class="scribe-workspace flex min-h-0 flex-1">
-      <aside
-        class="scribe-library flex w-[224px] shrink-0 flex-col border-r border-rule bg-chrome"
-        aria-label="Meeting library"
-      >
-        <div class="flex h-9 shrink-0 items-center border-b border-rule-light px-2">
-          <span class="flex-1 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3">
-            Meetings
-          </span>
-          <button
-            type="button"
-            class="scribe-icon-button"
-            title="Refresh meetings"
-            aria-label="Refresh meetings"
-            :disabled="meetings.loading"
-            @click="refresh"
-          >
-            <IconRefresh :size="13" :class="{ 'motion-safe:animate-spin': meetings.loading }" />
-          </button>
-        </div>
-
-        <div
-          v-if="meetings.candidates.length"
-          data-scribe-candidates
-          class="border-b border-rule"
-        >
-          <p class="px-2 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-3">
-            Detected
-          </p>
-          <div
-            v-for="candidate in meetings.candidates"
-            :key="candidate.id"
-            class="flex min-w-0 items-center"
-          >
-            <button
-              type="button"
-              class="scribe-library-row min-w-0 flex-1"
-              @click="beginStart(candidate, $event)"
-            >
-              <IconPhone :size="13" class="shrink-0 text-ink-2" />
-              <span class="min-w-0 flex-1 truncate">{{ candidate.appName }}</span>
-              <span class="font-mono text-[9px] text-ink-3">Record?</span>
-            </button>
-            <button
-              type="button"
-              class="scribe-icon-button mr-1 shrink-0"
-              :aria-label="`Dismiss ${candidate.appName} suggestion`"
-              :disabled="Boolean(meetings.pending[`candidate:${candidate.id}`])"
-              @click="dismissCandidate(candidate.id)"
-            >
-              <IconX :size="12" />
-            </button>
-          </div>
-        </div>
-
-        <div
-          class="min-h-0 flex-1 overflow-y-auto"
-          role="listbox"
-          aria-label="Recorded meetings"
-          :aria-busy="meetings.loading || undefined"
-        >
-          <button
-            v-for="meeting in meetings.meetings"
-            :key="meeting.id"
-            type="button"
-            data-scribe-meeting-row
-            role="option"
-            class="scribe-library-row min-h-12"
-            :class="{ 'bg-accent-soft': meeting.id === meetings.selectedId }"
-            :aria-selected="meeting.id === meetings.selectedId"
-            :aria-label="meetingRowLabel(meeting)"
-            :tabindex="meeting.id === meetings.selectedId ? 0 : -1"
-            @click="meetings.select(meeting.id)"
-            @keydown="onLibraryKeydown($event, meeting.id)"
-          >
-            <span class="min-w-0 flex-1 text-left">
-              <span class="block truncate text-[11px] font-medium">{{ meeting.title }}</span>
-              <span class="mt-0.5 block truncate font-mono text-[9px] text-ink-3">
-                {{ meetingDate(meeting) }} · {{ lifecycleLabel(meeting.lifecycle) }}
-              </span>
-            </span>
-            <IconPlayerRecordFilled
-              v-if="meeting.lifecycle === 'capturing'"
-              :size="10"
-              class="shrink-0 text-rem"
-              aria-label="Recording"
-            />
-            <IconAlertTriangle
-              v-else-if="meeting.lifecycle === 'interrupted' || meeting.error"
-              :size="12"
-              class="shrink-0 text-rem"
-              aria-label="Needs attention"
-            />
-          </button>
-
-          <div
-            v-if="meetings.loading && !meetings.loaded"
-            data-scribe-library-loading
-            role="status"
-            class="px-3 py-6 text-center text-[10px] leading-relaxed text-ink-3"
-          >
-            Loading meetings…
-          </div>
-          <div
-            v-else-if="meetings.loaded && !meetings.meetings.length"
-            class="px-3 py-6 text-center text-[10px] leading-relaxed text-ink-3"
-          >
-            No recordings yet. Choose Record meeting when everyone is informed.
-          </div>
-          <button
-            v-else-if="meetings.meetingsTruncated"
-            type="button"
-            data-scribe-load-older
-            class="w-full border-t border-rule-light px-3 py-2 text-left text-[9px] leading-relaxed text-ink-3 hover:text-ink"
-            :disabled="Boolean(meetings.pending['library-page'])"
-            @click="meetings.loadOlderMeetings()"
-          >
-            {{
-              meetings.pending['library-page']
-                ? 'Loading older meetings…'
-                : 'Load older meetings'
-            }}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          data-scribe-new
-          class="m-2 flex h-8 items-center justify-center gap-1.5 border border-rule bg-chrome-high text-[10px] font-semibold hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-50"
-          :disabled="Boolean(meetings.activeMeeting)"
-          @click="beginStart(null, $event)"
-        >
-          <IconMicrophone :size="13" />
-          Record meeting
-        </button>
-      </aside>
-
-      <main class="scribe-main min-w-0 flex-1 overflow-hidden bg-chrome-high">
+        <span class="min-w-0 flex-1 truncate text-[11px] font-semibold">Scribe settings</span>
+      </header>
+      <div class="min-h-0 flex-1 overflow-y-auto">
         <ScribeSettings
-          v-if="settingsOpen"
-          id="scribe-settings-panel"
           ref="settingsPanel"
+          embedded
           :config="meetings.config"
           :permissions="meetings.permissions"
           :models="meetings.models"
+          :audio-check="meetings.audioCheck"
           :pending="meetings.pending"
-          @close="closeSettings"
           @save="saveConfig"
           @save-api-key="saveApiKey"
           @clear-api-key="clearApiKey"
@@ -293,580 +28,413 @@
           @delete-model="deleteModel"
           @request-microphone-permission="requestMicrophonePermission"
           @open-system-audio-settings="openSystemAudioSettings"
+          @check-audio="checkAudio"
         />
+      </div>
+    </template>
 
-        <div
-          v-else-if="confirmingStart"
-          ref="consentPanel"
-          data-scribe-consent
-          role="region"
-          aria-labelledby="scribe-consent-title"
-          :aria-describedby="consentDescriptionIds"
-          tabindex="-1"
-          class="mx-auto flex h-full max-w-xl flex-col justify-center px-8"
+    <template v-else-if="meetings.activeMeeting">
+      <header class="scribe-transport">
+        <span class="size-2 shrink-0 rounded-full bg-rem" aria-hidden="true" />
+        <span data-scribe-recording-label class="font-mono text-[11px] tabular-nums">
+          {{ meetings.recording ? 'Recording' : 'Finalizing' }} {{ formattedElapsed }}
+        </span>
+        <span class="min-w-0 flex-1 truncate text-[10px] text-ink-3">
+          {{ meetings.activeMeeting.title }}
+        </span>
+        <button
+          v-if="meetings.recording"
+          type="button"
+          data-scribe-mute
+          class="scribe-quiet-button"
+          :aria-pressed="meetings.activeMeeting.micMuted"
+          :disabled="Boolean(meetings.pending.mic)"
+          @click="toggleMute"
         >
-          <p class="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-3">
-            Before recording
+          <IconMicrophoneOff v-if="meetings.activeMeeting.micMuted" :size="14" />
+          <IconMicrophone v-else :size="14" />
+          {{ meetings.activeMeeting.micMuted ? 'Unmute' : 'Mute' }}
+        </button>
+        <button
+          type="button"
+          data-scribe-stop
+          class="scribe-stop-button"
+          :disabled="!meetings.recording || Boolean(meetings.pending.stop)"
+          @click="stop"
+        >
+          <IconPlayerStopFilled :size="12" />
+          {{ meetings.pending.stop ? 'Stopping…' : 'Stop' }}
+        </button>
+      </header>
+
+      <div data-scribe-ledger class="scribe-capture-status" role="status">
+        <span>{{ captureStatus }}</span>
+        <span class="text-ink-3">{{ transcriptionStatus }}</span>
+      </div>
+
+      <div v-if="recordingNotice" data-scribe-error class="scribe-inline-notice" role="status">
+        <IconAlertTriangle :size="13" class="mt-px shrink-0" />
+        <span class="min-w-0 flex-1">{{ recordingNotice }}</span>
+        <button type="button" class="shrink-0 underline underline-offset-2" @click="dismissNotice">
+          Dismiss
+        </button>
+      </div>
+
+      <main class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <div class="mx-auto max-w-3xl">
+          <p v-if="!liveLedger.length" class="py-16 text-center text-[11px] text-ink-3">
+            {{ emptyLiveTranscript }}
           </p>
-          <h2 id="scribe-consent-title" class="mt-2 text-[17px] font-semibold">
-            Confirm everyone is informed
-          </h2>
-          <p
-            id="scribe-consent-scope"
-            class="mt-2 max-w-lg text-[11px] leading-relaxed text-ink-2"
-          >
-            Scribe records microphone and system audio. You are responsible for obtaining
-            any consent or giving any notice required for this meeting.
-          </p>
-          <div
-            v-if="meetings.config.transcriptionMode === 'custom'"
-            id="scribe-consent-route"
-            data-scribe-hosted-disclosure
-            class="mt-3 max-w-lg border-y border-rule bg-accent-soft px-3 py-2 text-[10px] leading-relaxed text-ink-2"
-          >
-            Both audio channels and transcript timing will be sent to
-            <strong class="font-semibold text-ink">{{ customDestination }}</strong>
-            using model <strong class="font-semibold text-ink">{{ meetings.config.customModel }}</strong>
-            for transcription. Mimir will not silently switch to another provider.
-          </div>
-          <p
+          <ol
             v-else
-            id="scribe-consent-route"
-            class="mt-3 max-w-lg text-[10px] leading-relaxed text-ink-3"
+            data-scribe-transcript-ledger
+            aria-label="Live meeting transcript"
+            class="divide-y divide-rule-light"
           >
-            Local transcription with {{ meetings.config.localModel }} stays on this Mac and does
-            not send meeting audio to a provider.
-          </p>
-          <p
-            v-if="candidateAppName"
-            id="scribe-consent-candidate"
-            data-scribe-candidate-disclosure
-            class="mt-2 text-[10px] leading-relaxed text-ink-3"
-          >
-            This recording was suggested because {{ candidateAppName }} is using the microphone.
-          </p>
-          <label class="mt-5 flex items-start gap-2 text-[11px] leading-relaxed text-ink-2">
-            <input
-              v-model="consentConfirmed"
-              ref="consentCheckbox"
-              data-scribe-consent-checkbox
-              type="checkbox"
-              class="mt-0.5 accent-accent"
-              :aria-describedby="consentDescriptionIds"
-            />
-            <span>I have informed the participants and may record this meeting.</span>
-          </label>
-          <label class="mt-4 block">
-            <span class="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-3">
-              Working title
-            </span>
-            <input
-              v-model="startTitle"
-              data-scribe-title
-              class="mt-1 h-8 w-full border border-rule bg-surface px-2 text-[11px] outline-none focus:border-accent"
-              placeholder="Mimir will refine this after the meeting"
-            />
-          </label>
-          <div class="mt-5 flex items-center gap-2">
-            <button
-              type="button"
-              class="scribe-button"
-              :disabled="Boolean(meetings.pending.start)"
-              @click="cancelStart"
+            <li
+              v-for="entry in liveLedger"
+              :key="entry.key"
+              data-scribe-ledger-kind
+              :data-kind="entry.kind"
+              class="grid grid-cols-[52px_70px_1fr] gap-3 py-3 text-[11px] leading-relaxed"
             >
-              Cancel
-            </button>
-            <button
-              type="button"
-              data-scribe-confirm-start
-              class="scribe-primary-button"
-              :disabled="!consentConfirmed || Boolean(meetings.pending.start)"
-              @click="start"
-            >
-              <IconMicrophone :size="13" />
-              {{ meetings.pending.start ? 'Starting…' : 'Start recording' }}
-            </button>
-          </div>
-          <p
-            v-if="consentError"
-            data-scribe-consent-error
-            role="alert"
-            class="mt-3 text-[10px] leading-relaxed text-rem"
-          >
-            {{ consentError }}
-          </p>
-        </div>
-
-        <div
-          v-else-if="!meetings.selectedMeeting"
-          class="mx-auto flex h-full max-w-lg flex-col justify-center px-8"
-        >
-          <IconMicrophone :size="25" :stroke-width="1.4" class="text-ink-3" />
-          <h2 class="mt-3 text-[15px] font-semibold">Ready when the meeting starts</h2>
-          <p class="mt-1.5 text-[11px] leading-relaxed text-ink-3">
-            Capture both sides, follow the transcript, then let Mimir prepare a title,
-            summary, and optional knowledge-graph draft.
-          </p>
-          <button
-            type="button"
-            class="scribe-primary-button mt-4 self-start"
-            @click="beginStart(null, $event)"
-          >
-            Record meeting
-          </button>
-        </div>
-
-        <article
-          v-else
-          data-scribe-meeting
-          class="flex h-full min-h-0 flex-col"
-          :aria-labelledby="`scribe-meeting-title-${meetings.selectedMeeting.id}`"
-        >
-          <header class="shrink-0 border-b border-rule px-4 py-3">
-            <div class="flex items-start gap-3">
-              <div class="min-w-0 flex-1">
-                <h2
-                  :id="`scribe-meeting-title-${meetings.selectedMeeting.id}`"
-                  class="truncate text-[15px] font-semibold"
-                >
-                  {{ meetings.selectedMeeting.title }}
-                </h2>
-                <p class="mt-1 font-mono text-[9px] text-ink-3">
-                  {{ meetingDate(meetings.selectedMeeting) }}
-                  · {{ formatDuration(meetings.selectedMeeting.durationMs) }}
-                  · transcript r{{ meetings.selectedMeeting.transcriptRevision }}
-                </p>
-                <ul
-                  v-if="meetings.selectedMeeting.tags?.length"
-                  data-scribe-reviewed-tags
-                  aria-label="Reviewed tags"
-                  class="mt-1.5 flex flex-wrap gap-x-1.5 font-mono text-[9px] text-ink-3"
-                >
-                  <li
-                    v-for="(tag, index) in meetings.selectedMeeting.tags"
-                    :key="tag"
-                    class="min-w-0"
-                  >
-                    <span v-if="index" class="mr-1.5" aria-hidden="true">·</span>
-                    <span>{{ tag }}</span>
-                  </li>
-                </ul>
-              </div>
-              <button
-                type="button"
-                class="scribe-button"
-                :disabled="meetingActionPending('export')"
-                @click="exportSelected('markdown')"
-              >
-                <IconDownload :size="13" />
-                {{
-                  meetingActionPending('export:markdown')
-                    ? 'Exporting…'
-                    : 'Export'
-                }}
-              </button>
-              <button
-                v-if="meetings.selectedMeeting.lifecycle === 'ready'"
-                type="button"
-                class="scribe-button"
-                @click="beginEdit"
-              >
-                <IconEdit :size="13" />
-                Edit
-              </button>
-            </div>
-            <div
-              v-if="meetingNeedsRecovery(meetings.selectedMeeting)"
-              data-scribe-recovery
-              role="status"
-              class="mt-3 flex items-center gap-2 border-y border-rule-light py-2 text-[10px]"
-            >
-              <IconAlertTriangle :size="13" class="shrink-0 text-rem" />
-              <span class="min-w-0 flex-1 text-ink-2">
-                {{ recoveryStatus(meetings.selectedMeeting) }}
+              <time class="font-mono text-[9px] text-ink-3">{{ timestamp(entry.startMs) }}</time>
+              <span class="text-[10px] font-medium">{{ entrySpeaker(entry) }}</span>
+              <span v-if="entry.kind === 'gap'" class="text-rem">
+                Capture gap · {{ gapDuration(entry) }}
               </span>
-              <button
-                v-if="failedJob(meetings.selectedMeeting, 'transcription')"
-                type="button"
-                class="scribe-button"
-                :disabled="Boolean(
-                  meetings.pending[`retry:${meetings.selectedMeeting.id}:transcription`],
-                )"
-                @click="retryJob(meetings.selectedMeeting.id, 'transcription')"
+              <span v-else :class="entry.final ? 'text-ink-2' : 'text-ink-3'">
+                {{ entry.text }}
+                <em v-if="!entry.final" class="ml-1 text-[9px] not-italic">wording may change</em>
+              </span>
+            </li>
+          </ol>
+        </div>
+      </main>
+    </template>
+
+    <template v-else-if="detailMeeting">
+      <header class="scribe-bar">
+        <button type="button" class="scribe-quiet-button" @click="closeDetail">
+          <IconChevronLeft :size="14" />
+          Meetings
+        </button>
+        <span class="min-w-0 flex-1" />
+        <button type="button" class="scribe-quiet-button" @click="beginEdit">
+          <IconEdit :size="13" />
+          Edit
+        </button>
+        <button
+          type="button"
+          class="scribe-quiet-button"
+          :disabled="meetingActionPending('export')"
+          @click="exportSelected('markdown')"
+        >
+          <IconDownload :size="13" />
+          Export
+        </button>
+        <button
+          type="button"
+          data-scribe-settings
+          class="scribe-icon-button"
+          aria-label="Scribe settings"
+          @click="openSettings"
+        >
+          <IconSettings :size="14" />
+        </button>
+      </header>
+
+      <article data-scribe-meeting class="min-h-0 flex-1 overflow-y-auto">
+        <div class="mx-auto max-w-3xl px-5 py-6">
+          <template v-if="editingMeeting">
+            <form class="space-y-4" @submit.prevent="saveMeetingEdits">
+              <label class="block">
+                <span class="scribe-field-label">Title</span>
+                <input v-model="editedTitle" data-scribe-edit-title class="scribe-input" />
+              </label>
+              <label class="block">
+                <span class="scribe-field-label">Summary</span>
+                <textarea
+                  v-model="editedSummary"
+                  data-scribe-edit-summary
+                  rows="8"
+                  class="scribe-input h-auto resize-y py-2"
+                />
+              </label>
+              <label class="block">
+                <span class="scribe-field-label">Tags, separated by commas</span>
+                <input v-model="editedTags" data-scribe-edit-tags class="scribe-input" />
+              </label>
+              <p
+                v-if="reviewedTagsError"
+                data-scribe-edit-tags-error
+                role="alert"
+                class="text-[10px] text-rem"
               >
-                Retry transcription
-              </button>
-            </div>
-            <nav
-              class="mt-3 flex gap-4"
-              role="tablist"
-              aria-label="Meeting detail"
-              @keydown="onDetailTabKeydown"
+                {{ reviewedTagsError }}
+              </p>
+              <div class="flex gap-2">
+                <button type="button" class="scribe-quiet-button" @click="editingMeeting = false">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  data-scribe-save-review
+                  class="scribe-primary-button"
+                  :disabled="Boolean(reviewedTagsError)"
+                >
+                  Save changes
+                </button>
+              </div>
+            </form>
+          </template>
+
+          <template v-else>
+            <h1 class="text-[20px] font-semibold leading-tight">{{ detailMeeting.title }}</h1>
+            <p class="mt-2 font-mono text-[9px] text-ink-3">
+              {{ meetingDate(detailMeeting) }} · {{ formatDuration(detailMeeting.durationMs) }}
+            </p>
+            <ul
+              v-if="detailMeeting.tags?.length"
+              data-scribe-reviewed-tags
+              aria-label="Reviewed tags"
+              class="mt-2 flex flex-wrap gap-x-2 font-mono text-[9px] text-ink-3"
             >
+              <li v-for="tag in detailMeeting.tags" :key="tag">{{ tag }}</li>
+            </ul>
+
+            <div
+              v-if="meetingNeedsRecovery(detailMeeting)"
+              class="scribe-inline-notice mt-5"
+              role="status"
+            >
+              <IconAlertTriangle :size="13" class="mt-px shrink-0" />
+              <span>{{ recoveryStatus(detailMeeting) }}</span>
+            </div>
+
+            <div class="mt-6 flex border-b border-rule" role="tablist" aria-label="Meeting review">
               <button
                 v-for="tab in detailTabs"
+                :id="`scribe-detail-tab-${tab.id}`"
                 :key="tab.id"
                 type="button"
-                :id="`scribe-detail-tab-${tab.id}`"
                 role="tab"
-                class="border-b pb-1 text-[10px]"
-                :class="detailTab === tab.id
-                  ? 'border-accent text-ink'
-                  : 'border-transparent text-ink-3 hover:text-ink'"
+                class="scribe-tab"
+                :class="detailTab === tab.id ? 'border-accent text-ink' : 'border-transparent text-ink-3'"
                 :aria-selected="detailTab === tab.id"
                 :aria-controls="`scribe-detail-panel-${tab.id}`"
                 :tabindex="detailTab === tab.id ? 0 : -1"
                 @click="detailTab = tab.id"
+                @keydown="onDetailTabKeydown"
               >
                 {{ tab.label }}
               </button>
-            </nav>
-          </header>
+            </div>
 
-          <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             <section
               v-if="detailTab === 'transcript'"
               id="scribe-detail-panel-transcript"
               role="tabpanel"
               aria-labelledby="scribe-detail-tab-transcript"
-              tabindex="0"
+              class="py-3"
             >
-              <div
-                v-if="
-                  meetings.selectedMeeting.transcriptTotalSegments
-                    > meetings.selectedMeeting.segments.length
-                "
-                class="mb-2 flex items-center gap-2 border-b border-rule-light pb-2"
-              >
-                <span class="flex-1 font-mono text-[9px] text-ink-3">
-                  Showing {{ meetings.selectedMeeting.segments.length }} of
-                  {{ meetings.selectedMeeting.transcriptTotalSegments }} segments
-                </span>
-                <button
-                  v-if="
-                    !meetings.selectedMeeting.transcriptShowingLatest
-                    || meetings.selectedMeeting.transcriptNewerAvailable
-                  "
-                  type="button"
-                  data-scribe-transcript-latest
-                  class="scribe-button"
-                  :disabled="meetings.selectedMeeting.transcriptLoading"
-                  @click="meetings.loadLatestTranscript()"
-                >
-                  Latest
-                </button>
-                <button
-                  v-if="meetings.selectedMeeting.transcriptHasEarlier"
-                  type="button"
-                  data-scribe-transcript-earlier
-                  class="scribe-button"
-                  :disabled="meetings.selectedMeeting.transcriptLoading"
-                  @click="meetings.loadEarlierTranscript()"
-                >
-                  Earlier
-                </button>
-              </div>
-              <div
-                v-if="meetings.selectedMeeting.transcriptError"
-                data-scribe-transcript-error
-                role="alert"
-                class="scribe-inline-alert mb-3"
-              >
-                <IconAlertTriangle :size="13" class="shrink-0 text-rem" />
-                <span class="min-w-0 flex-1">
-                  Transcript could not be loaded: {{ meetings.selectedMeeting.transcriptError }}
-                </span>
-                <button
-                  type="button"
-                  class="scribe-button"
-                  :disabled="meetings.selectedMeeting.transcriptLoading"
-                  @click="meetings.loadLatestTranscript()"
-                >
-                  Retry transcript
-                </button>
-              </div>
-              <div
-                v-if="
-                  meetings.selectedMeeting.transcriptLoading
-                  && !transcriptLedgerEntries(meetings.selectedMeeting).length
-                "
-                role="status"
-                class="py-12 text-center text-[11px] text-ink-3"
-              >
-                Loading transcript…
-              </div>
-              <div
-                v-else-if="!transcriptLedgerEntries(meetings.selectedMeeting).length"
-                class="py-12 text-center text-[11px] text-ink-3"
-              >
-                {{
-                  meetings.selectedMeeting.lifecycle === 'capturing'
-                    ? 'Listening for speech…'
-                    : 'No transcript is available.'
-                }}
-              </div>
-              <ol
-                v-else
-                data-scribe-transcript-ledger
-                class="scribe-transcript-ledger"
-                aria-label="Transcript time ledger"
-              >
+              <p v-if="!detailLedger.length" class="py-12 text-center text-[11px] text-ink-3">
+                No transcript text is available yet.
+              </p>
+              <ol v-else data-scribe-transcript-ledger class="divide-y divide-rule-light">
                 <li
-                  v-for="entry in transcriptLedgerEntries(meetings.selectedMeeting)"
+                  v-for="entry in detailLedger"
                   :key="entry.key"
-                  :data-scribe-ledger-kind="entry.kind"
-                  :data-scribe-ledger-channel="entry.channel"
-                  class="scribe-transcript-entry"
+                  data-scribe-ledger-kind
+                  :data-kind="entry.kind"
+                  class="grid grid-cols-[52px_70px_1fr] gap-3 py-3 text-[11px] leading-relaxed"
                 >
-                  <div class="scribe-transcript-time">
-                    <time :datetime="durationDateTime(entry.startMs)">
-                      {{ timestamp(entry.startMs) }}
-                    </time>
-                    <span class="scribe-transcript-marker" aria-hidden="true" />
-                    <span>{{ entrySpeaker(entry) }}</span>
-                  </div>
-                  <div v-if="entry.kind === 'segment'" class="min-w-0 py-2">
-                    <p class="select-text text-[12px] leading-[1.55] text-ink">
-                      {{ entry.text }}
-                    </p>
-                    <span
-                      v-if="!entry.final"
-                      class="mt-1 block font-mono text-[9px] text-ink-3"
-                    >
-                      Live partial · wording may change
-                    </span>
-                  </div>
-                  <div
-                    v-else
-                    class="scribe-gap-notice"
-                    role="note"
-                    :aria-label="gapLabel(entry)"
-                  >
-                    <IconAlertTriangle :size="13" class="shrink-0 text-rem" />
-                    <span>
-                      <strong class="font-medium text-ink-2">Capture gap</strong>
-                      · {{ gapDuration(entry) }} · {{ humanize(entry.reason) }}
-                    </span>
-                  </div>
+                  <time class="font-mono text-[9px] text-ink-3">{{ timestamp(entry.startMs) }}</time>
+                  <span class="text-[10px] font-medium">{{ entrySpeaker(entry) }}</span>
+                  <span v-if="entry.kind === 'gap'" class="text-rem">Capture gap · {{ gapDuration(entry) }}</span>
+                  <span v-else>{{ entry.text }}<em v-if="!entry.final" class="ml-1 text-[9px] not-italic text-ink-3">wording may change</em></span>
                 </li>
               </ol>
-            </section>
-
-            <section
-              v-else-if="detailTab === 'summary'"
-              id="scribe-detail-panel-summary"
-              role="tabpanel"
-              aria-labelledby="scribe-detail-tab-summary"
-              tabindex="0"
-            >
-              <form
-                v-if="editingMeeting"
-                class="max-w-3xl space-y-4"
-                @submit.prevent="saveMeetingEdits"
+              <button
+                v-if="detailMeeting.transcriptHasMore"
+                type="button"
+                class="scribe-quiet-button mt-3"
+                :disabled="Boolean(meetings.pending[`transcript:${detailMeeting.id}:older`])"
+                @click="meetings.loadOlderTranscript(detailMeeting.id)"
               >
-                <label class="block">
-                  <span class="scribe-settings-label">Reviewed title</span>
-                  <input
-                    v-model="editedTitle"
-                    data-scribe-edit-title
-                    class="scribe-settings-input"
-                    maxlength="200"
-                    required
-                  />
-                </label>
-                <label class="block">
-                  <span class="scribe-settings-label">Reviewed summary</span>
-                  <textarea
-                    v-model="editedSummary"
-                    data-scribe-edit-summary
-                    class="scribe-settings-input min-h-64 resize-y py-2 leading-relaxed"
-                    maxlength="100000"
-                  />
-                </label>
-                <label class="block">
-                  <span class="scribe-settings-label">Reviewed tags</span>
-                  <input
-                    v-model="editedTags"
-                    data-scribe-edit-tags
-                    class="scribe-settings-input"
-                    maxlength="5248"
-                    :aria-invalid="reviewedTagsError ? 'true' : undefined"
-                    :aria-describedby="reviewedTagsError
-                      ? 'scribe-reviewed-tags-help scribe-reviewed-tags-error'
-                      : 'scribe-reviewed-tags-help'"
-                  />
-                  <span
-                    id="scribe-reviewed-tags-help"
-                    class="mt-1 block text-[9px] leading-relaxed text-ink-3"
-                  >
-                    Comma-separated. Up to 64 tags; 80 characters each.
-                  </span>
-                  <span
-                    v-if="reviewedTagsError"
-                    id="scribe-reviewed-tags-error"
-                    data-scribe-edit-tags-error
-                    role="alert"
-                    class="mt-1 block text-[9px] leading-relaxed text-rem"
-                  >
-                    {{ reviewedTagsError }}
-                  </span>
-                </label>
-                <div class="flex gap-2">
-                  <button type="button" class="scribe-button" @click="cancelEdit">
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    data-scribe-save-review
-                    class="scribe-primary-button"
-                    :disabled="!editedTitle.trim() || reviewedTagsError || Boolean(
-                      meetings.pending[`update:${meetings.selectedMeeting.id}`],
-                    )"
-                  >
-                    Save review
-                  </button>
-                </div>
-              </form>
-              <div
-                v-else-if="meetings.selectedMeeting.summary"
-                class="max-w-3xl select-text whitespace-pre-wrap text-[12px] leading-[1.6]"
-              >
-                {{ meetings.selectedMeeting.summary }}
-              </div>
-              <div v-else class="py-10">
-                <p class="text-[11px] text-ink-2">
-                  {{ summaryStatus(meetings.selectedMeeting) }}
-                </p>
-                <button
-                  v-if="meetings.selectedMeeting.summaryState === 'failed'"
-                  type="button"
-                  class="scribe-button mt-3"
-                  :disabled="Boolean(
-                    meetings.pending[`retry:${meetings.selectedMeeting.id}:title-summary`],
-                  )"
-                  @click="retryJob(meetings.selectedMeeting.id, 'title-summary')"
-                >
-                  {{
-                    meetings.pending[`retry:${meetings.selectedMeeting.id}:title-summary`]
-                      ? 'Retrying…'
-                      : 'Retry title and summary'
-                  }}
-                </button>
-              </div>
+                Load earlier transcript
+              </button>
             </section>
 
             <section
               v-else
-              id="scribe-detail-panel-details"
+              id="scribe-detail-panel-summary"
               role="tabpanel"
-              aria-labelledby="scribe-detail-tab-details"
-              tabindex="0"
+              aria-labelledby="scribe-detail-tab-summary"
+              class="py-5"
             >
-              <dl class="grid max-w-2xl grid-cols-[150px_1fr] border-t border-rule text-[10px]">
-                <template
-                  v-for="[label, value] in diagnosticRows(meetings.selectedMeeting)"
-                  :key="label"
-                >
-                  <dt class="border-b border-rule-light py-2 font-mono text-ink-3">
-                    {{ label }}
-                  </dt>
-                  <dd class="border-b border-rule-light py-2 text-ink-2">{{ value }}</dd>
-                </template>
-              </dl>
+              <p v-if="detailMeeting.summary" class="whitespace-pre-wrap text-[12px] leading-7 text-ink-2">
+                {{ detailMeeting.summary }}
+              </p>
+              <p v-else class="text-[11px] leading-relaxed text-ink-3">
+                {{ summaryStatus(detailMeeting) }}
+              </p>
               <div
-                v-if="meetings.selectedMeeting.jobs.length"
-                class="mt-6 max-w-2xl border-t border-rule"
+                v-if="meetings.kgOffer?.id === detailMeeting.id"
+                data-scribe-kg-offer
+                class="mt-6 border-y border-rule py-4"
               >
-                <h3 class="py-3 text-[11px] font-semibold">Follow-up work</h3>
-                <ul class="border-t border-rule-light" aria-label="Meeting follow-up jobs">
-                  <li
-                    v-for="job in meetings.selectedMeeting.jobs"
-                    :key="job.id"
-                    class="flex min-h-10 items-center gap-3 border-b border-rule-light py-2 text-[10px]"
-                  >
-                    <span class="min-w-0 flex-1">
-                      <strong class="block font-medium text-ink-2">
-                        {{ jobLabel(job.kind) }}
-                      </strong>
-                      <span class="mt-0.5 block font-mono text-[9px] text-ink-3">
-                        {{ humanize(job.status) }} · attempt {{ job.attempt }}
-                        <template v-if="job.error"> · {{ job.error }}</template>
-                      </span>
-                    </span>
-                    <button
-                      v-if="job.activityId"
-                      type="button"
-                      class="scribe-button"
-                      @click="$emit('openActivity', job.activityId)"
-                    >
-                      Open Activity
-                    </button>
-                    <button
-                      v-if="job.status === 'failed'"
-                      type="button"
-                      class="scribe-button"
-                      :disabled="Boolean(
-                        meetings.pending[`retry:${meetings.selectedMeeting.id}:${job.kind}`],
-                      )"
-                      @click="retryJob(meetings.selectedMeeting.id, job.kind)"
-                    >
-                      Retry
-                    </button>
-                  </li>
-                </ul>
-              </div>
-              <div class="mt-6 max-w-2xl border-t border-rule pt-4">
-                <h3 class="text-[11px] font-semibold">Data and privacy</h3>
-                <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-                  Exports create a user-owned copy. Deletion cannot remove prior exports,
-                  backups, or audio already processed by a custom provider.
+                <p class="text-[11px] leading-relaxed text-ink-2">
+                  Create reviewable knowledge-graph entries from this meeting?
                 </p>
                 <div class="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    class="scribe-button"
-                    :disabled="meetingActionPending('export')"
-                    @click="exportSelected('json')"
-                  >
-                    {{ meetingActionPending('export:json') ? 'Exporting…' : 'Export JSON' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="scribe-button"
-                    :disabled="meetingActionPending('export')"
-                    @click="exportSelected('audio')"
-                  >
-                    {{ meetingActionPending('export:audio') ? 'Exporting…' : 'Export audio' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="scribe-button text-rem"
-                    :disabled="meetingActionPending('delete')"
-                    @click="deleteSelected('audio')"
-                  >
-                    {{
-                      meetingActionPending('delete')
-                        ? 'Deleting…'
-                        : 'Delete source audio'
-                    }}
-                  </button>
-                  <button
-                    type="button"
-                    data-scribe-delete-meeting
-                    class="scribe-button text-rem"
-                    :disabled="meetingActionPending('delete')"
-                    @click="deleteSelected('all')"
-                  >
-                    <IconTrash :size="13" />
-                    {{ meetingActionPending('delete') ? 'Deleting…' : 'Delete meeting' }}
-                  </button>
+                  <button type="button" class="scribe-quiet-button" @click="decideKg(detailMeeting.id, 'not-now')">Not now</button>
+                  <button type="button" class="scribe-primary-button" @click="decideKg(detailMeeting.id, 'create-draft')">Create KG draft</button>
                 </div>
               </div>
             </section>
-          </div>
-        </article>
+
+            <details class="mt-8 border-t border-rule pt-3">
+              <summary class="cursor-pointer text-[10px] text-ink-3 hover:text-ink">More actions</summary>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  class="scribe-quiet-button"
+                  :disabled="meetingActionPending('export:audio')"
+                  @click="exportSelected('audio')"
+                >
+                  Export audio
+                </button>
+                <button
+                  type="button"
+                  data-scribe-delete-meeting
+                  class="scribe-quiet-button text-rem"
+                  :disabled="meetingActionPending('delete')"
+                  @click="deleteSelected"
+                >
+                  <IconTrash :size="13" />
+                  Delete meeting
+                </button>
+              </div>
+            </details>
+          </template>
+        </div>
+      </article>
+    </template>
+
+    <template v-else>
+      <main class="min-h-0 flex-1 overflow-y-auto">
+        <div class="mx-auto max-w-3xl px-5 py-8">
+          <section class="border-b border-rule pb-7">
+            <div class="flex items-start gap-3">
+              <h1 class="min-w-0 flex-1 text-[20px] font-semibold leading-tight">
+                Record this meeting
+              </h1>
+              <button
+                type="button"
+                data-scribe-settings
+                class="scribe-icon-button shrink-0"
+                aria-label="Scribe settings"
+                @click="openSettings"
+              >
+                <IconSettings :size="14" />
+              </button>
+            </div>
+            <p class="mt-2 max-w-xl text-[11px] leading-relaxed text-ink-3">
+              Mimir records your microphone and system audio, transcribes while you talk,
+              and prepares a title and summary when you stop.
+            </p>
+            <p data-scribe-route-disclosure class="mt-2 text-[10px] leading-relaxed text-ink-3">
+              {{ routeDisclosure }}
+            </p>
+            <p class="mt-1 font-mono text-[9px] text-ink-3">{{ readyLabel }}</p>
+            <button
+              type="button"
+              data-scribe-new
+              class="scribe-record-button mt-5"
+              :disabled="Boolean(meetings.pending.start) || !canStart"
+              @click="start(null)"
+            >
+              <IconMicrophone :size="15" />
+              {{ meetings.pending.start ? 'Starting recording…' : primaryActionLabel }}
+            </button>
+            <button
+              v-if="!canStart"
+              type="button"
+              class="ml-2 text-[10px] text-ink-3 underline underline-offset-2 hover:text-ink"
+              @click="openSettings"
+            >
+              Finish setup
+            </button>
+            <p v-if="homeNotice" data-scribe-error role="status" class="mt-3 text-[10px] leading-relaxed text-rem">
+              {{ homeNotice }}
+            </p>
+          </section>
+
+          <section v-if="meetings.candidates.length" data-scribe-candidates class="border-b border-rule py-4">
+            <div
+              v-for="candidate in meetings.candidates"
+              :key="candidate.id"
+              class="flex items-center gap-3 py-1"
+            >
+              <IconPhone :size="14" class="shrink-0 text-ink-2" />
+              <p class="min-w-0 flex-1 truncate text-[11px]">
+                {{ candidate.appName }} may be a meeting
+              </p>
+              <button type="button" class="scribe-quiet-button" @click="start(candidate)">Record</button>
+              <button
+                type="button"
+                class="scribe-icon-button"
+                :aria-label="`Dismiss ${candidate.appName} suggestion`"
+                @click="dismissCandidate(candidate.id)"
+              >
+                <IconX :size="13" />
+              </button>
+            </div>
+          </section>
+
+          <section class="pt-6" aria-labelledby="scribe-recent-title">
+            <div class="flex items-center">
+              <h2 id="scribe-recent-title" class="min-w-0 flex-1 text-[12px] font-semibold">Recent meetings</h2>
+              <button
+                type="button"
+                class="scribe-quiet-button"
+                :disabled="meetings.loading"
+                @click="refresh"
+              >
+                <IconRefresh :size="13" />
+                Refresh
+              </button>
+            </div>
+            <p v-if="meetings.loading && !meetings.loaded" class="py-5 text-[10px] text-ink-3" role="status">
+              Finding recent meetings…
+            </p>
+            <p v-else-if="!meetings.meetings.length" class="py-5 text-[10px] text-ink-3">
+              Your completed meetings will appear here.
+            </p>
+            <div v-else class="mt-2 divide-y divide-rule-light border-t border-rule-light">
+              <button
+                v-for="meeting in meetings.meetings"
+                :key="meeting.id"
+                type="button"
+                data-scribe-meeting-row
+                class="scribe-meeting-row"
+                @click="openMeeting(meeting.id)"
+              >
+                <span class="min-w-0 flex-1 text-left">
+                  <span class="block truncate text-[11px] font-medium">{{ meeting.title }}</span>
+                  <span class="mt-0.5 block font-mono text-[9px] text-ink-3">
+                    {{ meetingDate(meeting) }} · {{ formatDuration(meeting.durationMs) }}
+                  </span>
+                </span>
+                <span v-if="meetingNeedsRecovery(meeting)" class="text-[9px] text-rem">Needs attention</span>
+                <IconChevronRight :size="13" class="shrink-0 text-ink-3" />
+              </button>
+            </div>
+          </section>
+        </div>
       </main>
-    </div>
+    </template>
 
     <p class="sr-only" aria-live="polite">{{ liveAnnouncement }}</p>
   </section>
@@ -876,16 +444,16 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
+  IconChevronLeft,
+  IconChevronRight,
   IconDownload,
   IconEdit,
   IconMicrophone,
   IconMicrophoneOff,
   IconPhone,
-  IconPlayerRecordFilled,
   IconPlayerStopFilled,
   IconRefresh,
   IconSettings,
-  IconTopologyStar3,
   IconTrash,
   IconX,
 } from '@tabler/icons-vue'
@@ -902,77 +470,130 @@ const props = defineProps({
   active: { type: Boolean, default: false },
 })
 const emit = defineEmits(['openFile', 'openActivity', 'diagnostic'])
-
 const meetings = useMeetingsStore()
 const scribeRoot = ref(null)
-const settingsButton = ref(null)
 const settingsPanel = ref(null)
-const consentPanel = ref(null)
-const consentCheckbox = ref(null)
 const settingsOpen = ref(false)
-const confirmingStart = ref(false)
-const consentConfirmed = ref(false)
-const consentError = ref('')
-const startTitle = ref('')
-const candidateId = ref(null)
-const candidateAppName = ref('')
+const detailMeetingId = ref(null)
 const detailTab = ref('transcript')
 const editingMeeting = ref(false)
 const editedTitle = ref('')
 const editedSummary = ref('')
 const editedTags = ref('')
+const actionError = ref('')
+const dismissedNativeNotice = ref('')
 const now = ref(Date.now())
 const liveAnnouncement = ref('')
-let startOpener = null
 const detailTabs = [
   { id: 'transcript', label: 'Transcript' },
   { id: 'summary', label: 'Summary' },
-  { id: 'details', label: 'Details' },
 ]
 let timer = null
+let lastActiveMeetingId = null
 
-const formattedElapsed = computed(() => (
-  formatDuration(Math.max(meetings.elapsedMs, now.value - Date.parse(
-    meetings.activeMeeting?.startedAt || new Date(now.value).toISOString(),
-  )))
-))
-const customDestination = computed(() => {
-  try {
-    const destination = new URL(meetings.config.customUrl)
-    return destination.protocol === 'https:'
-      ? destination.toString()
-      : 'the configured transcription service'
-  } catch {
-    return 'the configured transcription service'
+const detailMeeting = computed(() => {
+  if (!detailMeetingId.value) return null
+  // Library snapshots deliberately omit transcript text so opening Scribe is
+  // independent of meeting history size. The selected-meeting projection is
+  // the same record enriched with its separately paged transcript window.
+  // Reading the raw library row here made a successfully persisted transcript
+  // disappear from Review even though it remained visible during recording.
+  if (meetings.selectedMeeting?.id === detailMeetingId.value) {
+    return meetings.selectedMeeting
   }
+  return meetings.meetings.find(meeting => meeting.id === detailMeetingId.value) || null
 })
-const consentDescriptionIds = computed(() => [
-  'scribe-consent-scope',
-  'scribe-consent-route',
-  candidateAppName.value ? 'scribe-consent-candidate' : null,
-].filter(Boolean).join(' '))
+const formattedElapsed = computed(() => formatDuration(Math.max(
+  meetings.elapsedMs,
+  now.value - Date.parse(meetings.activeMeeting?.startedAt || new Date(now.value).toISOString()),
+)))
+const liveLedger = computed(() => transcriptLedgerEntries(meetings.activeMeeting))
+const detailLedger = computed(() => transcriptLedgerEntries(detailMeeting.value))
 const reviewedTags = computed(() => parseReviewedTags(editedTags.value))
 const reviewedTagsError = computed(() => reviewedTags.value.error)
+const isHosted = computed(() => meetings.config.transcriptionMode === 'custom')
+const hostedProviderName = computed(() => {
+  try {
+    const host = new URL(meetings.config.customUrl).hostname
+    return host === 'api.openai.com' ? 'OpenAI' : host || 'hosted service'
+  } catch {
+    return 'hosted service'
+  }
+})
+const canStart = computed(() => {
+  if (isHosted.value) return Boolean(meetings.config.apiKeyConfigured)
+  return meetings.models.some(model => (
+    model.id === meetings.config.localModel && model.status === 'installed'
+  ))
+})
+const primaryActionLabel = computed(() => (
+  canStart.value ? 'Start recording' : isHosted.value ? 'API key required' : 'Local model required'
+))
+const readyLabel = computed(() => (
+  isHosted.value
+    ? meetings.config.apiKeyConfigured
+      ? `Ready · ${hostedProviderName.value}`
+      : `Setup needed · ${hostedProviderName.value} API key`
+    : canStart.value ? 'Ready · On this Mac' : 'Setup needed · Local model'
+))
+const routeDisclosure = computed(() => {
+  if (!isHosted.value) return 'Audio and transcription stay on this Mac.'
+  return `Microphone and system audio are sent to ${hostedProviderName.value} for live transcription.`
+})
+const captureStatus = computed(() => {
+  const channels = meetings.activeMeeting?.channels || []
+  if (channels.includes('microphone') && channels.includes('system')) {
+    return meetings.activeMeeting?.micMuted
+      ? 'Recording system audio · microphone muted'
+      : 'Recording microphone + system audio'
+  }
+  return channels.includes('microphone') ? 'Recording microphone only' : 'Recording audio'
+})
+const transcriptionStatus = computed(() => {
+  const value = meetings.activeMeeting?.transcription
+  // A durable transcript segment is stronger evidence than a lagging worker
+  // readiness projection. Never tell the user transcription is still being
+  // prepared while words are already arriving on screen.
+  if (meetings.recording && liveLedger.value.some(entry => entry.kind === 'segment')) {
+    return isHosted.value
+      ? `Transcribing live with ${hostedProviderName.value}`
+      : 'Transcribing live on this Mac'
+  }
+  if (value === 'live') {
+    return isHosted.value
+      ? `Transcribing live with ${hostedProviderName.value}`
+      : 'Transcribing live on this Mac'
+  }
+  if (value === 'initializing' || value === 'connecting') return 'Preparing transcription · audio is safe'
+  if (value === 'delayed' || value === 'failed') return 'Transcript will be repaired after Stop'
+  if (value === 'final') return 'Transcript complete'
+  return 'Recording is safe'
+})
+const recordingNotice = computed(() => {
+  const notice = actionError.value || meetings.activeMeeting?.error || meetings.error
+  if (!notice || notice === dismissedNativeNotice.value) return ''
+  if (/transcri|worker|provider|model/i.test(notice)) {
+    return 'Recording is safe. Live transcription is unavailable; Mimir will retry from stored audio after you stop.'
+  }
+  return notice
+})
+const homeNotice = computed(() => actionError.value || (
+  meetings.error === dismissedNativeNotice.value ? '' : meetings.error
+))
+const emptyLiveTranscript = computed(() => {
+  const state = meetings.activeMeeting?.transcription
+  if (state === 'initializing' || state === 'connecting') return 'Preparing transcription. Recording has already started.'
+  if (state === 'delayed' || state === 'failed') return 'Recording continues. The transcript will be repaired after you stop.'
+  return 'Listening… transcript text will appear here.'
+})
 
-watch(
-  () => meetings.activeMeeting?.lifecycle,
-  lifecycle => {
-    if (!lifecycle) return
-    liveAnnouncement.value = lifecycleLabel(lifecycle)
-  },
-)
-watch(
-  () => meetings.selectedMeeting?.id,
-  () => {
-    editingMeeting.value = false
-  },
-)
-watch(
-  () => meetings.error,
-  error => {
-    if (error) emit('diagnostic', error)
-  },
-)
+watch(() => meetings.activeMeeting?.id, id => {
+  if (id) lastActiveMeetingId = id
+  if (!id && lastActiveMeetingId) {
+    detailMeetingId.value = lastActiveMeetingId
+    lastActiveMeetingId = null
+  }
+})
 
 onMounted(async () => {
   timer = window.setInterval(() => {
@@ -981,7 +602,7 @@ onMounted(async () => {
   try {
     await meetings.initialize()
   } catch (error) {
-    emit('diagnostic', message(error))
+    actionError.value = message(error)
   }
 })
 
@@ -995,66 +616,28 @@ function focusEntry() {
 
 defineExpose({ focusEntry })
 
-function beginStart(candidate = null, event = null) {
-  startOpener = event?.currentTarget instanceof HTMLElement
-    ? event.currentTarget
-    : document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-  candidateId.value = candidate?.id || null
-  candidateAppName.value = candidate?.appName || ''
-  startTitle.value = candidate?.appName ? `${candidate.appName} meeting` : ''
-  consentConfirmed.value = false
-  consentError.value = ''
-  settingsOpen.value = false
-  confirmingStart.value = true
-  nextTick(() => consentPanel.value?.focus())
-}
-
-function cancelStart() {
-  if (meetings.pending.start) return
-  confirmingStart.value = false
-  candidateId.value = null
-  candidateAppName.value = ''
-  consentConfirmed.value = false
-  consentError.value = ''
-  nextTick(() => {
-    if (startOpener?.isConnected) startOpener.focus()
-    else focusEntry()
-    startOpener = null
-  })
-}
-
-async function start() {
-  consentError.value = ''
+async function start(candidate) {
+  actionError.value = ''
+  dismissedNativeNotice.value = ''
   try {
     await meetings.start({
-      title: startTitle.value,
-      candidateId: candidateId.value,
+      title: candidate?.appName ? `${candidate.appName} meeting` : '',
+      candidateId: candidate?.id || null,
       workspacePath: props.workspacePath,
     })
-    cancelStart()
     liveAnnouncement.value = 'Recording started'
   } catch (error) {
-    const detail = message(error)
-    const requiresReconfirmation = /consent|disclosure|suggestion changed/i.test(detail)
-    consentError.value = requiresReconfirmation
-      ? 'Recording confirmation expired or changed. Review the disclosure and confirm again.'
-      : detail
-    if (requiresReconfirmation) {
-      consentConfirmed.value = false
-      nextTick(() => consentCheckbox.value?.focus())
-    }
-    emit('diagnostic', detail)
+    actionError.value = message(error)
   }
 }
 
 async function stop() {
+  actionError.value = ''
   try {
     await meetings.stop()
     liveAnnouncement.value = 'Recording stopped. Finalizing transcript.'
   } catch (error) {
-    emit('diagnostic', message(error))
+    actionError.value = message(error)
   }
 }
 
@@ -1062,173 +645,43 @@ async function toggleMute() {
   try {
     await meetings.setMicMuted(!meetings.activeMeeting?.micMuted)
   } catch (error) {
-    emit('diagnostic', message(error))
+    actionError.value = message(error)
   }
 }
 
-async function decideKg(id, decision) {
-  try {
-    const meeting = await meetings.decideKg(id, decision)
-    liveAnnouncement.value = ({
-      'create-draft': 'Knowledge-graph draft queued for review',
-      'not-now': 'Knowledge-graph draft deferred',
-      never: 'Knowledge-graph follow-up dismissed',
-    })[decision]
-    if (meeting?.jobs?.length) {
-      const activityId = meeting.jobs.find(job => job.kind === 'kg-proposal')?.activityId
-      if (activityId) emit('openActivity', activityId)
-    }
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
+function dismissNotice() {
+  dismissedNativeNotice.value = actionError.value || meetings.activeMeeting?.error || meetings.error
+  actionError.value = ''
+  meetings.dismissError?.()
 }
 
-async function retryJob(id, kind) {
-  try {
-    await meetings.retryJob(id, kind)
-    liveAnnouncement.value = `${jobLabel(kind)} retry queued`
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
+function openMeeting(id) {
+  meetings.select(id)
+  detailMeetingId.value = id
+  detailTab.value = 'transcript'
+  editingMeeting.value = false
+}
+
+function closeDetail() {
+  detailMeetingId.value = null
+  editingMeeting.value = false
+}
+
+function openSettings() {
+  settingsOpen.value = true
+  nextTick(() => settingsPanel.value?.focusEntry?.())
+}
+
+function closeSettings() {
+  settingsOpen.value = false
+  nextTick(focusEntry)
 }
 
 async function refresh() {
   try {
     await meetings.refresh()
   } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function exportSelected(format = 'markdown') {
-  const selected = meetings.selectedMeeting
-  if (!selected) return
-  try {
-    const result = await meetings.exportRecord(selected.id, format)
-    const path = typeof result === 'string' ? result : result?.path
-    if (path) emit('openFile', path)
-    liveAnnouncement.value = `${exportLabel(format)} exported`
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-function beginEdit() {
-  const selected = meetings.selectedMeeting
-  if (!selected) return
-  editedTitle.value = selected.title
-  editedSummary.value = selected.summary || ''
-  editedTags.value = (selected.tags || []).join(', ')
-  detailTab.value = 'summary'
-  editingMeeting.value = true
-}
-
-function cancelEdit() {
-  editingMeeting.value = false
-}
-
-async function saveMeetingEdits() {
-  const selected = meetings.selectedMeeting
-  if (!selected || reviewedTagsError.value) return
-  try {
-    await meetings.saveMeeting(selected.id, {
-      title: editedTitle.value,
-      summary: editedSummary.value,
-      tags: reviewedTags.value.tags,
-    })
-    editingMeeting.value = false
-    liveAnnouncement.value = 'Meeting review saved'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function deleteSelected(mode) {
-  const selected = meetings.selectedMeeting
-  if (!selected) return
-  const deletingAll = mode === 'all'
-  const accepted = await confirm(
-    deletingAll
-      ? `Permanently delete “${selected.title}” and its transcript, summary, and source audio?`
-      : `Permanently delete the source audio for “${selected.title}”? The transcript and summary will remain.`,
-    {
-      title: deletingAll ? 'Delete meeting?' : 'Delete source audio?',
-      kind: 'warning',
-      okLabel: deletingAll ? 'Delete meeting' : 'Delete audio',
-      cancelLabel: 'Cancel',
-    },
-  )
-  if (!accepted) return
-  try {
-    await meetings.remove(selected.id, mode)
-    liveAnnouncement.value = deletingAll
-      ? 'Meeting deleted'
-      : 'Meeting source audio deleted'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function saveConfig(patch) {
-  try {
-    await meetings.saveConfig(patch)
-    liveAnnouncement.value = 'Scribe setting saved'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function saveApiKey(value) {
-  try {
-    await meetings.saveApiKey(value)
-    liveAnnouncement.value = 'Custom transcription key saved in Keychain'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function clearApiKey() {
-  try {
-    await meetings.clearApiKey()
-    liveAnnouncement.value = 'Custom transcription key removed'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function installModel(id) {
-  try {
-    await meetings.installModel(id)
-    liveAnnouncement.value = 'Local model installation started'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function deleteModel(id) {
-  try {
-    await meetings.deleteModel(id)
-    liveAnnouncement.value = 'Local model removed'
-  } catch (error) {
-    emit('diagnostic', message(error))
-  }
-}
-
-async function requestMicrophonePermission() {
-  try {
-    const permission = await meetings.requestMicrophonePermission()
-    liveAnnouncement.value = `Microphone permission ${permissionLabel(permission)}`
-  } catch {
-    // The store owns the actionable native permission diagnostic.
-  }
-}
-
-async function openSystemAudioSettings() {
-  try {
-    await meetings.openSystemAudioSettings()
-    liveAnnouncement.value = 'System Settings opened to Screen and System Audio Recording'
-  } catch (error) {
-    emit('diagnostic', message(error))
+    actionError.value = message(error)
   }
 }
 
@@ -1236,30 +689,137 @@ async function dismissCandidate(id) {
   try {
     await meetings.dismissCandidate(id)
   } catch (error) {
-    emit('diagnostic', message(error))
+    actionError.value = message(error)
   }
 }
 
-function onKeydown(event) {
-  if (event.key === 'Escape' && confirmingStart.value && !meetings.pending.start) {
-    cancelStart()
-    event.preventDefault()
+function beginEdit() {
+  if (!detailMeeting.value) return
+  editedTitle.value = detailMeeting.value.title
+  editedSummary.value = detailMeeting.value.summary || ''
+  editedTags.value = (detailMeeting.value.tags || []).join(', ')
+  editingMeeting.value = true
+}
+
+async function saveMeetingEdits() {
+  if (!detailMeeting.value || reviewedTagsError.value) return
+  try {
+    await meetings.saveMeeting(detailMeeting.value.id, {
+      title: editedTitle.value,
+      summary: editedSummary.value,
+      tags: reviewedTags.value.tags,
+    })
+    editingMeeting.value = false
+    liveAnnouncement.value = 'Meeting review saved'
+  } catch (error) {
+    actionError.value = message(error)
   }
 }
 
-function toggleSettings() {
-  if (settingsOpen.value) {
-    closeSettings()
-    return
+async function exportSelected(format) {
+  if (!detailMeeting.value) return
+  try {
+    const result = await meetings.exportRecord(detailMeeting.value.id, format)
+    const path = typeof result === 'string' ? result : result?.path
+    if (path) emit('openFile', path)
+  } catch (error) {
+    actionError.value = message(error)
   }
-  confirmingStart.value = false
-  settingsOpen.value = true
-  nextTick(() => settingsPanel.value?.focusEntry?.())
 }
 
-function closeSettings() {
-  settingsOpen.value = false
-  nextTick(() => settingsButton.value?.focus())
+async function deleteSelected() {
+  if (!detailMeeting.value) return
+  const accepted = await confirm(
+    `Permanently delete “${detailMeeting.value.title}” and its transcript, summary, and source audio?`,
+    {
+      title: 'Delete meeting?',
+      kind: 'warning',
+      okLabel: 'Delete meeting',
+      cancelLabel: 'Cancel',
+    },
+  )
+  if (!accepted) return
+  try {
+    await meetings.remove(detailMeeting.value.id, 'all')
+    closeDetail()
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function decideKg(id, decision) {
+  try {
+    const meeting = await meetings.decideKg(id, decision)
+    const activityId = meeting?.jobs?.find(job => job.kind === 'kg-proposal')?.activityId
+    if (activityId) emit('openActivity', activityId)
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function saveConfig(patch) {
+  try {
+    await meetings.saveConfig(patch)
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function saveApiKey(value) {
+  try {
+    await meetings.saveApiKey(value)
+    liveAnnouncement.value = 'Hosted transcription API key saved in Keychain'
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function clearApiKey() {
+  try {
+    await meetings.clearApiKey()
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function installModel(id) {
+  try {
+    await meetings.installModel(id)
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function deleteModel(id) {
+  try {
+    await meetings.deleteModel(id)
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function requestMicrophonePermission() {
+  try {
+    await meetings.requestMicrophonePermission()
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function openSystemAudioSettings() {
+  try {
+    await meetings.openSystemAudioSettings()
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function checkAudio() {
+  try {
+    await meetings.checkAudio()
+  } catch (error) {
+    actionError.value = message(error)
+  }
 }
 
 function onDetailTabKeydown(event) {
@@ -1272,90 +832,7 @@ function onDetailTabKeydown(event) {
   if (event.key === 'ArrowRight') next = (current + 1) % detailTabs.length
   detailTab.value = detailTabs[next].id
   event.preventDefault()
-  nextTick(() => scribeRoot.value
-    ?.querySelector(`#scribe-detail-tab-${detailTabs[next].id}`)
-    ?.focus())
-}
-
-function onLibraryKeydown(event, id) {
-  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
-  const rows = [...scribeRoot.value?.querySelectorAll('[data-scribe-meeting-row]') || []]
-  const current = rows.findIndex(row => row === event.currentTarget)
-  if (current < 0 || !rows.length) return
-  let next = current
-  if (event.key === 'Home') next = 0
-  if (event.key === 'End') next = rows.length - 1
-  if (event.key === 'ArrowUp') next = Math.max(0, current - 1)
-  if (event.key === 'ArrowDown') next = Math.min(rows.length - 1, current + 1)
-  const target = rows[next]
-  if (!(target instanceof HTMLElement)) return
-  event.preventDefault()
-  target.focus()
-  const nextId = meetings.meetings[next]?.id
-  if (nextId && nextId !== id) meetings.select(nextId)
-}
-
-function channelLabel(channel) {
-  const active = meetings.activeMeeting
-  if (!active?.channels.includes(channel)) return 'unavailable'
-  if (channel === 'microphone' && active.micMuted) return 'muted'
-  return 'active'
-}
-
-function channelSpeaker(channel) {
-  if (channel === 'microphone') return 'You'
-  if (channel === 'system') return 'Others'
-  return 'Speaker'
-}
-
-function lifecycleLabel(value) {
-  return ({
-    arming: 'Starting capture',
-    capturing: 'Recording',
-    stopping: 'Stopping capture',
-    finalizing: 'Finalizing transcript',
-    ready: 'Ready',
-    interrupted: 'Interrupted',
-    needs_repair: 'Needs repair',
-    failed: 'Failed',
-  })[value] || String(value || 'Ready').replaceAll('-', ' ')
-}
-
-function transcriptionLabel(value) {
-  return ({
-    idle: 'not started',
-    connecting: 'connecting',
-    live: 'live',
-    delayed: 'delayed',
-    batch: 'repairing',
-    final: 'final',
-    failed: 'failed',
-  })[value] || String(value || 'idle')
-}
-
-function summaryStatus(meeting) {
-  return ({
-    'not-started': meeting.transcriptFinal
-      ? 'Title and summary have not started.'
-      : 'The summary starts after the transcript is final.',
-    queued: 'Title and summary are queued.',
-    running: 'Mimir is creating the title and summary.',
-    failed: 'Title and summary failed. The transcript is safe.',
-  })[meeting.summaryState] || 'No summary is available.'
-}
-
-function diagnosticRows(meeting) {
-  return [
-    ['Status', lifecycleLabel(meeting.lifecycle)],
-    ['Transcription', transcriptionLabel(meeting.transcription)],
-    ['Channels', meeting.channels.join(', ') || 'None'],
-    ['Transcript revision', String(meeting.transcriptRevision)],
-    ['Transcript final', meeting.transcriptFinal ? 'Yes' : 'No'],
-    ['Capture gaps', String(meeting.gapCount)],
-    ['Summary', meeting.summaryState.replaceAll('-', ' ')],
-    ['Knowledge graph', meeting.kgState.replaceAll('-', ' ')],
-    ['Source app', meeting.sourceApp || 'Manual'],
-  ]
+  nextTick(() => scribeRoot.value?.querySelector(`#scribe-detail-tab-${detailTabs[next].id}`)?.focus())
 }
 
 function transcriptLedgerEntries(meeting) {
@@ -1370,9 +847,7 @@ function transcriptLedgerEntries(meeting) {
     key: `gap:${gap.channel}:${gap.startMs}:${gap.endMs}:${index}`,
   }))
   return [...segments, ...gaps].sort((left, right) => (
-    left.startMs - right.startMs
-    || (left.kind === 'gap' ? -1 : 1)
-    || left.key.localeCompare(right.key)
+    left.startMs - right.startMs || (left.kind === 'gap' ? -1 : 1) || left.key.localeCompare(right.key)
   ))
 }
 
@@ -1381,135 +856,63 @@ function entrySpeaker(entry) {
   return entry.speaker || channelSpeaker(entry.channel)
 }
 
+function channelSpeaker(channel) {
+  return channel === 'microphone' ? 'You' : channel === 'system' ? 'Others' : 'Speaker'
+}
+
 function gapDuration(gap) {
   return `${formatDuration(Math.max(0, gap.endMs - gap.startMs))} unavailable`
 }
 
-function gapLabel(gap) {
-  return `Capture gap for ${channelSpeaker(gap.channel)} at ${timestamp(gap.startMs)}; ${
-    gapDuration(gap)
-  }; ${humanize(gap.reason)}`
-}
-
-function meetingRowLabel(meeting) {
-  return [
-    meeting.title,
-    meetingDate(meeting),
-    lifecycleLabel(meeting.lifecycle),
-    meeting.lifecycle === 'capturing' ? formatDuration(meeting.durationMs) : null,
-  ].filter(Boolean).join(', ')
-}
-
 function meetingNeedsRecovery(meeting) {
-  return ['interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle)
-    || Boolean(meeting?.error)
+  return ['interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle) || Boolean(meeting?.error)
 }
 
 function recoveryStatus(meeting) {
-  const transcriptionJob = meeting.jobs.find(job => job.kind === 'transcription')
-  if (transcriptionJob?.status === 'failed') {
-    return 'Stored audio is safe, but transcript recovery failed. Retry when the transcription route is available.'
-  }
-  if (['queued', 'running'].includes(transcriptionJob?.status)) {
-    return `Stored audio is safe. Transcript recovery is ${transcriptionJob.status}.`
-  }
-  if (meeting.error) return `Stored audio needs attention: ${meeting.error}`
-  return 'Capture ended unexpectedly. Stored audio is safe and recovery will resume after restart.'
+  const job = meeting.jobs?.find(candidate => candidate.kind === 'transcription')
+  if (job?.status === 'failed') return 'Stored audio is safe, but transcript recovery needs another attempt.'
+  if (['queued', 'running'].includes(job?.status)) return `Stored audio is safe. Transcript recovery is ${job.status}.`
+  return 'Capture ended unexpectedly. Stored audio is safe.'
 }
 
-function failedJob(meeting, kind) {
-  return meeting?.jobs?.find(job => job.kind === kind && job.status === 'failed') || null
-}
-
-function jobLabel(kind) {
+function summaryStatus(meeting) {
   return ({
-    'title-summary': 'Title and summary',
-    'kg-proposal': 'Knowledge-graph draft',
-    transcription: 'Transcript recovery',
-  })[kind] || humanize(kind)
+    'not-started': meeting.transcriptFinal ? 'The title and summary have not started.' : 'The summary starts after the transcript is final.',
+    queued: 'The title and summary are queued.',
+    running: 'Mimir is creating the title and summary.',
+    failed: 'The summary failed. The transcript is safe.',
+  })[meeting.summaryState] || 'No summary is available.'
 }
 
 function meetingActionPending(action) {
-  const id = meetings.selectedMeeting?.id
+  const id = detailMeeting.value?.id
   if (!id) return false
-  if (action === 'export') {
-    return Object.keys(meetings.pending).some(key => key.startsWith(`export:${id}:`))
-  }
-  if (action.startsWith('export:')) {
-    return Boolean(meetings.pending[`export:${id}:${action.slice('export:'.length)}`])
-  }
+  if (action === 'export') return Object.keys(meetings.pending).some(key => key.startsWith(`export:${id}:`))
+  if (action.startsWith('export:')) return Boolean(meetings.pending[`export:${id}:${action.slice(7)}`])
   if (action === 'delete') return Boolean(meetings.pending[`delete:${id}`])
   return false
 }
 
-function exportLabel(format) {
-  return ({
-    markdown: 'Markdown meeting',
-    json: 'JSON meeting',
-    audio: 'Meeting audio',
-  })[format] || 'Meeting'
-}
-
-function permissionLabel(value) {
-  return ({
-    granted: 'granted',
-    denied: 'denied',
-    'prompt-on-start': 'requested when capture starts',
-    unknown: 'not determined',
-  })[value] || humanize(value)
-}
-
 function parseReviewedTags(value) {
-  const candidates = String(value || '')
-    .split(',')
-    .map(tag => tag.trim())
-    .filter(Boolean)
-  if (candidates.length > MAX_REVIEWED_TAGS) {
-    return {
-      tags: [],
-      error: `Use at most ${MAX_REVIEWED_TAGS} reviewed tags.`,
-    }
-  }
+  const candidates = String(value || '').split(',').map(tag => tag.trim()).filter(Boolean)
+  if (candidates.length > MAX_REVIEWED_TAGS) return { tags: [], error: `Use at most ${MAX_REVIEWED_TAGS} reviewed tags.` }
   const tags = []
   const seen = new Set()
   for (const tag of candidates) {
-    if (tag.length > MAX_REVIEWED_TAG_CHARS) {
-      return {
-        tags: [],
-        error: `Each reviewed tag must be at most ${MAX_REVIEWED_TAG_CHARS} characters.`,
-      }
+    if (tag.length > MAX_REVIEWED_TAG_CHARS) return { tags: [], error: `Each reviewed tag must be at most ${MAX_REVIEWED_TAG_CHARS} characters.` }
+    if (new TextEncoder().encode(tag).byteLength > MAX_REVIEWED_TAG_BYTES) return { tags: [], error: `Each reviewed tag must be at most ${MAX_REVIEWED_TAG_BYTES} UTF-8 bytes.` }
+    if (/[\u0000-\u001f\u007f]/u.test(tag)) return { tags: [], error: 'Reviewed tags cannot contain control characters.' }
+    if (!seen.has(tag)) {
+      seen.add(tag)
+      tags.push(tag)
     }
-    if (new TextEncoder().encode(tag).byteLength > MAX_REVIEWED_TAG_BYTES) {
-      return {
-        tags: [],
-        error: `Each reviewed tag must be at most ${MAX_REVIEWED_TAG_BYTES} UTF-8 bytes.`,
-      }
-    }
-    if (/[\u0000-\u001f\u007f]/u.test(tag)) {
-      return {
-        tags: [],
-        error: 'Reviewed tags cannot contain control characters.',
-      }
-    }
-    if (seen.has(tag)) continue
-    seen.add(tag)
-    tags.push(tag)
   }
   return { tags, error: '' }
-}
-
-function humanize(value) {
-  return String(value || 'unknown').replaceAll(/[-_]/g, ' ')
 }
 
 function timestamp(milliseconds) {
   const seconds = Math.floor(Math.max(0, milliseconds) / 1000)
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
-
-function durationDateTime(milliseconds) {
-  const seconds = Math.max(0, Number(milliseconds) || 0) / 1000
-  return `PT${seconds}S`
 }
 
 function formatDuration(milliseconds) {
@@ -1523,15 +926,10 @@ function formatDuration(milliseconds) {
 }
 
 function meetingDate(meeting) {
-  const value = meeting.startedAt || meeting.updatedAt
-  if (!value) return 'No date'
-  const date = new Date(value)
+  const date = new Date(meeting.startedAt || meeting.updatedAt || '')
   if (Number.isNaN(date.getTime())) return 'No date'
   return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   }).format(date)
 }
 
@@ -1541,247 +939,162 @@ function message(error) {
 </script>
 
 <style scoped>
-.scribe-root {
-  container: scribe / inline-size;
+.scribe-bar,
+.scribe-transport {
+  display: flex;
+  min-height: 44px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-rule);
+  padding: 0 12px;
 }
 
-.scribe-button,
+.scribe-transport {
+  min-height: 50px;
+  background: var(--color-chrome);
+}
+
+.scribe-capture-status {
+  display: flex;
+  min-height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-rule-light);
+  padding: 0 14px;
+  font-size: 10px;
+}
+
+.scribe-inline-notice {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  gap: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-rem) 30%, transparent);
+  background: var(--color-surface);
+  padding: 8px 14px;
+  color: var(--color-rem);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.scribe-quiet-button,
 .scribe-primary-button,
-.scribe-stop {
+.scribe-record-button,
+.scribe-stop-button,
+.scribe-icon-button {
   display: inline-flex;
-  min-height: 28px;
+  min-height: 30px;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   border: 1px solid var(--color-rule);
   padding: 0 9px;
   font-size: 10px;
   font-weight: 600;
 }
 
-.scribe-button {
-  background: var(--color-chrome-high);
-  color: var(--color-ink-2);
+.scribe-icon-button {
+  width: 30px;
+  padding: 0;
 }
 
-.scribe-button:hover:not(:disabled) {
+.scribe-quiet-button:hover:not(:disabled),
+.scribe-icon-button:hover:not(:disabled) {
   background: var(--color-chrome-mid);
-  color: var(--color-ink);
 }
 
-.scribe-primary-button {
+.scribe-primary-button,
+.scribe-record-button {
   border-color: var(--color-accent);
   background: var(--color-accent);
   color: var(--color-surface);
 }
 
-.scribe-primary-button:hover:not(:disabled) {
-  filter: brightness(1.05);
-}
-
-.scribe-stop {
-  border-color: var(--color-rem);
-  background: transparent;
-  color: var(--color-rem);
-}
-
-.scribe-stop:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-rem) 10%, transparent);
-}
-
-.scribe-button:focus-visible,
-.scribe-primary-button:focus-visible,
-.scribe-stop:focus-visible,
-.scribe-icon-button:focus-visible,
-.scribe-library-row:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
-}
-
-.scribe-button:disabled,
-.scribe-primary-button:disabled,
-.scribe-stop:disabled,
-.scribe-icon-button:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-.scribe-icon-button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  color: var(--color-ink-3);
-}
-
-.scribe-icon-button:hover:not(:disabled) {
-  background: var(--color-chrome-mid);
-  color: var(--color-ink);
-}
-
-.scribe-library-row {
-  display: flex;
-  width: 100%;
-  min-height: 34px;
-  align-items: center;
-  gap: 7px;
-  border-bottom: 1px solid var(--color-rule-light);
-  padding: 6px 8px;
-  color: var(--color-ink-2);
-}
-
-.scribe-library-row:hover {
-  background: var(--color-chrome-mid);
-  color: var(--color-ink);
-}
-
-.scribe-alert {
-  display: flex;
-  min-height: 34px;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--color-rule);
-  padding: 6px 12px;
-  color: var(--color-rem);
-  font-size: 10px;
-}
-
-.scribe-alert button {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.scribe-inline-alert {
-  display: flex;
+.scribe-record-button {
   min-height: 36px;
+  padding: 0 14px;
+  font-size: 11px;
+}
+
+.scribe-stop-button {
+  border-color: var(--color-rem);
+  background: var(--color-rem);
+  color: var(--color-surface);
+}
+
+.scribe-quiet-button:focus-visible,
+.scribe-primary-button:focus-visible,
+.scribe-record-button:focus-visible,
+.scribe-stop-button:focus-visible,
+.scribe-icon-button:focus-visible,
+.scribe-meeting-row:focus-visible,
+.scribe-tab:focus-visible,
+.scribe-input:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.scribe-meeting-row {
+  display: flex;
+  min-height: 50px;
+  width: 100%;
   align-items: center;
-  gap: 8px;
-  border-block: 1px solid var(--color-rule-light);
-  padding: 6px 0;
-  color: var(--color-rem);
+  gap: 10px;
+  padding: 7px 2px;
+}
+
+.scribe-meeting-row:hover {
+  background: var(--color-chrome-mid);
+}
+
+.scribe-tab {
+  min-height: 34px;
+  border-bottom-width: 1px;
+  padding: 0 12px;
   font-size: 10px;
-}
-
-.scribe-transcript-ledger {
-  border-top: 1px solid var(--color-rule);
-}
-
-.scribe-transcript-entry {
-  display: grid;
-  min-height: 52px;
-  grid-template-columns: 84px minmax(0, 1fr);
-  column-gap: 16px;
-  border-bottom: 1px solid var(--color-rule-light);
-}
-
-.scribe-transcript-time {
-  position: relative;
-  display: grid;
-  align-content: center;
-  align-self: stretch;
-  border-right: 1px solid var(--color-rule);
-  padding-right: 13px;
-  color: var(--color-ink-3);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.45;
-  text-align: right;
-}
-
-.scribe-transcript-time > span:last-child {
-  overflow: hidden;
-  color: var(--color-ink-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scribe-transcript-marker {
-  position: absolute;
-  top: 50%;
-  right: -4px;
-  width: 7px;
-  height: 1px;
-  background: var(--color-rule);
-}
-
-.scribe-transcript-entry[data-scribe-ledger-kind='segment']
-  .scribe-transcript-time > span:last-child {
   font-weight: 600;
 }
 
-.scribe-transcript-entry[data-scribe-ledger-kind='gap'] {
-  background: var(--color-chrome-mid);
-}
-
-.scribe-gap-notice {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-  padding-block: 8px;
+.scribe-field-label {
+  display: block;
+  margin-bottom: 5px;
   color: var(--color-ink-3);
-  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
 }
 
-[role='tabpanel']:focus-visible,
-[data-scribe-consent]:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
+.scribe-input {
+  height: 34px;
+  width: 100%;
+  border: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  padding: 0 9px;
+  color: var(--color-ink);
+  font-size: 11px;
+  outline: none;
 }
 
-@container scribe (max-width: 620px) {
-  .scribe-workspace {
+@media (max-width: 620px) {
+  .scribe-transport {
+    flex-wrap: wrap;
+    padding-bottom: 7px;
+    padding-top: 7px;
+  }
+
+  .scribe-capture-status {
+    align-items: flex-start;
     flex-direction: column;
-  }
-
-  .scribe-library {
-    width: 100%;
-    max-height: 172px;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-rule);
-  }
-
-  .scribe-main {
-    min-height: 240px;
-  }
-
-  .scribe-kg-offer {
-    flex-wrap: wrap;
-  }
-
-  .scribe-kg-offer p {
-    flex-basis: calc(100% - 30px);
-  }
-}
-
-@container scribe (max-width: 440px) {
-  .scribe-app-header {
-    min-height: 52px;
-    flex-wrap: wrap;
-    gap: 3px;
-    padding-block: 4px;
-  }
-
-  [data-scribe-ledger] {
-    grid-template-columns: repeat(3, auto);
-    gap: 2px 12px;
-    padding-block: 5px;
-  }
-
-  [data-scribe-ledger] > :last-child {
-    grid-column: 1 / -1;
-    text-align: left;
-  }
-
-  .scribe-transcript-entry {
-    grid-template-columns: 66px minmax(0, 1fr);
-    column-gap: 10px;
-  }
-
-  .scribe-transcript-time {
-    padding-right: 9px;
+    gap: 2px;
+    padding-bottom: 6px;
+    padding-top: 6px;
   }
 }
 </style>

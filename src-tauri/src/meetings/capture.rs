@@ -40,6 +40,12 @@ const MAX_RESTART_ATTEMPTS: u8 = 6;
 const RESTART_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const RESTART_MAX_BACKOFF: Duration = Duration::from_secs(4);
 const RESTART_STABLE_MICROPHONE_FRAMES: u32 = 250;
+// CoreAudio delivers microphone and process-tap callbacks independently. A
+// stop can therefore observe a few callbacks from one source after the last
+// callback from the other even though neither source failed. Keep the durable
+// tracks aligned, but do not misrepresent this bounded scheduling skew as
+// missing meeting audio. Larger divergence remains an explicit capture gap.
+const MAX_CALLBACK_STOP_SKEW_FRAMES: u64 = 13;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RestartAttempt {
@@ -141,6 +147,10 @@ fn frames_for_interruption(interruption: Duration) -> u64 {
         .max(1)
         .saturating_add(FRAME_MILLISECONDS.saturating_sub(1))
         / FRAME_MILLISECONDS
+}
+
+fn is_bounded_callback_stop_skew(microphone_frames: u64, system_frames: u64) -> bool {
+    microphone_frames.max(system_frames) <= MAX_CALLBACK_STOP_SKEW_FRAMES
 }
 
 const fn canonical_frame_samples() -> u64 {
@@ -675,14 +685,17 @@ fn align_channel_writers(
     reason: &str,
 ) -> Result<(), String> {
     let aligned_samples = microphone.canonical_samples.max(system.canonical_samples);
-    microphone.push_timeline_gap_frames(
-        frames_for_samples(aligned_samples.saturating_sub(microphone.canonical_samples)),
-        reason,
-    )?;
-    system.push_timeline_gap_frames(
-        frames_for_samples(aligned_samples.saturating_sub(system.canonical_samples)),
-        reason,
-    )?;
+    let microphone_frames =
+        frames_for_samples(aligned_samples.saturating_sub(microphone.canonical_samples));
+    let system_frames =
+        frames_for_samples(aligned_samples.saturating_sub(system.canonical_samples));
+    if is_bounded_callback_stop_skew(microphone_frames, system_frames) {
+        microphone.push_timeline_padding_frames(microphone_frames)?;
+        system.push_timeline_padding_frames(system_frames)?;
+    } else {
+        microphone.push_timeline_gap_frames(microphone_frames, reason)?;
+        system.push_timeline_gap_frames(system_frames, reason)?;
+    }
     Ok(())
 }
 
@@ -821,6 +834,17 @@ impl ChannelWriter {
             reason: bounded_gap_reason(reason),
         })?;
 
+        self.push_timeline_padding_frames(frames)?;
+        self.flush_gap_manifest()
+    }
+
+    fn push_timeline_padding_frames(&mut self, frames: u64) -> Result<(), String> {
+        if frames == 0 {
+            return Ok(());
+        }
+        let gap_samples = frames
+            .checked_mul(canonical_frame_samples())
+            .ok_or_else(|| "capture alignment padding exceeds the meeting timeline".to_string())?;
         let mut remaining = gap_samples;
         while remaining > 0 {
             let space = CHUNK_SAMPLES.saturating_sub(self.buffer.len()).max(1);
@@ -834,7 +858,7 @@ impl ChannelWriter {
             remaining = remaining.saturating_sub(take as u64);
             self.persist_full_chunks()?;
         }
-        self.flush_gap_manifest()
+        Ok(())
     }
 
     fn record_gap(&mut self, gap: PersistedGap) -> Result<(), String> {
@@ -1165,6 +1189,18 @@ mod tests {
     }
 
     #[test]
+    fn stop_alignment_tolerance_does_not_hide_a_stalled_source() {
+        assert!(is_bounded_callback_stop_skew(
+            MAX_CALLBACK_STOP_SKEW_FRAMES,
+            0
+        ));
+        assert!(!is_bounded_callback_stop_skew(
+            MAX_CALLBACK_STOP_SKEW_FRAMES + 1,
+            0
+        ));
+    }
+
+    #[test]
     fn startup_readiness_reports_only_the_initial_outcome() {
         let (sender, receiver) = mpsc::sync_channel(2);
         let mut readiness = StartupReadiness::new(sender);
@@ -1175,6 +1211,93 @@ mod tests {
             .unwrap());
         assert_eq!(receiver.recv().unwrap(), Ok(()));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn normal_stop_alignment_does_not_report_callback_skew_as_missing_audio() {
+        use crate::meetings::{
+            AudioChannelDraft, AudioChannelKind, MeetingDraft, MeetingOrigin, MeetingStatus,
+        };
+        use serde_json::json;
+        use tempfile::tempdir;
+
+        let directory = tempdir().unwrap();
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "stop-alignment".into(),
+                    title: "Stop alignment".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: vec![
+                        AudioChannelDraft {
+                            id: "microphone".into(),
+                            kind: AudioChannelKind::Microphone,
+                            sample_rate_hz: CANONICAL_SAMPLE_RATE_HZ,
+                            channels: 1,
+                            sample_format: "f32le".into(),
+                            device_id: None,
+                        },
+                        AudioChannelDraft {
+                            id: "system".into(),
+                            kind: AudioChannelKind::System,
+                            sample_rate_hz: CANONICAL_SAMPLE_RATE_HZ,
+                            channels: 1,
+                            sample_format: "f32le".into(),
+                            device_id: None,
+                        },
+                    ],
+                    metadata: json!({}),
+                },
+                "2026-07-31T10:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                "stop-alignment",
+                0,
+                MeetingStatus::Recording,
+                "2026-07-31T10:00:01Z",
+                None,
+            )
+            .unwrap();
+
+        let mut microphone = ChannelWriter::new(
+            Arc::clone(&store),
+            directory.path().to_path_buf(),
+            "stop-alignment".into(),
+            "microphone",
+        );
+        let mut system = ChannelWriter::new(
+            Arc::clone(&store),
+            directory.path().to_path_buf(),
+            "stop-alignment".into(),
+            "system",
+        );
+        microphone
+            .push_canonical_samples(&vec![1.0; canonical_frame_samples() as usize * 3])
+            .unwrap();
+
+        align_channel_writers(
+            &mut microphone,
+            &mut system,
+            "capture stopped while one channel was ahead",
+        )
+        .unwrap();
+        microphone.finish().unwrap();
+        system.finish().unwrap();
+
+        assert_eq!(microphone.canonical_samples, system.canonical_samples);
+        assert!(store
+            .transcript_snapshot("stop-alignment", None)
+            .unwrap()
+            .gaps
+            .is_empty());
+        assert!(!directory
+            .path()
+            .join("stop-alignment/audio/system/gaps.json")
+            .exists());
     }
 
     #[cfg(target_os = "macos")]

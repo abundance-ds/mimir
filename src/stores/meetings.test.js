@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  checkMeetingAudio,
   dismissMeetingCandidate,
   issueMeetingStartConsent,
   listenToMeetingEvents,
@@ -16,6 +17,7 @@ import { useMeetingsStore } from './meetings.js'
 
 vi.mock('../services/meetings.js', async importOriginal => ({
   ...(await importOriginal()),
+  checkMeetingAudio: vi.fn(),
   clearMeetingsApiKey: vi.fn(),
   decideMeetingKgProposal: vi.fn(),
   deleteMeeting: vi.fn(),
@@ -86,6 +88,12 @@ describe('meetings store', () => {
     }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
       .mockResolvedValue(emptySnapshot)
+    vi.mocked(checkMeetingAudio).mockReset().mockResolvedValue({
+      microphone: 'signal',
+      systemAudio: 'signal',
+      runtimeIdentity: 'mimir',
+      observedMs: 4_000,
+    })
     vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
       token: 'native-secret',
@@ -112,6 +120,48 @@ describe('meetings store', () => {
     await store.initialize()
     expect(order).toEqual(['listener', 'snapshot'])
     expect(store.loaded).toBe(true)
+  })
+
+  it('keeps a bounded per-source audio-check result outside meeting history', async () => {
+    const store = useMeetingsStore()
+    await store.checkAudio()
+    expect(store.audioCheck).toEqual({
+      microphone: 'signal',
+      systemAudio: 'signal',
+      runtimeIdentity: 'mimir',
+      observedMs: 4_000,
+    })
+    expect(store.meetings).toEqual([])
+    expect(checkMeetingAudio).toHaveBeenCalledOnce()
+  })
+
+  it('makes the recorder usable before transcript detail hydration completes', async () => {
+    let releaseTranscript
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [{
+        id: 'history',
+        title: 'History',
+        lifecycle: 'ready',
+        durationMs: 60_000,
+        segments: [],
+        jobs: [],
+        gaps: [],
+        channels: ['microphone', 'system'],
+      }],
+    })
+    vi.mocked(loadMeetingTranscriptPage).mockImplementation(() => new Promise(resolve => {
+      releaseTranscript = resolve
+    }))
+    const store = useMeetingsStore()
+
+    await store.initialize()
+
+    expect(store.loaded).toBe(true)
+    expect(store.loading).toBe(false)
+    expect(store.meetings).toHaveLength(1)
+    expect(releaseTranscript).toBeTypeOf('function')
+    releaseTranscript({ ...emptyTranscriptPage, meetingId: 'history' })
   })
 
   it('rejects stale snapshots and accepts newer event snapshots', async () => {

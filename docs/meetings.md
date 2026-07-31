@@ -1,7 +1,11 @@
 # Scribe meetings
 
-Status: implementation complete for macOS arm64; release qualification remains
-pending until every required manual evidence record is populated
+Status: not ready. The automated repair suite is green, and a signed installed
+build has completed first-run microphone/system-audio permission, known-
+playback dual-signal capture, local live transcription, and Stop on the
+reference Mac. Hosted OpenAI and interrupted-recording recovery still lack
+signed end-to-end evidence. Do not describe Scribe as ready until every
+required record exists in the evidence manifest.
 
 Scribe is Mimir's native, local-first meeting recorder and transcription app.
 It detects likely calls, asks the user to start, records microphone and system
@@ -18,22 +22,29 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 
 - Recording is human-controlled. Detection presents a candidate; neither the
   detector nor an agent tool can exercise Mimir's microphone grant.
-- Starting requires an explicit in-app confirmation that participants were
-  informed. Mimir cannot determine the applicable consent law.
+- Starting is one deliberate Record action. Native code still issues and
+  consumes a short-lived, single-use authorization bound to the visible route
+  and candidate; this is an internal anti-replay boundary, not a user
+  attestation or legal checkbox.
 - A persistent workbench indicator exposes elapsed time, microphone mute, and
   Stop while capture is active, including when the Scribe app is not selected.
-- Settings exposes deliberate permission repair: microphone access re-enters
-  the native TCC request path, while system-audio repair opens the fixed macOS
-  **Privacy & Security → Screen & System Audio Recording** pane. The native
-  command accepts no renderer-controlled URL or process arguments.
+- Permission state is attributed only to the signed `rs.shoulde.mimir` bundle.
+  A terminal-launched development binary is labelled “development host — not
+  Mimir” even when that host has microphone access. System-audio setup creates
+  the public Core Audio process tap before opening the fixed macOS **Privacy &
+  Security → Screen & System Audio Recording** pane, which registers signed
+  Mimir with TCC. A separate four-second audio check reports microphone and
+  system signal independently, discards all samples, and creates no meeting.
 - Microphone mute writes aligned silence to that channel. There is no pause
   state that could make channel clocks disagree.
 - Microphone and system audio are separate, lossless 16 kHz mono `f32le`
   timelines. They are never mixed into the storage authority.
 - Capture owns the realtime budget. Transcription tails committed chunks and
   cannot block an audio callback or prevent durable recording.
-- Transcription is either `local` or `custom`. There is no vendor catalog,
-  hidden network route, or automatic provider fallback.
+- Transcription is either managed local or an explicit hosted URL. The primary
+  hosted setup is OpenAI Realtime (`gpt-live-transcribe`); advanced URLs remain
+  available and never receive audio without the selected route and an
+  endpoint-bound Keychain credential. There is no hidden provider fallback.
 - Stop drains audio and requests a terminal transcript revision. A terminal
   transcript with speech enqueues a durable title-and-summary Activity; a
   genuinely silent transcript completes without inventing a title, summary,
@@ -59,6 +70,7 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 | `jobs.rs` | durable title/summary, transcription repair, and KG-proposal work |
 | `tools.rs` | bounded, post-recording agent projection |
 | `native.rs` | startup composition and native lifecycle owners |
+| `permissions.rs` | signed-bundle identity and truthful TCC projection |
 
 Two deliberately small extracted crates sit under `src-tauri/crates/`:
 
@@ -129,6 +141,10 @@ When Stop discovers that the capture worker already ended, it durably records
 the interruption, drains and removes the live transcriber, and only then makes
 same-process repair claimable. A delayed failure callback is an idempotent
 redelivery and cannot create a second recovery owner.
+At an ordinary Stop, CoreAudio can deliver a few final callbacks from one
+source after the other. Scribe pads this bounded scheduling skew to keep tracks
+aligned without presenting a false capture gap. Divergence beyond the explicit
+tolerance remains durable gap evidence.
 If Stop instead joins a worker while device or sleep recovery is recording an
 explicit gap, it reloads the post-teardown meeting revision before entering
 `Finalizing`; the gap remains authoritative without turning a successful Stop
@@ -147,16 +163,22 @@ byte length, and SHA-256 are immutable source constants. Installation:
 4. verifies the exact length and SHA-256;
 5. atomically installs the artifact and records its manifest identity.
 
-Inference re-verifies the artifact immediately before use. `whisper-rs`
+Inference re-verifies the artifact immediately before use. Model preparation
+is owned asynchronously: recording returns without waiting for Metal warm-up,
+projects transcription as `initializing`, and Stop joins the same worker or
+queues one durable repair. `whisper-rs`
 embeds whisper.cpp in process with Metal enabled. Unsupported targets and a
 missing/corrupt model fail explicitly; Mimir never falls back to CPU or to a
 network provider. Separate microphone and system windows preserve the
 “You”/“Others” channel attribution.
 
-### Custom URL
+### OpenAI Realtime and advanced URLs
 
-The custom route accepts an explicit public `https://` URL and model name, then
-upgrades the connection to `wss://`. URLs with credentials, fragments,
+The hosted route accepts an explicit public `https://` URL and model name, then
+upgrades the connection to `wss://`. The normal OpenAI selection fills
+`https://api.openai.com/v1/realtime` and `gpt-live-transcribe` in the same
+atomic settings mutation, so selecting it cannot fail because a hidden URL is
+still empty. URLs with credentials, fragments,
 non-public/special-purpose addresses, unsafe DNS answers, or insecure schemes
 are rejected. The socket pins validated DNS results while retaining TLS
 hostname verification.
@@ -171,8 +193,17 @@ provenance. Delayed or restart recovery uses that exact pair and fails closed
 when legacy/damaged provenance is unavailable; changing global settings can
 never redirect previously captured audio.
 
-The versioned `mimir.stt.v1` WebSocket session sends model, sample format, and
-ordered `microphone`/`system` channel identifiers. Provider acknowledgements
+OpenAI uses two independently owned Realtime transcription WebSockets: one for
+microphone and one for system audio. Native code converts each committed 16
+kHz `f32le` channel to 24 kHz PCM16, commits bounded two-second turns, accepts
+delta/completed events, and assigns session-relative time plus `You`/`Others`
+provenance because the model does not supply word timing or speaker labels.
+The API key appears only in the TLS WebSocket `Authorization: Bearer` header.
+OpenAI does not receive Mimir's private provider subprotocol.
+
+Other advanced endpoints use the versioned `mimir.stt.v1` WebSocket session,
+which sends model, sample format, and ordered `microphone`/`system` channel
+identifiers. Provider acknowledgements
 advance a bounded replay cursor over committed audio. Disconnects retry with
 backoff; replay is bounded and idempotent, and an exceeded window becomes an
 explicit transcript gap. Partial revisions are durable and visually distinct
@@ -215,10 +246,18 @@ user export: hook execution never creates a copy in `meetings/exports/`.
 
 ## Renderer and agent surface
 
-`src/mimir/apps/ScribeApp.vue` owns the library, candidate suggestions,
-consent gate, live ledger, transcript, summary, job diagnostics, KG decision,
-exports, deletion, and settings. `src/stores/meetings.js` is an independent
+`src/mimir/apps/ScribeApp.vue` owns a three-state Ready → Recording → Review
+flow, inline candidate suggestions, live ledger, transcript, summary, job
+diagnostics, KG decision, exports, deletion, and separate settings. Record is
+one action; there is no consent screen. During recording, the fixed transport
+keeps Stop above every nonblocking diagnostic. `src/stores/meetings.js` is an independent
 workspace bootstrap initializer; it does not wait for MCP or Activities.
+Recorder readiness also does not wait for transcript-window hydration, and
+native startup secures private roots and authority files without recursively
+walking every historical audio chunk or model artifact.
+Library snapshots deliberately omit transcript text. Recording and Review both
+render the selected meeting's separately paged transcript window, so the final
+words visible live cannot disappear during Stop or when the meeting is reopened.
 Configuration mutations share one ordered renderer queue. While it is nonempty,
 every configuration control exposes and disables for the pending state; a
 second accepted mutation runs after the first instead of returning an empty

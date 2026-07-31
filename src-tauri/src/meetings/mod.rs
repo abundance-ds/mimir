@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod local_whisper;
 mod model;
 pub mod native;
+pub mod permissions;
 pub mod platform;
 pub mod runtime;
 mod store;

@@ -33,8 +33,10 @@ use super::{
 use crate::persistence::{ensure_private_directory, ensure_private_subdirectory};
 use chrono::Utc;
 use mimir_meeting_detect::DetectionMonitor;
+#[cfg(test)]
+use mimir_meeting_detect::PermissionState;
 #[cfg(any(test, target_os = "macos"))]
-use mimir_meeting_detect::{DetectionCandidate, DetectorSnapshot, PermissionState};
+use mimir_meeting_detect::{DetectionCandidate, DetectorSnapshot};
 #[cfg(target_os = "macos")]
 use mimir_meeting_detect::{DetectionConfig, DetectionEvent};
 #[cfg(target_os = "macos")]
@@ -335,10 +337,11 @@ struct DegradedDetectionEnvironment {
 impl MeetingEnvironmentProbe for DegradedDetectionEnvironment {
     fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
         let permission = mimir_meeting_detect::microphone_permission();
+        let identity = super::permissions::current_permission_runtime_identity();
         Ok(MeetingEnvironmentProjection {
             permissions: MeetingPermissions {
-                microphone: permission_name(permission.state).into(),
-                system_audio: "not-determined".into(),
+                microphone: identity.project_microphone(permission.state).into(),
+                system_audio: identity.project_system_audio().into(),
             },
             candidates: Vec::new(),
             diagnostic: Some(
@@ -365,16 +368,19 @@ impl MeetingEnvironmentProbe for DegradedDetectionEnvironment {
 
 #[cfg(any(test, target_os = "macos"))]
 fn map_detector_snapshot(snapshot: DetectorSnapshot) -> MeetingEnvironmentProjection {
+    let identity = super::permissions::current_permission_runtime_identity();
     let diagnostic = snapshot
         .diagnostic
         .or_else(|| snapshot.permission.remediation.clone());
     MeetingEnvironmentProjection {
         permissions: MeetingPermissions {
-            microphone: permission_name(snapshot.permission.state).into(),
+            microphone: identity
+                .project_microphone(snapshot.permission.state)
+                .into(),
             // The process-tap permission has no non-prompting preflight API.
             // Capture reports a precise actionable failure when opening it.
             system_audio: if cfg!(target_os = "macos") {
-                "not-determined".into()
+                identity.project_system_audio().into()
             } else {
                 "unavailable".into()
             },
@@ -394,18 +400,6 @@ fn map_candidate(candidate: DetectionCandidate) -> MeetingCandidate {
         // decisions, not a fabricated wall-clock timestamp.
         detected_at: None,
         confidence: candidate.confidence,
-    }
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn permission_name(permission: PermissionState) -> &'static str {
-    match permission {
-        PermissionState::NotDetermined => "not-determined",
-        PermissionState::Restricted => "restricted",
-        PermissionState::Denied => "denied",
-        PermissionState::Granted => "granted",
-        PermissionState::Unavailable => "unavailable",
-        PermissionState::Error => "error",
     }
 }
 
@@ -605,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn detector_snapshot_maps_candidates_and_permission_without_fake_time() {
+    fn detector_snapshot_never_attributes_test_host_permission_to_mimir() {
         let projection = map_detector_snapshot(DetectorSnapshot {
             permission: PermissionSnapshot {
                 state: PermissionState::Granted,
@@ -627,7 +621,7 @@ mod tests {
             diagnostic: None,
         });
 
-        assert_eq!(projection.permissions.microphone, "granted");
+        assert_eq!(projection.permissions.microphone, "development-host");
         assert_eq!(projection.candidates.len(), 1);
         assert_eq!(projection.candidates[0].app_id, "us.zoom.xos");
         assert_eq!(projection.candidates[0].confidence, 0.92);

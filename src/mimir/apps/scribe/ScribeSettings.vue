@@ -60,8 +60,49 @@
             {{ permissionLabel(permissions.systemAudio) }}
           </dd>
         </dl>
+        <p
+          v-if="permissions.microphone === 'development-host'"
+          class="mt-3 text-[9px] leading-relaxed text-ink-3"
+        >
+          This development build is running under another macOS host. Its permission is not
+          Mimir's permission; use the installed Mimir app for the final permission check.
+        </p>
+        <div class="mt-3 border-t border-rule-light pt-3">
+          <div class="flex items-start gap-3">
+            <p class="min-w-0 flex-1 text-[9px] leading-relaxed text-ink-3">
+              Play sound in any app, then check both inputs for four seconds. Samples are
+              discarded immediately and no meeting is created.
+            </p>
+            <button
+              type="button"
+              data-scribe-check-audio
+              class="scribe-settings-button shrink-0"
+              :disabled="Boolean(pending['audio-check'])"
+              @click="$emit('checkAudio')"
+            >
+              {{ pending['audio-check'] ? 'Checking…' : 'Check audio' }}
+            </button>
+          </div>
+          <dl
+            v-if="audioCheck"
+            data-scribe-audio-check-result
+            class="mt-2 grid grid-cols-[130px_1fr] border-t border-rule-light text-[10px]"
+            role="status"
+          >
+            <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
+            <dd class="border-b border-rule-light py-2">{{ signalLabel(audioCheck.microphone) }}</dd>
+            <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
+            <dd class="border-b border-rule-light py-2">{{ signalLabel(audioCheck.systemAudio) }}</dd>
+          </dl>
+          <p
+            v-if="audioCheck?.runtimeIdentity === 'development-host'"
+            class="mt-2 text-[9px] leading-relaxed text-rem"
+          >
+            These results belong to the development host, not the installed Mimir app.
+          </p>
+        </div>
         <button
-          v-if="permissions.microphone !== 'granted'"
+          v-if="!['granted', 'development-host'].includes(permissions.microphone)"
           type="button"
           data-scribe-grant-microphone
           class="scribe-settings-button mt-3"
@@ -71,7 +112,7 @@
           Grant microphone access
         </button>
         <button
-          v-if="permissions.systemAudio !== 'granted'"
+          v-if="!['granted', 'development-host'].includes(permissions.systemAudio)"
           type="button"
           data-scribe-open-system-audio-settings
           class="scribe-settings-button mt-3"
@@ -81,7 +122,7 @@
           {{
             pending['system-audio-settings']
               ? 'Opening System Settings…'
-              : 'Open system audio settings'
+              : 'Set up system audio'
           }}
         </button>
       </section>
@@ -103,7 +144,7 @@
             :aria-checked="config.transcriptionMode === 'local'"
             :tabindex="config.transcriptionMode === 'local' ? 0 : -1"
             :disabled="configPending"
-            @click="save({ transcriptionMode: 'local' })"
+            @click="selectMode('local')"
             @keydown="onModeKeydown"
           >
             Local model
@@ -118,10 +159,11 @@
             :aria-checked="config.transcriptionMode === 'custom'"
             :tabindex="config.transcriptionMode === 'custom' ? 0 : -1"
             :disabled="configPending"
-            @click="save({ transcriptionMode: 'custom' })"
+            data-scribe-openai-mode
+            @click="selectMode('custom')"
             @keydown="onModeKeydown"
           >
-            Custom URL
+            Hosted
           </button>
         </div>
 
@@ -173,30 +215,9 @@
         </div>
 
         <div v-else class="mt-3 space-y-3">
-          <label class="block">
-            <span class="scribe-settings-label">Endpoint URL</span>
-            <input
-              v-model="customUrl"
-              type="url"
-              class="scribe-settings-input"
-              placeholder="https://stt.example.com/v1/listen"
-              aria-describedby="scribe-custom-route-help"
-              :disabled="configPending"
-              @change="save({ customUrl })"
-            />
-          </label>
-          <label class="block">
-            <span class="scribe-settings-label">Model</span>
-            <input
-              v-model="customModel"
-              class="scribe-settings-input"
-              placeholder="Provider model name"
-              :disabled="configPending"
-              @change="save({ customModel })"
-            />
-          </label>
+          <p class="text-[10px] leading-relaxed text-ink-3">{{ hostedDescription }}</p>
           <form class="block" @submit.prevent="saveKey">
-            <span class="scribe-settings-label">API key</span>
+            <span class="scribe-settings-label">{{ hostedKeyLabel }}</span>
             <span class="flex gap-2">
               <input
                 v-model="apiKey"
@@ -223,11 +244,43 @@
               </button>
             </span>
           </form>
-          <p id="scribe-custom-route-help" class="text-[9px] leading-relaxed text-ink-3">
-            Remote URLs must use HTTPS; Mimir upgrades the connection to secure WebSocket.
-            Both audio channels and transcript timing go only to that exact endpoint.
-            The key remains in Keychain and is never returned to this screen.
+          <p class="text-[9px] leading-relaxed text-ink-3">
+            Stored in Keychain and never returned to this screen.
           </p>
+          <details class="border-t border-rule-light pt-3">
+            <summary class="cursor-pointer text-[10px] text-ink-3 hover:text-ink">
+              Advanced endpoint
+            </summary>
+            <div class="mt-3 space-y-3">
+              <label class="block">
+                <span class="scribe-settings-label">Endpoint URL</span>
+                <input
+                  v-model="customUrl"
+                  type="url"
+                  class="scribe-settings-input"
+                  placeholder="https://api.openai.com/v1/realtime"
+                  aria-describedby="scribe-custom-route-help"
+                  :disabled="configPending"
+                  @change="save({ customUrl })"
+                />
+              </label>
+              <label class="block">
+                <span class="scribe-settings-label">Model</span>
+                <input
+                  v-model="customModel"
+                  class="scribe-settings-input"
+                  placeholder="gpt-live-transcribe"
+                  :disabled="configPending"
+                  @change="save({ customModel })"
+                />
+              </label>
+              <p id="scribe-custom-route-help" class="text-[9px] leading-relaxed text-ink-3">
+                OpenAI Realtime uses <code>/v1/realtime</code>. Other URLs must implement
+                Mimir's versioned STT WebSocket contract. Both audio channels are sent only
+                to the exact HTTPS destination shown here.
+              </p>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -287,6 +340,7 @@ const props = defineProps({
   config: { type: Object, required: true },
   permissions: { type: Object, required: true },
   models: { type: Array, default: () => [] },
+  audioCheck: { type: Object, default: null },
   pending: { type: Object, default: () => ({}) },
   embedded: { type: Boolean, default: false },
 })
@@ -299,13 +353,34 @@ const emit = defineEmits([
   'deleteModel',
   'requestMicrophonePermission',
   'openSystemAudioSettings',
+  'checkAudio',
 ])
 
 const settingsRoot = ref(null)
 const customUrl = ref(props.config.customUrl)
 const customModel = ref(props.config.customModel)
 const apiKey = ref('')
+const OPENAI_REALTIME_URL = 'https://api.openai.com/v1/realtime'
+const OPENAI_TRANSCRIPTION_MODEL = 'gpt-live-transcribe'
 const configPending = computed(() => Boolean(props.pending.config))
+const isOpenAiEndpoint = computed(() => {
+  try {
+    const endpoint = new URL(customUrl.value)
+    return endpoint.hostname === 'api.openai.com'
+      && endpoint.pathname.replace(/\/+$/u, '') === '/v1/realtime'
+      && customModel.value.startsWith('gpt-')
+  } catch {
+    return false
+  }
+})
+const hostedDescription = computed(() => (
+  isOpenAiEndpoint.value
+    ? 'Streams both sides of the meeting to OpenAI for low-latency transcription.'
+    : 'Streams both sides of the meeting only to the configured HTTPS transcription service.'
+))
+const hostedKeyLabel = computed(() => (
+  isOpenAiEndpoint.value ? 'OpenAI API key' : 'Hosted transcription API key'
+))
 const retentionValue = computed(() => (
   props.config.retentionDays == null ? 'forever' : String(props.config.retentionDays)
 ))
@@ -327,6 +402,18 @@ watch(() => props.config.customModel, value => { customModel.value = value })
 
 function save(patch) {
   emit('save', patch)
+}
+
+function selectMode(mode) {
+  if (mode === 'local') {
+    save({ transcriptionMode: 'local' })
+    return
+  }
+  save({
+    transcriptionMode: 'custom',
+    customUrl: props.config.customUrl || OPENAI_REALTIME_URL,
+    customModel: props.config.customModel || OPENAI_TRANSCRIPTION_MODEL,
+  })
 }
 
 function saveKey() {
@@ -359,7 +446,7 @@ function onModeKeydown(event) {
   const custom = ['ArrowRight', 'ArrowDown', 'End'].includes(event.key)
   const mode = custom ? 'custom' : 'local'
   event.preventDefault()
-  save({ transcriptionMode: mode })
+  selectMode(mode)
   event.currentTarget
     ?.parentElement
     ?.querySelector(`[role="radio"]:nth-child(${custom ? 2 : 1})`)
@@ -386,10 +473,19 @@ function permissionLabel(value) {
   return ({
     granted: 'Granted',
     denied: 'Denied — use the repair action below',
-    'prompt-on-start': 'Requested when recording starts',
+    'prompt-on-start': 'Set up before the first recording',
     restricted: 'Restricted by macOS',
     unknown: 'Not checked',
+    'development-host': 'Development host — not Mimir',
   })[value] || String(value || 'Unknown').replaceAll('-', ' ')
+}
+
+function signalLabel(value) {
+  return ({
+    signal: 'Signal detected',
+    silent: 'No sound detected — play audio and retry',
+    'no-data': 'No frames received',
+  })[value] || 'Not checked'
 }
 
 function formatBytes(bytes) {

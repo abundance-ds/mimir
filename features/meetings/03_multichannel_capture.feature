@@ -65,3 +65,47 @@ Feature: Capture microphone and system audio without sacrificing durability
     When normalized frames are used for recording and transcription
     Then each durable chunk retains its source channel and time coordinates
     And conversion never fabricates or silently hides missing source frames
+
+  @MTG-049 @automated @native @security @packaging
+  Scenario: Permission state belongs to the installed Mimir application
+    Given Scribe is running outside the signed Mimir application bundle
+    When native permission state is projected
+    Then microphone and system-audio access are reported as unavailable for Mimir
+    And permission granted to a terminal or development host is never attributed to Mimir
+
+  @MTG-050 @automated @native @security
+  Scenario: System-audio setup registers Mimir before opening recovery settings
+    Given the signed Mimir application has never requested system-audio access
+    When the user starts system-audio setup
+    Then Mimir arms its native Core Audio process tap before opening System Settings
+    And only authoritative TCC state can report system-audio permission as granted
+
+  @MTG-051 @automated @native @security
+  Scenario: Audio signal checking never retains the observed samples
+    Given microphone and system-audio test frames are available
+    When Scribe checks each source for a bounded interval
+    Then it reports signal, silence, or missing data independently for each source
+    And the checker retains no audio samples or transcript content
+
+  @MTG-052 @manual @native @hardware @release
+  Scenario: A known system sound reaches the installed Mimir process tap
+    Given the signed installed Mimir application has completed system-audio setup
+    And a known test sound is playing from another application
+    When the user runs the bounded audio check
+    Then Scribe reports microphone and system-audio signal independently
+    And the test samples are discarded without creating a meeting
+
+  @MTG-053 @automated @native @contract
+  Scenario: Normal callback skew at Stop is padding rather than a false gap
+    Given healthy microphone and system sources end a few callbacks apart
+    When Mimir aligns their durable tracks during an ordinary Stop
+    Then bounded callback skew is padded without a user-visible capture gap
+    And divergence beyond the scheduling tolerance remains an explicit gap
+
+  @MTG-054 @automated @native @contract
+  Scenario: A microphone grant replaces the stale pre-prompt projection
+    Given macOS has completed Mimir's microphone permission request successfully
+    And the detector still projects its earlier not-determined observation
+    When the permission command returns to Scribe
+    Then Scribe reports the authoritative grant without a stale remediation error
+    And later detector polling reconciles to the same granted state

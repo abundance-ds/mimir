@@ -25,6 +25,10 @@ const TRANSCRIPT_EVENT_INTERVAL: Duration = Duration::from_millis(100);
 const MAIN_WINDOW_LABEL: &str = "main";
 const START_CONSENT_TTL: Duration = Duration::from_secs(45);
 const MAX_CONSENT_RECORDS: usize = 32;
+const AUDIO_CHECK_DURATION: Duration = Duration::from_secs(4);
+const AUDIO_SIGNAL_THRESHOLD: f32 = 0.002;
+const MICROPHONE_PROJECTION_TIMEOUT: Duration = Duration::from_secs(2);
+const MICROPHONE_PROJECTION_POLL: Duration = Duration::from_millis(25);
 const SYSTEM_AUDIO_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
 
@@ -66,6 +70,40 @@ pub struct MeetingStartConsentGrant {
     request_id: String,
     expires_in_ms: u64,
     disclosure: MeetingStartConsentDisclosure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingAudioCheck {
+    microphone: String,
+    system_audio: String,
+    runtime_identity: String,
+    observed_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct AudioSignalObservation {
+    sample_count: u64,
+    peak: f32,
+}
+
+impl AudioSignalObservation {
+    fn observe_samples(&mut self, samples: &[f32]) {
+        self.sample_count = self.sample_count.saturating_add(samples.len() as u64);
+        for sample in samples.iter().copied().filter(|sample| sample.is_finite()) {
+            self.peak = self.peak.max(sample.abs());
+        }
+    }
+
+    fn status(&self) -> &'static str {
+        if self.sample_count == 0 {
+            "no-data"
+        } else if self.peak >= AUDIO_SIGNAL_THRESHOLD {
+            "signal"
+        } else {
+            "silent"
+        }
+    }
 }
 
 impl std::fmt::Debug for MeetingStartConsentGrant {
@@ -576,9 +614,52 @@ pub async fn meetings_request_microphone_permission(
                 .remediation
                 .unwrap_or_else(|| "Microphone access is required to record a meeting".into()));
         }
-        runtime.snapshot().map_err(|error| error.to_string())
+        let expected = super::permissions::current_permission_runtime_identity()
+            .project_microphone(permission.state);
+        await_microphone_permission_projection(
+            || runtime.snapshot().map_err(|error| error.to_string()),
+            expected,
+            MICROPHONE_PROJECTION_TIMEOUT,
+            MICROPHONE_PROJECTION_POLL,
+        )
     })
     .await
+}
+
+fn await_microphone_permission_projection(
+    mut snapshot: impl FnMut() -> Result<MeetingSnapshot, String>,
+    expected: &str,
+    timeout: Duration,
+    poll: Duration,
+) -> Result<MeetingSnapshot, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let mut current = snapshot()?;
+        if current.permissions.microphone == expected {
+            return Ok(current);
+        }
+        if Instant::now() >= deadline {
+            // The request callback is the authoritative TCC result. The
+            // detector owns a separately polled projection and can lag it; do
+            // not send the renderer a status already known to be stale.
+            current.permissions.microphone = expected.to_string();
+            if current
+                .diagnostic
+                .as_deref()
+                .is_some_and(is_microphone_permission_remediation)
+            {
+                current.diagnostic = None;
+            }
+            return Ok(current);
+        }
+        std::thread::sleep(poll.min(deadline.saturating_duration_since(Instant::now())));
+    }
+}
+
+fn is_microphone_permission_remediation(value: &str) -> bool {
+    value.starts_with("Choose Enable Microphone")
+        || value.starts_with("Enable Mimir in System Settings > Privacy & Security > Microphone")
+        || value.starts_with("Microphone access is restricted by macOS policy")
 }
 
 /// Open the one macOS privacy pane that can repair process-tap permission.
@@ -587,12 +668,135 @@ pub async fn meetings_request_microphone_permission(
 /// renderer, so it cannot become a general-purpose process launcher.
 #[tauri::command]
 pub async fn meetings_open_system_audio_settings() -> Result<(), String> {
-    run_blocking(
-        "system audio permission settings",
-        open_system_audio_settings,
-    )
+    run_blocking("system audio permission settings", || {
+        run_system_audio_setup(arm_system_audio_permission, open_system_audio_settings)
+    })
     .await
 }
+
+#[tauri::command]
+pub async fn meetings_check_audio(
+    runtime: tauri::State<'_, MeetingRuntime>,
+) -> Result<MeetingAudioCheck, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting audio check", move || {
+        if runtime
+            .snapshot()
+            .map_err(|error| error.to_string())?
+            .active_meeting_id
+            .is_some()
+        {
+            return Err("Stop the current recording before checking audio".into());
+        }
+        perform_audio_signal_check()
+    })
+    .await
+}
+
+#[cfg(target_os = "macos")]
+fn perform_audio_signal_check() -> Result<MeetingAudioCheck, String> {
+    use futures_util::StreamExt;
+    use mimir_meeting_audio::{
+        CaptureHealth, FrameDuration, MicrophoneInput, RawAudioSpan, SystemAudioInput,
+    };
+
+    let identity = super::permissions::current_permission_runtime_identity();
+    let mut microphone = MicrophoneInput::open(None)
+        .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
+        .map_err(|error| format!("Microphone check could not start: {error}"))?;
+    let mut system = SystemAudioInput::open()
+        .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
+        .map_err(|error| format!("System-audio check could not start: {error}"))?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .map_err(|error| format!("Could not initialize the audio check: {error}"))?;
+    let (microphone, system) = runtime.block_on(async move {
+        let mut microphone_observation = AudioSignalObservation::default();
+        let mut system_observation = AudioSignalObservation::default();
+        let mut microphone_open = true;
+        let mut system_open = true;
+        let deadline = tokio::time::sleep(AUDIO_CHECK_DURATION);
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                frame = microphone.next(), if microphone_open => {
+                    match frame {
+                        Some(frame) => {
+                            for span in frame.spans {
+                                if let RawAudioSpan::Samples { samples, .. } = span {
+                                    microphone_observation.observe_samples(&samples);
+                                }
+                            }
+                        }
+                        None => microphone_open = false,
+                    }
+                }
+                frame = system.next(), if system_open => {
+                    match frame {
+                        Some(frame) => {
+                            for span in frame.spans {
+                                if let RawAudioSpan::Samples { samples, .. } = span {
+                                    system_observation.observe_samples(&samples);
+                                }
+                            }
+                        }
+                        None => system_open = false,
+                    }
+                }
+                _ = &mut deadline => break,
+            }
+            if !microphone_open && !system_open {
+                break;
+            }
+        }
+        (microphone_observation, system_observation)
+    });
+    Ok(MeetingAudioCheck {
+        microphone: microphone.status().into(),
+        system_audio: system.status().into(),
+        runtime_identity: if identity.is_installed_mimir() {
+            "mimir"
+        } else {
+            "development-host"
+        }
+        .into(),
+        observed_ms: AUDIO_CHECK_DURATION.as_millis() as u64,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn perform_audio_signal_check() -> Result<MeetingAudioCheck, String> {
+    Err("Audio checking is available only in Mimir for macOS".into())
+}
+
+fn run_system_audio_setup(
+    arm: impl FnOnce(),
+    open_settings: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    arm();
+    open_settings()
+}
+
+#[cfg(target_os = "macos")]
+fn arm_system_audio_permission() {
+    // Core Audio exposes no public non-prompting authorization query. Creating
+    // the global process tap is the public API that registers the signed app
+    // with TCC and prompts when needed. Dropping it immediately records no
+    // audio; the real capture session creates its own tap after permission.
+    let result = mimir_meeting_audio::SystemAudioInput::open().and_then(|input| {
+        input.start(
+            mimir_meeting_audio::FrameDuration::DEFAULT,
+            mimir_meeting_audio::CaptureHealth::default(),
+        )
+    });
+    if let Err(error) = result {
+        log::warn!("Could not arm Scribe system-audio permission before opening settings: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn arm_system_audio_permission() {}
 
 #[cfg(target_os = "macos")]
 fn open_system_audio_settings() -> Result<(), String> {
@@ -1080,5 +1284,89 @@ mod consent_tests {
         );
         assert!(!SYSTEM_AUDIO_SETTINGS_URL.contains(' '));
         assert!(!SYSTEM_AUDIO_SETTINGS_URL.contains("://"));
+    }
+
+    #[test]
+    fn system_audio_setup_arms_the_process_tap_before_opening_settings() {
+        let actions = std::sync::Mutex::new(Vec::new());
+        run_system_audio_setup(
+            || actions.lock().unwrap().push("arm"),
+            || {
+                actions.lock().unwrap().push("settings");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*actions.lock().unwrap(), ["arm", "settings"]);
+    }
+
+    fn permission_snapshot(microphone: &str, diagnostic: Option<&str>) -> MeetingSnapshot {
+        MeetingSnapshot {
+            revision: 1,
+            meetings: Vec::new(),
+            meetings_truncated: false,
+            next_meetings_before: None,
+            active_meeting_id: None,
+            candidates: Vec::new(),
+            config: super::super::runtime::MeetingConfig::default(),
+            permissions: super::super::runtime::MeetingPermissions {
+                microphone: microphone.into(),
+                system_audio: "prompt-on-start".into(),
+            },
+            models: Vec::new(),
+            diagnostic: diagnostic.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn microphone_request_returns_the_authoritative_grant_not_a_stale_detector_snapshot() {
+        let mut reads = VecDeque::from([
+            permission_snapshot(
+                "not-determined",
+                Some("Choose Enable Microphone to let Mimir detect and record meetings"),
+            ),
+            permission_snapshot("granted", None),
+        ]);
+        let refreshed = await_microphone_permission_projection(
+            || Ok(reads.pop_front().unwrap()),
+            "granted",
+            Duration::from_millis(20),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!(refreshed.permissions.microphone, "granted");
+        assert!(refreshed.diagnostic.is_none());
+
+        let authoritative = await_microphone_permission_projection(
+            || {
+                Ok(permission_snapshot(
+                    "not-determined",
+                    Some("Choose Enable Microphone to let Mimir detect and record meetings"),
+                ))
+            },
+            "granted",
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(authoritative.permissions.microphone, "granted");
+        assert!(authoritative.diagnostic.is_none());
+    }
+
+    #[test]
+    fn audio_signal_observation_classifies_each_source_without_retaining_samples() {
+        let empty = AudioSignalObservation::default();
+        assert_eq!(empty.status(), "no-data");
+
+        let mut silent = AudioSignalObservation::default();
+        silent.observe_samples(&[0.0, f32::NAN, 0.001]);
+        assert_eq!(silent.status(), "silent");
+        assert_eq!(silent.sample_count, 3);
+
+        let mut signal = AudioSignalObservation::default();
+        signal.observe_samples(&[0.0, -0.25, 0.1]);
+        assert_eq!(signal.status(), "signal");
+        assert_eq!(signal.sample_count, 3);
+        assert_eq!(std::mem::size_of::<AudioSignalObservation>(), 16);
     }
 }

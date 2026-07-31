@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import {
+  checkMeetingAudio,
   decideMeetingKgProposal,
   dismissMeetingCandidate,
   issueMeetingStartConsent,
@@ -49,6 +50,22 @@ describe('meetings service', () => {
       config: { transcriptionMode: 'custom', retentionDays: 30 },
       permissions: { microphone: 'granted', systemAudio: 'denied' },
     })
+  })
+
+  it('normalizes only bounded audio-check statuses from native IPC', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      microphone: 'signal',
+      system_audio: 'unexpected-provider-detail',
+      runtime_identity: 'mimir',
+      observed_ms: 4_000,
+    })
+    await expect(checkMeetingAudio()).resolves.toEqual({
+      microphone: 'signal',
+      systemAudio: 'no-data',
+      runtimeIdentity: 'mimir',
+      observedMs: 4_000,
+    })
+    expect(invoke).toHaveBeenCalledWith('meetings_check_audio')
   })
 
   it('normalizes bounded reviewed tags and validates tag updates before IPC', async () => {
