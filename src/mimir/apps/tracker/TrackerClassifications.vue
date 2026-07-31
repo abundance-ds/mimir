@@ -3,7 +3,7 @@
     <header class="flex min-h-10 flex-wrap items-center gap-2 border-b border-rule px-3 py-1.5">
       <div>
         <h2 class="text-[11px] font-semibold text-ink">Classification rules</h2>
-        <p class="text-[9px] text-ink-4">Manual rules always win over AI and can repair prior blocks.</p>
+        <p class="text-[9px] text-ink-4">Pending apps appear immediately; manual rules always win and repair prior blocks.</p>
       </div>
       <label class="ml-auto flex h-7 min-w-[160px] max-w-[280px] flex-1 items-center border border-rule bg-surface px-2 focus-within:border-accent">
         <IconSearch :size="11" class="text-ink-4" />
@@ -71,7 +71,7 @@
           </tr>
           <tr v-if="!filtered.length">
             <td colspan="5" class="px-3 py-12 text-center text-[9px] text-ink-4">
-              {{ query ? 'No rule matches this search.' : 'Classifications appear as Tracker sees new applications.' }}
+              {{ query ? 'No rule matches this search.' : 'New applications will appear here for classification.' }}
             </td>
           </tr>
         </tbody>

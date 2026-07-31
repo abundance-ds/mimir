@@ -18,6 +18,10 @@ pub fn request_accessibility() -> Result<(), String> {
     request_accessibility_impl()
 }
 
+pub fn prompt_accessibility() -> bool {
+    prompt_accessibility_impl()
+}
+
 pub fn legacy_argus_running() -> bool {
     legacy_argus_running_impl()
 }
@@ -40,6 +44,77 @@ fn accessibility_trusted() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 fn accessibility_trusted() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn prompt_accessibility_impl() -> bool {
+    use std::ffi::{c_char, c_void};
+
+    type CfRef = *const c_void;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: CfRef) -> bool;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFBooleanTrue: CfRef;
+        static kCFTypeDictionaryKeyCallBacks: u8;
+        static kCFTypeDictionaryValueCallBacks: u8;
+        fn CFDictionaryCreate(
+            allocator: CfRef,
+            keys: *const CfRef,
+            values: *const CfRef,
+            count: isize,
+            key_callbacks: *const c_void,
+            value_callbacks: *const c_void,
+        ) -> CfRef;
+        fn CFRelease(value: CfRef);
+        fn CFStringCreateWithCString(
+            allocator: CfRef,
+            value: *const c_char,
+            encoding: u32,
+        ) -> CfRef;
+    }
+
+    const UTF8: u32 = 0x0800_0100;
+    // SAFETY: all byte strings are static and NUL terminated. Create-rule
+    // Core Foundation objects stay alive for the synchronous AX call and are
+    // released exactly once afterwards. Standard CFType callbacks compare the
+    // newly-created key by value with kAXTrustedCheckOptionPrompt.
+    unsafe {
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            c"AXTrustedCheckOptionPrompt".as_ptr(),
+            UTF8,
+        );
+        if key.is_null() {
+            return false;
+        }
+        let keys = [key];
+        let values = [kCFBooleanTrue];
+        let options = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            std::ptr::addr_of!(kCFTypeDictionaryKeyCallBacks).cast(),
+            std::ptr::addr_of!(kCFTypeDictionaryValueCallBacks).cast(),
+        );
+        if options.is_null() {
+            CFRelease(key);
+            return false;
+        }
+        let trusted = AXIsProcessTrustedWithOptions(options);
+        CFRelease(options);
+        CFRelease(key);
+        trusted
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prompt_accessibility_impl() -> bool {
     false
 }
 

@@ -262,6 +262,12 @@ const statusLine = computed(() => {
   if (tracker.mode === 'unsupported') return 'This collector currently requires macOS'
   if (tracker.mode === 'error') return tracker.status.diagnostic || 'Collector needs attention'
   const current = tracker.status.current
+  if (current?.activity === 'UNKNOWN') {
+    const subject = current.domain || current.appName || 'new application'
+    return tracker.status.config.classificationEnabled
+      ? `Classifying · ${subject}`
+      : `Needs classification · ${subject}`
+  }
   return current
     ? `${current.activity} · ${current.domain || current.appName || current.subcategory || 'system'}`
     : 'Armed · waiting for first observation'
@@ -274,7 +280,9 @@ watch(
     () => tracker.status.revision,
   ],
   () => {
-    if (ready.value && props.active && selectedTab.value !== 'classifications') void refreshData()
+    if (!ready.value || !props.active) return
+    if (selectedTab.value === 'classifications') void loadClassifications()
+    else void refreshData()
   },
 )
 watch(() => props.active, (active) => {

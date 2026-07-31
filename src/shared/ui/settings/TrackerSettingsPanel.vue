@@ -45,7 +45,7 @@
           <div class="min-w-0 flex-1">
             <p class="text-[9px] font-semibold text-ink">Window access is required</p>
             <p class="mt-0.5 text-[9px] leading-relaxed text-ink-3">
-              macOS Accessibility lets Tracker read the front window title. Permission is requested only after enabling.
+              Enabling asks macOS for window-title access. If Mimir was already approved, macOS does not ask again.
             </p>
           </div>
           <button
@@ -74,6 +74,9 @@
         <p class="mt-1 font-mono text-[10px] text-ink">{{ modeLabel }}</p>
         <p v-if="tracker.enabled && config.launchAtLogin" class="mt-1 text-[9px] text-ink-4">
           Login launch {{ tracker.status.launchAtLoginActive ? 'active' : 'pending' }}
+        </p>
+        <p v-if="tracker.enabled && tracker.status.permissions.accessibilityRequired" class="mt-1 text-[9px] text-ink-4">
+          Window access {{ tracker.status.permissions.accessibility ? 'granted' : 'waiting for approval' }}
         </p>
         <button
           v-if="tracker.enabled"

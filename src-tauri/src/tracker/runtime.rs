@@ -226,6 +226,13 @@ impl TrackerRuntime {
             store.save_config(&config)?
         };
         *lock(&self.inner.config) = config.clone();
+        let should_prompt_for_accessibility = config.enabled
+            && config.collect_window_titles
+            && (!previous.enabled || !previous.collect_window_titles)
+            && !platform::permission_status(&config).accessibility;
+        if should_prompt_for_accessibility {
+            platform::prompt_accessibility();
+        }
         self.sync_autostart();
         if previous.enabled && !config.enabled {
             self.pause_at(now_ms(), "disabled")?;
@@ -349,7 +356,7 @@ impl TrackerRuntime {
             };
             if config.enabled {
                 if let Err(error) = self.tick(&config) {
-                    self.set_diagnostic(error);
+                    self.set_diagnostic(format!("Tracker collection is waiting to retry: {error}"));
                 }
             }
             match stop.recv_timeout(wait) {
@@ -389,7 +396,7 @@ impl TrackerRuntime {
             let store = lock(&self.inner.store);
             lock(&self.inner.engine).observe(&store, config, observation)?
         };
-        self.clear_diagnostic();
+        self.clear_diagnostic_prefix("Tracker collection is waiting to retry:");
         if changed {
             self.publish();
         }
@@ -447,15 +454,10 @@ impl TrackerRuntime {
     fn maybe_classify(&self, config: &TrackerConfig, now: i64) {
         if !config.classification_enabled
             || self.inner.classification_running.load(Ordering::Relaxed)
-            || now.saturating_sub(self.inner.last_classification_ms.load(Ordering::Relaxed))
-                < (config.classification_batch_seconds as i64) * 1000
         {
             return;
         }
-        self.inner
-            .last_classification_ms
-            .store(now, Ordering::Relaxed);
-        let jobs = match lock(&self.inner.store).due_classification_jobs(now, 25) {
+        let jobs = match self.classification_batch(config, now) {
             Ok(jobs) if !jobs.is_empty() => jobs,
             Ok(_) => return,
             Err(error) => {
@@ -495,7 +497,7 @@ impl TrackerRuntime {
                 let _ = lock(&runtime.inner.store).defer_classification_jobs(&keys, retry);
                 runtime.set_diagnostic(format!("AI classification is waiting to retry: {error}"));
             } else {
-                runtime.clear_diagnostic();
+                runtime.clear_diagnostic_prefix("AI classification is waiting to retry:");
                 runtime.publish();
             }
             runtime
@@ -503,6 +505,27 @@ impl TrackerRuntime {
                 .classification_running
                 .store(false, Ordering::Release);
         });
+    }
+
+    fn classification_batch(
+        &self,
+        config: &TrackerConfig,
+        now: i64,
+    ) -> Result<Vec<super::model::ClassificationJob>, String> {
+        if now.saturating_sub(self.inner.last_classification_ms.load(Ordering::Relaxed))
+            < (config.classification_batch_seconds as i64) * 1000
+        {
+            return Ok(Vec::new());
+        }
+        let jobs = lock(&self.inner.store).due_classification_jobs(now, 25)?;
+        // An empty startup scan must not make the first unknown application
+        // wait through a complete batching interval.
+        if !jobs.is_empty() {
+            self.inner
+                .last_classification_ms
+                .store(now, Ordering::Relaxed);
+        }
+        Ok(jobs)
     }
 
     async fn classify_jobs(
@@ -821,13 +844,16 @@ impl TrackerRuntime {
             .map_err(|error| format!("Could not create Tracker menu item: {error}"))?;
         let menu = Menu::with_items(&app, &[&open, &toggle, &take_break, &quit])
             .map_err(|error| format!("Could not create Tracker menu: {error}"))?;
-        let icon = app.default_window_icon().cloned();
-        let mut builder = TrayIconBuilder::with_id("mimir-tracker")
+        let icon = app
+            .default_window_icon()
+            .cloned()
+            .ok_or_else(|| "Mimir has no application icon for its menu-bar item.".to_string())?;
+        let builder = TrayIconBuilder::with_id("mimir-tracker")
             .menu(&menu)
             .show_menu_on_left_click(false)
-            .title("◉")
             .tooltip("Mimir Tracker")
-            .icon_as_template(true)
+            .icon(icon)
+            .icon_as_template(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "tracker-open" => open_tracker(app),
                 "tracker-toggle" => {
@@ -863,9 +889,6 @@ impl TrackerRuntime {
                     open_tracker(tray.app_handle());
                 }
             });
-        if let Some(icon) = icon {
-            builder = builder.icon(icon);
-        }
         *tray = Some(
             builder
                 .build(&app)
@@ -900,6 +923,18 @@ impl TrackerRuntime {
     fn clear_diagnostic(&self) {
         let mut current = lock(&self.inner.diagnostic);
         if current.take().is_some() {
+            drop(current);
+            self.publish();
+        }
+    }
+
+    fn clear_diagnostic_prefix(&self, prefix: &str) {
+        let mut current = lock(&self.inner.diagnostic);
+        if current
+            .as_deref()
+            .is_some_and(|value| value.starts_with(prefix))
+        {
+            *current = None;
             drop(current);
             self.publish();
         }
@@ -1214,6 +1249,39 @@ mod tests {
                 .to_rfc3339(),
             "2026-07-29T22:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn empty_scan_does_not_delay_the_first_classification_job() {
+        let (_directory, runtime) = runtime();
+        let config = TrackerConfig::default();
+        let first_scan = 1_000_000;
+        assert!(runtime
+            .classification_batch(&config, first_scan)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            runtime.inner.last_classification_ms.load(Ordering::Relaxed),
+            0
+        );
+
+        let observation = super::super::model::Observation {
+            observed_at_ms: first_scan + 1,
+            idle_seconds: 0,
+            app_name: "Ghostty".into(),
+            bundle_id: Some("com.mitchellh.ghostty".into()),
+            domain: None,
+            window_title: None,
+            mimir_context: None,
+        };
+        lock(&runtime.inner.store)
+            .queue_classification(&observation)
+            .unwrap();
+        let jobs = runtime
+            .classification_batch(&config, first_scan + 1)
+            .unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].key, "com.mitchellh.ghostty");
     }
 
     fn nudge_block(

@@ -86,11 +86,13 @@ Tracker stores only evidence needed to reproduce the timeline:
 | screenshot or screen pixels | never | not implemented or requested |
 
 Permissions are lazy. Disabled Tracker rejects the Accessibility command in
-Rust. Enabling does not itself open System Settings; the user chooses the
-visible access action. Turning title collection off removes the Accessibility
-requirement and app identity continues through `NSWorkspace`. Browser
-Automation is a second explicit switch and a denied browser degrades to
-app-level evidence.
+Rust. Enabling Tracker, or enabling window titles later, asks macOS for
+Accessibility when it has not already been granted; macOS does not repeat its
+prompt for an approved Mimir identity. The visible access action opens System
+Settings when approval still needs attention. Turning title collection off
+removes the Accessibility requirement and app identity continues through
+`NSWorkspace`. Browser Automation is a second explicit switch and a denied
+browser degrades to app-level evidence.
 
 Window titles and browser domains are the most sensitive local data Mimir
 persists. They are not added to `mimir_state`, Business graph context, public
@@ -117,7 +119,9 @@ System intervals are explicit:
 Mimir context receives a deterministic Work subcategory without AI. Exact
 manual rules always win. An app-level manual rule also corrects matching
 app-plus-domain history; a domain-specific rule remains exact. Unknown keys are
-durably queued and grouped into bounded batches of 25.
+always durably queued—even when AI classification is off—and appear immediately
+as editable pending rows. AI groups eligible keys into bounded batches of 25;
+an empty startup scan never delays the first real batch.
 
 AI classification uses Mimir's model registry, provider host policy, native
 transport, and keychain-backed credentials. `auto` uses Mimir's configured
@@ -236,8 +240,8 @@ golden IPC fixtures shared with renderer tests.
 
 Renderer coverage includes service command names, listener-before-drain store
 hydration, complete configuration updates, built-in routing, optional enable
-behavior, timeline geometry, manual rule correction, and dashboard hydration
-from the Rust golden fixtures.
+behavior, pending classification presentation, timeline geometry, manual rule
+correction, and dashboard hydration from the Rust golden fixtures.
 
 Run the full verification matrix from the repository root:
 

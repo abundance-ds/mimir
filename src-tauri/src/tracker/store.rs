@@ -487,8 +487,40 @@ impl TrackerStore {
         let rows = statement
             .query_map([], classification_from_row)
             .map_err(|error| format!("Could not query Tracker classifications: {error}"))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("Could not read Tracker classifications: {error}"))
+        let mut values = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not read Tracker classifications: {error}"))?;
+        drop(statement);
+
+        let mut pending_statement = self
+            .connection
+            .prepare(
+                "SELECT jobs.key, jobs.first_seen_ms, jobs.last_seen_ms
+                 FROM classification_jobs AS jobs
+                 LEFT JOIN classifications AS rules ON rules.key = jobs.key
+                 WHERE rules.key IS NULL",
+            )
+            .map_err(|error| format!("Could not prepare pending classification query: {error}"))?;
+        let pending = pending_statement
+            .query_map([], |row| {
+                Ok(Classification {
+                    key: row.get(0)?,
+                    activity: ActivityCategory::Unknown,
+                    subcategory: None,
+                    classified_by: "pending".into(),
+                    manual: false,
+                    created_at_ms: row.get(1)?,
+                    updated_at_ms: row.get(2)?,
+                })
+            })
+            .map_err(|error| format!("Could not query pending Tracker classifications: {error}"))?;
+        values.extend(
+            pending.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                format!("Could not read pending Tracker classifications: {error}")
+            })?,
+        );
+        values.sort_by_cached_key(|value| value.key.to_ascii_lowercase());
+        Ok(values)
     }
 
     pub fn save_classification(
@@ -536,16 +568,17 @@ impl TrackerStore {
             self.connection
                 .execute(
                     "UPDATE activity_blocks
-                     SET activity = ?2, subcategory = ?3, updated_at_ms = ?4
+                     SET activity = ?2, subcategory = ?3, source = ?4, updated_at_ms = ?5
                      WHERE (
                        classification_key = ?1
-                       OR (?5 = 1 AND instr(classification_key, ?1 || ' | ') = 1)
+                       OR (?6 = 1 AND instr(classification_key, ?1 || ' | ') = 1)
                      )
                        AND activity NOT IN ('AFK', 'OFF', 'Break')",
                     params![
                         key,
                         activity.as_str(),
                         clean(subcategory),
+                        if manual { "manual" } else { classified_by },
                         now,
                         apply_app_scope
                     ],
@@ -1008,6 +1041,7 @@ mod tests {
         assert!(blocks
             .iter()
             .all(|block| block.activity == ActivityCategory::Leisure));
+        assert!(blocks.iter().all(|block| block.source == "manual"));
     }
 
     #[test]

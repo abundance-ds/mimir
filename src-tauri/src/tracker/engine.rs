@@ -67,13 +67,13 @@ impl TrackerEngine {
 
         if self.current.is_none() {
             self.candidate = None;
-            return self.start_observation(store, config, observation.observed_at_ms, observation);
+            return self.start_observation(store, observation.observed_at_ms, observation);
         }
 
         let confirmation_ms = (config.change_confirmation_seconds as i64).saturating_mul(1000);
         if confirmation_ms == 0 {
             self.candidate = None;
-            return self.start_observation(store, config, observation.observed_at_ms, observation);
+            return self.start_observation(store, observation.observed_at_ms, observation);
         }
 
         match self.candidate.as_mut() {
@@ -85,12 +85,7 @@ impl TrackerEngine {
                     >= confirmation_ms
                 {
                     let candidate = self.candidate.take().expect("candidate exists");
-                    self.start_observation(
-                        store,
-                        config,
-                        candidate.first_seen_ms,
-                        candidate.observation,
-                    )
+                    self.start_observation(store, candidate.first_seen_ms, candidate.observation)
                 } else {
                     self.extend_current(store, observation.observed_at_ms)
                 }
@@ -190,13 +185,12 @@ impl TrackerEngine {
     fn start_observation(
         &mut self,
         store: &TrackerStore,
-        config: &TrackerConfig,
         transition_ms: i64,
         observation: Observation,
     ) -> Result<bool, String> {
         let classification_key = observation.classification_key();
         let (activity, subcategory, source) = classification_for_observation(store, &observation)?;
-        if activity == ActivityCategory::Unknown && config.classification_enabled {
+        if activity == ActivityCategory::Unknown {
             store.queue_classification(&observation)?;
         }
         let transition_ms = self
@@ -433,5 +427,20 @@ mod tests {
             })
             .unwrap();
         assert_eq!(page.total, 1);
+    }
+
+    #[test]
+    fn unknown_apps_remain_manually_classifiable_when_ai_is_off() {
+        let (_directory, store, mut engine, mut config) = harness();
+        config.classification_enabled = false;
+        engine
+            .observe(&store, &config, observation(1_000, 0, "Ghostty"))
+            .unwrap();
+
+        assert_eq!(store.queued_classification_count().unwrap(), 1);
+        let classifications = store.classifications().unwrap();
+        assert_eq!(classifications.len(), 1);
+        assert_eq!(classifications[0].activity, ActivityCategory::Unknown);
+        assert_eq!(classifications[0].classified_by, "pending");
     }
 }

@@ -82,6 +82,23 @@ describe('TrackerApp', () => {
     wrapper.unmount()
   })
 
+  it('names queued unknown activity as classification work in progress', async () => {
+    vi.mocked(trackerStatus).mockResolvedValue(enabledStatus({
+      queuedClassifications: 1,
+      current: {
+        ...enabledStatus().current,
+        activity: 'UNKNOWN',
+        appName: 'Ghostty',
+        domain: null,
+      },
+    }))
+    const wrapper = mountTracker()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Classifying · Ghostty')
+    wrapper.unmount()
+  })
+
   it('does no report work while disabled and can opt in from the empty state', async () => {
     vi.mocked(trackerStatus)
       .mockResolvedValueOnce(disabledStatus())

@@ -236,6 +236,11 @@ state inside an enabled Tracker. Pausing must write an `OFF` transition without
 hiding the instrument or disabling login launch. Do not implement either state
 as a renderer-only visibility toggle.
 
+The explicit off-to-on transition may issue the native Accessibility prompt
+when window titles are enabled. An already-approved Mimir identity produces no
+repeat macOS prompt. Keep this native and lazy; never request it during ordinary
+disabled startup.
+
 The legacy Argus app and Tracker must never collect simultaneously. Argus
 import refuses while Tracker is enabled or the exact legacy executable is
 running; keep source files untouched and perform the complete import in one
