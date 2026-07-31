@@ -23,7 +23,7 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 pub const MAX_TRANSCRIPT_PAGE_SEGMENTS: u32 = 250;
 const APPLICATION_ID: i64 = 0x4d4d4554; // "MMET"
 
@@ -75,6 +75,51 @@ pub struct MeetingListPage {
     pub next_before: Option<MeetingListCursor>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeetingDeletionMode {
+    Audio,
+    All,
+}
+
+impl MeetingDeletionMode {
+    fn storage_key(self) -> &'static str {
+        match self {
+            Self::Audio => "audio",
+            Self::All => "all",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeetingDeletionStage {
+    WaitingForJobs,
+    FilesPending,
+    DatabasePending,
+    MarkerCleanupPending,
+}
+
+impl MeetingDeletionStage {
+    fn storage_key(self) -> &'static str {
+        match self {
+            Self::WaitingForJobs => "waiting-for-jobs",
+            Self::FilesPending => "files-pending",
+            Self::DatabasePending => "database-pending",
+            Self::MarkerCleanupPending => "marker-cleanup-pending",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingDeletion {
+    pub meeting_id: String,
+    pub mode: MeetingDeletionMode,
+    pub stage: MeetingDeletionStage,
+    pub requested_at: String,
+    pub updated_at: String,
+    pub running_jobs: u32,
+    pub last_error: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum MeetingStoreError {
     #[error("meeting store private-storage error: {0}")]
@@ -103,6 +148,18 @@ pub enum MeetingStoreError {
     IdempotencyConflict { key: String },
     #[error("job '{job_id}' is no longer owned by this worker lease")]
     LeaseLost { job_id: String },
+    #[error(
+        "meeting '{meeting_id}' deletion is waiting for {running_jobs} running job(s) to finish"
+    )]
+    DeletionBlocked {
+        meeting_id: String,
+        running_jobs: u32,
+    },
+    #[error("meeting '{meeting_id}' is being permanently deleted ({stage})")]
+    DeletionInProgress {
+        meeting_id: String,
+        stage: &'static str,
+    },
     #[error("meeting database schema version {found} is newer than supported version {supported}")]
     UnsupportedSchemaVersion { found: u32, supported: u32 },
     #[error("meeting database belongs to another application (application_id={0})")]
@@ -217,11 +274,17 @@ impl MeetingStore {
         let limit = limit.clamp(1, 1_000);
         let connection = self.lock()?;
         let mut statement = connection.prepare(
-            "SELECT id FROM meetings
-             WHERE ?1 IS NULL
-                OR created_at < ?1
-                OR (created_at=?1 AND id < ?2)
-             ORDER BY created_at DESC,id DESC
+            "SELECT m.id FROM meetings m
+             WHERE NOT EXISTS (
+                     SELECT 1 FROM meeting_deletions d
+                     WHERE d.meeting_id=m.id AND d.mode='all'
+                   )
+               AND (
+                    ?1 IS NULL
+                 OR m.created_at < ?1
+                 OR (m.created_at=?1 AND m.id < ?2)
+               )
+             ORDER BY m.created_at DESC,m.id DESC
              LIMIT ?3",
         )?;
         let ids = statement
@@ -793,6 +856,10 @@ impl MeetingStore {
                JOIN transcript_segments s
                  ON s.meeting_id=f.meeting_id AND s.segment_id=f.segment_id
                WHERE transcript_segments_fts MATCH ?1
+                 AND NOT EXISTS (
+                   SELECT 1 FROM meeting_deletions d
+                   WHERE d.meeting_id=s.meeting_id AND d.mode='all'
+                 )
              )
              SELECT meeting_id,segment_id,start_ms,text
              FROM ranked
@@ -860,25 +927,34 @@ impl MeetingStore {
         Ok(held)
     }
 
-    /// Remove only durable source-audio chunk metadata. Channel definitions
-    /// remain because finalized transcript segments retain channel attribution.
-    pub fn delete_audio_chunks(&self, meeting_id: &str) -> Result<u64, MeetingStoreError> {
+    /// Begin an irreversible, crash-replayable deletion.
+    ///
+    /// The tombstone and pending-job cancellation share one `IMMEDIATE`
+    /// transaction. A permanent deletion is therefore hidden from readers
+    /// before another worker can claim work for it. Running jobs retain their
+    /// lease: their Activity may still own a process and output file, so the
+    /// deletion waits until that worker reaches a terminal lease boundary.
+    pub fn begin_deletion(
+        &self,
+        meeting_id: &str,
+        mode: MeetingDeletionMode,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
         validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_meeting_tx(&transaction, meeting_id)?;
-        let removed = transaction
-            .execute("DELETE FROM audio_chunks WHERE meeting_id=?1", [meeting_id])?
-            as u64;
-        transaction.commit()?;
-        Ok(removed)
-    }
-
-    /// Permanently remove a terminal meeting and every SQLite-owned child row.
-    pub fn delete_meeting(&self, meeting_id: &str) -> Result<(), MeetingStoreError> {
-        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
-        let mut connection = self.lock()?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) = load_deletion_optional_tx(&transaction, meeting_id)? {
+            if existing.mode != mode {
+                return Err(MeetingStoreError::Validation(format!(
+                    "meeting '{meeting_id}' already has a {} deletion in progress",
+                    existing.mode.storage_key()
+                )));
+            }
+            let deletion = refresh_deletion_tx(&transaction, existing, &observed_at)?;
+            transaction.commit()?;
+            return Ok(deletion);
+        }
         let status: Option<String> = transaction
             .query_row(
                 "SELECT status FROM meetings WHERE id=?1",
@@ -889,15 +965,254 @@ impl MeetingStore {
         let status = status.ok_or_else(|| not_found("meeting", meeting_id))?;
         if matches!(status.as_str(), "recording" | "stopping" | "finalizing") {
             return Err(MeetingStoreError::Validation(
-                "an active meeting cannot be permanently deleted".into(),
+                "an active meeting cannot be deleted".into(),
             ));
         }
-        let removed = transaction.execute("DELETE FROM meetings WHERE id=?1", [meeting_id])?;
-        if removed != 1 {
-            return Err(not_found("meeting", meeting_id));
+
+        if mode == MeetingDeletionMode::Audio {
+            let staged_chunks: bool = transaction.query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM audio_chunks
+                   WHERE meeting_id=?1 AND status='staged'
+                 )",
+                [meeting_id],
+                |row| row.get(0),
+            )?;
+            let transcription_jobs: bool = transaction.query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM follow_up_jobs
+                   WHERE meeting_id=?1
+                     AND kind='custom:transcription'
+                     AND state IN ('pending','running')
+                 )",
+                [meeting_id],
+                |row| row.get(0),
+            )?;
+            if staged_chunks || transcription_jobs {
+                return Err(MeetingStoreError::Validation(
+                    "source audio is held by transcription recovery; finish or resolve recovery before deleting it"
+                        .into(),
+                ));
+            }
         }
+
+        let running_jobs = if mode == MeetingDeletionMode::All {
+            running_job_count_tx(&transaction, meeting_id)?
+        } else {
+            0
+        };
+        transaction.execute(
+            "INSERT INTO meeting_deletions (
+               meeting_id,mode,stage,requested_at,updated_at,last_error
+             ) VALUES (?1,?2,?3,?4,?4,NULL)",
+            params![
+                meeting_id,
+                mode.storage_key(),
+                if running_jobs == 0 {
+                    MeetingDeletionStage::FilesPending.storage_key()
+                } else {
+                    MeetingDeletionStage::WaitingForJobs.storage_key()
+                },
+                observed_at
+            ],
+        )?;
+        if mode == MeetingDeletionMode::All {
+            transaction.execute(
+                "UPDATE follow_up_jobs SET
+                   state='cancelled',lease_owner=NULL,lease_token=NULL,
+                   lease_expires_at=NULL,last_error='cancelled by permanent meeting deletion',
+                   updated_at=?2
+                 WHERE meeting_id=?1 AND state='pending'",
+                params![meeting_id, observed_at],
+            )?;
+        }
+        let mut existing = load_deletion_optional_tx(&transaction, meeting_id)?
+            .expect("inserted meeting deletion must exist");
+        existing.running_jobs = running_jobs;
+        let deletion = refresh_deletion_tx(&transaction, existing, &observed_at)?;
+        transaction.commit()?;
+        Ok(deletion)
+    }
+
+    pub fn deletion(&self, meeting_id: &str) -> Result<Option<MeetingDeletion>, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        load_deletion_optional(&connection, meeting_id)
+    }
+
+    pub fn pending_deletions(&self) -> Result<Vec<MeetingDeletion>, MeetingStoreError> {
+        let connection = self.lock()?;
+        let mut statement = connection
+            .prepare("SELECT meeting_id FROM meeting_deletions ORDER BY requested_at,meeting_id")?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|meeting_id| {
+                load_deletion_optional(&connection, &meeting_id)?
+                    .ok_or_else(|| not_found("meeting deletion", &meeting_id))
+            })
+            .collect()
+    }
+
+    /// Recheck process-owned job leases without weakening their ownership.
+    pub fn refresh_deletion(
+        &self,
+        meeting_id: &str,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = load_deletion_optional_tx(&transaction, meeting_id)?
+            .ok_or_else(|| not_found("meeting deletion", meeting_id))?;
+        let deletion = refresh_deletion_tx(&transaction, existing, &observed_at)?;
+        transaction.commit()?;
+        Ok(deletion)
+    }
+
+    pub fn record_deletion_error(
+        &self,
+        meeting_id: &str,
+        detail: &str,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        if detail.trim().is_empty() || detail.len() > 16_384 {
+            return Err(MeetingStoreError::Validation(
+                "deletion error must contain 1 to 16384 bytes".into(),
+            ));
+        }
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let updated = transaction.execute(
+            "UPDATE meeting_deletions
+             SET last_error=?2,updated_at=?3 WHERE meeting_id=?1",
+            params![meeting_id, detail.trim(), observed_at],
+        )?;
+        if updated != 1 {
+            return Err(not_found("meeting deletion", meeting_id));
+        }
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .expect("updated meeting deletion must exist");
+        transaction.commit()?;
+        Ok(deletion)
+    }
+
+    /// Advance after the private file owner has durably removed its owned
+    /// artifacts. This boundary is persisted before SQLite authority changes.
+    pub fn mark_deletion_files_removed(
+        &self,
+        meeting_id: &str,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        self.advance_deletion(
+            meeting_id,
+            MeetingDeletionStage::FilesPending,
+            MeetingDeletionStage::DatabasePending,
+            observed_at,
+        )
+    }
+
+    /// Remove the SQLite-owned meeting/audio authority only after file removal
+    /// is durable. The independent deletion journal intentionally survives the
+    /// cascade so marker cleanup can be retried after a crash.
+    pub fn remove_deletion_database_authority(
+        &self,
+        meeting_id: &str,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .ok_or_else(|| not_found("meeting deletion", meeting_id))?;
+        if deletion.stage != MeetingDeletionStage::DatabasePending {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting deletion database boundary requires database-pending, found {}",
+                deletion.stage.storage_key()
+            )));
+        }
+        match deletion.mode {
+            MeetingDeletionMode::Audio => {
+                transaction
+                    .execute("DELETE FROM audio_chunks WHERE meeting_id=?1", [meeting_id])?;
+            }
+            MeetingDeletionMode::All => {
+                let running_jobs = running_job_count_tx(&transaction, meeting_id)?;
+                if running_jobs != 0 {
+                    return Err(MeetingStoreError::DeletionBlocked {
+                        meeting_id: meeting_id.into(),
+                        running_jobs,
+                    });
+                }
+                transaction.execute("DELETE FROM meetings WHERE id=?1", [meeting_id])?;
+            }
+        }
+        transaction.execute(
+            "UPDATE meeting_deletions SET
+               stage='marker-cleanup-pending',updated_at=?2,last_error=NULL
+             WHERE meeting_id=?1",
+            params![meeting_id, observed_at],
+        )?;
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .expect("advanced meeting deletion must exist");
+        transaction.commit()?;
+        Ok(deletion)
+    }
+
+    pub fn complete_deletion(&self, meeting_id: &str) -> Result<(), MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .ok_or_else(|| not_found("meeting deletion", meeting_id))?;
+        if deletion.stage != MeetingDeletionStage::MarkerCleanupPending {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting deletion cannot complete from {}",
+                deletion.stage.storage_key()
+            )));
+        }
+        transaction.execute(
+            "DELETE FROM meeting_deletions WHERE meeting_id=?1",
+            [meeting_id],
+        )?;
         transaction.commit()?;
         Ok(())
+    }
+
+    fn advance_deletion(
+        &self,
+        meeting_id: &str,
+        expected: MeetingDeletionStage,
+        next: MeetingDeletionStage,
+        observed_at: &str,
+    ) -> Result<MeetingDeletion, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .ok_or_else(|| not_found("meeting deletion", meeting_id))?;
+        if deletion.stage != expected {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting deletion expected {}, found {}",
+                expected.storage_key(),
+                deletion.stage.storage_key()
+            )));
+        }
+        transaction.execute(
+            "UPDATE meeting_deletions SET
+               stage=?2,updated_at=?3,last_error=NULL WHERE meeting_id=?1",
+            params![meeting_id, next.storage_key(), observed_at],
+        )?;
+        let deletion = load_deletion_optional_tx(&transaction, meeting_id)?
+            .expect("advanced meeting deletion must exist");
+        transaction.commit()?;
+        Ok(deletion)
     }
 
     pub fn enqueue_job(
@@ -914,6 +1229,9 @@ impl MeetingStore {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_meeting_tx(&transaction, &job.meeting_id)?;
+        if deletion_blocks_job_tx(&transaction, &job.meeting_id, &job.kind)? {
+            return Err(deletion_in_progress_tx(&transaction, &job.meeting_id)?);
+        }
         if let Some((existing, existing_hash)) =
             load_job_by_idempotency_tx(&transaction, &job.meeting_id, &job.idempotency_key)?
         {
@@ -966,8 +1284,18 @@ impl MeetingStore {
         release_expired_jobs(&transaction, &observed_at)?;
         let job_id: Option<String> = transaction
             .query_row(
-                "SELECT id FROM follow_up_jobs
-                 WHERE state='pending' AND not_before<=?1 AND attempts<max_attempts
+                "SELECT j.id FROM follow_up_jobs j
+                 WHERE j.state='pending'
+                   AND j.not_before<=?1
+                   AND j.attempts<j.max_attempts
+                   AND NOT EXISTS (
+                     SELECT 1 FROM meeting_deletions d
+                     WHERE d.meeting_id=j.meeting_id
+                       AND (
+                         d.mode='all'
+                         OR (d.mode='audio' AND j.kind='custom:transcription')
+                       )
+                   )
                  ORDER BY not_before,created_at,id LIMIT 1",
                 [&observed_at],
                 |row| row.get(0),
@@ -1017,6 +1345,30 @@ impl MeetingStore {
             return Err(MeetingStoreError::LeaseLost {
                 job_id: job_id.into(),
             });
+        }
+        let permanent_deletion: bool = transaction.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM meeting_deletions
+               WHERE meeting_id=?1 AND mode='all'
+             )",
+            [&current.definition.meeting_id],
+            |row| row.get(0),
+        )?;
+        if permanent_deletion {
+            transaction.execute(
+                "UPDATE follow_up_jobs SET
+                   state='cancelled',result_json=NULL,
+                   last_error='result discarded by permanent meeting deletion',
+                   lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?2
+                 WHERE id=?1",
+                params![job_id, observed_at],
+            )?;
+            let deletion = load_deletion_optional_tx(&transaction, &current.definition.meeting_id)?
+                .expect("permanent deletion query guaranteed a journal row");
+            refresh_deletion_tx(&transaction, deletion, &observed_at)?;
+            let job = load_job_tx(&transaction, job_id)?;
+            transaction.commit()?;
+            return Ok(job);
         }
         match outcome {
             JobFinish::Succeeded { result } => {
@@ -1140,13 +1492,23 @@ impl MeetingStore {
 
         let requeued_job_ids = query_strings(
             &transaction,
-            "SELECT id FROM follow_up_jobs
-             WHERE state='running' AND attempts<max_attempts ORDER BY id",
+            "SELECT j.id FROM follow_up_jobs j
+             WHERE j.state='running' AND j.attempts<j.max_attempts
+               AND NOT EXISTS (
+                 SELECT 1 FROM meeting_deletions d
+                 WHERE d.meeting_id=j.meeting_id AND d.mode='all'
+               )
+             ORDER BY j.id",
         )?;
         let failed_job_ids = query_strings(
             &transaction,
-            "SELECT id FROM follow_up_jobs
-             WHERE state='running' AND attempts>=max_attempts ORDER BY id",
+            "SELECT j.id FROM follow_up_jobs j
+             WHERE j.state='running' AND j.attempts>=j.max_attempts
+               AND NOT EXISTS (
+                 SELECT 1 FROM meeting_deletions d
+                 WHERE d.meeting_id=j.meeting_id AND d.mode='all'
+               )
+             ORDER BY j.id",
         )?;
         transaction.execute(
             "UPDATE follow_up_jobs SET
@@ -1154,7 +1516,33 @@ impl MeetingStore {
                not_before=CASE WHEN attempts>=max_attempts THEN not_before ELSE ?1 END,
                last_error='worker lease lost during application restart',
                lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?1
-             WHERE state='running'",
+             WHERE state='running'
+               AND NOT EXISTS (
+                 SELECT 1 FROM meeting_deletions d
+                 WHERE d.meeting_id=follow_up_jobs.meeting_id AND d.mode='all'
+               )",
+            [&observed_at],
+        )?;
+        transaction.execute(
+            "UPDATE follow_up_jobs SET
+               state='cancelled',last_error='cancelled by permanent meeting deletion after restart',
+               result_json=NULL,lease_owner=NULL,lease_token=NULL,
+               lease_expires_at=NULL,updated_at=?1
+             WHERE state='running'
+               AND EXISTS (
+                 SELECT 1 FROM meeting_deletions d
+                 WHERE d.meeting_id=follow_up_jobs.meeting_id AND d.mode='all'
+               )",
+            [&observed_at],
+        )?;
+        transaction.execute(
+            "UPDATE meeting_deletions SET
+               stage='files-pending',updated_at=?1
+             WHERE mode='all' AND stage='waiting-for-jobs'
+               AND NOT EXISTS (
+                 SELECT 1 FROM follow_up_jobs j
+                 WHERE j.meeting_id=meeting_deletions.meeting_id AND j.state='running'
+               )",
             [&observed_at],
         )?;
 
@@ -1216,6 +1604,12 @@ fn migrate(connection: &mut Connection) -> Result<(), MeetingStoreError> {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         migration_v3(&transaction)?;
         transaction.pragma_update(None, "user_version", 3)?;
+        transaction.commit()?;
+    }
+    if version < 4 {
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        migration_v4(&transaction)?;
+        transaction.pragma_update(None, "user_version", 4)?;
         transaction.commit()?;
     }
     Ok(())
@@ -1451,6 +1845,25 @@ fn migration_v3(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> 
     Ok(())
 }
 
+fn migration_v4(transaction: &Transaction<'_>) -> Result<(), MeetingStoreError> {
+    transaction.execute_batch(
+        "CREATE TABLE meeting_deletions (
+           meeting_id TEXT PRIMARY KEY,
+           mode TEXT NOT NULL CHECK(mode IN ('audio','all')),
+           stage TEXT NOT NULL CHECK(stage IN (
+             'waiting-for-jobs','files-pending','database-pending',
+             'marker-cleanup-pending'
+           )),
+           requested_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL,
+           last_error TEXT
+         );
+         CREATE INDEX idx_meeting_deletions_stage
+           ON meeting_deletions(stage,requested_at,meeting_id);",
+    )?;
+    Ok(())
+}
+
 fn insert_channel(
     transaction: &Transaction<'_>,
     meeting_id: &str,
@@ -1628,6 +2041,7 @@ fn load_meeting(
     connection: &Connection,
     meeting_id: &str,
 ) -> Result<MeetingRecord, MeetingStoreError> {
+    reject_permanent_deletion(connection, meeting_id)?;
     let mut meeting = connection
         .query_row(
             "SELECT id,title,origin_json,status,created_at,updated_at,started_at,
@@ -1648,6 +2062,7 @@ fn load_meeting_tx(
     transaction: &Transaction<'_>,
     meeting_id: &str,
 ) -> Result<MeetingRecord, MeetingStoreError> {
+    reject_permanent_deletion(transaction, meeting_id)?;
     let mut meeting = transaction
         .query_row(
             "SELECT id,title,origin_json,status,created_at,updated_at,started_at,
@@ -1662,6 +2077,152 @@ fn load_meeting_tx(
         .ok_or_else(|| not_found("meeting", meeting_id))?;
     meeting.channels = load_channels(transaction, meeting_id)?;
     Ok(meeting)
+}
+
+fn load_deletion_optional(
+    connection: &Connection,
+    meeting_id: &str,
+) -> Result<Option<MeetingDeletion>, MeetingStoreError> {
+    connection
+        .query_row(
+            "SELECT meeting_id,mode,stage,requested_at,updated_at,last_error
+             FROM meeting_deletions WHERE meeting_id=?1",
+            [meeting_id],
+            deletion_from_row,
+        )
+        .optional()
+        .map_err(MeetingStoreError::from)
+}
+
+fn load_deletion_optional_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+) -> Result<Option<MeetingDeletion>, MeetingStoreError> {
+    transaction
+        .query_row(
+            "SELECT meeting_id,mode,stage,requested_at,updated_at,last_error
+             FROM meeting_deletions WHERE meeting_id=?1",
+            [meeting_id],
+            deletion_from_row,
+        )
+        .optional()
+        .map_err(MeetingStoreError::from)
+}
+
+fn deletion_from_row(row: &Row<'_>) -> rusqlite::Result<MeetingDeletion> {
+    let mode = row.get::<_, String>(1)?;
+    let stage = row.get::<_, String>(2)?;
+    Ok(MeetingDeletion {
+        meeting_id: row.get(0)?,
+        mode: deletion_mode(&mode).map_err(text_from_sql_error)?,
+        stage: deletion_stage(&stage).map_err(text_from_sql_error)?,
+        requested_at: row.get(3)?,
+        updated_at: row.get(4)?,
+        running_jobs: 0,
+        last_error: row.get(5)?,
+    })
+}
+
+fn deletion_mode(value: &str) -> Result<MeetingDeletionMode, String> {
+    match value {
+        "audio" => Ok(MeetingDeletionMode::Audio),
+        "all" => Ok(MeetingDeletionMode::All),
+        other => Err(format!("unknown meeting deletion mode '{other}'")),
+    }
+}
+
+fn deletion_stage(value: &str) -> Result<MeetingDeletionStage, String> {
+    match value {
+        "waiting-for-jobs" => Ok(MeetingDeletionStage::WaitingForJobs),
+        "files-pending" => Ok(MeetingDeletionStage::FilesPending),
+        "database-pending" => Ok(MeetingDeletionStage::DatabasePending),
+        "marker-cleanup-pending" => Ok(MeetingDeletionStage::MarkerCleanupPending),
+        other => Err(format!("unknown meeting deletion stage '{other}'")),
+    }
+}
+
+fn running_job_count_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+) -> Result<u32, MeetingStoreError> {
+    let count: i64 = transaction.query_row(
+        "SELECT COUNT(*) FROM follow_up_jobs
+         WHERE meeting_id=?1 AND state='running'",
+        [meeting_id],
+        |row| row.get(0),
+    )?;
+    u32::try_from(count)
+        .map_err(|_| MeetingStoreError::Validation("running job count overflow".into()))
+}
+
+fn refresh_deletion_tx(
+    transaction: &Transaction<'_>,
+    mut deletion: MeetingDeletion,
+    observed_at: &str,
+) -> Result<MeetingDeletion, MeetingStoreError> {
+    if deletion.mode == MeetingDeletionMode::All
+        && deletion.stage == MeetingDeletionStage::WaitingForJobs
+    {
+        deletion.running_jobs = running_job_count_tx(transaction, &deletion.meeting_id)?;
+        if deletion.running_jobs == 0 {
+            transaction.execute(
+                "UPDATE meeting_deletions SET
+                   stage='files-pending',updated_at=?2,last_error=NULL
+                 WHERE meeting_id=?1 AND stage='waiting-for-jobs'",
+                params![deletion.meeting_id, observed_at],
+            )?;
+            deletion.stage = MeetingDeletionStage::FilesPending;
+            deletion.updated_at = observed_at.into();
+        }
+    } else if deletion.mode == MeetingDeletionMode::All {
+        deletion.running_jobs = running_job_count_tx(transaction, &deletion.meeting_id)?;
+    }
+    Ok(deletion)
+}
+
+fn deletion_blocks_job_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+    kind: &FollowUpJobKind,
+) -> Result<bool, MeetingStoreError> {
+    let mode: Option<String> = transaction
+        .query_row(
+            "SELECT mode FROM meeting_deletions WHERE meeting_id=?1",
+            [meeting_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(match mode.as_deref() {
+        Some("all") => true,
+        Some("audio") => matches!(kind, FollowUpJobKind::Custom(name) if name == "transcription"),
+        _ => false,
+    })
+}
+
+fn deletion_in_progress_tx(
+    transaction: &Transaction<'_>,
+    meeting_id: &str,
+) -> Result<MeetingStoreError, MeetingStoreError> {
+    let deletion = load_deletion_optional_tx(transaction, meeting_id)?
+        .ok_or_else(|| not_found("meeting deletion", meeting_id))?;
+    Ok(MeetingStoreError::DeletionInProgress {
+        meeting_id: meeting_id.into(),
+        stage: deletion.stage.storage_key(),
+    })
+}
+
+fn reject_permanent_deletion(
+    connection: &Connection,
+    meeting_id: &str,
+) -> Result<(), MeetingStoreError> {
+    let deletion = load_deletion_optional(connection, meeting_id)?;
+    if let Some(deletion) = deletion.filter(|value| value.mode == MeetingDeletionMode::All) {
+        return Err(MeetingStoreError::DeletionInProgress {
+            meeting_id: meeting_id.into(),
+            stage: deletion.stage.storage_key(),
+        });
+    }
+    Ok(())
 }
 
 fn meeting_from_row(row: &Row<'_>) -> rusqlite::Result<MeetingRecord> {
@@ -2090,11 +2651,27 @@ fn release_expired_jobs(
 ) -> Result<(), MeetingStoreError> {
     transaction.execute(
         "UPDATE follow_up_jobs SET
+           state='cancelled',result_json=NULL,
+           last_error='expired result discarded by permanent meeting deletion',
+           lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?1
+         WHERE state='running' AND lease_expires_at<=?1
+           AND EXISTS (
+             SELECT 1 FROM meeting_deletions d
+             WHERE d.meeting_id=follow_up_jobs.meeting_id AND d.mode='all'
+           )",
+        [observed_at],
+    )?;
+    transaction.execute(
+        "UPDATE follow_up_jobs SET
            state=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'pending' END,
            not_before=CASE WHEN attempts>=max_attempts THEN not_before ELSE ?1 END,
            last_error='worker lease expired before completion',
            lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?1
-         WHERE state='running' AND lease_expires_at<=?1",
+         WHERE state='running' AND lease_expires_at<=?1
+           AND NOT EXISTS (
+             SELECT 1 FROM meeting_deletions d
+             WHERE d.meeting_id=follow_up_jobs.meeting_id AND d.mode='all'
+           )",
         [observed_at],
     )?;
     Ok(())
@@ -2483,7 +3060,95 @@ mod tests {
     }
 
     #[test]
-    fn privacy_deletion_removes_audio_metadata_and_cascades_the_complete_record() {
+    fn permanent_deletion_tombstone_cancels_pending_work_and_waits_for_running_activity() {
+        let store = store();
+        let recording = start_recording(&store);
+        store
+            .transition_meeting(
+                &recording.id,
+                recording.revision,
+                MeetingStatus::Failed,
+                T2,
+                Some(&MeetingFailure {
+                    code: "terminal".into(),
+                    message: "ready for deletion".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        store
+            .enqueue_job(&job("privacy-running", "privacy-running", 2), T2)
+            .unwrap();
+        let running = store
+            .claim_next_job("privacy-worker", T2, T3)
+            .unwrap()
+            .unwrap();
+        store
+            .enqueue_job(&job("privacy-pending", "privacy-pending", 2), T2)
+            .unwrap();
+
+        let deletion = store
+            .begin_deletion("meeting-1", MeetingDeletionMode::All, T2)
+            .unwrap();
+        assert_eq!(deletion.stage, MeetingDeletionStage::WaitingForJobs);
+        assert_eq!(deletion.running_jobs, 1);
+        assert!(matches!(
+            store.get_meeting("meeting-1"),
+            Err(MeetingStoreError::DeletionInProgress { .. })
+        ));
+        assert!(store.list_meetings(10).unwrap().is_empty());
+        assert!(store
+            .claim_next_job("another-worker", T2, T3)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .list_jobs("meeting-1")
+                .unwrap()
+                .iter()
+                .find(|job| job.definition.id == "privacy-pending")
+                .unwrap()
+                .state,
+            JobState::Cancelled
+        );
+        assert!(matches!(
+            store.enqueue_job(&job("late-job", "late-job", 2), T2),
+            Err(MeetingStoreError::DeletionInProgress { .. })
+        ));
+
+        let finished = store
+            .finish_job(
+                &running.definition.id,
+                running.lease_token.as_deref().unwrap(),
+                &JobFinish::Succeeded {
+                    result: json!({"title": "must not survive"}),
+                },
+                T3,
+            )
+            .unwrap();
+        assert_eq!(finished.state, JobState::Cancelled);
+        assert!(finished.result.is_none());
+        assert_eq!(
+            store.deletion("meeting-1").unwrap().unwrap().stage,
+            MeetingDeletionStage::FilesPending
+        );
+        store.mark_deletion_files_removed("meeting-1", T3).unwrap();
+        store
+            .remove_deletion_database_authority("meeting-1", T3)
+            .unwrap();
+        assert_eq!(
+            store.deletion("meeting-1").unwrap().unwrap().stage,
+            MeetingDeletionStage::MarkerCleanupPending
+        );
+        store.complete_deletion("meeting-1").unwrap();
+        assert!(matches!(
+            store.get_meeting("meeting-1"),
+            Err(MeetingStoreError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn audio_deletion_rejects_transcription_recovery_holds_and_replays_independently() {
         let store = store();
         let recording = start_recording(&store);
         let chunk = AudioChunkDraft {
@@ -2499,47 +3164,126 @@ mod tests {
             relative_path: "meeting-1/audio/mic/00000000.f32le".into(),
         };
         store.stage_audio_chunk(&chunk, T1).unwrap();
-        store.commit_audio_chunk(&chunk.id, T2).unwrap();
-        store
-            .apply_transcript_batch(&batch(
-                "privacy-transcript",
-                0,
-                vec![TranscriptChange::UpsertSegment {
-                    segment: segment("privacy-segment", "private discussion"),
-                }],
-            ))
-            .unwrap();
-        store
-            .enqueue_job(&job("privacy-job", "privacy", 2), T2)
-            .unwrap();
-
-        assert_eq!(store.delete_audio_chunks("meeting-1").unwrap(), 1);
-        assert!(store
-            .recover_after_restart(T3)
-            .unwrap()
-            .staged_audio_chunks
-            .is_empty());
-
         let failed = store
             .transition_meeting(
                 "meeting-1",
-                store.get_meeting("meeting-1").unwrap().revision,
+                recording.revision,
                 MeetingStatus::Failed,
-                T3,
+                T2,
                 Some(&MeetingFailure {
-                    code: "privacy-test".into(),
-                    message: "terminal".into(),
+                    code: "recovery".into(),
+                    message: "terminal with staged audio".into(),
                     retryable: false,
                 }),
             )
             .unwrap();
         assert_eq!(failed.status, MeetingStatus::Failed);
-        store.delete_meeting("meeting-1").unwrap();
-        assert!(matches!(
-            store.get_meeting("meeting-1"),
-            Err(MeetingStoreError::NotFound { .. })
-        ));
-        assert!(store.list_jobs("meeting-1").is_err());
+        assert!(store
+            .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T2)
+            .unwrap_err()
+            .to_string()
+            .contains("transcription recovery"));
+
+        store.commit_audio_chunk(&chunk.id, T2).unwrap();
+        let mut transcription = job("repair-job", "repair", 2);
+        transcription.kind = FollowUpJobKind::Custom("transcription".into());
+        store.enqueue_job(&transcription, T2).unwrap();
+        assert!(store
+            .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T2)
+            .unwrap_err()
+            .to_string()
+            .contains("transcription recovery"));
+        store.cancel_job("repair-job", T2).unwrap();
+        store
+            .enqueue_job(&job("summary-job", "summary", 2), T2)
+            .unwrap();
+        let deletion = store
+            .begin_deletion("meeting-1", MeetingDeletionMode::Audio, T2)
+            .unwrap();
+        assert_eq!(deletion.stage, MeetingDeletionStage::FilesPending);
+        assert_eq!(
+            store
+                .claim_next_job("summary-worker", T2, T3)
+                .unwrap()
+                .unwrap()
+                .definition
+                .id,
+            "summary-job"
+        );
+        store.mark_deletion_files_removed("meeting-1", T3).unwrap();
+        store
+            .remove_deletion_database_authority("meeting-1", T3)
+            .unwrap();
+        store.complete_deletion("meeting-1").unwrap();
+        assert_eq!(
+            store.get_meeting("meeting-1").unwrap().status,
+            MeetingStatus::Failed
+        );
+        assert!(store
+            .recover_after_restart(T3)
+            .unwrap()
+            .staged_audio_chunks
+            .is_empty());
+    }
+
+    #[test]
+    fn deletion_journal_survives_every_database_boundary_and_meeting_cascade() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("meetings.sqlite");
+        {
+            let store = MeetingStore::open(&path).unwrap();
+            let recording = start_recording(&store);
+            store
+                .transition_meeting(
+                    "meeting-1",
+                    recording.revision,
+                    MeetingStatus::Failed,
+                    T2,
+                    Some(&MeetingFailure {
+                        code: "terminal".into(),
+                        message: "ready".into(),
+                        retryable: false,
+                    }),
+                )
+                .unwrap();
+            store
+                .begin_deletion("meeting-1", MeetingDeletionMode::All, T2)
+                .unwrap();
+        }
+        {
+            let store = MeetingStore::open(&path).unwrap();
+            assert_eq!(
+                store.pending_deletions().unwrap()[0].stage,
+                MeetingDeletionStage::FilesPending
+            );
+            store.mark_deletion_files_removed("meeting-1", T3).unwrap();
+        }
+        {
+            let store = MeetingStore::open(&path).unwrap();
+            assert_eq!(
+                store.pending_deletions().unwrap()[0].stage,
+                MeetingDeletionStage::DatabasePending
+            );
+            store
+                .remove_deletion_database_authority("meeting-1", T3)
+                .unwrap();
+        }
+        {
+            let store = MeetingStore::open(&path).unwrap();
+            assert!(matches!(
+                store.get_meeting("meeting-1"),
+                Err(MeetingStoreError::DeletionInProgress { .. })
+            ));
+            assert_eq!(
+                store.pending_deletions().unwrap()[0].stage,
+                MeetingDeletionStage::MarkerCleanupPending
+            );
+            store.complete_deletion("meeting-1").unwrap();
+            assert!(matches!(
+                store.get_meeting("meeting-1"),
+                Err(MeetingStoreError::NotFound { .. })
+            ));
+        }
     }
 
     #[test]

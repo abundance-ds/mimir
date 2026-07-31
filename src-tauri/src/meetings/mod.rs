@@ -27,7 +27,10 @@ pub use model::{
     TranscriptGapReason, TranscriptGapRecord, TranscriptRevision, TranscriptSegmentInput,
     TranscriptSegmentRecord, TranscriptSnapshot,
 };
-pub use store::{MeetingStore, MeetingStoreError, CURRENT_SCHEMA_VERSION};
+pub use store::{
+    MeetingDeletion, MeetingDeletionMode, MeetingDeletionStage, MeetingStore, MeetingStoreError,
+    CURRENT_SCHEMA_VERSION,
+};
 pub use transcript::{
     ProviderTranscriptFrame, TranscriptNormalization, TranscriptNormalizer,
     TranscriptNormalizerError,

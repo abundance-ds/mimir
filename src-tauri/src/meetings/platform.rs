@@ -17,7 +17,7 @@ use super::{
         MeetingDeleteMode, MeetingExport, MeetingExportFormat, MeetingModel, MeetingPermissions,
         MeetingPlatformPort, MeetingPlatformProjection, MeetingUpdatePatch,
     },
-    MeetingStore,
+    MeetingDeletionMode as StoreDeletionMode, MeetingDeletionStage, MeetingStore,
 };
 use crate::persistence::{
     ensure_private_directory, ensure_private_subdirectory, load_json_optional_quarantining,
@@ -1235,6 +1235,8 @@ struct NativeMeetingPlatformInner {
     changes: Arc<dyn MeetingPlatformChangeSink>,
     operation: Mutex<()>,
     diagnostics: Arc<Mutex<Vec<String>>>,
+    #[cfg(test)]
+    deletion_fault: Mutex<Option<&'static str>>,
 }
 
 #[derive(Clone)]
@@ -1274,6 +1276,8 @@ impl NativeMeetingPlatform {
                 changes,
                 operation: Mutex::new(()),
                 diagnostics,
+                #[cfg(test)]
+                deletion_fault: Mutex::new(None),
             }),
         };
         // Load once during construction so corruption is quarantined before
@@ -1394,6 +1398,10 @@ impl NativeMeetingPlatform {
                     })?
                     .with_timezone(&Utc);
                 if timestamp <= cutoff {
+                    self.inner
+                        .store
+                        .begin_deletion(&meeting.id, StoreDeletionMode::Audio, &now.to_rfc3339())
+                        .map_err(|error| error.to_string())?;
                     self.delete_meeting_files(&meeting.id, MeetingDeleteMode::Audio)?;
                     removed.push(meeting.id.clone());
                 }
@@ -1404,6 +1412,38 @@ impl NativeMeetingPlatform {
             before = page.next_before;
         }
         Ok(removed)
+    }
+
+    /// Replay every incomplete privacy deletion. The independent SQLite
+    /// journal survives both file removal and the meeting-row cascade, so an
+    /// ordinary launch can resume at the first unfinished durable boundary.
+    pub fn recover_pending_deletions(&self) -> Result<Vec<String>, String> {
+        let _operation = lock(&self.inner.operation)?;
+        let deletions = self
+            .inner
+            .store
+            .pending_deletions()
+            .map_err(|error| error.to_string())?;
+        let mut completed = Vec::new();
+        for deletion in deletions {
+            let refreshed = self
+                .inner
+                .store
+                .refresh_deletion(&deletion.meeting_id, &Utc::now().to_rfc3339())
+                .map_err(|error| error.to_string())?;
+            if refreshed.stage == MeetingDeletionStage::WaitingForJobs {
+                continue;
+            }
+            self.drive_deletion_locked(
+                &deletion.meeting_id,
+                match deletion.mode {
+                    StoreDeletionMode::Audio => MeetingDeleteMode::Audio,
+                    StoreDeletionMode::All => MeetingDeleteMode::All,
+                },
+            )?;
+            completed.push(deletion.meeting_id);
+        }
+        Ok(completed)
     }
 
     fn load_config(&self) -> Result<MeetingConfig, String> {
@@ -1501,51 +1541,160 @@ impl NativeMeetingPlatform {
         meeting_id: &str,
         mode: MeetingDeleteMode,
     ) -> Result<(), String> {
-        validate_component(meeting_id, "meeting id")?;
-        let meeting_root = safe_direct_child(&self.inner.paths.meetings_root, meeting_id)?;
-        if meeting_root.exists() {
-            reject_symlink(&meeting_root)?;
-        }
-        if mode == MeetingDeleteMode::All {
-            let mut content = self.load_content(meeting_id)?;
-            content.deleted = true;
-            self.save_content(meeting_id, &content)?;
-            if meeting_root.exists() {
-                fs::remove_dir_all(&meeting_root).map_err(|error| {
-                    format!("Could not delete meeting files for '{meeting_id}': {error}")
-                })?;
-                sync_directory(&self.inner.paths.meetings_root)?;
-            }
-            self.inner
+        let result = self.drive_deletion_locked(meeting_id, mode);
+        if let Err(error) = &result {
+            if self
+                .inner
                 .store
-                .delete_meeting(meeting_id)
-                .map_err(|error| format!("Could not delete meeting database record: {error}"))?;
-            let content_path = self.content_path(meeting_id)?;
-            remove_path_without_following(&content_path)?;
-            sync_directory(&self.inner.paths.content_root)?;
-            return Ok(());
+                .deletion(meeting_id)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                let _ = self.inner.store.record_deletion_error(
+                    meeting_id,
+                    error,
+                    &Utc::now().to_rfc3339(),
+                );
+            }
+        }
+        result
+    }
+
+    fn drive_deletion_locked(
+        &self,
+        meeting_id: &str,
+        mode: MeetingDeleteMode,
+    ) -> Result<(), String> {
+        validate_component(meeting_id, "meeting id")?;
+        let expected_mode = match mode {
+            MeetingDeleteMode::Audio => StoreDeletionMode::Audio,
+            MeetingDeleteMode::All => StoreDeletionMode::All,
+        };
+        let mut deletion = self
+            .inner
+            .store
+            .deletion(meeting_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| {
+                "Meeting deletion must be registered in the durable journal before files are removed"
+                    .to_string()
+            })?;
+        if deletion.mode != expected_mode {
+            return Err(format!(
+                "Meeting deletion mode changed from {} to {}",
+                match deletion.mode {
+                    StoreDeletionMode::Audio => "audio",
+                    StoreDeletionMode::All => "all",
+                },
+                match expected_mode {
+                    StoreDeletionMode::Audio => "audio",
+                    StoreDeletionMode::All => "all",
+                }
+            ));
+        }
+        deletion = self
+            .inner
+            .store
+            .refresh_deletion(meeting_id, &Utc::now().to_rfc3339())
+            .map_err(|error| error.to_string())?;
+        if deletion.stage == MeetingDeletionStage::WaitingForJobs {
+            return Err(format!(
+                "Meeting deletion is waiting for {} running follow-up job(s) to finish",
+                deletion.running_jobs
+            ));
         }
 
-        for name in ["audio", "microphone", "system"] {
-            let path = meeting_root.join(name);
-            remove_path_without_following(&path)?;
+        let meeting_root = safe_direct_child(&self.inner.paths.meetings_root, meeting_id)?;
+        if deletion.stage == MeetingDeletionStage::FilesPending {
+            if mode == MeetingDeleteMode::All {
+                self.persist_deleted_content_marker(meeting_id)?;
+                self.maybe_fail_deletion("after-content-hidden")?;
+                remove_path_without_following(&meeting_root)?;
+                sync_directory(&self.inner.paths.meetings_root)?;
+            } else {
+                for name in ["audio", "microphone", "system"] {
+                    remove_path_without_following(&meeting_root.join(name))?;
+                }
+                for name in [
+                    "recording.wav",
+                    "recording.flac",
+                    "recording.m4a",
+                    "recording.aac",
+                ] {
+                    remove_path_without_following(&meeting_root.join(name))?;
+                }
+                if meeting_root.exists() {
+                    sync_directory(&meeting_root)?;
+                }
+            }
+            self.maybe_fail_deletion("after-files-removed")?;
+            deletion = self
+                .inner
+                .store
+                .mark_deletion_files_removed(meeting_id, &Utc::now().to_rfc3339())
+                .map_err(|error| error.to_string())?;
+            self.maybe_fail_deletion("after-files-stage")?;
         }
-        for name in [
-            "recording.wav",
-            "recording.flac",
-            "recording.m4a",
-            "recording.aac",
-        ] {
-            remove_path_without_following(&meeting_root.join(name))?;
+
+        if deletion.stage == MeetingDeletionStage::DatabasePending {
+            deletion = self
+                .inner
+                .store
+                .remove_deletion_database_authority(meeting_id, &Utc::now().to_rfc3339())
+                .map_err(|error| error.to_string())?;
+            self.maybe_fail_deletion("after-database-removed")?;
         }
-        if meeting_root.exists() {
-            sync_directory(&meeting_root)?;
+
+        if deletion.stage == MeetingDeletionStage::MarkerCleanupPending {
+            if mode == MeetingDeleteMode::All {
+                remove_path_without_following(&self.content_path(meeting_id)?)?;
+                sync_directory(&self.inner.paths.content_root)?;
+            }
+            self.maybe_fail_deletion("after-marker-cleanup")?;
+            self.inner
+                .store
+                .complete_deletion(meeting_id)
+                .map_err(|error| error.to_string())?;
         }
-        self.inner
-            .store
-            .delete_audio_chunks(meeting_id)
-            .map_err(|error| format!("Could not delete meeting audio metadata: {error}"))?;
         Ok(())
+    }
+
+    fn persist_deleted_content_marker(&self, meeting_id: &str) -> Result<(), String> {
+        let path = self.content_path(meeting_id)?;
+        let mut content = match load_json_optional_quarantining::<PersistedMeetingContent>(&path)
+            .map_err(|error| error.to_string())?
+        {
+            QuarantinedLoad::Loaded(content) => content,
+            QuarantinedLoad::Missing | QuarantinedLoad::Quarantined { .. } => {
+                PersistedMeetingContent::default()
+            }
+        };
+        content.deleted = true;
+        self.save_content(meeting_id, &content)?;
+        sync_directory(&self.inner.paths.content_root)
+    }
+
+    fn maybe_fail_deletion(&self, point: &'static str) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            let mut fault = lock(&self.inner.deletion_fault)?;
+            if fault
+                .as_ref()
+                .is_some_and(|configured| *configured == point)
+            {
+                fault.take();
+                return Err(format!("injected deletion fault at {point}"));
+            }
+        }
+        #[cfg(not(test))]
+        let _ = point;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn inject_deletion_fault(&self, point: &'static str) {
+        *self.inner.deletion_fault.lock().unwrap() = Some(point);
     }
 
     fn export_markdown(&self, meeting_id: &str) -> Result<MeetingExport, String> {
@@ -1839,6 +1988,17 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
 
     fn update_content(&self, meeting_id: &str, patch: &MeetingUpdatePatch) -> Result<(), String> {
         let _operation = lock(&self.inner.operation)?;
+        if self
+            .inner
+            .store
+            .deletion(meeting_id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|deletion| deletion.mode == StoreDeletionMode::All)
+        {
+            return Err(format!(
+                "Meeting '{meeting_id}' is being permanently deleted"
+            ));
+        }
         let mut content = self.load_content(meeting_id)?;
         if content.deleted {
             return Err(format!("Meeting '{meeting_id}' has been deleted"));
@@ -1866,6 +2026,17 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
             return Err("Knowledge-graph decision must be create-draft, not-now, or never".into());
         }
         let _operation = lock(&self.inner.operation)?;
+        if self
+            .inner
+            .store
+            .deletion(meeting_id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|deletion| deletion.mode == StoreDeletionMode::All)
+        {
+            return Err(format!(
+                "Meeting '{meeting_id}' is being permanently deleted"
+            ));
+        }
         let mut content = self.load_content(meeting_id)?;
         if content.deleted {
             return Err(format!("Meeting '{meeting_id}' has been deleted"));
@@ -2982,6 +3153,14 @@ mod tests {
         }
 
         fixture
+            .store
+            .begin_deletion(
+                "meeting-1",
+                StoreDeletionMode::All,
+                &Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        fixture
             .platform
             .delete_meeting("meeting-1", MeetingDeleteMode::All)
             .unwrap();
@@ -2990,6 +3169,138 @@ mod tests {
             Err(crate::meetings::MeetingStoreError::NotFound { .. })
         ));
         assert!(!fixture.paths.content_root.join("meeting-1.json").exists());
+    }
+
+    #[test]
+    fn mtg_153_permanent_deletion_replays_every_fault_boundary_without_orphans() {
+        for fault in [
+            "after-content-hidden",
+            "after-files-removed",
+            "after-files-stage",
+            "after-database-removed",
+            "after-marker-cleanup",
+        ] {
+            let fixture = fixture();
+            create_meeting(&fixture, "meeting-1");
+            complete_meeting(&fixture, "meeting-1");
+            let meeting_root = fixture.paths.meetings_root.join("meeting-1");
+            fs::create_dir_all(meeting_root.join("audio")).unwrap();
+            fs::write(meeting_root.join("audio/0001.raw"), b"private audio").unwrap();
+            fixture
+                .platform
+                .update_content(
+                    "meeting-1",
+                    &MeetingUpdatePatch {
+                        summary: Some("private summary".into()),
+                        ..MeetingUpdatePatch::default()
+                    },
+                )
+                .unwrap();
+            fixture
+                .store
+                .begin_deletion("meeting-1", StoreDeletionMode::All, NOW)
+                .unwrap();
+            fixture.platform.inject_deletion_fault(fault);
+
+            let error = fixture
+                .platform
+                .delete_meeting("meeting-1", MeetingDeleteMode::All)
+                .unwrap_err();
+            assert!(error.contains(fault), "{fault}: {error}");
+            assert!(
+                fixture.store.deletion("meeting-1").unwrap().is_some(),
+                "{fault} erased the recovery journal"
+            );
+
+            assert_eq!(
+                fixture.platform.recover_pending_deletions().unwrap(),
+                ["meeting-1"]
+            );
+            assert!(fixture.store.deletion("meeting-1").unwrap().is_none());
+            assert!(matches!(
+                fixture.store.get_meeting("meeting-1"),
+                Err(crate::meetings::MeetingStoreError::NotFound { .. })
+            ));
+            assert!(!meeting_root.exists());
+            assert!(!fixture.paths.content_root.join("meeting-1.json").exists());
+        }
+    }
+
+    #[test]
+    fn mtg_153_audio_only_deletion_replays_files_database_and_cleanup_faults() {
+        for fault in [
+            "after-files-removed",
+            "after-files-stage",
+            "after-database-removed",
+            "after-marker-cleanup",
+        ] {
+            let fixture = fixture();
+            create_meeting(&fixture, "meeting-1");
+            let detected = fixture.store.get_meeting("meeting-1").unwrap();
+            let recording = fixture
+                .store
+                .transition_meeting(
+                    "meeting-1",
+                    detected.revision,
+                    super::super::MeetingStatus::Recording,
+                    NOW,
+                    None,
+                )
+                .unwrap();
+            let meeting_root = fixture.paths.meetings_root.join("meeting-1");
+            fs::create_dir_all(meeting_root.join("audio")).unwrap();
+            let audio_path = meeting_root.join("audio/0001.f32le");
+            fs::write(&audio_path, b"private audio").unwrap();
+            let bytes = fs::read(&audio_path).unwrap();
+            let chunk = crate::meetings::AudioChunkDraft {
+                id: "audio-delete-chunk".into(),
+                meeting_id: "meeting-1".into(),
+                channel_id: "microphone".into(),
+                sequence: 0,
+                start_ms: 0,
+                end_ms: 1_000,
+                sample_count: 16_000,
+                byte_len: bytes.len() as u64,
+                sha256: Sha256Digest::calculate(Cursor::new(&bytes))
+                    .unwrap()
+                    .to_string(),
+                relative_path: "meeting-1/audio/0001.f32le".into(),
+            };
+            fixture.store.stage_audio_chunk(&chunk, NOW).unwrap();
+            fixture.store.commit_audio_chunk(&chunk.id, NOW).unwrap();
+            let mut meeting = recording;
+            for status in [
+                super::super::MeetingStatus::Stopping,
+                super::super::MeetingStatus::Finalizing,
+                super::super::MeetingStatus::Completed,
+            ] {
+                meeting = fixture
+                    .store
+                    .transition_meeting("meeting-1", meeting.revision, status, NOW, None)
+                    .unwrap();
+            }
+            fixture
+                .store
+                .begin_deletion("meeting-1", StoreDeletionMode::Audio, NOW)
+                .unwrap();
+            fixture.platform.inject_deletion_fault(fault);
+            assert!(fixture
+                .platform
+                .delete_meeting("meeting-1", MeetingDeleteMode::Audio)
+                .unwrap_err()
+                .contains(fault));
+
+            assert_eq!(
+                fixture.platform.recover_pending_deletions().unwrap(),
+                ["meeting-1"]
+            );
+            assert!(!audio_path.exists());
+            assert!(fixture.store.deletion("meeting-1").unwrap().is_none());
+            assert_eq!(
+                fixture.store.get_meeting("meeting-1").unwrap().status,
+                super::super::MeetingStatus::Completed
+            );
+        }
     }
 
     #[test]

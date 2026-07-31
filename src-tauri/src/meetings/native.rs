@@ -223,6 +223,10 @@ pub fn bootstrap_native_meeting_engine(
         TauriMeetingEventSink::new(app) as Arc<dyn MeetingEventSink>,
     )
     .map_err(|error| error.to_string())?;
+    let recovered_deletions = platform.recover_pending_deletions()?;
+    if !recovered_deletions.is_empty() {
+        MeetingPlatformChangeSink::changed(changes.as_ref(), "deletion-recovery");
+    }
     let retention = RetentionMaintenance::start(
         Arc::clone(&platform),
         changes as Arc<dyn MeetingPlatformChangeSink>,

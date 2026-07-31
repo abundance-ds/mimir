@@ -11,9 +11,9 @@ use super::store::{
 };
 use super::{
     AudioChannelDraft, AudioChannelKind, FollowUpJob, FollowUpJobDraft, FollowUpJobKind, JobFinish,
-    JobState, MeetingDraft, MeetingFailure, MeetingOrigin, MeetingRecord, MeetingStatus,
-    MeetingStore, MeetingStoreError, RecoveryReport, TranscriptBatch, TranscriptGapRecord,
-    TranscriptSegmentRecord,
+    JobState, MeetingDeletionMode as StoreDeletionMode, MeetingDeletionStage, MeetingDraft,
+    MeetingFailure, MeetingOrigin, MeetingRecord, MeetingStatus, MeetingStore, MeetingStoreError,
+    RecoveryReport, TranscriptBatch, TranscriptGapRecord, TranscriptSegmentRecord,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -1436,6 +1436,28 @@ impl MeetingRuntime {
             self.inner
                 .store
                 .finish_job(job_id, lease_token, &outcome, &self.inner.clock.now())?;
+        if job.state == JobState::Cancelled {
+            if let Some(deletion) = self
+                .inner
+                .store
+                .deletion(&job.definition.meeting_id)?
+                .filter(|deletion| {
+                    deletion.mode == StoreDeletionMode::All
+                        && deletion.stage == MeetingDeletionStage::FilesPending
+                })
+            {
+                if let Err(message) = self
+                    .inner
+                    .platform
+                    .delete_meeting(&deletion.meeting_id, MeetingDeleteMode::All)
+                {
+                    self.set_diagnostic(format!(
+                        "Permanent deletion for meeting '{}' will resume at next launch: {message}",
+                        deletion.meeting_id
+                    ))?;
+                }
+            }
+        }
         if job.state == JobState::Succeeded && job.definition.kind == FollowUpJobKind::Summary {
             let config = self.platform_projection()?.config;
             if config.kg_prompt == "always-draft" {
@@ -1517,15 +1539,23 @@ impl MeetingRuntime {
                 "stop and finalize the active meeting before deleting it".into(),
             ));
         }
-        self.inner.store.get_meeting(meeting_id)?;
-        if mode == MeetingDeleteMode::All {
-            for job in self.inner.store.list_jobs(meeting_id)? {
-                if matches!(job.state, JobState::Pending | JobState::Running) {
-                    self.inner
-                        .store
-                        .cancel_job(&job.definition.id, &self.inner.clock.now())?;
-                }
+        if self.inner.store.deletion(meeting_id)?.is_none() {
+            self.inner.store.get_meeting(meeting_id)?;
+        }
+        let deletion = self.inner.store.begin_deletion(
+            meeting_id,
+            match mode {
+                MeetingDeleteMode::Audio => StoreDeletionMode::Audio,
+                MeetingDeleteMode::All => StoreDeletionMode::All,
+            },
+            &self.inner.clock.now(),
+        )?;
+        if deletion.stage == MeetingDeletionStage::WaitingForJobs {
+            return Err(MeetingStoreError::DeletionBlocked {
+                meeting_id: meeting_id.into(),
+                running_jobs: deletion.running_jobs,
             }
+            .into());
         }
         self.inner
             .platform
@@ -3341,6 +3371,87 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("destination unavailable"));
         assert!(fixture.platform.state.lock().unwrap().exports.is_empty());
+    }
+
+    #[test]
+    fn mtg_153_running_activity_only_releases_deletion_wait_and_cannot_recreate_content() {
+        let fixture = make_fixture();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "deletion-authority"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        fixture.runtime.stop(&meeting_id).unwrap();
+        let running = fixture
+            .runtime
+            .claim_next_job("activity-worker", LEASE_END)
+            .unwrap()
+            .unwrap();
+
+        let error = fixture
+            .runtime
+            .delete(&meeting_id, MeetingDeleteMode::All)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            MeetingRuntimeError::Store(MeetingStoreError::DeletionBlocked {
+                running_jobs: 1,
+                ..
+            })
+        ));
+        assert!(fixture
+            .runtime
+            .update_meeting(
+                &meeting_id,
+                MeetingUpdatePatch {
+                    title: Some("late Activity title".into()),
+                    summary: Some("late Activity summary".into()),
+                    tags: None,
+                },
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("being permanently deleted"));
+        assert!(!fixture
+            .platform
+            .state
+            .lock()
+            .unwrap()
+            .contents
+            .contains_key(&meeting_id));
+
+        fixture
+            .runtime
+            .finish_job(
+                &running.definition.id,
+                running.lease_token.as_deref().unwrap(),
+                JobFinish::Succeeded {
+                    result: json!({
+                        "title": "must be discarded",
+                        "summary": "must be discarded"
+                    }),
+                },
+            )
+            .unwrap();
+        let job = fixture
+            .store
+            .list_jobs(&meeting_id)
+            .unwrap()
+            .into_iter()
+            .find(|job| job.definition.id == running.definition.id)
+            .unwrap();
+        assert_eq!(job.state, JobState::Cancelled);
+        assert!(job.result.is_none());
+        assert_eq!(
+            fixture.store.deletion(&meeting_id).unwrap().unwrap().stage,
+            MeetingDeletionStage::FilesPending
+        );
+        let state = fixture.platform.state.lock().unwrap();
+        assert_eq!(
+            state.deleted,
+            [(meeting_id.clone(), MeetingDeleteMode::All)]
+        );
+        assert!(state.contents.get(&meeting_id).unwrap().deleted);
     }
 
     #[test]
