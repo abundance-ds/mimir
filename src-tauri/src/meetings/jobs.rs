@@ -399,50 +399,37 @@ fn execute_transcription_repair(
     inner: &MeetingJobWorkerInner,
     job: &FollowUpJob,
 ) -> Result<Value, String> {
-    let snapshot = inner
-        .runtime
-        .snapshot()
-        .map_err(|error| format!("Could not load Scribe transcription settings: {error}"))?;
-    let (route, model) = if snapshot.config.transcription_mode == "custom" {
-        (
-            snapshot.config.custom_url.clone(),
-            snapshot.config.custom_model.clone(),
-        )
-    } else {
-        ("local".into(), snapshot.config.local_model.clone())
-    };
+    // Repair is bound to the exact route and model persisted from the native
+    // consent grant. Looking at current global settings here would let old
+    // meeting audio cross a disclosure boundary after Local -> custom or
+    // endpoint-A -> endpoint-B configuration changes.
+    let route = required_job_payload_string(job, "transcriptionRoute")?;
+    let model = required_job_payload_string(job, "transcriptionModel")?;
     let run_id = format!("repair-{}", job.definition.id);
     inner.transcription.start(&TranscriptionStart {
         meeting_id: job.definition.meeting_id.clone(),
         run_id: run_id.clone(),
-        route,
-        model,
+        route: route.into(),
+        model: model.into(),
     })?;
     let current = inner
         .runtime
-        .snapshot()
-        .map_err(|error| format!("Could not refresh Scribe recovery state: {error}"))?
-        .meetings
-        .into_iter()
-        .find(|meeting| meeting.id == job.definition.meeting_id)
-        .ok_or_else(|| {
-            "The interrupted meeting disappeared during transcription repair".to_string()
-        })?;
+        .meeting(&job.definition.meeting_id)
+        .map_err(|error| format!("Could not refresh Scribe recovery state: {error}"))?;
     let batch = inner.transcription.finalize(&TranscriptionFinalize {
         meeting_id: job.definition.meeting_id.clone(),
         run_id,
         base_revision: current.transcript_revision,
         observed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
     })?;
-    let completed = inner
+    inner
         .runtime
         .complete_transcription_retry(&job.definition.meeting_id, batch)
         .map_err(|error| format!("Could not commit the repaired transcript: {error}"))?;
-    let repaired = completed
-        .meetings
-        .iter()
-        .find(|meeting| meeting.id == job.definition.meeting_id)
-        .ok_or_else(|| "The repaired meeting is missing from its snapshot".to_string())?;
+    let repaired = inner
+        .runtime
+        .meeting(&job.definition.meeting_id)
+        .map_err(|error| format!("Could not reload the repaired meeting: {error}"))?;
     Ok(json!({
         "transcriptRevision": repaired.transcript_revision,
         "segmentCount": repaired.segment_count,
@@ -468,12 +455,8 @@ fn require_terminal_job_transcript(
         .ok_or_else(|| "Meeting follow-up job is missing its transcript revision".to_string())?;
     let meeting = inner
         .runtime
-        .snapshot()
-        .map_err(|error| format!("Could not verify the meeting transcript authority: {error}"))?
-        .meetings
-        .into_iter()
-        .find(|meeting| meeting.id == job.definition.meeting_id)
-        .ok_or_else(|| "Meeting follow-up target no longer exists".to_string())?;
+        .meeting(&job.definition.meeting_id)
+        .map_err(|error| format!("Could not verify the meeting transcript authority: {error}"))?;
     if !is_exact_terminal_transcript(&meeting, requested_revision) {
         return Err(
             "Meeting follow-up requires the exact non-empty terminal transcript revision".into(),
@@ -488,6 +471,18 @@ fn is_exact_terminal_transcript(meeting: &MeetingView, requested_revision: u64) 
         && meeting.transcript_revision == requested_revision
         && meeting.segment_count > 0
         && meeting.transcript_all_final
+}
+
+fn required_job_payload_string<'a>(job: &'a FollowUpJob, field: &str) -> Result<&'a str, String> {
+    job.definition
+        .payload
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!("Meeting transcription repair is missing its immutable consented {field}")
+        })
 }
 
 fn prepare_hook_context(
@@ -1462,6 +1457,31 @@ mod tests {
         meeting.transcript_all_final = true;
         meeting.segment_count = 0;
         assert!(!is_exact_terminal_transcript(&meeting, 7));
+    }
+
+    #[test]
+    fn transcription_repair_requires_the_immutable_consented_route_and_model() {
+        let mut job = hook_job();
+        job.definition.kind = FollowUpJobKind::Custom("transcription".into());
+        job.definition.payload = json!({
+            "transcriptionRoute": "https://endpoint-a.example/v1/listen",
+            "transcriptionModel": "consented-model-a"
+        });
+
+        assert_eq!(
+            required_job_payload_string(&job, "transcriptionRoute").unwrap(),
+            "https://endpoint-a.example/v1/listen"
+        );
+        assert_eq!(
+            required_job_payload_string(&job, "transcriptionModel").unwrap(),
+            "consented-model-a"
+        );
+        job.definition.payload["transcriptionRoute"] = Value::String(" ".into());
+        assert!(required_job_payload_string(&job, "transcriptionRoute").is_err());
+        assert_eq!(
+            required_job_payload_string(&job, "transcriptionModel").unwrap(),
+            "consented-model-a"
+        );
     }
 
     #[test]

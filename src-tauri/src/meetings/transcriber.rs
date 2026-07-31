@@ -202,8 +202,8 @@ pub struct LocalFinalizeCommand {
 pub trait LocalTranscriber: Send + Sync {
     fn verify(&self, model_id: &str) -> Result<VerifiedLocalRuntime, String>;
 
-    /// Runs until `context.finalize` receives a command. Success requires the
-    /// runner to have emitted at least one final segment.
+    /// Runs until `context.finalize` receives a command. A successful silent
+    /// run may emit no segments; any emitted partial must still be resolved.
     fn run(&self, context: LocalTranscriptionContext<'_>) -> Result<(), String>;
 }
 
@@ -239,7 +239,6 @@ struct FinalizeCommand {
 
 struct WorkerCompletion {
     source: String,
-    final_segment_count: u64,
     unresolved_partial_count: usize,
 }
 
@@ -385,12 +384,6 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             .worker
             .join()
             .map_err(|_| "transcription worker panicked".to_string())??;
-        if completion.final_segment_count == 0 {
-            return Err(
-                "transcription provider completed without a final segment; delayed repair is required"
-                    .into(),
-            );
-        }
         if completion.unresolved_partial_count != 0 {
             return Err(format!(
                 "transcription provider completed with {} unresolved partial segment(s); delayed repair is required",
@@ -498,7 +491,6 @@ fn run_worker(
     }
     Ok(WorkerCompletion {
         source: source.into(),
-        final_segment_count: sink.final_segment_count(),
         unresolved_partial_count: sink.accumulator.unresolved_partial_count(),
     })
 }
@@ -1815,6 +1807,26 @@ mod tests {
         }
     }
 
+    struct SilentLocal;
+
+    impl LocalTranscriber for SilentLocal {
+        fn verify(&self, model_id: &str) -> Result<VerifiedLocalRuntime, String> {
+            Ok(VerifiedLocalRuntime {
+                runtime_id: "silent-test-runtime".into(),
+                runtime_version: "1".into(),
+                model_sha256: format!("verified-{model_id}"),
+            })
+        }
+
+        fn run(&self, context: LocalTranscriptionContext<'_>) -> Result<(), String> {
+            context
+                .finalize
+                .recv()
+                .map_err(|_| "silent test finalization channel closed".to_string())?;
+            Ok(())
+        }
+    }
+
     fn recording_store() -> Arc<MeetingStore> {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let created = store
@@ -1861,6 +1873,45 @@ mod tests {
             )
             .unwrap();
         store
+    }
+
+    #[test]
+    fn silent_local_meeting_emits_an_empty_terminal_batch() {
+        let temporary = TempDir::new().unwrap();
+        let store = recording_store();
+        let transcriber = NativeMeetingTranscriber::new(
+            Arc::clone(&store),
+            temporary.path(),
+            Arc::new(RuntimeRouteResolver),
+            Arc::new(NoMeetingCredential),
+            Arc::new(SilentLocal),
+            Arc::new(NoopTranscriptionChangeSink),
+        )
+        .unwrap();
+        let start = TranscriptionStart {
+            meeting_id: "meeting-1".into(),
+            run_id: "silent-run".into(),
+            route: "local".into(),
+            model: "whisper-small".into(),
+        };
+        transcriber.start(&start).unwrap();
+
+        let batch = transcriber
+            .finalize(&TranscriptionFinalize {
+                meeting_id: "meeting-1".into(),
+                run_id: "silent-run".into(),
+                base_revision: 0,
+                observed_at: "2026-07-30T10:05:00Z".into(),
+            })
+            .unwrap();
+
+        assert!(batch.marks_final);
+        assert!(batch.changes.is_empty());
+        assert_eq!(batch.base_revision, 0);
+        store.apply_transcript_batch(&batch).unwrap();
+        let overview = store.transcript_overview("meeting-1", 1).unwrap();
+        assert!(overview.is_final);
+        assert_eq!(overview.segment_count, 0);
     }
 
     #[test]

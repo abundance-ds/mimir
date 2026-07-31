@@ -1126,6 +1126,59 @@ pub fn run() {
                         api.prevent_exit();
                         let _ = main.emit("mimir://quit-requested", ());
                         let _ = main.set_focus();
+                    } else {
+                        // A recording deliberately survives destruction of the
+                        // renderer window. Dock/system Quit must therefore
+                        // remain guarded by native state even when no window
+                        // exists to receive the ordinary editor quit chain.
+                        let meetings = app_handle.state::<meetings::runtime::MeetingRuntime>();
+                        let active_meeting_id = meetings
+                            .snapshot()
+                            .map(|snapshot| snapshot.active_meeting_id)
+                            .unwrap_or_else(|error| {
+                                log::error!(
+                                    "Could not inspect Scribe before windowless Quit: {error}"
+                                );
+                                // Fail closed: recreate the UI rather than
+                                // silently abandoning potentially live audio.
+                                Some(String::new())
+                            });
+                        if let Some(meeting_id) = active_meeting_id {
+                            api.prevent_exit();
+                            let app = app_handle.clone();
+                            if let Err(error) = create_main_window(app_handle) {
+                                log::error!(
+                                    "Could not restore the main window for guarded Scribe Quit: {error}"
+                                );
+                            }
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let runtime =
+                                    app.state::<meetings::runtime::MeetingRuntime>();
+                                let result = if meeting_id.is_empty() {
+                                    Err("native meeting state could not be inspected".to_string())
+                                } else {
+                                    runtime.stop(&meeting_id).map(|_| ()).map_err(|error| {
+                                        format!(
+                                            "Could not durably stop Scribe during windowless Quit: {error}"
+                                        )
+                                    })
+                                };
+                                match result {
+                                    Ok(()) => app.exit(0),
+                                    Err(error) => {
+                                        log::error!("{error}");
+                                        if let Some(main) = app.get_webview_window("main") {
+                                            let _ = main.show();
+                                            let _ = main.set_focus();
+                                            let _ = main.emit(
+                                                "mimir://meeting-windowless-quit-failed",
+                                                error,
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
             }

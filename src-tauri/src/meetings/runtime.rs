@@ -333,6 +333,14 @@ pub trait MeetingCapturePort: Send + Sync {
     ) -> Result<(), String>;
 }
 
+/// Terminal health callback from the native capture supervisor.
+///
+/// This is intentionally separate from renderer events: a disk/device/driver
+/// failure must reach the durable runtime even when every window is closed.
+pub trait MeetingCaptureFailureSink: Send + Sync {
+    fn capture_failed(&self, meeting_id: &str, run_id: &str, message: &str);
+}
+
 pub trait MeetingTranscriptionPort: Send + Sync {
     fn start(&self, request: &TranscriptionStart) -> Result<(), String>;
 
@@ -602,11 +610,20 @@ impl MeetingRuntime {
         };
         for meeting_id in &recovery.interrupted_meeting_ids {
             let meeting = runtime.inner.store.get_meeting(meeting_id)?;
-            runtime.enqueue_transcription_retry(
+            if let Err(error) = runtime.enqueue_transcription_retry(
                 meeting_id,
                 meeting.transcript_revision,
                 "application restarted before transcript finalization",
-            )?;
+            ) {
+                // Recovery must never substitute today's provider selection
+                // for the route the human originally approved. Legacy or
+                // damaged records without that immutable disclosure remain
+                // safely interrupted and can still retain/export their audio.
+                runtime.set_diagnostic(format!(
+                    "Meeting '{meeting_id}' needs transcription recovery, but its original consented route is unavailable: {}",
+                    bounded_error(&error.to_string())
+                ))?;
+            }
         }
         if let Err(error) = runtime.inner.capture.recover(&recovery) {
             runtime.set_diagnostic(format!("Meeting audio recovery needs attention: {error}"))?;
@@ -890,11 +907,14 @@ impl MeetingRuntime {
                 })
                 .unwrap_or_else(|| json!({})),
         };
+        let (transcription_route, transcription_model) = transcription_route(&projection.config);
         let metadata = json!({
             "workspacePath": request.workspace_path.clone(),
             "sourceApp": candidate.map(|value| value.app_name.clone()),
             "consentConfirmed": true,
             "consentObservedAt": observed_at.clone(),
+            "transcriptionRoute": transcription_route,
+            "transcriptionModel": transcription_model,
             "retentionDays": projection.config.retention_days,
             "runId": run_id.clone(),
         });
@@ -912,6 +932,18 @@ impl MeetingRuntime {
             workspace_path: request.workspace_path.clone(),
             channels,
         };
+        // Publish the durable Recording state before opening native streams.
+        // If capture cannot start, the ordinary Recording -> Failed
+        // transition closes the attempt. This ordering ensures there is no
+        // fallible persistence boundary after a worker starts but before the
+        // runtime owns it.
+        let recording = self.inner.store.transition_meeting(
+            &meeting_id,
+            created.revision,
+            MeetingStatus::Recording,
+            &self.inner.clock.now(),
+            None,
+        )?;
         if let Err(message) = self.inner.capture.start(&capture_request) {
             let failure = MeetingFailure {
                 code: "capture-start-failed".into(),
@@ -920,7 +952,7 @@ impl MeetingRuntime {
             };
             self.inner.store.transition_meeting(
                 &meeting_id,
-                created.revision,
+                recording.revision,
                 MeetingStatus::Failed,
                 &self.inner.clock.now(),
                 Some(&failure),
@@ -928,15 +960,27 @@ impl MeetingRuntime {
             let _ = self.publish_unlocked("capture-failed", Some(meeting_id.clone()), Some(run_id));
             return Err(port_error("meeting capture start", message));
         }
-        let recording = self.inner.store.transition_meeting(
-            &meeting_id,
-            created.revision,
-            MeetingStatus::Recording,
-            &self.inner.clock.now(),
-            None,
-        )?;
 
-        let (route, model) = transcription_route(&projection.config);
+        let route = recording
+            .metadata
+            .get("transcriptionRoute")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "durable recording is missing its consented transcription route".into(),
+                )
+            })?
+            .to_string();
+        let model = recording
+            .metadata
+            .get("transcriptionModel")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "durable recording is missing its consented transcription model".into(),
+                )
+            })?
+            .to_string();
         let transcription_request = TranscriptionStart {
             meeting_id: meeting_id.clone(),
             run_id: run_id.clone(),
@@ -1137,6 +1181,12 @@ impl MeetingRuntime {
             }
         };
         let after_transcript = self.inner.store.get_meeting(meeting_id)?;
+        let has_final_speech = self
+            .inner
+            .store
+            .transcript_overview(meeting_id, 1)?
+            .segment_count
+            > 0;
         let completed = self.inner.store.transition_meeting(
             meeting_id,
             after_transcript.revision,
@@ -1147,7 +1197,7 @@ impl MeetingRuntime {
         *self.active()? = None;
 
         let projection = self.platform_projection()?;
-        if projection.config.summary_enabled {
+        if projection.config.summary_enabled && has_final_speech {
             self.enqueue_summary_job(
                 meeting_id,
                 applied.revision,
@@ -1193,6 +1243,87 @@ impl MeetingRuntime {
             "microphone-muted-changed",
             Some(meeting_id.into()),
             Some(active.run_id),
+        )
+    }
+
+    fn handle_capture_failure(
+        &self,
+        meeting_id: &str,
+        run_id: &str,
+        message: &str,
+    ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let active = self.active()?.clone();
+        let Some(active) = active else {
+            return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
+        };
+        if active.meeting_id != meeting_id || active.run_id != run_id {
+            // Late completion from a superseded native worker has no authority
+            // over the current session.
+            return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
+        }
+
+        // The worker has already ended. `stop` removes and joins its retained
+        // handle; its expected terminal error must not prevent transcript
+        // drainage or durable lifecycle repair.
+        let _ = self.inner.capture.stop(&CaptureStop {
+            meeting_id: meeting_id.into(),
+            run_id: run_id.into(),
+        });
+        let recording = self.inner.store.get_meeting(meeting_id)?;
+        let finalize = self.inner.transcription.finalize(&TranscriptionFinalize {
+            meeting_id: meeting_id.into(),
+            run_id: run_id.into(),
+            base_revision: recording.transcript_revision,
+            observed_at: self.inner.clock.now(),
+        });
+
+        let transcript_final = match finalize {
+            Ok(batch)
+                if batch.meeting_id == meeting_id
+                    && batch.base_revision == recording.transcript_revision
+                    && batch.marks_final =>
+            {
+                self.inner.store.apply_transcript_batch(&batch).is_ok()
+            }
+            _ => false,
+        };
+        let current = self.inner.store.get_meeting(meeting_id)?;
+        if transcript_final {
+            self.inner.store.transition_meeting(
+                meeting_id,
+                current.revision,
+                MeetingStatus::Failed,
+                &self.inner.clock.now(),
+                Some(&MeetingFailure {
+                    code: "capture-runtime-failed".into(),
+                    message: bounded_error(message),
+                    retryable: true,
+                }),
+            )?;
+        } else {
+            self.inner.store.transition_meeting(
+                meeting_id,
+                current.revision,
+                MeetingStatus::Interrupted,
+                &self.inner.clock.now(),
+                None,
+            )?;
+            self.enqueue_transcription_retry(
+                meeting_id,
+                current.transcript_revision,
+                "capture ended before transcript finalization",
+            )?;
+        }
+        *self.active()? = None;
+        self.set_diagnostic(format!(
+            "Recording stopped after a native capture failure: {}",
+            bounded_error(message)
+        ))?;
+        self.publish_unlocked(
+            "capture-runtime-failed",
+            Some(meeting_id.into()),
+            Some(run_id.into()),
         )
     }
 
@@ -1274,6 +1405,12 @@ impl MeetingRuntime {
         }
         self.inner.store.apply_transcript_batch(&batch)?;
         let persisted = self.inner.store.get_meeting(meeting_id)?;
+        let has_final_speech = self
+            .inner
+            .store
+            .transcript_overview(meeting_id, 1)?
+            .segment_count
+            > 0;
         self.inner.store.transition_meeting(
             meeting_id,
             persisted.revision,
@@ -1282,7 +1419,7 @@ impl MeetingRuntime {
             None,
         )?;
         let config = self.platform_projection()?.config;
-        if config.summary_enabled {
+        if config.summary_enabled && has_final_speech {
             self.enqueue_summary_job(
                 meeting_id,
                 persisted.transcript_revision,
@@ -1911,6 +2048,29 @@ impl MeetingRuntime {
         transcript_revision: u64,
         failure: &str,
     ) -> Result<FollowUpJob, MeetingRuntimeError> {
+        let meeting = self.inner.store.get_meeting(meeting_id)?;
+        let route = meeting
+            .metadata
+            .get("transcriptionRoute")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "meeting recovery has no immutable consented transcription route".into(),
+                )
+            })?;
+        let model = meeting
+            .metadata
+            .get("transcriptionModel")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "meeting recovery has no immutable consented transcription model".into(),
+                )
+            })?;
         let now = self.inner.clock.now();
         let idempotency_key = format!("{meeting_id}:transcription:{transcript_revision}");
         if let Some(existing) = self
@@ -1930,6 +2090,8 @@ impl MeetingRuntime {
             payload: json!({
                 "meetingId": meeting_id,
                 "transcriptRevision": transcript_revision,
+                "transcriptionRoute": route,
+                "transcriptionModel": model,
                 "failure": bounded_error(failure)
             }),
             max_attempts: DEFAULT_JOB_ATTEMPTS,
@@ -1969,6 +2131,20 @@ impl MeetingRuntime {
     fn set_diagnostic(&self, diagnostic: String) -> Result<(), MeetingRuntimeError> {
         *self.diagnostic()? = Some(diagnostic);
         Ok(())
+    }
+}
+
+impl MeetingCaptureFailureSink for MeetingRuntime {
+    fn capture_failed(&self, meeting_id: &str, run_id: &str, message: &str) {
+        if let Err(error) = self.handle_capture_failure(meeting_id, run_id, message) {
+            log::error!(
+                "Could not durably reconcile failed Scribe capture '{meeting_id}' ({run_id}): {error}"
+            );
+            let _ = self.set_diagnostic(format!(
+                "Scribe capture failed and needs restart recovery: {}",
+                bounded_error(message)
+            ));
+        }
     }
 }
 
@@ -2485,6 +2661,40 @@ mod tests {
         }
     }
 
+    struct AuthorityCheckingCapture {
+        store: Arc<MeetingStore>,
+        observed_status: Mutex<Option<MeetingStatus>>,
+    }
+
+    impl MeetingCapturePort for AuthorityCheckingCapture {
+        fn recover(&self, _report: &RecoveryReport) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn start(&self, request: &CaptureStart) -> Result<(), String> {
+            let status = self
+                .store
+                .get_meeting(&request.meeting_id)
+                .map_err(|error| error.to_string())?
+                .status;
+            *self.observed_status.lock().unwrap() = Some(status);
+            Ok(())
+        }
+
+        fn stop(&self, _request: &CaptureStop) -> Result<CaptureStopResult, String> {
+            Ok(CaptureStopResult::default())
+        }
+
+        fn set_microphone_muted(
+            &self,
+            _meeting_id: &str,
+            _run_id: &str,
+            _muted: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     struct FakePlatformState {
         projection: MeetingPlatformProjection,
         contents: BTreeMap<String, MeetingContentProjection>,
@@ -2720,6 +2930,7 @@ mod tests {
         runtime: MeetingRuntime,
         store: Arc<MeetingStore>,
         capture: Arc<FakeCapture>,
+        transcription: Arc<FakeTranscription>,
         platform: Arc<FakePlatform>,
         events: Arc<FakeEvents>,
     }
@@ -2733,7 +2944,7 @@ mod tests {
         let runtime = MeetingRuntime::new(
             Arc::clone(&store),
             capture.clone(),
-            transcription,
+            transcription.clone(),
             platform.clone(),
             Arc::new(FakeClock),
             events.clone(),
@@ -2743,6 +2954,7 @@ mod tests {
             runtime,
             store,
             capture,
+            transcription,
             platform,
             events,
         }
@@ -2816,6 +3028,13 @@ mod tests {
             .start(start_request(&fixture.runtime, "request-1"))
             .unwrap();
         let meeting_id = first.active_meeting_id.clone().unwrap();
+        let durable = fixture.store.get_meeting(&meeting_id).unwrap();
+        assert_eq!(durable.metadata["transcriptionRoute"], "local");
+        assert_eq!(durable.metadata["transcriptionModel"], "whisper-small");
+        assert_eq!(
+            fixture.transcription.starts.lock().unwrap()[0].route,
+            "local"
+        );
         let duplicate = fixture
             .runtime
             .start(start_request(&fixture.runtime, "request-1"))
@@ -3006,7 +3225,10 @@ mod tests {
                     speaker: None,
                     confidence: Some(0.8),
                     is_final: false,
-                    metadata: json!({}),
+                    metadata: json!({
+                        "transcriptionRoute": "local",
+                        "transcriptionModel": "whisper-small"
+                    }),
                 },
             }],
         };
@@ -3184,7 +3406,10 @@ mod tests {
                         microphone: "granted".into(),
                         system_audio: "denied".into(),
                     }),
-                    metadata: json!({}),
+                    metadata: json!({
+                        "transcriptionRoute": "local",
+                        "transcriptionModel": "whisper-small"
+                    }),
                 },
                 NOW,
             )
@@ -3243,6 +3468,18 @@ mod tests {
             job.definition.kind == FollowUpJobKind::Custom("transcription".into())
                 && job.state == JobState::Pending
         }));
+        let transcription_job = jobs
+            .iter()
+            .find(|job| job.definition.kind == FollowUpJobKind::Custom("transcription".into()))
+            .unwrap();
+        assert_eq!(
+            transcription_job.definition.payload["transcriptionRoute"],
+            "local"
+        );
+        assert_eq!(
+            transcription_job.definition.payload["transcriptionModel"],
+            "whisper-small"
+        );
         let reports = capture.recoveries.lock().unwrap();
         assert_eq!(reports[0].interrupted_meeting_ids, vec!["meeting-recovery"]);
         assert_eq!(reports[0].requeued_job_ids, vec!["job-recovery"]);
@@ -3298,6 +3535,75 @@ mod tests {
             )
             .unwrap();
         assert_eq!(duplicate.revision, recovered.revision);
+    }
+
+    #[test]
+    fn recovery_keeps_the_original_consented_route_after_global_provider_changes() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "meeting-consented-endpoint-a".into(),
+                    title: "Endpoint-bound recovery".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: capture_channels(&MeetingPermissions {
+                        microphone: "granted".into(),
+                        system_audio: "granted".into(),
+                    }),
+                    metadata: json!({
+                        "transcriptionRoute": "https://endpoint-a.example/v1/listen",
+                        "transcriptionModel": "consented-model-a"
+                    }),
+                },
+                NOW,
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Recording,
+                NOW,
+                None,
+            )
+            .unwrap();
+
+        let platform = Arc::new(FakePlatform::default());
+        {
+            let mut state = platform.state.lock().unwrap();
+            state.projection.config.transcription_mode = "custom".into();
+            state.projection.config.custom_url = "https://endpoint-b.example/v1/listen".into();
+            state.projection.config.custom_model = "current-model-b".into();
+            state.projection.config.api_key_configured = true;
+        }
+        MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(FakeCapture::default()),
+            Arc::new(FakeTranscription::default()),
+            platform,
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+
+        let repair = store
+            .list_jobs(&created.id)
+            .unwrap()
+            .into_iter()
+            .find(|job| job.definition.kind == FollowUpJobKind::Custom("transcription".into()))
+            .expect("interrupted capture must receive one repair job");
+        assert_eq!(
+            repair.definition.payload["transcriptionRoute"],
+            "https://endpoint-a.example/v1/listen"
+        );
+        assert_eq!(
+            repair.definition.payload["transcriptionModel"],
+            "consented-model-a"
+        );
+        assert_ne!(
+            repair.definition.payload["transcriptionRoute"],
+            "https://endpoint-b.example/v1/listen"
+        );
     }
 
     #[test]
@@ -3476,5 +3782,87 @@ mod tests {
             .unwrap()
             .active_meeting_id
             .is_none());
+    }
+
+    #[test]
+    fn capture_worker_starts_only_after_durable_runtime_ownership_exists() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let capture = Arc::new(AuthorityCheckingCapture {
+            store: Arc::clone(&store),
+            observed_status: Mutex::new(None),
+        });
+        let runtime = MeetingRuntime::new(
+            store,
+            capture.clone(),
+            Arc::new(FakeTranscription::default()),
+            Arc::new(FakePlatform::default()),
+            Arc::new(FakeClock),
+            Arc::new(FakeEvents::default()),
+        )
+        .unwrap();
+
+        runtime
+            .start(start_request(&runtime, "durable-before-worker"))
+            .unwrap();
+        assert_eq!(
+            *capture.observed_status.lock().unwrap(),
+            Some(MeetingStatus::Recording)
+        );
+    }
+
+    #[test]
+    fn mtg_046_mid_session_capture_failure_is_immediately_durable_and_visible() {
+        let fixture = make_fixture();
+        let started = fixture
+            .runtime
+            .start(start_request(&fixture.runtime, "mid-session-failure"))
+            .unwrap();
+        let meeting_id = started.active_meeting_id.unwrap();
+        let run_id = fixture.capture.starts.lock().unwrap()[0].run_id.clone();
+
+        fixture.runtime.capture_failed(
+            &meeting_id,
+            &run_id,
+            "disk reserve was exhausted while committing microphone audio",
+        );
+
+        let snapshot = fixture.runtime.snapshot().unwrap();
+        assert!(snapshot.active_meeting_id.is_none());
+        let meeting = snapshot
+            .meetings
+            .iter()
+            .find(|meeting| meeting.id == meeting_id)
+            .unwrap();
+        assert_eq!(meeting.lifecycle, "failed");
+        assert!(meeting.transcript_final);
+        assert!(meeting.error.as_deref().unwrap().contains("disk reserve"));
+        assert_eq!(
+            fixture
+                .store
+                .get_meeting(&meeting_id)
+                .unwrap()
+                .failure
+                .as_ref()
+                .map(|failure| failure.code.as_str()),
+            Some("capture-runtime-failed")
+        );
+        assert_eq!(fixture.capture.stops.lock().unwrap().len(), 1);
+        assert!(fixture
+            .events
+            .published
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "capture-runtime-failed"));
+
+        // A late callback from a superseded worker cannot damage the already
+        // reconciled record.
+        fixture
+            .runtime
+            .capture_failed(&meeting_id, "stale-run", "late device error");
+        assert_eq!(
+            fixture.store.get_meeting(&meeting_id).unwrap().status,
+            MeetingStatus::Failed
+        );
     }
 }

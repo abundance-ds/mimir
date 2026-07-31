@@ -73,10 +73,10 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
         }
         "meetings.get" => {
             let meeting_id = required_string(&input, "meeting_id")?;
-            let snapshot = runtime.snapshot().map_err(runtime_error)?;
+            let meeting = runtime.meeting(meeting_id).map_err(runtime_error)?;
             get_projection(
                 runtime,
-                &snapshot,
+                &meeting,
                 meeting_id,
                 input
                     .get("transcript_offset")
@@ -106,7 +106,8 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
             runtime
                 .update_meeting(meeting_id, patch)
                 .map_err(runtime_error)
-                .and_then(|snapshot| get_projection(runtime, &snapshot, meeting_id, 0, Some(0)))
+                .and_then(|_| runtime.meeting(meeting_id).map_err(runtime_error))
+                .and_then(|meeting| get_projection(runtime, &meeting, meeting_id, 0, Some(0)))
         }
         _ => Err(ToolError::new(
             ToolErrorCode::NotFound,
@@ -161,12 +162,12 @@ fn list_page_projection(
 
 fn get_projection(
     runtime: &MeetingRuntime,
-    snapshot: &MeetingSnapshot,
+    meeting: &MeetingView,
     meeting_id: &str,
     offset: u64,
     limit: Option<u64>,
 ) -> Result<Value, ToolError> {
-    let meeting = find_meeting(snapshot, meeting_id)?;
+    require_public_meeting(meeting)?;
     let limit = bounded_limit(limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT)?;
     let page = if limit == 0 {
         None
@@ -330,27 +331,14 @@ fn meeting_metadata(meeting: &MeetingView) -> Result<Value, ToolError> {
     Ok(Value::Object(object))
 }
 
-fn find_meeting<'a>(
-    snapshot: &'a MeetingSnapshot,
-    meeting_id: &str,
-) -> Result<&'a MeetingView, ToolError> {
-    let meeting = snapshot
-        .meetings
-        .iter()
-        .find(|meeting| meeting.id == meeting_id)
-        .ok_or_else(|| {
-            ToolError::new(
-                ToolErrorCode::NotFound,
-                format!("Mimir Scribe meeting '{meeting_id}' was not found"),
-            )
-        })?;
+fn require_public_meeting(meeting: &MeetingView) -> Result<(), ToolError> {
     if !is_public_meeting(meeting) {
         return Err(ToolError::new(
             ToolErrorCode::Unavailable,
             "the meeting becomes available to agents after recording and finalization stop",
         ));
     }
-    Ok(meeting)
+    Ok(())
 }
 
 fn is_public_meeting(meeting: &MeetingView) -> bool {
@@ -534,8 +522,139 @@ fn object_schema(properties: Value, required: &[&str]) -> Value {
 mod tests {
     use super::*;
     use crate::meetings::runtime::{
-        MeetingConfig, MeetingPermissions, MeetingPlatformProjection, MeetingSnapshot,
+        CaptureStart, CaptureStop, CaptureStopResult, MeetingCapturePort, MeetingClock,
+        MeetingConfig, MeetingContentProjection, MeetingDeleteMode, MeetingEvent, MeetingEventSink,
+        MeetingExport, MeetingExportFormat, MeetingPermissions, MeetingPlatformPort,
+        MeetingPlatformProjection, MeetingSnapshot, MeetingTranscriptionPort,
+        TranscriptionFinalize, TranscriptionStart,
     };
+    use crate::meetings::{
+        MeetingDraft, MeetingFailure, MeetingOrigin, MeetingStatus, MeetingStore, TranscriptBatch,
+    };
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    struct TestCapture;
+
+    impl MeetingCapturePort for TestCapture {
+        fn recover(&self, _report: &crate::meetings::RecoveryReport) -> Result<(), String> {
+            Ok(())
+        }
+        fn start(&self, _request: &CaptureStart) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _request: &CaptureStop) -> Result<CaptureStopResult, String> {
+            Ok(CaptureStopResult::default())
+        }
+        fn set_microphone_muted(
+            &self,
+            _meeting_id: &str,
+            _run_id: &str,
+            _muted: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    struct TestTranscription;
+
+    impl MeetingTranscriptionPort for TestTranscription {
+        fn start(&self, _request: &TranscriptionStart) -> Result<(), String> {
+            Ok(())
+        }
+        fn finalize(&self, _request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
+            Err("unused".into())
+        }
+    }
+
+    #[derive(Default)]
+    struct TestPlatform {
+        contents: Mutex<BTreeMap<String, MeetingContentProjection>>,
+    }
+
+    impl MeetingPlatformPort for TestPlatform {
+        fn projection(&self) -> Result<MeetingPlatformProjection, String> {
+            Ok(MeetingPlatformProjection::default())
+        }
+        fn content(&self, meeting_id: &str) -> Result<MeetingContentProjection, String> {
+            Ok(self
+                .contents
+                .lock()
+                .unwrap()
+                .get(meeting_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+        fn update_config(
+            &self,
+            _patch: &crate::meetings::runtime::MeetingConfigPatch,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn set_api_key(&self, _api_key: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn clear_api_key(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn install_model(&self, _model_id: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn delete_model(&self, _model_id: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn update_content(
+            &self,
+            meeting_id: &str,
+            patch: &MeetingUpdatePatch,
+        ) -> Result<(), String> {
+            let mut contents = self.contents.lock().unwrap();
+            let content = contents.entry(meeting_id.into()).or_default();
+            if let Some(title) = &patch.title {
+                content.title = Some(title.clone());
+            }
+            if let Some(summary) = &patch.summary {
+                content.summary = Some(summary.clone());
+            }
+            if let Some(tags) = &patch.tags {
+                content.tags = tags.clone();
+            }
+            Ok(())
+        }
+        fn set_kg_decision(&self, _meeting_id: &str, _decision: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn delete_meeting(
+            &self,
+            _meeting_id: &str,
+            _mode: MeetingDeleteMode,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn export_meeting(
+            &self,
+            _meeting_id: &str,
+            _format: MeetingExportFormat,
+        ) -> Result<MeetingExport, String> {
+            Err("unused".into())
+        }
+    }
+
+    struct TestClock;
+
+    impl MeetingClock for TestClock {
+        fn now(&self) -> String {
+            "2026-07-31T00:00:00Z".into()
+        }
+    }
+
+    struct TestEvents;
+
+    impl MeetingEventSink for TestEvents {
+        fn publish(&self, _event: &MeetingEvent) -> Result<(), String> {
+            Ok(())
+        }
+    }
 
     fn snapshot() -> MeetingSnapshot {
         MeetingSnapshot {
@@ -587,5 +706,70 @@ mod tests {
     fn platform_projection_type_remains_serializable_for_tool_bootstrap() {
         let projection = MeetingPlatformProjection::default();
         assert!(serde_json::to_value(projection).is_ok());
+    }
+
+    #[test]
+    fn get_and_update_resolve_records_beyond_the_snapshot_cap() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        for index in 0..=200 {
+            let id = format!("meeting-{index:03}");
+            let created = store
+                .create_meeting(
+                    &MeetingDraft {
+                        id: id.clone(),
+                        title: format!("Meeting {index}"),
+                        origin: MeetingOrigin::default(),
+                        channels: Vec::new(),
+                        metadata: json!({}),
+                    },
+                    "2026-07-31T00:00:00Z",
+                )
+                .unwrap();
+            store
+                .transition_meeting(
+                    &id,
+                    created.revision,
+                    MeetingStatus::Failed,
+                    "2026-07-31T00:00:01Z",
+                    Some(&MeetingFailure {
+                        code: "fixture".into(),
+                        message: "terminal fixture".into(),
+                        retryable: false,
+                    }),
+                )
+                .unwrap();
+        }
+        let platform = Arc::new(TestPlatform::default());
+        let runtime = MeetingRuntime::new(
+            store,
+            Arc::new(TestCapture),
+            Arc::new(TestTranscription),
+            platform,
+            Arc::new(TestClock),
+            Arc::new(TestEvents),
+        )
+        .unwrap();
+        let snapshot = runtime.snapshot().unwrap();
+        assert!(snapshot.meetings_truncated);
+        assert!(!snapshot
+            .meetings
+            .iter()
+            .any(|meeting| meeting.id == "meeting-000"));
+
+        let fetched = execute(
+            &runtime,
+            "meetings.get",
+            json!({"meeting_id": "meeting-000", "transcript_limit": 0}),
+        )
+        .unwrap();
+        assert_eq!(fetched["id"], "meeting-000");
+
+        let updated = execute(
+            &runtime,
+            "meetings.update",
+            json!({"meeting_id": "meeting-000", "title": "Reviewed oldest meeting"}),
+        )
+        .unwrap();
+        assert_eq!(updated["title"], "Reviewed oldest meeting");
     }
 }

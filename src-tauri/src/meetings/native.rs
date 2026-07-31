@@ -152,29 +152,39 @@ pub fn bootstrap_native_meeting_engine(
         let notification_app = app.clone();
         let notified_candidates = Arc::new(Mutex::new(HashSet::<String>::new()));
         let callback_notified_candidates = Arc::clone(&notified_candidates);
-        let detector = Arc::new(
-            DetectionMonitor::start(
-                DetectionConfig {
-                    // The durable native config is applied by platform
-                    // construction before this bootstrap returns.
-                    enabled: false,
-                    ..DetectionConfig::default()
-                },
-                move |event| {
-                    handle_detection_notification(
-                        &notification_app,
-                        &callback_notified_candidates,
-                        &event,
-                    );
-                    MeetingPlatformChangeSink::changed(callback_changes.as_ref(), "detection");
-                },
-            )
-            .map_err(|error| format!("Could not start native meeting detection: {error}"))?,
-        );
-        (
-            Some(Arc::clone(&detector)),
-            Arc::new(DetectionEnvironment::new(detector)),
-        )
+        match DetectionMonitor::start(
+            DetectionConfig {
+                // The durable native config is applied by platform
+                // construction before this bootstrap returns.
+                enabled: false,
+                ..DetectionConfig::default()
+            },
+            move |event| {
+                handle_detection_notification(
+                    &notification_app,
+                    &callback_notified_candidates,
+                    &event,
+                );
+                MeetingPlatformChangeSink::changed(callback_changes.as_ref(), "detection");
+            },
+        ) {
+            Ok(detector) => {
+                let detector = Arc::new(detector);
+                (
+                    Some(Arc::clone(&detector)),
+                    Arc::new(DetectionEnvironment::new(detector)),
+                )
+            }
+            Err(error) => {
+                // Detection is an assistive suggestion, not a prerequisite
+                // for deliberate manual capture. A Core Audio listener
+                // failure must not prevent Mimir (or Scribe) from launching.
+                let diagnostic =
+                    format!("Meeting detection is unavailable in this launch: {error}");
+                log::error!("{diagnostic}");
+                (None, Arc::new(DegradedDetectionEnvironment { diagnostic }))
+            }
+        }
     };
     #[cfg(not(target_os = "macos"))]
     let (detector, environment): (
@@ -223,6 +233,7 @@ pub fn bootstrap_native_meeting_engine(
         TauriMeetingEventSink::new(app) as Arc<dyn MeetingEventSink>,
     )
     .map_err(|error| error.to_string())?;
+    capture.install_failure_sink(Arc::new(runtime.clone()))?;
     let recovered_deletions = platform.recover_pending_deletions()?;
     if !recovered_deletions.is_empty() {
         MeetingPlatformChangeSink::changed(changes.as_ref(), "deletion-recovery");
@@ -312,6 +323,43 @@ impl MeetingEnvironmentProbe for DetectionEnvironment {
             .dismiss_candidate(candidate_id)
             .map(|_| ())
             .map_err(|error| format!("Could not dismiss meeting candidate: {error}"))
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct DegradedDetectionEnvironment {
+    diagnostic: String,
+}
+
+#[cfg(target_os = "macos")]
+impl MeetingEnvironmentProbe for DegradedDetectionEnvironment {
+    fn projection(&self) -> Result<MeetingEnvironmentProjection, String> {
+        let permission = mimir_meeting_detect::microphone_permission();
+        Ok(MeetingEnvironmentProjection {
+            permissions: MeetingPermissions {
+                microphone: permission_name(permission.state).into(),
+                system_audio: "not-determined".into(),
+            },
+            candidates: Vec::new(),
+            diagnostic: Some(
+                permission
+                    .remediation
+                    .map(|remediation| format!("{} {remediation}", self.diagnostic))
+                    .unwrap_or_else(|| self.diagnostic.clone()),
+            ),
+        })
+    }
+
+    fn set_detection_enabled(&self, enabled: bool) -> Result<(), String> {
+        if enabled {
+            Err(self.diagnostic.clone())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn dismiss_candidate(&self, _candidate_id: &str) -> Result<(), String> {
+        Err(self.diagnostic.clone())
     }
 }
 
@@ -584,6 +632,24 @@ mod tests {
         assert_eq!(projection.candidates[0].app_id, "us.zoom.xos");
         assert_eq!(projection.candidates[0].confidence, 0.92);
         assert_eq!(projection.candidates[0].detected_at, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn degraded_detector_keeps_manual_capture_projection_available() {
+        let environment = DegradedDetectionEnvironment {
+            diagnostic: "Meeting detection listener could not start".into(),
+        };
+        let projection = environment.projection().unwrap();
+
+        assert!(projection.candidates.is_empty());
+        assert!(projection
+            .diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("could not start"));
+        assert!(environment.set_detection_enabled(false).is_ok());
+        assert!(environment.set_detection_enabled(true).is_err());
     }
 
     #[test]

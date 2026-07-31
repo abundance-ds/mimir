@@ -6,7 +6,9 @@
 //! and committed only after the durable bytes exist.
 
 use super::{
-    runtime::{CaptureStart, CaptureStop, CaptureStopResult, MeetingCapturePort},
+    runtime::{
+        CaptureStart, CaptureStop, CaptureStopResult, MeetingCaptureFailureSink, MeetingCapturePort,
+    },
     AudioChunkDraft, AudioChunkStatus, MeetingStore, MeetingStoreError, RecoveryReport,
     TranscriptBatch, TranscriptChange, TranscriptGapInput, TranscriptGapReason,
 };
@@ -179,6 +181,7 @@ pub struct NativeMeetingCapture {
     store: Arc<MeetingStore>,
     data_dir: PathBuf,
     sessions: Mutex<HashMap<String, CaptureSession>>,
+    failure_sink: Arc<Mutex<Option<Arc<dyn MeetingCaptureFailureSink>>>>,
 }
 
 impl NativeMeetingCapture {
@@ -190,7 +193,23 @@ impl NativeMeetingCapture {
             store,
             data_dir,
             sessions: Mutex::new(HashMap::new()),
+            failure_sink: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn install_failure_sink(
+        &self,
+        sink: Arc<dyn MeetingCaptureFailureSink>,
+    ) -> Result<(), String> {
+        let mut current = self
+            .failure_sink
+            .lock()
+            .map_err(|_| "meeting capture failure-sink mutex was poisoned".to_string())?;
+        if current.is_some() {
+            return Err("meeting capture failure sink is already installed".into());
+        }
+        *current = Some(sink);
+        Ok(())
     }
 
     fn sessions(&self) -> Result<MutexGuard<'_, HashMap<String, CaptureSession>>, String> {
@@ -244,6 +263,16 @@ impl MeetingCapturePort for NativeMeetingCapture {
 
     fn start(&self, request: &CaptureStart) -> Result<(), String> {
         let mut sessions = self.sessions()?;
+        let finished = sessions
+            .iter()
+            .filter(|(_, session)| session.worker.is_finished())
+            .map(|(meeting_id, _)| meeting_id.clone())
+            .collect::<Vec<_>>();
+        for meeting_id in finished {
+            if let Some(session) = sessions.remove(&meeting_id) {
+                let _ = session.worker.join();
+            }
+        }
         if sessions.contains_key(&request.meeting_id) {
             return Err(format!(
                 "meeting '{}' already owns an audio capture worker",
@@ -258,11 +287,42 @@ impl MeetingCapturePort for NativeMeetingCapture {
         let data_dir = self.data_dir.clone();
         let request = request.clone();
         let meeting_id = request.meeting_id.clone();
+        let worker_meeting_id = meeting_id.clone();
+        let worker_run_id = request.run_id.clone();
         let worker_muted = Arc::clone(&microphone_muted);
+        let failure_sink = Arc::clone(&self.failure_sink);
+        let (startup_decision_tx, startup_decision_rx) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name(format!("mimir-audio-{}", request.meeting_id))
             .spawn(move || {
-                run_capture_worker(store, data_dir, request, stop_rx, worker_muted, ready_tx)
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_capture_worker(store, data_dir, request, stop_rx, worker_muted, ready_tx)
+                }))
+                .unwrap_or_else(|_| Err("meeting audio worker panicked".into()));
+                let armed = startup_decision_rx.recv().unwrap_or(false);
+                if armed {
+                    if let Err(message) = &result {
+                        let sink = failure_sink
+                            .lock()
+                            .ok()
+                            .and_then(|sink| sink.as_ref().cloned());
+                        if let Some(sink) = sink {
+                            let meeting_id = worker_meeting_id.clone();
+                            let run_id = worker_run_id.clone();
+                            let message = message.clone();
+                            let _ = thread::Builder::new()
+                                .name("mimir-audio-failure".into())
+                                .spawn(move || {
+                                    sink.capture_failed(&meeting_id, &run_id, &message);
+                                });
+                        } else {
+                            log::error!(
+                                "Scribe capture '{worker_meeting_id}' failed without an installed failure sink: {message}"
+                            );
+                        }
+                    }
+                }
+                result
             })
             .map_err(|error| format!("could not spawn meeting audio worker: {error}"))?;
 
@@ -276,14 +336,17 @@ impl MeetingCapturePort for NativeMeetingCapture {
                         worker,
                     },
                 );
+                let _ = startup_decision_tx.send(true);
                 Ok(())
             }
             Ok(Err(message)) => {
+                let _ = startup_decision_tx.send(false);
                 let _ = stop.send(true);
                 let _ = worker.join();
                 Err(message)
             }
             Err(error) => {
+                let _ = startup_decision_tx.send(false);
                 let _ = stop.send(true);
                 let _ = worker.join();
                 Err(format!(
