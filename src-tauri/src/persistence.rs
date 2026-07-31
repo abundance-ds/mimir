@@ -406,7 +406,14 @@ pub fn ensure_private_directory(path: impl AsRef<Path>) -> Result<(), Persistenc
             }
         }
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path)
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder
+                .create(path)
                 .map_err(|source| io_error("create private directory", path, source))?;
             let metadata = fs::symlink_metadata(path)
                 .map_err(|source| io_error("inspect created private directory", path, source))?;

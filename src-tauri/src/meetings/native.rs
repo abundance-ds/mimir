@@ -30,6 +30,7 @@ use super::{
     },
     MeetingStore,
 };
+use crate::persistence::{ensure_private_directory, ensure_private_subdirectory};
 use chrono::Utc;
 use mimir_meeting_detect::DetectionMonitor;
 #[cfg(any(test, target_os = "macos"))]
@@ -39,7 +40,6 @@ use mimir_meeting_detect::{DetectionConfig, DetectionEvent};
 #[cfg(target_os = "macos")]
 use std::collections::HashSet;
 use std::{
-    fs,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -131,13 +131,12 @@ pub fn bootstrap_native_meeting_engine(
     app: &tauri::AppHandle,
     mimir_root: impl AsRef<Path>,
 ) -> Result<NativeMeetingEngine, String> {
+    let mimir_root = mimir_root.as_ref();
     let paths = MeetingPlatformPaths::from_mimir_root(mimir_root);
-    fs::create_dir_all(&paths.meetings_root).map_err(|error| {
-        format!(
-            "Could not create Scribe data directory {}: {error}",
-            paths.meetings_root.display()
-        )
-    })?;
+    ensure_private_directory(mimir_root)
+        .map_err(|error| format!("Could not secure Mimir's private data directory: {error}"))?;
+    ensure_private_subdirectory(mimir_root, "meetings")
+        .map_err(|error| format!("Could not secure Scribe data directory: {error}"))?;
     let store = Arc::new(
         MeetingStore::open(paths.meetings_root.join(STORE_FILE_NAME))
             .map_err(|error| error.to_string())?,

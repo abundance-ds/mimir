@@ -20,7 +20,9 @@ use super::{
     MeetingStore,
 };
 use crate::persistence::{
-    load_json_optional_quarantining, write_bytes_atomic, write_json_atomic, QuarantinedLoad,
+    ensure_private_directory, ensure_private_subdirectory, load_json_optional_quarantining,
+    prepare_private_file_path, repair_private_file, repair_private_file_if_exists,
+    repair_private_tree, write_private_bytes_atomic, write_private_json_atomic, QuarantinedLoad,
 };
 use chrono::{DateTime, Duration, Utc};
 use futures_util::StreamExt;
@@ -722,12 +724,10 @@ impl ModelManager {
         changes: Arc<dyn MeetingPlatformChangeSink>,
         diagnostics: Arc<Mutex<Vec<String>>>,
     ) -> Result<Arc<Self>, String> {
-        fs::create_dir_all(&paths.models_root).map_err(|error| {
-            format!(
-                "Could not create managed model directory {}: {error}",
-                paths.models_root.display()
-            )
-        })?;
+        ensure_private_directory(&paths.models_root)
+            .map_err(|error| format!("Could not secure managed model directory: {error}"))?;
+        repair_private_tree(&paths.models_root)
+            .map_err(|error| format!("Could not repair managed model storage: {error}"))?;
         let mut indexed = BTreeMap::new();
         for entry in catalog {
             entry
@@ -841,8 +841,8 @@ impl ModelManager {
         let runtime = RuntimePlatform::current().ok_or_else(|| {
             "Managed local transcription models are supported only on macOS arm64".to_string()
         })?;
-        fs::create_dir_all(&self.paths.models_root)
-            .map_err(|error| format!("Could not create managed model directory: {error}"))?;
+        ensure_private_directory(&self.paths.models_root)
+            .map_err(|error| format!("Could not secure managed model directory: {error}"))?;
         {
             let mut active = lock(&self.active)?;
             if !active.insert(model_id.to_string()) {
@@ -925,10 +925,6 @@ impl ModelManager {
             "Managed local transcription models are supported only on macOS arm64".to_string()
         })?;
         let model_dir = self.model_version_dir(&entry.manifest)?;
-        fs::create_dir_all(&model_dir).map_err(|error| {
-            format!("Could not create managed model install directory: {error}")
-        })?;
-        reject_symlink(&model_dir)?;
         let final_path = model_dir.join("model.bin");
         let pending_path = model_dir.join(format!(".model-{}.part", Uuid::new_v4()));
         let mut pending_guard = PendingPath::file(pending_path.clone());
@@ -982,10 +978,13 @@ impl ModelManager {
             .finish_verification(&entry.manifest, runtime, metadata.len(), digest)
             .map_err(|error| format!("Managed model verification failed: {error}"))?;
 
-        reject_symlink(&final_path)?;
+        repair_private_file_if_exists(&final_path)
+            .map_err(|error| format!("Could not secure managed model destination: {error}"))?;
         fs::rename(&pending_path, &final_path)
             .map_err(|error| format!("Could not atomically install the managed model: {error}"))?;
         pending_guard.disarm();
+        repair_private_file(&final_path)
+            .map_err(|error| format!("Could not secure installed model: {error}"))?;
         sync_directory(&model_dir)?;
         self.persist_model_state(model_id, download_state)?;
         Ok(())
@@ -1086,12 +1085,17 @@ impl ModelManager {
     }
 
     fn model_version_dir(&self, manifest: &ModelManifest) -> Result<PathBuf, String> {
-        let model_root = safe_direct_child(&self.paths.models_root, manifest.model_id.as_str())?;
-        safe_direct_child(&model_root, manifest.version.as_str())
+        let relative = PathBuf::from(manifest.model_id.as_str()).join(manifest.version.as_str());
+        ensure_private_subdirectory(&self.paths.models_root, relative)
+            .map_err(|error| format!("Could not secure managed model version directory: {error}"))
     }
 
     fn model_artifact_path(&self, manifest: &ModelManifest) -> Result<PathBuf, String> {
-        Ok(self.model_version_dir(manifest)?.join("model.bin"))
+        let relative = PathBuf::from(manifest.model_id.as_str())
+            .join(manifest.version.as_str())
+            .join("model.bin");
+        prepare_private_file_path(&self.paths.models_root, relative)
+            .map_err(|error| format!("Could not resolve managed model artifact: {error}"))
     }
 
     fn persist_model_state(
@@ -1106,6 +1110,8 @@ impl ModelManager {
     }
 
     fn load_state(&self) -> Result<PersistedModelState, String> {
+        repair_private_file_if_exists(&self.paths.model_state_file)
+            .map_err(|error| format!("Could not secure managed model state: {error}"))?;
         let outcome =
             load_json_optional_quarantining::<PersistedModelState>(&self.paths.model_state_file)
                 .map_err(|error| error.to_string())?;
@@ -1131,7 +1137,8 @@ impl ModelManager {
     }
 
     fn save_state(&self, state: &PersistedModelState) -> Result<(), String> {
-        write_json_atomic(&self.paths.model_state_file, state).map_err(|error| error.to_string())
+        write_private_json_atomic(&self.paths.model_state_file, state)
+            .map_err(|error| error.to_string())
     }
 
     fn record_install_failure(&self, model_id: &str, error: &str) {
@@ -1247,10 +1254,7 @@ impl NativeMeetingPlatform {
         downloader: Arc<dyn ModelArtifactDownloader>,
         changes: Arc<dyn MeetingPlatformChangeSink>,
     ) -> Result<Self, String> {
-        create_managed_directory(&paths.meetings_root)?;
-        create_managed_directory(&paths.content_root)?;
-        create_managed_directory(&paths.exports_root)?;
-        create_managed_directory(&paths.models_root)?;
+        secure_platform_paths(&paths)?;
         let diagnostics = Arc::new(Mutex::new(Vec::new()));
         let models = ModelManager::new(
             paths.clone(),
@@ -1403,6 +1407,8 @@ impl NativeMeetingPlatform {
     }
 
     fn load_config(&self) -> Result<MeetingConfig, String> {
+        repair_private_file_if_exists(&self.inner.paths.config_file)
+            .map_err(|error| format!("Could not secure meeting settings: {error}"))?;
         match load_json_optional_quarantining::<PersistedMeetingConfig>(
             &self.inner.paths.config_file,
         )
@@ -1425,18 +1431,14 @@ impl NativeMeetingPlatform {
 
     fn save_config(&self, config: MeetingConfig) -> Result<(), String> {
         let persisted = PersistedMeetingConfig::new(config)?;
-        write_json_atomic(&self.inner.paths.config_file, &persisted)
+        write_private_json_atomic(&self.inner.paths.config_file, &persisted)
             .map_err(|error| error.to_string())
     }
 
     fn content_path(&self, meeting_id: &str) -> Result<PathBuf, String> {
         validate_component(meeting_id, "meeting id")?;
-        reject_symlink(&self.inner.paths.content_root)?;
-        Ok(self
-            .inner
-            .paths
-            .content_root
-            .join(format!("{meeting_id}.json")))
+        prepare_private_file_path(&self.inner.paths.content_root, format!("{meeting_id}.json"))
+            .map_err(|error| format!("Could not resolve private meeting content path: {error}"))
     }
 
     fn load_content(&self, meeting_id: &str) -> Result<PersistedMeetingContent, String> {
@@ -1490,7 +1492,7 @@ impl NativeMeetingPlatform {
         meeting_id: &str,
         content: &PersistedMeetingContent,
     ) -> Result<(), String> {
-        write_json_atomic(self.content_path(meeting_id)?, content)
+        write_private_json_atomic(self.content_path(meeting_id)?, content)
             .map_err(|error| error.to_string())
     }
 
@@ -1604,7 +1606,8 @@ impl NativeMeetingPlatform {
             }
         }
         let path = self.unique_export_path(meeting_id, "md")?;
-        write_bytes_atomic(&path, markdown.as_bytes()).map_err(|error| error.to_string())?;
+        write_private_bytes_atomic(&path, markdown.as_bytes())
+            .map_err(|error| error.to_string())?;
         Ok(MeetingExport {
             format: "markdown".into(),
             path: path.to_string_lossy().into_owned(),
@@ -1630,7 +1633,7 @@ impl NativeMeetingPlatform {
             "transcript": transcript,
         });
         let path = self.unique_export_path(meeting_id, "json")?;
-        write_json_atomic(&path, &document).map_err(|error| error.to_string())?;
+        write_private_json_atomic(&path, &document).map_err(|error| error.to_string())?;
         Ok(MeetingExport {
             format: "json".into(),
             path: path.to_string_lossy().into_owned(),
@@ -1668,8 +1671,7 @@ impl NativeMeetingPlatform {
             &self.inner.paths.exports_root,
             &format!(".{export_name}.part"),
         )?;
-        fs::create_dir(&pending_path)
-            .map_err(|error| format!("Could not create audio export staging directory: {error}"))?;
+        create_private_new_directory(&pending_path)?;
         let mut pending_guard = PendingPath::directory(pending_path.clone());
         let mut copied = 0_u64;
         for name in ["audio", "microphone", "system"] {
@@ -1705,10 +1707,9 @@ impl NativeMeetingPlatform {
     fn unique_export_path(&self, meeting_id: &str, extension: &str) -> Result<PathBuf, String> {
         validate_component(meeting_id, "meeting id")?;
         validate_component(extension, "export extension")?;
-        safe_direct_child(
-            &self.inner.paths.exports_root,
-            &format!("{meeting_id}-{}.{}", Uuid::new_v4(), extension),
-        )
+        let name = format!("{meeting_id}-{}.{}", Uuid::new_v4(), extension);
+        prepare_private_file_path(&self.inner.paths.exports_root, name)
+            .map_err(|error| format!("Could not resolve private meeting export path: {error}"))
     }
 }
 
@@ -2015,10 +2016,41 @@ fn validate_component(value: &str, label: &'static str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn create_managed_directory(path: &Path) -> Result<(), String> {
-    fs::create_dir_all(path)
-        .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
-    reject_symlink(path)
+fn secure_platform_paths(paths: &MeetingPlatformPaths) -> Result<(), String> {
+    let config_root = paths
+        .config_file
+        .parent()
+        .ok_or_else(|| "Meeting settings path has no private parent directory".to_string())?;
+    ensure_private_directory(config_root)
+        .map_err(|error| format!("Could not secure Mimir's private data directory: {error}"))?;
+
+    for directory in [
+        &paths.meetings_root,
+        &paths.content_root,
+        &paths.exports_root,
+        &paths.models_root,
+    ] {
+        let relative = directory.strip_prefix(config_root).map_err(|_| {
+            format!(
+                "Managed Scribe directory {} is outside its private root",
+                directory.display()
+            )
+        })?;
+        ensure_private_subdirectory(config_root, relative).map_err(|error| {
+            format!(
+                "Could not secure managed Scribe directory {}: {error}",
+                directory.display()
+            )
+        })?;
+    }
+
+    repair_private_file_if_exists(&paths.config_file)
+        .map_err(|error| format!("Could not repair meeting settings permissions: {error}"))?;
+    repair_private_tree(&paths.meetings_root)
+        .map_err(|error| format!("Could not repair private meeting storage: {error}"))?;
+    repair_private_tree(&paths.models_root)
+        .map_err(|error| format!("Could not repair private model storage: {error}"))?;
+    Ok(())
 }
 
 fn safe_direct_child(root: &Path, child: &str) -> Result<PathBuf, String> {
@@ -2094,9 +2126,12 @@ fn copy_path_without_symlinks(source: &Path, destination: &Path) -> Result<u64, 
         ));
     }
     if metadata.is_file() {
+        repair_private_file(source)
+            .map_err(|error| format!("Could not secure source audio artifact: {error}"))?;
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("Could not create audio export directory: {error}"))?;
+            ensure_private_directory(parent).map_err(|error| {
+                format!("Could not secure private audio export directory: {error}")
+            })?;
         }
         let mut input =
             File::open(source).map_err(|error| format!("Could not read audio export: {error}"))?;
@@ -2115,8 +2150,7 @@ fn copy_path_without_symlinks(source: &Path, destination: &Path) -> Result<u64, 
             source.display()
         ));
     }
-    fs::create_dir(destination)
-        .map_err(|error| format!("Could not create audio export directory: {error}"))?;
+    create_private_new_directory(destination)?;
     let mut copied = 0_u64;
     let mut entries = fs::read_dir(source)
         .map_err(|error| format!("Could not read meeting audio directory: {error}"))?
@@ -2175,6 +2209,13 @@ impl Drop for PendingPath {
 }
 
 fn create_private_new_file(path: &Path) -> Result<File, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Private file {} has no parent directory", path.display()))?;
+    ensure_private_directory(parent)
+        .map_err(|error| format!("Could not secure private file parent: {error}"))?;
+    repair_private_file_if_exists(path)
+        .map_err(|error| format!("Refusing unsafe private file path: {error}"))?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -2185,6 +2226,32 @@ fn create_private_new_file(path: &Path) -> Result<File, String> {
     options
         .open(path)
         .map_err(|error| format!("Could not create {}: {error}", path.display()))
+}
+
+fn create_private_new_directory(path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Private directory {} has no parent", path.display()))?;
+    ensure_private_directory(parent)
+        .map_err(|error| format!("Could not secure private directory parent: {error}"))?;
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path).map_err(|error| {
+        format!(
+            "Could not create private directory {}: {error}",
+            path.display()
+        )
+    })?;
+    ensure_private_directory(path).map_err(|error| {
+        format!(
+            "Could not secure private directory {}: {error}",
+            path.display()
+        )
+    })
 }
 
 fn sync_tree(path: &Path) -> Result<(), String> {
@@ -2448,6 +2515,130 @@ mod tests {
                 .transition_meeting(id, meeting.revision, status, NOW, None)
                 .unwrap();
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn platform_startup_repairs_legacy_private_trees_and_refuses_symlink_components() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let paths = MeetingPlatformPaths::from_mimir_root(directory.path());
+        let content_nested = paths.content_root.join("legacy");
+        let export_nested = paths.exports_root.join("legacy");
+        let model_nested = paths.models_root.join("whisper-small/test-1");
+        for path in [&content_nested, &export_nested, &model_nested] {
+            fs::create_dir_all(path).unwrap();
+        }
+        let config = PersistedMeetingConfig::new(MeetingConfig::default()).unwrap();
+        fs::write(&paths.config_file, serde_json::to_vec(&config).unwrap()).unwrap();
+        fs::write(content_nested.join("meeting.json"), b"legacy content").unwrap();
+        fs::write(export_nested.join("transcript.md"), b"legacy export").unwrap();
+        fs::write(model_nested.join("model.bin"), b"legacy model").unwrap();
+        fs::write(
+            &paths.model_state_file,
+            serde_json::to_vec(&PersistedModelState::default()).unwrap(),
+        )
+        .unwrap();
+
+        for path in [
+            directory.path(),
+            &paths.meetings_root,
+            &paths.content_root,
+            &content_nested,
+            &paths.exports_root,
+            &export_nested,
+            paths.models_root.parent().unwrap(),
+            &paths.models_root,
+            model_nested.parent().unwrap(),
+            &model_nested,
+        ] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        for path in [
+            &paths.config_file,
+            &content_nested.join("meeting.json"),
+            &export_nested.join("transcript.md"),
+            &paths.model_state_file,
+            &model_nested.join("model.bin"),
+        ] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+
+        let completion = Arc::new((Mutex::new(false), Condvar::new()));
+        NativeMeetingPlatform::new(
+            paths.clone(),
+            Arc::new(MeetingStore::open_in_memory().unwrap()),
+            Vec::new(),
+            Arc::new(FakeSecrets::default()),
+            Arc::new(FakeEnvironment),
+            Arc::new(FakeDisk),
+            Arc::new(FakeDownloader {
+                bytes: Vec::new(),
+                completion,
+            }),
+            Arc::new(NoopMeetingPlatformChangeSink),
+        )
+        .unwrap();
+
+        for path in [
+            directory.path(),
+            &paths.meetings_root,
+            &paths.content_root,
+            &content_nested,
+            &paths.exports_root,
+            &export_nested,
+            paths.models_root.parent().unwrap(),
+            &paths.models_root,
+            model_nested.parent().unwrap(),
+            &model_nested,
+        ] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o700,
+                "{} was not repaired owner-only",
+                path.display()
+            );
+        }
+        for path in [
+            &paths.config_file,
+            &content_nested.join("meeting.json"),
+            &export_nested.join("transcript.md"),
+            &paths.model_state_file,
+            &model_nested.join("model.bin"),
+        ] {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600,
+                "{} was not repaired owner-only",
+                path.display()
+            );
+        }
+
+        let unsafe_root = directory.path().join("unsafe-profile");
+        fs::create_dir(&unsafe_root).unwrap();
+        fs::create_dir(unsafe_root.join("models")).unwrap();
+        let outside = directory.path().join("outside-models");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, unsafe_root.join("models/stt")).unwrap();
+        let unsafe_paths = MeetingPlatformPaths::from_mimir_root(&unsafe_root);
+        let error = NativeMeetingPlatform::new(
+            unsafe_paths,
+            Arc::new(MeetingStore::open_in_memory().unwrap()),
+            Vec::new(),
+            Arc::new(FakeSecrets::default()),
+            Arc::new(FakeEnvironment),
+            Arc::new(FakeDisk),
+            Arc::new(FakeDownloader {
+                bytes: Vec::new(),
+                completion: Arc::new((Mutex::new(false), Condvar::new())),
+            }),
+            Arc::new(NoopMeetingPlatformChangeSink),
+        )
+        .err()
+        .expect("a symlinked managed model root must be refused");
+        assert!(error.contains("symbolic link") || error.contains("private managed path"));
+        assert!(fs::read_dir(&outside).unwrap().next().is_none());
     }
 
     #[test]
