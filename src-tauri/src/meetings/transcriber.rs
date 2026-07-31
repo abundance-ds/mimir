@@ -627,7 +627,11 @@ impl PersistedAudioSource {
     }
 
     fn channel_files(&self, channel: &str) -> Result<BTreeMap<u64, PathBuf>, String> {
-        let directory = self.root.join(&self.meeting_id).join("audio").join(channel);
+        validate_path_component(channel, "audio channel")?;
+        let Some(directory) = validated_audio_directory(&self.root, &self.meeting_id, channel)?
+        else {
+            return Ok(BTreeMap::new());
+        };
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -669,6 +673,41 @@ impl PersistedAudioSource {
         }
         Ok(chunks)
     }
+}
+
+/// Resolve only Mimir-owned directory components without following a replaced
+/// meeting, audio, or channel symlink. Lexical containment alone is
+/// insufficient because another local process can swap a directory after
+/// capture but before delayed transcription.
+fn validated_audio_directory(
+    root: &Path,
+    meeting_id: &str,
+    channel: &str,
+) -> Result<Option<PathBuf>, String> {
+    let paths = [
+        root.to_path_buf(),
+        root.join(meeting_id),
+        root.join(meeting_id).join("audio"),
+        root.join(meeting_id).join("audio").join(channel),
+    ];
+    for path in &paths {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect durable audio directory authority: {error}"
+                ))
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Err("durable audio directory authority contains a symbolic link".into());
+        }
+        if !metadata.is_dir() {
+            return Err("durable audio directory authority is not a directory".into());
+        }
+    }
+    Ok(paths.last().cloned())
 }
 
 fn read_mono_chunk(path: &Path) -> Result<Vec<u8>, String> {
@@ -1583,6 +1622,29 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(values, vec![1.0, 3.0, 2.0, 4.0]);
         assert_eq!(chunks[0].sequence, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn durable_audio_reader_rejects_symlinked_parent_components() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = TempDir::new().unwrap();
+        let outside = temporary.path().join("outside");
+        write_chunk(&outside, "external", "microphone", 0, &[0.75]);
+        let meeting_audio = temporary.path().join("meeting-1").join("audio");
+        fs::create_dir_all(&meeting_audio).unwrap();
+        symlink(
+            outside.join("external").join("audio").join("microphone"),
+            meeting_audio.join("microphone"),
+        )
+        .unwrap();
+        fs::create_dir_all(meeting_audio.join("system")).unwrap();
+        let source = PersistedAudioSource::new(temporary.path(), "meeting-1").unwrap();
+
+        let error = source.paired_chunks_from(0).unwrap_err();
+
+        assert!(error.contains("symbolic link"));
     }
 
     #[test]
