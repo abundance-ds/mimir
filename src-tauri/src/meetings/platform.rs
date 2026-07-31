@@ -3130,6 +3130,16 @@ mod tests {
             .join("microphone");
         fs::create_dir_all(&audio).unwrap();
         fs::write(audio.join("0001.raw"), b"audio").unwrap();
+        let hook_input = fixture
+            .paths
+            .meetings_root
+            .join("meeting-1/followups/summary-job/transcript.jsonl");
+        fs::create_dir_all(hook_input.parent().unwrap()).unwrap();
+        fs::write(
+            &hook_input,
+            b"{\"type\":\"segment\",\"text\":\"private\"}\n",
+        )
+        .unwrap();
         let export = fixture
             .platform
             .export_meeting("meeting-1", MeetingExportFormat::Audio)
@@ -3169,6 +3179,10 @@ mod tests {
             Err(crate::meetings::MeetingStoreError::NotFound { .. })
         ));
         assert!(!fixture.paths.content_root.join("meeting-1.json").exists());
+        assert!(
+            !hook_input.exists(),
+            "whole-record deletion must remove managed hook transcript inputs"
+        );
     }
 
     #[test]

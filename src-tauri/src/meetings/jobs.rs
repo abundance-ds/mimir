@@ -9,8 +9,8 @@
 use super::{
     platform::MeetingPlatformPaths,
     runtime::{
-        MeetingExportFormat, MeetingRuntime, MeetingTranscriptionPort, MeetingUpdatePatch,
-        MeetingView, TranscriptionFinalize, TranscriptionStart,
+        MeetingRuntime, MeetingSegmentView, MeetingTranscriptPage, MeetingTranscriptionPort,
+        MeetingUpdatePatch, MeetingView, TranscriptionFinalize, TranscriptionStart,
     },
     FollowUpJob, FollowUpJobKind, JobFinish,
 };
@@ -19,7 +19,7 @@ use crate::{
         ActivityEvent, ActivityEventSink, ActivityRecord, ActivityStatus, ActivitySubscriptionId,
         ActivitySupervisor, SessionExitReason,
     },
-    persistence::{ensure_private_directory, repair_private_file},
+    persistence::{ensure_private_directory, repair_private_file, write_private_bytes_atomic},
     routine_runtime::{MeetingHookLaunch, RoutineRuntime},
 };
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
@@ -45,6 +45,8 @@ const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const LEASE_DURATION_HOURS: i64 = 6;
 const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_HOOK_TRANSCRIPT_BYTES: u64 = MAX_OUTPUT_BYTES * 8;
+const HOOK_TRANSCRIPT_PAGE_SEGMENTS: u32 = 250;
 const MAX_TITLE_CHARS: usize = 200;
 const MAX_SUMMARY_CHARS: usize = 100_000;
 const MAX_KG_ENTRIES: usize = 200;
@@ -496,17 +498,6 @@ fn prepare_hook_context(
     validate_component(&job.definition.meeting_id, "meeting id")?;
     validate_component(&job.definition.id, "job id")?;
     validate_component(output_name, "output filename")?;
-    let export = inner
-        .runtime
-        .export(&job.definition.meeting_id, MeetingExportFormat::Markdown)
-        .map_err(|error| format!("Could not materialize the meeting transcript: {error}"))?;
-    let transcript_path = PathBuf::from(export.path);
-    if let Some(parent) = transcript_path.parent() {
-        ensure_private_directory(parent).map_err(|error| {
-            format!("Could not secure the meeting transcript directory: {error}")
-        })?;
-    }
-    require_regular_file(&transcript_path, MAX_OUTPUT_BYTES * 8)?;
 
     let meeting_root = contained_join(&inner.paths.meetings_root, &job.definition.meeting_id)?;
     ensure_private_directory(&meeting_root)
@@ -517,6 +508,7 @@ fn prepare_hook_context(
     let job_root = contained_join(&followups, &job.definition.id)?;
     ensure_private_directory(&job_root)
         .map_err(|error| format!("Could not secure managed follow-up job directory: {error}"))?;
+    let transcript_path = materialize_hook_transcript(&inner.runtime, job, &job_root)?;
     let output_path = contained_join(&job_root, output_name)?;
 
     Ok(HookContext {
@@ -527,6 +519,182 @@ fn prepare_hook_context(
         // controlled output and is isolated from graph/project data.
         workspace: job_root,
     })
+}
+
+trait HookTranscriptSource {
+    fn transcript_slice(
+        &self,
+        meeting_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> Result<MeetingTranscriptPage, String>;
+}
+
+impl HookTranscriptSource for MeetingRuntime {
+    fn transcript_slice(
+        &self,
+        meeting_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> Result<MeetingTranscriptPage, String> {
+        MeetingRuntime::transcript_slice(self, meeting_id, offset, limit)
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn materialize_hook_transcript(
+    source: &impl HookTranscriptSource,
+    job: &FollowUpJob,
+    job_root: &Path,
+) -> Result<PathBuf, String> {
+    let requested_revision = job
+        .definition
+        .payload
+        .get("transcriptRevision")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "Meeting follow-up job is missing its transcript revision".to_string())?;
+    let transcript_path = contained_join(job_root, "transcript.jsonl")?;
+    let transcript =
+        render_hook_transcript(source, &job.definition.meeting_id, requested_revision)?;
+    publish_immutable_hook_transcript(&transcript_path, &transcript)?;
+    Ok(transcript_path)
+}
+
+fn render_hook_transcript(
+    source: &impl HookTranscriptSource,
+    meeting_id: &str,
+    requested_revision: u64,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    let mut offset = 0_u64;
+    let mut expected_total = None;
+    loop {
+        let page = source
+            .transcript_slice(meeting_id, offset, HOOK_TRANSCRIPT_PAGE_SEGMENTS)
+            .map_err(|error| {
+                format!("Could not read the authoritative meeting transcript: {error}")
+            })?;
+        if page.meeting_id != meeting_id || page.revision != requested_revision {
+            return Err(
+                "Meeting transcript changed while its private hook input was materialized".into(),
+            );
+        }
+        match expected_total {
+            Some(total) if total != page.total_segments => {
+                return Err(
+                    "Meeting transcript size changed while its private hook input was materialized"
+                        .into(),
+                );
+            }
+            None => {
+                expected_total = Some(page.total_segments);
+                append_jsonl(
+                    &mut bytes,
+                    &json!({
+                        "type": "mimir-scribe-transcript",
+                        "schemaVersion": 1,
+                        "meetingId": meeting_id,
+                        "transcriptRevision": requested_revision,
+                        "segmentCount": page.total_segments,
+                    }),
+                )?;
+            }
+            Some(_) => {}
+        }
+        if page.segments.iter().any(|segment| !segment.is_final) {
+            return Err("Meeting hook input contains a non-final transcript segment".into());
+        }
+        for segment in &page.segments {
+            append_transcript_segment(&mut bytes, segment)?;
+        }
+        let page_len = u64::try_from(page.segments.len())
+            .map_err(|_| "Meeting transcript page length overflowed".to_string())?;
+        offset = offset
+            .checked_add(page_len)
+            .ok_or_else(|| "Meeting transcript offset overflowed".to_string())?;
+        let total = expected_total.unwrap_or_default();
+        if offset == total {
+            break;
+        }
+        if page_len == 0 || offset > total || !page.has_more {
+            return Err("Meeting transcript pagination ended before every segment was read".into());
+        }
+    }
+    if expected_total == Some(0) {
+        return Err("Meeting follow-up transcript is empty".into());
+    }
+    Ok(bytes)
+}
+
+fn append_transcript_segment(
+    bytes: &mut Vec<u8>,
+    segment: &MeetingSegmentView,
+) -> Result<(), String> {
+    append_jsonl(
+        bytes,
+        &json!({
+            "type": "segment",
+            "id": segment.id,
+            "startMs": segment.start_ms,
+            "endMs": segment.end_ms,
+            "channel": segment.channel,
+            "speaker": segment.speaker,
+            "text": segment.text,
+            "final": segment.is_final,
+            "revision": segment.revision,
+        }),
+    )
+}
+
+fn append_jsonl(bytes: &mut Vec<u8>, value: &Value) -> Result<(), String> {
+    let line = serde_json::to_vec(value)
+        .map_err(|error| format!("Could not encode private meeting hook input: {error}"))?;
+    let next_len = bytes
+        .len()
+        .checked_add(line.len())
+        .and_then(|length| length.checked_add(1))
+        .ok_or_else(|| "Meeting hook transcript size overflowed".to_string())?;
+    if next_len as u64 > MAX_HOOK_TRANSCRIPT_BYTES {
+        return Err(format!(
+            "Meeting hook transcript exceeds the {} byte safety limit",
+            MAX_HOOK_TRANSCRIPT_BYTES
+        ));
+    }
+    bytes.extend_from_slice(&line);
+    bytes.push(b'\n');
+    Ok(())
+}
+
+fn publish_immutable_hook_transcript(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            let mut existing = open_controlled_file(path, MAX_HOOK_TRANSCRIPT_BYTES)?;
+            let mut persisted = Vec::new();
+            existing
+                .read_to_end(&mut persisted)
+                .map_err(|error| format!("Could not verify private meeting hook input: {error}"))?;
+            if persisted != bytes {
+                return Err(
+                    "Existing private meeting hook input differs from its authoritative revision"
+                        .into(),
+                );
+            }
+        }
+        Ok(_) => {
+            return Err("Refusing an unsafe private meeting hook transcript path".into());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            write_private_bytes_atomic(path, bytes).map_err(|error| {
+                format!("Could not publish private meeting hook input: {error}")
+            })?;
+        }
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect private meeting hook input: {error}"
+            ));
+        }
+    }
+    require_regular_file(path, MAX_HOOK_TRANSCRIPT_BYTES)
 }
 
 fn launch_hook(
@@ -945,6 +1113,62 @@ mod tests {
         ActivityHost, ActivityKind, ActivityOrigin, ActivityRetention, ActivitySessionRecord,
         SessionExitRecord,
     };
+    use crate::meetings::{FollowUpJobDraft, JobState};
+
+    struct ScriptedTranscript {
+        meeting_id: String,
+        revision: u64,
+        segments: Vec<MeetingSegmentView>,
+    }
+
+    impl HookTranscriptSource for ScriptedTranscript {
+        fn transcript_slice(
+            &self,
+            meeting_id: &str,
+            offset: u64,
+            limit: u32,
+        ) -> Result<MeetingTranscriptPage, String> {
+            if meeting_id != self.meeting_id {
+                return Err("wrong meeting".into());
+            }
+            let offset = usize::try_from(offset).map_err(|_| "offset overflow")?;
+            let end = offset
+                .saturating_add(limit as usize)
+                .min(self.segments.len());
+            Ok(MeetingTranscriptPage {
+                meeting_id: self.meeting_id.clone(),
+                revision: self.revision,
+                total_segments: self.segments.len() as u64,
+                has_more: end < self.segments.len(),
+                next_before: None,
+                segments: self.segments[offset.min(self.segments.len())..end].to_vec(),
+                summary: None,
+            })
+        }
+    }
+
+    fn hook_job() -> FollowUpJob {
+        FollowUpJob {
+            definition: FollowUpJobDraft {
+                id: "summary-job".into(),
+                meeting_id: "meeting-1".into(),
+                kind: FollowUpJobKind::Summary,
+                idempotency_key: "meeting-1:summary:7".into(),
+                payload: json!({"transcriptRevision": 7}),
+                max_attempts: 3,
+                not_before: "2026-07-30T10:00:00Z".into(),
+            },
+            state: JobState::Running,
+            attempts: 1,
+            created_at: "2026-07-30T10:00:00Z".into(),
+            updated_at: "2026-07-30T10:00:00Z".into(),
+            lease_owner: Some("worker".into()),
+            lease_token: Some("lease".into()),
+            lease_expires_at: Some("2026-07-30T11:00:00Z".into()),
+            last_error: None,
+            result: None,
+        }
+    }
 
     fn terminal_record(id: &str, status: ActivityStatus) -> ActivityRecord {
         let origin = ActivityOrigin {
@@ -1120,6 +1344,87 @@ mod tests {
             assert!(open_controlled_file(&link, 1024).is_err());
             assert!(controlled_output_exists(&link).is_err());
         }
+    }
+
+    #[test]
+    fn hook_input_is_private_idempotent_and_never_creates_a_public_export_copy() {
+        let directory = tempfile::tempdir().unwrap();
+        let meetings_root = directory.path().join("meetings");
+        let exports_root = meetings_root.join("exports");
+        let job_root = meetings_root.join("meeting-1/followups/summary-job");
+        fs::create_dir_all(job_root.parent().unwrap()).unwrap();
+        ensure_private_directory(&exports_root).unwrap();
+        ensure_private_directory(&job_root).unwrap();
+        let source = ScriptedTranscript {
+            meeting_id: "meeting-1".into(),
+            revision: 7,
+            segments: vec![MeetingSegmentView {
+                id: "segment-1".into(),
+                text: "Ship after the privacy review.".into(),
+                start_ms: 0,
+                end_ms: 1_000,
+                channel: "system".into(),
+                speaker: Some("Them".into()),
+                is_final: true,
+                revision: 7,
+            }],
+        };
+
+        let first = materialize_hook_transcript(&source, &hook_job(), &job_root).unwrap();
+        let second = materialize_hook_transcript(&source, &hook_job(), &job_root).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first, job_root.join("transcript.jsonl"));
+        let input = fs::read_to_string(&first).unwrap();
+        assert!(input.contains("\"transcriptRevision\":7"));
+        assert!(input.contains("Ship after the privacy review."));
+        assert_eq!(fs::read_dir(&exports_root).unwrap().count(), 0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        fs::remove_dir_all(meetings_root.join("meeting-1")).unwrap();
+        assert!(!first.exists());
+        assert_eq!(fs::read_dir(&exports_root).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_input_rejects_symlinks_and_does_not_replace_a_different_revision() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let job_root = directory.path().join("meeting-1/followups/summary-job");
+        fs::create_dir_all(job_root.parent().unwrap()).unwrap();
+        ensure_private_directory(&job_root).unwrap();
+        let source = ScriptedTranscript {
+            meeting_id: "meeting-1".into(),
+            revision: 7,
+            segments: vec![MeetingSegmentView {
+                id: "segment-1".into(),
+                text: "Authoritative".into(),
+                start_ms: 0,
+                end_ms: 1_000,
+                channel: "microphone".into(),
+                speaker: None,
+                is_final: true,
+                revision: 7,
+            }],
+        };
+        let outside = directory.path().join("outside");
+        fs::write(&outside, b"preserve").unwrap();
+        symlink(&outside, job_root.join("transcript.jsonl")).unwrap();
+        assert!(materialize_hook_transcript(&source, &hook_job(), &job_root).is_err());
+        assert_eq!(fs::read(&outside).unwrap(), b"preserve");
+
+        fs::remove_file(job_root.join("transcript.jsonl")).unwrap();
+        let path = materialize_hook_transcript(&source, &hook_job(), &job_root).unwrap();
+        fs::write(&path, b"different-but-bounded").unwrap();
+        assert!(materialize_hook_transcript(&source, &hook_job(), &job_root).is_err());
     }
 
     #[test]

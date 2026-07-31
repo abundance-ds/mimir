@@ -153,7 +153,10 @@ The default successful flow is:
 Failures do not change a completed meeting into a recording failure. They
 remain visible in both Scribe and the Activity tray and can be retried.
 Idempotency keys and lease ownership prevent duplicate successful work after
-restart.
+restart. Each hook reads an immutable, bounded JSONL transcript materialized
+from the exact terminal SQLite revision under
+`<meeting>/followups/<job>/transcript.jsonl`. This is private job input, not a
+user export: hook execution never creates a copy in `meetings/exports/`.
 
 ## Renderer and agent surface
 
@@ -181,14 +184,19 @@ meetings.
 | `~/.mimir/meetings.json` | native-owned Scribe configuration, no secret |
 | `~/.mimir/meetings/meetings.sqlite` | lifecycle, chunk, transcript, and job authority |
 | `~/.mimir/meetings/<id>/audio/` | independent committed channel chunks and gaps |
-| `~/.mimir/meetings/<id>/` | controlled hook inputs/outputs and generated artifacts |
+| `~/.mimir/meetings/<id>/followups/<job>/` | immutable bounded hook transcript input and controlled output |
 | `~/.mimir/meetings/.content/` | reviewed title, summary, tags, and KG decision |
 | `~/.mimir/meetings/exports/` | explicit user exports |
 | `~/.mimir/models/stt/` | verified managed model and installation state |
 
 Retention removes source audio only when the meeting is terminal and no
 recovery or running-job hold applies. “Delete audio” preserves transcript and
-reviewed content; “Delete meeting” removes the record and owned files.
+reviewed content; “Delete meeting” tombstones the record, waits for any leased
+Activity to finish without accepting its result, and removes the record plus
+all owned files, including managed hook inputs and outputs. Files under
+`meetings/exports/` exist only after an explicit user export and are
+deliberately outside whole-record deletion; the user manages those copies
+separately.
 Deletion is best-effort local erasure and does not promise removal from
 filesystem snapshots, backups, synced exports, or a custom provider that
 already processed audio.

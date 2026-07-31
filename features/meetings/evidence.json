@@ -353,8 +353,26 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/store.rs",
-      "selector": "privacy_deletion_removes_audio_metadata_and_cascades_the_complete_record",
+      "selector": "permanent_deletion_tombstone_cancels_pending_work_and_waits_for_running_activity",
       "scenarios": ["MTG-137", "MTG-153"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime.rs",
+      "selector": "mtg_153_running_activity_only_releases_deletion_wait_and_cannot_recreate_content",
+      "scenarios": ["MTG-153"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/platform.rs",
+      "selector": "mtg_153_permanent_deletion_replays_every_fault_boundary_without_orphans",
+      "scenarios": ["MTG-153"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/jobs.rs",
+      "selector": "hook_input_is_private_idempotent_and_never_creates_a_public_export_copy",
+      "scenarios": ["MTG-153"]
     },
     {
       "kind": "rust-test",

@@ -25,11 +25,13 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
     And notes, transcript, provenance, and deletion outcome remain consistent with policy
 
   @MTG-153 @automated @native @security
-  Scenario: Delete meeting cancels owned background work
-    Given a meeting has queued transcription, finalization, or proposal jobs
+  Scenario: Delete meeting safely drains owned background work
+    Given a meeting has queued or running transcription, finalization, or proposal jobs
     When the user confirms Delete meeting
-    Then Mimir cancels or terminally detaches all owned jobs before data removal
-    And a late job result cannot recreate deleted meeting content
+    Then Mimir cancels unclaimed jobs and tombstones the record before another claim
+    And deletion waits while an owned Activity still holds a running lease
+    And the late result only releases that wait and cannot recreate deleted content
+    And managed hook transcript inputs are removed with the owned meeting directory
 
   @MTG-154 @automated @domain @contract
   Scenario: Export identifies provenance and known gaps

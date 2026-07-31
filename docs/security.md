@@ -188,9 +188,14 @@ user. The native credential resolver returns the Keychain secret only when
 that exact validated endpoint is selected.
 
 Meeting transcripts are untrusted input to stop-time CLI agents. Prompts mark
-the transcript as quoted data, exact argv avoids shell reconstruction, input
-and output paths must remain under the owned meeting directory, symlinks are
-rejected, reads/writes are bounded, and JSON output is strictly validated.
+the transcript as quoted data and exact argv avoids shell reconstruction.
+Each hook receives an immutable, owner-only, bounded JSONL input materialized
+from the exact terminal transcript revision under the meeting's private
+`followups/<job>/` directory. Hook execution never uses the public export path.
+Input and output paths must remain under the owned meeting directory, symlinks
+are rejected, reads/writes are bounded, and JSON output is strictly validated.
+Whole-record deletion removes these managed hook artifacts; explicit user
+exports remain separate copies under `meetings/exports/`.
 Knowledge-graph work produces a reviewable proposal only; accepting it follows
 the graph's normal revision-aware review boundary.
 
