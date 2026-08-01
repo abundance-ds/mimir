@@ -443,9 +443,10 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   function onEvent(event) {
+    const kind = String(event?.kind || '').toLowerCase()
     if (
       event?.meetingId
-      && String(event.kind || '').toLowerCase().includes('transcript')
+      && kind === 'transcript'
     ) {
       queueTranscriptRefresh(event.meetingId)
       return

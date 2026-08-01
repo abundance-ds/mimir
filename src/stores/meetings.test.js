@@ -627,6 +627,50 @@ describe('meetings store', () => {
     vi.useRealTimers()
   })
 
+  it('refreshes worker state instead of leaving a rejected provider on Connecting', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [{
+        id: 'live',
+        title: 'Live',
+        lifecycle: 'capturing',
+        transcription: 'connecting',
+        transcriptRevision: 1,
+        segments: [],
+        jobs: [],
+        gaps: [],
+        gapCount: 0,
+        channels: ['microphone', 'system'],
+      }],
+      activeMeetingId: 'live',
+    })
+    const store = useMeetingsStore()
+    await store.initialize()
+    vi.mocked(loadMeetingSnapshot).mockClear()
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      meetings: [{
+        id: 'live',
+        title: 'Live',
+        lifecycle: 'capturing',
+        transcription: 'failed',
+        transcriptRevision: 1,
+        segments: [],
+        jobs: [],
+        gaps: [],
+        gapCount: 0,
+        channels: ['microphone', 'system'],
+      }],
+      activeMeetingId: 'live',
+    })
+
+    eventHandler({ kind: 'transcription-state', meetingId: 'live', refresh: true })
+    await vi.waitFor(() => expect(loadMeetingSnapshot).toHaveBeenCalledTimes(1))
+
+    expect(store.activeMeeting.transcription).toBe('failed')
+  })
+
   it('loads older meeting pages without discarding the selected library', async () => {
     const recent = {
       id: 'recent',

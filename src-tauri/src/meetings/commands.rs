@@ -566,6 +566,20 @@ impl TranscriptionChangeSink for TauriMeetingPlatformChangeSink {
             }
         }
     }
+
+    fn state_changed(&self, meeting_id: &str) {
+        // Worker state changes are rare and must refresh the meeting snapshot.
+        // Treating them like transcript deltas refreshed only the ledger and
+        // left “Connecting…” visible forever after a provider rejection.
+        let _ = self.app.emit(
+            MEETING_PLATFORM_CHANGED_EVENT,
+            serde_json::json!({
+                "kind": "transcription-state",
+                "meetingId": meeting_id,
+                "refresh": true,
+            }),
+        );
+    }
 }
 
 fn emit_transcript_changed(app: &tauri::AppHandle, meeting_id: &str) {
