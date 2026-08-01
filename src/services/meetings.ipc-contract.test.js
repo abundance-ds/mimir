@@ -16,6 +16,7 @@ const expectedLiveMeeting = {
   lifecycle: 'capturing',
   transcription: 'live',
   startedAt: '2026-07-31T08:00:00.000Z',
+  recordingStartedAt: '2026-07-31T08:00:00.000Z',
   stoppedAt: null,
   durationMs: 754_321,
   workspacePath: null,
@@ -45,6 +46,7 @@ const expectedFinalMeeting = {
   lifecycle: 'ready',
   transcription: 'final',
   startedAt: '2026-07-30T14:00:00.000Z',
+  recordingStartedAt: null,
   stoppedAt: '2026-07-30T14:42:17.000Z',
   durationMs: 2_537_000,
   workspacePath: null,
@@ -245,6 +247,7 @@ describe('Scribe golden IPC contracts', () => {
         title: 'Architecture sync',
         workspacePath: null,
         candidateId: 'candidate-teams-01',
+        continueMeetingId: null,
         consentToken: 'fixture-consent-token-never-valid',
       },
     })

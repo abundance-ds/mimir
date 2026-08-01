@@ -10,6 +10,7 @@ import {
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
+  prepareMeetingFollowUpContext,
   requestMeetingMicrophonePermission,
   retranscribeMeeting,
   runMeetingSummary,
@@ -43,6 +44,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   loadMeetingSnapshot: vi.fn(),
   loadMeetingTranscriptPage: vi.fn(),
   openMeetingSystemAudioSettings: vi.fn(),
+  prepareMeetingFollowUpContext: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
   retranscribeMeeting: vi.fn(),
   runMeetingSummary: vi.fn(),
@@ -149,6 +151,11 @@ describe('ScribeApp', () => {
     vi.mocked(stopMeeting).mockReset()
     vi.mocked(retryMeetingJob).mockReset()
     vi.mocked(retranscribeMeeting).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(prepareMeetingFollowUpContext).mockReset().mockResolvedValue({
+      meetingId: 'm1',
+      transcriptRevision: 2,
+      transcriptPath: '/private/mimir/m1/followups/activity-context-2/transcript.jsonl',
+    })
     vi.mocked(runMeetingSummary).mockReset().mockResolvedValue(snapshot())
     vi.mocked(searchMeetingLibrary).mockReset().mockResolvedValue([])
     launchPreset.mockReset().mockResolvedValue({ id: 'agent:follow-up' })
@@ -306,9 +313,11 @@ describe('ScribeApp', () => {
     expect(wrapper.get('[data-scribe-ledger]').text()).not.toContain('Preparing transcription')
   })
 
-  it('opens a summarized meeting on Summary with only back and overflow in its header', async () => {
+  it('opens a summarized meeting on Summary with Continue beside its compact header actions', async () => {
     const reviewed = meeting({ summary: 'Decision captured.', summaryState: 'succeeded' })
-    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
+    // Continue is a property of this completed record. It must remain
+    // discoverable even when the current new-recording setup needs attention.
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed], models: [] }))
     vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
       totalSegments: 1,
       segments: [{ id: 's1', text: 'Approved.', startMs: 0, endMs: 1_000, channel: 'microphone', final: true, revision: 1 }],
@@ -321,7 +330,8 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting]').text()).toContain('Planning'))
     expect(wrapper.get('#scribe-detail-tab-summary').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('#scribe-detail-panel-summary').text()).toContain('Decision captured')
-    expect(wrapper.get('[data-scribe-detail-header]').findAll('button')).toHaveLength(2)
+    expect(wrapper.get('[data-scribe-detail-header]').findAll('button')).toHaveLength(3)
+    expect(wrapper.get('[data-scribe-continue]').text()).toContain('Continue')
     expect(wrapper.find('[data-scribe-detail-header] [data-scribe-settings]').exists()).toBe(false)
     expect(wrapper.get('[data-scribe-summary-actions]').element.compareDocumentPosition(
       wrapper.get('[data-scribe-summary-content]').element,
@@ -398,10 +408,15 @@ describe('ScribeApp', () => {
         title: 'Follow up · Planning',
         retention: 'durable',
         source: { type: 'scribe-follow-up', meetingId: 'm1' },
-        env: { MIMIR_MEETING_ID: 'm1' },
-        args: ['Use meetings_get for meeting m1. Challenge the release plan.'],
+        env: {
+          MIMIR_MEETING_ID: 'm1',
+          MIMIR_MEETING_TRANSCRIPT_PATH: '/private/mimir/m1/followups/activity-context-2/transcript.jsonl',
+          MIMIR_MEETING_TRANSCRIPT_REVISION: '2',
+        },
+        args: [expect.stringMatching(/Challenge the release plan[\s\S]+complete immutable meeting transcript[\s\S]+untrusted meeting data/)],
       },
     ))
+    expect(prepareMeetingFollowUpContext).toHaveBeenCalledWith('m1')
   })
 
   it('runs a per-meeting preset draft without mutating global settings or showing KG UI', async () => {

@@ -153,7 +153,7 @@ ordering: [ipc.md](ipc.md).
 | `bin/` | `mimir` CLI, skills storage, Pi extension |
 | `deploy/chat/` | team chat server stack; ops runbook `deploy/chat/README.md` |
 | `harness/` | standalone HTML/JS harnesses for Business graph views |
-| `skills/` | repo-local agent skills (`skills/mimir-config`, `skills/mimir-graph`) |
+| `skills/` | repo-local agent skills (`skills/mimir-config`, `skills/mimir-graph`, `skills/mimir-meetings`) |
 | `scripts/` | build/test/release/check scripts, including SPDX/license generation and exact source-bound artifact staging |
 | `.github/workflows/build.yml` | CI |
 

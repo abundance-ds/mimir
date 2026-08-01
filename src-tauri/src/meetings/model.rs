@@ -680,10 +680,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gherkin_terminal_meetings_never_reopen() {
-        // Given a terminal meeting
-        // When every other status is considered
-        // Then no different transition is accepted.
+    fn gherkin_terminal_states_never_reopen_through_the_generic_transition_api() {
+        // Explicit continuation is an atomic store operation with a transcript
+        // barrier; the generic lifecycle transition API remains closed.
         for terminal in [
             MeetingStatus::Completed,
             MeetingStatus::Failed,

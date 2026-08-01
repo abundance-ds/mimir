@@ -5,6 +5,7 @@
 //! Tauri's command task before entering the serialized runtime.
 
 use super::audio_test::MeetingAudioTestStarted;
+use super::jobs::{MeetingFollowUpContext, MeetingJobWorker};
 use super::native::NativeMeetingEngine;
 use super::platform::MeetingPlatformChangeSink;
 use super::runtime::{
@@ -47,6 +48,8 @@ pub struct MeetingStartDisclosureRequest {
     pub candidate_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_app_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_meeting_id: Option<String>,
     pub transcription_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
@@ -60,6 +63,8 @@ pub struct MeetingStartConsentDisclosure {
     pub candidate_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_app_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_meeting_id: Option<String>,
     pub transcription_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
@@ -421,6 +426,7 @@ fn disclosure_matches(
 ) -> bool {
     disclosed.candidate_id == context.candidate_id
         && disclosed.candidate_app_name == context.candidate_app_name
+        && disclosed.continue_meeting_id == context.continue_meeting_id
         && disclosed.transcription_mode == context.transcription_mode
         && disclosed.destination == context.destination
         && disclosed.model == context.model
@@ -430,6 +436,7 @@ fn disclosure_from_context(context: &MeetingStartConsentContext) -> MeetingStart
     MeetingStartConsentDisclosure {
         candidate_id: context.candidate_id.clone(),
         candidate_app_name: context.candidate_app_name.clone(),
+        continue_meeting_id: context.continue_meeting_id.clone(),
         transcription_mode: context.transcription_mode.clone(),
         destination: context.destination.clone(),
         model: context.model.clone(),
@@ -992,7 +999,10 @@ pub async fn meetings_issue_start_consent(
     let authority = authority.inner().clone();
     run_blocking("meeting consent issue", move || {
         let context = runtime
-            .start_consent_context(disclosure.candidate_id.as_deref())
+            .start_consent_context_for(
+                disclosure.candidate_id.as_deref(),
+                disclosure.continue_meeting_id.as_deref(),
+            )
             .map_err(|error| error.to_string())?;
         authority.issue(&window_label, context, &disclosure)
     })
@@ -1014,7 +1024,10 @@ pub async fn meetings_start(
     run_blocking("meeting start", move || {
         let mut request = request;
         let context = runtime
-            .start_consent_context(request.candidate_id.as_deref())
+            .start_consent_context_for(
+                request.candidate_id.as_deref(),
+                request.continue_meeting_id.as_deref(),
+            )
             .map_err(|error| error.to_string())?;
         let consent = authority.begin_start(
             &window_label,
@@ -1149,6 +1162,18 @@ pub async fn meetings_run_summary(
 }
 
 #[tauri::command]
+pub async fn meetings_follow_up_context(
+    worker: tauri::State<'_, MeetingJobWorker>,
+    meeting_id: String,
+) -> Result<MeetingFollowUpContext, String> {
+    let preparer = worker.inner().follow_up_context_preparer();
+    run_blocking("meeting follow-up context", move || {
+        preparer.prepare(&meeting_id)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn meetings_retranscribe(
     runtime: tauri::State<'_, MeetingRuntime>,
     meeting_id: String,
@@ -1270,6 +1295,7 @@ mod consent_tests {
             candidate_id: None,
             candidate_app_id: None,
             candidate_app_name: None,
+            continue_meeting_id: None,
             transcription_mode: "local".into(),
             destination: None,
             model: "whisper-small".into(),
@@ -1280,6 +1306,7 @@ mod consent_tests {
         MeetingStartDisclosureRequest {
             candidate_id: context.candidate_id.clone(),
             candidate_app_name: context.candidate_app_name.clone(),
+            continue_meeting_id: context.continue_meeting_id.clone(),
             transcription_mode: context.transcription_mode.clone(),
             destination: context.destination.clone(),
             model: context.model.clone(),
@@ -1429,6 +1456,7 @@ mod consent_tests {
             candidate_id: Some("candidate-zoom".into()),
             candidate_app_id: Some("us.zoom.xos".into()),
             candidate_app_name: Some("Zoom".into()),
+            continue_meeting_id: None,
             transcription_mode: "custom".into(),
             destination: Some("https://speech.example.test/v1/listen".into()),
             model: "meeting-v2".into(),

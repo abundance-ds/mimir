@@ -45,12 +45,14 @@ Feature: Own meeting capture as one durable native lifecycle
     Then an available renderer lets the user return to recording or stop and finalize
     And without a renderer native Stop completes before exit or Mimir stays open
 
-  @MTG-026 @automated @domain @native
-  Scenario: A terminal meeting never reopens
-    Given a meeting already has a terminal capture and transcript
-    When another recording is requested
-    Then Mimir creates a distinct meeting and run identifier
-    And the terminal meeting and its transcript provenance remain immutable
+  @MTG-026 @automated @domain @native @desktop
+  Scenario: A stopped meeting can continue after a break
+    Given a meeting already has a completed capture and final transcript
+    When the user continues that meeting
+    Then Mimir records under the same meeting identifier with a new run identifier
+    And committed audio and transcript history remain immutable and append-only
+    And elapsed meeting time excludes the break between capture runs
+    And a late event from the ended run cannot mutate the continued run
 
   @MTG-027 @automated @native @contract
   Scenario: Events notify while snapshots recover state

@@ -82,7 +82,7 @@ describe('ScribeSettings', () => {
       .toBe('https://speech.example.com/mimir-stt')
   })
 
-  it('checks both audio sources without presenting a recording workflow', async () => {
+  it('shows only moving input levels while an audio test is active', async () => {
     const wrapper = mount(ScribeSettings, {
       props: {
         embedded: true,
@@ -97,8 +97,7 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.get('[data-scribe-audio-check-result]').text()).toContain('Signal detected')
-    expect(wrapper.get('[data-scribe-audio-check-result]').text()).toContain('play audio and retry')
+    expect(wrapper.get('[data-scribe-audio-check-result]').text()).not.toContain('detected')
     expect(wrapper.get('[data-scribe-audio-level="microphone"]').attributes('aria-valuenow'))
       .toBe('78')
     expect(wrapper.get('[data-scribe-audio-level="system"]').attributes('aria-valuenow'))
@@ -106,6 +105,25 @@ describe('ScribeSettings', () => {
     expect(wrapper.get('[data-scribe-check-audio]').text()).toBe('Stop test')
     await wrapper.get('[data-scribe-check-audio]').trigger('click')
     expect(wrapper.emitted('checkAudio')).toHaveLength(1)
+  })
+
+  it('hides stale input levels whenever the audio test is not running', () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true,
+        config,
+        permissions: { microphone: 'granted', systemAudio: 'granted' },
+        audioCheck: {
+          state: 'stopped',
+          microphone: { state: 'stopped', level: 0 },
+          systemAudio: { state: 'stopped', level: 0 },
+        },
+        audioTesting: false,
+      },
+    })
+
+    expect(wrapper.find('[data-scribe-audio-check-result]').exists()).toBe(false)
+    expect(wrapper.get('[data-scribe-check-audio]').text()).toBe('Test inputs')
   })
 
   it('selects a stable microphone identity or returns to the system default', async () => {

@@ -8,6 +8,15 @@
     :style="position"
     @keydown="onKeydown"
   >
+    <button
+      v-if="canContinue"
+      type="button"
+      role="menuitem"
+      data-scribe-continue-meeting
+      @click="choose('continue')"
+    >
+      Continue recording
+    </button>
     <button type="button" role="menuitem" data-scribe-rename-meeting @click="choose('rename')">
       Rename
     </button>
@@ -48,6 +57,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 defineProps({
   position: { type: Object, required: true },
   canRetranscribe: { type: Boolean, default: false },
+  canContinue: { type: Boolean, default: false },
   filesPending: { type: Boolean, default: false },
   markdownPending: { type: Boolean, default: false },
   audioPending: { type: Boolean, default: false },
@@ -57,6 +67,7 @@ defineProps({
 const emit = defineEmits([
   'close',
   'rename',
+  'continue',
   'files',
   'saveMarkdown',
   'saveAudio',

@@ -75,6 +75,10 @@ pub struct StartMeetingRequest {
     pub workspace_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_id: Option<String>,
+    /// Existing completed meeting whose durable timeline should be continued
+    /// with a fresh native capture run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_meeting_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consent_token: Option<String>,
     /// Set only by the native IPC command after consuming a window-bound,
@@ -94,6 +98,7 @@ pub(crate) struct MeetingStartConsentContext {
     pub candidate_id: Option<String>,
     pub candidate_app_id: Option<String>,
     pub candidate_app_name: Option<String>,
+    pub continue_meeting_id: Option<String>,
     pub transcription_mode: String,
     pub destination: Option<String>,
     pub model: String,
@@ -344,6 +349,8 @@ pub struct CaptureStart {
     pub workspace_path: Option<String>,
     pub microphone_device_id: Option<String>,
     pub channels: Vec<AudioChannelDraft>,
+    /// First append-only chunk sequence owned by this capture run.
+    pub first_sequence: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,6 +370,9 @@ pub struct TranscriptionStart {
     pub run_id: String,
     pub route: String,
     pub model: String,
+    /// First append-only audio sequence owned by this live run. Repair passes
+    /// always use zero because they rebuild retained source audio.
+    pub first_sequence: u64,
     /// Present only for a durable, from-sequence-zero repair pass. Live
     /// capture writes directly to the current transcript; repair output stays
     /// private until one all-final generation is atomically reconciled.
@@ -539,6 +549,10 @@ pub struct MeetingView {
     pub transcription: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
+    /// Start of the current native capture run. Unlike `started_at`, this
+    /// advances when a completed meeting is continued after a break.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recording_started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stopped_at: Option<String>,
     pub duration_ms: u64,
@@ -685,6 +699,7 @@ struct ActiveCapture {
     mic_muted: bool,
     transcription: String,
     duration_ms: u64,
+    recording_started_at: String,
 }
 
 struct MeetingRuntimeInner {
@@ -816,14 +831,39 @@ impl MeetingRuntime {
     /// The command layer uses this both when issuing a consent grant and when
     /// consuming it. `start` resolves it once more while holding the runtime
     /// operation lock, closing the settings/candidate TOCTOU window.
+    #[cfg(test)]
     pub(crate) fn start_consent_context(
         &self,
         candidate_id: Option<&str>,
     ) -> Result<MeetingStartConsentContext, MeetingRuntimeError> {
+        self.start_consent_context_for(candidate_id, None)
+    }
+
+    pub(crate) fn start_consent_context_for(
+        &self,
+        candidate_id: Option<&str>,
+        continue_meeting_id: Option<&str>,
+    ) -> Result<MeetingStartConsentContext, MeetingRuntimeError> {
         let _operation = self.operation()?;
+        if candidate_id.is_some() && continue_meeting_id.is_some() {
+            return Err(MeetingRuntimeError::Validation(
+                "a detected meeting and a completed meeting cannot be recorded in one start request"
+                    .into(),
+            ));
+        }
+        if let Some(meeting_id) = continue_meeting_id {
+            require_nonempty(meeting_id, "meeting id")?;
+            let meeting = self.inner.store.get_meeting(meeting_id)?;
+            if meeting.status != MeetingStatus::Completed {
+                return Err(MeetingRuntimeError::Validation(format!(
+                    "meeting '{meeting_id}' is {} and cannot be continued",
+                    meeting.status
+                )));
+            }
+        }
         let projection = self.platform_projection()?;
         validate_config(&projection.config)?;
-        consent_context_for_projection(&projection, candidate_id)
+        consent_context_for_projection(&projection, candidate_id, continue_meeting_id)
     }
 
     pub fn start(
@@ -833,8 +873,11 @@ impl MeetingRuntime {
         let _operation = self.operation()?;
         let projection = self.platform_projection()?;
         validate_config(&projection.config)?;
-        let current_consent =
-            consent_context_for_projection(&projection, request.candidate_id.as_deref())?;
+        let current_consent = consent_context_for_projection(
+            &projection,
+            request.candidate_id.as_deref(),
+            request.continue_meeting_id.as_deref(),
+        )?;
         match request.authorized_consent.as_ref() {
             None => return Err(MeetingRuntimeError::ConsentRequired),
             Some(authorized) if authorized != &current_consent => {
@@ -860,6 +903,10 @@ impl MeetingRuntime {
             return Err(MeetingRuntimeError::ActiveMeeting {
                 meeting_id: active.meeting_id,
             });
+        }
+
+        if request.continue_meeting_id.is_some() {
+            return self.continue_completed_unlocked(request, &projection, request_key);
         }
 
         let meeting_id = format!("meeting-{}", Uuid::new_v4());
@@ -927,6 +974,7 @@ impl MeetingRuntime {
             workspace_path: request.workspace_path.clone(),
             microphone_device_id: projection.config.microphone_device_id.clone(),
             channels,
+            first_sequence: 0,
         };
         // Publish the durable Recording state before opening native streams.
         // If capture cannot start, the ordinary Recording -> Failed
@@ -952,6 +1000,7 @@ impl MeetingRuntime {
             mic_muted: false,
             transcription: "initializing".into(),
             duration_ms: 0,
+            recording_started_at: observed_at.clone(),
         });
         if let Err(message) = self.inner.capture.start(&capture_request) {
             let failure = MeetingFailure {
@@ -1003,6 +1052,7 @@ impl MeetingRuntime {
             run_id: run_id.clone(),
             route,
             model,
+            first_sequence: 0,
             repair_generation: None,
             repair_intent: None,
         };
@@ -1034,6 +1084,169 @@ impl MeetingRuntime {
 
         debug_assert_eq!(recording.status, MeetingStatus::Recording);
         self.publish_unlocked("capture-started", Some(meeting_id), Some(run_id))
+    }
+
+    fn continue_completed_unlocked(
+        &self,
+        request: StartMeetingRequest,
+        projection: &MeetingPlatformProjection,
+        request_key: Option<String>,
+    ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let meeting_id = request
+            .continue_meeting_id
+            .as_deref()
+            .ok_or_else(|| MeetingRuntimeError::Validation("meeting id is required".into()))?;
+        require_nonempty(meeting_id, "meeting id")?;
+        if request.candidate_id.is_some() {
+            return Err(MeetingRuntimeError::Validation(
+                "a detected meeting cannot continue an existing meeting".into(),
+            ));
+        }
+        let previous = self.inner.store.get_meeting(meeting_id)?;
+        if previous.status != MeetingStatus::Completed {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is {} and cannot be continued",
+                previous.status
+            )));
+        }
+        let (route, model) = transcription_route(&projection.config);
+        let previous_route =
+            metadata_string(&previous.metadata, "transcriptionRoute").ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "the completed meeting is missing its transcription route".into(),
+                )
+            })?;
+        let previous_model =
+            metadata_string(&previous.metadata, "transcriptionModel").ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "the completed meeting is missing its transcription model".into(),
+                )
+            })?;
+        if route != previous_route || model != previous_model {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "this meeting used {previous_model}; select the same transcription setup to continue it, or start a new meeting"
+            )));
+        }
+
+        let first_sequence = self.inner.store.next_audio_sequence(meeting_id)?;
+        let run_id = format!("run-{}", Uuid::new_v4());
+        let observed_at = self.inner.clock.now();
+        let previous_metadata = previous.metadata.clone();
+        let mut metadata = previous.metadata.clone();
+        let metadata_object = metadata.as_object_mut().ok_or_else(|| {
+            MeetingRuntimeError::Validation("meeting metadata must be an object".into())
+        })?;
+        metadata_object.insert("continuationPreviousMetadata".into(), previous_metadata);
+        metadata_object.insert("runId".into(), Value::String(run_id.clone()));
+        metadata_object.insert(
+            "captureRunCount".into(),
+            Value::from(
+                metadata_object
+                    .get("captureRunCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1)
+                    .saturating_add(1),
+            ),
+        );
+        metadata_object.insert(
+            "continuationFirstSequence".into(),
+            Value::from(first_sequence),
+        );
+        metadata_object.insert(
+            "continuationPreviousStoppedAt".into(),
+            previous
+                .stopped_at
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        metadata_object.insert(
+            "continuationPreviousFinalizedAt".into(),
+            previous
+                .finalized_at
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        metadata_object.insert(
+            "microphoneDeviceId".into(),
+            projection
+                .config
+                .microphone_device_id
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        let recording = self.inner.store.reopen_completed_meeting(
+            meeting_id,
+            previous.revision,
+            &run_id,
+            &metadata,
+            &observed_at,
+        )?;
+        let channels = recording
+            .channels
+            .iter()
+            .map(|channel| channel.definition.clone())
+            .collect::<Vec<_>>();
+        let capture_request = CaptureStart {
+            meeting_id: meeting_id.into(),
+            run_id: run_id.clone(),
+            workspace_path: request
+                .workspace_path
+                .or_else(|| metadata_string(&recording.metadata, "workspacePath")),
+            microphone_device_id: projection.config.microphone_device_id.clone(),
+            channels,
+            first_sequence,
+        };
+        *self.active()? = Some(ActiveCapture {
+            meeting_id: meeting_id.into(),
+            run_id: run_id.clone(),
+            request_key,
+            mic_muted: false,
+            transcription: "initializing".into(),
+            duration_ms: first_sequence.saturating_mul(1_000),
+            recording_started_at: observed_at,
+        });
+        if let Err(message) = self.inner.capture.start(&capture_request) {
+            self.inner.store.rollback_meeting_continuation(
+                meeting_id,
+                recording.revision,
+                &run_id,
+                &self.inner.clock.now(),
+            )?;
+            *self.active()? = None;
+            let _ = self.publish_unlocked("capture-failed", Some(meeting_id.into()), Some(run_id));
+            return Err(port_error("meeting capture start", message));
+        }
+
+        let transcription_request = TranscriptionStart {
+            meeting_id: meeting_id.into(),
+            run_id: run_id.clone(),
+            route,
+            model,
+            first_sequence,
+            repair_generation: None,
+            repair_intent: None,
+        };
+        let transcription = match self.inner.transcription.start(&transcription_request) {
+            Ok(()) => self.inner.transcription.status(meeting_id).as_str().into(),
+            Err(error) => {
+                self.set_diagnostic(format!(
+                    "Recording continues; live transcription is delayed: {}",
+                    bounded_error(&error)
+                ))?;
+                "delayed".into()
+            }
+        };
+        if let Some(active) = self
+            .active()?
+            .as_mut()
+            .filter(|active| active.meeting_id == meeting_id && active.run_id == run_id)
+        {
+            active.transcription = transcription;
+        }
+        self.publish_unlocked("capture-continued", Some(meeting_id.into()), Some(run_id))
     }
 
     pub fn stop(&self, meeting_id: &str) -> Result<MeetingSnapshot, MeetingRuntimeError> {
@@ -2006,7 +2219,14 @@ fn transcription_route(config: &MeetingConfig) -> (String, String) {
 fn consent_context_for_projection(
     projection: &MeetingPlatformProjection,
     candidate_id: Option<&str>,
+    continue_meeting_id: Option<&str>,
 ) -> Result<MeetingStartConsentContext, MeetingRuntimeError> {
+    if candidate_id.is_some() && continue_meeting_id.is_some() {
+        return Err(MeetingRuntimeError::Validation(
+            "a detected meeting and a completed meeting cannot be recorded in one start request"
+                .into(),
+        ));
+    }
     let candidate = match candidate_id {
         Some(candidate_id) => Some(
             projection
@@ -2033,6 +2253,7 @@ fn consent_context_for_projection(
         candidate_id: candidate.map(|value| value.id.clone()),
         candidate_app_id: candidate.map(|value| value.app_id.clone()),
         candidate_app_name: candidate.map(|value| value.app_name.clone()),
+        continue_meeting_id: continue_meeting_id.map(str::to_string),
         transcription_mode: projection.config.transcription_mode.clone(),
         destination,
         model,
@@ -2213,6 +2434,14 @@ fn stable_start_key(request: &StartMeetingRequest) -> Option<String> {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(|value| format!("candidate:{value}"))
+        })
+        .or_else(|| {
+            request
+                .continue_meeting_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| format!("continue:{value}"))
         })
         .or_else(|| {
             Some(format!(

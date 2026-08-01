@@ -14,6 +14,7 @@ import {
   normalizeMeetingTranscriptPage,
   normalizeMeetingSnapshot,
   openMeetingSystemAudioSettings,
+  prepareMeetingFollowUpContext,
   requestMeetingMicrophonePermission,
   retranscribeMeeting,
   runMeetingSummary,
@@ -178,6 +179,23 @@ describe('meetings service', () => {
     })
   })
 
+  it('prepares immutable transcript context before opening a custom agent', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      meetingId: 'reviewed',
+      transcriptRevision: 7,
+      transcriptPath: '/private/mimir/reviewed/transcript.jsonl',
+    })
+
+    await expect(prepareMeetingFollowUpContext('reviewed')).resolves.toEqual({
+      meetingId: 'reviewed',
+      transcriptRevision: 7,
+      transcriptPath: '/private/mimir/reviewed/transcript.jsonl',
+    })
+    expect(invoke).toHaveBeenCalledWith('meetings_follow_up_context', {
+      meetingId: 'reviewed',
+    })
+  })
+
   it('sends a fine-tuned summary recipe as one per-run native request', async () => {
     vi.mocked(invoke).mockResolvedValue({ revision: 4, meetings: [] })
 
@@ -252,6 +270,7 @@ describe('meetings service', () => {
       disclosure: {
         candidateId: null,
         candidateAppName: null,
+        continueMeetingId: null,
         transcriptionMode: 'local',
         destination: null,
         model: 'whisper-small',
@@ -263,6 +282,7 @@ describe('meetings service', () => {
         title: 'Architecture',
         workspacePath: '/work',
         candidateId: null,
+        continueMeetingId: null,
         consentToken: 'native-secret',
       },
     })

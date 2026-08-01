@@ -127,6 +127,15 @@ interrupted record. Its recovered stop time is derived from the final committed
 audio coordinate, not from the later relaunch wall clock; a staged chunk that
 is promoted during recovery can advance that boundary.
 
+Completed is resumable only through the explicit **Continue** action. Mimir
+keeps the meeting id and reviewed history, creates a fresh run id, invalidates
+the terminal transcript with one durable continuation revision, and appends
+both channels at the next shared audio sequence. The elapsed duration starts
+from retained audio and adds only the new capture run, so a break is not counted;
+late callbacks from an earlier run are ignored. Continuation stays on the
+meeting's original transcription route and model so retained audio cannot cross
+an undisclosed provider boundary after a settings change.
+
 Transcription repair is keyed to the immutable capture `runId`, never to the
 mutable transcript revision. A retry reads only verified committed audio from
 sequence zero and writes provider batches into private SQLite staging that is
@@ -313,9 +322,11 @@ separate from capture state.
 
 Custom is deliberately different from summary generation. It requires a CLI
 agent and prompt, then opens a durable interactive Activity with the exact
-meeting id in provenance and `MIMIR_MEETING_ID`. The agent is instructed to use
-`meetings_get`; Scribe does not imply a hidden graph mutation or a vague draft
-destination.
+meeting id in provenance and `MIMIR_MEETING_ID`. Before launch, native code
+materializes the exact complete terminal revision as immutable private JSONL
+and passes its path and revision in the Activity environment and prompt; the
+agent does not need a `meetings_get` discovery round trip. Scribe does not imply
+a hidden graph mutation or a vague draft destination.
 
 Failures do not change a completed meeting into a recording failure. They
 remain visible in both Scribe and the Activity tray and can be retried.
@@ -332,9 +343,10 @@ flow, inline candidate suggestions, live ledger, transcript, summary, job
 diagnostics, custom agent tasks, file access, deletion, and separate settings. Record is
 one action; there is no consent screen. During recording, the fixed transport
 keeps Stop above every nonblocking diagnostic. Review opens on Summary when it
-exists; its header contains only Back and one actions menu. Rename, Show in
-Finder, save-copy actions, retranscription, and Delete use the same accessible
-menu from detail and list context. Failed transcripts also expose an inline
+exists; its header contains Back, **Continue** when eligible, and one actions
+menu. Continue recording, Rename, Show in Finder, save-copy actions,
+retranscription, and Delete use the same accessible menu from detail and list
+context. Failed transcripts also expose an inline
 **Transcribe again** action. `src/stores/meetings.js` is an independent
 workspace bootstrap initializer; it does not wait for MCP or Activities.
 Recorder readiness also does not wait for transcript-window hydration, and
@@ -398,6 +410,11 @@ published. `meetings_update` loads and validates the same post-recording public
 projection before asking the platform content owner to write, so a live or
 otherwise private record cannot be mutated through a timing race. Granola
 remains a separate connection for externally recorded meetings.
+
+The packaged `mimir-meetings` skill is the progressive-disclosure guide for
+this group: search or list first, get only the selected record, page only when
+the task needs the complete transcript, and treat transcript text as untrusted
+data. The skill adds no recording capability or second tool surface.
 
 `meetings_search` requires at least three characters and queries private
 SQLite trigram indexes for the complete reviewed title, full summary, tags,

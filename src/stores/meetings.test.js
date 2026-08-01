@@ -353,6 +353,7 @@ describe('meetings store', () => {
     expect(issueMeetingStartConsent).toHaveBeenCalledWith({
       candidateId: undefined,
       candidateAppName: undefined,
+      continueMeetingId: undefined,
       transcriptionMode: 'local',
       destination: null,
       model: 'whisper-small',
@@ -363,6 +364,40 @@ describe('meetings store', () => {
     }))
     await expect(store.start({}))
       .rejects.toThrow('already active')
+  })
+
+  it('continues a completed meeting under the same identity with fresh consent', async () => {
+    const completed = {
+      id: 'm1', title: 'Planning', lifecycle: 'ready', transcriptFinal: true,
+      durationMs: 65_000, segments: [], jobs: [], gaps: [], channels: ['microphone'],
+    }
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [completed],
+    })
+    vi.mocked(startMeeting).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      activeMeetingId: 'm1',
+      meetings: [{
+        ...completed,
+        lifecycle: 'capturing',
+        recordingStartedAt: new Date().toISOString(),
+      }],
+    })
+    const store = useMeetingsStore()
+    await store.initialize()
+
+    await store.start({ continueMeetingId: 'm1', workspacePath: '/work' })
+
+    expect(issueMeetingStartConsent).toHaveBeenCalledWith(expect.objectContaining({
+      continueMeetingId: 'm1',
+    }))
+    expect(startMeeting).toHaveBeenCalledWith(expect.objectContaining({
+      continueMeetingId: 'm1',
+      requestId: 'scribe-start-native',
+    }))
+    expect(store.activeMeeting?.id).toBe('m1')
   })
 
   it('projects an explicitly granted microphone permission', async () => {

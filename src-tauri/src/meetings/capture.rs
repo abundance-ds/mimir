@@ -590,9 +590,16 @@ fn run_capture_worker(context: CaptureWorkerContext) -> Result<CaptureStopResult
             data_dir.clone(),
             request.meeting_id.clone(),
             source_plan.microphone_channel_id,
+            request.first_sequence,
         );
         let mut system_writer = source_plan.system_channel_id.map(|channel_id| {
-            ChannelWriter::new(store, data_dir, request.meeting_id.clone(), channel_id)
+            ChannelWriter::new(
+                store,
+                data_dir,
+                request.meeting_id.clone(),
+                channel_id,
+                request.first_sequence,
+            )
         });
         let mut microphone = Some(initial_microphone);
         let mut system: Option<SystemAudioStream> = None;
@@ -1177,14 +1184,15 @@ impl ChannelWriter {
         data_dir: PathBuf,
         meeting_id: String,
         channel_id: impl Into<String>,
+        first_sequence: u64,
     ) -> Self {
         Self {
             store,
             data_dir,
             meeting_id,
             channel_id: channel_id.into(),
-            chunk_sequence: 0,
-            canonical_samples: 0,
+            chunk_sequence: first_sequence,
+            canonical_samples: first_sequence.saturating_mul(CHUNK_SAMPLES as u64),
             buffer: Vec::with_capacity(CHUNK_SAMPLES),
             gaps: Vec::new(),
         }
@@ -1490,6 +1498,8 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::meetings::{MeetingDraft, MeetingOrigin, MeetingStatus};
+    use serde_json::json;
 
     struct BlockingOpenWorker {
         entered: mpsc::SyncSender<()>,
@@ -1545,6 +1555,7 @@ mod tests {
                 "microphone",
                 super::super::AudioChannelKind::Microphone,
             )],
+            first_sequence: 0,
         }
     }
 
@@ -1609,12 +1620,14 @@ mod tests {
             directory.path().to_path_buf(),
             "degraded-system".into(),
             "microphone",
+            0,
         );
         let mut system = ChannelWriter::new(
             Arc::clone(&store),
             directory.path().to_path_buf(),
             "degraded-system".into(),
             "system",
+            0,
         );
         let mut outage = SystemChannelOutage::new(
             "system audio process tap could not open; microphone capture continued",
@@ -1880,12 +1893,14 @@ mod tests {
             directory.path().to_path_buf(),
             "stop-alignment".into(),
             "microphone",
+            0,
         );
         let mut system = ChannelWriter::new(
             Arc::clone(&store),
             directory.path().to_path_buf(),
             "stop-alignment".into(),
             "system",
+            0,
         );
         microphone
             .push_canonical_samples(&vec![1.0; canonical_frame_samples() as usize * 3])
@@ -1957,6 +1972,7 @@ mod tests {
             directory.path().to_path_buf(),
             "restart-meeting".into(),
             "microphone",
+            0,
         );
         let samples_per_frame = canonical_frame_samples();
         let frame = |sequence, start_sample, value| RawAudioFrame {
@@ -2034,6 +2050,59 @@ mod tests {
         assert_eq!(output[0], 0.0);
         assert_eq!(output[4], 1.0);
         assert!((output[2] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn continuation_writer_starts_at_its_append_cursor_without_overwriting_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "continued-meeting".into(),
+                    title: "Continued meeting".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: vec![channel("microphone", AudioChannelKind::Microphone)],
+                    metadata: json!({}),
+                },
+                "2026-08-01T10:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Recording,
+                "2026-08-01T10:00:01Z",
+                None,
+            )
+            .unwrap();
+        let mut writer = ChannelWriter::new(
+            Arc::clone(&store),
+            directory.path().to_path_buf(),
+            created.id.clone(),
+            "microphone",
+            2,
+        );
+        writer
+            .push_canonical_samples(&vec![0.25; CHUNK_SAMPLES])
+            .unwrap();
+        writer.finish().unwrap();
+
+        let chunks = store
+            .committed_audio_chunks(&created.id, "microphone", 0, 10)
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].definition.sequence, 2);
+        assert_eq!(chunks[0].definition.start_ms, 2_000);
+        assert!(directory
+            .path()
+            .join("continued-meeting/audio/microphone/00000002.f32le")
+            .is_file());
+        assert!(!directory
+            .path()
+            .join("continued-meeting/audio/microphone/00000000.f32le")
+            .exists());
     }
 
     #[test]

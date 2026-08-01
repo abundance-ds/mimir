@@ -130,6 +130,7 @@ export async function issueMeetingStartConsent(disclosure = {}) {
     disclosure: {
       candidateId: optionalString(disclosure.candidateId),
       candidateAppName: optionalString(disclosure.candidateAppName),
+      continueMeetingId: optionalString(disclosure.continueMeetingId),
       transcriptionMode: mode,
       destination: mode === 'custom' ? optionalString(disclosure.destination) : null,
       model: requiredId(disclosure.model, 'transcription model'),
@@ -151,6 +152,7 @@ export async function startMeeting(request = {}) {
       title: optionalString(request.title),
       workspacePath: optionalString(request.workspacePath),
       candidateId: optionalString(request.candidateId),
+      continueMeetingId: optionalString(request.continueMeetingId),
       consentToken: requiredId(request.consentToken, 'native recording consent token'),
     },
   }))
@@ -223,6 +225,22 @@ export async function retranscribeMeeting(meetingId) {
   return normalizeMeetingSnapshot(await invoke('meetings_retranscribe', {
     meetingId: requiredId(meetingId, 'meeting'),
   }))
+}
+
+export async function prepareMeetingFollowUpContext(meetingId) {
+  const value = object(await invoke('meetings_follow_up_context', {
+    meetingId: requiredId(meetingId, 'meeting'),
+  }))
+  return {
+    meetingId: requiredId(value.meetingId ?? value.meeting_id, 'meeting'),
+    transcriptRevision: nonnegativeInteger(
+      value.transcriptRevision ?? value.transcript_revision,
+    ),
+    transcriptPath: requiredString(
+      value.transcriptPath ?? value.transcript_path,
+      'meeting transcript path',
+    ),
+  }
 }
 
 export async function deleteMeeting(meetingId, mode = 'all') {
@@ -399,6 +417,9 @@ function normalizeMeeting(value) {
     lifecycle: String(meeting.lifecycle || 'ready'),
     transcription: String(meeting.transcription || meeting.transcriptionState || 'idle'),
     startedAt: optionalString(meeting.startedAt ?? meeting.started_at),
+    recordingStartedAt: optionalString(
+      meeting.recordingStartedAt ?? meeting.recording_started_at,
+    ),
     stoppedAt: optionalString(meeting.stoppedAt ?? meeting.stopped_at),
     durationMs: nonnegativeInteger(meeting.durationMs ?? meeting.duration_ms),
     workspacePath: optionalString(meeting.workspacePath ?? meeting.workspace_path),
@@ -658,6 +679,12 @@ function requiredId(value, label) {
   const id = String(value || '').trim()
   if (!id) throw new Error(`Choose a ${label}.`)
   return id
+}
+
+function requiredString(value, label) {
+  const string = String(value || '').trim()
+  if (!string) throw new Error(`${label} is missing.`)
+  return string
 }
 
 function uniqueStrings(value) {

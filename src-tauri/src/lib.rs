@@ -1076,6 +1076,7 @@ pub fn run() {
             meetings::commands::meetings_decide_kg,
             meetings::commands::meetings_retry_job,
             meetings::commands::meetings_run_summary,
+            meetings::commands::meetings_follow_up_context,
             meetings::commands::meetings_retranscribe,
             meetings::commands::meetings_delete,
             meetings::commands::meetings_export,

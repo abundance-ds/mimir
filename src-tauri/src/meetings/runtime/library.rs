@@ -448,6 +448,7 @@ impl MeetingRuntime {
             lifecycle: lifecycle(record.status).into(),
             transcription,
             started_at: record.started_at.clone(),
+            recording_started_at: active.map(|value| value.recording_started_at.clone()),
             stopped_at: record.stopped_at.clone(),
             duration_ms,
             workspace_path: content

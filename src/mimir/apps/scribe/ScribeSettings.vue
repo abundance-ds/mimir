@@ -92,17 +92,15 @@
             </button>
           </div>
           <dl
-            v-if="audioCheck"
+            v-if="audioTesting && audioCheck"
             data-scribe-audio-check-result
             class="mt-2 grid grid-cols-[130px_1fr] border-t border-rule-light text-[10px]"
-            role="status"
           >
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
-            <dd class="border-b border-rule-light py-2">
-              <span>{{ signalLabel(audioCheck.microphone) }}</span>
+            <dd class="flex items-center border-b border-rule-light py-2">
               <span
                 data-scribe-audio-level="microphone"
-                class="scribe-audio-level"
+                class="scribe-audio-level flex-1"
                 role="progressbar"
                 aria-label="Microphone input level"
                 aria-valuemin="0"
@@ -113,11 +111,10 @@
               </span>
             </dd>
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
-            <dd class="border-b border-rule-light py-2">
-              <span>{{ signalLabel(audioCheck.systemAudio) }}</span>
+            <dd class="flex items-center border-b border-rule-light py-2">
               <span
                 data-scribe-audio-level="system"
-                class="scribe-audio-level"
+                class="scribe-audio-level flex-1"
                 role="progressbar"
                 aria-label="System-audio input level"
                 aria-valuemin="0"
@@ -129,7 +126,7 @@
             </dd>
           </dl>
           <p
-            v-if="audioCheck?.runtimeIdentity === 'development-host'"
+            v-if="audioTesting && audioCheck?.runtimeIdentity === 'development-host'"
             class="mt-2 text-[9px] leading-relaxed text-rem"
           >
             Development-host results. Verify in the installed Mimir app.
@@ -633,18 +630,6 @@ function permissionLabel(value) {
   })[value] || String(value || 'Unknown').replaceAll('-', ' ')
 }
 
-function signalLabel(value) {
-  const state = typeof value === 'string' ? value : value?.state
-  return ({
-    signal: 'Signal detected',
-    silent: 'No sound detected — play audio and retry',
-    'no-data': 'No frames received',
-    'open-failed': value?.error || 'Could not open input',
-    ended: value?.error || 'Input stopped',
-    stopped: 'Stopped',
-  })[state] || 'Not checked'
-}
-
 function audioSourceLevel(value) {
   if (typeof value === 'number') return Math.min(100, Math.max(0, value))
   return Math.min(100, Math.max(0, Number(value?.level) || 0))
@@ -760,7 +745,6 @@ input[type='checkbox']:focus-visible {
 .scribe-audio-level {
   display: block;
   height: 3px;
-  margin-top: 5px;
   overflow: hidden;
   background: var(--color-rule-light);
 }

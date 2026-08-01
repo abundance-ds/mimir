@@ -23,7 +23,7 @@ use crate::{
     routine_runtime::{MeetingHookLaunch, RoutineRuntime},
 };
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -138,6 +138,19 @@ pub struct MeetingJobWorker {
     inner: Arc<MeetingJobWorkerInner>,
 }
 
+#[derive(Clone)]
+pub struct MeetingFollowUpContextPreparer {
+    inner: Arc<MeetingJobWorkerInner>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingFollowUpContext {
+    pub meeting_id: String,
+    pub transcript_revision: u64,
+    pub transcript_path: String,
+}
+
 impl MeetingJobWorker {
     pub fn start(
         runtime: MeetingRuntime,
@@ -197,6 +210,56 @@ impl MeetingJobWorker {
             }
         }
         self.inner.supervisor.unsubscribe(self.inner.subscription);
+    }
+
+    /// Materialize one immutable, complete transcript for a human-launched
+    /// Activity. The agent receives this context directly and never has to
+    /// discover or page `meetings_get` before it can begin the requested task.
+    pub fn follow_up_context_preparer(&self) -> MeetingFollowUpContextPreparer {
+        MeetingFollowUpContextPreparer {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl MeetingFollowUpContextPreparer {
+    pub fn prepare(&self, meeting_id: &str) -> Result<MeetingFollowUpContext, String> {
+        validate_component(meeting_id, "meeting id")?;
+        let meeting = self
+            .inner
+            .runtime
+            .meeting(meeting_id)
+            .map_err(|error| format!("Could not verify the meeting transcript: {error}"))?;
+        if meeting.lifecycle != "ready"
+            || !meeting.transcript_final
+            || !meeting.transcript_all_final
+            || meeting.segment_count == 0
+        {
+            return Err("A custom follow-up requires a completed, non-empty transcript".into());
+        }
+        let meeting_root = contained_join(&self.inner.paths.meetings_root, meeting_id)?;
+        ensure_private_directory(&meeting_root)
+            .map_err(|error| format!("Could not secure managed meeting directory: {error}"))?;
+        let followups = contained_join(&meeting_root, "followups")?;
+        ensure_private_directory(&followups)
+            .map_err(|error| format!("Could not secure managed follow-up directory: {error}"))?;
+        let activity_root = contained_join(
+            &followups,
+            &format!("activity-context-{}", meeting.transcript_revision),
+        )?;
+        ensure_private_directory(&activity_root)
+            .map_err(|error| format!("Could not secure custom follow-up context: {error}"))?;
+        let transcript_path = materialize_transcript_revision(
+            &self.inner.runtime,
+            meeting_id,
+            meeting.transcript_revision,
+            &activity_root,
+        )?;
+        Ok(MeetingFollowUpContext {
+            meeting_id: meeting_id.into(),
+            transcript_revision: meeting.transcript_revision,
+            transcript_path: transcript_path.to_string_lossy().into_owned(),
+        })
     }
 }
 
@@ -500,6 +563,7 @@ pub(crate) fn execute_transcription_repair_with(
         run_id: run_id.clone(),
         route: route.into(),
         model: model.into(),
+        first_sequence: 0,
         repair_generation: Some(capture_generation.to_string()),
         repair_intent: user_requested
             .then_some(super::runtime::TranscriptionRepairIntent::UserRequestedRetranscription),
@@ -669,9 +733,22 @@ fn materialize_hook_transcript(
         .get("transcriptRevision")
         .and_then(Value::as_u64)
         .ok_or_else(|| "Meeting follow-up job is missing its transcript revision".to_string())?;
-    let transcript_path = contained_join(job_root, "transcript.jsonl")?;
-    let transcript =
-        render_hook_transcript(source, &job.definition.meeting_id, requested_revision)?;
+    materialize_transcript_revision(
+        source,
+        &job.definition.meeting_id,
+        requested_revision,
+        job_root,
+    )
+}
+
+fn materialize_transcript_revision(
+    source: &impl HookTranscriptSource,
+    meeting_id: &str,
+    requested_revision: u64,
+    root: &Path,
+) -> Result<PathBuf, String> {
+    let transcript_path = contained_join(root, "transcript.jsonl")?;
+    let transcript = render_hook_transcript(source, meeting_id, requested_revision)?;
     publish_immutable_hook_transcript(&transcript_path, &transcript)?;
     Ok(transcript_path)
 }

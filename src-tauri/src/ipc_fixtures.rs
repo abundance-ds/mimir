@@ -589,6 +589,7 @@ fn live_meeting() -> MeetingView {
         lifecycle: "capturing".into(),
         transcription: "live".into(),
         started_at: Some("2026-07-31T08:00:00.000Z".into()),
+        recording_started_at: Some("2026-07-31T08:00:00.000Z".into()),
         stopped_at: None,
         duration_ms: 754_321,
         // Native workspace paths are intentionally absent from this renderer
@@ -624,6 +625,7 @@ fn finalized_meeting() -> MeetingView {
         lifecycle: "ready".into(),
         transcription: "final".into(),
         started_at: Some("2026-07-30T14:00:00.000Z".into()),
+        recording_started_at: None,
         stopped_at: Some("2026-07-30T14:42:17.000Z".into()),
         duration_ms: 2_537_000,
         workspace_path: None,
@@ -777,6 +779,7 @@ fn meetings_issue_start_consent() -> MeetingStartConsentGrant {
         MeetingStartConsentDisclosure {
             candidate_id: Some("candidate-teams-01".into()),
             candidate_app_name: Some("Microsoft Teams".into()),
+            continue_meeting_id: None,
             transcription_mode: "custom".into(),
             destination: Some("https://speech.example.test/v1/listen".into()),
             model: "nova-3".into(),

@@ -404,6 +404,12 @@ impl NormalizedSegment {
             && self.channel_id == other.channel_id
     }
 
+    fn can_revise_provenance(&self, existing: &Self) -> bool {
+        self.start_ms == existing.start_ms
+            && self.end_ms >= existing.end_ms
+            && self.channel_id == existing.channel_id
+    }
+
     fn same_payload(&self, other: &Self) -> bool {
         self.same_provenance(other)
             && self.text == other.text
@@ -547,7 +553,11 @@ impl TranscriptAccumulator {
                 actions.push(Action::Accept(incoming));
                 continue;
             };
-            if !incoming.same_provenance(&existing.value) {
+            // A live VAD turn has a stable start/channel as soon as speech is
+            // detected, while its end can only become known as more audio
+            // arrives. Permit that end to grow monotonically until final;
+            // finalized segments remain immutable below.
+            if !incoming.can_revise_provenance(&existing.value) {
                 return Err(NormalizeError::ProvenanceConflict);
             }
             if existing.value.state == SegmentState::Final {
@@ -1307,6 +1317,32 @@ mod tests {
             Err(NormalizeError::ProvenanceConflict)
         ));
         assert_eq!(accumulator.segments()[&id("segment-1")].value.start_ms, 100);
+    }
+
+    #[test]
+    fn a_live_turn_may_extend_its_end_but_never_move_or_shrink() {
+        let mut accumulator = TranscriptAccumulator::default();
+        let first = segment(1, SegmentState::Partial, "still");
+        accumulator
+            .apply(batch(1, "batch-1", first.clone()))
+            .unwrap();
+
+        let mut extended = segment(2, SegmentState::Final, "still speaking");
+        extended.end_ms = first.end_ms + 900;
+        accumulator
+            .apply(batch(2, "batch-2", extended.clone()))
+            .unwrap();
+        assert_eq!(
+            accumulator.segments()[&id("segment-1")].value.end_ms,
+            extended.end_ms
+        );
+
+        let mut shrinking = segment(3, SegmentState::Final, "invalid");
+        shrinking.end_ms = extended.end_ms - 1;
+        assert!(matches!(
+            accumulator.apply(batch(3, "batch-3", shrinking)),
+            Err(NormalizeError::ProvenanceConflict)
+        ));
     }
 
     #[test]

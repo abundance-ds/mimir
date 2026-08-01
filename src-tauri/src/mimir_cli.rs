@@ -13,6 +13,7 @@ const PI_EXTENSION_SOURCE: &str = include_str!("../../bin/pi-mimir-extension.ts"
 const MIMIR_CONFIG_SKILL: &str = include_str!("../../skills/mimir-config/SKILL.md");
 const MIMIR_GRAPH_SKILL: &str = include_str!("../../skills/mimir-graph/SKILL.md");
 const MIMIR_GRAPH_REFERENCE: &str = include_str!("../../skills/mimir-graph/references/graph.md");
+const MIMIR_MEETINGS_SKILL: &str = include_str!("../../skills/mimir-meetings/SKILL.md");
 const LEGACY_MIMIR_CONFIG_SKILL_V1: &str = r#"---
 name: mimir-config
 description: Locate and safely edit Mimir settings, launchers, routines, apps, and skills.
@@ -95,6 +96,15 @@ fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
             .join(".builtin-sources")
             .join("mimir-graph-reference.json"),
         MIMIR_GRAPH_REFERENCE.as_bytes(),
+        &[],
+    )?;
+
+    install_managed_builtin_skill(
+        &catalog.join("mimir-meetings").join("SKILL.md"),
+        &skills_root
+            .join(".builtin-sources")
+            .join("mimir-meetings.json"),
+        MIMIR_MEETINGS_SKILL.as_bytes(),
         &[],
     )
 }
@@ -282,12 +292,16 @@ mod tests {
         let reference = home
             .path()
             .join(".mimir/skills/catalog/mimir-graph/references/graph.md");
+        let meetings = home
+            .path()
+            .join(".mimir/skills/catalog/mimir-meetings/SKILL.md");
         assert_eq!(fs::read_to_string(config).unwrap(), MIMIR_CONFIG_SKILL);
         assert_eq!(fs::read_to_string(graph).unwrap(), MIMIR_GRAPH_SKILL);
         assert_eq!(
             fs::read_to_string(reference).unwrap(),
             MIMIR_GRAPH_REFERENCE
         );
+        assert_eq!(fs::read_to_string(meetings).unwrap(), MIMIR_MEETINGS_SKILL);
     }
 
     #[test]
@@ -317,6 +331,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(catalog.join("mimir-graph/references/graph.md")).unwrap(),
             MIMIR_GRAPH_REFERENCE
+        );
+        assert_eq!(
+            fs::read_to_string(catalog.join("mimir-meetings/SKILL.md")).unwrap(),
+            MIMIR_MEETINGS_SKILL
         );
         assert!(!home
             .path()
@@ -360,6 +378,8 @@ mod tests {
         assert!(MIMIR_SKILLS_SOURCE.contains("export async function prepareSkills"));
         assert!(MIMIR_CONFIG_SKILL.contains("name: mimir-config"));
         assert!(MIMIR_GRAPH_SKILL.contains("name: mimir-graph"));
+        assert!(MIMIR_MEETINGS_SKILL.contains("name: mimir-meetings"));
+        assert!(MIMIR_MEETINGS_SKILL.contains("meetings_search"));
         for kind in crate::business_graph::ENTITY_KINDS {
             assert!(MIMIR_GRAPH_REFERENCE.contains(kind));
         }

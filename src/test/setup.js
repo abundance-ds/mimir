@@ -73,7 +73,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'meetings_dismiss_candidate',
   'meetings_issue_start_consent',
   'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
-  'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_run_summary', 'meetings_retranscribe', 'meetings_delete',
+  'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_run_summary', 'meetings_follow_up_context', 'meetings_retranscribe', 'meetings_delete',
   'meetings_export', 'meetings_update_config', 'meetings_set_api_key',
   'meetings_clear_api_key', 'meetings_install_model', 'meetings_delete_model',
   // canonical dynamic tool providers

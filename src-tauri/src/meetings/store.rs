@@ -13,6 +13,7 @@ use crate::persistence::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
@@ -487,6 +488,13 @@ impl MeetingStore {
         }
 
         if current.status != MeetingStatus::Completed {
+            let mut completed_metadata = current.metadata.clone();
+            if let Some(metadata) = completed_metadata.as_object_mut() {
+                metadata.remove("continuationPreviousMetadata");
+                metadata.remove("continuationPreviousStoppedAt");
+                metadata.remove("continuationPreviousFinalizedAt");
+            }
+            let completed_metadata = json(completed_metadata)?;
             transaction.execute(
                 "UPDATE meetings SET
                    status='completed',
@@ -496,9 +504,10 @@ impl MeetingStore {
                    finalized_at=?2,
                    failure_code=NULL,
                    failure_message=NULL,
-                   failure_retryable=NULL
+                   failure_retryable=NULL,
+                   metadata_json=?3
                  WHERE id=?1",
-                params![meeting_id, observed_at],
+                params![meeting_id, observed_at, completed_metadata],
             )?;
         }
 
@@ -774,6 +783,250 @@ impl MeetingStore {
                 |row| row.get(0),
             )
             .map_err(Into::into)
+    }
+
+    /// Return the first sequence a new append-only capture run may own.
+    ///
+    /// The cursor is shared by every channel so a resumed microphone and
+    /// system stream can never overwrite or pair with an earlier run. A
+    /// completed meeting must not retain staged audio; recovery owns that
+    /// state before continuation is allowed.
+    pub fn next_audio_sequence(&self, meeting_id: &str) -> Result<u64, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        require_meeting(&connection, meeting_id)?;
+        let staged: bool = connection.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM audio_chunks
+               WHERE meeting_id=?1 AND status='staged'
+             )",
+            [meeting_id],
+            |row| row.get(0),
+        )?;
+        if staged {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting '{meeting_id}' still has staged audio and must be recovered before continuation"
+            )));
+        }
+        let maximum = connection.query_row(
+            "SELECT MAX(sequence) FROM audio_chunks
+             WHERE meeting_id=?1",
+            [meeting_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        maximum.map_or(Ok(0), |value| {
+            from_i64(value, "audio chunk sequence")?
+                .checked_add(1)
+                .ok_or_else(|| {
+                    MeetingStoreError::Validation("audio chunk sequence overflow".into())
+                })
+        })
+    }
+
+    /// Reopen one completed meeting for an append-only continuation run.
+    ///
+    /// Lifecycle, transcript-finality invalidation, run metadata, and pending
+    /// follow-up cancellation share one SQLite transaction. Earlier audio,
+    /// transcript revisions, reviewed content, and the original start time
+    /// remain immutable.
+    pub fn reopen_completed_meeting(
+        &self,
+        meeting_id: &str,
+        expected_revision: u64,
+        run_id: &str,
+        metadata: &serde_json::Value,
+        observed_at: &str,
+    ) -> Result<MeetingRecord, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        validate_id(run_id, "capture run id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let metadata = json(metadata.clone())?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_meeting_tx(&transaction, meeting_id)?;
+        if current.revision != expected_revision {
+            return Err(MeetingStoreError::RevisionConflict {
+                meeting_id: meeting_id.into(),
+                expected: expected_revision,
+                actual: current.revision,
+            });
+        }
+        if current.status != MeetingStatus::Completed {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting '{meeting_id}' is {} and cannot be continued",
+                current.status
+            )));
+        }
+        let final_revision: Option<bool> = transaction
+            .query_row(
+                "SELECT marks_final FROM transcript_revisions
+                 WHERE meeting_id=?1 AND revision=?2",
+                params![meeting_id, to_i64(current.transcript_revision)?],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if final_revision != Some(true) {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting '{meeting_id}' does not have a final transcript and cannot be continued"
+            )));
+        }
+
+        let revision = current
+            .transcript_revision
+            .checked_add(1)
+            .ok_or_else(|| MeetingStoreError::Validation("transcript revision overflow".into()))?;
+        let batch = TranscriptBatch {
+            meeting_id: meeting_id.into(),
+            batch_id: format!("continue-{run_id}"),
+            base_revision: current.transcript_revision,
+            source: "native-continuation".into(),
+            observed_at: observed_at.clone(),
+            marks_final: false,
+            changes: Vec::new(),
+        };
+        let batch_hash = transcript_batch_fingerprint(&batch, &observed_at)?;
+        transaction.execute(
+            "INSERT INTO transcript_revisions (
+               meeting_id,revision,base_revision,batch_id,source,observed_at,marks_final
+             ) VALUES (?1,?2,?3,?4,?5,?6,0)",
+            params![
+                meeting_id,
+                to_i64(revision)?,
+                to_i64(current.transcript_revision)?,
+                batch.batch_id,
+                batch.source,
+                observed_at
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO transcript_batches (meeting_id,batch_id,batch_hash,revision)
+             VALUES (?1,?2,?3,?4)",
+            params![meeting_id, batch.batch_id, batch_hash, to_i64(revision)?],
+        )?;
+        transaction.execute(
+            "UPDATE meetings SET
+               status='recording',updated_at=?2,revision=revision+1,
+               transcript_revision=?3,stopped_at=NULL,finalized_at=NULL,
+               interrupted_at=NULL,interruption_reason=NULL,
+               failure_code=NULL,failure_message=NULL,failure_retryable=NULL,
+               metadata_json=?4
+             WHERE id=?1",
+            params![meeting_id, observed_at, to_i64(revision)?, metadata],
+        )?;
+        transaction.execute(
+            "UPDATE follow_up_jobs SET
+               state='cancelled',last_error='meeting continued before follow-up completed',
+               lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=?2
+             WHERE meeting_id=?1 AND state='pending'",
+            params![meeting_id, observed_at],
+        )?;
+        let meeting = load_meeting_tx(&transaction, meeting_id)?;
+        transaction.commit()?;
+        Ok(meeting)
+    }
+
+    /// Restore the exact completed authority when a continuation worker could
+    /// not be opened. This is the synchronous-start rollback paired with
+    /// `reopen_completed_meeting`; no earlier content is deleted or rewritten.
+    pub fn rollback_meeting_continuation(
+        &self,
+        meeting_id: &str,
+        expected_revision: u64,
+        run_id: &str,
+        observed_at: &str,
+    ) -> Result<MeetingRecord, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        validate_id(run_id, "capture run id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_meeting_tx(&transaction, meeting_id)?;
+        if current.revision != expected_revision {
+            return Err(MeetingStoreError::RevisionConflict {
+                meeting_id: meeting_id.into(),
+                expected: expected_revision,
+                actual: current.revision,
+            });
+        }
+        if current.status != MeetingStatus::Recording
+            || current.metadata.get("runId").and_then(Value::as_str) != Some(run_id)
+        {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting '{meeting_id}' is not owned by continuation run '{run_id}'"
+            )));
+        }
+        let continuation_batch = format!("continue-{run_id}");
+        let (base_revision, stored_batch, source, marks_final) = transaction.query_row(
+            "SELECT base_revision,batch_id,source,marks_final
+             FROM transcript_revisions
+             WHERE meeting_id=?1 AND revision=?2",
+            params![meeting_id, to_i64(current.transcript_revision)?],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
+                ))
+            },
+        )?;
+        if stored_batch != continuation_batch || source != "native-continuation" || marks_final {
+            return Err(MeetingStoreError::Validation(format!(
+                "meeting '{meeting_id}' received transcript work after continuation started"
+            )));
+        }
+        let base_revision = from_i64(base_revision, "transcript revision")?;
+        transaction.execute(
+            "DELETE FROM transcript_batches WHERE meeting_id=?1 AND batch_id=?2",
+            params![meeting_id, continuation_batch],
+        )?;
+        transaction.execute(
+            "DELETE FROM transcript_revisions WHERE meeting_id=?1 AND revision=?2",
+            params![meeting_id, to_i64(current.transcript_revision)?],
+        )?;
+        let previous_stopped_at = current
+            .metadata
+            .get("continuationPreviousStoppedAt")
+            .and_then(Value::as_str);
+        let previous_finalized_at = current
+            .metadata
+            .get("continuationPreviousFinalizedAt")
+            .and_then(Value::as_str);
+        let previous_metadata = current
+            .metadata
+            .get("continuationPreviousMetadata")
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                MeetingStoreError::Validation(format!(
+                    "meeting '{meeting_id}' is missing its pre-continuation metadata"
+                ))
+            })?;
+        let previous_metadata = json(previous_metadata.clone())?;
+        transaction.execute(
+            "UPDATE meetings SET
+               status='completed',updated_at=?2,revision=revision+1,
+               transcript_revision=?3,stopped_at=?4,finalized_at=?5,
+               metadata_json=?6
+             WHERE id=?1",
+            params![
+                meeting_id,
+                observed_at,
+                to_i64(base_revision)?,
+                previous_stopped_at,
+                previous_finalized_at,
+                previous_metadata
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE follow_up_jobs SET
+               state='pending',last_error=NULL,not_before=?2,updated_at=?2
+             WHERE meeting_id=?1 AND state='cancelled'
+               AND last_error='meeting continued before follow-up completed'",
+            params![meeting_id, observed_at],
+        )?;
+        let meeting = load_meeting_tx(&transaction, meeting_id)?;
+        transaction.commit()?;
+        Ok(meeting)
     }
 
     pub fn apply_transcript_batch(

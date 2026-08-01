@@ -92,7 +92,8 @@ export const useMeetingsStore = defineStore('meetings', () => {
     const active = activeMeeting.value
     if (!active?.startedAt) return 0
     if (!recording.value) return active.durationMs
-    return Math.max(active.durationMs, Date.now() - Date.parse(active.startedAt))
+    const runStartedAt = Date.parse(active.recordingStartedAt || active.startedAt)
+    return active.durationMs + Math.max(0, Date.now() - runStartedAt)
   })
   const audioTesting = computed(() => Boolean(audioTestId.value))
   const kgOffer = computed(() => meetings.value.find(
@@ -163,6 +164,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
       const consent = await issueMeetingStartConsent({
         candidateId: candidate?.id,
         candidateAppName: candidate?.appName,
+        continueMeetingId: request?.continueMeetingId,
         transcriptionMode: config.value.transcriptionMode,
         destination: custom ? config.value.customUrl : null,
         model: custom ? config.value.customModel : config.value.localModel,

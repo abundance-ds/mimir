@@ -238,8 +238,8 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/model.rs",
-      "selector": "gherkin_terminal_meetings_never_reopen",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
+      "selector": "completed_meeting_continues_under_the_same_id_with_a_fresh_run",
       "scenarios": ["MTG-026"]
     },
     {
@@ -287,7 +287,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
-      "selector": "checks both audio sources without presenting a recording workflow",
+      "selector": "shows only moving input levels while an audio test is active",
       "scenarios": ["MTG-051"]
     },
     {
@@ -479,7 +479,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "opens a summarized meeting on Summary with only back and overflow in its header",
+      "selector": "opens a summarized meeting on Summary with Continue beside its compact header actions",
       "scenarios": ["MTG-079"]
     },
     {
@@ -635,7 +635,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "opens a summarized meeting on Summary with only back and overflow in its header",
+      "selector": "opens a summarized meeting on Summary with Continue beside its compact header actions",
       "scenarios": ["MTG-208"]
     },
     {

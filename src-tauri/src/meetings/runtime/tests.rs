@@ -182,6 +182,15 @@ impl MeetingTranscriptionPort for FakeTranscription {
 
     fn finalize(&self, request: &TranscriptionFinalize) -> Result<TranscriptBatch, String> {
         self.finalizes.lock().unwrap().push(request.clone());
+        let first_sequence = self
+            .starts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|start| start.run_id == request.run_id)
+            .map(|start| start.first_sequence)
+            .unwrap_or(0);
+        let start_ms = first_sequence.saturating_mul(1_000) as i64;
         Ok(TranscriptBatch {
             meeting_id: request.meeting_id.clone(),
             batch_id: format!("final-{}", request.run_id),
@@ -191,9 +200,9 @@ impl MeetingTranscriptionPort for FakeTranscription {
             marks_final: true,
             changes: vec![TranscriptChange::UpsertSegment {
                 segment: TranscriptSegmentInput {
-                    id: "segment-1".into(),
-                    start_ms: 0,
-                    end_ms: 4_000,
+                    id: format!("segment-{}", request.run_id),
+                    start_ms,
+                    end_ms: start_ms.saturating_add(4_000),
                     text: "Production readiness is a release requirement.".into(),
                     channel_id: Some("microphone".into()),
                     speaker: Some("Speaker 1".into()),
@@ -757,6 +766,7 @@ fn start_request_for_candidate(
         title: Some("Release review".into()),
         workspace_path: Some("/workspace".into()),
         candidate_id: candidate_id.map(str::to_string),
+        continue_meeting_id: None,
         consent_token: None,
         authorized_consent: Some(runtime.start_consent_context(candidate_id).unwrap()),
     }
@@ -1190,6 +1200,182 @@ fn stop_refreshes_revision_after_capture_records_reconnect_gap() {
     assert!(overview.is_final);
     assert_eq!(overview.unresolved_gap_count, 1);
     assert_eq!(overview.gaps[0].gap.id, "microphone-reconnect-gap");
+}
+
+#[test]
+fn completed_meeting_continues_under_the_same_id_with_a_fresh_run() {
+    let fixture = make_fixture();
+    let started = fixture
+        .runtime
+        .start(start_request(&fixture.runtime, "continuation-first-run"))
+        .unwrap();
+    let meeting_id = started.active_meeting_id.unwrap();
+    let first_run_id = fixture.capture.starts.lock().unwrap()[0].run_id.clone();
+    fixture
+        .store
+        .stage_audio_chunk(
+            &crate::meetings::AudioChunkDraft {
+                id: format!("{meeting_id}-microphone-00000004"),
+                meeting_id: meeting_id.clone(),
+                channel_id: "microphone".into(),
+                sequence: 4,
+                start_ms: 4_000,
+                end_ms: 5_000,
+                sample_count: 16_000,
+                byte_len: 64_000,
+                sha256: "a".repeat(64),
+                relative_path: format!("{meeting_id}/audio/microphone/00000004.f32le"),
+            },
+            NOW,
+        )
+        .unwrap();
+    fixture
+        .store
+        .commit_audio_chunk(&format!("{meeting_id}-microphone-00000004"), NOW)
+        .unwrap();
+    fixture.runtime.stop(&meeting_id).unwrap();
+    let final_before = fixture.store.get_meeting(&meeting_id).unwrap();
+    assert_eq!(final_before.status, MeetingStatus::Completed);
+
+    let mut request = start_request(&fixture.runtime, "continuation-second-run");
+    request.title = None;
+    request.continue_meeting_id = Some(meeting_id.clone());
+    request.authorized_consent = Some(
+        fixture
+            .runtime
+            .start_consent_context_for(None, Some(&meeting_id))
+            .unwrap(),
+    );
+    let continued = fixture.runtime.start(request).unwrap();
+    assert_eq!(
+        continued.active_meeting_id.as_deref(),
+        Some(meeting_id.as_str())
+    );
+    let continued_view = continued
+        .meetings
+        .iter()
+        .find(|meeting| meeting.id == meeting_id)
+        .unwrap();
+    assert_eq!(continued_view.duration_ms, 5_000);
+    assert!(continued_view.recording_started_at.is_some());
+    let starts = fixture.capture.starts.lock().unwrap().clone();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[1].meeting_id, meeting_id);
+    assert_ne!(starts[1].run_id, first_run_id);
+    assert_eq!(starts[1].first_sequence, 5);
+    drop(starts);
+
+    let reopened = fixture.store.get_meeting(&meeting_id).unwrap();
+    assert_eq!(reopened.status, MeetingStatus::Recording);
+    assert!(reopened.transcript_revision > final_before.transcript_revision);
+    assert!(
+        !fixture
+            .store
+            .transcript_overview(&meeting_id, 10)
+            .unwrap()
+            .is_final
+    );
+
+    fixture
+        .runtime
+        .handle_capture_failure(&meeting_id, &first_run_id, "late old-run failure")
+        .unwrap();
+    assert_eq!(
+        fixture.store.get_meeting(&meeting_id).unwrap().status,
+        MeetingStatus::Recording
+    );
+
+    let finalized = fixture.runtime.stop(&meeting_id).unwrap();
+    assert!(finalized.active_meeting_id.is_none());
+    assert_eq!(
+        fixture.store.get_meeting(&meeting_id).unwrap().status,
+        MeetingStatus::Completed
+    );
+    let completed_after_continuation = fixture.store.get_meeting(&meeting_id).unwrap();
+    assert!(completed_after_continuation
+        .metadata
+        .get("continuationPreviousMetadata")
+        .is_none());
+    assert!(completed_after_continuation
+        .metadata
+        .get("continuationPreviousStoppedAt")
+        .is_none());
+    assert!(completed_after_continuation
+        .metadata
+        .get("continuationPreviousFinalizedAt")
+        .is_none());
+    assert!(
+        fixture
+            .store
+            .transcript_overview(&meeting_id, 10)
+            .unwrap()
+            .is_final
+    );
+}
+
+#[test]
+fn failed_continuation_open_restores_the_exact_completed_transcript_and_pending_summary() {
+    let fixture = make_fixture();
+    let started = fixture
+        .runtime
+        .start(start_request(
+            &fixture.runtime,
+            "continuation-rollback-first",
+        ))
+        .unwrap();
+    let meeting_id = started.active_meeting_id.unwrap();
+    fixture.runtime.stop(&meeting_id).unwrap();
+    let completed = fixture.store.get_meeting(&meeting_id).unwrap();
+    let pending_job = fixture
+        .store
+        .list_jobs(&meeting_id)
+        .unwrap()
+        .into_iter()
+        .find(|job| job.definition.kind == FollowUpJobKind::Summary)
+        .unwrap();
+    assert_eq!(pending_job.state, JobState::Pending);
+    *fixture.capture.fail_start.lock().unwrap() = Some("device open refused".into());
+
+    let mut request = start_request(&fixture.runtime, "continuation-rollback-second");
+    request.continue_meeting_id = Some(meeting_id.clone());
+    request.authorized_consent = Some(
+        fixture
+            .runtime
+            .start_consent_context_for(None, Some(&meeting_id))
+            .unwrap(),
+    );
+    assert!(fixture.runtime.start(request).is_err());
+
+    let restored = fixture.store.get_meeting(&meeting_id).unwrap();
+    assert_eq!(restored.status, MeetingStatus::Completed);
+    assert_eq!(restored.transcript_revision, completed.transcript_revision);
+    assert_eq!(restored.stopped_at, completed.stopped_at);
+    assert_eq!(restored.finalized_at, completed.finalized_at);
+    assert_eq!(restored.metadata, completed.metadata);
+    assert!(
+        fixture
+            .store
+            .transcript_overview(&meeting_id, 10)
+            .unwrap()
+            .is_final
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_jobs(&meeting_id)
+            .unwrap()
+            .into_iter()
+            .find(|job| job.definition.id == pending_job.definition.id)
+            .unwrap()
+            .state,
+        JobState::Pending
+    );
+    assert!(fixture
+        .runtime
+        .snapshot()
+        .unwrap()
+        .active_meeting_id
+        .is_none());
 }
 
 #[test]
@@ -2640,6 +2826,7 @@ fn stop_winning_failed_worker_race_enqueues_repair_before_delayed_callback() {
                 .as_str()
                 .unwrap()
                 .into(),
+            first_sequence: 0,
             repair_generation: Some(run_id.clone()),
             repair_intent: None,
         })

@@ -154,8 +154,12 @@ impl LocalTranscriber for ManagedWhisperTranscriber {
             Some(cached) if cached.matches(&artifact) => cached.session,
             _ => self.prepare(&artifact)?.session,
         };
-        let mut stream =
-            StreamingState::new(context.run_id, self.window_chunks, self.poll_interval);
+        let mut stream = StreamingState::new(
+            context.run_id,
+            context.first_sequence,
+            self.window_chunks,
+            self.poll_interval,
+        );
 
         let mut finalizing = false;
         loop {
@@ -556,10 +560,15 @@ struct StreamingState {
 }
 
 impl StreamingState {
-    fn new(run_id: &str, window_chunks: usize, poll_interval: Duration) -> Self {
+    fn new(
+        run_id: &str,
+        first_sequence: u64,
+        window_chunks: usize,
+        poll_interval: Duration,
+    ) -> Self {
         Self {
-            next_sequence: 0,
-            expected_sequence: None,
+            next_sequence: first_sequence,
+            expected_sequence: Some(first_sequence),
             provider_sequence: 0,
             window_index: 0,
             window_samples: window_chunks.saturating_mul(SAMPLE_RATE_HZ),
@@ -1126,6 +1135,7 @@ mod tests {
                 meeting_id: "meeting-1",
                 run_id: "run-1",
                 model_id: "whisper-small",
+                first_sequence: 0,
                 audio: &audio,
                 finalize: &finalize_rx,
                 sink: &mut sink,
@@ -1175,7 +1185,7 @@ mod tests {
 
     #[test]
     fn silence_never_fabricates_a_transcript() {
-        let mut stream = StreamingState::new("run-1", 1, Duration::from_millis(1));
+        let mut stream = StreamingState::new("run-1", 0, 1, Duration::from_millis(1));
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mut inference = FakeSession {
             calls: Arc::clone(&calls),
@@ -1293,6 +1303,7 @@ mod tests {
                 meeting_id: "meeting-long",
                 run_id: "run-long",
                 model_id: "whisper-small",
+                first_sequence: 0,
                 audio: &audio,
                 finalize: &finalize_rx,
                 sink: &mut sink,
