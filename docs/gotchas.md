@@ -291,9 +291,12 @@ a localhost exception.
 
 The OpenAI Realtime route is selected by the `/v1/realtime` path plus a
 `gpt-*` model. It uses OpenAI's JSON event contract over two channel-specific
-WebSockets and no `mimir.stt.v1` subprotocol. Other advanced hosted URLs still
-use Mimir's versioned provider-neutral contract. Do not send the proprietary
-start/audio frames to OpenAI or treat arbitrary URLs as OpenAI-compatible.
+WebSockets and no `mimir.stt.v1` subprotocol. Keep the user-facing and
+credential-bound endpoint canonical; the native OpenAI connector alone adds
+the wire-only `intent=transcription` query selector. Other advanced hosted
+URLs still use Mimir's versioned provider-neutral contract. Do not send the
+proprietary start/audio frames to OpenAI or treat arbitrary URLs as
+OpenAI-compatible.
 
 ### Scribe permissions belong to the application bundle
 

@@ -349,6 +349,7 @@ describe('meetings store', () => {
       }],
     })
     await store.start({ title: 'Planning' })
+    expect(requestMeetingMicrophonePermission).not.toHaveBeenCalled()
     expect(issueMeetingStartConsent).toHaveBeenCalledWith({
       candidateId: undefined,
       candidateAppName: undefined,
@@ -378,6 +379,42 @@ describe('meetings store', () => {
       microphone: 'granted',
       systemAudio: 'prompt-on-start',
     })
+  })
+
+  it('requests microphone access only when the native projection is not already granted', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      permissions: { microphone: 'prompt', systemAudio: 'prompt-on-start' },
+    })
+    vi.mocked(requestMeetingMicrophonePermission).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+    })
+    vi.mocked(startMeeting).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 3,
+      activeMeetingId: 'm1',
+      meetings: [
+        {
+          id: 'm1',
+          title: 'Permission test',
+          lifecycle: 'capturing',
+          durationMs: 0,
+          segments: [],
+          jobs: [],
+          gaps: [],
+          channels: ['microphone', 'system'],
+        },
+      ],
+    })
+    const store = useMeetingsStore()
+    await store.initialize()
+
+    await store.start({ title: 'Permission test' })
+
+    expect(requestMeetingMicrophonePermission).toHaveBeenCalledTimes(1)
+    expect(startMeeting).toHaveBeenCalledTimes(1)
   })
 
   it('serializes concurrent config mutations without dropping either user intent', async () => {

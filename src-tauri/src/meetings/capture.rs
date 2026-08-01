@@ -9,8 +9,9 @@ use super::{
     runtime::{
         CaptureStart, CaptureStop, CaptureStopResult, MeetingCaptureFailureSink, MeetingCapturePort,
     },
-    AudioChunkDraft, AudioChunkStatus, MeetingStore, MeetingStoreError, RecoveryReport,
-    TranscriptBatch, TranscriptChange, TranscriptGapInput, TranscriptGapReason,
+    AudioChannelDraft, AudioChannelKind, AudioChunkDraft, AudioChunkStatus, MeetingStore,
+    MeetingStoreError, RecoveryReport, TranscriptBatch, TranscriptChange, TranscriptGapInput,
+    TranscriptGapReason,
 };
 use crate::persistence::{
     ensure_private_directory, prepare_private_file_path, write_private_bytes_atomic,
@@ -33,9 +34,9 @@ use tokio::sync::watch;
 
 const CANONICAL_SAMPLE_RATE_HZ: u32 = 16_000;
 const FRAME_MILLISECONDS: u64 = 20;
+const FRAME_MILLISECONDS_DURATION: Duration = Duration::from_millis(FRAME_MILLISECONDS);
 const CHUNK_SAMPLES: usize = CANONICAL_SAMPLE_RATE_HZ as usize;
 const MINIMUM_FREE_BYTES: u64 = 512 * 1024 * 1024;
-const START_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RESTART_ATTEMPTS: u8 = 6;
 const RESTART_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const RESTART_MAX_BACKOFF: Duration = Duration::from_secs(4);
@@ -46,6 +47,7 @@ const RESTART_STABLE_MICROPHONE_FRAMES: u32 = 250;
 // tracks aligned, but do not misrepresent this bounded scheduling skew as
 // missing meeting audio. Larger divergence remains an explicit capture gap.
 const MAX_CALLBACK_STOP_SKEW_FRAMES: u64 = 13;
+const SYSTEM_GAP_CHECKPOINT_FRAMES: u64 = 1_500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RestartAttempt {
@@ -157,26 +159,148 @@ const fn canonical_frame_samples() -> u64 {
     CANONICAL_SAMPLE_RATE_HZ as u64 * FRAME_MILLISECONDS / 1_000
 }
 
-struct StartupReadiness {
-    sender: Option<mpsc::SyncSender<Result<(), String>>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureWorkerPhase {
+    Opening,
+    StopRequested,
+    Capturing,
+    Finished,
 }
 
-impl StartupReadiness {
-    fn new(sender: mpsc::SyncSender<Result<(), String>>) -> Self {
+#[derive(Debug)]
+struct CaptureStartupState {
+    phase: Mutex<CaptureWorkerPhase>,
+}
+
+impl CaptureStartupState {
+    fn opening() -> Self {
         Self {
-            sender: Some(sender),
+            phase: Mutex::new(CaptureWorkerPhase::Opening),
         }
     }
 
-    /// Returns `true` only for the first report.
-    fn report(&mut self, result: Result<(), String>) -> Result<bool, String> {
-        let Some(sender) = self.sender.take() else {
-            return Ok(false);
-        };
-        sender
-            .send(result)
-            .map_err(|_| "meeting capture caller stopped during initialization".to_string())?;
-        Ok(true)
+    /// Atomically hands successfully opened streams to the capture loop.
+    /// A Stop that won the race keeps ownership and prevents callbacks from
+    /// becoming live after the renderer already finalized the meeting.
+    fn begin_capture(&self) -> Result<bool, String> {
+        let mut phase = self
+            .phase
+            .lock()
+            .map_err(|_| "meeting capture startup state was poisoned".to_string())?;
+        match *phase {
+            CaptureWorkerPhase::Opening => {
+                *phase = CaptureWorkerPhase::Capturing;
+                Ok(true)
+            }
+            CaptureWorkerPhase::StopRequested => Ok(false),
+            CaptureWorkerPhase::Capturing => {
+                Err("meeting capture worker attempted to start twice".into())
+            }
+            CaptureWorkerPhase::Finished => Ok(false),
+        }
+    }
+
+    fn request_stop(&self) -> Result<StopDisposition, String> {
+        let mut phase = self
+            .phase
+            .lock()
+            .map_err(|_| "meeting capture startup state was poisoned".to_string())?;
+        match *phase {
+            CaptureWorkerPhase::Opening => {
+                *phase = CaptureWorkerPhase::StopRequested;
+                Ok(StopDisposition::ReapOpeningWorker)
+            }
+            CaptureWorkerPhase::StopRequested => Ok(StopDisposition::ReapOpeningWorker),
+            CaptureWorkerPhase::Capturing | CaptureWorkerPhase::Finished => {
+                Ok(StopDisposition::JoinOwnedWorker)
+            }
+        }
+    }
+
+    fn finish(&self) {
+        if let Ok(mut phase) = self.phase.lock() {
+            *phase = CaptureWorkerPhase::Finished;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopDisposition {
+    ReapOpeningWorker,
+    JoinOwnedWorker,
+}
+
+struct CaptureWorkerContext {
+    store: Arc<MeetingStore>,
+    data_dir: PathBuf,
+    request: CaptureStart,
+    stop: watch::Receiver<bool>,
+    microphone_muted: Arc<AtomicBool>,
+    startup: Arc<CaptureStartupState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CaptureSourcePlan {
+    microphone_channel_id: String,
+    system_channel_id: Option<String>,
+}
+
+impl CaptureSourcePlan {
+    fn from_channels(channels: &[AudioChannelDraft]) -> Result<Self, String> {
+        let microphone = channels
+            .iter()
+            .filter(|channel| channel.kind == AudioChannelKind::Microphone)
+            .collect::<Vec<_>>();
+        if microphone.len() != 1 {
+            return Err(
+                "meeting capture requires exactly one authorized microphone channel".into(),
+            );
+        }
+        let system = channels
+            .iter()
+            .filter(|channel| channel.kind == AudioChannelKind::System)
+            .collect::<Vec<_>>();
+        if system.len() > 1 {
+            return Err("meeting capture permits at most one authorized system channel".into());
+        }
+        let microphone_channel_id = microphone[0].id.trim();
+        if microphone_channel_id.is_empty() {
+            return Err("authorized microphone channel id cannot be empty".into());
+        }
+        let system_channel_id = system
+            .first()
+            .map(|channel| channel.id.trim())
+            .map(|channel_id| {
+                if channel_id.is_empty() {
+                    Err("authorized system channel id cannot be empty".to_string())
+                } else {
+                    Ok(channel_id.to_string())
+                }
+            })
+            .transpose()?;
+        Ok(Self {
+            microphone_channel_id: microphone_channel_id.to_string(),
+            system_channel_id,
+        })
+    }
+}
+
+#[cfg(test)]
+impl CaptureWorkerContext {
+    fn begin_capture(&self) -> Result<bool, String> {
+        self.startup.begin_capture()
+    }
+}
+
+trait CaptureWorkerRunner: Send + Sync {
+    fn run(&self, context: CaptureWorkerContext) -> Result<CaptureStopResult, String>;
+}
+
+struct NativeCaptureWorkerRunner;
+
+impl CaptureWorkerRunner for NativeCaptureWorkerRunner {
+    fn run(&self, context: CaptureWorkerContext) -> Result<CaptureStopResult, String> {
+        run_capture_worker(context)
     }
 }
 
@@ -184,6 +308,7 @@ impl StartupReadiness {
 struct CaptureSession {
     stop: watch::Sender<bool>,
     microphone_muted: Arc<AtomicBool>,
+    startup: Arc<CaptureStartupState>,
     worker: thread::JoinHandle<Result<CaptureStopResult, String>>,
 }
 
@@ -193,10 +318,19 @@ pub struct NativeMeetingCapture {
     sessions: Mutex<HashMap<String, CaptureSession>>,
     failure_sink: Arc<Mutex<Option<Arc<dyn MeetingCaptureFailureSink>>>>,
     startup_cleanup_pending: Arc<AtomicBool>,
+    worker_runner: Arc<dyn CaptureWorkerRunner>,
 }
 
 impl NativeMeetingCapture {
     pub fn new(store: Arc<MeetingStore>, data_dir: impl Into<PathBuf>) -> Result<Self, String> {
+        Self::with_worker(store, data_dir, Arc::new(NativeCaptureWorkerRunner))
+    }
+
+    fn with_worker(
+        store: Arc<MeetingStore>,
+        data_dir: impl Into<PathBuf>,
+        worker_runner: Arc<dyn CaptureWorkerRunner>,
+    ) -> Result<Self, String> {
         let data_dir = data_dir.into();
         ensure_private_directory(&data_dir)
             .map_err(|error| format!("could not secure meeting audio directory: {error}"))?;
@@ -206,6 +340,7 @@ impl NativeMeetingCapture {
             sessions: Mutex::new(HashMap::new()),
             failure_sink: Arc::new(Mutex::new(None)),
             startup_cleanup_pending: Arc::new(AtomicBool::new(false)),
+            worker_runner,
         })
     }
 
@@ -300,25 +435,32 @@ impl MeetingCapturePort for NativeMeetingCapture {
         ensure_free_space(&self.data_dir)?;
         let (stop, stop_rx) = watch::channel(false);
         let microphone_muted = Arc::new(AtomicBool::new(false));
-        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        let store = Arc::clone(&self.store);
-        let data_dir = self.data_dir.clone();
-        let request = request.clone();
+        let startup = Arc::new(CaptureStartupState::opening());
+        let context = CaptureWorkerContext {
+            store: Arc::clone(&self.store),
+            data_dir: self.data_dir.clone(),
+            request: request.clone(),
+            stop: stop_rx,
+            microphone_muted: Arc::clone(&microphone_muted),
+            startup: Arc::clone(&startup),
+        };
         let meeting_id = request.meeting_id.clone();
         let worker_meeting_id = meeting_id.clone();
         let worker_run_id = request.run_id.clone();
-        let worker_muted = Arc::clone(&microphone_muted);
         let failure_sink = Arc::clone(&self.failure_sink);
-        let (startup_decision_tx, startup_decision_rx) = mpsc::sync_channel(1);
+        let worker_startup = Arc::clone(&startup);
+        let runner = Arc::clone(&self.worker_runner);
+        let (registered_tx, registered_rx) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name(format!("mimir-audio-{}", request.meeting_id))
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_capture_worker(store, data_dir, request, stop_rx, worker_muted, ready_tx)
+                    runner.run(context)
                 }))
                 .unwrap_or_else(|_| Err("meeting audio worker panicked".into()));
-                let armed = startup_decision_rx.recv().unwrap_or(false);
-                if armed {
+                worker_startup.finish();
+                let registered = registered_rx.recv().unwrap_or(false);
+                if registered {
                     if let Err(message) = &result {
                         let sink = failure_sink
                             .lock()
@@ -343,46 +485,19 @@ impl MeetingCapturePort for NativeMeetingCapture {
                 result
             })
             .map_err(|error| format!("could not spawn meeting audio worker: {error}"))?;
-
-        match ready_rx.recv_timeout(START_TIMEOUT) {
-            Ok(Ok(())) => {
-                sessions.insert(
-                    meeting_id,
-                    CaptureSession {
-                        stop,
-                        microphone_muted,
-                        worker,
-                    },
-                );
-                let _ = startup_decision_tx.send(true);
-                Ok(())
-            }
-            Ok(Err(message)) => {
-                let _ = startup_decision_tx.send(false);
-                let _ = stop.send(true);
-                drop(ready_rx);
-                reap_startup_worker(
-                    "meeting audio startup",
-                    worker,
-                    Arc::clone(&self.startup_cleanup_pending),
-                );
-                Err(message)
-            }
-            Err(error) => {
-                let _ = startup_decision_tx.send(false);
-                let _ = stop.send(true);
-                drop(ready_rx);
-                reap_startup_worker(
-                    "timed-out meeting audio startup",
-                    worker,
-                    Arc::clone(&self.startup_cleanup_pending),
-                );
-                Err(format!(
-                    "meeting audio devices did not initialize within {} seconds: {error}",
-                    START_TIMEOUT.as_secs()
-                ))
-            }
-        }
+        sessions.insert(
+            meeting_id,
+            CaptureSession {
+                stop,
+                microphone_muted,
+                startup,
+                worker,
+            },
+        );
+        // A device can reject synchronously on the worker thread. Do not let
+        // that terminal callback race the session-map insertion above.
+        let _ = registered_tx.send(true);
+        Ok(())
     }
 
     fn stop(&self, request: &CaptureStop) -> Result<CaptureStopResult, String> {
@@ -391,10 +506,20 @@ impl MeetingCapturePort for NativeMeetingCapture {
             .remove(&request.meeting_id)
             .ok_or_else(|| format!("meeting '{}' has no audio worker", request.meeting_id))?;
         let _ = session.stop.send(true);
-        session
-            .worker
-            .join()
-            .map_err(|_| "meeting audio worker panicked".to_string())?
+        match session.startup.request_stop()? {
+            StopDisposition::ReapOpeningWorker => {
+                reap_startup_worker(
+                    "stopped meeting audio startup",
+                    session.worker,
+                    Arc::clone(&self.startup_cleanup_pending),
+                );
+                Ok(CaptureStopResult { duration_ms: 0 })
+            }
+            StopDisposition::JoinOwnedWorker => session
+                .worker
+                .join()
+                .map_err(|_| "meeting audio worker panicked".to_string())?,
+        }
     }
 
     fn set_microphone_muted(
@@ -436,46 +561,54 @@ fn reap_startup_worker<T: Send + 'static>(
 }
 
 #[cfg(target_os = "macos")]
-fn run_capture_worker(
-    store: Arc<MeetingStore>,
-    data_dir: PathBuf,
-    request: CaptureStart,
-    mut stop: watch::Receiver<bool>,
-    microphone_muted: Arc<AtomicBool>,
-    ready: mpsc::SyncSender<Result<(), String>>,
-) -> Result<CaptureStopResult, String> {
+fn run_capture_worker(context: CaptureWorkerContext) -> Result<CaptureStopResult, String> {
     use futures_util::StreamExt;
+
+    let CaptureWorkerContext {
+        store,
+        data_dir,
+        request,
+        mut stop,
+        microphone_muted,
+        startup,
+    } = context;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
         .map_err(|error| format!("could not initialize meeting audio runtime: {error}"))?;
     runtime.block_on(async move {
-        let mut readiness = StartupReadiness::new(ready);
-        let initial_streams = match open_native_streams(request.microphone_device_id.as_deref()) {
-            Ok(streams) => streams,
-            Err(error) => {
-                let _ = readiness.report(Err(error.clone()));
-                return Err(error);
-            }
-        };
-        readiness.report(Ok(()))?;
+        let source_plan = CaptureSourcePlan::from_channels(&request.channels)?;
+        let initial_microphone = open_microphone_stream(request.microphone_device_id.as_deref())?;
+        if !startup.begin_capture()? {
+            drop(initial_microphone);
+            return Ok(CaptureStopResult { duration_ms: 0 });
+        }
 
         let mut mic_writer = ChannelWriter::new(
             Arc::clone(&store),
             data_dir.clone(),
             request.meeting_id.clone(),
-            "microphone",
+            source_plan.microphone_channel_id,
         );
-        let mut system_writer =
-            ChannelWriter::new(store, data_dir, request.meeting_id.clone(), "system");
-        let mut streams = Some(initial_streams);
+        let mut system_writer = source_plan.system_channel_id.map(|channel_id| {
+            ChannelWriter::new(store, data_dir, request.meeting_id.clone(), channel_id)
+        });
+        let mut microphone = Some(initial_microphone);
+        let mut system: Option<SystemAudioStream> = None;
+        let mut system_open = None;
+        let mut system_retry = SystemRetryPolicy::default();
+        let mut system_retry_at = Instant::now();
+        let mut system_outage = system_writer.as_ref().map(|_| {
+            SystemChannelOutage::new(
+                "system audio was unavailable while its process tap was opening",
+            )
+        });
+        let mut system_maintenance = tokio::time::interval(FRAME_MILLISECONDS_DURATION);
+        system_maintenance.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut restart_policy = CaptureRestartPolicy::default();
 
         let capture_result: Result<(), String> = 'capture: loop {
-            let pair = streams
-                .as_mut()
-                .expect("native streams are restored before capture resumes");
             let event = tokio::select! {
                 biased;
                 changed = stop.changed() => {
@@ -485,18 +618,21 @@ fn run_capture_worker(
                         continue;
                     }
                 }
-                frame = pair.microphone.next() => {
+                _ = system_maintenance.tick(), if system_writer.is_some() => {
+                    CaptureLoopEvent::MaintainSystem
+                }
+                frame = async { microphone.as_mut().expect("guarded microphone").next().await }, if microphone.is_some() => {
                     match frame {
                         Some(frame) => CaptureLoopEvent::Microphone(frame),
-                        None => CaptureLoopEvent::Interrupted(
+                        None => CaptureLoopEvent::MicrophoneInterrupted(
                             "the microphone stream ended unexpectedly",
                         ),
                     }
                 }
-                frame = pair.system.next() => {
+                frame = async { system.as_mut().expect("guarded system stream").next().await }, if system.is_some() => {
                     match frame {
                         Some(frame) => CaptureLoopEvent::System(frame),
-                        None => CaptureLoopEvent::Interrupted(
+                        None => CaptureLoopEvent::SystemInterrupted(
                             "the system-audio process tap ended unexpectedly",
                         ),
                     }
@@ -512,25 +648,81 @@ fn run_capture_worker(
                         break Err(error);
                     }
                     restart_policy.record_microphone_frame();
+                    if system.is_none() {
+                        let system_writer = system_writer
+                            .as_mut()
+                            .expect("system outage exists only for an authorized writer");
+                        let outage = system_outage
+                            .as_mut()
+                            .expect("authorized system channel owns outage evidence");
+                        if let Err(error) = outage.cover_to(system_writer, mic_writer.canonical_samples)
+                        {
+                            break Err(error);
+                        }
+                    }
                 }
                 CaptureLoopEvent::System(frame) => {
+                    let Some(system_writer) = system_writer.as_mut() else {
+                        break Err("system audio produced data without an authorized channel".into());
+                    };
                     if let Err(error) = system_writer.push_frame(frame, false) {
                         break Err(error);
                     }
                 }
-                CaptureLoopEvent::Interrupted(reason) => {
-                    // Always discard both streams. Keeping the surviving
-                    // source would let the independent device clocks diverge
-                    // and would hide part of the outage in only one track.
-                    drop(streams.take());
+                CaptureLoopEvent::MaintainSystem => {
+                    if let Err(error) = maintain_system_capture(
+                        &mut system,
+                        &mut system_open,
+                        &mut system_retry,
+                        &mut system_retry_at,
+                        system_outage
+                            .as_mut()
+                            .expect("maintenance requires an authorized system channel"),
+                        system_writer
+                            .as_mut()
+                            .expect("maintenance requires an authorized system writer"),
+                        mic_writer.canonical_samples,
+                    ) {
+                        break Err(error);
+                    }
+                }
+                CaptureLoopEvent::SystemInterrupted(reason) => {
+                    drop(system.take());
+                    system_open = None;
+                    system_retry.reset();
+                    system_retry_at = Instant::now();
+                    let outage = system_outage
+                        .as_mut()
+                        .expect("system interruption requires an authorized channel");
+                    if let Err(error) = outage.replace_reason(
+                        system_writer
+                            .as_mut()
+                            .expect("system interruption requires an authorized writer"),
+                        reason,
+                    ) {
+                        break Err(error);
+                    }
+                    log::warn!("Scribe system audio degraded without stopping microphone capture: {reason}");
+                }
+                CaptureLoopEvent::MicrophoneInterrupted(reason) => {
+                    drop(microphone.take());
+                    drop(system.take());
+                    system_open = None;
+                    if let (Some(outage), Some(writer)) =
+                        (system_outage.as_mut(), system_writer.as_mut())
+                    {
+                        if let Err(error) = outage.finish(writer) {
+                            break Err(error);
+                        }
+                    }
                     let interrupted_at = Instant::now();
                     let mut last_failure = reason.to_string();
 
                     loop {
                         let Some(attempt) = restart_policy.record_failure() else {
-                            if let Err(error) = apply_restart_gap(
+                            if let Err(error) = apply_microphone_restart_gap(
                                 &mut mic_writer,
-                                &mut system_writer,
+                                system_writer.as_mut(),
                                 interrupted_at.elapsed(),
                                 reason,
                             ) {
@@ -543,9 +735,9 @@ fn run_capture_worker(
                         };
 
                         if wait_for_stop(&mut stop, attempt.delay).await {
-                            if let Err(error) = apply_restart_gap(
+                            if let Err(error) = apply_microphone_restart_gap(
                                 &mut mic_writer,
-                                &mut system_writer,
+                                system_writer.as_mut(),
                                 interrupted_at.elapsed(),
                                 "capture stopped while audio devices were reconnecting",
                             ) {
@@ -554,17 +746,24 @@ fn run_capture_worker(
                             break 'capture Ok(());
                         }
 
-                        match open_native_streams(request.microphone_device_id.as_deref()) {
+                        match open_microphone_stream(request.microphone_device_id.as_deref()) {
                             Ok(reopened) => {
-                                if let Err(error) = apply_restart_gap(
+                                if let Err(error) = apply_microphone_restart_gap(
                                     &mut mic_writer,
-                                    &mut system_writer,
+                                    system_writer.as_mut(),
                                     interrupted_at.elapsed(),
                                     reason,
                                 ) {
                                     break 'capture Err(error);
                                 }
-                                streams = Some(reopened);
+                                microphone = Some(reopened);
+                                if let Some(outage) = system_outage.as_mut() {
+                                    *outage = SystemChannelOutage::new(
+                                        "system audio was unavailable while the microphone recovered",
+                                    );
+                                    system_retry.reset();
+                                    system_retry_at = Instant::now();
+                                }
                                 break;
                             }
                             Err(error) => {
@@ -577,18 +776,36 @@ fn run_capture_worker(
             }
         };
 
-        drop(streams);
-        let alignment_result = align_channel_writers(
-            &mut mic_writer,
-            &mut system_writer,
-            "capture stopped while one channel was ahead",
-        );
+        drop(microphone);
+        drop(system);
+        drop(system_open);
+        let outage_result = match (system_outage.as_mut(), system_writer.as_mut()) {
+            (Some(outage), Some(writer)) => {
+                outage.cover_to(writer, mic_writer.canonical_samples)?;
+                outage.finish(writer)
+            }
+            _ => Ok(()),
+        };
+        let alignment_result = if let Some(system_writer) = system_writer.as_mut() {
+            align_channel_writers(
+                &mut mic_writer,
+                system_writer,
+                "capture stopped while one channel was ahead",
+            )
+        } else {
+            Ok(())
+        };
         let mic_finish = mic_writer.finish();
-        let system_finish = system_writer.finish();
-        let duration_ms = mic_writer.duration_ms().max(system_writer.duration_ms());
+        let system_finish = system_writer
+            .as_mut()
+            .map_or(Ok(()), ChannelWriter::finish);
+        let duration_ms = system_writer.as_ref().map_or_else(
+            || mic_writer.duration_ms(),
+            |writer| mic_writer.duration_ms().max(writer.duration_ms()),
+        );
         combine_capture_results(
             capture_result,
-            alignment_result,
+            combine_unit_results(outage_result, alignment_result),
             mic_finish,
             system_finish,
             duration_ms,
@@ -597,22 +814,24 @@ fn run_capture_worker(
 }
 
 #[cfg(target_os = "macos")]
-struct NativeCaptureStreams {
-    microphone: std::pin::Pin<Box<mimir_meeting_audio::MicrophoneStream>>,
-    system: std::pin::Pin<Box<mimir_meeting_audio::SystemAudioStream>>,
-}
+type MicrophoneStream = std::pin::Pin<Box<mimir_meeting_audio::MicrophoneStream>>;
+
+#[cfg(target_os = "macos")]
+type SystemAudioStream = std::pin::Pin<Box<mimir_meeting_audio::SystemAudioStream>>;
 
 #[cfg(target_os = "macos")]
 enum CaptureLoopEvent {
     Stop,
     Microphone(mimir_meeting_audio::RawAudioFrame),
     System(mimir_meeting_audio::RawAudioFrame),
-    Interrupted(&'static str),
+    MaintainSystem,
+    MicrophoneInterrupted(&'static str),
+    SystemInterrupted(&'static str),
 }
 
 #[cfg(target_os = "macos")]
-fn open_native_streams(microphone_device_id: Option<&str>) -> Result<NativeCaptureStreams, String> {
-    use mimir_meeting_audio::{CaptureHealth, FrameDuration, MicrophoneInput, SystemAudioInput};
+fn open_microphone_stream(microphone_device_id: Option<&str>) -> Result<MicrophoneStream, String> {
+    use mimir_meeting_audio::{CaptureHealth, FrameDuration, MicrophoneInput};
 
     let microphone_input = MicrophoneInput::open_device(microphone_device_id).map_err(|error| {
         format!(
@@ -633,6 +852,13 @@ fn open_native_streams(microphone_device_id: Option<&str>) -> Result<NativeCaptu
                 "microphone capture opened but its stream could not start; reconnect or select an input device and verify Microphone permission: {error}"
             )
         })?;
+    Ok(Box::pin(microphone))
+}
+
+#[cfg(target_os = "macos")]
+fn open_system_audio_stream() -> Result<SystemAudioStream, String> {
+    use mimir_meeting_audio::{CaptureHealth, FrameDuration, SystemAudioInput};
+
     let system = SystemAudioInput::open()
         .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
         .map_err(|error| {
@@ -640,10 +866,106 @@ fn open_native_streams(microphone_device_id: Option<&str>) -> Result<NativeCaptu
                 "system audio capture is unavailable; verify Screen & System Audio Recording permission and the default output device: {error}"
             )
         })?;
-    Ok(NativeCaptureStreams {
-        microphone: Box::pin(microphone),
-        system: Box::pin(system),
-    })
+    Ok(Box::pin(system))
+}
+
+#[cfg(target_os = "macos")]
+struct SystemOpenAttempt {
+    result: mpsc::Receiver<Result<SystemAudioStream, String>>,
+}
+
+#[cfg(target_os = "macos")]
+impl SystemOpenAttempt {
+    fn spawn() -> Result<Self, String> {
+        let (send, result) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("mimir-system-audio-open".into())
+            .spawn(move || {
+                let _ = send.send(open_system_audio_stream());
+            })
+            .map_err(|error| format!("could not start system-audio initialization: {error}"))?;
+        Ok(Self { result })
+    }
+
+    fn poll(&self) -> Option<Result<SystemAudioStream, String>> {
+        match self.result.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(
+                "system-audio initialization ended without a result".into(),
+            )),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Default)]
+struct SystemRetryPolicy {
+    failures: u8,
+}
+
+#[cfg(target_os = "macos")]
+impl SystemRetryPolicy {
+    fn reset(&mut self) {
+        self.failures = 0;
+    }
+
+    fn next_delay(&mut self) -> Duration {
+        self.failures = self.failures.saturating_add(1).min(16);
+        let shift = u32::from(self.failures.saturating_sub(1)).min(7);
+        Duration::from_millis(250_u64.saturating_mul(1_u64 << shift)).min(Duration::from_secs(30))
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn maintain_system_capture(
+    system: &mut Option<SystemAudioStream>,
+    opening: &mut Option<SystemOpenAttempt>,
+    retry: &mut SystemRetryPolicy,
+    retry_at: &mut Instant,
+    outage: &mut SystemChannelOutage,
+    writer: &mut ChannelWriter,
+    microphone_samples: u64,
+) -> Result<(), String> {
+    if system.is_some() {
+        return Ok(());
+    }
+    outage.cover_to(writer, microphone_samples)?;
+
+    if let Some(attempt) = opening.as_ref() {
+        let Some(result) = attempt.poll() else {
+            return Ok(());
+        };
+        *opening = None;
+        match result {
+            Ok(stream) => {
+                outage.finish(writer)?;
+                *system = Some(stream);
+                retry.reset();
+                return Ok(());
+            }
+            Err(error) => {
+                outage.replace_reason(writer, &error)?;
+                *retry_at = Instant::now() + retry.next_delay();
+                log::warn!(
+                    "Scribe system audio remains unavailable; microphone capture continues: {error}"
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    if Instant::now() >= *retry_at {
+        match SystemOpenAttempt::spawn() {
+            Ok(attempt) => *opening = Some(attempt),
+            Err(error) => {
+                outage.replace_reason(writer, &error)?;
+                *retry_at = Instant::now() + retry.next_delay();
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -666,27 +988,32 @@ fn restart_exhausted_message(attempts: u8, last_failure: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn apply_restart_gap(
+fn apply_microphone_restart_gap(
     microphone: &mut ChannelWriter,
-    system: &mut ChannelWriter,
+    mut system: Option<&mut ChannelWriter>,
     interruption: Duration,
     reason: &str,
 ) -> Result<(), String> {
-    let plan = CaptureRestartPolicy::gap_plan(
-        microphone.canonical_samples,
-        system.canonical_samples,
-        interruption,
-    );
+    let system_samples = system
+        .as_ref()
+        .map(|writer| writer.canonical_samples)
+        .unwrap_or(microphone.canonical_samples);
+    let plan =
+        CaptureRestartPolicy::gap_plan(microphone.canonical_samples, system_samples, interruption);
     microphone.push_timeline_gap_frames(
         plan.microphone_catch_up_frames,
         "microphone channel aligned before capture restart",
     )?;
-    system.push_timeline_gap_frames(
-        plan.system_catch_up_frames,
-        "system channel aligned before capture restart",
-    )?;
+    if let Some(system) = system.as_mut() {
+        system.push_timeline_gap_frames(
+            plan.system_catch_up_frames,
+            "system channel aligned before capture restart",
+        )?;
+    }
     microphone.push_timeline_gap_frames(plan.interruption_frames, reason)?;
-    system.push_timeline_gap_frames(plan.interruption_frames, reason)?;
+    if let Some(system) = system {
+        system.push_timeline_gap_frames(plan.interruption_frames, reason)?;
+    }
     Ok(())
 }
 
@@ -732,18 +1059,31 @@ fn combine_capture_results(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn combine_unit_results(
+    first: Result<(), String>,
+    second: Result<(), String>,
+) -> Result<(), String> {
+    match (first, second) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(first), Err(second)) => Err(format!("{first}; {second}")),
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
-fn run_capture_worker(
-    _store: Arc<MeetingStore>,
-    _data_dir: PathBuf,
-    _request: CaptureStart,
-    _stop: watch::Receiver<bool>,
-    _microphone_muted: Arc<AtomicBool>,
-    ready: mpsc::SyncSender<Result<(), String>>,
-) -> Result<CaptureStopResult, String> {
+fn run_capture_worker(context: CaptureWorkerContext) -> Result<CaptureStopResult, String> {
+    let CaptureWorkerContext {
+        store,
+        data_dir,
+        request,
+        stop,
+        microphone_muted,
+        startup,
+    } = context;
+    let _ = (store, data_dir, request, stop, microphone_muted, startup);
     let message =
         "native meeting capture is supported only by the macOS arm64 Scribe release".to_string();
-    let _ = ready.send(Err(message.clone()));
     Err(message)
 }
 
@@ -752,11 +1092,72 @@ struct ChannelWriter {
     store: Arc<MeetingStore>,
     data_dir: PathBuf,
     meeting_id: String,
-    channel_id: &'static str,
+    channel_id: String,
     chunk_sequence: u64,
     canonical_samples: u64,
     buffer: Vec<f32>,
     gaps: Vec<PersistedGap>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct SystemChannelOutage {
+    reason: String,
+    checkpoint_start_sample: Option<u64>,
+}
+
+#[cfg(target_os = "macos")]
+impl SystemChannelOutage {
+    fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: bounded_gap_reason(&reason.into()),
+            checkpoint_start_sample: None,
+        }
+    }
+
+    /// Advance the unavailable system channel to the microphone-owned clock.
+    /// Silence is persisted through the ordinary chunk authority; explicit
+    /// gap evidence is checkpointed every thirty seconds instead of emitting
+    /// one SQLite transcript mutation for every 20 ms microphone callback.
+    fn cover_to(&mut self, writer: &mut ChannelWriter, target_samples: u64) -> Result<(), String> {
+        if target_samples <= writer.canonical_samples {
+            return Ok(());
+        }
+        let missing_samples = target_samples.saturating_sub(writer.canonical_samples);
+        let frames = frames_for_samples(missing_samples);
+        self.checkpoint_start_sample
+            .get_or_insert(writer.canonical_samples);
+        writer.push_timeline_padding_frames(frames)?;
+        let checkpoint_samples = SYSTEM_GAP_CHECKPOINT_FRAMES
+            .checked_mul(canonical_frame_samples())
+            .ok_or_else(|| "system-audio gap checkpoint overflowed".to_string())?;
+        if writer.canonical_samples.saturating_sub(
+            self.checkpoint_start_sample
+                .unwrap_or(writer.canonical_samples),
+        ) >= checkpoint_samples
+        {
+            self.checkpoint(writer)?;
+        }
+        Ok(())
+    }
+
+    fn checkpoint(&mut self, writer: &mut ChannelWriter) -> Result<(), String> {
+        let Some(start_sample) = self.checkpoint_start_sample.take() else {
+            return Ok(());
+        };
+        writer.record_gap_samples(start_sample, writer.canonical_samples, &self.reason)?;
+        writer.flush_gap_manifest()
+    }
+
+    fn finish(&mut self, writer: &mut ChannelWriter) -> Result<(), String> {
+        self.checkpoint(writer)
+    }
+
+    fn replace_reason(&mut self, writer: &mut ChannelWriter, reason: &str) -> Result<(), String> {
+        self.finish(writer)?;
+        self.reason = bounded_gap_reason(reason);
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -775,13 +1176,13 @@ impl ChannelWriter {
         store: Arc<MeetingStore>,
         data_dir: PathBuf,
         meeting_id: String,
-        channel_id: &'static str,
+        channel_id: impl Into<String>,
     ) -> Self {
         Self {
             store,
             data_dir,
             meeting_id,
-            channel_id,
+            channel_id: channel_id.into(),
             chunk_sequence: 0,
             canonical_samples: 0,
             buffer: Vec::with_capacity(CHUNK_SAMPLES),
@@ -839,15 +1240,27 @@ impl ChannelWriter {
         let end_sample = start_sample
             .checked_add(gap_samples)
             .ok_or_else(|| "capture restart gap overflows the meeting timeline".to_string())?;
+        self.record_gap_samples(start_sample, end_sample, reason)?;
+
+        self.push_timeline_padding_frames(frames)?;
+        self.flush_gap_manifest()
+    }
+
+    fn record_gap_samples(
+        &mut self,
+        start_sample: u64,
+        end_sample: u64,
+        reason: &str,
+    ) -> Result<(), String> {
+        if end_sample <= start_sample {
+            return Ok(());
+        }
         self.record_gap(PersistedGap {
             sequence: start_sample / canonical_frame_samples(),
             start_ms: start_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64,
             end_ms: end_sample.saturating_mul(1_000) / CANONICAL_SAMPLE_RATE_HZ as u64,
             reason: bounded_gap_reason(reason),
-        })?;
-
-        self.push_timeline_padding_frames(frames)?;
-        self.flush_gap_manifest()
+        })
     }
 
     fn push_timeline_padding_frames(&mut self, frames: u64) -> Result<(), String> {
@@ -894,7 +1307,7 @@ impl ChannelWriter {
                 start_ms,
                 end_ms,
                 reason: transcript_gap_reason(&gap.reason),
-                channel_id: Some(self.channel_id.into()),
+                channel_id: Some(self.channel_id.clone()),
                 detail: Some(gap.reason.clone()),
             },
         };
@@ -975,7 +1388,7 @@ impl ChannelWriter {
         let draft = AudioChunkDraft {
             id: format!("{}-{}-{sequence:08}", self.meeting_id, self.channel_id),
             meeting_id: self.meeting_id.clone(),
-            channel_id: self.channel_id.into(),
+            channel_id: self.channel_id.clone(),
             sequence,
             start_ms: start_ms as i64,
             end_ms: end_ms.max(start_ms.saturating_add(1)) as i64,
@@ -1078,6 +1491,239 @@ fn now() -> String {
 mod tests {
     use super::*;
 
+    struct BlockingOpenWorker {
+        entered: mpsc::SyncSender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl CaptureWorkerRunner for BlockingOpenWorker {
+        fn run(&self, context: CaptureWorkerContext) -> Result<CaptureStopResult, String> {
+            self.entered
+                .send(())
+                .map_err(|_| "blocking-open observer stopped".to_string())?;
+            self.release
+                .lock()
+                .map_err(|_| "blocking-open release was poisoned".to_string())?
+                .recv()
+                .map_err(|_| "blocking-open release stopped".to_string())?;
+            if !context.begin_capture()? {
+                return Ok(CaptureStopResult { duration_ms: 0 });
+            }
+            Err("test worker unexpectedly entered capture".into())
+        }
+    }
+
+    struct FailingOpenWorker;
+
+    impl CaptureWorkerRunner for FailingOpenWorker {
+        fn run(&self, _context: CaptureWorkerContext) -> Result<CaptureStopResult, String> {
+            Err("synthetic device-open failure".into())
+        }
+    }
+
+    struct RecordingFailureSink {
+        failures: mpsc::SyncSender<(String, String, String)>,
+    }
+
+    impl MeetingCaptureFailureSink for RecordingFailureSink {
+        fn capture_failed(&self, meeting_id: &str, run_id: &str, message: &str) {
+            let _ = self.failures.send((
+                meeting_id.to_string(),
+                run_id.to_string(),
+                message.to_string(),
+            ));
+        }
+    }
+
+    fn capture_request(meeting_id: &str) -> CaptureStart {
+        CaptureStart {
+            meeting_id: meeting_id.into(),
+            run_id: format!("run-{meeting_id}"),
+            workspace_path: None,
+            microphone_device_id: None,
+            channels: vec![channel(
+                "microphone",
+                super::super::AudioChannelKind::Microphone,
+            )],
+        }
+    }
+
+    fn channel(id: &str, kind: super::super::AudioChannelKind) -> super::super::AudioChannelDraft {
+        super::super::AudioChannelDraft {
+            id: id.into(),
+            kind,
+            sample_rate_hz: CANONICAL_SAMPLE_RATE_HZ,
+            channels: 1,
+            sample_format: "f32le".into(),
+            device_id: None,
+        }
+    }
+
+    #[test]
+    fn mic_only_channel_authority_never_requests_a_system_stream_or_writer() {
+        let plan = CaptureSourcePlan::from_channels(&[channel(
+            "chosen-microphone",
+            super::super::AudioChannelKind::Microphone,
+        )])
+        .unwrap();
+
+        assert_eq!(plan.microphone_channel_id, "chosen-microphone");
+        assert_eq!(plan.system_channel_id, None);
+        assert!(plan.system_channel_id.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn requested_system_open_failure_retains_mic_and_persists_aligned_gap_silence() {
+        use crate::meetings::{AudioChannelKind, MeetingDraft, MeetingOrigin, MeetingStatus};
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "degraded-system".into(),
+                    title: "Degraded system".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: vec![
+                        channel("microphone", AudioChannelKind::Microphone),
+                        channel("system", AudioChannelKind::System),
+                    ],
+                    metadata: json!({}),
+                },
+                "2026-08-01T10:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                "degraded-system",
+                0,
+                MeetingStatus::Recording,
+                "2026-08-01T10:00:01Z",
+                None,
+            )
+            .unwrap();
+        let mut microphone = ChannelWriter::new(
+            Arc::clone(&store),
+            directory.path().to_path_buf(),
+            "degraded-system".into(),
+            "microphone",
+        );
+        let mut system = ChannelWriter::new(
+            Arc::clone(&store),
+            directory.path().to_path_buf(),
+            "degraded-system".into(),
+            "system",
+        );
+        let mut outage = SystemChannelOutage::new(
+            "system audio process tap could not open; microphone capture continued",
+        );
+
+        for _ in 0..55 {
+            microphone
+                .push_canonical_samples(&vec![0.25; canonical_frame_samples() as usize])
+                .unwrap();
+            outage
+                .cover_to(&mut system, microphone.canonical_samples)
+                .unwrap();
+        }
+        outage.finish(&mut system).unwrap();
+        microphone.finish().unwrap();
+        system.finish().unwrap();
+
+        assert_eq!(microphone.canonical_samples, system.canonical_samples);
+        assert!(microphone.canonical_samples > CANONICAL_SAMPLE_RATE_HZ as u64);
+        assert!(!store
+            .committed_audio_chunks("degraded-system", "microphone", 0, 100)
+            .unwrap()
+            .is_empty());
+        assert!(!store
+            .committed_audio_chunks("degraded-system", "system", 0, 100)
+            .unwrap()
+            .is_empty());
+        assert!(!store
+            .transcript_snapshot("degraded-system", None)
+            .unwrap()
+            .gaps
+            .is_empty());
+    }
+
+    #[test]
+    fn pending_device_open_is_owned_before_start_returns_and_stop_is_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let capture = NativeMeetingCapture::with_worker(
+            store,
+            directory.path(),
+            Arc::new(BlockingOpenWorker {
+                entered: entered_tx,
+                release: Mutex::new(release_rx),
+            }),
+        )
+        .unwrap();
+        let request = capture_request("pending-open");
+
+        let started_at = Instant::now();
+        capture.start(&request).unwrap();
+        assert!(started_at.elapsed() < Duration::from_millis(100));
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let stopped_at = Instant::now();
+        let stopped = capture
+            .stop(&CaptureStop {
+                meeting_id: request.meeting_id.clone(),
+                run_id: request.run_id.clone(),
+            })
+            .unwrap();
+        assert!(stopped_at.elapsed() < Duration::from_millis(100));
+        assert_eq!(stopped.duration_ms, 0);
+        assert!(capture.startup_cleanup_pending.load(Ordering::Acquire));
+
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while capture.startup_cleanup_pending.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!capture.startup_cleanup_pending.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn asynchronous_open_failure_reaches_sink_and_retains_stoppable_ownership() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let capture =
+            NativeMeetingCapture::with_worker(store, directory.path(), Arc::new(FailingOpenWorker))
+                .unwrap();
+        let (failures_tx, failures_rx) = mpsc::sync_channel(1);
+        capture
+            .install_failure_sink(Arc::new(RecordingFailureSink {
+                failures: failures_tx,
+            }))
+            .unwrap();
+        let request = capture_request("failed-open");
+
+        capture.start(&request).unwrap();
+        assert_eq!(
+            failures_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            (
+                request.meeting_id.clone(),
+                request.run_id.clone(),
+                "synthetic device-open failure".into(),
+            )
+        );
+        let error = capture
+            .stop(&CaptureStop {
+                meeting_id: request.meeting_id,
+                run_id: request.run_id,
+            })
+            .unwrap_err();
+        assert_eq!(error, "synthetic device-open failure");
+        assert!(!error.contains("no audio worker"));
+    }
+
     #[test]
     fn restart_backoff_is_exponential_capped_and_bounded() {
         let mut policy = CaptureRestartPolicy {
@@ -1118,39 +1764,6 @@ mod tests {
             ]
         );
         assert_eq!(policy.record_failure(), None);
-    }
-
-    #[test]
-    fn timed_out_start_returns_without_joining_and_late_worker_cannot_arm() {
-        let (release_tx, release_rx) = mpsc::channel();
-        let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
-        let (decision_tx, decision_rx) = mpsc::sync_channel(1);
-        let armed = Arc::new(AtomicBool::new(false));
-        let worker_armed = Arc::clone(&armed);
-        let worker = thread::spawn(move || {
-            release_rx.recv().unwrap();
-            assert!(ready_tx.send(Ok(())).is_err());
-            if decision_rx.recv().unwrap_or(false) {
-                worker_armed.store(true, Ordering::Release);
-            }
-        });
-        let pending = Arc::new(AtomicBool::new(false));
-
-        assert!(ready_rx.recv_timeout(Duration::from_millis(5)).is_err());
-        decision_tx.send(false).unwrap();
-        drop(ready_rx);
-        let returned_at = Instant::now();
-        reap_startup_worker("test meeting audio startup", worker, Arc::clone(&pending));
-
-        assert!(returned_at.elapsed() < Duration::from_millis(100));
-        assert!(pending.load(Ordering::Acquire));
-        release_tx.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while pending.load(Ordering::Acquire) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(1));
-        }
-        assert!(!pending.load(Ordering::Acquire));
-        assert!(!armed.load(Ordering::Acquire));
     }
 
     #[test]
@@ -1210,19 +1823,6 @@ mod tests {
             MAX_CALLBACK_STOP_SKEW_FRAMES + 1,
             0
         ));
-    }
-
-    #[test]
-    fn startup_readiness_reports_only_the_initial_outcome() {
-        let (sender, receiver) = mpsc::sync_channel(2);
-        let mut readiness = StartupReadiness::new(sender);
-
-        assert!(readiness.report(Ok(())).unwrap());
-        assert!(!readiness
-            .report(Err("a later restart failed".into()))
-            .unwrap());
-        assert_eq!(receiver.recv().unwrap(), Ok(()));
-        assert!(receiver.try_recv().is_err());
     }
 
     #[cfg(target_os = "macos")]

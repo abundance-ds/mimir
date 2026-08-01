@@ -1335,13 +1335,12 @@ fn resolve_meeting_hook(
         workspace: Some(request.workspace.clone()),
         interactive: false,
     };
-    let resolved = resolve_routine(&definition, presets, config)
+    let mut resolved = resolve_routine(&definition, presets, config)
         .map_err(|(field, message)| format!("Meeting follow-up {field}: {message}"))?;
     reject_shell_meeting_hook(&resolved.launch.command)?;
-    reject_unconfined_meeting_hook(
-        resolved.launch.agent_id.as_deref().unwrap_or_default(),
-        &resolved.args,
-    )?;
+    let agent_id = resolved.launch.agent_id.as_deref().unwrap_or_default();
+    resolved.args = confined_meeting_hook_args(agent_id, &resolved.args)?;
+    reject_unconfined_meeting_hook(agent_id, &resolved.args)?;
     Ok(resolved)
 }
 
@@ -1407,6 +1406,63 @@ fn reject_unconfined_meeting_hook(agent_id: &str, arguments: &[String]) -> Resul
         );
     }
     Ok(())
+}
+
+/// Build a hook-only argv from an ordinary launcher preset.
+///
+/// Launcher presets are user-facing terminal defaults and commonly include
+/// `--yolo`. A meeting transcript is untrusted input, so a durable hook must
+/// not inherit those authority-expanding flags. Codex hooks instead run in an
+/// ephemeral workspace-write sandbox rooted at the private job directory. We
+/// preserve only an explicit model choice; auth remains available even while
+/// user configuration, hooks, MCP servers, and extra writable roots are not.
+fn confined_meeting_hook_args(agent_id: &str, arguments: &[String]) -> Result<Vec<String>, String> {
+    let arguments = without_mimir_tool_connection(agent_id, arguments);
+    if agent_id != "codex" {
+        reject_unconfined_meeting_hook(agent_id, &arguments)?;
+        return Ok(arguments);
+    }
+    let (prompt, options) = arguments
+        .split_last()
+        .ok_or_else(|| "Meeting follow-up is missing its prompt argument.".to_string())?;
+    if options.first().map(String::as_str) != Some("exec") {
+        return Err("Meeting follow-up Codex adapter did not select exec mode.".into());
+    }
+
+    let mut model = None;
+    let mut index = 1;
+    while index < options.len() {
+        match options[index].as_str() {
+            "-m" | "--model" => {
+                let value = options.get(index + 1).ok_or_else(|| {
+                    "Meeting follow-up Codex model option is missing its value.".to_string()
+                })?;
+                model = Some(value.clone());
+                index += 2;
+            }
+            value if value.starts_with("--model=") => {
+                model = value.strip_prefix("--model=").map(str::to_string);
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+
+    let mut confined = vec![
+        "exec".into(),
+        "--ignore-user-config".into(),
+        "--sandbox".into(),
+        "workspace-write".into(),
+        "--skip-git-repo-check".into(),
+        "--ephemeral".into(),
+        "--color".into(),
+        "never".into(),
+    ];
+    if let Some(model) = model {
+        confined.extend(["--model".into(), model]);
+    }
+    confined.push(prompt.clone());
+    Ok(confined)
 }
 
 fn without_mimir_tool_connection(agent_id: &str, arguments: &[String]) -> Vec<String> {
@@ -2171,6 +2227,37 @@ mod tests {
         assert!(
             reject_unconfined_meeting_hook("codex", &["exec".into(), "--full-auto".into()]).is_ok()
         );
+
+        let confined = confined_meeting_hook_args(
+            "codex",
+            &[
+                "exec".into(),
+                "--yolo".into(),
+                "-C".into(),
+                "/tmp/outside".into(),
+                "-c".into(),
+                "sandbox_workspace_write.writable_roots=[\"/tmp\"]".into(),
+                "--model".into(),
+                "gpt-5".into(),
+                prompt.into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(confined.first().map(String::as_str), Some("exec"));
+        assert_eq!(confined.last().map(String::as_str), Some(prompt));
+        assert!(confined
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "workspace-write"]));
+        assert!(confined.windows(2).any(|pair| pair == ["--model", "gpt-5"]));
+        assert!(confined
+            .iter()
+            .any(|argument| argument == "--ignore-user-config"));
+        assert!(!confined.iter().any(|argument| {
+            argument == "--yolo"
+                || argument == "-C"
+                || argument.contains("writable_roots")
+                || argument == "/tmp/outside"
+        }));
 
         let workspace = tempfile::tempdir().unwrap();
         let request = MeetingHookLaunch {

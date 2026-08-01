@@ -174,6 +174,7 @@
               <IconAlertTriangle :size="13" class="mt-px shrink-0" />
               <span class="min-w-0 flex-1">{{ recoveryStatus(detailMeeting) }}</span>
               <button
+                v-if="meetingCanRetranscribe(detailMeeting)"
                 type="button"
                 data-scribe-recover-inline
                 class="scribe-quiet-button shrink-0"
@@ -268,7 +269,7 @@
                     :disabled="summaryRunPending"
                     @click="runSummary"
                   >
-                    {{ summaryRunPending ? 'Starting…' : detailMeeting.summary ? 'Create again' : 'Create summary' }}
+                    {{ summaryActionLabel }}
                   </button>
                 </div>
                 <div class="mt-3 flex flex-wrap items-center gap-3">
@@ -355,7 +356,7 @@
                   </button>
                 </div>
                 <p v-if="actionError" class="mt-3 text-[10px] text-rem" role="alert">
-                  {{ actionError }}
+                  {{ safeFailureDetail(actionError) }}
                 </p>
               </div>
               <p
@@ -567,7 +568,7 @@
     <ScribeMeetingMenu
       v-if="meetingMenuOpen && menuMeeting"
       :position="meetingMenuPosition"
-      :needs-recovery="meetingNeedsRecovery(menuMeeting)"
+      :can-retranscribe="meetingCanRetranscribe(menuMeeting)"
       :files-pending="meetingActionPending(menuMeeting.id, 'export:files')"
       :markdown-pending="meetingActionPending(menuMeeting.id, 'export:markdown')"
       :audio-pending="meetingActionPending(menuMeeting.id, 'export:audio')"
@@ -706,10 +707,20 @@ const meetingSearchActive = computed(() => (
 const meetingGroups = computed(() => groupMeetings(meetings.meetings))
 const meetingMenuOpen = computed(() => Boolean(meetingMenuId.value))
 const menuMeeting = computed(() => meetingById(meetingMenuId.value))
-const summaryRunPending = computed(() => (
-  Boolean(detailMeeting.value && meetings.pending[`summary:${detailMeeting.value.id}`])
-  || ['queued', 'running'].includes(detailMeeting.value?.summaryState)
+const summaryRequestPending = computed(() => Boolean(
+  detailMeeting.value && meetings.pending[`summary:${detailMeeting.value.id}`],
 ))
+const summaryPhase = computed(() => meetingSummaryPhase(detailMeeting.value))
+const summaryRunPending = computed(() => (
+  summaryRequestPending.value || ['queued', 'running'].includes(summaryPhase.value)
+))
+const summaryActionLabel = computed(() => {
+  if (summaryRequestPending.value) return 'Starting…'
+  if (summaryPhase.value === 'queued') return 'Queued'
+  if (summaryPhase.value === 'running') return 'Creating…'
+  if (['failed', 'cancelled'].includes(summaryPhase.value)) return 'Try again'
+  return detailMeeting.value?.summary ? 'Create again' : 'Create summary'
+})
 const isHosted = computed(() => meetings.config.transcriptionMode === 'custom')
 const hostedProviderName = computed(() => {
   try {
@@ -752,7 +763,7 @@ const transcriptionStatus = computed(() => {
   // A durable transcript segment is stronger evidence than a lagging worker
   // readiness projection. Never tell the user transcription is still being
   // prepared while words are already arriving on screen.
-  if (meetings.recording && liveLedger.value.some(entry => entry.kind === 'segment')) {
+  if (liveLedger.value.some(entry => entry.kind === 'segment')) {
     return isHosted.value
       ? `Live transcript · ${hostedProviderName.value}`
       : 'Live transcript · On this Mac'
@@ -774,13 +785,14 @@ const recordingNotice = computed(() => {
   const notice = actionError.value || meetings.activeMeeting?.error || meetings.error
   if (!notice || notice === dismissedNativeNotice.value) return ''
   if (/transcri|worker|provider|model/i.test(notice)) {
-    return 'Live transcription unavailable. Recording continues; the transcript will be rebuilt after Stop.'
+    const detail = safeFailureDetail(notice)
+    return `Live transcription unavailable. Recording continues; transcript will rebuild after Stop.${detail ? ` ${detail}` : ''}`
   }
-  return notice
+  return safeFailureDetail(notice)
 })
-const homeNotice = computed(() => actionError.value || (
+const homeNotice = computed(() => safeFailureDetail(actionError.value || (
   meetings.error === dismissedNativeNotice.value ? '' : meetings.error
-))
+)))
 const emptyLiveTranscript = computed(() => {
   const state = meetings.activeMeeting?.transcription
   if (state === 'initializing') return 'Preparing transcription…'
@@ -1196,20 +1208,49 @@ function meetingNeedsRecovery(meeting) {
   return ['interrupted', 'needs_repair', 'failed'].includes(meeting?.lifecycle) || Boolean(meeting?.error)
 }
 
+function meetingCanRetranscribe(meeting) {
+  return ['ready', 'failed', 'interrupted', 'needs_repair'].includes(meeting?.lifecycle)
+}
+
 function recoveryStatus(meeting) {
-  const job = meeting.jobs?.find(candidate => candidate.kind === 'transcription')
-  if (job?.status === 'failed') return 'Stored audio is safe, but transcript recovery needs another attempt.'
-  if (['queued', 'running'].includes(job?.status)) return `Stored audio is safe. Transcript recovery is ${job.status}.`
-  return 'Capture ended unexpectedly. Stored audio is safe.'
+  const job = latestMeetingJob(meeting, 'transcription')
+  if (job?.status === 'failed') {
+    const detail = safeFailureDetail(job.error || meeting.error)
+    return `Stored audio is safe, but transcript recovery failed.${detail ? ` ${detail}` : ''}`
+  }
+  if (['pending', 'queued', 'running'].includes(job?.status)) {
+    return `Stored audio is safe. Transcript recovery is ${job.status === 'pending' ? 'queued' : job.status}.`
+  }
+  const detail = safeFailureDetail(meeting.error)
+  return `Capture ended unexpectedly. Stored audio is safe.${detail ? ` ${detail}` : ''}`
 }
 
 function summaryStatus(meeting) {
+  const phase = meetingSummaryPhase(meeting)
+  if (phase === 'failed') {
+    const detail = safeFailureDetail(latestMeetingJob(meeting, 'title-summary')?.error)
+    return `Summary failed.${detail ? ` ${detail}` : ''}`
+  }
   return ({
     'not-started': meeting.transcriptFinal ? 'Not created' : 'Waiting for final transcript',
     queued: 'Queued',
     running: 'Creating…',
-    failed: 'Summary failed. Create it again below.',
-  })[meeting.summaryState] || 'No summary'
+    cancelled: 'Summary stopped. Try again.',
+  })[phase] || 'No summary'
+}
+
+function meetingSummaryPhase(meeting) {
+  const status = latestMeetingJob(meeting, 'title-summary')?.status
+  if (status === 'pending') return 'queued'
+  return status || meeting?.summaryState || 'not-started'
+}
+
+function latestMeetingJob(meeting, kind) {
+  const jobs = meeting?.jobs || []
+  for (let index = jobs.length - 1; index >= 0; index -= 1) {
+    if (jobs[index]?.kind === kind) return jobs[index]
+  }
+  return null
 }
 
 function meetingById(id) {
@@ -1302,6 +1343,22 @@ function meetingDate(meeting) {
 
 function message(error) {
   return error instanceof Error ? error.message : String(error || 'Meeting operation failed.')
+}
+
+function safeFailureDetail(value) {
+  let detail = String(value || '')
+    .replace(/[\u0000-\u001f\u007f]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (!detail) return ''
+  detail = detail
+    .replace(/\bauthorization\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu, 'Authorization: [redacted]')
+    .replace(/\bbearer\s+[a-z0-9._~+/=-]+/giu, 'Bearer [redacted]')
+    .replace(/\b(?:sk|rk)-[a-z0-9_-]{8,}\b/giu, '[redacted]')
+    .replace(/\b(api[-_ ]?key|access[-_ ]?token|token|secret)\s*[:=]\s*[^\s,;]+/giu, '$1=[redacted]')
+    .replace(/([?&](?:api_?key|key|token|secret|signature|sig)=)[^&#\s]*/giu, '$1[redacted]')
+  const characters = [...detail]
+  return characters.length > 320 ? `${characters.slice(0, 319).join('')}…` : detail
 }
 </script>
 

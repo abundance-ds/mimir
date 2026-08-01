@@ -448,14 +448,22 @@ pub(crate) fn execute_transcription_repair_with(
     // the job lease result reached SQLite. Redelivery must finish locally and
     // perform zero model, credential, network, or audio-disclosure work.
     let already_committed = if user_requested {
-        runtime
+        let committed = runtime
             .committed_transcript_repair_revision(
                 &job.definition.meeting_id,
                 capture_generation,
                 &run_id,
             )
             .map_err(|error| format!("Could not reconcile completed retranscription: {error}"))?
-            .is_some()
+            .is_some();
+        if committed {
+            runtime
+                .complete_terminal_recovery(&job.definition.meeting_id)
+                .map_err(|error| {
+                    format!("Could not reconcile the retranscribed meeting lifecycle: {error}")
+                })?;
+        }
+        committed
     } else {
         runtime
             .complete_terminal_recovery(&job.definition.meeting_id)
@@ -464,6 +472,14 @@ pub(crate) fn execute_transcription_repair_with(
     if already_committed {
         return transcription_repair_result(runtime, &job.definition.meeting_id);
     }
+    let repairs_interrupted_meeting = user_requested
+        && matches!(
+            runtime
+                .durable_meeting(&job.definition.meeting_id)
+                .map_err(|error| format!("Could not inspect Scribe recovery state: {error}"))?
+                .status,
+            super::MeetingStatus::Interrupted | super::MeetingStatus::Finalizing
+        );
     if !runtime
         .has_committed_audio(&job.definition.meeting_id)
         .map_err(|error| format!("Could not verify Scribe source audio authority: {error}"))?
@@ -496,7 +512,16 @@ pub(crate) fn execute_transcription_repair_with(
         base_revision: current.transcript_revision,
         observed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
     })?;
-    if user_requested {
+    if repairs_interrupted_meeting {
+        runtime
+            .complete_transcription_retry(
+                &job.definition.meeting_id,
+                capture_generation,
+                &run_id,
+                batch,
+            )
+            .map_err(|error| format!("Could not complete the interrupted meeting: {error}"))?;
+    } else if user_requested {
         runtime
             .complete_user_retranscription(
                 &job.definition.meeting_id,

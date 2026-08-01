@@ -371,9 +371,26 @@ impl MeetingTranscriptionPort for ScriptedRetranscription {
             request.repair_intent,
             Some(TranscriptionRepairIntent::UserRequestedRetranscription)
         );
-        self.store
-            .begin_transcript_retranscription(&request.meeting_id, generation, &request.run_id, NOW)
+        let meeting = self
+            .store
+            .get_meeting(&request.meeting_id)
             .map_err(|error| error.to_string())?;
+        if meeting.status == MeetingStatus::Interrupted {
+            self.store.begin_transcript_repair(
+                &request.meeting_id,
+                generation,
+                &request.run_id,
+                NOW,
+            )
+        } else {
+            self.store.begin_transcript_retranscription(
+                &request.meeting_id,
+                generation,
+                &request.run_id,
+                NOW,
+            )
+        }
+        .map_err(|error| error.to_string())?;
         let base_revision = self
             .store
             .get_meeting(&request.meeting_id)
@@ -1650,6 +1667,114 @@ fn recovery_keeps_the_original_consented_route_after_global_provider_changes() {
         repair.definition.payload["transcriptionRoute"],
         "https://endpoint-b.example/v1/listen"
     );
+}
+
+#[test]
+fn explicit_retranscription_replaces_pending_recovery_for_interrupted_audio() {
+    let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+    let created = store
+        .create_meeting(
+            &MeetingDraft {
+                id: "meeting-interrupted-retranscription".into(),
+                title: "Interrupted retranscription".into(),
+                origin: MeetingOrigin::default(),
+                channels: capture_channels(&MeetingPermissions {
+                    microphone: "granted".into(),
+                    system_audio: "granted".into(),
+                }),
+                metadata: json!({
+                    "transcriptionRoute": "local",
+                    "transcriptionModel": "whisper-small",
+                    "runId": "run-interrupted-retranscription"
+                }),
+            },
+            NOW,
+        )
+        .unwrap();
+    store
+        .transition_meeting(
+            &created.id,
+            created.revision,
+            MeetingStatus::Recording,
+            NOW,
+            None,
+        )
+        .unwrap();
+    store
+        .stage_audio_chunk(
+            &crate::meetings::AudioChunkDraft {
+                id: "interrupted-source-chunk".into(),
+                meeting_id: created.id.clone(),
+                channel_id: "microphone".into(),
+                sequence: 0,
+                start_ms: 0,
+                end_ms: 1_000,
+                sample_count: 16_000,
+                byte_len: 64_000,
+                sha256: "c".repeat(64),
+                relative_path: format!("{}/audio/microphone/00000000.f32le", created.id),
+            },
+            NOW,
+        )
+        .unwrap();
+    store
+        .commit_audio_chunk("interrupted-source-chunk", NOW)
+        .unwrap();
+
+    let platform = Arc::new(FakePlatform::default());
+    {
+        let mut state = platform.state.lock().unwrap();
+        state.projection.config.transcription_mode = "custom".into();
+        state.projection.config.custom_url = "https://current-provider.example/v1/listen".into();
+        state.projection.config.custom_model = "current-model".into();
+        state.projection.config.api_key_configured = true;
+    }
+    let runtime = MeetingRuntime::new(
+        Arc::clone(&store),
+        Arc::new(FakeCapture::default()),
+        Arc::new(FakeTranscription::default()),
+        platform,
+        Arc::new(FakeClock),
+        Arc::new(FakeEvents::default()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        store.get_meeting(&created.id).unwrap().status,
+        MeetingStatus::Interrupted
+    );
+    runtime.retranscribe(&created.id).unwrap();
+
+    let jobs = store.list_jobs(&created.id).unwrap();
+    let automatic = jobs
+        .iter()
+        .find(|job| {
+            job.definition.kind == FollowUpJobKind::Custom("transcription".into())
+                && job.definition.payload["transcriptionIntent"] != "user-retranscription"
+        })
+        .expect("startup must have queued automatic recovery");
+    assert_eq!(automatic.state, JobState::Cancelled);
+    let requested = jobs
+        .iter()
+        .find(|job| job.definition.payload["transcriptionIntent"] == "user-retranscription")
+        .expect("the human request must replace pending automatic recovery");
+    assert_eq!(
+        requested.definition.payload["transcriptionRoute"],
+        "https://current-provider.example/v1/listen"
+    );
+
+    crate::meetings::jobs::execute_transcription_repair_with(
+        &runtime,
+        &ScriptedRetranscription {
+            store: Arc::clone(&store),
+            fail_finalize: false,
+        },
+        requested,
+    )
+    .unwrap();
+    let recovered = store.get_meeting(&created.id).unwrap();
+    assert_eq!(recovered.status, MeetingStatus::Completed);
+    assert_eq!(recovered.transcript_revision, 1);
 }
 
 #[test]

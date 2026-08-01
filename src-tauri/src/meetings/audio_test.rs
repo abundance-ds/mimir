@@ -345,13 +345,27 @@ struct ThreadAudioTestWorker {
 impl AudioTestWorker for ThreadAudioTestWorker {
     fn stop(mut self: Box<Self>) {
         let _ = self.stop.send(true);
-        if self
-            .worker
-            .take()
-            .is_some_and(|worker| worker.join().is_err())
-        {
-            log::error!("Scribe audio-test worker panicked during teardown");
+        if let Some(worker) = self.worker.take() {
+            reap_audio_test_worker(worker);
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn reap_audio_test_worker(worker: thread::JoinHandle<()>) {
+    // Core Audio/TCC can block inside device open and cannot observe the watch
+    // signal until that native call returns. Recording startup must never join
+    // such a diagnostic worker synchronously; retain cleanup on a tiny reaper
+    // thread instead.
+    if let Err(error) = thread::Builder::new()
+        .name("mimir-audio-test-reaper".into())
+        .spawn(move || {
+            if worker.join().is_err() {
+                log::error!("Scribe audio-test worker panicked during teardown");
+            }
+        })
+    {
+        log::error!("Could not reclaim Scribe audio-test worker: {error}");
     }
 }
 
@@ -500,6 +514,8 @@ fn publish_event(sink: &Arc<dyn MeetingAudioTestEventSink>, event: MeetingAudioT
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(target_os = "macos")]
+    use std::time::Instant;
 
     struct FakeWorker {
         stops: Arc<AtomicUsize>,
@@ -575,5 +591,29 @@ mod tests {
         manager.stop_window("main").unwrap();
         manager.stop_window("main").unwrap();
         assert_eq!(stops.load(Ordering::SeqCst), 2);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn blocked_native_audio_test_cleanup_never_delays_recording_startup() {
+        let (release, blocked) = std::sync::mpsc::sync_channel(1);
+        let finished = Arc::new(AtomicUsize::new(0));
+        let worker_finished = Arc::clone(&finished);
+        let worker = thread::spawn(move || {
+            let _ = blocked.recv();
+            worker_finished.store(1, Ordering::Release);
+        });
+
+        let started = Instant::now();
+        reap_audio_test_worker(worker);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert_eq!(finished.load(Ordering::Acquire), 0);
+
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while finished.load(Ordering::Acquire) == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(finished.load(Ordering::Acquire), 1);
     }
 }

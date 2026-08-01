@@ -129,7 +129,8 @@ Feature: Produce live and batch transcripts through local or custom routes
     Given the OpenAI Realtime endpoint is selected
     When the credential is saved and the native WebSocket handshake is created
     Then native storage confirms an endpoint-bound Keychain read-back before reporting success
-    Then the API key is injected only as an Authorization bearer header
+    And the WebSocket transport adds the dedicated transcription intent without changing the persisted endpoint
+    And the API key is injected only as an Authorization bearer header
     And the key never appears in renderer state, meeting provenance, diagnostics, or URLs
 
   @MTG-078 @automated @frontend @contract
@@ -158,9 +159,10 @@ Feature: Produce live and batch transcripts through local or custom routes
 
   @MTG-081 @automated @native @recovery @security
   Scenario: A user retranscribes retained audio with the currently selected provider
-    Given a completed or failed meeting has integrity-committed source audio
+    Given a completed, failed, or interrupted meeting has integrity-committed source audio
     And its original consented route differs from the provider selected today
     When the user explicitly requests retranscription
     Then the new job freezes today's route and model without changing automatic recovery policy
+    And a queued automatic repair is superseded before today's provider receives audio
     And the existing transcript remains authoritative through partial output or provider failure
     And only one all-final replacement generation advances the transcript revision

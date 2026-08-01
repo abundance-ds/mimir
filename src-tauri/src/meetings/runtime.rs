@@ -940,6 +940,19 @@ impl MeetingRuntime {
             &self.inner.clock.now(),
             None,
         )?;
+        // Install runtime ownership before the native worker is spawned. The
+        // capture port returns once that worker is registered, while Core
+        // Audio opens on the worker thread. A terminal open failure can
+        // therefore never outrun ActiveCapture, and Stop has an authoritative
+        // run token even while the devices are still opening.
+        *self.active()? = Some(ActiveCapture {
+            meeting_id: meeting_id.clone(),
+            run_id: run_id.clone(),
+            request_key: request_key.clone(),
+            mic_muted: false,
+            transcription: "initializing".into(),
+            duration_ms: 0,
+        });
         if let Err(message) = self.inner.capture.start(&capture_request) {
             let failure = MeetingFailure {
                 code: "capture-start-failed".into(),
@@ -953,6 +966,14 @@ impl MeetingRuntime {
                 &self.inner.clock.now(),
                 Some(&failure),
             )?;
+            {
+                let mut active = self.active()?;
+                if active.as_ref().is_some_and(|active| {
+                    active.meeting_id == meeting_id && active.run_id == run_id
+                }) {
+                    *active = None;
+                }
+            }
             let _ = self.publish_unlocked("capture-failed", Some(meeting_id.clone()), Some(run_id));
             return Err(port_error("meeting capture start", message));
         }
@@ -995,14 +1016,13 @@ impl MeetingRuntime {
                 "delayed".into()
             }
         };
-        *self.active()? = Some(ActiveCapture {
-            meeting_id: meeting_id.clone(),
-            run_id: run_id.clone(),
-            request_key,
-            mic_muted: false,
-            transcription,
-            duration_ms: 0,
-        });
+        if let Some(active) = self
+            .active()?
+            .as_mut()
+            .filter(|active| active.meeting_id == meeting_id && active.run_id == run_id)
+        {
+            active.transcription = transcription;
+        }
         if let Some(candidate_id) = request.candidate_id.as_deref() {
             if let Err(message) = self.inner.platform.dismiss_candidate(candidate_id) {
                 self.set_diagnostic(format!(

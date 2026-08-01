@@ -21,7 +21,7 @@
       Save audio copy
     </button>
     <button
-      v-if="needsRecovery"
+      v-if="canRetranscribe"
       type="button"
       role="menuitem"
       data-scribe-recover-meeting
@@ -47,7 +47,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 defineProps({
   position: { type: Object, required: true },
-  needsRecovery: { type: Boolean, default: false },
+  canRetranscribe: { type: Boolean, default: false },
   filesPending: { type: Boolean, default: false },
   markdownPending: { type: Boolean, default: false },
   audioPending: { type: Boolean, default: false },

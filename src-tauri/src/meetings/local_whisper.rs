@@ -15,6 +15,7 @@ use super::{
         VerifiedLocalRuntime,
     },
 };
+use earshot::Detector as VoiceActivityDetector;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -32,7 +33,15 @@ const DEFAULT_WINDOW_CHUNKS: usize = 8;
 const MAX_TAIL_CHUNKS: usize = 32;
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_HISTORY_BYTES: usize = 2_048;
-const SILENCE_RMS_THRESHOLD: f32 = 0.000_25;
+const VAD_FRAME_SAMPLES: usize = 256;
+const VAD_SCORE_THRESHOLD: f32 = 0.55;
+const VAD_MIN_FRAME_RMS: f32 = 0.001_5;
+const VAD_MIN_WINDOW_RMS: f32 = 0.001_5;
+const VAD_MIN_ACTIVE_FRAMES: usize = 4;
+const VAD_MIN_CONSECUTIVE_FRAMES: usize = 2;
+const MAX_NO_SPEECH_PROBABILITY: f32 = 0.60;
+const MIN_SEGMENT_CONFIDENCE: f32 = 0.30;
+const MAX_IDENTICAL_SEGMENTS_PER_WINDOW: usize = 2;
 
 /// Production local runner. The catalog must be the same immutable manifest
 /// catalog exposed by [`super::platform::NativeMeetingPlatform`].
@@ -470,6 +479,13 @@ impl WhisperInferenceSession for MetalWhisperSession {
         parameters.set_split_on_word(true);
         parameters.set_suppress_blank(true);
         parameters.set_suppress_nst(true);
+        parameters.set_temperature(0.0);
+        // Temperature fallback is useful for long-form media but turns weak
+        // acoustic evidence into increasingly creative text in short live
+        // windows. Keep local meeting decoding deterministic instead.
+        parameters.set_temperature_inc(0.0);
+        parameters.set_logprob_thold(-0.8);
+        parameters.set_no_speech_thold(MAX_NO_SPEECH_PROBABILITY);
         parameters.set_print_special(false);
         parameters.set_print_progress(false);
         parameters.set_print_realtime(false);
@@ -485,7 +501,7 @@ impl WhisperInferenceSession for MetalWhisperSession {
         let duration_ms = samples.len() as u64 * 1_000 / SAMPLE_RATE_HZ as u64;
         let mut decoded = Vec::new();
         for segment in state.as_iter() {
-            if segment.no_speech_probability() >= 0.80 {
+            if segment.no_speech_probability() >= MAX_NO_SPEECH_PROBABILITY {
                 continue;
             }
             let text = segment
@@ -565,6 +581,8 @@ impl StreamingState {
             .is_some_and(|expected| chunk.sequence != expected)
         {
             self.flush(inference, sink)?;
+            self.microphone.reset_voice_activity();
+            self.system.reset_voice_activity();
         }
         let (microphone, system) = split_stereo_f32le(&chunk.bytes)?;
         self.microphone
@@ -602,10 +620,11 @@ impl StreamingState {
         let Some(window) = window else {
             return Ok(());
         };
-        if signal_rms(&window.samples) < SILENCE_RMS_THRESHOLD {
+        if !window.contains_speech {
             return Ok(());
         }
-        let decoded = inference.transcribe(&window.samples, &window.history)?;
+        let decoded =
+            suppress_implausible_segments(inference.transcribe(&window.samples, &window.history)?);
         let duration_ms = window.end_ms.saturating_sub(window.start_ms);
         let mut partials = Vec::new();
         for (index, segment) in decoded.into_iter().enumerate() {
@@ -699,6 +718,7 @@ struct ChannelWindow {
     end_ms: u64,
     samples: Vec<f32>,
     history: String,
+    voice_activity: Box<VoiceActivityDetector>,
 }
 
 impl ChannelWindow {
@@ -710,6 +730,7 @@ impl ChannelWindow {
             end_ms: 0,
             samples: Vec::new(),
             history: String::new(),
+            voice_activity: VoiceActivityDetector::default_boxed(),
         }
     }
 
@@ -725,12 +746,17 @@ impl ChannelWindow {
         Ok(())
     }
 
+    fn reset_voice_activity(&mut self) {
+        self.voice_activity.reset();
+    }
+
     fn take(&mut self) -> Option<ReadyWindow> {
         let start_ms = self.start_ms.take()?;
         if self.samples.is_empty() {
             return None;
         }
         let samples = std::mem::take(&mut self.samples);
+        let contains_speech = contains_speech(&samples, self.voice_activity.as_mut());
         let history = self.history.clone();
         Some(ReadyWindow {
             channel_id: self.channel_id,
@@ -739,6 +765,7 @@ impl ChannelWindow {
             end_ms: self.end_ms,
             samples,
             history,
+            contains_speech,
         })
     }
 }
@@ -750,6 +777,7 @@ struct ReadyWindow {
     end_ms: u64,
     samples: Vec<f32>,
     history: String,
+    contains_speech: bool,
 }
 
 fn split_stereo_f32le(bytes: &[u8]) -> Result<(Vec<f32>, Vec<f32>), String> {
@@ -789,6 +817,81 @@ fn signal_rms(samples: &[f32]) -> f32 {
         .sum::<f64>()
         / samples.len() as f64;
     mean_square.sqrt() as f32
+}
+
+/// Conservative frame-level gate in front of Whisper.
+///
+/// RMS alone cannot distinguish a quiet speaker from laptop fan, room tone,
+/// or an open microphone preamp. Earshot supplies a speech-likelihood score
+/// over 16 ms spectral frames; the energy and duration requirements prevent a
+/// single click or numerical dither from opening the gate. Detector state is
+/// retained per capture channel so speech at an eight-second boundary is not
+/// treated as a new stream.
+fn contains_speech(samples: &[f32], detector: &mut VoiceActivityDetector) -> bool {
+    if samples.len() < VAD_FRAME_SAMPLES {
+        return false;
+    }
+    let window_rms = signal_rms(samples);
+    let mut active_frames = 0_usize;
+    let mut consecutive_frames = 0_usize;
+    let mut longest_run = 0_usize;
+    for frame in samples.chunks_exact(VAD_FRAME_SAMPLES) {
+        let frame_rms = signal_rms(frame);
+        let score = detector.predict_f32(frame);
+        if frame_rms >= VAD_MIN_FRAME_RMS && score >= VAD_SCORE_THRESHOLD {
+            active_frames = active_frames.saturating_add(1);
+            consecutive_frames = consecutive_frames.saturating_add(1);
+            longest_run = longest_run.max(consecutive_frames);
+        } else {
+            consecutive_frames = 0;
+        }
+    }
+    window_rms >= VAD_MIN_WINDOW_RMS
+        && active_frames >= VAD_MIN_ACTIVE_FRAMES
+        && longest_run >= VAD_MIN_CONSECUTIVE_FRAMES
+}
+
+fn suppress_implausible_segments(decoded: Vec<DecodedSegment>) -> Vec<DecodedSegment> {
+    let mut repetitions = BTreeMap::<String, usize>::new();
+    for segment in &decoded {
+        let normalized = normalized_phrase(&segment.text);
+        if !normalized.is_empty() {
+            *repetitions.entry(normalized).or_default() += 1;
+        }
+    }
+    decoded
+        .into_iter()
+        .filter(|segment| {
+            let normalized = normalized_phrase(&segment.text);
+            if normalized.is_empty() {
+                return false;
+            }
+            if segment
+                .confidence
+                .is_some_and(|confidence| confidence < MIN_SEGMENT_CONFIDENCE)
+            {
+                return false;
+            }
+            repetitions.get(&normalized).copied().unwrap_or_default()
+                <= MAX_IDENTICAL_SEGMENTS_PER_WINDOW
+        })
+        .collect()
+}
+
+fn normalized_phrase(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn short_hash(value: &[u8]) -> String {
@@ -901,7 +1004,7 @@ mod tests {
             Ok(vec![DecodedSegment {
                 start_ms: 100,
                 end_ms: samples.len() as u64 * 1_000 / SAMPLE_RATE_HZ as u64,
-                text: if samples[0] > 0.0 {
+                text: if samples.get(100).copied().unwrap_or_default() > 0.0 {
                     "microphone speech".into()
                 } else {
                     "system speech".into()
@@ -938,8 +1041,15 @@ mod tests {
             let directory = root.join(meeting_id).join("audio").join(channel);
             fs::create_dir_all(&directory).unwrap();
             let mut bytes = Vec::with_capacity(SAMPLE_RATE_HZ * size_of::<f32>());
-            for _ in 0..SAMPLE_RATE_HZ {
-                bytes.extend_from_slice(&value.to_le_bytes());
+            for index in 0..SAMPLE_RATE_HZ {
+                let time = index as f32 / SAMPLE_RATE_HZ as f32;
+                let carrier = (std::f32::consts::TAU * 130.0 * time).sin()
+                    + 0.55 * (std::f32::consts::TAU * 260.0 * time).sin()
+                    + 0.25 * (std::f32::consts::TAU * 520.0 * time).sin();
+                let syllabic_envelope =
+                    0.35 + 0.65 * (std::f32::consts::PI * 3.5 * time).sin().abs();
+                let sample = value * carrier * syllabic_envelope;
+                bytes.extend_from_slice(&sample.clamp(-1.0, 1.0).to_le_bytes());
             }
             fs::write(directory.join(format!("{sequence:08}.f32le")), bytes).unwrap();
         }
@@ -1088,6 +1198,60 @@ mod tests {
 
         assert!(calls.lock().unwrap().is_empty());
         assert!(sink.batches.is_empty());
+    }
+
+    #[test]
+    fn room_tone_and_isolated_clicks_do_not_open_the_voice_gate() {
+        let mut detector = VoiceActivityDetector::default_boxed();
+        let mut noise = Vec::with_capacity(SAMPLE_RATE_HZ * 8);
+        let mut state = 0x1234_5678_u32;
+        for index in 0..noise.capacity() {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let white = ((state >> 8) as f32 / 0x00ff_ffff as f32) * 2.0 - 1.0;
+            let click = matches!(index, 19_000 | 19_001 | 73_000).then_some(0.18);
+            noise.push(click.unwrap_or(white * 0.002));
+        }
+
+        assert!(!contains_speech(&noise, detector.as_mut()));
+    }
+
+    #[test]
+    fn sustained_speech_like_harmonics_open_the_voice_gate() {
+        let mut detector = VoiceActivityDetector::default_boxed();
+        let mut samples = Vec::with_capacity(SAMPLE_RATE_HZ * 2);
+        for index in 0..samples.capacity() {
+            let time = index as f32 / SAMPLE_RATE_HZ as f32;
+            let carrier = (std::f32::consts::TAU * 125.0 * time).sin()
+                + 0.7 * (std::f32::consts::TAU * 250.0 * time).sin()
+                + 0.35 * (std::f32::consts::TAU * 500.0 * time).sin()
+                + 0.15 * (std::f32::consts::TAU * 1_500.0 * time).sin();
+            let envelope = (std::f32::consts::PI * 4.0 * time).sin().abs();
+            samples.push((0.06 * carrier * envelope).clamp(-1.0, 1.0));
+        }
+
+        assert!(contains_speech(&samples, detector.as_mut()));
+    }
+
+    #[test]
+    fn low_confidence_punctuation_and_repeated_decoder_output_are_suppressed() {
+        let segment = |text: &str, confidence: f32| DecodedSegment {
+            start_ms: 0,
+            end_ms: 1_000,
+            text: text.into(),
+            language: Some("en".into()),
+            confidence: Some(confidence),
+        };
+        let filtered = suppress_implausible_segments(vec![
+            segment("Subscribe", 0.99),
+            segment(" subscribe! ", 0.95),
+            segment("SUBSCRIBE.", 0.97),
+            segment("investigación 같이", 0.12),
+            segment("...", 0.99),
+            segment("The deployment is ready.", 0.86),
+        ]);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].text, "The deployment is ready.");
     }
 
     #[test]

@@ -372,9 +372,15 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             ));
         }
         if let Some(capture_generation) = request.repair_generation.as_deref() {
-            let begin = if request.repair_intent
+            let user_replaces_terminal_transcript = request.repair_intent
                 == Some(TranscriptionRepairIntent::UserRequestedRetranscription)
-            {
+                && self
+                    .store
+                    .get_meeting(&request.meeting_id)
+                    .map_err(|error| error.to_string())?
+                    .status
+                    != super::MeetingStatus::Interrupted;
+            let begin = if user_replaces_terminal_transcript {
                 self.store.begin_transcript_retranscription(
                     &request.meeting_id,
                     capture_generation,
@@ -1469,7 +1475,7 @@ impl OpenAiTranscriptState {
                     .unwrap_or("provider-error");
                 Err(format!(
                     "OpenAI realtime transcription failed ({})",
-                    opaque_provider_error_code(code)
+                    actionable_openai_error_code(code)
                 ))
             }
             _ => Ok(OpenAiEventEffect::default()),
@@ -1728,7 +1734,7 @@ async fn openai_session(
                     .unwrap_or("session-rejected");
                 return Err(format!(
                     "OpenAI realtime session was rejected ({})",
-                    opaque_provider_error_code(code)
+                    actionable_openai_error_code(code)
                 ));
             }
             _ => {}
@@ -2220,8 +2226,7 @@ async fn connect_openai_pinned(
     endpoint: &CustomSttEndpoint,
     credential: &str,
 ) -> Result<(PinnedWebSocket, SocketAddr), String> {
-    let parsed =
-        Url::parse(endpoint.as_str()).map_err(|_| "approved OpenAI endpoint is invalid")?;
+    let parsed = openai_transport_url(endpoint)?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "approved OpenAI endpoint has no host".to_string())?;
@@ -2255,7 +2260,7 @@ async fn connect_openai_pinned(
         };
         tcp.set_nodelay(true)
             .map_err(|_| "could not configure OpenAI connection".to_string())?;
-        let mut request = endpoint
+        let mut request = parsed
             .as_str()
             .into_client_request()
             .map_err(|_| "could not build OpenAI handshake".to_string())?;
@@ -2282,6 +2287,20 @@ async fn connect_openai_pinned(
         "OpenAI connection failed ({})",
         last_error.unwrap_or("no validated address succeeded")
     ))
+}
+
+fn openai_transport_url(endpoint: &CustomSttEndpoint) -> Result<Url, String> {
+    let mut parsed =
+        Url::parse(endpoint.as_str()).map_err(|_| "approved OpenAI endpoint is invalid")?;
+    // OpenAI uses this wire-only selector to create a dedicated transcription
+    // session. Keep it out of persisted/user-facing configuration so the
+    // approved endpoint remains stable and credential binding stays scoped to
+    // the canonical host/path.
+    parsed
+        .query_pairs_mut()
+        .clear()
+        .append_pair("intent", "transcription");
+    Ok(parsed)
 }
 
 async fn connect_pinned(
@@ -2473,6 +2492,18 @@ fn sanitize_error_code(message: &str) -> String {
 
 fn opaque_provider_error_code(code: &str) -> String {
     opaque_diagnostic_code("provider-error", code)
+}
+
+fn actionable_openai_error_code(code: &str) -> String {
+    match code {
+        "invalid_api_key" | "authentication_error" => "authentication-failed".into(),
+        "insufficient_quota" => "quota-exhausted".into(),
+        "rate_limit_exceeded" => "rate-limited".into(),
+        "model_not_found" => "model-unavailable".into(),
+        "invalid_model" => "unsupported-transcription-model".into(),
+        "missing_model" => "transcription-session-selector-missing".into(),
+        _ => opaque_provider_error_code(code),
+    }
 }
 
 fn opaque_diagnostic_code(prefix: &str, sensitive: &str) -> String {
@@ -3438,6 +3469,16 @@ mod tests {
             .all(|character| character.is_ascii_alphanumeric() || character == '-'));
         let provider = opaque_provider_error_code(SECRET);
         assert!(!provider.contains(SECRET));
+        assert_eq!(
+            actionable_openai_error_code("invalid_api_key"),
+            "authentication-failed"
+        );
+        assert_eq!(
+            actionable_openai_error_code("insufficient_quota"),
+            "quota-exhausted"
+        );
+        assert!(actionable_openai_error_code(SECRET).starts_with("provider-error-"));
+        assert!(!actionable_openai_error_code(SECRET).contains(SECRET));
 
         let chunk = PersistedAudioChunk {
             sequence: 1,
@@ -3594,7 +3635,8 @@ mod tests {
                 let tcp = TcpStream::connect(address)
                     .await
                     .map_err(|_| "test OpenAI TCP connection failed".to_string())?;
-                let mut request = endpoint
+                let transport = openai_transport_url(endpoint)?;
+                let mut request = transport
                     .as_str()
                     .into_client_request()
                     .map_err(|_| "could not build test OpenAI handshake".to_string())?;
@@ -3701,6 +3743,7 @@ mod tests {
         let expected_authorization = expected_authorization.to_string();
         accept_hdr_async(tls, move |request: &Request, response: Response| {
             assert_eq!(request.uri().path(), "/v1/realtime");
+            assert_eq!(request.uri().query(), Some("intent=transcription"));
             assert_eq!(
                 request
                     .headers()

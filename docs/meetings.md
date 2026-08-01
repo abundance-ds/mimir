@@ -3,9 +3,11 @@
 Status: not ready. The automated repair suite is green, and a signed installed
 build has completed first-run microphone/system-audio permission, known-
 playback dual-signal capture, local live transcription, and Stop on the
-reference Mac. Hosted OpenAI and interrupted-recording recovery still lack
-signed end-to-end evidence. Do not describe Scribe as ready until every
-required record exists in the evidence manifest.
+reference Mac. A real Keychain credential has completed OpenAI's dedicated
+transcription-session handshake; hosted live audio-to-transcript and
+interrupted-recording recovery still lack signed end-to-end evidence. Do not
+describe Scribe as ready until every required record exists in the evidence
+manifest.
 
 Scribe is Mimir's native, local-first meeting recorder and transcription app.
 It detects likely calls, asks the user to start, records microphone and system
@@ -146,12 +148,23 @@ window, and durably stops before exit; an inspection or Stop failure fails
 closed with Mimir still running. Closing or destroying the renderer does not
 stop native capture.
 
-Unexpected device loss reopens both capture sources as one generation, keeps
-the canonical sample positions monotonic, and persists aligned silence/gap
-evidence. Exhausted bounded retries fail actionably after finalizing everything
-already committed. The worker reports a terminal disk/device/driver failure to
-the durable runtime even without a renderer, which immediately leaves the
-meeting visibly failed or interrupted for repair instead of waiting for Stop.
+Device readiness is asynchronous. After free-space and durable-state
+preflight, the runtime installs the active run and capture worker before Core
+Audio or TCC can block. Record therefore returns with owned `Opening` state;
+Stop can cancel that exact worker immediately, while a native opener that has
+not returned is reclaimed off the command path. Stopping an audio level check
+uses the same non-blocking cleanup rule, so diagnostics cannot trap Record.
+
+Unexpected microphone loss reopens the capture generation while keeping the
+canonical sample positions monotonic. System-audio open and restart are
+independent: a missing or ended process tap keeps microphone capture live,
+writes aligned system silence under the authorized channel, and persists
+explicit bounded gap evidence while retrying the tap. A mic-only consent never
+opens or writes a system channel. Exhausted microphone retries fail actionably
+after finalizing everything already committed. The worker reports a terminal
+disk/microphone/driver failure to the durable runtime even without a renderer,
+which immediately leaves the meeting visibly failed or interrupted for repair
+instead of waiting for Stop.
 When Stop discovers that the capture worker already ended, it durably records
 the interruption, drains and removes the live transcriber, and only then makes
 same-process repair claimable. A delayed failure callback is an idempotent
@@ -185,7 +198,10 @@ queues one durable repair. `whisper-rs`
 embeds whisper.cpp in process with Metal enabled. Unsupported targets and a
 missing/corrupt model fail explicitly; Mimir never falls back to CPU or to a
 network provider. Separate microphone and system windows preserve the
-“You”/“Others” channel attribution.
+“You”/“Others” channel attribution. A persistent per-channel Earshot voice
+gate requires sustained speech evidence before Whisper inference; deterministic
+decoding, no-speech/log-probability thresholds, and bounded repetition
+filtering prevent room tone and isolated clicks from becoming invented text.
 
 ### OpenAI Realtime and advanced URLs
 
@@ -193,7 +209,9 @@ The hosted route accepts an explicit public `https://` URL and model name, then
 upgrades the connection to `wss://`. The normal OpenAI selection fills
 `https://api.openai.com/v1/realtime` and `gpt-live-transcribe` in the same
 atomic settings mutation, so selecting it cannot fail because a hidden URL is
-still empty. URLs with credentials, fragments,
+still empty. The persisted endpoint remains canonical; only the wire handshake
+adds `intent=transcription`, which selects OpenAI's dedicated transcription
+session before Mimir sends `session.update`. URLs with credentials, fragments,
 non-public/special-purpose addresses, unsafe DNS answers, or insecure schemes
 are rejected. The socket pins validated DNS results while retaining TLS
 hostname verification.
@@ -213,14 +231,17 @@ when legacy/damaged provenance is unavailable; changing global settings can
 never redirect previously captured audio.
 
 Explicit retranscription is a separate human action. It requires retained,
-committed source audio and a `Completed` or `Failed` meeting, then freezes the
-currently selected route and model into a new durable job. It does not reuse or
-weaken automatic recovery's original-route rule. Provider output remains in a
-private generation while it is partial; provider failure leaves the old
-transcript and revision readable. Only an all-final pass atomically replaces
-the STT-owned projection. The action itself is the authorization—there is no
-attestation checkbox. A crash after commit but before job acknowledgement is
-reconciled locally without disclosing the audio a second time.
+committed source audio and a `Completed`, `Failed`, or `Interrupted` meeting,
+then freezes the currently selected route and model into a new durable job. A
+pending automatic repair is cancelled before the deliberate new route can
+receive audio; a running repair remains authoritative until it finishes. This
+does not weaken automatic recovery's original-route rule. Provider output
+remains in a private generation while it is partial; provider failure leaves
+the old transcript and revision readable. Only an all-final pass atomically
+replaces the STT-owned projection and completes an interrupted meeting. The
+action itself is the authorization—there is no attestation checkbox. A crash
+after commit but before job acknowledgement is reconciled locally without
+disclosing the audio a second time.
 
 OpenAI uses two independently owned Realtime transcription WebSockets: one for
 microphone and one for system audio. Native code converts each committed 16
@@ -243,8 +264,11 @@ a valid terminal result when no partial remains.
 ## Stop-time Activities
 
 Follow-up jobs are leased, durable rows. The worker launches through
-`RoutineRuntime` as a real PTY Activity using a preset's exact headless argv;
-it never invokes a shell. Meeting id, hook id, immutable transcript revision,
+`RoutineRuntime` as a real PTY Activity and never invokes a shell. Ordinary
+launcher presets select the agent and optional model, but stop-time Codex work
+is reduced to an ephemeral workspace-write invocation with user config, MCP,
+extra directories, and authority-expanding flags disabled. Meeting id, hook
+id, immutable transcript revision,
 and controlled paths are recorded as Activity provenance. Prompts treat the
 transcript as untrusted quoted data, and outputs are bounded, schema-validated
 JSON files under the meeting directory.

@@ -11,11 +11,12 @@ Feature: Capture microphone and system audio without sacrificing durability
     And both tracks share monotonic meeting-time coordinates
 
   @MTG-041 @automated @native @security
-  Scenario: A required unavailable channel prevents false recording success
+  Scenario: Unavailable system audio degrades to an honest microphone recording
     Given microphone capture is available but system audio is unavailable
     When the user attempts dual-channel capture
-    Then native start fails with an actionable channel error
-    And the session is never reported as recording or complete
+    Then microphone capture continues without waiting for the system tap
+    And the missing system interval is retained as explicit gap evidence
+    And Mimir never treats aligned gap padding as captured system speech
 
   @MTG-042 @manual @native @hardware
   Scenario: Muting the microphone does not suppress system audio
@@ -25,7 +26,7 @@ Feature: Capture microphone and system audio without sacrificing durability
     And the system-audio channel continues with uninterrupted time coordinates
 
   @MTG-043 @manual @native @hardware
-  Scenario: A device route change restarts only the affected source
+  Scenario: A microphone route change remains one recoverable capture run
     Given dual-channel capture is active
     When the selected microphone is disconnected and a replacement is chosen
     Then the microphone source restarts within the same capture run

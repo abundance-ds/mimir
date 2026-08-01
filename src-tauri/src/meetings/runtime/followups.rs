@@ -268,10 +268,10 @@ impl MeetingRuntime {
         let meeting = self.inner.store.get_meeting(meeting_id)?;
         if !matches!(
             meeting.status,
-            MeetingStatus::Completed | MeetingStatus::Failed
+            MeetingStatus::Completed | MeetingStatus::Failed | MeetingStatus::Interrupted
         ) {
             return Err(MeetingRuntimeError::Validation(
-                "retranscription requires a completed or failed meeting".into(),
+                "retranscription requires a stopped meeting with retained audio".into(),
             ));
         }
         if !self.inner.store.has_committed_audio(meeting_id)? {
@@ -282,9 +282,33 @@ impl MeetingRuntime {
         let jobs = self.inner.store.list_jobs(meeting_id)?;
         if jobs.iter().any(|job| {
             job.definition.kind == FollowUpJobKind::Custom("transcription".into())
+                && job.definition.payload["transcriptionIntent"] == "user-retranscription"
                 && matches!(job.state, JobState::Pending | JobState::Running)
         }) {
             return self.snapshot_unlocked(self.inner.revision.load(Ordering::Acquire));
+        }
+        if jobs.iter().any(|job| {
+            job.definition.kind == FollowUpJobKind::Custom("transcription".into())
+                && job.definition.payload["transcriptionIntent"] != "user-retranscription"
+                && job.state == JobState::Running
+        }) {
+            return Err(MeetingRuntimeError::Validation(
+                "transcription recovery is already running; try again after it finishes".into(),
+            ));
+        }
+        // A human retry after changing provider intentionally supersedes a
+        // queued automatic crash-recovery pass. Leaving both pending makes the
+        // button appear to do nothing and can disclose the same audio to two
+        // routes. A running pass is rejected above because cancelling its
+        // durable lease cannot stop an already-open provider connection.
+        for job in jobs.iter().filter(|job| {
+            job.definition.kind == FollowUpJobKind::Custom("transcription".into())
+                && job.definition.payload["transcriptionIntent"] != "user-retranscription"
+                && job.state == JobState::Pending
+        }) {
+            self.inner
+                .store
+                .cancel_job(&job.definition.id, &self.inner.clock.now())?;
         }
         let projection = self.platform_projection()?;
         validate_config(&projection.config)?;

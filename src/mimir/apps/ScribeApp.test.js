@@ -234,7 +234,7 @@ describe('ScribeApp', () => {
       lifecycle: 'capturing',
       transcription: 'failed',
       transcriptFinal: false,
-      error: 'meeting m1 has no live transcription worker',
+      error: 'OpenAI transcription worker failed: rate_limit_exceeded (request req_123); Authorization: Bearer sk-secret-value',
     })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
       activeMeetingId: active.id,
@@ -249,6 +249,10 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
 
     expect(wrapper.get('[data-scribe-error]').text()).toContain('Recording continues')
+    expect(wrapper.get('[data-scribe-error]').text()).toContain('rate_limit_exceeded')
+    expect(wrapper.get('[data-scribe-error]').text()).toContain('req_123')
+    expect(wrapper.get('[data-scribe-error]').text()).toContain('[redacted]')
+    expect(wrapper.get('[data-scribe-error]').text()).not.toContain('sk-secret-value')
     expect(wrapper.get('[data-scribe-ledger]').text()).toContain('microphone + system audio')
     await wrapper.get('[data-scribe-stop]').trigger('click')
     await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
@@ -276,6 +280,30 @@ describe('ScribeApp', () => {
     expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('Others')
     expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('wording may change')
     expect(wrapper.get('[data-scribe-ledger]').text()).toContain('Live transcript · On this Mac')
+  })
+
+  it('lets visible transcript segments outrank a stale preparing state after Stop', async () => {
+    const active = meeting({
+      lifecycle: 'finalizing',
+      transcription: 'initializing',
+      transcriptFinal: false,
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      activeMeetingId: active.id,
+      meetings: [active],
+    }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
+      totalSegments: 1,
+      segments: [
+        { id: 's1', text: 'Already transcribed', startMs: 0, endMs: 1_000, channel: 'microphone', final: true, revision: 1 },
+      ],
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-transcript-ledger]').text())
+      .toContain('Already transcribed'))
+    expect(wrapper.get('[data-scribe-ledger]').text()).toContain('Live transcript · On this Mac')
+    expect(wrapper.get('[data-scribe-ledger]').text()).not.toContain('Preparing transcription')
   })
 
   it('opens a summarized meeting on Summary with only back and overflow in its header', async () => {
@@ -401,6 +429,52 @@ describe('ScribeApp', () => {
     expect(wrapper.find('[data-scribe-kg-offer]').exists()).toBe(false)
   })
 
+  it('shows durable summary progress instead of leaving the action at Starting', async () => {
+    const running = meeting({
+      summaryState: 'running',
+      jobs: [{ id: 'summary-1', kind: 'title-summary', status: 'running', attempt: 1, error: null }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [running] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+
+    expect(wrapper.get('[data-scribe-regenerate-summary]').text()).toBe('Creating…')
+    expect(wrapper.get('[data-scribe-regenerate-summary]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toBe('Creating…')
+    expect(wrapper.text()).not.toContain('Starting…')
+  })
+
+  it('trusts a failed summary job over stale running state and exposes a safe retry', async () => {
+    const failed = meeting({
+      summaryState: 'running',
+      jobs: [{
+        id: 'summary-1',
+        kind: 'title-summary',
+        status: 'failed',
+        attempt: 3,
+        error: 'OpenAI returned insufficient_quota; api_key=sk-summary-secret',
+      }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [failed] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+
+    const retry = wrapper.get('[data-scribe-regenerate-summary]')
+    expect(retry.text()).toBe('Try again')
+    expect(retry.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('insufficient_quota')
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('[redacted]')
+    expect(wrapper.get('[data-scribe-summary-content]').text()).not.toContain('sk-summary-secret')
+    await retry.trigger('click')
+    expect(runMeetingSummary).toHaveBeenCalledWith('m1', expect.objectContaining({
+      template: 'standard',
+    }))
+  })
+
   it('edits reviewed title summary and bounded tags', async () => {
     const complete = meeting({ summary: 'Initial summary.', tags: ['release', 'customer'] })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
@@ -493,14 +567,49 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(updateMeeting).toHaveBeenCalledWith('m1', { title: 'Renamed' }))
   })
 
-  it('opens the row menu from the keyboard and retries transcript recovery', async () => {
+  it('offers manual retranscription for an interrupted recording', async () => {
+    const interrupted = meeting({ lifecycle: 'interrupted' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [interrupted] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-row]').trigger('keydown', { key: 'F10', shiftKey: true })
+    await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
+    await vi.waitFor(() => expect(retranscribeMeeting).toHaveBeenCalledWith('m1'))
+  })
+
+  it('offers manual retranscription for a legacy repair lifecycle', async () => {
     const interrupted = meeting({ lifecycle: 'needs_repair' })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [interrupted] }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
 
     await wrapper.get('[data-scribe-meeting-row]').trigger('keydown', { key: 'F10', shiftKey: true })
+    await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
+    await vi.waitFor(() => expect(retranscribeMeeting).toHaveBeenCalledWith('m1'))
+  })
+
+  it('does not offer manual retranscription while a meeting is still finalizing', async () => {
+    const interrupted = meeting({ lifecycle: 'finalizing', error: 'Finalizing transcript' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [interrupted] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-row]').trigger('keydown', { key: 'F10', shiftKey: true })
     expect(wrapper.get('[data-scribe-meeting-menu]').exists()).toBe(true)
+    expect(wrapper.find('[data-scribe-recover-meeting]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    expect(wrapper.find('[data-scribe-recover-inline]').exists()).toBe(false)
+    expect(retranscribeMeeting).not.toHaveBeenCalled()
+  })
+
+  it('offers manual retranscription for a failed terminal meeting', async () => {
+    const failed = meeting({ lifecycle: 'failed', error: 'Provider rejected the audio' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [failed] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-row]').trigger('keydown', { key: 'F10', shiftKey: true })
     await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
     await vi.waitFor(() => expect(retranscribeMeeting).toHaveBeenCalledWith('m1'))
   })

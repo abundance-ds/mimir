@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 673 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
+Inventory: 674 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -137,6 +137,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:dtor@0.3.0 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/dtor/0.3.0/download | f1057d6c64987086ff8ed0fd3fbf377a6b7d205cc7715868cd401705f715cbe4 |
 | cargo:dunce@1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | https://crates.io/api/v1/crates/dunce/1.0.5/download | 92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813 |
 | cargo:dyn-clone@1.0.20 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dyn-clone/1.0.20/download | d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555 |
+| cargo:earshot@1.2.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/earshot/1.2.1/download | 86b09710f15e995d175f80aa9101f37cd2bc12bb45593e7eac1809ab99acd1ab |
 | cargo:either@1.17.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/either/1.17.0/download | 9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d |
 | cargo:embed_plist@1.2.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/embed_plist/1.2.2/download | 4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7 |
 | cargo:embed-resource@3.0.9 | MIT | https://crates.io/api/v1/crates/embed-resource/3.0.9/download | c31a88c8d26de40ed18fe748c547845aa39de1db3afd958f8cb91579f3644bcb |

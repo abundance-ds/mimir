@@ -50,9 +50,9 @@
     },
     {
       "feature": "features/meetings/02_capture_lifecycle.feature",
-      "idRange": ["MTG-020", "MTG-029"],
+      "idRange": ["MTG-020", "MTG-030"],
       "owner": "meeting-runtime",
-      "verificationScope": ["native lifecycle and single-owner tests", "ended-worker Stop, reconnect-gap revision refresh, and transcriber handoff", "snapshot and event ordering contracts", "guarded desktop Quit"]
+      "verificationScope": ["native lifecycle, prompt startup ownership, and single-owner tests", "ended-worker Stop, reconnect-gap revision refresh, and transcriber handoff", "snapshot and event ordering contracts", "guarded desktop Quit"]
     },
     {
       "feature": "features/meetings/03_multichannel_capture.feature",
@@ -232,14 +232,20 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/capture.rs",
+      "selector": "pending_device_open_is_owned_before_start_returns_and_stop_is_prompt",
+      "scenarios": ["MTG-030"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/model.rs",
       "selector": "gherkin_terminal_meetings_never_reopen",
       "scenarios": ["MTG-026"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime/tests.rs",
-      "selector": "capture_start_failure_is_durable_and_never_reported_as_success",
+      "path": "src-tauri/src/meetings/capture.rs",
+      "selector": "requested_system_open_failure_retains_mic_and_persists_aligned_gap_silence",
       "scenarios": ["MTG-041"]
     },
     {
@@ -433,6 +439,12 @@
       "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "retranscription_failure_keeps_the_old_revision_until_one_terminal_pass_commits",
       "scenarios": ["MTG-071", "MTG-081"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
+      "selector": "explicit_retranscription_replaces_pending_recovery_for_interrupted_audio",
+      "scenarios": ["MTG-081"]
     },
     {
       "kind": "rust-test",
@@ -641,7 +653,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "opens the row menu from the keyboard and retries transcript recovery",
+      "selector": "offers manual retranscription for an interrupted recording",
       "scenarios": ["MTG-211"]
     },
     {

@@ -16,6 +16,7 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
     Given a queued title and summary job is eligible to run
     When Mimir launches its configured editable summary instructions and CLI agent preset
     Then the durable Activity receives exact argv and an immutable transcript snapshot identity
+    And an authority-expanding launcher preset is reduced to a private hook-only sandbox
     And the exact user-reviewed summary instructions are part of the immutable job input
     And no shell string is parsed or evaluated
 

@@ -74,3 +74,11 @@ Feature: Own meeting capture as one durable native lifecycle
     When capture records the unavailable interval before its worker joins
     Then Stop refreshes the durable meeting revision after capture teardown
     And the meeting reaches durable finalization with the reconnect gap preserved
+
+  @MTG-030 @automated @native @performance @recovery
+  Scenario: A slow native device open never traps recording controls
+    Given a requested audio device is blocked inside native initialization
+    When the user starts a meeting
+    Then durable capture ownership is returned promptly without waiting for device readiness
+    And Stop can cancel the owned startup without reporting a missing audio worker
+    And snapshots remain available while native cleanup finishes in the background

@@ -150,7 +150,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
       throw new Error('A meeting is already active.')
     }
     return runPending('start', async () => {
-      applySnapshot(await requestMeetingMicrophonePermission())
+      if (!['granted', 'development-host'].includes(permissions.value.microphone)) {
+        applySnapshot(await requestMeetingMicrophonePermission())
+      }
       const candidate = request?.candidateId
         ? candidates.value.find(value => value.id === request.candidateId)
         : null
