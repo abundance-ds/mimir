@@ -60,6 +60,13 @@ app; the verified in-product install downloads about 488 MB into
 
 See [testing.md](testing.md) for what each command proves, environment limits, and change-to-test routing.
 
+Rust development and test profiles keep line-table debugging but disable
+incremental compilation. Scribe's native audio and Whisper graph otherwise
+accumulates several gigabytes of never-pruned incremental state. Cargo still
+does not garbage-collect its native build-output directory; `cargo clean
+--manifest-path src-tauri/Cargo.toml` removes only regenerable output when disk space is
+more important than the next build's warm cache.
+
 ## Packaging
 
 Check macOS signing prerequisites:
