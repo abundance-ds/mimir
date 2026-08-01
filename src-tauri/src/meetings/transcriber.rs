@@ -11,8 +11,8 @@
 use super::{
     config::CustomSttEndpoint,
     runtime::{
-        MeetingTranscriptionPort, TranscriptionFinalize, TranscriptionStart,
-        TranscriptionWorkerStatus,
+        MeetingTranscriptionPort, TranscriptionFinalize, TranscriptionRepairIntent,
+        TranscriptionStart, TranscriptionWorkerStatus,
     },
     stt::{
         AudioEncoding, ClientMessage, NormalizedSegment, NormalizedTranscriptBatch, SegmentState,
@@ -245,11 +245,56 @@ struct TranscriptionSession {
     state: Arc<Mutex<TranscriptionSessionState>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TranscriptionSessionState {
     Initializing,
+    Connecting,
+    Listening,
     Live,
+    Reconnecting,
     Failed,
+}
+
+#[derive(Clone)]
+struct WorkerStatusReporter {
+    meeting_id: String,
+    state: Arc<Mutex<TranscriptionSessionState>>,
+    changes: Arc<dyn TranscriptionChangeSink>,
+}
+
+impl WorkerStatusReporter {
+    fn set(&self, next: TranscriptionSessionState) {
+        let changed = self
+            .state
+            .lock()
+            .map(|mut state| {
+                if *state == next {
+                    return false;
+                }
+                *state = next;
+                true
+            })
+            .unwrap_or(false);
+        if changed {
+            self.changes.state_changed(&self.meeting_id);
+        }
+    }
+}
+
+struct ReportingBatchSink<'a> {
+    inner: &'a mut dyn NormalizedBatchSink,
+    status: WorkerStatusReporter,
+}
+
+impl NormalizedBatchSink for ReportingBatchSink<'_> {
+    fn ingest(&mut self, batch: NormalizedTranscriptBatch) -> Result<(), String> {
+        self.status.set(TranscriptionSessionState::Live);
+        self.inner.ingest(batch)
+    }
+
+    fn final_segment_count(&self) -> u64 {
+        self.inner.final_segment_count()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -327,16 +372,24 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             ));
         }
         if let Some(capture_generation) = request.repair_generation.as_deref() {
-            match self
-                .store
-                .begin_transcript_repair(
+            let begin = if request.repair_intent
+                == Some(TranscriptionRepairIntent::UserRequestedRetranscription)
+            {
+                self.store.begin_transcript_retranscription(
                     &request.meeting_id,
                     capture_generation,
                     &request.run_id,
                     &now(),
                 )
-                .map_err(|error| error.to_string())?
-            {
+            } else {
+                self.store.begin_transcript_repair(
+                    &request.meeting_id,
+                    capture_generation,
+                    &request.run_id,
+                    &now(),
+                )
+            };
+            match begin.map_err(|error| error.to_string())? {
                 TranscriptRepairBegin::Collecting => {}
                 TranscriptRepairBegin::AlreadyCommitted { revision } => {
                     return Err(format!(
@@ -356,9 +409,17 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         let local = Arc::clone(&self.local);
         let changes = Arc::clone(&self.changes);
         let state = Arc::new(Mutex::new(TranscriptionSessionState::Initializing));
-        let worker_state = Arc::clone(&state);
-        let worker_changes = Arc::clone(&self.changes);
-        let worker_meeting_id = request.meeting_id.clone();
+        let worker_status = WorkerStatusReporter {
+            meeting_id: request.meeting_id.clone(),
+            state: Arc::clone(&state),
+            changes: Arc::clone(&self.changes),
+        };
+        let failure_status = worker_status.clone();
+        let ready_status = if matches!(provider, ResolvedTranscriptionProvider::Custom { .. }) {
+            TranscriptionSessionState::Listening
+        } else {
+            TranscriptionSessionState::Live
+        };
         let thread_name = format!("mimir-stt-{}", request.meeting_id);
         let worker = thread::Builder::new()
             .name(thread_name)
@@ -374,6 +435,7 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                     changes,
                     finalize_rx,
                     ready_tx,
+                    worker_status,
                 );
                 if let Err(message) = &result {
                     // This succeeds only while the caller is still waiting for
@@ -381,10 +443,7 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                     // and a later runtime failure cannot masquerade as a
                     // second startup outcome.
                     let _ = startup_error.try_send(Err(message.clone()));
-                    if let Ok(mut state) = worker_state.lock() {
-                        *state = TranscriptionSessionState::Failed;
-                    }
-                    worker_changes.state_changed(&worker_meeting_id);
+                    failure_status.set(TranscriptionSessionState::Failed);
                 }
                 result
             })
@@ -396,14 +455,17 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             .name(format!("mimir-stt-ready-{}", request.meeting_id))
             .spawn(move || {
                 let next = match ready_rx.recv() {
-                    Ok(Ok(())) => TranscriptionSessionState::Live,
+                    Ok(Ok(())) => ready_status,
                     Ok(Err(_)) | Err(_) => TranscriptionSessionState::Failed,
                 };
                 if let Ok(mut state) = readiness_state.lock() {
                     // A worker can fail immediately after reporting Ready.
                     // Never let the slower observer overwrite that terminal
                     // failure with a stale Live projection.
-                    if matches!(*state, TranscriptionSessionState::Initializing) {
+                    if !matches!(
+                        *state,
+                        TranscriptionSessionState::Live | TranscriptionSessionState::Failed
+                    ) {
                         *state = next;
                     }
                 }
@@ -495,8 +557,11 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
         let status = match session.state.lock() {
             Ok(state) => match &*state {
                 TranscriptionSessionState::Initializing => TranscriptionWorkerStatus::Initializing,
+                TranscriptionSessionState::Connecting => TranscriptionWorkerStatus::Connecting,
+                TranscriptionSessionState::Listening => TranscriptionWorkerStatus::Listening,
                 TranscriptionSessionState::Live => TranscriptionWorkerStatus::Live,
-                TranscriptionSessionState::Failed => TranscriptionWorkerStatus::Delayed,
+                TranscriptionSessionState::Reconnecting => TranscriptionWorkerStatus::Reconnecting,
+                TranscriptionSessionState::Failed => TranscriptionWorkerStatus::Failed,
             },
             Err(_) => TranscriptionWorkerStatus::Delayed,
         };
@@ -515,6 +580,7 @@ fn run_worker(
     changes: Arc<dyn TranscriptionChangeSink>,
     finalize: Receiver<FinalizeCommand>,
     ready: SyncSender<Result<(), String>>,
+    status: WorkerStatusReporter,
 ) -> Result<WorkerCompletion, String> {
     let audio =
         PersistedAudioSource::authoritative(Arc::clone(&store), data_dir, &request.meeting_id)?;
@@ -574,6 +640,7 @@ fn run_worker(
             run_result?;
         }
         ResolvedTranscriptionProvider::Custom { endpoint, model } => {
+            status.set(TranscriptionSessionState::Connecting);
             let credential = resolve_custom_credential(credentials.as_ref(), &endpoint)?;
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -587,11 +654,16 @@ fn run_worker(
                 audio: &audio,
                 finalize: &finalize,
                 ready: &ready,
+                status: &status,
+            };
+            let mut reporting_sink = ReportingBatchSink {
+                inner: &mut sink,
+                status: status.clone(),
             };
             if is_openai_realtime_route(&endpoint, &model) {
-                runtime.block_on(run_openai_realtime(context, &mut sink))?;
+                runtime.block_on(run_openai_realtime(context, &mut reporting_sink))?;
             } else {
-                runtime.block_on(run_custom(context, &mut sink))?;
+                runtime.block_on(run_custom(context, &mut reporting_sink))?;
             }
         }
     }
@@ -1795,6 +1867,7 @@ struct CustomRunContext<'a> {
     audio: &'a PersistedAudioSource,
     finalize: &'a Receiver<FinalizeCommand>,
     ready: &'a SyncSender<Result<(), String>>,
+    status: &'a WorkerStatusReporter,
 }
 
 async fn run_custom(
@@ -1837,6 +1910,7 @@ async fn run_custom_with_connector(
         audio,
         finalize,
         ready,
+        status,
     } = context;
     let preflight = SttPreflightRequest {
         operation: TranscriptionOperation::Live,
@@ -1862,6 +1936,11 @@ async fn run_custom_with_connector(
     let mut finalizing = false;
 
     loop {
+        status.set(if ready_reported {
+            TranscriptionSessionState::Reconnecting
+        } else {
+            TranscriptionSessionState::Connecting
+        });
         if !finalizing {
             match finalize.try_recv() {
                 Ok(_) => finalizing = true,
@@ -2547,6 +2626,14 @@ mod tests {
         fn state_changed(&self, _meeting_id: &str) {}
     }
 
+    fn test_status_reporter() -> WorkerStatusReporter {
+        WorkerStatusReporter {
+            meeting_id: "meeting-1".into(),
+            state: Arc::new(Mutex::new(TranscriptionSessionState::Initializing)),
+            changes: Arc::new(NoopTranscriptionChangeSink),
+        }
+    }
+
     struct SilentLocal;
 
     impl LocalTranscriber for SilentLocal {
@@ -2719,6 +2806,7 @@ mod tests {
             route: "local".into(),
             model: "whisper-small".into(),
             repair_generation: None,
+            repair_intent: None,
         };
         let release = thread::spawn(move || {
             thread::sleep(Duration::from_millis(150));
@@ -2763,18 +2851,19 @@ mod tests {
             route: "local".into(),
             model: "whisper-small".into(),
             repair_generation: None,
+            repair_intent: None,
         };
         transcriber.start(&start).unwrap();
 
         let deadline = Instant::now() + Duration::from_secs(1);
-        while transcriber.status("meeting-1") != TranscriptionWorkerStatus::Delayed
+        while transcriber.status("meeting-1") != TranscriptionWorkerStatus::Failed
             && Instant::now() < deadline
         {
             thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(
             transcriber.status("meeting-1"),
-            TranscriptionWorkerStatus::Delayed
+            TranscriptionWorkerStatus::Failed
         );
         assert!(transcriber
             .finalize(&TranscriptionFinalize {
@@ -2806,6 +2895,7 @@ mod tests {
             route: "local".into(),
             model: "whisper-small".into(),
             repair_generation: None,
+            repair_intent: None,
         };
         transcriber.start(&start).unwrap();
 
@@ -2883,6 +2973,7 @@ mod tests {
             route: "local".into(),
             model: "whisper-small".into(),
             repair_generation: Some("run-generation-1".into()),
+            repair_intent: None,
         };
         transcriber.start(&start).unwrap();
         let terminal = transcriber
@@ -3266,6 +3357,7 @@ mod tests {
                 route: "local".into(),
                 model: "whisper-small".into(),
                 repair_generation: None,
+                repair_intent: None,
             })
             .unwrap();
         assert!(matches!(local, ResolvedTranscriptionProvider::Local { .. }));
@@ -3277,6 +3369,7 @@ mod tests {
                 route: "https://speech.example.com/mimir".into(),
                 model: "meeting-model".into(),
                 repair_generation: None,
+                repair_intent: None,
             })
             .unwrap();
         let ResolvedTranscriptionProvider::Custom { endpoint, .. } = custom else {
@@ -3291,6 +3384,7 @@ mod tests {
                 route: "http://speech.example.com/mimir".into(),
                 model: "meeting-model".into(),
                 repair_generation: None,
+                repair_intent: None,
             })
             .is_err());
         assert!(resolver
@@ -3300,6 +3394,7 @@ mod tests {
                 route: "http://127.0.0.1:9000/mimir".into(),
                 model: "meeting-model".into(),
                 repair_generation: None,
+                repair_intent: None,
             })
             .is_err());
     }
@@ -3875,6 +3970,7 @@ mod tests {
             route: endpoint.as_str().into(),
             model: "gpt-live-transcribe".into(),
             repair_generation: None,
+            repair_intent: None,
         };
         let (finalize_tx, finalize_rx) = mpsc::channel();
         finalize_tx
@@ -3892,6 +3988,7 @@ mod tests {
                 audio: &audio,
                 finalize: &finalize_rx,
                 ready: &ready_tx,
+                status: &test_status_reporter(),
             },
             &mut sink,
             &connector,
@@ -4074,6 +4171,7 @@ mod tests {
             route: endpoint.as_str().into(),
             model: "tls-model".into(),
             repair_generation: None,
+            repair_intent: None,
         };
         let (finalize_tx, finalize_rx) = mpsc::channel();
         finalize_tx
@@ -4091,6 +4189,7 @@ mod tests {
                 audio: &audio,
                 finalize: &finalize_rx,
                 ready: &ready_tx,
+                status: &test_status_reporter(),
             },
             &mut sink,
             &connector,

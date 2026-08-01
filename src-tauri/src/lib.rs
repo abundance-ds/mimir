@@ -987,6 +987,15 @@ pub fn run() {
             if let tauri::WindowEvent::Destroyed = event {
                 let app = window.app_handle().clone();
                 let window_id = window.label().to_string();
+                let audio_tests = app
+                    .state::<meetings::native::NativeMeetingEngine>()
+                    .audio_tests();
+                let audio_window_id = window_id.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(error) = audio_tests.stop_window(&audio_window_id) {
+                        log::error!("Could not stop Scribe audio check for destroyed window: {error}");
+                    }
+                });
                 tauri::async_runtime::spawn(async move {
                     app.state::<tool_runtime::ToolRuntime>()
                         .disconnect_window(&window_id)
@@ -1050,10 +1059,14 @@ pub fn run() {
             app_quit_confirmed,
             meetings::commands::meetings_snapshot,
             meetings::commands::meetings_library_page,
+            meetings::commands::meetings_search_library,
             meetings::commands::meetings_transcript_page,
             meetings::commands::meetings_request_microphone_permission,
             meetings::commands::meetings_open_system_audio_settings,
             meetings::commands::meetings_check_audio,
+            meetings::commands::meetings_microphone_devices,
+            meetings::commands::meetings_audio_test_start,
+            meetings::commands::meetings_audio_test_stop,
             meetings::commands::meetings_dismiss_candidate,
             meetings::commands::meetings_issue_start_consent,
             meetings::commands::meetings_start,
@@ -1062,6 +1075,8 @@ pub fn run() {
             meetings::commands::meetings_update,
             meetings::commands::meetings_decide_kg,
             meetings::commands::meetings_retry_job,
+            meetings::commands::meetings_run_summary,
+            meetings::commands::meetings_retranscribe,
             meetings::commands::meetings_delete,
             meetings::commands::meetings_export,
             meetings::commands::meetings_update_config,

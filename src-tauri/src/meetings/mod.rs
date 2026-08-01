@@ -4,6 +4,7 @@
 //! `MeetingStore` is the durable authority; capture, transcription, and UI
 //! adapters can be layered over its optimistic revisions and idempotent writes.
 
+pub mod audio_test;
 pub mod capture;
 pub mod commands;
 pub mod config;

@@ -452,7 +452,7 @@ fn run_capture_worker(
         .map_err(|error| format!("could not initialize meeting audio runtime: {error}"))?;
     runtime.block_on(async move {
         let mut readiness = StartupReadiness::new(ready);
-        let initial_streams = match open_native_streams() {
+        let initial_streams = match open_native_streams(request.microphone_device_id.as_deref()) {
             Ok(streams) => streams,
             Err(error) => {
                 let _ = readiness.report(Err(error.clone()));
@@ -554,7 +554,7 @@ fn run_capture_worker(
                             break 'capture Ok(());
                         }
 
-                        match open_native_streams() {
+                        match open_native_streams(request.microphone_device_id.as_deref()) {
                             Ok(reopened) => {
                                 if let Err(error) = apply_restart_gap(
                                     &mut mic_writer,
@@ -611,14 +611,26 @@ enum CaptureLoopEvent {
 }
 
 #[cfg(target_os = "macos")]
-fn open_native_streams() -> Result<NativeCaptureStreams, String> {
+fn open_native_streams(microphone_device_id: Option<&str>) -> Result<NativeCaptureStreams, String> {
     use mimir_meeting_audio::{CaptureHealth, FrameDuration, MicrophoneInput, SystemAudioInput};
 
-    let microphone = MicrophoneInput::open(None)
-        .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
+    let microphone_input = MicrophoneInput::open_device(microphone_device_id).map_err(|error| {
+        format!(
+            "microphone capture could not open a usable input; reconnect the selected device or verify Microphone permission: {error}"
+        )
+    })?;
+    if let Some(missing) = microphone_input.fallback_from_device_id() {
+        log::warn!(
+            "Selected Scribe microphone '{missing}' is unavailable; using '{}' ({}) for this capture",
+            microphone_input.device_name(),
+            microphone_input.device_id()
+        );
+    }
+    let microphone = microphone_input
+        .start(FrameDuration::DEFAULT, CaptureHealth::default())
         .map_err(|error| {
             format!(
-                "microphone capture is unavailable; reconnect or select an input device and verify Microphone permission: {error}"
+                "microphone capture opened but its stream could not start; reconnect or select an input device and verify Microphone permission: {error}"
             )
         })?;
     let system = SystemAudioInput::open()

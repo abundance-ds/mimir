@@ -432,13 +432,36 @@ pub(crate) fn execute_transcription_repair_with(
     transcription: &dyn MeetingTranscriptionPort,
     job: &FollowUpJob,
 ) -> Result<Value, String> {
+    let user_requested = job
+        .definition
+        .payload
+        .get("transcriptionIntent")
+        .and_then(Value::as_str)
+        == Some("user-retranscription");
+    let capture_generation = required_job_payload_string(job, "captureGeneration")?;
+    let run_id = if user_requested {
+        format!("retranscribe-{capture_generation}")
+    } else {
+        format!("repair-{capture_generation}")
+    };
     // A provider may have committed its terminal batch and lifecycle before
     // the job lease result reached SQLite. Redelivery must finish locally and
     // perform zero model, credential, network, or audio-disclosure work.
-    if runtime
-        .complete_terminal_recovery(&job.definition.meeting_id)
-        .map_err(|error| format!("Could not reconcile terminal Scribe recovery: {error}"))?
-    {
+    let already_committed = if user_requested {
+        runtime
+            .committed_transcript_repair_revision(
+                &job.definition.meeting_id,
+                capture_generation,
+                &run_id,
+            )
+            .map_err(|error| format!("Could not reconcile completed retranscription: {error}"))?
+            .is_some()
+    } else {
+        runtime
+            .complete_terminal_recovery(&job.definition.meeting_id)
+            .map_err(|error| format!("Could not reconcile terminal Scribe recovery: {error}"))?
+    };
+    if already_committed {
         return transcription_repair_result(runtime, &job.definition.meeting_id);
     }
     if !runtime
@@ -455,14 +478,14 @@ pub(crate) fn execute_transcription_repair_with(
     // endpoint-A -> endpoint-B configuration changes.
     let route = required_job_payload_string(job, "transcriptionRoute")?;
     let model = required_job_payload_string(job, "transcriptionModel")?;
-    let capture_generation = required_job_payload_string(job, "captureGeneration")?;
-    let run_id = format!("repair-{capture_generation}");
     transcription.start(&TranscriptionStart {
         meeting_id: job.definition.meeting_id.clone(),
         run_id: run_id.clone(),
         route: route.into(),
         model: model.into(),
         repair_generation: Some(capture_generation.to_string()),
+        repair_intent: user_requested
+            .then_some(super::runtime::TranscriptionRepairIntent::UserRequestedRetranscription),
     })?;
     let current = runtime
         .durable_meeting(&job.definition.meeting_id)
@@ -473,14 +496,25 @@ pub(crate) fn execute_transcription_repair_with(
         base_revision: current.transcript_revision,
         observed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
     })?;
-    runtime
-        .complete_transcription_retry(
-            &job.definition.meeting_id,
-            capture_generation,
-            &run_id,
-            batch,
-        )
-        .map_err(|error| format!("Could not commit the repaired transcript: {error}"))?;
+    if user_requested {
+        runtime
+            .complete_user_retranscription(
+                &job.definition.meeting_id,
+                capture_generation,
+                &run_id,
+                batch,
+            )
+            .map_err(|error| format!("Could not commit the retranscribed transcript: {error}"))?;
+    } else {
+        runtime
+            .complete_transcription_retry(
+                &job.definition.meeting_id,
+                capture_generation,
+                &run_id,
+                batch,
+            )
+            .map_err(|error| format!("Could not commit the repaired transcript: {error}"))?;
+    }
     transcription_repair_result(runtime, &job.definition.meeting_id)
 }
 

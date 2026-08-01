@@ -4,12 +4,15 @@
 //! `src/services/meetings.js`. Potentially blocking native work is moved off
 //! Tauri's command task before entering the serialized runtime.
 
+use super::audio_test::MeetingAudioTestStarted;
+use super::native::NativeMeetingEngine;
 use super::platform::MeetingPlatformChangeSink;
 use super::runtime::{
     MeetingConfigPatch, MeetingDeleteMode, MeetingEvent, MeetingEventSink, MeetingExport,
-    MeetingExportFormat, MeetingLibraryCursor, MeetingLibraryPage, MeetingRuntime, MeetingSnapshot,
-    MeetingStartConsentContext, MeetingTranscriptCursor, MeetingTranscriptPage, MeetingUpdatePatch,
-    StartMeetingRequest, MEETING_EVENT,
+    MeetingExportFormat, MeetingLibraryCursor, MeetingLibraryPage, MeetingLibrarySearchHit,
+    MeetingRuntime, MeetingSnapshot, MeetingStartConsentContext, MeetingSummaryRunRequest,
+    MeetingTranscriptCursor, MeetingTranscriptPage, MeetingUpdatePatch, StartMeetingRequest,
+    MEETING_EVENT,
 };
 use super::transcriber::TranscriptionChangeSink;
 use serde::{Deserialize, Serialize};
@@ -81,6 +84,19 @@ pub struct MeetingAudioCheck {
     system_audio_level: u8,
     runtime_identity: String,
     observed_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingMicrophoneCatalog {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_device_id: Option<String>,
+    selected_available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    effective_device_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fallback_reason: Option<String>,
+    devices: Vec<mimir_meeting_audio::MicrophoneDevice>,
 }
 
 #[derive(Debug, Default)]
@@ -608,6 +624,37 @@ pub async fn meetings_library_page(
 }
 
 #[tauri::command]
+pub async fn meetings_search_library(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<MeetingLibrarySearchHit>, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting library search", move || {
+        let mut hits = runtime
+            .search_library(&query, limit.unwrap_or(50).min(100))
+            .map_err(|error| error.to_string())?;
+        for hit in &mut hits {
+            hit.matched.transcript.truncate(3);
+            for transcript in &mut hit.matched.transcript {
+                transcript.text = bounded_chars(&transcript.text, 240);
+            }
+        }
+        Ok(hits)
+    })
+    .await
+}
+
+fn bounded_chars(value: &str, maximum: usize) -> String {
+    let mut chars = value.chars();
+    let mut bounded = chars.by_ref().take(maximum).collect::<String>();
+    if chars.next().is_some() {
+        bounded.push('…');
+    }
+    bounded
+}
+
+#[tauri::command]
 pub async fn meetings_request_microphone_permission(
     runtime: tauri::State<'_, MeetingRuntime>,
 ) -> Result<MeetingSnapshot, String> {
@@ -692,28 +739,113 @@ pub async fn meetings_check_audio(
 ) -> Result<MeetingAudioCheck, String> {
     let runtime = runtime.inner().clone();
     run_blocking("meeting audio check", move || {
-        if runtime
-            .snapshot()
-            .map_err(|error| error.to_string())?
-            .active_meeting_id
-            .is_some()
-        {
+        let snapshot = runtime.snapshot().map_err(|error| error.to_string())?;
+        if snapshot.active_meeting_id.is_some() {
             return Err("Stop the current recording before checking audio".into());
         }
-        perform_audio_signal_check()
+        perform_audio_signal_check(snapshot.config.microphone_device_id.as_deref())
     })
     .await
 }
 
+#[tauri::command]
+pub async fn meetings_microphone_devices(
+    runtime: tauri::State<'_, MeetingRuntime>,
+) -> Result<MeetingMicrophoneCatalog, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("microphone device enumeration", move || {
+        let selected = runtime
+            .snapshot()
+            .map_err(|error| error.to_string())?
+            .config
+            .microphone_device_id;
+        let devices = mimir_meeting_audio::list_microphone_devices()
+            .map_err(|error| format!("Could not enumerate microphones: {error}"))?;
+        Ok(project_microphone_catalog(selected, devices))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_audio_test_start(
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<'_, MeetingRuntime>,
+    engine: tauri::State<'_, NativeMeetingEngine>,
+) -> Result<MeetingAudioTestStarted, String> {
+    let owner_window = window.label().to_string();
+    let runtime = runtime.inner().clone();
+    let audio_tests = engine.audio_tests();
+    run_blocking("live meeting audio test start", move || {
+        let snapshot = runtime.snapshot().map_err(|error| error.to_string())?;
+        if snapshot.active_meeting_id.is_some() {
+            return Err("Stop the current recording before checking audio".into());
+        }
+        audio_tests.start(&owner_window, snapshot.config.microphone_device_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_audio_test_stop(
+    window: tauri::WebviewWindow,
+    engine: tauri::State<'_, NativeMeetingEngine>,
+    test_id: String,
+) -> Result<(), String> {
+    let owner_window = window.label().to_string();
+    let audio_tests = engine.audio_tests();
+    run_blocking("live meeting audio test stop", move || {
+        audio_tests.stop(&owner_window, &test_id)
+    })
+    .await
+}
+
+fn project_microphone_catalog(
+    selected_device_id: Option<String>,
+    devices: Vec<mimir_meeting_audio::MicrophoneDevice>,
+) -> MeetingMicrophoneCatalog {
+    let selected_available = selected_device_id
+        .as_deref()
+        .is_none_or(|selected| devices.iter().any(|device| device.id == selected));
+    let fallback = devices
+        .iter()
+        .find(|device| device.is_default)
+        .or_else(|| devices.first());
+    let effective_device_id = selected_device_id
+        .as_ref()
+        .filter(|_| selected_available)
+        .cloned()
+        .or_else(|| fallback.map(|device| device.id.clone()));
+    let fallback_reason = selected_device_id
+        .as_ref()
+        .filter(|_| !selected_available)
+        .map(|_| {
+            if fallback.is_some() {
+                "The selected microphone is unavailable; Scribe will use the current default microphone until it returns or a new device is selected."
+            } else {
+                "The selected microphone is unavailable and macOS reports no fallback microphone."
+            }
+            .to_string()
+        });
+    MeetingMicrophoneCatalog {
+        selected_device_id,
+        selected_available,
+        effective_device_id,
+        fallback_reason,
+        devices,
+    }
+}
+
 #[cfg(target_os = "macos")]
-fn perform_audio_signal_check() -> Result<MeetingAudioCheck, String> {
+fn perform_audio_signal_check(
+    microphone_device_id: Option<&str>,
+) -> Result<MeetingAudioCheck, String> {
     use futures_util::StreamExt;
     use mimir_meeting_audio::{
         CaptureHealth, FrameDuration, MicrophoneInput, RawAudioSpan, SystemAudioInput,
     };
 
     let identity = super::permissions::current_permission_runtime_identity();
-    let mut microphone = MicrophoneInput::open(None)
+    let mut microphone = MicrophoneInput::open_device(microphone_device_id)
         .and_then(|input| input.start(FrameDuration::DEFAULT, CaptureHealth::default()))
         .map_err(|error| format!("Microphone check could not start: {error}"))?;
     let mut system = SystemAudioInput::open()
@@ -780,7 +912,9 @@ fn perform_audio_signal_check() -> Result<MeetingAudioCheck, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn perform_audio_signal_check() -> Result<MeetingAudioCheck, String> {
+fn perform_audio_signal_check(
+    _microphone_device_id: Option<&str>,
+) -> Result<MeetingAudioCheck, String> {
     Err("Audio checking is available only in Mimir for macOS".into())
 }
 
@@ -869,12 +1003,14 @@ pub async fn meetings_issue_start_consent(
 pub async fn meetings_start(
     window: tauri::WebviewWindow,
     runtime: tauri::State<'_, MeetingRuntime>,
+    engine: tauri::State<'_, NativeMeetingEngine>,
     authority: tauri::State<'_, MeetingStartConsentAuthority>,
     request: StartMeetingRequest,
 ) -> Result<MeetingSnapshot, String> {
     let window_label = window.label().to_string();
     let runtime = runtime.inner().clone();
     let authority = authority.inner().clone();
+    let audio_tests = engine.audio_tests();
     run_blocking("meeting start", move || {
         let mut request = request;
         let context = runtime
@@ -899,6 +1035,7 @@ pub async fn meetings_start(
                 }
             }
             ConsentStart::Fresh(consent) => {
+                audio_tests.stop_window(&window_label)?;
                 // The bearer token is consumed before the runtime sees the
                 // request. Only this non-deserializable context crosses the
                 // native boundary into capture orchestration.
@@ -991,6 +1128,35 @@ pub async fn meetings_retry_job(
     run_blocking("meeting job retry", move || {
         runtime
             .retry_job(&meeting_id, &job_kind)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_run_summary(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    meeting_id: String,
+    request: MeetingSummaryRunRequest,
+) -> Result<MeetingSnapshot, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting summary run", move || {
+        runtime
+            .run_summary(&meeting_id, request)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_retranscribe(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    meeting_id: String,
+) -> Result<MeetingSnapshot, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting retranscription", move || {
+        runtime
+            .retranscribe(&meeting_id)
             .map_err(|error| error.to_string())
     })
     .await
@@ -1385,5 +1551,44 @@ mod consent_tests {
         assert!(signal.level() >= 75);
         assert_eq!(signal.sample_count, 3);
         assert_eq!(std::mem::size_of::<AudioSignalObservation>(), 16);
+    }
+
+    #[test]
+    fn microphone_catalog_makes_missing_selection_fallback_explicit() {
+        let devices = vec![
+            mimir_meeting_audio::MicrophoneDevice {
+                id: "CoreAudio:default".into(),
+                name: "MacBook Microphone".into(),
+                is_default: true,
+            },
+            mimir_meeting_audio::MicrophoneDevice {
+                id: "CoreAudio:usb".into(),
+                name: "USB Microphone".into(),
+                is_default: false,
+            },
+        ];
+        let automatic = project_microphone_catalog(None, devices.clone());
+        assert!(automatic.selected_available);
+        assert_eq!(
+            automatic.effective_device_id.as_deref(),
+            Some("CoreAudio:default")
+        );
+        assert!(automatic.fallback_reason.is_none());
+
+        let selected = project_microphone_catalog(Some("CoreAudio:usb".into()), devices.clone());
+        assert!(selected.selected_available);
+        assert_eq!(
+            selected.effective_device_id.as_deref(),
+            Some("CoreAudio:usb")
+        );
+        assert!(selected.fallback_reason.is_none());
+
+        let missing = project_microphone_catalog(Some("CoreAudio:gone".into()), devices);
+        assert!(!missing.selected_available);
+        assert_eq!(
+            missing.effective_device_id.as_deref(),
+            Some("CoreAudio:default")
+        );
+        assert!(missing.fallback_reason.unwrap().contains("unavailable"));
     }
 }

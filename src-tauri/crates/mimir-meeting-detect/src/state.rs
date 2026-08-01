@@ -248,7 +248,7 @@ impl DetectionPolicy {
 
     fn group_evidence(&self, apps: Vec<AppEvidence>) -> BTreeMap<String, Vec<AppEvidence>> {
         let mut grouped = BTreeMap::<String, Vec<AppEvidence>>::new();
-        for app in apps {
+        for app in apps.into_iter().map(AppEvidence::canonicalized) {
             if self.config.excludes(&app) {
                 continue;
             }

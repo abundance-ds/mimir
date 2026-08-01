@@ -29,6 +29,14 @@ const DEFAULT_SELF_APP_NAME: &str = "mimir";
 const MIN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+const APP_FAMILIES: &[(&str, &str)] = &[
+    ("com.tinyspeck.slackmacgap", "Slack"),
+    ("com.microsoft.teams2", "Microsoft Teams"),
+    ("com.microsoft.teams", "Microsoft Teams"),
+    ("com.google.chrome", "Google Chrome"),
+    ("us.zoom.xos", "Zoom"),
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum DetectError {
     #[error("meeting detection is unsupported on this platform")]
@@ -97,6 +105,25 @@ impl AppEvidence {
             .filter(|value| !value.is_empty())
             .map(str::to_ascii_lowercase)
             .unwrap_or_else(|| format!("pid:{}", self.process_id))
+    }
+
+    fn canonicalized(mut self) -> Self {
+        let Some(bundle_id) = self.bundle_id.as_deref().map(str::trim) else {
+            return self;
+        };
+        let normalized = bundle_id.to_ascii_lowercase();
+        let helper_name = self.app_name.to_ascii_lowercase().contains("helper");
+        for (family, display_name) in APP_FAMILIES {
+            if normalized == *family {
+                return self;
+            }
+            if helper_name && normalized.starts_with(&format!("{family}.")) {
+                self.bundle_id = Some((*family).to_owned());
+                self.app_name = (*display_name).to_owned();
+                return self;
+            }
+        }
+        self
     }
 }
 

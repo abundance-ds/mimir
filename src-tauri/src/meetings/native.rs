@@ -13,6 +13,7 @@ use super::platform::UnavailableMeetingEnvironment;
 #[cfg(any(test, target_os = "macos"))]
 use super::runtime::{MeetingCandidate, MeetingPermissions};
 use super::{
+    audio_test::MeetingAudioTestManager,
     capture::NativeMeetingCapture,
     commands::{TauriMeetingEventSink, TauriMeetingPlatformChangeSink},
     local_whisper::ManagedWhisperTranscriber,
@@ -73,6 +74,7 @@ pub struct NativeMeetingEngine {
     platform: Arc<NativeMeetingPlatform>,
     capture: Arc<NativeMeetingCapture>,
     transcription: Arc<NativeMeetingTranscriber>,
+    audio_tests: MeetingAudioTestManager,
     lifecycle: NativeMeetingLifecycle,
 }
 
@@ -111,9 +113,15 @@ impl NativeMeetingEngine {
         self.transcription.clone()
     }
 
+    pub fn audio_tests(&self) -> MeetingAudioTestManager {
+        self.audio_tests.clone()
+    }
+
     /// Idempotently stops maintenance and native detector listeners.
     pub fn shutdown(&self) -> Result<(), String> {
-        self.lifecycle.shutdown()
+        let audio_tests = self.audio_tests.stop_all();
+        let lifecycle = self.lifecycle.shutdown();
+        audio_tests.and(lifecycle)
     }
 }
 
@@ -226,6 +234,7 @@ pub fn bootstrap_native_meeting_engine(
         Arc::clone(&store),
         paths.meetings_root.clone(),
     )?);
+    let audio_tests = MeetingAudioTestManager::production(app);
     let runtime = MeetingRuntime::new(
         Arc::clone(&store),
         capture.clone() as Arc<dyn MeetingCapturePort>,
@@ -253,6 +262,7 @@ pub fn bootstrap_native_meeting_engine(
         platform,
         capture,
         transcription,
+        audio_tests,
         lifecycle: NativeMeetingLifecycle {
             detector,
             retention,

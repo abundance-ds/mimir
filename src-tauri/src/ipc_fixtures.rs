@@ -690,6 +690,7 @@ fn meetings_snapshot() -> MeetingSnapshot {
         config: MeetingConfig {
             detection_enabled: true,
             auto_record: false,
+            microphone_device_id: Some("CoreAudio:fixture-microphone".into()),
             transcription_mode: "custom".into(),
             custom_url: "https://speech.example.test/v1/listen".into(),
             custom_model: "nova-3".into(),

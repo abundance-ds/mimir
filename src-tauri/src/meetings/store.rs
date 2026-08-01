@@ -879,6 +879,48 @@ impl MeetingStore {
         provider_run_id: &str,
         observed_at: &str,
     ) -> Result<TranscriptRepairBegin, MeetingStoreError> {
+        self.begin_transcript_repair_for_statuses(
+            meeting_id,
+            capture_generation,
+            provider_run_id,
+            observed_at,
+            &[MeetingStatus::Interrupted, MeetingStatus::Finalizing],
+            "transcript repair",
+        )
+    }
+
+    /// Start a user-requested replacement pass over retained source audio.
+    ///
+    /// Unlike automatic crash repair, this is allowed only after recording
+    /// has reached a terminal lifecycle. Its staged rows remain private, so a
+    /// provider or model failure cannot damage the transcript the user could
+    /// already read.
+    pub fn begin_transcript_retranscription(
+        &self,
+        meeting_id: &str,
+        capture_generation: &str,
+        provider_run_id: &str,
+        observed_at: &str,
+    ) -> Result<TranscriptRepairBegin, MeetingStoreError> {
+        self.begin_transcript_repair_for_statuses(
+            meeting_id,
+            capture_generation,
+            provider_run_id,
+            observed_at,
+            &[MeetingStatus::Completed, MeetingStatus::Failed],
+            "retranscription",
+        )
+    }
+
+    fn begin_transcript_repair_for_statuses(
+        &self,
+        meeting_id: &str,
+        capture_generation: &str,
+        provider_run_id: &str,
+        observed_at: &str,
+        allowed_statuses: &[MeetingStatus],
+        operation: &str,
+    ) -> Result<TranscriptRepairBegin, MeetingStoreError> {
         validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
         validate_id(capture_generation, "capture generation")
             .map_err(MeetingStoreError::Validation)?;
@@ -887,12 +929,9 @@ impl MeetingStore {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let meeting = load_meeting_tx(&transaction, meeting_id)?;
-        if !matches!(
-            meeting.status,
-            MeetingStatus::Interrupted | MeetingStatus::Finalizing
-        ) {
+        if !allowed_statuses.contains(&meeting.status) {
             return Err(MeetingStoreError::Validation(format!(
-                "meeting '{meeting_id}' is {} and cannot begin transcript repair",
+                "meeting '{meeting_id}' is {} and cannot begin {operation}",
                 meeting.status
             )));
         }
@@ -950,6 +989,54 @@ impl MeetingStore {
         }
         transaction.commit()?;
         Ok(TranscriptRepairBegin::Collecting)
+    }
+
+    /// Return the terminal revision for an exactly matching committed repair
+    /// generation. This is the local-only redelivery check used after a crash
+    /// between transcript commit and durable job acknowledgement.
+    pub fn committed_transcript_repair_revision(
+        &self,
+        meeting_id: &str,
+        capture_generation: &str,
+        provider_run_id: &str,
+    ) -> Result<Option<u64>, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        validate_id(capture_generation, "capture generation")
+            .map_err(MeetingStoreError::Validation)?;
+        validate_id(provider_run_id, "provider run id").map_err(MeetingStoreError::Validation)?;
+        let connection = self.lock()?;
+        let row = connection
+            .query_row(
+                "SELECT provider_run_id,state,terminal_revision
+                 FROM transcript_repair_runs
+                 WHERE meeting_id=?1 AND capture_generation=?2",
+                params![meeting_id, capture_generation],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((stored_run_id, state, revision)) = row else {
+            return Ok(None);
+        };
+        if stored_run_id != provider_run_id {
+            return Err(MeetingStoreError::IdempotencyConflict {
+                key: format!("{meeting_id}:{capture_generation}"),
+            });
+        }
+        if state != "committed" {
+            return Ok(None);
+        }
+        let revision = revision.ok_or_else(|| {
+            MeetingStoreError::Validation(format!(
+                "committed transcript repair '{meeting_id}:{capture_generation}' has no terminal revision"
+            ))
+        })?;
+        Ok(Some(from_i64(revision, "repair terminal revision")?))
     }
 
     /// Persist a bounded provider batch into private repair staging.

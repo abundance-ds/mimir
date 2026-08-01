@@ -3,7 +3,7 @@ use std::task::{Context, Poll};
 
 use futures_util::Stream;
 
-use crate::{CaptureError, CaptureHealth, FrameDuration, RawAudioFrame};
+use crate::{CaptureError, CaptureHealth, FrameDuration, MicrophoneDevice, RawAudioFrame};
 
 fn unsupported() -> CaptureError {
     CaptureError::UnsupportedPlatform {
@@ -19,12 +19,24 @@ impl MicrophoneInput {
         Err(unsupported())
     }
 
+    pub fn open_device(_device_id: Option<&str>) -> Result<Self, CaptureError> {
+        Err(unsupported())
+    }
+
     pub const fn sample_rate(&self) -> u32 {
         0
     }
 
     pub fn device_name(&self) -> String {
         String::new()
+    }
+
+    pub fn device_id(&self) -> String {
+        String::new()
+    }
+
+    pub fn fallback_from_device_id(&self) -> Option<&str> {
+        None
     }
 
     pub fn start(
@@ -37,6 +49,10 @@ impl MicrophoneInput {
 }
 
 pub fn list_microphones() -> Result<Vec<String>, CaptureError> {
+    Err(unsupported())
+}
+
+pub fn list_microphone_devices() -> Result<Vec<MicrophoneDevice>, CaptureError> {
     Err(unsupported())
 }
 
@@ -94,6 +110,10 @@ mod tests {
             Err(CaptureError::UnsupportedPlatform { .. })
         ));
         assert!(matches!(
+            MicrophoneInput::open_device(None),
+            Err(CaptureError::UnsupportedPlatform { .. })
+        ));
+        assert!(matches!(
             SystemAudioInput::open(),
             Err(CaptureError::UnsupportedPlatform { .. })
         ));
@@ -101,10 +121,16 @@ mod tests {
             list_microphones(),
             Err(CaptureError::UnsupportedPlatform { .. })
         ));
+        assert!(matches!(
+            list_microphone_devices(),
+            Err(CaptureError::UnsupportedPlatform { .. })
+        ));
 
         let microphone = MicrophoneInput;
         assert_eq!(microphone.sample_rate(), 0);
         assert!(microphone.device_name().is_empty());
+        assert!(microphone.device_id().is_empty());
+        assert!(microphone.fallback_from_device_id().is_none());
         assert!(matches!(
             microphone.start(FrameDuration::DEFAULT, CaptureHealth::default()),
             Err(CaptureError::UnsupportedPlatform { .. })

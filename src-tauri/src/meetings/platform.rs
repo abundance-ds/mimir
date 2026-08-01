@@ -518,6 +518,8 @@ struct PersistedMeetingConfig {
 struct StoredMeetingConfig {
     detection_enabled: bool,
     auto_record: bool,
+    #[serde(default)]
+    microphone_device_id: Option<String>,
     transcription_mode: String,
     custom_url: String,
     custom_model: String,
@@ -538,6 +540,7 @@ impl From<MeetingConfig> for StoredMeetingConfig {
         Self {
             detection_enabled: config.detection_enabled,
             auto_record: config.auto_record,
+            microphone_device_id: config.microphone_device_id,
             transcription_mode: config.transcription_mode,
             custom_url: config.custom_url,
             custom_model: config.custom_model,
@@ -568,6 +571,7 @@ impl From<StoredMeetingConfig> for MeetingConfig {
         Self {
             detection_enabled: config.detection_enabled,
             auto_record: config.auto_record,
+            microphone_device_id: config.microphone_device_id,
             transcription_mode: config.transcription_mode,
             custom_url: config.custom_url,
             custom_model: config.custom_model,
@@ -2077,6 +2081,9 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         if let Some(value) = patch.auto_record {
             config.auto_record = value;
         }
+        if let Some(value) = &patch.microphone_device_id {
+            config.microphone_device_id = value.clone();
+        }
         if let Some(value) = &patch.transcription_mode {
             config.transcription_mode = value.trim().to_string();
         }
@@ -2261,6 +2268,9 @@ fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
             "Automatic meeting recording is disabled; every recording requires explicit human consent"
                 .into(),
         );
+    }
+    if let Some(device_id) = &config.microphone_device_id {
+        super::runtime::validate_microphone_device_id(device_id)?;
     }
     if config.local_model.trim() != config.local_model || config.local_model.is_empty() {
         return Err("Local meeting model cannot be empty or padded with whitespace".into());
@@ -3141,6 +3151,7 @@ mod tests {
         fixture
             .platform
             .update_config(&MeetingConfigPatch {
+                microphone_device_id: Some(Some("CoreAudio:stable-microphone-uid".into())),
                 transcription_mode: Some("custom".into()),
                 custom_url: Some("https://stt.example.com/v1/listen".into()),
                 custom_model: Some("nova-2".into()),
@@ -3152,6 +3163,16 @@ mod tests {
         assert_eq!(
             fixture.platform.projection().unwrap().config.custom_model,
             "nova-2"
+        );
+        assert_eq!(
+            fixture
+                .platform
+                .projection()
+                .unwrap()
+                .config
+                .microphone_device_id
+                .as_deref(),
+            Some("CoreAudio:stable-microphone-uid")
         );
         assert_eq!(
             fixture

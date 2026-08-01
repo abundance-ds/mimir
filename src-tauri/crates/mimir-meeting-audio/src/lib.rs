@@ -18,12 +18,13 @@ mod rt_ring;
 
 pub use async_ring::{realtime_bridge, AsyncRingReader, BridgeEvent, RealtimeWriter};
 pub use backend::{
-    list_microphones, MicrophoneInput, MicrophoneStream, SystemAudioInput, SystemAudioStream,
+    list_microphone_devices, list_microphones, MicrophoneInput, MicrophoneStream, SystemAudioInput,
+    SystemAudioStream,
 };
 pub use contract::{
     AudioFormat, AudioSource, CaptureError, CaptureGap, CaptureHealth, CaptureHealthSnapshot,
-    DualRawFrame, FrameDuration, GapReason, JoinedTrack, RawAudioFrame, RawAudioSpan,
-    SourceHealthSnapshot,
+    DualRawFrame, FrameDuration, GapReason, JoinedTrack, MicrophoneDevice, RawAudioFrame,
+    RawAudioSpan, SourceHealthSnapshot,
 };
 pub use drift::{
     DriftConfig, DriftConfigError, DriftResetReason, DriftSnapshot, DriftTracker, DriftUpdate,

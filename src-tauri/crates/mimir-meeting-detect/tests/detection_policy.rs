@@ -50,6 +50,33 @@ fn repeated_equivalent_signals_are_coalesced() {
 }
 
 #[test]
+fn slack_audio_helpers_are_grouped_under_the_human_facing_app() {
+    let mut policy = DetectionPolicy::new(DetectionConfig {
+        sustained_use: Duration::ZERO,
+        ..DetectionConfig::default()
+    })
+    .unwrap();
+
+    let events = policy
+        .observe(
+            0,
+            vec![
+                app(41, "com.tinyspeck.slackmacgap.helper", "Slack Helper"),
+                app(42, "com.tinyspeck.slackmacgap.helper.renderer", "Helper"),
+            ],
+        )
+        .unwrap();
+
+    let DetectionEvent::CandidateSuggested(candidate) = &events[0] else {
+        panic!("expected one Slack suggestion")
+    };
+    assert_eq!(events.len(), 1);
+    assert_eq!(candidate.app_id, "com.tinyspeck.slackmacgap");
+    assert_eq!(candidate.app_name, "Slack");
+    assert_eq!(candidate.process_ids, vec![41, 42]);
+}
+
+#[test]
 fn microphone_flapping_inside_absence_grace_does_not_duplicate() {
     let mut policy = DetectionPolicy::new(DetectionConfig {
         sustained_use: Duration::ZERO,

@@ -12,7 +12,8 @@ mod platform;
 mod unsupported_platform_contract;
 
 pub use platform::{
-    list_microphones, MicrophoneInput, MicrophoneStream, SystemAudioInput, SystemAudioStream,
+    list_microphone_devices, list_microphones, MicrophoneInput, MicrophoneStream, SystemAudioInput,
+    SystemAudioStream,
 };
 
 pub(crate) use framed::FramedReader;

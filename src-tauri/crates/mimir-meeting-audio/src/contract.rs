@@ -4,6 +4,18 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Stable native identity and display metadata for one microphone input.
+///
+/// On macOS `id` is CPAL's serialized Core Audio device UID, not the mutable
+/// display name or enumeration index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneDevice {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
 /// The two independently captured, canonical meeting tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
