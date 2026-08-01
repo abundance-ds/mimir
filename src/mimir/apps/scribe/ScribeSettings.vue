@@ -24,23 +24,18 @@
 
     <div class="mx-auto max-w-2xl divide-y divide-rule px-4 pb-8">
       <section class="py-4">
-        <h3 class="text-[11px] font-semibold">Capture and detection</h3>
-        <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-          Detection suggests a recording after sustained meeting activity. Starting capture
-          always remains a deliberate human action.
-        </p>
+        <h3 class="text-[11px] font-semibold">Capture</h3>
         <p
           v-if="configPending"
           data-scribe-config-pending
           class="mt-2 border-y border-rule-light py-2 font-mono text-[9px] text-ink-3"
           role="status"
         >
-          Saving settings… further changes will follow in order.
+          Saving…
         </p>
         <label class="scribe-setting-row">
           <span>
             <strong>Detect meeting apps</strong>
-            <small>Show a local recording suggestion after sustained meeting activity.</small>
           </span>
           <input
             data-scribe-detection
@@ -64,14 +59,12 @@
           v-if="permissions.microphone === 'development-host'"
           class="mt-3 text-[9px] leading-relaxed text-ink-3"
         >
-          This development build is running under another macOS host. Its permission is not
-          Mimir's permission; use the installed Mimir app for the final permission check.
+          Permission belongs to the development host. Verify it in the installed Mimir app.
         </p>
         <div class="mt-3 border-t border-rule-light pt-3">
           <div class="flex items-start gap-3">
             <p class="min-w-0 flex-1 text-[9px] leading-relaxed text-ink-3">
-              Play sound in any app, then check both inputs for four seconds. Samples are
-              discarded immediately and no meeting is created.
+              Play audio, then check both inputs for 4 seconds. No samples are kept.
             </p>
             <button
               type="button"
@@ -124,7 +117,7 @@
             v-if="audioCheck?.runtimeIdentity === 'development-host'"
             class="mt-2 text-[9px] leading-relaxed text-rem"
           >
-            These results belong to the development host, not the installed Mimir app.
+            Development-host results. Verify in the installed Mimir app.
           </p>
         </div>
         <button
@@ -194,9 +187,6 @@
         </div>
 
         <div v-if="config.transcriptionMode === 'local'" class="mt-3">
-          <p class="text-[10px] leading-relaxed text-ink-3">
-            Local mode stays on this Mac. Mimir will not silently fall back to a network provider.
-          </p>
           <div
             v-for="model in models"
             :key="model.id"
@@ -247,7 +237,7 @@
             class="border-y border-rule-light py-2 text-[10px]"
             role="status"
           >
-            {{ config.apiKeyConfigured ? 'Saved in Keychain · ready to use' : 'API key required' }}
+            {{ config.apiKeyConfigured ? 'Saved in Keychain' : 'API key required' }}
           </p>
           <form class="block" @submit.prevent="saveKey">
             <span class="scribe-settings-label">{{ hostedKeyLabel }}</span>
@@ -296,9 +286,6 @@
           >
             {{ credentialError }}
           </p>
-          <p class="text-[9px] leading-relaxed text-ink-3">
-            Stored in Keychain and never returned to this screen.
-          </p>
           <details class="border-t border-rule-light pt-3">
             <summary class="cursor-pointer text-[10px] text-ink-3 hover:text-ink">
               Advanced endpoint
@@ -327,9 +314,8 @@
                 />
               </label>
               <p id="scribe-custom-route-help" class="text-[9px] leading-relaxed text-ink-3">
-                OpenAI Realtime uses <code>/v1/realtime</code>. Other URLs must implement
-                Mimir's versioned STT WebSocket contract. Both audio channels are sent only
-                to the exact HTTPS destination shown here.
+                Custom endpoints require HTTPS and Mimir's STT WebSocket protocol. Both audio
+                channels are sent to this URL.
               </p>
             </div>
           </details>
@@ -341,7 +327,6 @@
         <label class="scribe-setting-row">
           <span>
             <strong>Create title and summary</strong>
-            <small>Runs after the transcript reaches a terminal revision.</small>
           </span>
           <input
             data-scribe-summary-enabled
@@ -359,7 +344,7 @@
               :options="summaryTemplateOptions"
               :disabled="configPending"
               aria-label="Summary format"
-              @update:model-value="save({ summaryTemplate: $event })"
+              @update:model-value="selectSummaryTemplate"
             />
           </label>
           <label class="block">
@@ -373,9 +358,41 @@
             />
           </label>
         </div>
-        <p v-if="config.summaryEnabled" class="mt-2 text-[9px] leading-relaxed text-ink-3">
-          This recipe is used after future meetings and when you deliberately create a summary again.
-        </p>
+        <div v-if="config.summaryEnabled" class="mt-3">
+          <div class="mb-1 flex items-center gap-2">
+            <label for="scribe-summary-prompt" class="scribe-settings-label mb-0 flex-1">
+              System prompt
+            </label>
+            <button
+              type="button"
+              class="text-[9px] text-ink-3 underline underline-offset-2 hover:text-ink"
+              :disabled="configPending"
+              @click="resetSummaryPrompt"
+            >
+              Reset to preset
+            </button>
+          </div>
+          <textarea
+            id="scribe-summary-prompt"
+            v-model="summaryPrompt"
+            data-scribe-summary-prompt
+            rows="10"
+            maxlength="16000"
+            class="scribe-settings-textarea"
+            :disabled="configPending"
+          />
+          <div class="mt-2 flex justify-end">
+            <button
+              type="button"
+              data-scribe-save-summary-prompt
+              class="scribe-settings-button"
+              :disabled="configPending || !summaryPrompt.trim() || !summaryPromptChanged"
+              @click="saveSummaryPrompt"
+            >
+              Save prompt
+            </button>
+          </div>
+        </div>
         <label class="mt-3 block">
           <span class="scribe-settings-label">Knowledge-graph follow-up</span>
           <ScribeSelect
@@ -401,7 +418,7 @@
           />
         </label>
         <p class="mt-2 text-[9px] leading-relaxed text-ink-3">
-          Recovery-required audio and audio used by an active follow-up job are held until safe.
+          Recovery and active jobs may keep audio longer.
         </p>
       </section>
     </div>
@@ -412,7 +429,11 @@
 import { computed, ref, watch } from 'vue'
 import { IconX } from '@tabler/icons-vue'
 import ScribeSelect from './ScribeSelect.vue'
-import { SUMMARY_TEMPLATE_OPTIONS, summaryAgentOptions as buildSummaryAgentOptions } from './summaryRecipes.js'
+import {
+  SUMMARY_TEMPLATE_OPTIONS,
+  summaryAgentOptions as buildSummaryAgentOptions,
+  summaryPromptFor,
+} from './summaryRecipes.js'
 
 const props = defineProps({
   config: { type: Object, required: true },
@@ -441,6 +462,9 @@ const settingsRoot = ref(null)
 const customUrl = ref(props.config.customUrl)
 const customModel = ref(props.config.customModel)
 const apiKey = ref('')
+const summaryPrompt = ref(
+  props.config.summaryPrompt || summaryPromptFor(props.config.summaryTemplate),
+)
 const OPENAI_REALTIME_URL = 'https://api.openai.com/v1/realtime'
 const OPENAI_TRANSCRIPTION_MODEL = 'gpt-live-transcribe'
 const configPending = computed(() => Boolean(props.pending.config))
@@ -456,8 +480,8 @@ const isOpenAiEndpoint = computed(() => {
 })
 const hostedDescription = computed(() => (
   isOpenAiEndpoint.value
-    ? 'Streams both sides of the meeting to OpenAI for low-latency transcription.'
-    : 'Streams both sides of the meeting only to the configured HTTPS transcription service.'
+    ? 'Sends microphone and system audio to OpenAI.'
+    : 'Sends microphone and system audio to the configured HTTPS service.'
 ))
 const hostedKeyLabel = computed(() => (
   isOpenAiEndpoint.value ? 'OpenAI API key' : 'Hosted transcription API key'
@@ -466,6 +490,11 @@ const retentionValue = computed(() => (
   props.config.retentionDays == null ? 'forever' : String(props.config.retentionDays)
 ))
 const summaryTemplateOptions = SUMMARY_TEMPLATE_OPTIONS
+const summaryPromptChanged = computed(() => (
+  summaryPrompt.value !== (
+    props.config.summaryPrompt || summaryPromptFor(props.config.summaryTemplate)
+  )
+))
 const summaryAgentOptions = computed(() => buildSummaryAgentOptions(
   props.summaryAgents.map(option => ({
     id: option.id ?? option.value,
@@ -491,12 +520,30 @@ const retentionOptions = [
 
 watch(() => props.config.customUrl, value => { customUrl.value = value })
 watch(() => props.config.customModel, value => { customModel.value = value })
+watch(
+  () => [props.config.summaryPrompt, props.config.summaryTemplate],
+  ([prompt, template]) => { summaryPrompt.value = prompt || summaryPromptFor(template) },
+)
 watch(() => props.credentialNotice, value => {
   if (value) apiKey.value = ''
 })
 
 function save(patch) {
   emit('save', patch)
+}
+
+function selectSummaryTemplate(template) {
+  summaryPrompt.value = summaryPromptFor(template)
+  save({ summaryTemplate: template, summaryPrompt: summaryPrompt.value })
+}
+
+function resetSummaryPrompt() {
+  summaryPrompt.value = summaryPromptFor(props.config.summaryTemplate)
+}
+
+function saveSummaryPrompt() {
+  if (!summaryPrompt.value.trim() || !summaryPromptChanged.value) return
+  save({ summaryPrompt: summaryPrompt.value })
 }
 
 function selectMode(mode) {
@@ -552,7 +599,7 @@ function modelStatus(model) {
     return `Downloading ${modelProgress(model)}%`
   }
   if (model.status === 'installed') {
-    return `${formatBytes(model.bytes)} · checksum verified`
+    return `${formatBytes(model.bytes)} · Installed`
   }
   if (model.error) return model.error
   return `${formatBytes(model.bytes)} download`
@@ -641,11 +688,30 @@ function formatBytes(bytes) {
   outline: none;
 }
 
+.scribe-settings-textarea {
+  min-height: 190px;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  padding: 9px;
+  color: var(--color-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.scribe-settings-textarea:focus {
+  border-color: var(--color-accent);
+}
+
 .scribe-settings-input:focus {
   border-color: var(--color-accent);
 }
 
 .scribe-settings-input:focus-visible,
+.scribe-settings-textarea:focus-visible,
 .scribe-settings-button:focus-visible,
 [role='radio']:focus-visible,
 input[type='checkbox']:focus-visible {

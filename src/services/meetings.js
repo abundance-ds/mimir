@@ -163,13 +163,31 @@ export async function deleteMeeting(meetingId, mode = 'all') {
 
 export async function exportMeeting(meetingId, format = 'markdown') {
   const normalized = String(format || '').trim()
-  if (!['markdown', 'json', 'audio'].includes(normalized)) {
-    throw new Error('Meeting export format must be markdown, json, or audio.')
+  if (!['markdown', 'json', 'audio', 'files'].includes(normalized)) {
+    throw new Error('Meeting export format must be markdown, json, audio, or files.')
   }
   return invoke('meetings_export', {
     meetingId: requiredId(meetingId, 'meeting'),
     format: normalized,
   })
+}
+
+export async function showMeetingFiles(meetingId) {
+  const exported = await exportMeeting(meetingId, 'files')
+  await revealMeetingExport(exported)
+  return exported
+}
+
+export async function exportMeetingToFinder(meetingId, format) {
+  const exported = await exportMeeting(meetingId, format)
+  await revealMeetingExport(exported)
+  return exported
+}
+
+async function revealMeetingExport(exported) {
+  const path = String(exported?.path || '').trim()
+  if (!path) throw new Error('Meeting files are unavailable.')
+  await invoke('reveal_in_finder', { path })
 }
 
 export async function updateMeetingsConfig(patch = {}) {
@@ -417,6 +435,7 @@ function normalizeMeetingsConfig(value) {
     localModel: String(config.localModel ?? config.local_model ?? 'whisper-small'),
     summaryEnabled: config.summaryEnabled ?? config.summary_enabled ?? true,
     summaryTemplate: String(config.summaryTemplate ?? config.summary_template ?? 'standard'),
+    summaryPrompt: String(config.summaryPrompt ?? config.summary_prompt ?? ''),
     summaryPreset: String(config.summaryPreset ?? config.summary_preset ?? ''),
     kgPrompt: String(config.kgPrompt ?? config.kg_prompt ?? 'ask'),
     kgPreset: String(config.kgPreset ?? config.kg_preset ?? ''),
@@ -469,6 +488,14 @@ function serializeConfigPatch(patch) {
       throw new Error('Choose a valid summary format.')
     }
     serialized.summaryTemplate = template
+  }
+  if ('summaryPrompt' in source) {
+    const prompt = String(source.summaryPrompt ?? '')
+    if (!prompt.trim()) throw new Error('Summary instructions cannot be empty.')
+    if ([...prompt].length > 16_000) {
+      throw new Error('Summary instructions cannot exceed 16000 characters.')
+    }
+    serialized.summaryPrompt = prompt
   }
   if ('summaryPreset' in source) serialized.summaryPreset = String(source.summaryPreset || '').trim()
   if ('kgPrompt' in source) {

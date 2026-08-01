@@ -39,6 +39,7 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
     When the user exports the meeting
     Then the export identifies time coordinates, channels, transcript revisions, and gaps
     And it does not represent inferred or missing speech as verbatim fact
+    And Show files writes the current Markdown into the owned meeting directory beside available source audio
 
   @MTG-155 @automated @native @security
   Scenario: Local meeting storage uses owner-only access

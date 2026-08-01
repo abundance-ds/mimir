@@ -129,12 +129,13 @@
         </button>
         <button
           type="button"
+          data-scribe-show-files
           class="scribe-quiet-button"
-          :disabled="meetingActionPending('export')"
-          @click="exportSelected('markdown')"
+          :disabled="meetingActionPending('export:files')"
+          @click="revealSelectedFiles"
         >
-          <IconDownload :size="13" />
-          Export
+          <IconFolderOpen :size="13" />
+          Files
         </button>
         <button
           type="button"
@@ -160,8 +161,8 @@
                 <textarea
                   v-model="editedSummary"
                   data-scribe-edit-summary
-                  rows="8"
-                  class="scribe-input h-auto resize-y py-2"
+                  rows="14"
+                  class="scribe-input scribe-summary-editor"
                 />
               </label>
               <label class="block">
@@ -287,11 +288,7 @@
                 data-scribe-summary-recipe
                 class="mt-6 border-y border-rule py-4"
               >
-                <p class="text-[10px] font-semibold">Create summary again</p>
-                <p class="mt-1 text-[9px] leading-relaxed text-ink-3">
-                  Choose the format and CLI agent for this run. The new result remains editable.
-                </p>
-                <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                <div class="grid gap-3 sm:grid-cols-2">
                   <label class="block">
                     <span class="scribe-field-label">Summary format</span>
                     <ScribeSelect
@@ -299,7 +296,7 @@
                       :options="summaryTemplateOptions"
                       :disabled="Boolean(meetings.pending.config)"
                       aria-label="Summary format for create again"
-                      @update:model-value="saveConfig({ summaryTemplate: $event })"
+                      @update:model-value="saveSummaryTemplate"
                     />
                   </label>
                   <label class="block">
@@ -313,6 +310,9 @@
                     />
                   </label>
                 </div>
+                <button type="button" class="mt-3 text-[9px] text-ink-3 underline underline-offset-2 hover:text-ink" @click="openSettings">
+                  Edit system prompt
+                </button>
                 <button
                   type="button"
                   data-scribe-regenerate-summary
@@ -333,7 +333,7 @@
                 class="mt-6 border-y border-rule py-4"
               >
                 <p class="text-[11px] leading-relaxed text-ink-2">
-                  Create reviewable knowledge-graph entries from this meeting?
+                  Create a reviewable knowledge-graph draft?
                 </p>
                 <div class="mt-3 flex flex-wrap gap-2">
                   <button type="button" class="scribe-quiet-button" @click="decideKg(detailMeeting.id, 'not-now')">Not now</button>
@@ -342,9 +342,16 @@
               </div>
             </section>
 
-            <details class="mt-8 border-t border-rule pt-3">
-              <summary class="cursor-pointer text-[10px] text-ink-3 hover:text-ink">More actions</summary>
-              <div class="mt-3 flex flex-wrap gap-2">
+            <div class="mt-8 flex flex-wrap gap-2 border-t border-rule pt-3" aria-label="Meeting files and deletion">
+                <button
+                  type="button"
+                  class="scribe-quiet-button"
+                  :disabled="meetingActionPending('export:markdown')"
+                  @click="exportSelected('markdown')"
+                >
+                  <IconDownload :size="13" />
+                  Export Markdown
+                </button>
                 <button
                   type="button"
                   class="scribe-quiet-button"
@@ -363,8 +370,7 @@
                   <IconTrash :size="13" />
                   Delete meeting
                 </button>
-              </div>
-            </details>
+            </div>
           </template>
         </div>
       </article>
@@ -388,14 +394,14 @@
                 <IconSettings :size="14" />
               </button>
             </div>
-            <p class="mt-2 max-w-xl text-[11px] leading-relaxed text-ink-3">
-              Mimir records your microphone and system audio, transcribes while you talk,
-              and prepares a title and summary when you stop.
-            </p>
-            <p data-scribe-route-disclosure class="mt-2 text-[10px] leading-relaxed text-ink-3">
+            <p
+              v-if="isHosted"
+              data-scribe-route-disclosure
+              class="mt-2 text-[10px] leading-relaxed text-ink-3"
+            >
               {{ routeDisclosure }}
             </p>
-            <p class="mt-1 font-mono text-[9px] text-ink-3">{{ readyLabel }}</p>
+            <p v-if="readyLabel" class="mt-1 font-mono text-[9px] text-ink-3">{{ readyLabel }}</p>
             <button
               type="button"
               data-scribe-new
@@ -455,10 +461,10 @@
               </button>
             </div>
             <p v-if="meetings.loading && !meetings.loaded" class="py-5 text-[10px] text-ink-3" role="status">
-              Finding recent meetings…
+              Loading…
             </p>
             <p v-else-if="!meetings.meetings.length" class="py-5 text-[10px] text-ink-3">
-              Your completed meetings will appear here.
+              No meetings yet
             </p>
             <div v-else class="mt-2 divide-y divide-rule-light border-t border-rule-light">
               <button
@@ -496,6 +502,7 @@ import {
   IconChevronRight,
   IconDownload,
   IconEdit,
+  IconFolderOpen,
   IconMicrophone,
   IconMicrophoneOff,
   IconPhone,
@@ -510,7 +517,11 @@ import { useMeetingsStore } from '../../stores/meetings.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import ScribeSettings from './scribe/ScribeSettings.vue'
 import ScribeSelect from './scribe/ScribeSelect.vue'
-import { SUMMARY_TEMPLATE_OPTIONS, summaryAgentOptions as buildSummaryAgentOptions } from './scribe/summaryRecipes.js'
+import {
+  SUMMARY_TEMPLATE_OPTIONS,
+  summaryAgentOptions as buildSummaryAgentOptions,
+  summaryPromptFor,
+} from './scribe/summaryRecipes.js'
 
 const MAX_REVIEWED_TAGS = 64
 const MAX_REVIEWED_TAG_CHARS = 80
@@ -594,12 +605,11 @@ const primaryActionLabel = computed(() => (
 const readyLabel = computed(() => (
   isHosted.value
     ? meetings.config.apiKeyConfigured
-      ? `Ready · ${hostedProviderName.value}`
-      : `Setup needed · ${hostedProviderName.value} API key`
-    : canStart.value ? 'Ready · On this Mac' : 'Setup needed · Local model'
+      ? ''
+      : `${hostedProviderName.value} API key required`
+    : canStart.value ? '' : 'Local model required'
 ))
 const routeDisclosure = computed(() => {
-  if (!isHosted.value) return 'Audio and transcription stay on this Mac.'
   return `Microphone and system audio are sent to ${hostedProviderName.value} for live transcription.`
 })
 const captureStatus = computed(() => {
@@ -618,24 +628,24 @@ const transcriptionStatus = computed(() => {
   // prepared while words are already arriving on screen.
   if (meetings.recording && liveLedger.value.some(entry => entry.kind === 'segment')) {
     return isHosted.value
-      ? `Transcribing live with ${hostedProviderName.value}`
-      : 'Transcribing live on this Mac'
+      ? `Live transcript · ${hostedProviderName.value}`
+      : 'Live transcript · On this Mac'
   }
   if (value === 'live') {
     return isHosted.value
-      ? `Transcribing live with ${hostedProviderName.value}`
-      : 'Transcribing live on this Mac'
+      ? `Live transcript · ${hostedProviderName.value}`
+      : 'Live transcript · On this Mac'
   }
-  if (value === 'initializing' || value === 'connecting') return 'Preparing transcription · audio is safe'
-  if (value === 'delayed' || value === 'failed') return 'Transcript will be repaired after Stop'
+  if (value === 'initializing' || value === 'connecting') return 'Transcription starting'
+  if (value === 'delayed' || value === 'failed') return 'Transcript rebuild after Stop'
   if (value === 'final') return 'Transcript complete'
-  return 'Recording is safe'
+  return 'Audio saved'
 })
 const recordingNotice = computed(() => {
   const notice = actionError.value || meetings.activeMeeting?.error || meetings.error
   if (!notice || notice === dismissedNativeNotice.value) return ''
   if (/transcri|worker|provider|model/i.test(notice)) {
-    return 'Recording is safe. Live transcription is unavailable; Mimir will retry from stored audio after you stop.'
+    return 'Live transcription unavailable. Recording continues; the transcript will be rebuilt after Stop.'
   }
   return notice
 })
@@ -644,9 +654,9 @@ const homeNotice = computed(() => actionError.value || (
 ))
 const emptyLiveTranscript = computed(() => {
   const state = meetings.activeMeeting?.transcription
-  if (state === 'initializing' || state === 'connecting') return 'Preparing transcription. Recording has already started.'
-  if (state === 'delayed' || state === 'failed') return 'Recording continues. The transcript will be repaired after you stop.'
-  return 'Listening… transcript text will appear here.'
+  if (state === 'initializing' || state === 'connecting') return 'Waiting for transcript…'
+  if (state === 'delayed' || state === 'failed') return 'Live transcript unavailable'
+  return 'Listening…'
 })
 
 watch(() => meetings.activeMeeting?.id, id => {
@@ -781,9 +791,21 @@ async function saveMeetingEdits() {
 async function exportSelected(format) {
   if (!detailMeeting.value) return
   try {
-    const result = await meetings.exportRecord(detailMeeting.value.id, format)
+    const result = format === 'audio'
+      ? await meetings.exportToFinder(detailMeeting.value.id, format)
+      : await meetings.exportRecord(detailMeeting.value.id, format)
     const path = typeof result === 'string' ? result : result?.path
-    if (path) emit('openFile', path)
+    if (path && format !== 'audio') emit('openFile', path)
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
+async function revealSelectedFiles() {
+  if (!detailMeeting.value) return
+  try {
+    await meetings.revealFiles(detailMeeting.value.id)
+    liveAnnouncement.value = 'Meeting files opened in Finder'
   } catch (error) {
     actionError.value = message(error)
   }
@@ -825,6 +847,13 @@ async function saveConfig(patch) {
   } catch (error) {
     actionError.value = message(error)
   }
+}
+
+async function saveSummaryTemplate(template) {
+  await saveConfig({
+    summaryTemplate: template,
+    summaryPrompt: summaryPromptFor(template),
+  })
 }
 
 async function saveApiKey(value) {
@@ -962,11 +991,11 @@ function recoveryStatus(meeting) {
 
 function summaryStatus(meeting) {
   return ({
-    'not-started': meeting.transcriptFinal ? 'The title and summary have not started.' : 'The summary starts after the transcript is final.',
-    queued: 'The title and summary are queued.',
-    running: 'Mimir is creating the title and summary.',
-    failed: 'The summary failed. The transcript is safe.',
-  })[meeting.summaryState] || 'No summary is available.'
+    'not-started': meeting.transcriptFinal ? 'Not created' : 'Waiting for final transcript',
+    queued: 'Queued',
+    running: 'Creating…',
+    failed: 'Summary failed. Create it again below.',
+  })[meeting.summaryState] || 'No summary'
 }
 
 function meetingActionPending(action) {
@@ -1165,6 +1194,15 @@ button:disabled {
   color: var(--color-ink);
   font-size: 11px;
   outline: none;
+}
+
+.scribe-input.scribe-summary-editor {
+  min-height: 280px;
+  height: auto;
+  resize: vertical;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 @media (max-width: 620px) {

@@ -697,6 +697,7 @@ fn meetings_snapshot() -> MeetingSnapshot {
             local_model: "whisper-small".into(),
             summary_enabled: true,
             summary_template: "standard".into(),
+            summary_prompt: crate::meetings::runtime::default_summary_prompt(),
             summary_preset: "meeting-follow-up".into(),
             kg_prompt: "ask".into(),
             kg_preset: "meeting-kg-draft".into(),

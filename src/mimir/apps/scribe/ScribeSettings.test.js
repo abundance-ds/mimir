@@ -10,6 +10,7 @@ const config = {
   localModel: 'whisper-small',
   summaryEnabled: true,
   summaryTemplate: 'standard',
+  summaryPrompt: 'Write a balanced meeting summary.',
   summaryPreset: '',
   kgPrompt: 'ask',
   retentionDays: 30,
@@ -26,7 +27,7 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.get('[data-scribe-config-pending]').text()).toContain('Saving settings')
+    expect(wrapper.get('[data-scribe-config-pending]').text()).toBe('Saving…')
     expect(wrapper.get('[data-scribe-detection]').attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('[role="radio"]').every(
       control => control.attributes('disabled') !== undefined,
@@ -75,7 +76,7 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('configured HTTPS transcription service')
+    expect(wrapper.text()).toContain('Sends microphone and system audio to the configured HTTPS service')
     expect(wrapper.text()).toContain('Hosted transcription API key')
     expect(wrapper.get('input[type="url"]').element.value)
       .toBe('https://speech.example.com/mimir-stt')
@@ -104,8 +105,8 @@ describe('ScribeSettings', () => {
       .toBe('78')
     expect(wrapper.get('[data-scribe-audio-level="system"]').attributes('aria-valuenow'))
       .toBe('12')
-    expect(wrapper.text()).toContain('discarded immediately')
-    expect(wrapper.text()).toContain('development host, not the installed Mimir app')
+    expect(wrapper.text()).toContain('No samples are kept')
+    expect(wrapper.text()).toContain('Verify in the installed Mimir app')
     await wrapper.get('[data-scribe-check-audio]').trigger('click')
     expect(wrapper.emitted('checkAudio')).toHaveLength(1)
   })
@@ -160,5 +161,54 @@ describe('ScribeSettings', () => {
     expect(wrapper.get('[data-scribe-api-key-error]').text()).toContain('Keychain refused')
     expect(wrapper.get('[aria-label="Summary format"]').exists()).toBe(true)
     expect(wrapper.get('[aria-label="Summary CLI agent"]').text()).toContain('Codex')
+  })
+
+  it('makes the actual summary system prompt editable and resets it with a preset', async () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true,
+        config,
+        permissions: { microphone: 'granted', systemAudio: 'granted' },
+      },
+    })
+
+    const prompt = wrapper.get('[data-scribe-summary-prompt]')
+    expect(prompt.attributes('rows')).toBe('10')
+    expect(prompt.element.value).toBe('Write a balanced meeting summary.')
+    await prompt.setValue('Always list decisions before actions.')
+    await wrapper.get('[data-scribe-save-summary-prompt]').trigger('click')
+    expect(wrapper.emitted('save')).toContainEqual([{
+      summaryPrompt: 'Always list decisions before actions.',
+    }])
+
+    const format = wrapper.get('[aria-label="Summary format"]')
+    await format.trigger('click')
+    await wrapper.findAll('[role="option"]')
+      .find(option => option.text().includes('Brief'))
+      .trigger('click')
+    expect(wrapper.emitted('save').at(-1)).toEqual([expect.objectContaining({
+      summaryTemplate: 'brief',
+      summaryPrompt: expect.stringContaining('compact executive summary'),
+    })])
+  })
+
+  it('keeps settings labels and hosted disclosure without product-tour prose', () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true,
+        config: {
+          ...config,
+          transcriptionMode: 'custom',
+          customUrl: 'https://api.openai.com/v1/realtime',
+          customModel: 'gpt-live-transcribe',
+        },
+        permissions: { microphone: 'granted', systemAudio: 'granted' },
+      },
+    })
+
+    expect(wrapper.text()).toContain('Sends microphone and system audio to OpenAI')
+    expect(wrapper.text()).not.toContain('Detection suggests a recording')
+    expect(wrapper.text()).not.toContain('This recipe is used after future meetings')
+    expect(wrapper.text()).not.toContain('Stored in Keychain and never returned')
   })
 })

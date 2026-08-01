@@ -217,9 +217,13 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(&path)
+        let mut command = std::process::Command::new("open");
+        if _p.is_dir() {
+            command.arg(&path);
+        } else {
+            command.arg("-R").arg(&path);
+        }
+        command
             .spawn()
             .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
         return Ok(());

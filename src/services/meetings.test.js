@@ -13,6 +13,7 @@ import {
   normalizeMeetingSnapshot,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  showMeetingFiles,
   startMeeting,
   updateMeeting,
   updateMeetingsConfig,
@@ -180,6 +181,30 @@ describe('meetings service', () => {
     await expect(decideMeetingKgProposal('meeting-1', 'publish-everywhere'))
       .rejects.toThrow('knowledge-graph draft')
     expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('serializes user-owned summary instructions and bounded meeting-file export', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ revision: 2, meetings: [] })
+      .mockResolvedValueOnce({ format: 'files', path: '/meetings/meeting-1' })
+      .mockResolvedValueOnce()
+
+    await updateMeetingsConfig({ summaryPrompt: 'Lead with decisions and name each owner.' })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_update_config', {
+      patch: { summaryPrompt: 'Lead with decisions and name each owner.' },
+    })
+
+    await expect(showMeetingFiles('meeting-1')).resolves.toEqual({
+      format: 'files',
+      path: '/meetings/meeting-1',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'meetings_export', {
+      meetingId: 'meeting-1',
+      format: 'files',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'reveal_in_finder', {
+      path: '/meetings/meeting-1',
+    })
   })
 
   it('installs the event listener before callers request their snapshot', async () => {

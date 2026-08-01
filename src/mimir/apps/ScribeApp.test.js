@@ -12,6 +12,7 @@ import {
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
   retryMeetingJob,
+  showMeetingFiles,
   startMeeting,
   stopMeeting,
   updateMeeting,
@@ -35,6 +36,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   openMeetingSystemAudioSettings: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
   retryMeetingJob: vi.fn(),
+  showMeetingFiles: vi.fn(),
   setMeetingMicMuted: vi.fn(),
   setMeetingsApiKey: vi.fn(),
   startMeeting: vi.fn(),
@@ -135,6 +137,7 @@ describe('ScribeApp', () => {
     vi.mocked(stopMeeting).mockReset()
     vi.mocked(decideMeetingKgProposal).mockReset()
     vi.mocked(retryMeetingJob).mockReset()
+    vi.mocked(showMeetingFiles).mockReset()
   })
 
   it('starts recording with one action and no participant attestation gate', async () => {
@@ -146,6 +149,8 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { workspacePath: '/work', active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-new]').attributes('disabled')).toBeUndefined())
 
+    expect(wrapper.text()).not.toContain('Mimir records your microphone')
+    expect(wrapper.find('[data-scribe-route-disclosure]').exists()).toBe(false)
     expect(wrapper.find('[data-scribe-consent-checkbox]').exists()).toBe(false)
     await wrapper.get('[data-scribe-new]').trigger('click')
 
@@ -226,7 +231,7 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
 
-    expect(wrapper.get('[data-scribe-error]').text()).toContain('Recording is safe')
+    expect(wrapper.get('[data-scribe-error]').text()).toContain('Recording continues')
     expect(wrapper.get('[data-scribe-ledger]').text()).toContain('microphone + system audio')
     await wrapper.get('[data-scribe-stop]').trigger('click')
     await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
@@ -253,7 +258,7 @@ describe('ScribeApp', () => {
     expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('You')
     expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('Others')
     expect(wrapper.get('[data-scribe-transcript-ledger]').text()).toContain('wording may change')
-    expect(wrapper.get('[data-scribe-ledger]').text()).toContain('Transcribing live on this Mac')
+    expect(wrapper.get('[data-scribe-ledger]').text()).toContain('Live transcript · On this Mac')
   })
 
   it('opens one recent meeting into the focused Transcript and Summary review', async () => {
@@ -328,6 +333,8 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
     await wrapper.findAll('button').find(button => button.text() === 'Edit').trigger('click')
+    expect(wrapper.get('[data-scribe-edit-summary]').attributes('rows')).toBe('14')
+    expect(wrapper.get('[data-scribe-edit-summary]').classes()).toContain('scribe-summary-editor')
     await wrapper.get('[data-scribe-edit-title]').setValue('Reviewed outcome')
     await wrapper.get('[data-scribe-edit-summary]').setValue('Reviewed summary.')
     await wrapper.get('[data-scribe-edit-tags]').setValue('release, decision, release')
@@ -372,8 +379,23 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    expect(wrapper.get('[data-scribe-delete-meeting]').isVisible()).toBe(true)
     await wrapper.get('[data-scribe-delete-meeting]').trigger('click')
 
     await vi.waitFor(() => expect(deleteMeeting).toHaveBeenCalledWith('m1', 'all'))
+  })
+
+  it('reveals current Markdown beside the owned meeting audio', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting()] }))
+    vi.mocked(showMeetingFiles).mockResolvedValue({
+      format: 'files',
+      path: '/meetings/m1',
+    })
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('[data-scribe-show-files]').trigger('click')
+
+    await vi.waitFor(() => expect(showMeetingFiles).toHaveBeenCalledWith('m1'))
   })
 })

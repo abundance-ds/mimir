@@ -117,6 +117,7 @@ const expectedSnapshot = {
     localModel: 'whisper-small',
     summaryEnabled: true,
     summaryTemplate: 'standard',
+    summaryPrompt: 'Write a balanced meeting summary with context, decisions, action items, and open questions. Use short Markdown sections only when they improve scanning.',
     summaryPreset: 'meeting-follow-up',
     kgPrompt: 'ask',
     kgPreset: 'meeting-kg-draft',

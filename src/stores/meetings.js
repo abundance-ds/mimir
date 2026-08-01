@@ -8,6 +8,7 @@ import {
   deleteMeetingModel,
   dismissMeetingCandidate,
   exportMeeting,
+  exportMeetingToFinder,
   installMeetingModel,
   issueMeetingStartConsent,
   listenToMeetingEvents,
@@ -21,6 +22,7 @@ import {
   setMeetingsApiKey,
   startMeeting,
   stopMeeting,
+  showMeetingFiles,
   updateMeeting,
   updateMeetingsConfig,
 } from '../services/meetings.js'
@@ -212,6 +214,14 @@ export const useMeetingsStore = defineStore('meetings', () => {
 
   async function exportRecord(id, format = 'markdown') {
     return runPending(`export:${id}:${format}`, () => exportMeeting(id, format))
+  }
+
+  async function revealFiles(id) {
+    return runPending(`export:${id}:files`, () => showMeetingFiles(id))
+  }
+
+  async function exportToFinder(id, format) {
+    return runPending(`export:${id}:${format}`, () => exportMeetingToFinder(id, format))
   }
 
   function saveConfig(patch) {
@@ -522,6 +532,8 @@ export const useMeetingsStore = defineStore('meetings', () => {
     retryJob,
     remove,
     exportRecord,
+    revealFiles,
+    exportToFinder,
     saveConfig,
     saveApiKey,
     clearApiKey,
@@ -581,6 +593,7 @@ function defaultConfig() {
     localModel: 'whisper-small',
     summaryEnabled: true,
     summaryTemplate: 'standard',
+    summaryPrompt: '',
     summaryPreset: '',
     kgPrompt: 'ask',
     kgPreset: '',

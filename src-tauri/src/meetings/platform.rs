@@ -525,6 +525,8 @@ struct StoredMeetingConfig {
     summary_enabled: bool,
     #[serde(default = "default_summary_template")]
     summary_template: String,
+    #[serde(default)]
+    summary_prompt: String,
     summary_preset: String,
     kg_prompt: String,
     kg_preset: String,
@@ -542,6 +544,7 @@ impl From<MeetingConfig> for StoredMeetingConfig {
             local_model: config.local_model,
             summary_enabled: config.summary_enabled,
             summary_template: config.summary_template,
+            summary_prompt: config.summary_prompt,
             summary_preset: config.summary_preset,
             kg_prompt: config.kg_prompt,
             kg_preset: config.kg_preset,
@@ -552,6 +555,16 @@ impl From<MeetingConfig> for StoredMeetingConfig {
 
 impl From<StoredMeetingConfig> for MeetingConfig {
     fn from(config: StoredMeetingConfig) -> Self {
+        let summary_prompt = if config.summary_prompt.trim().is_empty() {
+            super::runtime::summary_template_instructions(&config.summary_template)
+                .unwrap_or_else(|| {
+                    super::runtime::summary_template_instructions("standard")
+                        .expect("standard summary instructions must exist")
+                })
+                .to_string()
+        } else {
+            config.summary_prompt
+        };
         Self {
             detection_enabled: config.detection_enabled,
             auto_record: config.auto_record,
@@ -562,6 +575,7 @@ impl From<StoredMeetingConfig> for MeetingConfig {
             local_model: config.local_model,
             summary_enabled: config.summary_enabled,
             summary_template: config.summary_template,
+            summary_prompt,
             summary_preset: config.summary_preset,
             kg_prompt: config.kg_prompt,
             kg_preset: config.kg_preset,
@@ -1819,7 +1833,7 @@ impl NativeMeetingPlatform {
         *self.inner.deletion_fault.lock().unwrap() = Some(point);
     }
 
-    fn export_markdown(&self, meeting_id: &str) -> Result<MeetingExport, String> {
+    fn render_markdown(&self, meeting_id: &str) -> Result<String, String> {
         let meeting = self
             .inner
             .store
@@ -1876,12 +1890,32 @@ impl NativeMeetingPlatform {
                 ));
             }
         }
+        Ok(markdown)
+    }
+
+    fn export_markdown(&self, meeting_id: &str) -> Result<MeetingExport, String> {
+        let markdown = self.render_markdown(meeting_id)?;
         let path = self.unique_export_path(meeting_id, "md")?;
         write_private_bytes_atomic(&path, markdown.as_bytes())
             .map_err(|error| error.to_string())?;
         Ok(MeetingExport {
             format: "markdown".into(),
             path: path.to_string_lossy().into_owned(),
+        })
+    }
+
+    fn export_files(&self, meeting_id: &str) -> Result<MeetingExport, String> {
+        validate_component(meeting_id, "meeting id")?;
+        let markdown = self.render_markdown(meeting_id)?;
+        let meeting_root = ensure_private_subdirectory(&self.inner.paths.meetings_root, meeting_id)
+            .map_err(|error| format!("Could not resolve private meeting directory: {error}"))?;
+        let markdown_path = prepare_private_file_path(&meeting_root, "meeting.md")
+            .map_err(|error| format!("Could not resolve meeting Markdown path: {error}"))?;
+        write_private_bytes_atomic(&markdown_path, markdown.as_bytes())
+            .map_err(|error| error.to_string())?;
+        Ok(MeetingExport {
+            format: "files".into(),
+            path: meeting_root.to_string_lossy().into_owned(),
         })
     }
 
@@ -2061,6 +2095,9 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         if let Some(value) = &patch.summary_template {
             config.summary_template = value.trim().to_string();
         }
+        if let Some(value) = &patch.summary_prompt {
+            config.summary_prompt = value.clone();
+        }
         if let Some(value) = &patch.summary_preset {
             config.summary_preset = value.trim().to_string();
         }
@@ -2213,6 +2250,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
             MeetingExportFormat::Markdown => self.export_markdown(meeting_id),
             MeetingExportFormat::Json => self.export_json(meeting_id),
             MeetingExportFormat::Audio => self.export_audio(meeting_id),
+            MeetingExportFormat::Files => self.export_files(meeting_id),
         }
     }
 }
@@ -2251,6 +2289,8 @@ fn validate_meeting_config(config: &MeetingConfig) -> Result<(), String> {
     super::runtime::summary_template_instructions(&config.summary_template).ok_or_else(|| {
         "Summary format must be standard, brief, decisions-actions, or detailed".to_string()
     })?;
+    super::runtime::require_summary_prompt(&config.summary_prompt)
+        .map_err(|error| error.to_string())?;
     for (label, value) in [
         ("summary preset", config.summary_preset.as_str()),
         ("knowledge-graph preset", config.kg_preset.as_str()),
@@ -3154,6 +3194,7 @@ mod tests {
                 custom_model: Some("nova-3".into()),
                 summary_enabled: Some(true),
                 summary_template: Some("decisions-actions".into()),
+                summary_prompt: Some("List decisions first, then actions by owner.".into()),
                 summary_preset: Some("concise".into()),
                 ..MeetingConfigPatch::default()
             })
@@ -3162,6 +3203,10 @@ mod tests {
         let hooks = fixture.platform.hook_config().unwrap();
         assert!(hooks.summary_enabled);
         assert_eq!(hooks.summary_template, "decisions-actions");
+        assert_eq!(
+            hooks.summary_prompt,
+            "List decisions first, then actions by owner."
+        );
         assert_eq!(hooks.summary_preset, "concise");
         assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 0);
 
@@ -3483,6 +3528,12 @@ mod tests {
         assert!(markdown.contains("A release decision was made."));
         assert!(markdown.contains("Ship it carefully."));
         assert!(markdown.contains("00:00:01 · Alex"));
+        let files = fixture
+            .platform
+            .export_meeting("meeting-1", MeetingExportFormat::Files)
+            .unwrap();
+        let meeting_markdown = Path::new(&files.path).join("meeting.md");
+        assert_eq!(fs::read_to_string(meeting_markdown).unwrap(), markdown);
         let summary_hits = fixture
             .store
             .search_content("release decision", 10)

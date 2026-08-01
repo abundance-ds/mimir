@@ -241,12 +241,17 @@ The default successful flow is:
 4. if chosen, run a separate proposal-only Activity and expose its result for
    normal review.
 
-The summary recipe has two independent controls. A system-owned format selects
-`standard`, `brief`, `decisions-actions`, or `detailed` instructions; an
-optional launcher preset selects the exact installed CLI agent configuration.
-Both identities are copied into the durable job payload. A completed meeting
-can deliberately enqueue a new title-and-summary generation using the current
-recipe; ordinary retry and regeneration remain separate from capture state.
+The summary recipe has three independent controls. A format preset
+(`standard`, `brief`, `decisions-actions`, or `detailed`) seeds a visible,
+editable summary prompt; the saved prompt is user-owned rather than hidden in
+native code. An optional launcher preset selects the exact installed CLI agent
+configuration. The format identity, exact prompt text, and agent identity are
+copied into the durable job payload, so later settings edits cannot alter an
+already queued run. A completed meeting can deliberately enqueue a new
+title-and-summary generation using the current recipe; ordinary retry and
+regeneration remain separate from capture state. Output schema, transcript-
+as-untrusted handling, path bounds, and no-shell execution remain fixed safety
+constraints outside the editable summary prompt.
 
 Failures do not change a completed meeting into a recording failure. They
 remain visible in both Scribe and the Activity tray and can be retried.
@@ -312,6 +317,7 @@ rows after an interrupted write.
 | `~/.mimir/meetings.json` | native-owned Scribe configuration, no secret |
 | `~/.mimir/meetings/meetings.sqlite` | lifecycle, chunk, transcript, job authority, and private reviewed-content search index |
 | `~/.mimir/meetings/<id>/audio/` | independent committed channel chunks and gaps |
+| `~/.mimir/meetings/<id>/meeting.md` | current reviewed summary and transcript, materialized by **Files** |
 | `~/.mimir/meetings/<id>/followups/<job>/` | immutable bounded hook transcript input and controlled output |
 | `~/.mimir/meetings/.content/` | reviewed title, summary, tags, and KG decision |
 | `~/.mimir/meetings/exports/` | explicit user exports |
@@ -325,6 +331,11 @@ all owned files, including managed hook inputs and outputs. Files under
 `meetings/exports/` exist only after an explicit user export and are
 deliberately outside whole-record deletion; the user manages those copies
 separately.
+The Review header's **Files** action atomically refreshes `meeting.md` inside
+the owned meeting directory and reveals that directory in Finder. Available
+source audio remains beside it. Unlike an export copy, this materialized file
+is owned by the meeting and is removed by **Delete meeting** together with the
+database record, transcript, reviewed content, follow-up artifacts, and audio.
 An unresolved `collecting` transcript-repair generation is itself an audio
 hold, even after its job attempts are exhausted; both explicit audio deletion
 and retention skip it. Conversely, retry refuses before provider startup when

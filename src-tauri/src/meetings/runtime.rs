@@ -127,6 +127,8 @@ pub struct MeetingConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_preset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kg_prompt: Option<String>,
@@ -152,6 +154,7 @@ pub struct MeetingConfig {
     pub local_model: String,
     pub summary_enabled: bool,
     pub summary_template: String,
+    pub summary_prompt: String,
     pub summary_preset: String,
     pub kg_prompt: String,
     pub kg_preset: String,
@@ -170,6 +173,7 @@ impl Default for MeetingConfig {
             local_model: "whisper-small".into(),
             summary_enabled: true,
             summary_template: "standard".into(),
+            summary_prompt: default_summary_prompt(),
             summary_preset: String::new(),
             kg_prompt: "ask".into(),
             kg_preset: String::new(),
@@ -182,6 +186,7 @@ impl Default for MeetingConfig {
 pub struct MeetingHookConfig {
     pub summary_enabled: bool,
     pub summary_template: String,
+    pub summary_prompt: String,
     pub summary_preset: String,
     pub kg_prompt: String,
     pub kg_preset: String,
@@ -192,6 +197,7 @@ impl From<&MeetingConfig> for MeetingHookConfig {
         Self {
             summary_enabled: config.summary_enabled,
             summary_template: config.summary_template.clone(),
+            summary_prompt: config.summary_prompt.clone(),
             summary_preset: config.summary_preset.clone(),
             kg_prompt: config.kg_prompt.clone(),
             kg_preset: config.kg_preset.clone(),
@@ -286,6 +292,7 @@ pub enum MeetingExportFormat {
     Markdown,
     Json,
     Audio,
+    Files,
 }
 
 impl MeetingExportFormat {
@@ -294,8 +301,9 @@ impl MeetingExportFormat {
             "markdown" => Ok(Self::Markdown),
             "json" => Ok(Self::Json),
             "audio" => Ok(Self::Audio),
+            "files" => Ok(Self::Files),
             _ => Err(MeetingRuntimeError::Validation(
-                "meeting export format must be markdown, json, or audio".into(),
+                "meeting export format must be markdown, json, audio, or files".into(),
             )),
         }
     }
@@ -1461,6 +1469,7 @@ impl MeetingRuntime {
                 meeting_id,
                 applied.revision,
                 &hook_config.summary_template,
+                &hook_config.summary_prompt,
                 &hook_config.summary_preset,
                 &completed_at,
             )
@@ -1740,6 +1749,7 @@ impl MeetingRuntime {
                     &current.id,
                     overview.revision,
                     &config.summary_template,
+                    &config.summary_prompt,
                     &config.summary_preset,
                     &completed_at,
                 )
@@ -1836,6 +1846,7 @@ impl MeetingRuntime {
                     meeting_id,
                     applied.revision,
                     &config.summary_template,
+                    &config.summary_prompt,
                     &config.summary_preset,
                     &completed_at,
                 )
@@ -2087,6 +2098,7 @@ impl MeetingRuntime {
                 meeting_id,
                 meeting.transcript_revision,
                 &config.summary_template,
+                &config.summary_prompt,
                 &config.summary_preset,
                 &now,
             )
@@ -2444,6 +2456,7 @@ impl MeetingRuntime {
         meeting_id: &str,
         transcript_revision: u64,
         template: &str,
+        instructions: &str,
         preset: &str,
         not_before: &str,
     ) -> FollowUpJobDraft {
@@ -2457,6 +2470,7 @@ impl MeetingRuntime {
                 "meetingId": meeting_id,
                 "transcriptRevision": transcript_revision,
                 "template": template,
+                "instructions": instructions,
                 "preset": preset,
                 "output": {
                     "title": "reviewable",
@@ -2715,6 +2729,7 @@ fn consent_context_for_projection(
 
 fn validate_config(config: &MeetingConfig) -> Result<(), MeetingRuntimeError> {
     require_summary_template(&config.summary_template)?;
+    require_summary_prompt(&config.summary_prompt)?;
     match config.transcription_mode.as_str() {
         "local" => require_nonempty(&config.local_model, "local transcription model"),
         "custom" => {
@@ -2741,6 +2756,9 @@ fn validate_config(config: &MeetingConfig) -> Result<(), MeetingRuntimeError> {
 fn validate_config_patch(patch: &MeetingConfigPatch) -> Result<(), MeetingRuntimeError> {
     if let Some(template) = &patch.summary_template {
         require_summary_template(template)?;
+    }
+    if let Some(prompt) = &patch.summary_prompt {
+        require_summary_prompt(prompt)?;
     }
     if let Some(mode) = &patch.transcription_mode {
         if !matches!(mode.as_str(), "local" | "custom") {
@@ -2787,6 +2805,34 @@ pub(crate) fn summary_template_instructions(value: &str) -> Option<&'static str>
         ),
         _ => None,
     }
+}
+
+pub(crate) fn default_summary_prompt() -> String {
+    summary_template_instructions("standard")
+        .expect("standard summary instructions must exist")
+        .into()
+}
+
+pub(crate) fn require_summary_prompt(value: &str) -> Result<(), MeetingRuntimeError> {
+    if value.trim().is_empty() {
+        return Err(MeetingRuntimeError::Validation(
+            "summary instructions cannot be empty".into(),
+        ));
+    }
+    if value.chars().count() > 16_000 {
+        return Err(MeetingRuntimeError::Validation(
+            "summary instructions exceed 16000 characters".into(),
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(MeetingRuntimeError::Validation(
+            "summary instructions contain unsupported control characters".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_update_patch(patch: &MeetingUpdatePatch) -> Result<(), MeetingRuntimeError> {
@@ -3539,6 +3585,9 @@ mod tests {
             if let Some(value) = &patch.summary_template {
                 config.summary_template = value.clone();
             }
+            if let Some(value) = &patch.summary_prompt {
+                config.summary_prompt = value.clone();
+            }
             if let Some(value) = &patch.summary_preset {
                 config.summary_preset = value.clone();
             }
@@ -3655,6 +3704,7 @@ mod tests {
                     MeetingExportFormat::Markdown => "markdown",
                     MeetingExportFormat::Json => "json",
                     MeetingExportFormat::Audio => "audio",
+                    MeetingExportFormat::Files => "files",
                 }
                 .into(),
                 path: format!("/tmp/{meeting_id}.export"),
@@ -4219,6 +4269,9 @@ mod tests {
             .runtime
             .update_config(MeetingConfigPatch {
                 summary_template: Some("decisions-actions".into()),
+                summary_prompt: Some(
+                    "Start with the decision. Name every owner and preserve explicit dates.".into(),
+                ),
                 summary_preset: Some("codex-review".into()),
                 ..MeetingConfigPatch::default()
             })
@@ -4239,6 +4292,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(rerun.definition.payload["template"], "decisions-actions");
+        assert_eq!(
+            rerun.definition.payload["instructions"],
+            "Start with the decision. Name every owner and preserve explicit dates."
+        );
         assert_eq!(rerun.definition.payload["preset"], "codex-review");
         assert!(rerun
             .definition
