@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
-  checkMeetingAudio,
   dismissMeetingCandidate,
   issueMeetingStartConsent,
+  listenToMeetingAudioTestEvents,
   listenToMeetingEvents,
   loadMeetingLibraryPage,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   requestMeetingMicrophonePermission,
+  startMeetingAudioTest,
+  runMeetingSummary,
+  searchMeetingLibrary,
   startMeeting,
   stopMeeting,
   updateMeetingsConfig,
@@ -17,7 +20,6 @@ import { useMeetingsStore } from './meetings.js'
 
 vi.mock('../services/meetings.js', async importOriginal => ({
   ...(await importOriginal()),
-  checkMeetingAudio: vi.fn(),
   clearMeetingsApiKey: vi.fn(),
   decideMeetingKgProposal: vi.fn(),
   deleteMeeting: vi.fn(),
@@ -26,11 +28,16 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   exportMeeting: vi.fn(),
   installMeetingModel: vi.fn(),
   issueMeetingStartConsent: vi.fn(),
+  listenToMeetingAudioTestEvents: vi.fn(),
   listenToMeetingEvents: vi.fn(),
   loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
   loadMeetingTranscriptPage: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
+  startMeetingAudioTest: vi.fn(),
+  stopMeetingAudioTest: vi.fn(),
+  runMeetingSummary: vi.fn(),
+  searchMeetingLibrary: vi.fn(),
   retryMeetingJob: vi.fn(),
   setMeetingMicMuted: vi.fn(),
   setMeetingsApiKey: vi.fn(),
@@ -53,6 +60,8 @@ const emptySnapshot = {
     customModel: '',
     localModel: 'whisper-small',
     summaryEnabled: true,
+    summaryTemplate: 'standard',
+    summaryPrompt: 'Write a balanced meeting summary.',
     kgPrompt: 'ask',
   },
   permissions: { microphone: 'granted', systemAudio: 'granted' },
@@ -72,14 +81,21 @@ const emptyTranscriptPage = {
 
 describe('meetings store', () => {
   let eventHandler
+  let audioTestHandler
 
   beforeEach(() => {
     setActivePinia(createPinia())
     eventHandler = null
+    audioTestHandler = null
     vi.mocked(listenToMeetingEvents).mockReset().mockImplementation(async handler => {
       eventHandler = handler
       return vi.fn()
     })
+    vi.mocked(listenToMeetingAudioTestEvents).mockReset().mockImplementation(async handler => {
+      audioTestHandler = handler
+      return vi.fn()
+    })
+    vi.mocked(startMeetingAudioTest).mockReset().mockResolvedValue({ testId: 'audio-1' })
     vi.mocked(loadMeetingSnapshot).mockReset().mockResolvedValue(emptySnapshot)
     vi.mocked(loadMeetingLibraryPage).mockReset()
     vi.mocked(loadMeetingTranscriptPage).mockReset().mockImplementation(async meetingId => ({
@@ -88,14 +104,8 @@ describe('meetings store', () => {
     }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
       .mockResolvedValue(emptySnapshot)
-    vi.mocked(checkMeetingAudio).mockReset().mockResolvedValue({
-      microphone: 'signal',
-      systemAudio: 'signal',
-      microphoneLevel: 74,
-      systemAudioLevel: 61,
-      runtimeIdentity: 'mimir',
-      observedMs: 4_000,
-    })
+    vi.mocked(searchMeetingLibrary).mockReset().mockResolvedValue([])
+    vi.mocked(runMeetingSummary).mockReset()
     vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
       token: 'native-secret',
@@ -127,16 +137,127 @@ describe('meetings store', () => {
   it('keeps a bounded per-source audio-check result outside meeting history', async () => {
     const store = useMeetingsStore()
     await store.checkAudio()
+    audioTestHandler({
+      testId: 'audio-1',
+      state: 'running',
+      sequence: 1,
+      microphone: { state: 'signal', level: 74, error: null },
+      systemAudio: { state: 'signal', level: 61, error: null },
+    })
     expect(store.audioCheck).toEqual({
-      microphone: 'signal',
-      systemAudio: 'signal',
-      microphoneLevel: 74,
-      systemAudioLevel: 61,
-      runtimeIdentity: 'mimir',
-      observedMs: 4_000,
+      testId: 'audio-1',
+      state: 'running',
+      sequence: 1,
+      microphone: { state: 'signal', level: 74, error: null },
+      systemAudio: { state: 'signal', level: 61, error: null },
     })
     expect(store.meetings).toEqual([])
-    expect(checkMeetingAudio).toHaveBeenCalledOnce()
+    expect(startMeetingAudioTest).toHaveBeenCalledOnce()
+  })
+
+  it('keeps native search results separate from the bounded recent library', async () => {
+    vi.mocked(searchMeetingLibrary).mockResolvedValue([{
+      meeting: { id: 'older', title: 'Older release review' },
+      matched: { title: true, summary: false, tags: false, transcript: [] },
+    }])
+    const store = useMeetingsStore()
+
+    await expect(store.search(' release ')).resolves.toHaveLength(1)
+    expect(searchMeetingLibrary).toHaveBeenCalledWith('release')
+    expect(store.searchResults[0].meeting.id).toBe('older')
+
+    await expect(store.search('re')).resolves.toEqual([])
+    expect(store.searchResults).toEqual([])
+    expect(searchMeetingLibrary).toHaveBeenCalledTimes(1)
+  })
+
+  it('never lets a slower stale library search replace the latest query', async () => {
+    let releaseFirst
+    vi.mocked(searchMeetingLibrary)
+      .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve }))
+      .mockResolvedValueOnce([{
+        meeting: { id: 'latest', title: 'Latest match' },
+        matched: { title: true, summary: false, tags: false, transcript: [] },
+      }])
+    const store = useMeetingsStore()
+
+    const first = store.search('first query')
+    const second = store.search('latest query')
+    await second
+    releaseFirst([{
+      meeting: { id: 'stale', title: 'Stale match' },
+      matched: { title: true, summary: false, tags: false, transcript: [] },
+    }])
+    await first
+
+    expect(store.searchQuery).toBe('latest query')
+    expect(store.searchResults.map(hit => hit.meeting.id)).toEqual(['latest'])
+    expect(store.pending.search).toBeUndefined()
+  })
+
+  it('opens and pages a full-library search hit outside the recent snapshot', async () => {
+    vi.mocked(searchMeetingLibrary).mockResolvedValue([{
+      meeting: {
+        id: 'older',
+        title: 'Older searchable meeting',
+        lifecycle: 'ready',
+        transcriptRevision: 4,
+        jobs: [],
+        gaps: [],
+      },
+      matched: { title: false, summary: false, tags: false, transcript: [] },
+    }])
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue({
+      ...emptyTranscriptPage,
+      meetingId: 'older',
+      revision: 4,
+      totalSegments: 1,
+      segments: [{
+        id: 'older-segment', text: 'Found in history.', startMs: 0, endMs: 1000,
+        channel: 'microphone', final: true, revision: 4,
+      }],
+      summary: 'Historical summary.',
+    })
+    const store = useMeetingsStore()
+
+    await store.search('history')
+    store.select('older')
+    await vi.waitFor(() => expect(store.selectedMeeting?.segments).toHaveLength(1))
+
+    expect(loadMeetingTranscriptPage).toHaveBeenCalledWith('older', null)
+    expect(store.selectedMeeting).toMatchObject({
+      id: 'older', summary: 'Historical summary.',
+    })
+  })
+
+  it('runs a fine-tuned summary without changing global defaults', async () => {
+    const reviewed = {
+      id: 'reviewed', title: 'Reviewed', lifecycle: 'ready', jobs: [], gaps: [], channels: [],
+    }
+    vi.mocked(runMeetingSummary).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      meetings: [{ ...reviewed, summaryState: 'queued' }],
+    })
+    const store = useMeetingsStore()
+    store.applySnapshot({ ...emptySnapshot, meetings: [reviewed] })
+
+    await store.runSummary('reviewed', {
+      template: 'decisions-actions',
+      prompt: 'Put decisions first.',
+      preset: 'codex-review',
+    })
+
+    expect(runMeetingSummary).toHaveBeenCalledWith('reviewed', {
+      template: 'decisions-actions',
+      prompt: 'Put decisions first.',
+      preset: 'codex-review',
+    })
+    expect(store.config).toMatchObject({
+      summaryTemplate: 'standard',
+      summaryPrompt: 'Write a balanced meeting summary.',
+    })
+    expect(store.meetings[0].summaryState).toBe('queued')
   })
 
   it('makes the recorder usable before transcript detail hydration completes', async () => {

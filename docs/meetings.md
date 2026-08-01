@@ -11,7 +11,9 @@ Scribe is Mimir's native, local-first meeting recorder and transcription app.
 It detects likely calls, asks the user to start, records microphone and system
 audio as independent durable tracks, transcribes through a managed local model
 or one explicitly configured custom service, and runs reviewable follow-up
-Activities after a terminal transcript.
+Activities after a terminal transcript. The review surface exposes only
+summary generation and a general custom agent task; knowledge-graph proposals
+are not part of the current Scribe interaction model.
 
 This document owns Scribe product and subsystem detail. General Activity
 lifecycle, MCP transport, persistence helpers, and visual language remain in
@@ -33,9 +35,16 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   Mimir” even when that host has microphone access. System-audio setup creates
   the public Core Audio process tap before opening the fixed macOS **Privacy &
   Security → Screen & System Audio Recording** pane, which registers signed
-  Mimir with TCC. A separate four-second audio check reports microphone and
-  system signal plus a normalized peak-strength value independently, discards
-  all samples, and creates no meeting.
+  Mimir with TCC. Audio checking can stream one combined microphone/system
+  level projection at no more than 10 Hz. It distinguishes open failure, no
+  callbacks, captured silence, and signal, reduces frames immediately to a
+  bounded count and peak, discards every sample, and creates no meeting.
+- Microphone selection is persisted as CPAL's serialized Core Audio device UID,
+  never as a display name or enumeration index. Device catalogs explicitly
+  report whether that UID is still available. If it is missing, capture uses
+  the current default microphone for that run and the catalog supplies a
+  fallback explanation; the stored choice is retained so reconnecting the
+  device restores the user's selection.
 - Microphone mute writes aligned silence to that channel. There is no pause
   state that could make channel clocks disagree.
 - Microphone and system audio are separate, lossless 16 kHz mono `f32le`
@@ -49,11 +58,12 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 - Stop drains audio and requests a terminal transcript revision. A terminal
   transcript with speech enqueues a durable title-and-summary Activity; a
   genuinely silent transcript completes without inventing a title, summary,
-  or graph follow-up. A failed or unresolved transcript remains visibly
+  or follow-up. A failed or unresolved transcript remains visibly
   recoverable and is never labelled complete.
-- Knowledge-graph follow-up defaults to a separate user decision. “Create
-  reviewable draft” runs a proposal Activity; it never mutates the graph
-  invisibly.
+- Summary offers three clear starting points—Summary, Brief, and Decisions +
+  actions—plus Custom. Presets seed a per-run prompt that stays collapsed until
+  the user wants to fine-tune it. Custom opens an interactive CLI-agent
+  Activity for the reviewed meeting.
 
 ## Native composition
 
@@ -61,9 +71,13 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 
 | Owner | Responsibility |
 |---|---|
-| `runtime.rs` | serialized lifecycle, recovery, snapshots, jobs, config policy |
+| `runtime.rs` | serialized capture lifecycle, recovery, and config policy |
+| `runtime/library.rs` | bounded library, transcript, search, and renderer projections |
+| `runtime/followups.rs` | durable summary reruns and retained-audio retranscription |
+| `runtime/tests.rs` | runtime contract fakes and behavioral tests |
 | `store.rs` | SQLite authority, transcript revisions, chunk staging, leases |
 | `capture.rs` | native audio streams, resampling, durable chunk commit, gaps |
+| `audio_test.rs` | ephemeral level streaming, window ownership, native teardown |
 | `transcriber.rs` | provider selection, durable tailing, live/final persistence |
 | `local_whisper.rs` | in-process, Metal-only whisper.cpp inference |
 | `stt.rs` | versioned provider-neutral WebSocket contract |
@@ -198,6 +212,16 @@ provenance. Delayed or restart recovery uses that exact pair and fails closed
 when legacy/damaged provenance is unavailable; changing global settings can
 never redirect previously captured audio.
 
+Explicit retranscription is a separate human action. It requires retained,
+committed source audio and a `Completed` or `Failed` meeting, then freezes the
+currently selected route and model into a new durable job. It does not reuse or
+weaken automatic recovery's original-route rule. Provider output remains in a
+private generation while it is partial; provider failure leaves the old
+transcript and revision readable. Only an all-final pass atomically replaces
+the STT-owned projection. The action itself is the authorization—there is no
+attestation checkbox. A crash after commit but before job acknowledgement is
+reconciled locally without disclosing the audio a second time.
+
 OpenAI uses two independently owned Realtime transcription WebSockets: one for
 microphone and one for system audio. Native code converts each committed 16
 kHz `f32le` channel to 24 kHz PCM16, commits bounded two-second turns, accepts
@@ -237,21 +261,32 @@ The default successful flow is:
 
 1. generate a concise title and Markdown summary from the terminal transcript;
 2. compare-and-set the reviewed content projection;
-3. show “Create reviewable knowledge-graph draft?”, “Not now”, and “Never”;
-4. if chosen, run a separate proposal-only Activity and expose its result for
-   normal review.
+3. open completed meetings on Summary when a summary exists;
+4. let the user create another summary from a seeded preset or launch a Custom
+   interactive agent task.
 
-The summary recipe has three independent controls. A format preset
-(`standard`, `brief`, `decisions-actions`, or `detailed`) seeds a visible,
-editable summary prompt; the saved prompt is user-owned rather than hidden in
-native code. An optional launcher preset selects the exact installed CLI agent
-configuration. The format identity, exact prompt text, and agent identity are
-copied into the durable job payload, so later settings edits cannot alter an
-already queued run. A completed meeting can deliberately enqueue a new
-title-and-summary generation using the current recipe; ordinary retry and
-regeneration remain separate from capture state. Output schema, transcript-
-as-untrusted handling, path bounds, and no-shell execution remain fixed safety
-constraints outside the editable summary prompt.
+The visible summary presets are `standard`, `brief`, and `decisions-actions`.
+Each seeds an editable per-run prompt. A separate optional launcher selector
+chooses the exact installed CLI-agent preset for that run. The format identity,
+exact prompt text, and agent identity are copied into the durable job payload,
+so later settings edits cannot alter an already queued run and fine-tuning one
+meeting cannot silently change future meetings. The globally saved prompt is
+editable only in Scribe settings.
+
+The editable text is not the entire agent prompt. Native code wraps it in a
+fixed safety and output envelope: it identifies the immutable transcript as
+untrusted data, forbids following transcript instructions, requires one
+bounded title/summary JSON object at the controlled output path, and forbids
+other file changes. The user-authored text is inserted as the summary-specific
+instruction inside that envelope. A completed meeting can deliberately enqueue
+a new title-and-summary generation; ordinary retry and regeneration remain
+separate from capture state.
+
+Custom is deliberately different from summary generation. It requires a CLI
+agent and prompt, then opens a durable interactive Activity with the exact
+meeting id in provenance and `MIMIR_MEETING_ID`. The agent is instructed to use
+`meetings_get`; Scribe does not imply a hidden graph mutation or a vague draft
+destination.
 
 Failures do not change a completed meeting into a recording failure. They
 remain visible in both Scribe and the Activity tray and can be retried.
@@ -265,9 +300,13 @@ user export: hook execution never creates a copy in `meetings/exports/`.
 
 `src/mimir/apps/ScribeApp.vue` owns a three-state Ready → Recording → Review
 flow, inline candidate suggestions, live ledger, transcript, summary, job
-diagnostics, KG decision, exports, deletion, and separate settings. Record is
+diagnostics, custom agent tasks, file access, deletion, and separate settings. Record is
 one action; there is no consent screen. During recording, the fixed transport
-keeps Stop above every nonblocking diagnostic. `src/stores/meetings.js` is an independent
+keeps Stop above every nonblocking diagnostic. Review opens on Summary when it
+exists; its header contains only Back and one actions menu. Rename, Show in
+Finder, save-copy actions, retranscription, and Delete use the same accessible
+menu from detail and list context. Failed transcripts also expose an inline
+**Transcribe again** action. `src/stores/meetings.js` is an independent
 workspace bootstrap initializer; it does not wait for MCP or Activities.
 Recorder readiness also does not wait for transcript-window hydration, and
 native startup secures private roots and authority files without recursively
@@ -279,6 +318,35 @@ Configuration mutations share one ordered renderer queue. While it is nonempty,
 every configuration control exposes and disables for the pending state; a
 second accepted mutation runs after the first instead of returning an empty
 success or silently discarding user intent.
+
+The native microphone/audio-test renderer contract is:
+
+- `MeetingSnapshot.config.microphoneDeviceId` is the persisted Core Audio UID
+  or `null` for the current default.
+- Select or clear it through the existing ordered `meetings_update_config`
+  command with `{ microphoneDeviceId: <device id> }` or
+  `{ microphoneDeviceId: null }`.
+- `meetings_microphone_devices` returns `{ selectedDeviceId,
+  selectedAvailable, effectiveDeviceId, fallbackReason, devices[] }`; every
+  device is `{ id, name, isDefault }`.
+- `meetings_audio_test_start` takes no renderer-selected device argument. It
+  uses the authoritative persisted configuration and returns `{ testId,
+  requestedMicrophoneDeviceId }` immediately.
+- `mimir://meeting-audio-test` emits `{ testId, sequence, state, microphone,
+  systemAudio, microphoneDeviceId, microphoneDeviceName,
+  fallbackFromMicrophoneDeviceId }`. Each source is `{ state, level, error? }`;
+  running level events are combined and capped at 10 Hz.
+- `meetings_audio_test_stop({ testId })` is owner-window scoped. Starting a
+  recording, destroying the owner window, native shutdown, and explicit Stop
+  all release both test streams. Renderer cleanup is helpful but not required
+  for correctness.
+
+Native snapshots expose transcription as `initializing`, `connecting`,
+`listening`, `live`, `reconnecting`, `failed`, `delayed`, `batch`, `final`, or
+`idle`. `src/services/meetings.js` exposes `retranscribeMeeting(meetingId)` and
+the Pinia store exposes `retranscribe(id)`; both invoke
+`meetings_retranscribe` and receive the ordinary authoritative snapshot. This
+command is intentionally absent from the public agent tool projection.
 
 Reviewed tags use the same projection in native meeting detail, list/search
 agent metadata, and the Scribe review surface, so they cannot become
@@ -331,7 +399,7 @@ all owned files, including managed hook inputs and outputs. Files under
 `meetings/exports/` exist only after an explicit user export and are
 deliberately outside whole-record deletion; the user manages those copies
 separately.
-The Review header's **Files** action atomically refreshes `meeting.md` inside
+The Review menu's **Show in Finder** action atomically refreshes `meeting.md` inside
 the owned meeting directory and reveals that directory in Finder. Available
 source audio remains beside it. Unlike an export copy, this materialized file
 is owned by the meeting and is removed by **Delete meeting** together with the

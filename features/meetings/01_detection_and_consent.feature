@@ -68,3 +68,10 @@ Feature: Detect meetings without recording before the user has authority
     When the user enables meeting detection
     Then the returned native snapshot no longer reports detection as disabled
     And the detector continues initialization without presenting the stale state as an error
+
+  @MTG-010 @automated @native @contract
+  Scenario: Helper processes become one human-facing meeting app
+    Given a supported meeting application uses separate audio helper processes
+    When native detection observes those helpers
+    Then Mimir groups them under the parent application's stable identity and name
+    And the user sees one suggestion rather than internal process labels

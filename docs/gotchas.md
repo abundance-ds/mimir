@@ -152,12 +152,14 @@ Keep the `keyring` dependency's `apple-native` Cargo feature enabled. Without
 it, the crate selects an in-memory mock on macOS: writes appear successful but
 disappear before read-back and never reach Keychain.
 
-### Summary format and launcher preset are different controls
+### Summary defaults and per-run recipes are different scopes
 
-`summaryTemplate` chooses one system-owned prompt format; `summaryPreset`
-chooses an exact launcher preset and therefore the CLI agent/model flags. Both
-are frozen into each durable summary job. “Create again” intentionally uses
-the current pair and receives a new retry-generation identity.
+`summaryTemplate`, `summaryPrompt`, and `summaryPreset` are global defaults.
+Review seeds a per-run draft from them; editing that draft must not update
+global settings. `meetings_run_summary` freezes the exact format, prompt, and
+launcher preset into a new retry-generation job. The native safety/output
+envelope remains fixed around the editable instructions. Custom follow-up is a
+separate interactive Activity, not a summary template or graph shortcut.
 
 ### Classify staged audio before accepting terminal text
 

@@ -75,6 +75,35 @@ describe('AppActivity', () => {
     expect(wrapper.findComponent({ name: 'EmbeddedAppHost' }).exists()).toBe(false)
   })
 
+  it('forwards Scribe settings to the one global settings surface', async () => {
+    const record = activity({
+      id: 'scribe',
+      title: 'Scribe',
+      mode: 'rust-helper',
+      helper: 'scribe',
+    }, { helper: 'scribe' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: {
+        stubs: {
+          ScribeApp: defineComponent({
+            name: 'ScribeApp',
+            emits: ['openSettings'],
+            setup(_, { emit }) {
+              return () => h('button', {
+                'data-open-scribe-settings': '',
+                onClick: () => emit('openSettings', 'scribe'),
+              })
+            },
+          }),
+        },
+      },
+    })
+
+    await wrapper.get('[data-open-scribe-settings]').trigger('click')
+    expect(wrapper.emitted('openSettings')).toEqual([['scribe']])
+  })
+
   it('forwards workbench entry focus to the hosted surface', () => {
     const focusEntry = vi.fn()
     const record = activity({

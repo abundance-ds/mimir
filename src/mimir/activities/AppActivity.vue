@@ -17,6 +17,7 @@
     :active="active"
     @open-file="$emit('openFile', $event)"
     @open-activity="$emit('openActivity', $event)"
+    @open-settings="$emit('openSettings', $event)"
     @diagnostic="$emit('diagnostic', $event)"
   />
   <TodayApp
@@ -79,6 +80,7 @@ const props = defineProps({
 defineEmits([
   'openFile',
   'openActivity',
+  'openSettings',
   'startWork',
   'chooseWorkspace',
   'launchPlan',

@@ -4,39 +4,7 @@
     data-scribe-app
     class="flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
   >
-    <template v-if="settingsOpen">
-      <header class="scribe-bar">
-        <button type="button" class="scribe-quiet-button" @click="closeSettings">
-          <IconChevronLeft :size="14" />
-          Back
-        </button>
-        <span class="min-w-0 flex-1 truncate text-[11px] font-semibold">Scribe settings</span>
-      </header>
-      <div class="min-h-0 flex-1 overflow-y-auto">
-        <ScribeSettings
-          ref="settingsPanel"
-          embedded
-          :config="meetings.config"
-          :permissions="meetings.permissions"
-          :models="meetings.models"
-          :audio-check="meetings.audioCheck"
-          :pending="meetings.pending"
-          :credential-notice="credentialNotice"
-          :credential-error="credentialError"
-          :summary-agents="availableSummaryAgents"
-          @save="saveConfig"
-          @save-api-key="saveApiKey"
-          @clear-api-key="clearApiKey"
-          @install-model="installModel"
-          @delete-model="deleteModel"
-          @request-microphone-permission="requestMicrophonePermission"
-          @open-system-audio-settings="openSystemAudioSettings"
-          @check-audio="checkAudio"
-        />
-      </div>
-    </template>
-
-    <template v-else-if="meetings.activeMeeting">
+    <template v-if="meetings.activeMeeting">
       <header class="scribe-transport">
         <span class="size-2 shrink-0 rounded-full bg-rem" aria-hidden="true" />
         <span data-scribe-recording-label class="font-mono text-[11px] tabular-nums">
@@ -117,34 +85,23 @@
     </template>
 
     <template v-else-if="detailMeeting">
-      <header class="scribe-bar">
+      <header data-scribe-detail-header class="scribe-bar">
         <button type="button" class="scribe-quiet-button" @click="closeDetail">
           <IconChevronLeft :size="14" />
           Meetings
         </button>
         <span class="min-w-0 flex-1" />
-        <button type="button" class="scribe-quiet-button" @click="beginEdit">
-          <IconEdit :size="13" />
-          Edit
-        </button>
         <button
           type="button"
-          data-scribe-show-files
-          class="scribe-quiet-button"
-          :disabled="meetingActionPending('export:files')"
-          @click="revealSelectedFiles"
-        >
-          <IconFolderOpen :size="13" />
-          Files
-        </button>
-        <button
-          type="button"
-          data-scribe-settings
+          data-scribe-detail-overflow
           class="scribe-icon-button"
-          aria-label="Scribe settings"
-          @click="openSettings"
+          aria-label="Meeting actions"
+          aria-haspopup="menu"
+          :aria-expanded="meetingMenuOpen && meetingMenuId === detailMeeting.id"
+          @pointerdown.stop
+          @click="openDetailMenu"
         >
-          <IconSettings :size="14" />
+          <IconDots :size="15" />
         </button>
       </header>
 
@@ -156,19 +113,21 @@
                 <span class="scribe-field-label">Title</span>
                 <input v-model="editedTitle" data-scribe-edit-title class="scribe-input" />
               </label>
-              <label class="block">
-                <span class="scribe-field-label">Summary</span>
-                <textarea
-                  v-model="editedSummary"
-                  data-scribe-edit-summary
-                  rows="14"
-                  class="scribe-input scribe-summary-editor"
-                />
-              </label>
-              <label class="block">
-                <span class="scribe-field-label">Tags, separated by commas</span>
-                <input v-model="editedTags" data-scribe-edit-tags class="scribe-input" />
-              </label>
+              <template v-if="!renameOnly">
+                <label class="block">
+                  <span class="scribe-field-label">Summary</span>
+                  <textarea
+                    v-model="editedSummary"
+                    data-scribe-edit-summary
+                    rows="14"
+                    class="scribe-input scribe-summary-editor"
+                  />
+                </label>
+                <label class="block">
+                  <span class="scribe-field-label">Tags, separated by commas</span>
+                  <input v-model="editedTags" data-scribe-edit-tags class="scribe-input" />
+                </label>
+              </template>
               <p
                 v-if="reviewedTagsError"
                 data-scribe-edit-tags-error
@@ -178,16 +137,16 @@
                 {{ reviewedTagsError }}
               </p>
               <div class="flex gap-2">
-                <button type="button" class="scribe-quiet-button" @click="editingMeeting = false">
+                <button type="button" class="scribe-quiet-button" @click="cancelMeetingEdit">
                   Cancel
                 </button>
                 <button
                   type="submit"
                   data-scribe-save-review
                   class="scribe-primary-button"
-                  :disabled="Boolean(reviewedTagsError)"
+                  :disabled="!renameOnly && Boolean(reviewedTagsError)"
                 >
-                  Save changes
+                  {{ renameOnly ? 'Rename' : 'Save changes' }}
                 </button>
               </div>
             </form>
@@ -213,7 +172,16 @@
               role="status"
             >
               <IconAlertTriangle :size="13" class="mt-px shrink-0" />
-              <span>{{ recoveryStatus(detailMeeting) }}</span>
+              <span class="min-w-0 flex-1">{{ recoveryStatus(detailMeeting) }}</span>
+              <button
+                type="button"
+                data-scribe-recover-inline
+                class="scribe-quiet-button shrink-0"
+                :disabled="Boolean(meetings.pending[`retranscribe:${detailMeeting.id}`])"
+                @click="requestMeetingRecovery(detailMeeting)"
+              >
+                {{ meetings.pending[`retranscribe:${detailMeeting.id}`] ? 'Starting…' : 'Transcribe again' }}
+              </button>
             </div>
 
             <div class="mt-6 flex border-b border-rule" role="tablist" aria-label="Meeting review">
@@ -277,100 +245,130 @@
               aria-labelledby="scribe-detail-tab-summary"
               class="py-5"
             >
-              <p v-if="detailMeeting.summary" class="whitespace-pre-wrap text-[12px] leading-7 text-ink-2">
+              <div data-scribe-summary-actions class="border-b border-rule pb-4">
+                <div
+                  v-if="detailMeeting.transcriptFinal && detailMeeting.segmentCount > 0"
+                  class="flex flex-wrap items-end gap-3"
+                >
+                  <label class="min-w-44 flex-1">
+                    <span class="scribe-field-label">Task</span>
+                    <ScribeSelect
+                      :model-value="summaryTask"
+                      :options="summaryTaskOptions"
+                      :disabled="summaryRunPending"
+                      aria-label="Summary task"
+                      @update:model-value="selectSummaryTask"
+                    />
+                  </label>
+                  <button
+                    v-if="summaryTask !== 'custom'"
+                    type="button"
+                    data-scribe-regenerate-summary
+                    class="scribe-primary-button"
+                    :disabled="summaryRunPending"
+                    @click="runSummary"
+                  >
+                    {{ summaryRunPending ? 'Starting…' : detailMeeting.summary ? 'Create again' : 'Create summary' }}
+                  </button>
+                </div>
+                <div class="mt-3 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    data-scribe-edit-notes
+                    class="text-[9px] text-ink-3 underline underline-offset-2 hover:text-ink"
+                    @click="beginEdit"
+                  >
+                    Edit notes
+                  </button>
+                  <button
+                    v-if="summaryTask !== 'custom' && detailMeeting.transcriptFinal && detailMeeting.segmentCount > 0"
+                    type="button"
+                    data-scribe-prompt-toggle
+                    class="text-[9px] text-ink-3 underline underline-offset-2 hover:text-ink"
+                    :aria-expanded="summaryPromptExpanded"
+                    @click="summaryPromptExpanded = !summaryPromptExpanded"
+                  >
+                    {{ summaryPromptExpanded ? 'Hide prompt' : 'Prompt' }}
+                  </button>
+                  <button
+                    v-if="summaryTask !== 'custom' && detailMeeting.transcriptFinal && detailMeeting.segmentCount > 0"
+                    type="button"
+                    data-scribe-summary-options-toggle
+                    class="text-[9px] text-ink-3 underline underline-offset-2 hover:text-ink"
+                    :aria-expanded="summaryOptionsExpanded"
+                    @click="summaryOptionsExpanded = !summaryOptionsExpanded"
+                  >
+                    Options
+                  </button>
+                </div>
+                <label v-if="summaryTask !== 'custom' && summaryPromptExpanded" class="mt-3 block">
+                  <span class="sr-only">Prompt</span>
+                  <textarea
+                    v-model="summaryPromptDraft"
+                    data-scribe-summary-prompt
+                    rows="8"
+                    class="scribe-input scribe-prompt-editor"
+                  />
+                </label>
+                <div
+                  v-if="summaryTask !== 'custom' && summaryOptionsExpanded"
+                  data-scribe-summary-options
+                  class="mt-3 max-w-xs"
+                >
+                  <label class="block">
+                    <span class="scribe-field-label">Agent</span>
+                    <ScribeSelect
+                      :model-value="summaryAgent"
+                      :options="summaryAgentOptions"
+                      aria-label="Summary agent"
+                      @update:model-value="summaryAgent = $event"
+                    />
+                  </label>
+                </div>
+                <div v-if="summaryTask === 'custom'" data-scribe-custom-task class="mt-3 grid gap-3">
+                  <label class="block">
+                    <span class="scribe-field-label">Agent</span>
+                    <ScribeSelect
+                      :model-value="summaryAgent"
+                      :options="summaryAgentOptions"
+                      aria-label="Custom task agent"
+                      @update:model-value="summaryAgent = $event"
+                    />
+                  </label>
+                  <label class="block">
+                    <span class="scribe-field-label">Prompt</span>
+                    <textarea
+                      v-model="customTaskPrompt"
+                      data-scribe-custom-task-prompt
+                      rows="3"
+                      class="scribe-input scribe-custom-task-editor"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    data-scribe-open-summary-activity
+                    class="scribe-primary-button justify-self-start"
+                    :disabled="!selectedSummaryAgentPreset || customActivityPending"
+                    @click="requestCustomSummaryActivity"
+                  >
+                    {{ customActivityPending ? 'Opening…' : selectedSummaryAgentPreset ? 'Open Activity' : 'Agent required' }}
+                  </button>
+                </div>
+                <p v-if="actionError" class="mt-3 text-[10px] text-rem" role="alert">
+                  {{ actionError }}
+                </p>
+              </div>
+              <p
+                v-if="detailMeeting.summary"
+                data-scribe-summary-content
+                class="mt-5 whitespace-pre-wrap text-[12px] leading-7 text-ink-2"
+              >
                 {{ detailMeeting.summary }}
               </p>
-              <p v-else class="text-[11px] leading-relaxed text-ink-3">
+              <p v-else data-scribe-summary-content class="mt-5 text-[11px] leading-relaxed text-ink-3">
                 {{ summaryStatus(detailMeeting) }}
               </p>
-              <div
-                v-if="detailMeeting.transcriptFinal && detailMeeting.segmentCount > 0"
-                data-scribe-summary-recipe
-                class="mt-6 border-y border-rule py-4"
-              >
-                <div class="grid gap-3 sm:grid-cols-2">
-                  <label class="block">
-                    <span class="scribe-field-label">Summary format</span>
-                    <ScribeSelect
-                      :model-value="meetings.config.summaryTemplate || 'standard'"
-                      :options="summaryTemplateOptions"
-                      :disabled="Boolean(meetings.pending.config)"
-                      aria-label="Summary format for create again"
-                      @update:model-value="saveSummaryTemplate"
-                    />
-                  </label>
-                  <label class="block">
-                    <span class="scribe-field-label">CLI agent</span>
-                    <ScribeSelect
-                      :model-value="meetings.config.summaryPreset || ''"
-                      :options="summaryAgentOptions"
-                      :disabled="Boolean(meetings.pending.config)"
-                      aria-label="Summary CLI agent for create again"
-                      @update:model-value="saveConfig({ summaryPreset: $event })"
-                    />
-                  </label>
-                </div>
-                <button type="button" class="mt-3 text-[9px] text-ink-3 underline underline-offset-2 hover:text-ink" @click="openSettings">
-                  Edit system prompt
-                </button>
-                <button
-                  type="button"
-                  data-scribe-regenerate-summary
-                  class="scribe-primary-button mt-3"
-                  :disabled="Boolean(meetings.pending.config)
-                    || Boolean(meetings.pending[`retry:${detailMeeting.id}:title-summary`])
-                    || ['queued', 'running'].includes(detailMeeting.summaryState)"
-                  @click="regenerateSummary"
-                >
-                  {{ ['queued', 'running'].includes(detailMeeting.summaryState)
-                    ? 'Summary in progress…'
-                    : 'Create again' }}
-                </button>
-              </div>
-              <div
-                v-if="meetings.kgOffer?.id === detailMeeting.id"
-                data-scribe-kg-offer
-                class="mt-6 border-y border-rule py-4"
-              >
-                <p class="text-[11px] leading-relaxed text-ink-2">
-                  Create a reviewable knowledge-graph draft?
-                </p>
-                <div class="mt-3 flex flex-wrap gap-2">
-                  <button type="button" class="scribe-quiet-button" @click="decideKg(detailMeeting.id, 'not-now')">Not now</button>
-                  <button type="button" class="scribe-primary-button" @click="decideKg(detailMeeting.id, 'create-draft')">Create KG draft</button>
-                </div>
-              </div>
             </section>
-
-            <div class="mt-8 flex flex-wrap gap-2 border-t border-rule pt-3" aria-label="Meeting files and deletion">
-                <button
-                  type="button"
-                  class="scribe-quiet-button"
-                  :disabled="meetingActionPending('export:markdown')"
-                  @click="exportSelected('markdown')"
-                >
-                  <IconDownload :size="13" />
-                  Export Markdown
-                </button>
-                <button
-                  type="button"
-                  class="scribe-quiet-button"
-                  :disabled="meetingActionPending('export:audio')"
-                  @click="exportSelected('audio')"
-                >
-                  Export audio
-                </button>
-                <button
-                  type="button"
-                  data-scribe-delete-meeting
-                  class="scribe-quiet-button text-rem"
-                  :disabled="meetingActionPending('delete')"
-                  @click="deleteSelected"
-                >
-                  <IconTrash :size="13" />
-                  Delete meeting
-                </button>
-            </div>
           </template>
         </div>
       </article>
@@ -378,12 +376,53 @@
 
     <template v-else>
       <main class="min-h-0 flex-1 overflow-y-auto">
-        <div class="mx-auto max-w-3xl px-5 py-8">
-          <section class="border-b border-rule pb-7">
-            <div class="flex items-start gap-3">
-              <h1 class="min-w-0 flex-1 text-[20px] font-semibold leading-tight">
-                Record this meeting
-              </h1>
+        <div class="mx-auto max-w-3xl px-5 py-4">
+          <section class="border-b border-rule pb-4">
+            <div data-scribe-home-toolbar class="flex items-center gap-2">
+              <button
+                type="button"
+                data-scribe-new
+                class="scribe-record-button"
+                :disabled="Boolean(meetings.pending.start) || !canStart"
+                @click="start(null)"
+              >
+                <IconMicrophone :size="15" />
+                {{ meetings.pending.start ? 'Starting…' : primaryActionLabel }}
+              </button>
+              <button
+                v-if="!canStart"
+                type="button"
+                class="text-[10px] text-ink-3 underline underline-offset-2 hover:text-ink"
+                @click="openSettings"
+              >
+                Setup
+              </button>
+              <label class="relative min-w-36 flex-1">
+                <span class="sr-only">Search meetings</span>
+                <IconSearch
+                  :size="13"
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-3"
+                />
+                <input
+                  ref="meetingSearchInput"
+                  v-model="meetingSearchDraft"
+                  data-scribe-meeting-search
+                  type="search"
+                  class="scribe-search-input"
+                  placeholder="Search meetings"
+                  autocomplete="off"
+                />
+                <button
+                  v-if="meetingSearchDraft"
+                  type="button"
+                  data-scribe-clear-search
+                  class="absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center text-ink-3 hover:text-ink"
+                  aria-label="Clear search"
+                  @click="clearMeetingSearch"
+                >
+                  <IconX :size="12" />
+                </button>
+              </label>
               <button
                 type="button"
                 data-scribe-settings
@@ -402,24 +441,6 @@
               {{ routeDisclosure }}
             </p>
             <p v-if="readyLabel" class="mt-1 font-mono text-[9px] text-ink-3">{{ readyLabel }}</p>
-            <button
-              type="button"
-              data-scribe-new
-              class="scribe-record-button mt-5"
-              :disabled="Boolean(meetings.pending.start) || !canStart"
-              @click="start(null)"
-            >
-              <IconMicrophone :size="15" />
-              {{ meetings.pending.start ? 'Starting recording…' : primaryActionLabel }}
-            </button>
-            <button
-              v-if="!canStart"
-              type="button"
-              class="ml-2 text-[10px] text-ink-3 underline underline-offset-2 hover:text-ink"
-              @click="openSettings"
-            >
-              Finish setup
-            </button>
             <p v-if="homeNotice" data-scribe-error role="status" class="mt-3 text-[10px] leading-relaxed text-rem">
               {{ homeNotice }}
             </p>
@@ -433,7 +454,7 @@
             >
               <IconPhone :size="14" class="shrink-0 text-ink-2" />
               <p class="min-w-0 flex-1 truncate text-[11px]">
-                {{ candidate.appName }} may be a meeting
+                {{ candidate.appName }} may be in a call
               </p>
               <button type="button" class="scribe-quiet-button shrink-0" @click="start(candidate)">Record</button>
               <button
@@ -447,10 +468,13 @@
             </div>
           </section>
 
-          <section class="pt-6" aria-labelledby="scribe-recent-title">
+          <section class="pt-4" aria-labelledby="scribe-recent-title">
             <div class="flex items-center">
-              <h2 id="scribe-recent-title" class="min-w-0 flex-1 text-[12px] font-semibold">Recent meetings</h2>
+              <h2 id="scribe-recent-title" class="min-w-0 flex-1 text-[12px] font-semibold">
+                {{ meetingSearchActive ? 'Search' : 'Meetings' }}
+              </h2>
               <button
+                v-if="!meetingSearchActive"
                 type="button"
                 class="scribe-quiet-button"
                 :disabled="meetings.loading"
@@ -460,35 +484,102 @@
                 Refresh
               </button>
             </div>
-            <p v-if="meetings.loading && !meetings.loaded" class="py-5 text-[10px] text-ink-3" role="status">
+            <p v-if="meetingSearchActive && meetings.pending.search" class="py-5 text-[10px] text-ink-3" role="status">
+              Searching…
+            </p>
+            <p v-else-if="meetingSearchActive && !meetings.searchResults.length" class="py-5 text-[10px] text-ink-3">
+              No matches
+            </p>
+            <div v-else-if="meetingSearchActive" class="mt-2 divide-y divide-rule-light border-t border-rule-light">
+              <button
+                v-for="hit in meetings.searchResults"
+                :key="hit.meeting.id"
+                type="button"
+                data-scribe-meeting-row
+                data-scribe-search-result
+                class="scribe-meeting-row"
+                aria-haspopup="menu"
+                @click="openMeeting(hit.meeting.id)"
+                @contextmenu.prevent="openRowMenu($event, hit.meeting)"
+                @keydown="onMeetingRowKeydown($event, hit.meeting)"
+              >
+                <span class="min-w-0 flex-1 text-left">
+                  <span class="block truncate text-[11px] font-medium">{{ hit.meeting.title }}</span>
+                  <span
+                    v-if="searchSnippet(hit)"
+                    data-scribe-search-snippet
+                    class="mt-0.5 block truncate text-[9px] text-ink-3"
+                  >
+                    {{ searchSnippet(hit) }}
+                  </span>
+                  <span class="mt-0.5 block font-mono text-[9px] text-ink-3">
+                    {{ meetingDate(hit.meeting) }} · {{ formatDuration(hit.meeting.durationMs) }}
+                  </span>
+                </span>
+                <span v-if="meetingNeedsRecovery(hit.meeting)" class="text-[9px] text-rem">Needs attention</span>
+                <IconChevronRight :size="13" class="shrink-0 text-ink-3" />
+              </button>
+            </div>
+            <p v-else-if="meetings.loading && !meetings.loaded" class="py-5 text-[10px] text-ink-3" role="status">
               Loading…
             </p>
             <p v-else-if="!meetings.meetings.length" class="py-5 text-[10px] text-ink-3">
               No meetings yet
             </p>
-            <div v-else class="mt-2 divide-y divide-rule-light border-t border-rule-light">
-              <button
-                v-for="meeting in meetings.meetings"
-                :key="meeting.id"
-                type="button"
-                data-scribe-meeting-row
-                class="scribe-meeting-row"
-                @click="openMeeting(meeting.id)"
+            <div v-else class="mt-2">
+              <section
+                v-for="group in meetingGroups"
+                :key="group.id"
+                data-scribe-meeting-group
+                :data-group="group.id"
+                class="mt-4 first:mt-0"
               >
-                <span class="min-w-0 flex-1 text-left">
-                  <span class="block truncate text-[11px] font-medium">{{ meeting.title }}</span>
-                  <span class="mt-0.5 block font-mono text-[9px] text-ink-3">
-                    {{ meetingDate(meeting) }} · {{ formatDuration(meeting.durationMs) }}
-                  </span>
-                </span>
-                <span v-if="meetingNeedsRecovery(meeting)" class="text-[9px] text-rem">Needs attention</span>
-                <IconChevronRight :size="13" class="shrink-0 text-ink-3" />
-              </button>
+                <h3 class="font-mono text-[9px] text-ink-3">{{ group.label }}</h3>
+                <div class="mt-1 divide-y divide-rule-light border-t border-rule-light">
+                  <button
+                    v-for="meeting in group.meetings"
+                    :key="meeting.id"
+                    type="button"
+                    data-scribe-meeting-row
+                    class="scribe-meeting-row"
+                    aria-haspopup="menu"
+                    @click="openMeeting(meeting.id)"
+                    @contextmenu.prevent="openRowMenu($event, meeting)"
+                    @keydown="onMeetingRowKeydown($event, meeting)"
+                  >
+                    <span class="min-w-0 flex-1 text-left">
+                      <span class="block truncate text-[11px] font-medium">{{ meeting.title }}</span>
+                      <span class="mt-0.5 block font-mono text-[9px] text-ink-3">
+                        {{ meetingDate(meeting) }} · {{ formatDuration(meeting.durationMs) }}
+                      </span>
+                    </span>
+                    <span v-if="meetingNeedsRecovery(meeting)" class="text-[9px] text-rem">Needs attention</span>
+                    <IconChevronRight :size="13" class="shrink-0 text-ink-3" />
+                  </button>
+                </div>
+              </section>
             </div>
           </section>
         </div>
       </main>
     </template>
+
+    <ScribeMeetingMenu
+      v-if="meetingMenuOpen && menuMeeting"
+      :position="meetingMenuPosition"
+      :needs-recovery="meetingNeedsRecovery(menuMeeting)"
+      :files-pending="meetingActionPending(menuMeeting.id, 'export:files')"
+      :markdown-pending="meetingActionPending(menuMeeting.id, 'export:markdown')"
+      :audio-pending="meetingActionPending(menuMeeting.id, 'export:audio')"
+      :delete-pending="meetingActionPending(menuMeeting.id, 'delete')"
+      @close="closeMeetingMenu"
+      @rename="beginRename(menuMeeting.id)"
+      @files="revealMeetingFiles(menuMeeting.id)"
+      @save-markdown="saveMeetingCopy(menuMeeting.id, 'markdown')"
+      @save-audio="saveMeetingCopy(menuMeeting.id, 'audio')"
+      @recover="requestMeetingRecovery(menuMeeting)"
+      @delete="deleteMeetingById(menuMeeting.id)"
+    />
 
     <p class="sr-only" aria-live="polite">{{ liveAnnouncement }}</p>
   </section>
@@ -500,25 +591,23 @@ import {
   IconAlertTriangle,
   IconChevronLeft,
   IconChevronRight,
-  IconDownload,
-  IconEdit,
-  IconFolderOpen,
+  IconDots,
   IconMicrophone,
   IconMicrophoneOff,
   IconPhone,
   IconPlayerStopFilled,
   IconRefresh,
+  IconSearch,
   IconSettings,
-  IconTrash,
   IconX,
 } from '@tabler/icons-vue'
 import { confirm } from '@tauri-apps/plugin-dialog'
+import { useActivityRuntimeStore } from '../../stores/activityRuntime.js'
 import { useMeetingsStore } from '../../stores/meetings.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
-import ScribeSettings from './scribe/ScribeSettings.vue'
+import ScribeMeetingMenu from './scribe/ScribeMeetingMenu.vue'
 import ScribeSelect from './scribe/ScribeSelect.vue'
 import {
-  SUMMARY_TEMPLATE_OPTIONS,
   summaryAgentOptions as buildSummaryAgentOptions,
   summaryPromptFor,
 } from './scribe/summaryRecipes.js'
@@ -531,15 +620,19 @@ const props = defineProps({
   workspacePath: { type: String, default: '' },
   active: { type: Boolean, default: false },
 })
-const emit = defineEmits(['openFile', 'openActivity', 'diagnostic'])
+const emit = defineEmits([
+  'openFile',
+  'diagnostic',
+  'openSettings',
+])
 const meetings = useMeetingsStore()
 const launchers = useLaunchersStore()
+const activityRuntime = useActivityRuntimeStore()
 const scribeRoot = ref(null)
-const settingsPanel = ref(null)
-const settingsOpen = ref(false)
 const detailMeetingId = ref(null)
 const detailTab = ref('transcript')
 const editingMeeting = ref(false)
+const renameOnly = ref(false)
 const editedTitle = ref('')
 const editedSummary = ref('')
 const editedTags = ref('')
@@ -547,22 +640,44 @@ const actionError = ref('')
 const dismissedNativeNotice = ref('')
 const now = ref(Date.now())
 const liveAnnouncement = ref('')
-const credentialNotice = ref('')
-const credentialError = ref('')
+const summaryTask = ref('standard')
+const summaryPromptDraft = ref(summaryPromptFor('standard'))
+const summaryPromptExpanded = ref(false)
+const summaryOptionsExpanded = ref(false)
+const summaryAgent = ref('')
+const customTaskPrompt = ref('Follow up on this meeting.')
+const customActivityPending = ref(false)
+const meetingSearchDraft = ref('')
+const meetingSearchInput = ref(null)
+const detailSearchMeeting = ref(null)
+const meetingMenuId = ref('')
+const meetingMenuPosition = ref({ left: '0px', top: '0px' })
+const meetingMenuReturnFocus = ref(null)
 const detailTabs = [
   { id: 'transcript', label: 'Transcript' },
   { id: 'summary', label: 'Summary' },
 ]
-const summaryTemplateOptions = SUMMARY_TEMPLATE_OPTIONS
+const summaryTaskOptions = Object.freeze([
+  { value: 'standard', label: 'Summary' },
+  { value: 'brief', label: 'Brief' },
+  { value: 'decisions-actions', label: 'Decisions + actions' },
+  { value: 'custom', label: 'Custom' },
+])
 const availableSummaryAgents = computed(() => launchers.availablePresets.filter(
   preset => preset.kind === 'agent',
 ))
 const summaryAgentOptions = computed(() => buildSummaryAgentOptions(
   availableSummaryAgents.value,
-  meetings.config.summaryPreset,
+  summaryAgent.value,
+))
+const selectedSummaryAgentPreset = computed(() => (
+  availableSummaryAgents.value.find(preset => preset.id === summaryAgent.value)
+  || (!summaryAgent.value ? availableSummaryAgents.value[0] : null)
+  || null
 ))
 let timer = null
 let lastActiveMeetingId = null
+let meetingSearchTimer = null
 
 const detailMeeting = computed(() => {
   if (!detailMeetingId.value) return null
@@ -574,7 +689,8 @@ const detailMeeting = computed(() => {
   if (meetings.selectedMeeting?.id === detailMeetingId.value) {
     return meetings.selectedMeeting
   }
-  return meetings.meetings.find(meeting => meeting.id === detailMeetingId.value) || null
+  return meetings.meetings.find(meeting => meeting.id === detailMeetingId.value)
+    || (detailSearchMeeting.value?.id === detailMeetingId.value ? detailSearchMeeting.value : null)
 })
 const formattedElapsed = computed(() => formatDuration(Math.max(
   meetings.elapsedMs,
@@ -584,6 +700,16 @@ const liveLedger = computed(() => transcriptLedgerEntries(meetings.activeMeeting
 const detailLedger = computed(() => transcriptLedgerEntries(detailMeeting.value))
 const reviewedTags = computed(() => parseReviewedTags(editedTags.value))
 const reviewedTagsError = computed(() => reviewedTags.value.error)
+const meetingSearchActive = computed(() => (
+  [...meetingSearchDraft.value.trim()].length >= 3
+))
+const meetingGroups = computed(() => groupMeetings(meetings.meetings))
+const meetingMenuOpen = computed(() => Boolean(meetingMenuId.value))
+const menuMeeting = computed(() => meetingById(meetingMenuId.value))
+const summaryRunPending = computed(() => (
+  Boolean(detailMeeting.value && meetings.pending[`summary:${detailMeeting.value.id}`])
+  || ['queued', 'running'].includes(detailMeeting.value?.summaryState)
+))
 const isHosted = computed(() => meetings.config.transcriptionMode === 'custom')
 const hostedProviderName = computed(() => {
   try {
@@ -636,7 +762,10 @@ const transcriptionStatus = computed(() => {
       ? `Live transcript · ${hostedProviderName.value}`
       : 'Live transcript · On this Mac'
   }
-  if (value === 'initializing' || value === 'connecting') return 'Transcription starting'
+  if (value === 'initializing') return 'Preparing transcription…'
+  if (value === 'connecting') return `Connecting to ${isHosted.value ? hostedProviderName.value : 'local model'}…`
+  if (value === 'listening') return 'Listening · no speech yet'
+  if (value === 'reconnecting') return 'Reconnecting…'
   if (value === 'delayed' || value === 'failed') return 'Transcript rebuild after Stop'
   if (value === 'final') return 'Transcript complete'
   return 'Audio saved'
@@ -654,9 +783,11 @@ const homeNotice = computed(() => actionError.value || (
 ))
 const emptyLiveTranscript = computed(() => {
   const state = meetings.activeMeeting?.transcription
-  if (state === 'initializing' || state === 'connecting') return 'Waiting for transcript…'
+  if (state === 'initializing') return 'Preparing transcription…'
+  if (state === 'connecting') return 'Connecting…'
+  if (state === 'reconnecting') return 'Reconnecting…'
   if (state === 'delayed' || state === 'failed') return 'Live transcript unavailable'
-  return 'Listening…'
+  return 'Listening · no speech yet'
 })
 
 watch(() => meetings.activeMeeting?.id, id => {
@@ -665,6 +796,20 @@ watch(() => meetings.activeMeeting?.id, id => {
     detailMeetingId.value = lastActiveMeetingId
     lastActiveMeetingId = null
   }
+})
+
+watch(meetingSearchDraft, value => {
+  if (meetingSearchTimer) window.clearTimeout(meetingSearchTimer)
+  const normalized = value.trim()
+  if ([...normalized].length < 3) {
+    meetings.clearSearch()
+    return
+  }
+  meetingSearchTimer = window.setTimeout(() => {
+    meetings.search(normalized).catch(error => {
+      actionError.value = message(error)
+    })
+  }, 250)
 })
 
 onMounted(async () => {
@@ -680,6 +825,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
+  if (meetingSearchTimer) window.clearTimeout(meetingSearchTimer)
 })
 
 function focusEntry() {
@@ -728,25 +874,90 @@ function dismissNotice() {
 }
 
 function openMeeting(id) {
+  const meeting = meetingById(id)
+  if (!meeting) return
+  const recent = meetings.meetings.some(candidate => candidate.id === id)
   meetings.select(id)
+  detailSearchMeeting.value = recent ? null : meeting
   detailMeetingId.value = id
-  detailTab.value = 'transcript'
+  detailTab.value = meeting.summary ? 'summary' : 'transcript'
   editingMeeting.value = false
+  renameOnly.value = false
+  resetSummaryRunDraft()
 }
 
 function closeDetail() {
+  closeMeetingMenu({ restoreFocus: false })
   detailMeetingId.value = null
+  detailSearchMeeting.value = null
   editingMeeting.value = false
+  renameOnly.value = false
 }
 
 function openSettings() {
-  settingsOpen.value = true
-  nextTick(() => settingsPanel.value?.focusEntry?.())
+  emit('openSettings', 'scribe')
 }
 
-function closeSettings() {
-  settingsOpen.value = false
-  nextTick(focusEntry)
+function openDetailMenu(event) {
+  if (!detailMeeting.value) return
+  if (meetingMenuId.value === detailMeeting.value.id) {
+    closeMeetingMenu()
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  openMeetingMenu(detailMeeting.value, {
+    left: rect.right,
+    top: rect.bottom + 4,
+    alignEnd: true,
+    returnFocus: event.currentTarget,
+  })
+}
+
+function openRowMenu(event, meeting) {
+  openMeetingMenu(meeting, {
+    left: event.clientX,
+    top: event.clientY,
+    returnFocus: event.currentTarget,
+  })
+}
+
+function onMeetingRowKeydown(event, meeting) {
+  if (!(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return
+  event.preventDefault()
+  const rect = event.currentTarget.getBoundingClientRect()
+  openMeetingMenu(meeting, {
+    left: rect.left + 12,
+    top: rect.top + 12,
+    returnFocus: event.currentTarget,
+  })
+}
+
+function openMeetingMenu(meeting, { left, top, alignEnd = false, returnFocus = null }) {
+  meetingMenuId.value = meeting.id
+  meetingMenuReturnFocus.value = returnFocus
+  meetingMenuPosition.value = {
+    left: `${Math.max(4, Number(left) || 0)}px`,
+    top: `${Math.max(4, Number(top) || 0)}px`,
+    ...(alignEnd ? { transform: 'translateX(-100%)' } : {}),
+  }
+}
+
+function closeMeetingMenu({ restoreFocus = true } = {}) {
+  if (!meetingMenuId.value) return
+  const returnFocus = meetingMenuReturnFocus.value
+  meetingMenuId.value = ''
+  meetingMenuReturnFocus.value = null
+  if (restoreFocus) nextTick(() => returnFocus?.focus?.())
+}
+
+async function requestMeetingRecovery(meeting) {
+  closeMeetingMenu({ restoreFocus: false })
+  try {
+    await meetings.retranscribe(meeting.id)
+    liveAnnouncement.value = 'Transcript retry started'
+  } catch (error) {
+    actionError.value = message(error)
+  }
 }
 
 async function refresh() {
@@ -755,6 +966,12 @@ async function refresh() {
   } catch (error) {
     actionError.value = message(error)
   }
+}
+
+function clearMeetingSearch() {
+  meetingSearchDraft.value = ''
+  meetings.clearSearch()
+  nextTick(() => meetingSearchInput.value?.focus())
 }
 
 async function dismissCandidate(id) {
@@ -770,30 +987,51 @@ function beginEdit() {
   editedTitle.value = detailMeeting.value.title
   editedSummary.value = detailMeeting.value.summary || ''
   editedTags.value = (detailMeeting.value.tags || []).join(', ')
+  renameOnly.value = false
   editingMeeting.value = true
 }
 
+function beginRename(id) {
+  const meeting = meetingById(id)
+  if (!meeting) return
+  closeMeetingMenu({ restoreFocus: false })
+  if (detailMeetingId.value !== id) openMeeting(id)
+  editedTitle.value = meeting.title
+  renameOnly.value = true
+  editingMeeting.value = true
+  nextTick(() => scribeRoot.value?.querySelector('[data-scribe-edit-title]')?.focus())
+}
+
+function cancelMeetingEdit() {
+  editingMeeting.value = false
+  renameOnly.value = false
+}
+
 async function saveMeetingEdits() {
-  if (!detailMeeting.value || reviewedTagsError.value) return
+  if (!detailMeeting.value || (!renameOnly.value && reviewedTagsError.value)) return
   try {
-    await meetings.saveMeeting(detailMeeting.value.id, {
-      title: editedTitle.value,
-      summary: editedSummary.value,
-      tags: reviewedTags.value.tags,
-    })
+    const patch = renameOnly.value
+      ? { title: editedTitle.value }
+      : {
+          title: editedTitle.value,
+          summary: editedSummary.value,
+          tags: reviewedTags.value.tags,
+        }
+    await meetings.saveMeeting(detailMeeting.value.id, patch)
     editingMeeting.value = false
-    liveAnnouncement.value = 'Meeting review saved'
+    liveAnnouncement.value = renameOnly.value ? 'Meeting renamed' : 'Meeting review saved'
+    renameOnly.value = false
   } catch (error) {
     actionError.value = message(error)
   }
 }
 
-async function exportSelected(format) {
-  if (!detailMeeting.value) return
+async function saveMeetingCopy(id, format) {
+  closeMeetingMenu({ restoreFocus: false })
   try {
     const result = format === 'audio'
-      ? await meetings.exportToFinder(detailMeeting.value.id, format)
-      : await meetings.exportRecord(detailMeeting.value.id, format)
+      ? await meetings.exportToFinder(id, format)
+      : await meetings.exportRecord(id, format)
     const path = typeof result === 'string' ? result : result?.path
     if (path && format !== 'audio') emit('openFile', path)
   } catch (error) {
@@ -801,20 +1039,22 @@ async function exportSelected(format) {
   }
 }
 
-async function revealSelectedFiles() {
-  if (!detailMeeting.value) return
+async function revealMeetingFiles(id) {
+  closeMeetingMenu({ restoreFocus: false })
   try {
-    await meetings.revealFiles(detailMeeting.value.id)
+    await meetings.revealFiles(id)
     liveAnnouncement.value = 'Meeting files opened in Finder'
   } catch (error) {
     actionError.value = message(error)
   }
 }
 
-async function deleteSelected() {
-  if (!detailMeeting.value) return
+async function deleteMeetingById(id) {
+  const meeting = meetingById(id)
+  if (!meeting) return
+  closeMeetingMenu({ restoreFocus: false })
   const accepted = await confirm(
-    `Permanently delete “${detailMeeting.value.title}” and its transcript, summary, and source audio?`,
+    `Permanently delete “${meeting.title}” and its transcript, summary, and source audio?`,
     {
       title: 'Delete meeting?',
       kind: 'warning',
@@ -824,115 +1064,89 @@ async function deleteSelected() {
   )
   if (!accepted) return
   try {
-    await meetings.remove(detailMeeting.value.id, 'all')
-    closeDetail()
+    await meetings.remove(id, 'all')
+    if (detailMeetingId.value === id) closeDetail()
   } catch (error) {
     actionError.value = message(error)
   }
 }
 
-async function decideKg(id, decision) {
-  try {
-    const meeting = await meetings.decideKg(id, decision)
-    const activityId = meeting?.jobs?.find(job => job.kind === 'kg-proposal')?.activityId
-    if (activityId) emit('openActivity', activityId)
-  } catch (error) {
-    actionError.value = message(error)
+function resetSummaryRunDraft() {
+  const template = summaryTaskOptions.some(option => (
+    option.value !== 'custom' && option.value === meetings.config.summaryTemplate
+  ))
+    ? meetings.config.summaryTemplate
+    : 'standard'
+  summaryTask.value = template
+  summaryPromptDraft.value = meetings.config.summaryPrompt || summaryPromptFor(template)
+  summaryPromptExpanded.value = false
+  summaryOptionsExpanded.value = false
+  summaryAgent.value = meetings.config.summaryPreset || ''
+  customTaskPrompt.value = 'Follow up on this meeting.'
+}
+
+function selectSummaryTask(task) {
+  summaryTask.value = task
+  if (task === 'custom') {
+    summaryPromptExpanded.value = false
+    summaryOptionsExpanded.value = false
+    return
   }
+  summaryPromptDraft.value = summaryPromptFor(task)
+  summaryPromptExpanded.value = false
 }
 
-async function saveConfig(patch) {
-  try {
-    await meetings.saveConfig(patch)
-  } catch (error) {
-    actionError.value = message(error)
-  }
-}
-
-async function saveSummaryTemplate(template) {
-  await saveConfig({
-    summaryTemplate: template,
-    summaryPrompt: summaryPromptFor(template),
-  })
-}
-
-async function saveApiKey(value) {
-  credentialNotice.value = ''
-  credentialError.value = ''
-  try {
-    const replacing = meetings.config.apiKeyConfigured
-    const configured = await meetings.saveApiKey(value)
-    if (!configured) throw new Error('Keychain did not confirm the saved API key.')
-    credentialNotice.value = replacing
-      ? 'API key replaced and verified in Keychain.'
-      : 'API key saved and verified in Keychain.'
-    liveAnnouncement.value = credentialNotice.value
-  } catch (error) {
-    credentialError.value = message(error)
-  }
-}
-
-async function clearApiKey() {
-  credentialNotice.value = ''
-  credentialError.value = ''
-  try {
-    const configured = await meetings.clearApiKey()
-    if (configured) throw new Error('Keychain still reports an API key after removal.')
-    credentialNotice.value = 'API key removed from Keychain.'
-    liveAnnouncement.value = credentialNotice.value
-  } catch (error) {
-    credentialError.value = message(error)
-  }
-}
-
-async function regenerateSummary() {
+async function runSummary() {
   if (!detailMeeting.value) return
   actionError.value = ''
   try {
-    await meetings.retryJob(detailMeeting.value.id, 'title-summary')
-    liveAnnouncement.value = 'A new title and summary run is queued.'
+    const request = summaryRunRequest(detailMeeting.value)
+    await meetings.runSummary(detailMeeting.value.id, {
+      template: request.template,
+      prompt: request.prompt,
+      preset: request.preset,
+    })
+    liveAnnouncement.value = 'Summary started'
   } catch (error) {
     actionError.value = message(error)
   }
 }
 
-async function installModel(id) {
+async function requestCustomSummaryActivity() {
+  const meeting = detailMeeting.value
+  const preset = selectedSummaryAgentPreset.value
+  if (!meeting || !preset || customActivityPending.value) return
+  customActivityPending.value = true
+  actionError.value = ''
   try {
-    await meetings.installModel(id)
+    const task = customTaskPrompt.value.trim() || 'Follow up on this meeting.'
+    await activityRuntime.launchPreset(
+      preset,
+      meeting.workspacePath || props.workspacePath,
+      {
+        title: `Follow up · ${meeting.title}`,
+        retention: 'durable',
+        source: { type: 'scribe-follow-up', meetingId: meeting.id },
+        env: { MIMIR_MEETING_ID: meeting.id },
+        args: [`Use meetings_get for meeting ${meeting.id}. ${task}`],
+      },
+    )
+    liveAnnouncement.value = 'Activity opened'
   } catch (error) {
     actionError.value = message(error)
+  } finally {
+    customActivityPending.value = false
   }
 }
 
-async function deleteModel(id) {
-  try {
-    await meetings.deleteModel(id)
-  } catch (error) {
-    actionError.value = message(error)
-  }
-}
-
-async function requestMicrophonePermission() {
-  try {
-    await meetings.requestMicrophonePermission()
-  } catch (error) {
-    actionError.value = message(error)
-  }
-}
-
-async function openSystemAudioSettings() {
-  try {
-    await meetings.openSystemAudioSettings()
-  } catch (error) {
-    actionError.value = message(error)
-  }
-}
-
-async function checkAudio() {
-  try {
-    await meetings.checkAudio()
-  } catch (error) {
-    actionError.value = message(error)
+function summaryRunRequest(meeting) {
+  return {
+    meetingId: meeting.id,
+    meetingTitle: meeting.title,
+    workspacePath: meeting.workspacePath || props.workspacePath,
+    template: summaryTask.value,
+    prompt: summaryTask.value === 'custom' ? customTaskPrompt.value : summaryPromptDraft.value,
+    preset: summaryAgent.value,
   }
 }
 
@@ -998,8 +1212,47 @@ function summaryStatus(meeting) {
   })[meeting.summaryState] || 'No summary'
 }
 
-function meetingActionPending(action) {
-  const id = detailMeeting.value?.id
+function meetingById(id) {
+  return meetings.meetings.find(meeting => meeting.id === id)
+    || meetings.searchResults.find(hit => hit.meeting.id === id)?.meeting
+    || null
+}
+
+function searchSnippet(hit) {
+  const text = String(hit?.matched?.transcript?.[0]?.text || '').replace(/\s+/gu, ' ').trim()
+  return text.length > 180 ? `${text.slice(0, 179)}…` : text
+}
+
+function groupMeetings(values) {
+  const sorted = [...values].sort((left, right) => meetingTime(right) - meetingTime(left))
+  const startToday = new Date()
+  startToday.setHours(0, 0, 0, 0)
+  const previousWeek = startToday.getTime() - (7 * 24 * 60 * 60 * 1000)
+  const groups = [
+    { id: 'unresolved', label: 'Needs attention', meetings: [] },
+    { id: 'today', label: 'Today', meetings: [] },
+    { id: 'previous-7-days', label: 'Previous 7 days', meetings: [] },
+    { id: 'earlier', label: 'Earlier', meetings: [] },
+  ]
+  for (const meeting of sorted) {
+    if (meetingNeedsRecovery(meeting)) {
+      groups[0].meetings.push(meeting)
+      continue
+    }
+    const timestamp = meetingTime(meeting)
+    if (timestamp >= startToday.getTime()) groups[1].meetings.push(meeting)
+    else if (timestamp >= previousWeek) groups[2].meetings.push(meeting)
+    else groups[3].meetings.push(meeting)
+  }
+  return groups.filter(group => group.meetings.length)
+}
+
+function meetingTime(meeting) {
+  const value = Date.parse(meeting.startedAt || meeting.updatedAt || '')
+  return Number.isFinite(value) ? value : 0
+}
+
+function meetingActionPending(id, action) {
   if (!id) return false
   if (action === 'export') return Object.keys(meetings.pending).some(key => key.startsWith(`export:${id}:`))
   if (action.startsWith('export:')) return Boolean(meetings.pending[`export:${id}:${action.slice(7)}`])
@@ -1203,6 +1456,42 @@ button:disabled {
   padding: 10px;
   font-size: 12px;
   line-height: 1.65;
+}
+
+.scribe-input.scribe-prompt-editor {
+  min-height: 150px;
+  height: auto;
+  resize: vertical;
+  padding: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.scribe-input.scribe-custom-task-editor {
+  min-height: 76px;
+  height: auto;
+  resize: vertical;
+  padding: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.scribe-search-input {
+  height: 32px;
+  width: 100%;
+  border: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  padding: 0 30px 0 26px;
+  color: var(--color-ink);
+  font-size: 10px;
+  outline: none;
+}
+
+.scribe-search-input:focus-visible {
+  border-color: var(--color-accent);
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 @media (max-width: 620px) {

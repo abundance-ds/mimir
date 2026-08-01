@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { useLaunchersStore } from '../../stores/launchers.js'
 import {
-  decideMeetingKgProposal,
   deleteMeeting,
   dismissMeetingCandidate,
   issueMeetingStartConsent,
@@ -11,6 +11,9 @@ import {
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  retranscribeMeeting,
+  runMeetingSummary,
+  searchMeetingLibrary,
   retryMeetingJob,
   showMeetingFiles,
   startMeeting,
@@ -18,11 +21,17 @@ import {
   updateMeeting,
 } from '../../services/meetings.js'
 import ScribeApp from './ScribeApp.vue'
+import { summaryPromptFor } from './scribe/summaryRecipes.js'
+
+const { launchPreset } = vi.hoisted(() => ({ launchPreset: vi.fn() }))
+
+vi.mock('../../stores/activityRuntime.js', () => ({
+  useActivityRuntimeStore: () => ({ launchPreset }),
+}))
 
 vi.mock('../../services/meetings.js', async importOriginal => ({
   ...(await importOriginal()),
   clearMeetingsApiKey: vi.fn(),
-  decideMeetingKgProposal: vi.fn(),
   deleteMeeting: vi.fn(),
   deleteMeetingModel: vi.fn(),
   dismissMeetingCandidate: vi.fn(),
@@ -35,6 +44,9 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   loadMeetingTranscriptPage: vi.fn(),
   openMeetingSystemAudioSettings: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
+  retranscribeMeeting: vi.fn(),
+  runMeetingSummary: vi.fn(),
+  searchMeetingLibrary: vi.fn(),
   retryMeetingJob: vi.fn(),
   showMeetingFiles: vi.fn(),
   setMeetingMicMuted: vi.fn(),
@@ -135,8 +147,11 @@ describe('ScribeApp', () => {
     vi.mocked(updateMeeting).mockReset()
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
-    vi.mocked(decideMeetingKgProposal).mockReset()
     vi.mocked(retryMeetingJob).mockReset()
+    vi.mocked(retranscribeMeeting).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(runMeetingSummary).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(searchMeetingLibrary).mockReset().mockResolvedValue([])
+    launchPreset.mockReset().mockResolvedValue({ id: 'agent:follow-up' })
     vi.mocked(showMeetingFiles).mockReset()
   })
 
@@ -149,6 +164,7 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { workspacePath: '/work', active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-new]').attributes('disabled')).toBeUndefined())
 
+    expect(wrapper.get('[data-scribe-home-toolbar]').text()).not.toContain('Record this meeting')
     expect(wrapper.text()).not.toContain('Mimir records your microphone')
     expect(wrapper.find('[data-scribe-route-disclosure]').exists()).toBe(false)
     expect(wrapper.find('[data-scribe-consent-checkbox]').exists()).toBe(false)
@@ -208,6 +224,7 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-candidates]').text()).toContain('Zoom'))
 
+    expect(wrapper.get('[data-scribe-candidates]').text()).toContain('Zoom may be in a call')
     await wrapper.get('[aria-label="Dismiss Zoom suggestion"]').trigger('click')
     await vi.waitFor(() => expect(dismissMeetingCandidate).toHaveBeenCalledWith('candidate-zoom'))
   })
@@ -261,7 +278,7 @@ describe('ScribeApp', () => {
     expect(wrapper.get('[data-scribe-ledger]').text()).toContain('Live transcript · On this Mac')
   })
 
-  it('opens one recent meeting into the focused Transcript and Summary review', async () => {
+  it('opens a summarized meeting on Summary with only back and overflow in its header', async () => {
     const reviewed = meeting({ summary: 'Decision captured.', summaryState: 'succeeded' })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
     vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
@@ -274,14 +291,16 @@ describe('ScribeApp', () => {
 
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting]').text()).toContain('Planning'))
-    expect(wrapper.get('#scribe-detail-tab-transcript').attributes('aria-selected')).toBe('true')
-    await vi.waitFor(() => expect(wrapper.get('#scribe-detail-panel-transcript').text())
-      .toContain('Approved.'))
-    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+    expect(wrapper.get('#scribe-detail-tab-summary').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('#scribe-detail-panel-summary').text()).toContain('Decision captured')
+    expect(wrapper.get('[data-scribe-detail-header]').findAll('button')).toHaveLength(2)
+    expect(wrapper.find('[data-scribe-detail-header] [data-scribe-settings]').exists()).toBe(false)
+    expect(wrapper.get('[data-scribe-summary-actions]').element.compareDocumentPosition(
+      wrapper.get('[data-scribe-summary-content]').element,
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('lets a completed summary run again with the currently selected recipe', async () => {
+  it('seeds a collapsed per-run preset prompt that remains a summary task when edited', async () => {
     const reviewed = meeting({ summary: 'Decision captured.', summaryState: 'succeeded' })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
     vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({
@@ -289,40 +308,97 @@ describe('ScribeApp', () => {
       segments: [{ id: 's1', text: 'Approved.', startMs: 0, endMs: 1_000, channel: 'microphone', final: true, revision: 1 }],
       summary: reviewed.summary,
     }))
-    vi.mocked(retryMeetingJob).mockResolvedValue(snapshot({
-      revision: 2,
-      meetings: [{ ...reviewed, summaryState: 'queued' }],
-    }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
-    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
-    await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
 
-    await vi.waitFor(() => expect(retryMeetingJob).toHaveBeenCalledWith('m1', 'title-summary'))
+    await wrapper.get('[aria-label="Summary task"]').trigger('click')
+    expect(wrapper.findAll('[role="option"]').map(option => option.text())).toEqual([
+      'Summary',
+      'Brief',
+      'Decisions + actions',
+      'Custom',
+    ])
+    await wrapper.findAll('[role="option"]').find(option => option.text().includes('Brief')).trigger('click')
+    expect(wrapper.get('[data-scribe-prompt-toggle]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('[data-scribe-summary-options-toggle]').attributes('aria-expanded')).toBe('false')
+    await wrapper.get('[data-scribe-summary-options-toggle]').trigger('click')
+    expect(wrapper.get('[aria-label="Summary agent"]').exists()).toBe(true)
+    expect(wrapper.find('[data-scribe-summary-prompt]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-prompt-toggle]').trigger('click')
+    expect(wrapper.get('[data-scribe-summary-prompt]').element.value).toBe(summaryPromptFor('brief'))
+
+    await wrapper.get('[data-scribe-summary-prompt]').setValue('Fine-tuned summary prompt')
+    expect(wrapper.get('[aria-label="Summary task"]').text()).toContain('Brief')
+    await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
+    expect(runMeetingSummary).toHaveBeenCalledWith('m1', {
+      template: 'brief',
+      prompt: 'Fine-tuned summary prompt',
+      preset: '',
+    })
+    expect(retryMeetingJob).not.toHaveBeenCalled()
   })
 
-  it('offers a reviewable KG draft only in the completed meeting review', async () => {
-    const complete = meeting({
-      summary: 'The team agreed on the release boundary.',
+  it('expands Custom into its own prompt and visible agent selector', async () => {
+    const reviewed = meeting({ summary: 'Decision captured.', summaryState: 'succeeded' })
+    useLaunchersStore().presets = [{
+      id: 'codex-review',
+      title: 'Codex',
+      kind: 'agent',
+      binary: '/usr/bin/codex',
+      args: [],
+    }]
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: reviewed.summary }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+
+    await wrapper.get('[aria-label="Summary task"]').trigger('click')
+    await wrapper.findAll('[role="option"]').find(option => option.text().includes('Custom')).trigger('click')
+    expect(wrapper.get('[data-scribe-custom-task-prompt]').attributes('rows')).toBe('3')
+    expect(wrapper.get('[aria-label="Custom task agent"]').exists()).toBe(true)
+    await wrapper.get('[data-scribe-custom-task-prompt]').setValue('Challenge the release plan.')
+    await wrapper.get('[data-scribe-open-summary-activity]').trigger('click')
+
+    await vi.waitFor(() => expect(launchPreset).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'codex-review' }),
+      '/work',
+      {
+        title: 'Follow up · Planning',
+        retention: 'durable',
+        source: { type: 'scribe-follow-up', meetingId: 'm1' },
+        env: { MIMIR_MEETING_ID: 'm1' },
+        args: ['Use meetings_get for meeting m1. Challenge the release plan.'],
+      },
+    ))
+  })
+
+  it('runs a per-meeting preset draft without mutating global settings or showing KG UI', async () => {
+    const reviewed = meeting({
+      summary: 'Decision captured.',
       summaryState: 'succeeded',
       kgState: 'awaiting-decision',
     })
-    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
-    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: complete.summary }))
-    vi.mocked(decideMeetingKgProposal).mockResolvedValue(snapshot({
-      revision: 2,
-      meetings: [{ ...complete, kgState: 'draft-queued' }],
-    }))
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [reviewed] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: reviewed.summary }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
-    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+    const task = wrapper.get('[aria-label="Summary task"]')
+    await task.trigger('click')
+    await wrapper.findAll('[role="option"]')
+      .find(option => option.text().includes('Decisions + actions'))
+      .trigger('click')
+    await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
 
-    expect(wrapper.get('[data-scribe-kg-offer]').text()).toContain('reviewable')
-    await wrapper.get('[data-scribe-kg-offer]').findAll('button').at(-1).trigger('click')
-    await vi.waitFor(() => expect(decideMeetingKgProposal)
-      .toHaveBeenCalledWith('m1', 'create-draft'))
+    expect(runMeetingSummary).toHaveBeenCalledWith('m1', {
+      template: 'decisions-actions',
+      prompt: summaryPromptFor('decisions-actions'),
+      preset: '',
+    })
+    expect(retryMeetingJob).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-scribe-kg-offer]').exists()).toBe(false)
   })
 
   it('edits reviewed title summary and bounded tags', async () => {
@@ -332,7 +408,7 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
-    await wrapper.findAll('button').find(button => button.text() === 'Edit').trigger('click')
+    await wrapper.get('[data-scribe-edit-notes]').trigger('click')
     expect(wrapper.get('[data-scribe-edit-summary]').attributes('rows')).toBe('14')
     expect(wrapper.get('[data-scribe-edit-summary]').classes()).toContain('scribe-summary-editor')
     await wrapper.get('[data-scribe-edit-title]').setValue('Reviewed outcome')
@@ -351,7 +427,8 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
-    await wrapper.findAll('button').find(button => button.text() === 'Edit').trigger('click')
+    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+    await wrapper.get('[data-scribe-edit-notes]').trigger('click')
     await wrapper.get('[data-scribe-edit-tags]').setValue(`release, ${'x'.repeat(81)}`)
 
     expect(wrapper.get('[data-scribe-edit-tags-error]').text()).toContain('80 characters')
@@ -359,18 +436,16 @@ describe('ScribeApp', () => {
     expect(updateMeeting).not.toHaveBeenCalled()
   })
 
-  it('keeps permission repair actions in settings without blocking recording controls', async () => {
+  it('opens the one global Scribe settings surface', async () => {
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
       permissions: { microphone: 'denied', systemAudio: 'prompt-on-start' },
     }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-settings]').exists()).toBe(true))
     await wrapper.get('[data-scribe-settings]').trigger('click')
-    await wrapper.get('[data-scribe-grant-microphone]').trigger('click')
-    await wrapper.get('[data-scribe-open-system-audio-settings]').trigger('click')
 
-    await vi.waitFor(() => expect(requestMeetingMicrophonePermission).toHaveBeenCalledTimes(1))
-    expect(openMeetingSystemAudioSettings).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('openSettings')).toEqual([['scribe']])
+    expect(wrapper.find('[data-scribe-settings-panel]').exists()).toBe(false)
   })
 
   it('requires native confirmation before permanently deleting a meeting', async () => {
@@ -379,6 +454,7 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('[data-scribe-detail-overflow]').trigger('click')
     expect(wrapper.get('[data-scribe-delete-meeting]').isVisible()).toBe(true)
     await wrapper.get('[data-scribe-delete-meeting]').trigger('click')
 
@@ -394,8 +470,93 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('[data-scribe-detail-overflow]').trigger('click')
     await wrapper.get('[data-scribe-show-files]').trigger('click')
 
     await vi.waitFor(() => expect(showMeetingFiles).toHaveBeenCalledWith('m1'))
+  })
+
+  it('opens the row menu by right-click and renames without entering notes editing', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting()] }))
+    vi.mocked(updateMeeting).mockResolvedValue(snapshot({ meetings: [meeting({ title: 'Renamed' })] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-row]').trigger('contextmenu', { clientX: 80, clientY: 90 })
+    expect(wrapper.get('[data-scribe-meeting-menu]').attributes('role')).toBe('menu')
+    await wrapper.get('[data-scribe-rename-meeting]').trigger('click')
+    expect(wrapper.get('[data-scribe-edit-title]').exists()).toBe(true)
+    expect(wrapper.find('[data-scribe-edit-summary]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-edit-title]').setValue('Renamed')
+    await wrapper.get('[data-scribe-save-review]').trigger('submit')
+
+    await vi.waitFor(() => expect(updateMeeting).toHaveBeenCalledWith('m1', { title: 'Renamed' }))
+  })
+
+  it('opens the row menu from the keyboard and retries transcript recovery', async () => {
+    const interrupted = meeting({ lifecycle: 'needs_repair' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [interrupted] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-row]').trigger('keydown', { key: 'F10', shiftKey: true })
+    expect(wrapper.get('[data-scribe-meeting-menu]').exists()).toBe(true)
+    await wrapper.get('[data-scribe-recover-meeting]').trigger('click')
+    await vi.waitFor(() => expect(retranscribeMeeting).toHaveBeenCalledWith('m1'))
+  })
+
+  it('debounces full-library search, shows one transcript snippet, and clears it', async () => {
+    vi.mocked(searchMeetingLibrary).mockResolvedValue([{
+      meeting: meeting({ id: 'older', title: 'Older release review' }),
+      matched: {
+        title: true,
+        summary: false,
+        tags: false,
+        transcript: [
+          { meetingId: 'older', segmentId: 's1', startMs: 0, text: 'First release evidence.' },
+          { meetingId: 'older', segmentId: 's2', startMs: 1_000, text: 'Second evidence.' },
+        ],
+      },
+    }])
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-search]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-search]').setValue('re')
+    await new Promise(resolve => setTimeout(resolve, 275))
+    expect(searchMeetingLibrary).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-scribe-meeting-search]').setValue('release')
+    expect(searchMeetingLibrary).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(searchMeetingLibrary).toHaveBeenCalledWith('release'))
+    expect(wrapper.get('[data-scribe-search-result]').text()).toContain('Older release review')
+    expect(wrapper.get('[data-scribe-search-snippet]').text()).toBe('First release evidence.')
+    expect(wrapper.findAll('[data-scribe-search-snippet]')).toHaveLength(1)
+
+    await wrapper.get('[data-scribe-clear-search]').trigger('click')
+    expect(wrapper.get('[data-scribe-meeting-search]').element.value).toBe('')
+    expect(wrapper.find('[data-scribe-search-result]').exists()).toBe(false)
+  })
+
+  it('keeps unresolved meetings first, then groups the rest by date', async () => {
+    const now = Date.now()
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      meetings: [
+        meeting({ id: 'week', title: 'This week', startedAt: new Date(now - 3 * 86_400_000).toISOString() }),
+        meeting({ id: 'old', title: 'Older', startedAt: new Date(now - 14 * 86_400_000).toISOString() }),
+        meeting({ id: 'today', title: 'Today item', startedAt: new Date(now).toISOString() }),
+        meeting({ id: 'repair', title: 'Interrupted', lifecycle: 'needs_repair', startedAt: new Date(now - 20 * 86_400_000).toISOString() }),
+      ],
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.findAll('[data-scribe-meeting-group]')).toHaveLength(4))
+
+    expect(wrapper.findAll('[data-scribe-meeting-group]').map(group => group.attributes('data-group')))
+      .toEqual(['unresolved', 'today', 'previous-7-days', 'earlier'])
+    expect(wrapper.findAll('[data-scribe-meeting-row]').map(row => row.text())).toEqual([
+      expect.stringContaining('Interrupted'),
+      expect.stringContaining('Today item'),
+      expect.stringContaining('This week'),
+      expect.stringContaining('Older'),
+    ])
   })
 })

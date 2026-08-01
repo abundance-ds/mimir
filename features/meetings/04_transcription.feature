@@ -155,3 +155,12 @@ Feature: Produce live and batch transcripts through local or custom routes
     When Scribe renders the live transcript ledger
     Then the status says transcription is live
     And it does not tell the user transcription is still being prepared
+
+  @MTG-081 @automated @native @recovery @security
+  Scenario: A user retranscribes retained audio with the currently selected provider
+    Given a completed or failed meeting has integrity-committed source audio
+    And its original consented route differs from the provider selected today
+    When the user explicitly requests retranscription
+    Then the new job freezes today's route and model without changing automatic recovery policy
+    And the existing transcript remains authoritative through partial output or provider failure
+    And only one all-final replacement generation advances the transcript revision

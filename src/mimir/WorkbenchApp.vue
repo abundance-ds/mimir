@@ -97,6 +97,7 @@
                 @launch-app="launchApp"
                 @launch-plan="launchAppPlan"
                 @open-activity="openActivityRecord"
+                @open-settings="openSettings"
                 @start-work="startGraphWork"
                 @diagnostic="showDiagnostic"
               />
@@ -884,8 +885,8 @@ function sortActivities(mode) {
   })
 }
 
-function openSettings() {
-  editorRef.value?.mimirOpenSettings?.('appearance')
+function openSettings(section = 'appearance') {
+  editorRef.value?.mimirOpenSettings?.(section || 'appearance')
 }
 
 function activateQuickOpenResult(result) {

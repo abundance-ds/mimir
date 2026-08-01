@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 
 export const MEETING_EVENT = 'mimir://meeting-event'
 export const MEETING_PLATFORM_CHANGED_EVENT = 'mimir://meeting-platform-changed'
+export const MEETING_AUDIO_TEST_EVENT = 'mimir://meeting-audio-test'
 export const TRANSCRIPT_PAGE_SIZE = 250
 const MAX_MEETING_TAGS = 64
 const MAX_MEETING_TAG_CHARS = 80
@@ -29,6 +30,18 @@ export async function loadMeetingLibraryPage(before, limit = 200) {
     before: before ? normalizeMeetingLibraryCursor(before) : null,
     limit: Math.min(200, Math.max(1, nonnegativeInteger(limit))),
   }))
+}
+
+export async function searchMeetingLibrary(query, limit = 50) {
+  const normalized = String(query || '').trim()
+  if ([...normalized].length < 3) return []
+  const hits = await invoke('meetings_search_library', {
+    query: normalized,
+    limit: Math.min(100, Math.max(1, nonnegativeInteger(limit))),
+  })
+  return (Array.isArray(hits) ? hits : [])
+    .filter(isPlainObject)
+    .map(normalizeMeetingSearchHit)
 }
 
 export async function requestMeetingMicrophonePermission() {
@@ -59,6 +72,47 @@ export async function checkMeetingAudio() {
       : 'development-host',
     observedMs: nonnegativeInteger(value.observedMs ?? value.observed_ms),
   }
+}
+
+export async function loadMeetingMicrophones() {
+  const value = object(await invoke('meetings_microphone_devices'))
+  return {
+    selectedDeviceId: optionalString(value.selectedDeviceId ?? value.selected_device_id),
+    selectedAvailable: Boolean(value.selectedAvailable ?? value.selected_available),
+    effectiveDeviceId: optionalString(value.effectiveDeviceId ?? value.effective_device_id),
+    fallbackReason: optionalString(value.fallbackReason ?? value.fallback_reason),
+    devices: (Array.isArray(value.devices) ? value.devices : [])
+      .filter(isPlainObject)
+      .map(device => ({
+        id: String(device.id || ''),
+        name: String(device.name || 'Microphone'),
+        isDefault: Boolean(device.isDefault ?? device.is_default),
+      }))
+      .filter(device => device.id),
+  }
+}
+
+export async function startMeetingAudioTest() {
+  const value = object(await invoke('meetings_audio_test_start'))
+  return {
+    testId: requiredId(value.testId ?? value.test_id, 'audio test'),
+    requestedMicrophoneDeviceId: optionalString(
+      value.requestedMicrophoneDeviceId ?? value.requested_microphone_device_id,
+    ),
+  }
+}
+
+export async function stopMeetingAudioTest(testId) {
+  return invoke('meetings_audio_test_stop', {
+    testId: requiredId(testId, 'audio test'),
+  })
+}
+
+export async function listenToMeetingAudioTestEvents(onEvent) {
+  if (typeof onEvent !== 'function') throw new Error('An audio test handler is required.')
+  return listen(MEETING_AUDIO_TEST_EVENT, event => {
+    onEvent(normalizeMeetingAudioTestEvent(event?.payload))
+  })
 }
 
 export async function dismissMeetingCandidate(candidateId) {
@@ -147,6 +201,27 @@ export async function retryMeetingJob(meetingId, jobKind) {
   return normalizeMeetingSnapshot(await invoke('meetings_retry_job', {
     meetingId: requiredId(meetingId, 'meeting'),
     jobKind: kind,
+  }))
+}
+
+export async function runMeetingSummary(meetingId, request = {}) {
+  const template = String(request.template || '').trim()
+  if (!['standard', 'brief', 'decisions-actions', 'detailed'].includes(template)) {
+    throw new Error('Choose a valid summary format.')
+  }
+  const prompt = String(request.prompt ?? '')
+  if (!prompt.trim()) throw new Error('Enter a summary prompt.')
+  if ([...prompt].length > 16_000) throw new Error('Summary prompt cannot exceed 16000 characters.')
+  const preset = String(request.preset || '').trim()
+  return normalizeMeetingSnapshot(await invoke('meetings_run_summary', {
+    meetingId: requiredId(meetingId, 'meeting'),
+    request: { template, prompt, preset },
+  }))
+}
+
+export async function retranscribeMeeting(meetingId) {
+  return normalizeMeetingSnapshot(await invoke('meetings_retranscribe', {
+    meetingId: requiredId(meetingId, 'meeting'),
   }))
 }
 
@@ -363,6 +438,28 @@ function normalizeMeeting(value) {
   }
 }
 
+function normalizeMeetingSearchHit(value) {
+  const hit = object(value)
+  const matched = object(hit.matched)
+  return {
+    meeting: normalizeMeeting(hit.meeting),
+    matched: {
+      title: Boolean(matched.title),
+      summary: Boolean(matched.summary),
+      tags: Boolean(matched.tags),
+      transcript: (Array.isArray(matched.transcript) ? matched.transcript : [])
+        .filter(isPlainObject)
+        .slice(0, 3)
+        .map(value => ({
+          meetingId: String(value.meetingId ?? value.meeting_id ?? ''),
+          segmentId: String(value.segmentId ?? value.segment_id ?? ''),
+          startMs: nonnegativeInteger(value.startMs ?? value.start_ms),
+          text: String(value.text || ''),
+        })),
+    },
+  }
+}
+
 function normalizeTranscriptCursor(value) {
   const cursor = object(value)
   const segmentId = String(cursor.segmentId ?? cursor.segment_id ?? '').trim()
@@ -426,6 +523,9 @@ function normalizeMeetingsConfig(value) {
   return {
     detectionEnabled: Boolean(config.detectionEnabled ?? config.detection_enabled),
     autoRecord: Boolean(config.autoRecord ?? config.auto_record),
+    microphoneDeviceId: optionalString(
+      config.microphoneDeviceId ?? config.microphone_device_id,
+    ),
     transcriptionMode: String(
       config.transcriptionMode ?? config.transcription_mode ?? 'local',
     ),
@@ -471,6 +571,11 @@ function serializeConfigPatch(patch) {
   const serialized = {}
   if ('detectionEnabled' in source) serialized.detectionEnabled = Boolean(source.detectionEnabled)
   if ('autoRecord' in source) serialized.autoRecord = Boolean(source.autoRecord)
+  if ('microphoneDeviceId' in source) {
+    serialized.microphoneDeviceId = source.microphoneDeviceId == null
+      ? null
+      : requiredId(source.microphoneDeviceId, 'microphone')
+  }
   if ('transcriptionMode' in source) {
     const mode = String(source.transcriptionMode || '').trim()
     if (!['local', 'custom'].includes(mode)) {
@@ -512,6 +617,35 @@ function serializeConfigPatch(patch) {
       : nullableNonnegativeInteger(source.retentionDays)
   }
   return serialized
+}
+
+function normalizeMeetingAudioTestEvent(value) {
+  const event = object(value)
+  const source = candidate => {
+    const projection = object(candidate)
+    const state = String(projection.state || 'no-data')
+    return {
+      state: ['open-failed', 'no-data', 'silent', 'signal', 'ended', 'stopped'].includes(state)
+        ? state
+        : 'no-data',
+      level: Math.min(100, nonnegativeInteger(projection.level)),
+      error: optionalString(projection.error),
+    }
+  }
+  return {
+    testId: String(event.testId ?? event.test_id ?? ''),
+    sequence: nonnegativeInteger(event.sequence),
+    state: String(event.state || 'running') === 'stopped' ? 'stopped' : 'running',
+    microphone: source(event.microphone),
+    systemAudio: source(event.systemAudio ?? event.system_audio),
+    microphoneDeviceId: optionalString(event.microphoneDeviceId ?? event.microphone_device_id),
+    microphoneDeviceName: optionalString(
+      event.microphoneDeviceName ?? event.microphone_device_name,
+    ),
+    fallbackFromMicrophoneDeviceId: optionalString(
+      event.fallbackFromMicrophoneDeviceId ?? event.fallback_from_microphone_device_id,
+    ),
+  }
 }
 
 function compareMeetings(left, right) {

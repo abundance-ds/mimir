@@ -1,7 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  checkMeetingAudio,
   clearMeetingsApiKey,
   decideMeetingKgProposal,
   deleteMeeting,
@@ -11,16 +10,23 @@ import {
   exportMeetingToFinder,
   installMeetingModel,
   issueMeetingStartConsent,
+  listenToMeetingAudioTestEvents,
   listenToMeetingEvents,
+  loadMeetingMicrophones,
   loadMeetingLibraryPage,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  retranscribeMeeting,
   retryMeetingJob,
+  runMeetingSummary,
+  searchMeetingLibrary,
   setMeetingMicMuted,
   setMeetingsApiKey,
   startMeeting,
+  startMeetingAudioTest,
+  stopMeetingAudioTest,
   stopMeeting,
   showMeetingFiles,
   updateMeeting,
@@ -37,6 +43,16 @@ export const useMeetingsStore = defineStore('meetings', () => {
   const config = ref(defaultConfig())
   const permissions = ref({ microphone: 'unknown', systemAudio: 'unknown' })
   const audioCheck = ref(null)
+  const microphoneCatalog = ref({
+    selectedDeviceId: null,
+    selectedAvailable: true,
+    effectiveDeviceId: null,
+    fallbackReason: null,
+    devices: [],
+  })
+  const audioTestId = ref(null)
+  const searchResults = ref([])
+  const searchQuery = ref('')
   const models = ref([])
   const selectedId = ref('')
   const activeMeetingId = ref(null)
@@ -45,15 +61,17 @@ export const useMeetingsStore = defineStore('meetings', () => {
   const error = ref('')
   const pending = ref({})
   let unlisten = null
+  let unlistenAudioTest = null
   let initializing = null
   let refreshQueued = false
   let transcriptRefreshTimer = null
   let configMutationTail = Promise.resolve()
   let queuedConfigMutations = 0
+  let searchGeneration = 0
   const transcriptRefreshIds = new Set()
 
   const selectedMeeting = computed(() => {
-    const meeting = meetings.value.find(meeting => meeting.id === selectedId.value)
+    const meeting = meetingRecord(selectedId.value)
       || meetings.value.find(meeting => meeting.id === activeMeetingId.value)
       || meetings.value[0]
       || null
@@ -76,6 +94,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     if (!recording.value) return active.durationMs
     return Math.max(active.durationMs, Date.now() - Date.parse(active.startedAt))
   })
+  const audioTesting = computed(() => Boolean(audioTestId.value))
   const kgOffer = computed(() => meetings.value.find(
     meeting => meeting.kgState === 'awaiting-decision',
   ) || null)
@@ -205,6 +224,20 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
   }
 
+  async function runSummary(id, request) {
+    return runPending(`summary:${id}`, async () => {
+      applySnapshot(await runMeetingSummary(id, request))
+      return meetings.value.find(meeting => meeting.id === id) || null
+    })
+  }
+
+  async function retranscribe(id) {
+    return runPending(`retranscribe:${id}`, async () => {
+      applySnapshot(await retranscribeMeeting(id))
+      return meetings.value.find(meeting => meeting.id === id) || null
+    })
+  }
+
   async function remove(id, mode = 'all') {
     return runPending(`delete:${id}`, async () => {
       applySnapshot(await deleteMeeting(id, mode))
@@ -232,6 +265,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
       error.value = ''
       try {
         applySnapshot(await updateMeetingsConfig(queuedPatch))
+        if (Object.hasOwn(queuedPatch, 'microphoneDeviceId')) {
+          void refreshMicrophones()
+        }
         return config.value
       } catch (cause) {
         error.value = message(cause)
@@ -264,9 +300,81 @@ export const useMeetingsStore = defineStore('meetings', () => {
 
   async function checkAudio() {
     return runPending('audio-check', async () => {
-      audioCheck.value = await checkMeetingAudio()
+      if (audioTestId.value) {
+        const id = audioTestId.value
+        await stopMeetingAudioTest(id)
+        audioTestId.value = null
+        return audioCheck.value
+      }
+      if (!unlistenAudioTest) {
+        unlistenAudioTest = await listenToMeetingAudioTestEvents(onAudioTestEvent)
+      }
+      audioCheck.value = {
+        state: 'running',
+        microphone: { state: 'no-data', level: 0, error: null },
+        systemAudio: { state: 'no-data', level: 0, error: null },
+      }
+      const started = await startMeetingAudioTest()
+      audioTestId.value = started.testId
       return audioCheck.value
     })
+  }
+
+  async function refreshMicrophones() {
+    try {
+      microphoneCatalog.value = await loadMeetingMicrophones()
+      return microphoneCatalog.value
+    } catch (cause) {
+      error.value = message(cause)
+      throw cause
+    }
+  }
+
+  function onAudioTestEvent(event) {
+    if (!event?.testId) return
+    if (audioTestId.value && event.testId !== audioTestId.value) return
+    if (event.state === 'stopped') {
+      audioTestId.value = null
+      return
+    }
+    audioTestId.value ||= event.testId
+    audioCheck.value = event
+  }
+
+  async function search(query) {
+    const normalized = String(query || '').trim()
+    const generation = ++searchGeneration
+    searchQuery.value = normalized
+    if ([...normalized].length < 3) {
+      searchResults.value = []
+      return []
+    }
+    pending.value = { ...pending.value, search: true }
+    try {
+      const results = await searchMeetingLibrary(normalized)
+      if (generation === searchGeneration && searchQuery.value === normalized) {
+        searchResults.value = results
+      }
+      return results
+    } catch (cause) {
+      if (generation === searchGeneration) error.value = message(cause)
+      throw cause
+    } finally {
+      if (generation === searchGeneration) {
+        const nextPending = { ...pending.value }
+        delete nextPending.search
+        pending.value = nextPending
+      }
+    }
+  }
+
+  function clearSearch() {
+    searchGeneration += 1
+    searchQuery.value = ''
+    searchResults.value = []
+    const nextPending = { ...pending.value }
+    delete nextPending.search
+    pending.value = nextPending
   }
 
   async function saveApiKey(value) {
@@ -298,7 +406,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   function select(id) {
-    if (!meetings.value.some(meeting => meeting.id === id)) return
+    if (!meetingRecord(id)) return
     selectedId.value = id
     pruneTranscriptWindows()
     void refreshTranscript(id).catch(() => {})
@@ -315,7 +423,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     permissions.value = snapshot.permissions
     models.value = snapshot.models
     activeMeetingId.value = snapshot.activeMeetingId
-    if (!meetings.value.some(meeting => meeting.id === selectedId.value)) {
+    if (!meetingRecord(selectedId.value)) {
       selectedId.value = snapshot.activeMeetingId || meetings.value[0]?.id || ''
     }
     pruneTranscriptWindows()
@@ -367,7 +475,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   async function refreshTranscript(id, before = null) {
-    if (!id || !meetings.value.some(meeting => meeting.id === id)) return null
+    if (!id || !meetingRecord(id)) return null
     const existing = transcriptWindows.value[id]
     if (existing?.loading) {
       queueTranscriptRefresh(id)
@@ -395,7 +503,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
         loading: false,
         error: '',
       })
-      const meeting = meetings.value.find(value => value.id === id)
+      const meeting = meetingRecord(id)
       if (meeting && page.revision > meeting.transcriptRevision) {
         meeting.transcriptRevision = page.revision
       }
@@ -439,7 +547,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   function queueTranscriptRefresh(id) {
-    if (!id || !meetings.value.some(meeting => meeting.id === id)) return
+    if (!id || !meetingRecord(id)) return
     // Do not kick a reader out of an older page when live words arrive.
     const window = transcriptWindows.value[id]
     if (window && !window.showingLatest) {
@@ -467,6 +575,13 @@ export const useMeetingsStore = defineStore('meetings', () => {
     )
   }
 
+  function meetingRecord(id) {
+    if (!id) return null
+    return meetings.value.find(meeting => meeting.id === id)
+      || searchResults.value.find(hit => hit.meeting.id === id)?.meeting
+      || null
+  }
+
   async function runPending(key, operation) {
     if (pending.value[key]) return null
     pending.value = { ...pending.value, [key]: true }
@@ -486,6 +601,10 @@ export const useMeetingsStore = defineStore('meetings', () => {
   function dispose() {
     unlisten?.()
     unlisten = null
+    unlistenAudioTest?.()
+    unlistenAudioTest = null
+    if (audioTestId.value) void stopMeetingAudioTest(audioTestId.value).catch(() => {})
+    audioTestId.value = null
     initializing = null
     loaded.value = false
     if (transcriptRefreshTimer != null) clearTimeout(transcriptRefreshTimer)
@@ -505,6 +624,10 @@ export const useMeetingsStore = defineStore('meetings', () => {
     config,
     permissions,
     audioCheck,
+    microphoneCatalog,
+    audioTestId,
+    searchResults,
+    searchQuery,
     models,
     selectedId,
     activeMeetingId,
@@ -517,11 +640,15 @@ export const useMeetingsStore = defineStore('meetings', () => {
     recording,
     stopping,
     elapsedMs,
+    audioTesting,
     kgOffer,
     initialize,
     refresh,
     requestMicrophonePermission,
     checkAudio,
+    refreshMicrophones,
+    search,
+    clearSearch,
     openSystemAudioSettings,
     dismissCandidate,
     start,
@@ -530,6 +657,8 @@ export const useMeetingsStore = defineStore('meetings', () => {
     saveMeeting,
     decideKg,
     retryJob,
+    runSummary,
+    retranscribe,
     remove,
     exportRecord,
     revealFiles,
@@ -586,6 +715,7 @@ function defaultConfig() {
   return {
     detectionEnabled: false,
     autoRecord: false,
+    microphoneDeviceId: null,
     transcriptionMode: 'local',
     customUrl: '',
     customModel: '',

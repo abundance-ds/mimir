@@ -2,7 +2,6 @@ export const SUMMARY_TEMPLATE_OPTIONS = Object.freeze([
   { value: 'standard', label: 'Standard · balanced' },
   { value: 'brief', label: 'Brief · executive' },
   { value: 'decisions-actions', label: 'Decisions + actions' },
-  { value: 'detailed', label: 'Detailed · chronological' },
 ])
 
 export const SUMMARY_PROMPTS = Object.freeze({

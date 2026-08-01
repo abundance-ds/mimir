@@ -110,3 +110,26 @@ Feature: Capture microphone and system audio without sacrificing durability
     When the permission command returns to Scribe
     Then Scribe reports the authoritative grant without a stale remediation error
     And later detector polling reconciles to the same granted state
+
+  @MTG-055 @automated @native @contract
+  Scenario: A selected microphone survives names and device-order changes
+    Given two microphones have distinct stable Core Audio identities
+    And the user selected one microphone in native Scribe configuration
+    When device names or enumeration order change before the next capture
+    Then Scribe opens the selected stable device identity
+    And a missing selected device falls back visibly to the current default microphone
+
+  @MTG-056 @automated @native @performance @security
+  Scenario: Live audio checking streams bounded levels without retaining audio
+    Given no meeting capture is active
+    When the user starts a live microphone and system-audio check
+    Then combined level updates arrive no more than ten times per second
+    And capture-open failure, no data, captured silence, and detected signal remain distinct
+    And only bounded counters and peaks are retained between updates
+
+  @MTG-057 @automated @native @recovery
+  Scenario: Every live audio check releases its native streams
+    Given a live audio check owns microphone and system-audio streams
+    When the user stops the check or its owning window is destroyed
+    Then both native streams stop and are dropped exactly once
+    And a later check can acquire the devices without restarting Mimir

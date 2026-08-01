@@ -13,7 +13,11 @@
       :config="meetings.config"
       :permissions="meetings.permissions"
       :models="meetings.models"
+      :audio-check="meetings.audioCheck"
+      :audio-testing="meetings.audioTesting"
+      :microphone-catalog="meetings.microphoneCatalog"
       :pending="meetings.pending"
+      :summary-agents="summaryAgents"
       :credential-notice="credentialNotice"
       :credential-error="credentialError"
       @save="run(meetings.saveConfig, $event)"
@@ -27,24 +31,31 @@
       @open-system-audio-settings="
         run(meetings.openSystemAudioSettings)
       "
+      @check-audio="run(meetings.checkAudio)"
     />
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useLaunchersStore } from '../../../stores/launchers.js'
 import { useMeetingsStore } from '../../../stores/meetings.js'
 import ScribeSettings from '../../../mimir/apps/scribe/ScribeSettings.vue'
 
 const meetings = useMeetingsStore()
+const launchers = useLaunchersStore()
 const status = ref('')
 const failed = ref(false)
 const credentialNotice = ref('')
 const credentialError = ref('')
+const summaryAgents = computed(() => launchers.availablePresets.filter(
+  preset => preset.kind === 'agent',
+))
 
 onMounted(async () => {
   try {
     await meetings.initialize()
+    await meetings.refreshMicrophones()
   } catch (error) {
     failed.value = true
     status.value = message(error)

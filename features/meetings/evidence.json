@@ -44,7 +44,7 @@
   "suites": [
     {
       "feature": "features/meetings/01_detection_and_consent.feature",
-      "idRange": ["MTG-001", "MTG-009"],
+      "idRange": ["MTG-001", "MTG-010"],
       "owner": "meeting-detection-and-consent",
       "verificationScope": ["native fake-clock detection policy", "human consent and hosted-route disclosure", "global recording indicator"]
     },
@@ -56,13 +56,13 @@
     },
     {
       "feature": "features/meetings/03_multichannel_capture.feature",
-      "idRange": ["MTG-040", "MTG-054"],
+      "idRange": ["MTG-040", "MTG-057"],
       "owner": "meeting-audio",
       "verificationScope": ["bounded dual-channel audio primitives", "capture failure and resampling tests", "macOS hardware evidence"]
     },
     {
       "feature": "features/meetings/04_transcription.feature",
-      "idRange": ["MTG-060", "MTG-080"],
+      "idRange": ["MTG-060", "MTG-081"],
       "owner": "meeting-transcription",
       "verificationScope": ["revisioned STT contracts", "custom transport and credentials", "verified in-process local model"]
     },
@@ -74,7 +74,7 @@
     },
     {
       "feature": "features/meetings/06_title_and_summary_finalization.feature",
-      "idRange": ["MTG-110", "MTG-118"],
+      "idRange": ["MTG-110", "MTG-120"],
       "owner": "meeting-finalization-jobs",
       "verificationScope": ["atomic completed-lifecycle summary outbox", "controlled argv and output", "monotonic retry and revision identity"]
     },
@@ -98,7 +98,7 @@
     },
     {
       "feature": "features/meetings/10_accessibility_and_workbench.feature",
-      "idRange": ["MTG-200", "MTG-207"],
+      "idRange": ["MTG-200", "MTG-212"],
       "owner": "meeting-workbench",
       "verificationScope": ["global mute/Stop and permission-repair tests", "ordered settings mutation", "bounded reviewed-tag projection and editing", "manual keyboard and assistive technology audit", "release visual matrix"]
     },
@@ -141,6 +141,12 @@
       "scenarios": ["MTG-009"]
     },
     {
+      "kind": "rust-test",
+      "path": "src-tauri/crates/mimir-meeting-detect/tests/detection_policy.rs",
+      "selector": "slack_audio_helpers_are_grouped_under_the_human_facing_app",
+      "scenarios": ["MTG-010"]
+    },
+    {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
       "selector": "shows a detected app as a dismissible inline suggestion",
@@ -178,9 +184,9 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "explicit_consent_single_active_and_idempotent_controls",
-      "scenarios": ["MTG-021", "MTG-022"]
+      "scenarios": ["MTG-021", "MTG-022", "MTG-055"]
     },
     {
       "kind": "js-test",
@@ -190,7 +196,7 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "real_time_batches_reject_stale_runs_and_are_idempotent",
       "scenarios": ["MTG-024"]
     },
@@ -214,13 +220,13 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "stop_winning_failed_worker_race_enqueues_repair_before_delayed_callback",
       "scenarios": ["MTG-028"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "stop_refreshes_revision_after_capture_records_reconnect_gap",
       "scenarios": ["MTG-029"]
     },
@@ -232,13 +238,13 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "capture_start_failure_is_durable_and_never_reported_as_success",
       "scenarios": ["MTG-041"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "mtg_046_mid_session_capture_failure_is_immediately_durable_and_visible",
       "scenarios": ["MTG-046"]
     },
@@ -289,6 +295,24 @@
       "path": "src-tauri/src/meetings/commands.rs",
       "selector": "microphone_request_returns_the_authoritative_grant_not_a_stale_detector_snapshot",
       "scenarios": ["MTG-054"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/crates/mimir-meeting-audio/src/macos/mic.rs",
+      "selector": "stable_identity_selects_the_requested_microphone_independent_of_name_and_order",
+      "scenarios": ["MTG-055"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/audio_test.rs",
+      "selector": "level_projection_is_rate_limited_and_never_retains_samples",
+      "scenarios": ["MTG-056"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/audio_test.rs",
+      "selector": "explicit_stop_and_window_teardown_release_each_test_once",
+      "scenarios": ["MTG-057"]
     },
     {
       "kind": "rust-test",
@@ -346,19 +370,19 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "recovery_interrupts_capture_and_requeues_running_work",
       "scenarios": ["MTG-070", "MTG-094"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "repeated_restarts_reuse_one_capture_generation_repair_owner",
       "scenarios": ["MTG-070", "MTG-092"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "recovery_keeps_the_original_consented_route_after_global_provider_changes",
       "scenarios": ["MTG-070"]
     },
@@ -400,6 +424,18 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
+      "selector": "explicit_retranscription_freezes_the_current_route_and_preserves_the_old_transcript",
+      "scenarios": ["MTG-070", "MTG-081"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
+      "selector": "retranscription_failure_keeps_the_old_revision_until_one_terminal_pass_commits",
+      "scenarios": ["MTG-071", "MTG-081"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/transcriber.rs",
       "selector": "openai_tls_peer_receives_two_channel_sessions_and_returns_live_revisions",
       "scenarios": ["MTG-076", "MTG-077"]
@@ -425,7 +461,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "opens one recent meeting into the focused Transcript and Summary review",
+      "selector": "opens a summarized meeting on Summary with only back and overflow in its header",
       "scenarios": ["MTG-079"]
     },
     {
@@ -460,19 +496,19 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "startup_completes_terminal_batch_before_lifecycle_without_stt_disclosure",
       "scenarios": ["MTG-098"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "completed_repair_job_redelivery_performs_zero_provider_work",
       "scenarios": ["MTG-098"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "failed_terminal_repair_redelivery_performs_zero_provider_or_audio_work",
       "scenarios": ["MTG-098", "MTG-101"]
     },
@@ -484,13 +520,13 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "startup_repairs_a_terminal_transcript_after_promoting_staged_audio_tail",
       "scenarios": ["MTG-100"]
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "startup_preserves_capture_failure_intent_across_terminal_crash_window",
       "scenarios": ["MTG-101"]
     },
@@ -514,7 +550,7 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "stop_finalizes_transcript_then_summary_then_offers_and_queues_kg",
       "scenarios": ["MTG-110", "MTG-112", "MTG-130", "MTG-135"]
     },
@@ -532,15 +568,27 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "completed_summary_can_run_again_with_the_current_template_and_agent_preset",
       "scenarios": ["MTG-111", "MTG-116"]
     },
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "lets a completed summary run again with the currently selected recipe",
-      "scenarios": ["MTG-116"]
+      "selector": "runs a per-meeting preset draft without mutating global settings or showing KG UI",
+      "scenarios": ["MTG-116", "MTG-119"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
+      "selector": "per_run_summary_uses_exact_recipe_without_mutating_global_defaults",
+      "scenarios": ["MTG-119"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "expands Custom into its own prompt and visible agent selector",
+      "scenarios": ["MTG-120"]
     },
     {
       "kind": "rust-test",
@@ -556,7 +604,7 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "repeated_manual_job_retries_receive_monotonic_idempotency_generations",
       "scenarios": ["MTG-114"]
     },
@@ -565,6 +613,42 @@
       "path": "src/mimir/apps/ScribeApp.test.js",
       "selector": "edits reviewed title summary and bounded tags",
       "scenarios": ["MTG-112", "MTG-116", "MTG-207"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "opens a summarized meeting on Summary with only back and overflow in its header",
+      "scenarios": ["MTG-208"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "opens the one global Scribe settings surface",
+      "scenarios": ["MTG-208"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "debounces full-library search, shows one transcript snippet, and clears it",
+      "scenarios": ["MTG-209"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "opens the row menu by right-click and renames without entering notes editing",
+      "scenarios": ["MTG-210"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "opens the row menu from the keyboard and retries transcript recovery",
+      "scenarios": ["MTG-211"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "keeps Stop visible above nonblocking transcription failure",
+      "scenarios": ["MTG-212"]
     },
     {
       "kind": "rust-test",
@@ -580,7 +664,7 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "silent_terminal_meeting_completes_without_summary_job",
       "scenarios": ["MTG-118"]
     },
@@ -598,7 +682,7 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "mtg_153_running_activity_only_releases_deletion_wait_and_cannot_recreate_content",
       "scenarios": ["MTG-153"]
     },
@@ -628,7 +712,7 @@
     },
     {
       "kind": "rust-test",
-      "path": "src-tauri/src/meetings/runtime.rs",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "repair_retry_refuses_to_replace_a_transcript_after_source_audio_is_gone",
       "scenarios": ["MTG-161"]
     },

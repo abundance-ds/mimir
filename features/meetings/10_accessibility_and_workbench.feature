@@ -58,3 +58,38 @@ Feature: Keep recording state operable and understandable throughout Mimir
     When the meeting appears in native detail, agent metadata, and the Scribe review surface
     Then the same bounded tags are visible instead of becoming write-only metadata
     And the user can keyboard-edit at most 64 tags of at most 80 characters each
+
+  @MTG-208 @automated @renderer @accessibility
+  Scenario: Review opens on the useful result without duplicating global settings
+    Given a completed meeting already has a summary
+    When the user opens that meeting
+    Then Summary is the default tab and its task controls precede the summary
+    And the detail header contains only Back and one actions menu
+    And the global summary prompt remains editable in exactly one settings surface
+
+  @MTG-209 @automated @renderer @contract
+  Scenario: A growing meeting library stays findable
+    Given the recent snapshot is bounded and older meetings remain durable
+    When the user searches at least three characters
+    Then native search covers titles, summaries, tags, and transcript text across the full library
+    And ordinary browsing groups unresolved meetings before Today, Previous 7 days, and Earlier
+
+  @MTG-210 @automated @renderer @accessibility
+  Scenario: Meeting actions are consistent from list and detail
+    Given a meeting is visible in the library or detail view
+    When the user opens its context or overflow menu with pointer or keyboard
+    Then Rename, Show in Finder, save-copy actions, and Delete are available in one menu
+    And destructive deletion still requires explicit confirmation
+
+  @MTG-211 @automated @renderer @recovery
+  Scenario: A failed transcript has an immediate repair action
+    Given retained source audio exists for a meeting whose transcript needs attention
+    When the meeting detail is opened
+    Then Transcribe again is visible beside the failure state and in the actions menu
+    And it reprocesses with the currently selected provider and model
+
+  @MTG-212 @automated @renderer @accessibility
+  Scenario: Errors never obstruct recording control
+    Given recording continues while transcription reports a recoverable error
+    When the error is visible
+    Then Stop remains fixed, visible, and keyboard operable above the diagnostic

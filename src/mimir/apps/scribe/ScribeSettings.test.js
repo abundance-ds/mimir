@@ -89,13 +89,11 @@ describe('ScribeSettings', () => {
         config,
         permissions: { microphone: 'development-host', systemAudio: 'development-host' },
         audioCheck: {
-          microphone: 'signal',
-          systemAudio: 'silent',
-          microphoneLevel: 78,
-          systemAudioLevel: 12,
-          runtimeIdentity: 'development-host',
-          observedMs: 4_000,
+          state: 'running',
+          microphone: { state: 'signal', level: 78 },
+          systemAudio: { state: 'silent', level: 12 },
         },
+        audioTesting: true,
       },
     })
 
@@ -105,10 +103,31 @@ describe('ScribeSettings', () => {
       .toBe('78')
     expect(wrapper.get('[data-scribe-audio-level="system"]').attributes('aria-valuenow'))
       .toBe('12')
-    expect(wrapper.text()).toContain('No samples are kept')
-    expect(wrapper.text()).toContain('Verify in the installed Mimir app')
+    expect(wrapper.get('[data-scribe-check-audio]').text()).toBe('Stop test')
     await wrapper.get('[data-scribe-check-audio]').trigger('click')
     expect(wrapper.emitted('checkAudio')).toHaveLength(1)
+  })
+
+  it('selects a stable microphone identity or returns to the system default', async () => {
+    const wrapper = mount(ScribeSettings, {
+      props: {
+        embedded: true,
+        config,
+        permissions: { microphone: 'granted', systemAudio: 'granted' },
+        microphoneCatalog: {
+          devices: [{ id: 'coreaudio:desk-mic', name: 'Desk Mic', isDefault: false }],
+          fallbackReason: null,
+        },
+      },
+    })
+
+    const selector = wrapper.get('[aria-label="Microphone input"]')
+    expect(selector.text()).toContain('System default')
+    await selector.trigger('click')
+    await wrapper.findAll('[role="option"]')
+      .find(option => option.text().includes('Desk Mic'))
+      .trigger('click')
+    expect(wrapper.emitted('save')?.at(-1)).toEqual([{ microphoneDeviceId: 'coreaudio:desk-mic' }])
   })
 
   it('keeps credential state visible and does not erase a replacement before confirmation', async () => {
@@ -163,7 +182,7 @@ describe('ScribeSettings', () => {
     expect(wrapper.get('[aria-label="Summary CLI agent"]').text()).toContain('Codex')
   })
 
-  it('makes the actual summary system prompt editable and resets it with a preset', async () => {
+  it('keeps the editable summary prompt in global settings and resets it with a preset', async () => {
     const wrapper = mount(ScribeSettings, {
       props: {
         embedded: true,
@@ -173,6 +192,8 @@ describe('ScribeSettings', () => {
     })
 
     const prompt = wrapper.get('[data-scribe-summary-prompt]')
+    expect(wrapper.text()).toContain('Summary prompt')
+    expect(wrapper.text()).not.toContain('Knowledge-graph follow-up')
     expect(prompt.attributes('rows')).toBe('10')
     expect(prompt.element.value).toBe('Write a balanced meeting summary.')
     await prompt.setValue('Always list decisions before actions.')

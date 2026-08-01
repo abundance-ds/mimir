@@ -110,6 +110,7 @@ const expectedSnapshot = {
   config: {
     detectionEnabled: true,
     autoRecord: false,
+    microphoneDeviceId: 'CoreAudio:fixture-microphone',
     transcriptionMode: 'custom',
     customUrl: 'https://speech.example.test/v1/listen',
     customModel: 'nova-3',

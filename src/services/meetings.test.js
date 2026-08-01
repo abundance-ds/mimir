@@ -6,14 +6,21 @@ import {
   decideMeetingKgProposal,
   dismissMeetingCandidate,
   issueMeetingStartConsent,
+  listenToMeetingAudioTestEvents,
   listenToMeetingEvents,
+  loadMeetingMicrophones,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   normalizeMeetingTranscriptPage,
   normalizeMeetingSnapshot,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  retranscribeMeeting,
+  runMeetingSummary,
+  searchMeetingLibrary,
   showMeetingFiles,
+  startMeetingAudioTest,
+  stopMeetingAudioTest,
   startMeeting,
   updateMeeting,
   updateMeetingsConfig,
@@ -73,6 +80,60 @@ describe('meetings service', () => {
     expect(invoke).toHaveBeenCalledWith('meetings_check_audio')
   })
 
+  it('normalizes stable microphones and bounded live level events', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      selected_device_id: 'uid-selected',
+      selected_available: false,
+      effective_device_id: 'uid-default',
+      fallback_reason: 'Selected microphone is unavailable; using MacBook Microphone.',
+      devices: [
+        { id: 'uid-default', name: 'MacBook Microphone', is_default: true },
+        { id: '', name: 'Invalid' },
+      ],
+    })
+    await expect(loadMeetingMicrophones()).resolves.toEqual({
+      selectedDeviceId: 'uid-selected',
+      selectedAvailable: false,
+      effectiveDeviceId: 'uid-default',
+      fallbackReason: 'Selected microphone is unavailable; using MacBook Microphone.',
+      devices: [{ id: 'uid-default', name: 'MacBook Microphone', isDefault: true }],
+    })
+
+    let eventHandler
+    vi.mocked(listen).mockImplementationOnce(async (_name, handler) => {
+      eventHandler = handler
+      return vi.fn()
+    })
+    const received = vi.fn()
+    await listenToMeetingAudioTestEvents(received)
+    eventHandler({ payload: {
+      test_id: 'test-1',
+      sequence: 7,
+      state: 'running',
+      microphone: { state: 'signal', level: 73 },
+      system_audio: { state: 'provider-detail', level: 140, error: 'bounded' },
+      microphone_device_name: 'MacBook Microphone',
+    } })
+    expect(received).toHaveBeenCalledWith({
+      testId: 'test-1',
+      sequence: 7,
+      state: 'running',
+      microphone: { state: 'signal', level: 73, error: null },
+      systemAudio: { state: 'no-data', level: 100, error: 'bounded' },
+      microphoneDeviceId: null,
+      microphoneDeviceName: 'MacBook Microphone',
+      fallbackFromMicrophoneDeviceId: null,
+    })
+
+    vi.mocked(invoke).mockResolvedValueOnce({ test_id: 'test-1' }).mockResolvedValueOnce()
+    await expect(startMeetingAudioTest()).resolves.toEqual({
+      testId: 'test-1',
+      requestedMicrophoneDeviceId: null,
+    })
+    await stopMeetingAudioTest('test-1')
+    expect(invoke).toHaveBeenLastCalledWith('meetings_audio_test_stop', { testId: 'test-1' })
+  })
+
   it('normalizes bounded reviewed tags and validates tag updates before IPC', async () => {
     const normalized = normalizeMeetingSnapshot({
       revision: 1,
@@ -100,6 +161,72 @@ describe('meetings service', () => {
       tags: ['x'.repeat(81)],
     })).rejects.toThrow('80')
     expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('requests explicit retranscription without a renderer consent checkbox', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      revision: 12,
+      meetings: [{ id: 'retained-audio', transcription: 'batch' }],
+    })
+
+    await expect(retranscribeMeeting('retained-audio')).resolves.toMatchObject({
+      revision: 12,
+      meetings: [{ id: 'retained-audio', transcription: 'batch' }],
+    })
+    expect(invoke).toHaveBeenCalledWith('meetings_retranscribe', {
+      meetingId: 'retained-audio',
+    })
+  })
+
+  it('sends a fine-tuned summary recipe as one per-run native request', async () => {
+    vi.mocked(invoke).mockResolvedValue({ revision: 4, meetings: [] })
+
+    await runMeetingSummary('reviewed', {
+      template: 'brief',
+      prompt: 'Lead with the decision, then list owners.',
+      preset: 'codex-review',
+    })
+
+    expect(invoke).toHaveBeenCalledWith('meetings_run_summary', {
+      meetingId: 'reviewed',
+      request: {
+        template: 'brief',
+        prompt: 'Lead with the decision, then list owners.',
+        preset: 'codex-review',
+      },
+    })
+    await expect(runMeetingSummary('reviewed', {
+      template: 'brief', prompt: '  ', preset: '',
+    })).rejects.toThrow('summary prompt')
+  })
+
+  it('searches the complete native meeting library and bounds transcript evidence', async () => {
+    vi.mocked(invoke).mockResolvedValue([{
+      meeting: { id: 'm1', title: 'Launch review', lifecycle: 'ready' },
+      matched: {
+        title: true,
+        summary: false,
+        tags: true,
+        transcript: Array.from({ length: 8 }, (_, index) => ({
+          meeting_id: 'm1',
+          segment_id: `s${index}`,
+          start_ms: index * 1000,
+          text: `release evidence ${index}`,
+        })),
+      },
+    }])
+
+    const [result] = await searchMeetingLibrary(' release ', 500)
+    expect(result).toMatchObject({
+      meeting: { id: 'm1', title: 'Launch review' },
+      matched: { title: true, tags: true },
+    })
+    expect(result.matched.transcript[0]).toMatchObject({ segmentId: 's0' })
+    expect(result.matched.transcript).toHaveLength(3)
+    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_search_library', {
+      query: 'release', limit: 100,
+    })
+    await expect(searchMeetingLibrary('re')).resolves.toEqual([])
   })
 
   it('acquires native consent authority and starts only with its opaque grant', async () => {

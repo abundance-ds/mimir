@@ -45,6 +45,23 @@
             @change="save({ detectionEnabled: $event.target.checked })"
           />
         </label>
+        <label class="mt-3 block">
+          <span class="scribe-settings-label">Microphone input</span>
+          <ScribeSelect
+            :model-value="config.microphoneDeviceId || ''"
+            :options="microphoneOptions"
+            :disabled="configPending || audioTesting"
+            aria-label="Microphone input"
+            @update:model-value="save({ microphoneDeviceId: $event || null })"
+          />
+        </label>
+        <p
+          v-if="microphoneCatalog.fallbackReason"
+          class="mt-2 text-[9px] text-rem"
+          role="status"
+        >
+          {{ microphoneCatalog.fallbackReason }}
+        </p>
         <dl class="mt-3 grid grid-cols-[130px_1fr] border-t border-rule-light text-[10px]">
           <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
           <dd class="border-b border-rule-light py-2">
@@ -63,9 +80,7 @@
         </p>
         <div class="mt-3 border-t border-rule-light pt-3">
           <div class="flex items-start gap-3">
-            <p class="min-w-0 flex-1 text-[9px] leading-relaxed text-ink-3">
-              Play audio, then check both inputs for 4 seconds. No samples are kept.
-            </p>
+            <span class="min-w-0 flex-1 text-[10px] font-medium">Input levels</span>
             <button
               type="button"
               data-scribe-check-audio
@@ -73,7 +88,7 @@
               :disabled="Boolean(pending['audio-check'])"
               @click="$emit('checkAudio')"
             >
-              {{ pending['audio-check'] ? 'Checking…' : 'Check audio' }}
+              {{ pending['audio-check'] ? 'Starting…' : audioTesting ? 'Stop test' : 'Test inputs' }}
             </button>
           </div>
           <dl
@@ -92,9 +107,9 @@
                 aria-label="Microphone input level"
                 aria-valuemin="0"
                 aria-valuemax="100"
-                :aria-valuenow="audioCheck.microphoneLevel"
+                :aria-valuenow="audioSourceLevel(audioCheck.microphone)"
               >
-                <span :style="{ width: `${audioCheck.microphoneLevel}%` }" />
+                <span :style="{ width: `${audioSourceLevel(audioCheck.microphone)}%` }" />
               </span>
             </dd>
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
@@ -107,9 +122,9 @@
                 aria-label="System-audio input level"
                 aria-valuemin="0"
                 aria-valuemax="100"
-                :aria-valuenow="audioCheck.systemAudioLevel"
+                :aria-valuenow="audioSourceLevel(audioCheck.systemAudio)"
               >
-                <span :style="{ width: `${audioCheck.systemAudioLevel}%` }" />
+                <span :style="{ width: `${audioSourceLevel(audioCheck.systemAudio)}%` }" />
               </span>
             </dd>
           </dl>
@@ -361,7 +376,7 @@
         <div v-if="config.summaryEnabled" class="mt-3">
           <div class="mb-1 flex items-center gap-2">
             <label for="scribe-summary-prompt" class="scribe-settings-label mb-0 flex-1">
-              System prompt
+              Summary prompt
             </label>
             <button
               type="button"
@@ -393,16 +408,6 @@
             </button>
           </div>
         </div>
-        <label class="mt-3 block">
-          <span class="scribe-settings-label">Knowledge-graph follow-up</span>
-          <ScribeSelect
-            :model-value="config.kgPrompt"
-            :options="kgPromptOptions"
-            :disabled="configPending"
-            aria-label="Knowledge-graph follow-up"
-            @update:model-value="save({ kgPrompt: $event })"
-          />
-        </label>
       </section>
 
       <section class="py-4">
@@ -440,6 +445,11 @@ const props = defineProps({
   permissions: { type: Object, required: true },
   models: { type: Array, default: () => [] },
   audioCheck: { type: Object, default: null },
+  audioTesting: { type: Boolean, default: false },
+  microphoneCatalog: {
+    type: Object,
+    default: () => ({ devices: [], fallbackReason: null }),
+  },
   pending: { type: Object, default: () => ({}) },
   embedded: { type: Boolean, default: false },
   credentialNotice: { type: String, default: '' },
@@ -490,6 +500,13 @@ const retentionValue = computed(() => (
   props.config.retentionDays == null ? 'forever' : String(props.config.retentionDays)
 ))
 const summaryTemplateOptions = SUMMARY_TEMPLATE_OPTIONS
+const microphoneOptions = computed(() => [
+  { value: '', label: 'System default' },
+  ...(props.microphoneCatalog.devices || []).map(device => ({
+    value: device.id,
+    label: `${device.name}${device.isDefault ? ' · Default' : ''}`,
+  })),
+])
 const summaryPromptChanged = computed(() => (
   summaryPrompt.value !== (
     props.config.summaryPrompt || summaryPromptFor(props.config.summaryTemplate)
@@ -505,11 +522,6 @@ const summaryAgentOptions = computed(() => buildSummaryAgentOptions(
   })),
   props.config.summaryPreset,
 ))
-const kgPromptOptions = [
-  { value: 'ask', label: 'Ask every time' },
-  { value: 'always-draft', label: 'Always create a reviewable draft' },
-  { value: 'never', label: 'Never ask' },
-]
 const retentionOptions = [
   { value: '0', label: 'Delete after final transcript' },
   { value: '7', label: '7 days' },
@@ -622,11 +634,20 @@ function permissionLabel(value) {
 }
 
 function signalLabel(value) {
+  const state = typeof value === 'string' ? value : value?.state
   return ({
     signal: 'Signal detected',
     silent: 'No sound detected — play audio and retry',
     'no-data': 'No frames received',
-  })[value] || 'Not checked'
+    'open-failed': value?.error || 'Could not open input',
+    ended: value?.error || 'Input stopped',
+    stopped: 'Stopped',
+  })[state] || 'Not checked'
+}
+
+function audioSourceLevel(value) {
+  if (typeof value === 'number') return Math.min(100, Math.max(0, value))
+  return Math.min(100, Math.max(0, Number(value?.level) || 0))
 }
 
 function formatBytes(bytes) {

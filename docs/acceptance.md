@@ -288,15 +288,17 @@ requirements; they do not replace runtime verification.
 
 - Sustained microphone use by a recognized call process yields one deduplicated
   local candidate. Disabled detection owns no listeners and emits no prompt.
-- A candidate or manual start opens the consent confirmation; capture cannot
-  begin without the explicit acknowledgement and a deliberate user action.
+- A candidate or manual start uses one deliberate Record action. Native code
+  binds that action to a short-lived route/candidate authorization, but no
+  participant-attestation checkbox or second confirmation screen is shown.
 - Recording exposes a persistent elapsed-time, mute, and Stop control outside
   the Scribe surface. Only one recording can be active.
 - Settings forwards microphone repair to the native permission request and
   opens system-audio repair only at the fixed macOS Screen & System Audio
   Recording privacy pane. While a configuration save is pending, mutation
   controls are visibly disabled and accepted overlapping changes commit in
-  request order.
+  request order. Settings lists microphones by stable Core Audio identity and
+  streams bounded microphone/system input levels until the user stops the test.
 - Microphone and system audio commit as separate lossless timelines. Mute
   writes microphone silence; route/device interruption reopens both streams
   with aligned gap evidence and monotonic timestamps.
@@ -328,15 +330,25 @@ requirements; they do not replace runtime verification.
   presses Stop.
 - Delayed transcription reads only integrity-verified committed audio and uses
   the exact route/model approved for that meeting, even if provider settings
-  later change.
+  later change. An explicit **Transcribe again** action instead freezes the
+  currently selected route/model, preserves the prior transcript on failure,
+  and atomically replaces it only after one all-final pass.
 - Stop finalizes durable audio and transcript before enqueuing a visible
   title-and-summary Activity. Completed lifecycle and the default summary
   outbox commit atomically; Stop reads hook policy without reading the STT
   credential. The Activity uses exact argv and controlled, immutable transcript
   input; failures remain retryable under monotonic manual-retry generations.
-- A successful summary offers a separate knowledge-graph choice. “Create”
-  produces a reviewable proposal; “Not now” and “Never” do not mutate graph
-  data.
+- Summary review offers Summary, Brief, and Decisions + actions presets plus
+  Custom. Presets seed an expandable per-run prompt and optional CLI agent;
+  fine-tuning one run does not mutate global defaults. The editable text is
+  wrapped in a fixed native safety/output prompt. Custom opens a durable
+  interactive Activity with the exact meeting identity. Scribe presents no
+  knowledge-graph shortcut in this flow.
+- Meetings with summaries open on Summary. Global settings never appear in a
+  meeting detail. List and detail share accessible context/overflow actions for
+  Rename, Show in Finder, save-copy actions, retranscription, and confirmed
+  Delete. Full-library search remains native and ordinary browsing groups
+  Needs attention, Today, Previous 7 days, and Earlier.
 - Agent tools can list, get, search, and update completed/interrupted Scribe
   records with bounded results. They cannot start, mute, stop, request
   permission, configure a provider, or publish a graph mutation. Search terms

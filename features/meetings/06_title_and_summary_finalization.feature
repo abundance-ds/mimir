@@ -69,3 +69,18 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
     When the user stops the meeting
     Then Mimir commits an empty terminal transcript and completes the meeting
     And it does not queue title, summary, or graph work for invented content
+
+  @MTG-119 @automated @native @renderer @contract
+  Scenario: Fine-tuning one summary does not change future meetings
+    Given a completed meeting has a terminal non-empty transcript
+    When the user chooses a summary preset and fine-tunes its prompt for this run
+    Then the exact preset, prompt, and CLI agent are frozen into one durable job
+    And the global summary defaults remain unchanged
+
+  @MTG-120 @automated @renderer @desktop
+  Scenario: Custom follow-up opens as an interactive agent Activity
+    Given the user is reviewing a completed meeting
+    When they choose Custom, select a CLI agent, enter a prompt, and run it
+    Then Mimir opens a durable interactive Activity with that exact meeting identity
+    And the agent can retrieve the meeting through meetings_get
+    And no knowledge-graph action is presented as a Scribe task
