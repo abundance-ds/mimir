@@ -123,6 +123,7 @@ Feature: Produce live and batch transcripts through local or custom routes
     When committed microphone and system chunks arrive during recording
     Then Mimir streams each channel through an independently owned session
     And transcript deltas retain Mimir's You and Others channel provenance
+    And whitespace-only provider framing never becomes an empty segment or stops either session
 
   @MTG-077 @automated @native @security
   Scenario: OpenAI credentials remain endpoint-bound in Keychain

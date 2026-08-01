@@ -27,6 +27,18 @@ Run the desktop app:
 bun tauri dev
 ```
 
+`bun tauri dev` is sufficient for IPC and ordinary desktop work, but its raw
+development executable has no stable application-bundle identity and cannot
+prove Mimir's system-audio TCC path. Build an ad-hoc local `.app` for Scribe
+hardware checks without distribution signing or notarization:
+
+```bash
+bun run scribe:smoke-app
+open src-tauri/target/debug/bundle/macos/Mimir.app
+```
+
+This is test-only. It does not produce or claim a release artifact.
+
 Vite binds to `127.0.0.1:1420`. If the port is busy: `lsof -nP -iTCP:1420 -sTCP:LISTEN`.
 
 `bun run dev` starts only the browser frontend. PTYs, dialogs, file index, Apps, Routines, key storage, and MCP require Tauri.

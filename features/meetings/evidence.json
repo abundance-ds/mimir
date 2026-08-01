@@ -454,6 +454,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "openai_whitespace_only_deltas_never_become_empty_segments_or_stop_the_worker",
+      "scenarios": ["MTG-076"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/platform.rs",
       "selector": "credential_save_succeeds_only_after_endpoint_bound_readback",
       "scenarios": ["MTG-077"]

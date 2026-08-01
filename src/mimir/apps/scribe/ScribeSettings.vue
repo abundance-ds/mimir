@@ -45,7 +45,7 @@
             @change="save({ detectionEnabled: $event.target.checked })"
           />
         </label>
-        <label class="mt-3 block">
+        <div class="mt-3 block">
           <span class="scribe-settings-label">Microphone input</span>
           <ScribeSelect
             :model-value="config.microphoneDeviceId || ''"
@@ -54,7 +54,7 @@
             aria-label="Microphone input"
             @update:model-value="save({ microphoneDeviceId: $event || null })"
           />
-        </label>
+        </div>
         <p
           v-if="microphoneCatalog.fallbackReason"
           class="mt-2 text-[9px] text-rem"
@@ -352,7 +352,7 @@
           />
         </label>
         <div v-if="config.summaryEnabled" class="mt-3 grid gap-3 sm:grid-cols-2">
-          <label class="block">
+          <div class="block">
             <span class="scribe-settings-label">Summary format</span>
             <ScribeSelect
               :model-value="config.summaryTemplate || 'standard'"
@@ -361,8 +361,8 @@
               aria-label="Summary format"
               @update:model-value="selectSummaryTemplate"
             />
-          </label>
-          <label class="block">
+          </div>
+          <div class="block">
             <span class="scribe-settings-label">CLI agent</span>
             <ScribeSelect
               :model-value="config.summaryPreset || ''"
@@ -371,7 +371,7 @@
               aria-label="Summary CLI agent"
               @update:model-value="save({ summaryPreset: $event })"
             />
-          </label>
+          </div>
         </div>
         <div v-if="config.summaryEnabled" class="mt-3">
           <div class="mb-1 flex items-center gap-2">
@@ -412,7 +412,7 @@
 
       <section class="py-4">
         <h3 class="text-[11px] font-semibold">Retention</h3>
-        <label class="mt-3 block">
+        <div class="mt-3 block">
           <span class="scribe-settings-label">Keep source audio</span>
           <ScribeSelect
             :model-value="retentionValue"
@@ -421,7 +421,7 @@
             aria-label="Keep source audio"
             @update:model-value="saveRetention"
           />
-        </label>
+        </div>
         <p class="mt-2 text-[9px] leading-relaxed text-ink-3">
           Recovery and active jobs may keep audio longer.
         </p>

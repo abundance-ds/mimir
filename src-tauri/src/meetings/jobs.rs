@@ -276,7 +276,8 @@ fn execute_claimed_job(inner: &MeetingJobWorkerInner, job: FollowUpJob) {
         Ok(result) => JobFinish::Succeeded { result },
         Err(error) => JobFinish::Failed {
             error: bounded_error(&error),
-            retryable: !inner.stopping.load(Ordering::Acquire),
+            retryable: !inner.stopping.load(Ordering::Acquire)
+                && is_retryable_job_failure(&job, &error),
             retry_at: Some(
                 (Utc::now() + ChronoDuration::seconds(retry_delay_seconds(job.attempts)))
                     .to_rfc3339_opts(SecondsFormat::Millis, true),
@@ -1205,6 +1206,31 @@ fn retry_delay_seconds(attempt: u32) -> i64 {
     30_i64.saturating_mul(2_i64.saturating_pow(exponent))
 }
 
+fn is_retryable_job_failure(job: &FollowUpJob, error: &str) -> bool {
+    if !matches!(
+        &job.definition.kind,
+        FollowUpJobKind::Custom(name) if name == "transcription"
+    ) {
+        return true;
+    }
+    let error = error.to_ascii_lowercase();
+    ![
+        "transcript segment text is empty or too large",
+        "provider final segment omitted",
+        "provider final segment used an unknown audio channel",
+        "authentication-failed",
+        "quota-exhausted",
+        "model-unavailable",
+        "unsupported-transcription-model",
+        "requires an api key",
+        "credential is not configured",
+        "source audio is no longer available",
+        "no committed source audio",
+    ]
+    .iter()
+    .any(|terminal| error.contains(terminal))
+}
+
 fn bounded_error(error: &str) -> String {
     let normalized = error.replace(['\n', '\r'], " ");
     let mut chars = normalized.chars();
@@ -1633,6 +1659,29 @@ mod tests {
         assert_eq!(retry_delay_seconds(1), 30);
         assert_eq!(retry_delay_seconds(2), 60);
         assert_eq!(retry_delay_seconds(99), 1_920);
+    }
+
+    #[test]
+    fn deterministic_transcription_contract_failures_do_not_wait_through_retries() {
+        let mut transcription = hook_job();
+        transcription.definition.kind = FollowUpJobKind::Custom("transcription".into());
+
+        assert!(!is_retryable_job_failure(
+            &transcription,
+            "transcript segment text is empty or too large"
+        ));
+        assert!(!is_retryable_job_failure(
+            &transcription,
+            "OpenAI realtime session was rejected (authentication-failed)"
+        ));
+        assert!(is_retryable_job_failure(
+            &transcription,
+            "OpenAI realtime connection closed before finalization"
+        ));
+        assert!(is_retryable_job_failure(
+            &hook_job(),
+            "meeting Activity temporarily failed"
+        ));
     }
 
     #[test]

@@ -203,6 +203,7 @@ describe('ScribeSettings', () => {
     }])
 
     const format = wrapper.get('[aria-label="Summary format"]')
+    expect(format.element.closest('label')).toBeNull()
     await format.trigger('click')
     await wrapper.findAll('[role="option"]')
       .find(option => option.text().includes('Brief'))

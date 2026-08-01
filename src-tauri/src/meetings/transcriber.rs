@@ -1204,7 +1204,16 @@ impl StoreBatchSink {
 }
 
 impl NormalizedBatchSink for StoreBatchSink {
-    fn ingest(&mut self, batch: NormalizedTranscriptBatch) -> Result<(), String> {
+    fn ingest(&mut self, mut batch: NormalizedTranscriptBatch) -> Result<(), String> {
+        // Provider adapters should already suppress framing-only output, but
+        // the durable boundary is the final defense. One empty partial must
+        // never turn a healthy audio/provider session into a failed meeting.
+        batch
+            .segments
+            .retain(|segment| !segment.text.trim().is_empty());
+        if batch.segments.is_empty() {
+            return Ok(());
+        }
         for segment in &batch.segments {
             if segment.state != SegmentState::Final {
                 continue;
@@ -1409,7 +1418,11 @@ impl OpenAiTranscriptState {
             "conversation.item.input_audio_transcription.delta" => {
                 let item_id = required_openai_string(value, "item_id")?;
                 let delta = required_openai_string(value, "delta")?;
-                if delta.is_empty() || self.completed_items.contains(item_id) {
+                // OpenAI can emit framing-only whitespace before speech. It
+                // is not a transcript segment; persisting it violates the
+                // store contract and used to terminate an otherwise healthy
+                // live worker after its first silent turn.
+                if delta.trim().is_empty() || self.completed_items.contains(item_id) {
                     return Ok(OpenAiEventEffect::default());
                 }
                 let range = self.range_for(item_id);
@@ -3087,6 +3100,52 @@ mod tests {
     }
 
     #[test]
+    fn normalized_provider_whitespace_is_ignored_before_durable_ingest() {
+        let store = recording_store();
+        let mut sink = StoreBatchSink::new(
+            Arc::clone(&store),
+            "meeting-1",
+            "run-whitespace",
+            "custom",
+            None,
+            Arc::new(CountingChanges::default()),
+        )
+        .unwrap();
+
+        sink.ingest(provider_batch(
+            1,
+            "whitespace-only",
+            1,
+            SegmentState::Partial,
+            " \n\t",
+        ))
+        .unwrap();
+        assert!(store
+            .transcript_snapshot("meeting-1", None)
+            .unwrap()
+            .segments
+            .is_empty());
+
+        sink.ingest(provider_batch(
+            2,
+            "speech-after-whitespace",
+            2,
+            SegmentState::Final,
+            "Still listening",
+        ))
+        .unwrap();
+        assert_eq!(
+            store
+                .transcript_snapshot("meeting-1", None)
+                .unwrap()
+                .segments[0]
+                .segment
+                .text,
+            "Still listening"
+        );
+    }
+
+    #[test]
     fn durable_channels_are_interleaved_only_at_the_provider_boundary() {
         let temporary = TempDir::new().unwrap();
         let store = recording_store();
@@ -3556,6 +3615,41 @@ mod tests {
         assert_eq!(completed.text, "Guten Morgen");
         assert_eq!(completed.segment_id, partial.segment_id);
         assert!(final_event.completed_turn);
+    }
+
+    #[test]
+    fn openai_whitespace_only_deltas_never_become_empty_segments_or_stop_the_worker() {
+        let mut state =
+            OpenAiTranscriptState::new(OpenAiChannel::Microphone, Arc::new(AtomicU64::new(1)));
+        state.queue_commit(OpenAiAudioRange {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "item_whitespace"
+            }))
+            .unwrap();
+
+        let whitespace = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "item_whitespace",
+                "delta": " \n\t"
+            }))
+            .unwrap();
+        assert!(whitespace.batches.is_empty());
+
+        let speech = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "item_whitespace",
+                "delta": "Still listening"
+            }))
+            .unwrap();
+        assert_eq!(speech.batches.len(), 1);
+        assert_eq!(speech.batches[0].segments[0].text, "Still listening");
     }
 
     #[test]

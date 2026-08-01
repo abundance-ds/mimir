@@ -251,7 +251,7 @@
                   v-if="detailMeeting.transcriptFinal && detailMeeting.segmentCount > 0"
                   class="flex flex-wrap items-end gap-3"
                 >
-                  <label class="min-w-44 flex-1">
+                  <div class="min-w-44 flex-1">
                     <span class="scribe-field-label">Task</span>
                     <ScribeSelect
                       :model-value="summaryTask"
@@ -260,7 +260,7 @@
                       aria-label="Summary task"
                       @update:model-value="selectSummaryTask"
                     />
-                  </label>
+                  </div>
                   <button
                     v-if="summaryTask !== 'custom'"
                     type="button"
@@ -316,7 +316,7 @@
                   data-scribe-summary-options
                   class="mt-3 max-w-xs"
                 >
-                  <label class="block">
+                  <div class="block">
                     <span class="scribe-field-label">Agent</span>
                     <ScribeSelect
                       :model-value="summaryAgent"
@@ -324,10 +324,10 @@
                       aria-label="Summary agent"
                       @update:model-value="summaryAgent = $event"
                     />
-                  </label>
+                  </div>
                 </div>
                 <div v-if="summaryTask === 'custom'" data-scribe-custom-task class="mt-3 grid gap-3">
-                  <label class="block">
+                  <div class="block">
                     <span class="scribe-field-label">Agent</span>
                     <ScribeSelect
                       :model-value="summaryAgent"
@@ -335,7 +335,7 @@
                       aria-label="Custom task agent"
                       @update:model-value="summaryAgent = $event"
                     />
-                  </label>
+                  </div>
                   <label class="block">
                     <span class="scribe-field-label">Prompt</span>
                     <textarea
@@ -1219,13 +1219,26 @@ function recoveryStatus(meeting) {
     return `Stored audio is safe, but transcript recovery failed.${detail ? ` ${detail}` : ''}`
   }
   if (['pending', 'queued', 'running'].includes(job?.status)) {
-    return `Stored audio is safe. Transcript recovery is ${job.status === 'pending' ? 'queued' : job.status}.`
+    const detail = safeFailureDetail(job.error)
+    const phase = job.status === 'pending' ? 'queued' : job.status
+    return `Stored audio is safe. Transcript recovery is ${phase}.${detail ? ` Last attempt: ${detail}` : ''}`
   }
   const detail = safeFailureDetail(meeting.error)
   return `Capture ended unexpectedly. Stored audio is safe.${detail ? ` ${detail}` : ''}`
 }
 
 function summaryStatus(meeting) {
+  if (!meeting.transcriptFinal) {
+    const transcription = latestMeetingJob(meeting, 'transcription')
+    const detail = safeFailureDetail(transcription?.error || meeting.error)
+    if (transcription?.status === 'failed') {
+      return `Retranscribe this meeting before creating a summary.${detail ? ` ${detail}` : ''}`
+    }
+    if (['pending', 'queued', 'running'].includes(transcription?.status)) {
+      const phase = transcription.status === 'pending' ? 'queued' : transcription.status
+      return `Transcript recovery is ${phase}.${detail ? ` Last attempt: ${detail}` : ''}`
+    }
+  }
   const phase = meetingSummaryPhase(meeting)
   if (phase === 'failed') {
     const detail = safeFailureDetail(latestMeetingJob(meeting, 'title-summary')?.error)

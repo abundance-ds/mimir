@@ -51,6 +51,11 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   state that could make channel clocks disagree.
 - Microphone and system audio are separate, lossless 16 kHz mono `f32le`
   timelines. They are never mixed into the storage authority.
+- The system tap is global: audible output from Spotify, browsers, meeting
+  apps, and other processes is included unless a process is explicitly
+  excluded. Hardware signal must be checked from the bundled Mimir app; the
+  raw `bun tauri dev` executable has no stable TCC bundle identity and is not
+  valid system-audio evidence.
 - Capture owns the realtime budget. Transcription tails committed chunks and
   cannot block an audio callback or prevent durable recording.
 - Transcription is either managed local or an explicit hosted URL. The primary

@@ -341,6 +341,7 @@ describe('ScribeApp', () => {
     await wrapper.get('[data-scribe-meeting-row]').trigger('click')
 
     await wrapper.get('[aria-label="Summary task"]').trigger('click')
+    expect(wrapper.get('[aria-label="Summary task"]').element.closest('label')).toBeNull()
     expect(wrapper.findAll('[role="option"]').map(option => option.text())).toEqual([
       'Summary',
       'Brief',
@@ -348,6 +349,7 @@ describe('ScribeApp', () => {
       'Custom',
     ])
     await wrapper.findAll('[role="option"]').find(option => option.text().includes('Brief')).trigger('click')
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
     expect(wrapper.get('[data-scribe-prompt-toggle]').attributes('aria-expanded')).toBe('false')
     expect(wrapper.get('[data-scribe-summary-options-toggle]').attributes('aria-expanded')).toBe('false')
     await wrapper.get('[data-scribe-summary-options-toggle]').trigger('click')
@@ -444,6 +446,35 @@ describe('ScribeApp', () => {
     expect(wrapper.get('[data-scribe-regenerate-summary]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-scribe-summary-content]').text()).toBe('Creating…')
     expect(wrapper.text()).not.toContain('Starting…')
+  })
+
+  it('explains that transcript recovery blocks summary instead of showing generic waiting', async () => {
+    const interrupted = meeting({
+      lifecycle: 'interrupted',
+      transcription: 'failed',
+      transcriptFinal: false,
+      segmentCount: 2,
+      jobs: [{
+        id: 'transcription-1',
+        kind: 'transcription',
+        status: 'failed',
+        attempt: 1,
+        error: 'OpenAI returned an invalid empty segment',
+      }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [interrupted] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('#scribe-detail-tab-summary').trigger('click')
+
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain(
+      'Retranscribe this meeting before creating a summary',
+    )
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('invalid empty segment')
+    expect(wrapper.get('[data-scribe-summary-content]').text()).not.toContain(
+      'Waiting for final transcript',
+    )
   })
 
   it('trusts a failed summary job over stale running state and exposes a safe retry', async () => {
