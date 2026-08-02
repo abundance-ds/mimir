@@ -60,6 +60,9 @@ describe('ScribeSettings', () => {
       },
     ]])
     expect(wrapper.get('[data-scribe-openai-mode]').text()).toBe('Hosted')
+    expect(wrapper.text()).toContain('Requested on first use')
+    expect(wrapper.get('[data-scribe-open-system-audio-settings]').text())
+      .toBe('Open macOS audio permissions')
   })
 
   it('keeps an explicit custom URL visible and labels its credential honestly', () => {

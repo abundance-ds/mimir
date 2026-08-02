@@ -238,6 +238,11 @@ Saving reports success only after an endpoint-bound Keychain read-back matches
 the submitted secret. Scribe then shows a persistent configured state with
 separate replace and remove actions; it retains the typed value and renders the
 native failure beside the field when Keychain does not confirm the write.
+After one successful read, the endpoint-bound value (including an absent value)
+is cached only in process memory. Snapshot and transcript notifications reuse
+that result instead of repeatedly opening Keychain authorization dialogs. The
+cache is invalidated when the endpoint changes and overwritten on explicit save
+or removal.
 
 The route and model approved at Start are persisted as immutable meeting
 provenance. Delayed or restart recovery uses that exact pair and fails closed
@@ -433,6 +438,7 @@ rows after an interrupted write.
 | `~/.mimir/meetings/<id>/audio/` | independent committed channel chunks and gaps |
 | `~/.mimir/meetings/<id>/meeting.md` | current reviewed summary and transcript, materialized by **Files** |
 | `~/.mimir/meetings/<id>/followups/<job>/` | immutable bounded hook transcript input and controlled output |
+| `~/.mimir/meetings/<id>/scribe-debug.jsonl` | rotating owner-only pipeline events; no transcript text, audio, credential, or provider URL |
 | `~/.mimir/meetings/.content/` | reviewed title, summary, tags, and KG decision |
 | `~/.mimir/meetings/exports/` | explicit user exports |
 | `~/.mimir/models/stt/` | verified managed model and installation state |

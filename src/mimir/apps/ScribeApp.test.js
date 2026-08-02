@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import {
@@ -263,6 +263,33 @@ describe('ScribeApp', () => {
     expect(wrapper.get('[data-scribe-ledger]').text()).toContain('microphone + system audio')
     await wrapper.get('[data-scribe-stop]').trigger('click')
     await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
+  })
+
+  it('advances the recording clock during silence without native events', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-02T10:00:00.000Z'))
+    const active = meeting({
+      lifecycle: 'capturing',
+      transcription: 'listening',
+      startedAt: '2026-08-02T10:00:00.000Z',
+      recordingStartedAt: '2026-08-02T10:00:00.000Z',
+      stoppedAt: null,
+      durationMs: 0,
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      activeMeetingId: active.id,
+      meetings: [active],
+    }))
+
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-recording-label]').text()).toContain('0:00')
+
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(wrapper.get('[data-scribe-recording-label]').text()).toContain('0:03')
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('shows live partial speech and capture gaps in one ledger', async () => {

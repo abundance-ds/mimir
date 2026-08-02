@@ -146,6 +146,11 @@ struct EndpointBoundKeychainSecret {
     secret: String,
 }
 
+struct CachedMeetingSecret {
+    endpoint_binding: String,
+    secret: Option<String>,
+}
+
 fn encode_endpoint_bound_secret(
     endpoint: &CustomSttEndpoint,
     secret: &str,
@@ -1261,6 +1266,7 @@ struct NativeMeetingPlatformInner {
     models: Arc<ModelManager>,
     changes: Arc<dyn MeetingPlatformChangeSink>,
     operation: Mutex<()>,
+    credential_cache: Mutex<Option<CachedMeetingSecret>>,
     diagnostics: Arc<Mutex<Vec<String>>>,
     #[cfg(test)]
     content_loads: std::sync::atomic::AtomicUsize,
@@ -1304,6 +1310,7 @@ impl NativeMeetingPlatform {
                 models,
                 changes,
                 operation: Mutex::new(()),
+                credential_cache: Mutex::new(None),
                 diagnostics,
                 #[cfg(test)]
                 content_loads: std::sync::atomic::AtomicUsize::new(0),
@@ -1371,7 +1378,44 @@ impl NativeMeetingPlatform {
                 "Custom meeting transcription endpoint changed; refusing credential access".into(),
             );
         }
-        self.inner.secrets.read(endpoint)
+        self.cached_custom_secret(endpoint)
+    }
+
+    fn cached_custom_secret(&self, endpoint: &CustomSttEndpoint) -> Result<Option<String>, String> {
+        let binding = endpoint.credential_binding();
+        let mut cache = lock(&self.inner.credential_cache)?;
+        if let Some(cached) = cache.as_ref() {
+            if cached.endpoint_binding == binding {
+                return Ok(cached.secret.clone());
+            }
+        }
+
+        // Keychain reads can display a macOS authorization dialog. Cache both
+        // presence and absence for this process so snapshots and transcript
+        // events never turn one user action into repeated password prompts.
+        let secret = self.inner.secrets.read(endpoint)?;
+        *cache = Some(CachedMeetingSecret {
+            endpoint_binding: binding,
+            secret: secret.clone(),
+        });
+        Ok(secret)
+    }
+
+    fn cache_custom_secret(
+        &self,
+        endpoint: &CustomSttEndpoint,
+        secret: Option<String>,
+    ) -> Result<(), String> {
+        *lock(&self.inner.credential_cache)? = Some(CachedMeetingSecret {
+            endpoint_binding: endpoint.credential_binding(),
+            secret,
+        });
+        Ok(())
+    }
+
+    fn invalidate_credential_cache(&self) -> Result<(), String> {
+        *lock(&self.inner.credential_cache)? = None;
+        Ok(())
     }
 
     /// Resolve the redacted persisted custom route into the WebSocket endpoint
@@ -2026,7 +2070,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
     fn projection(&self) -> Result<MeetingPlatformProjection, String> {
         let mut config = self.load_config()?;
         config.api_key_configured = configured_custom_stt_endpoint(&config)?
-            .map(|endpoint| self.inner.secrets.read(&endpoint))
+            .map(|endpoint| self.cached_custom_secret(&endpoint))
             .transpose()?
             .flatten()
             .is_some();
@@ -2134,6 +2178,7 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
                 // after a later atomic config-write failure is safe and
                 // explicit re-entry repairs it.
                 self.inner.secrets.clear()?;
+                self.invalidate_credential_cache()?;
             }
             self.save_config(config)
         })();
@@ -2167,12 +2212,19 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         let endpoint = configured_custom_stt_endpoint(&config)?.ok_or_else(|| {
             "Select a valid custom transcription endpoint before saving its API key".to_string()
         })?;
-        store_and_verify_secret(self.inner.secrets.as_ref(), &endpoint, secret)
+        self.invalidate_credential_cache()?;
+        store_and_verify_secret(self.inner.secrets.as_ref(), &endpoint, secret)?;
+        self.cache_custom_secret(&endpoint, Some(secret.to_string()))
     }
 
     fn clear_api_key(&self) -> Result<(), String> {
         let _operation = lock(&self.inner.operation)?;
-        self.inner.secrets.clear()
+        let endpoint = configured_custom_stt_endpoint(&self.load_config()?)?;
+        self.inner.secrets.clear()?;
+        match endpoint {
+            Some(endpoint) => self.cache_custom_secret(&endpoint, None),
+            None => self.invalidate_credential_cache(),
+        }
     }
 
     fn install_model(&self, model_id: &str) -> Result<(), String> {
@@ -3232,6 +3284,44 @@ mod tests {
         assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 0);
 
         fixture.platform.projection().unwrap();
+        assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn repeated_projections_read_the_keychain_only_once_per_endpoint() {
+        let fixture = fixture();
+        fixture
+            .platform
+            .update_config(&MeetingConfigPatch {
+                transcription_mode: Some("custom".into()),
+                custom_url: Some("https://stt.example.com/v1/listen".into()),
+                custom_model: Some("nova-3".into()),
+                ..MeetingConfigPatch::default()
+            })
+            .unwrap();
+
+        assert!(
+            !fixture
+                .platform
+                .projection()
+                .unwrap()
+                .config
+                .api_key_configured
+        );
+        assert!(
+            !fixture
+                .platform
+                .projection()
+                .unwrap()
+                .config
+                .api_key_configured
+        );
+        let endpoint = fixture.platform.custom_stt_endpoint().unwrap().unwrap();
+        assert_eq!(
+            fixture.platform.custom_api_key_for(&endpoint).unwrap(),
+            None
+        );
+
         assert_eq!(fixture.secrets.reads.load(Ordering::Relaxed), 1);
     }
 

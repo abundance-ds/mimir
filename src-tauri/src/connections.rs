@@ -45,12 +45,17 @@ pub(crate) fn register_native_tools(registry: &ToolRegistry) -> Result<(), Strin
         slack_account: slack_account.clone(),
     };
 
-    if enabled(&settings, "google") {
+    // Credential-backed connections must be explicitly configured before
+    // startup probes Keychain. The old unconditional probe produced multiple
+    // password dialogs even though no Google or Slack tools were registered.
+    if credential_connection_declared(&settings, &legacy_defaults, "google") {
         if let Some(bundle) = google_bundle(&google_account).ok().flatten() {
             register_google_tools(registry, &runtime, &bundle)?;
         }
     }
-    if enabled(&settings, "slack") && slack_token(&slack_account).ok().flatten().is_some() {
+    if credential_connection_declared(&settings, &legacy_defaults, "slack")
+        && slack_token(&slack_account).ok().flatten().is_some()
+    {
         register_slack_tools(registry, &runtime)?;
     }
     if enabled(&settings, "granola") {
@@ -1348,6 +1353,16 @@ fn enabled(settings: &Value, name: &str) -> bool {
     }
 }
 
+fn credential_connection_declared(settings: &Value, legacy_defaults: &Value, name: &str) -> bool {
+    if settings.pointer(&format!("/connections/{name}")).is_some() {
+        return enabled(settings, name);
+    }
+    legacy_defaults
+        .get(name)
+        .and_then(Value::as_str)
+        .is_some_and(|account| !account.trim().is_empty())
+}
+
 fn gmail_summary(message: &Value) -> Value {
     let headers = gmail_headers(message.get("payload"));
     json!({
@@ -2084,6 +2099,30 @@ mod tests {
         ));
         assert!(!enabled(
             &json!({ "connections": { "google": { "enabled": false } } }),
+            "google"
+        ));
+    }
+
+    #[test]
+    fn startup_probes_only_declared_credential_connections() {
+        assert!(!credential_connection_declared(
+            &json!({}),
+            &json!({}),
+            "google"
+        ));
+        assert!(credential_connection_declared(
+            &json!({ "connections": { "google": true } }),
+            &json!({}),
+            "google"
+        ));
+        assert!(!credential_connection_declared(
+            &json!({ "connections": { "google": false } }),
+            &json!({ "google": "legacy@example.com" }),
+            "google"
+        ));
+        assert!(credential_connection_declared(
+            &json!({}),
+            &json!({ "google": "legacy@example.com" }),
             "google"
         ));
     }

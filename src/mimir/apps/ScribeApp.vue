@@ -713,10 +713,19 @@ const detailMeeting = computed(() => {
     || (detailSearchMeeting.value?.id === detailMeetingId.value ? detailSearchMeeting.value : null)
 })
 const formattedElapsed = computed(() => {
-  // Reading `now` keeps this projection ticking; the store owns the
-  // accumulated duration across continuation runs and excludes breaks.
-  void now.value
-  return formatDuration(meetings.elapsedMs)
+  const active = meetings.activeMeeting
+  if (!active?.startedAt) return formatDuration(0)
+  if (!meetings.recording) return formatDuration(active.durationMs)
+
+  // `Date.now()` is not reactive. Reading a Pinia computed that calls it
+  // returned the cached value until an audio/transcript event changed the
+  // meeting record, so the clock appeared to stop during silence. Calculate
+  // from this component's reactive clock instead.
+  const runStartedAt = Date.parse(active.recordingStartedAt || active.startedAt)
+  const currentRunMs = Number.isFinite(runStartedAt)
+    ? Math.max(0, now.value - runStartedAt)
+    : 0
+  return formatDuration((Number(active.durationMs) || 0) + currentRunMs)
 })
 const liveLedger = computed(() => transcriptLedgerEntries(meetings.activeMeeting))
 const detailLedger = computed(() => transcriptLedgerEntries(detailMeeting.value))

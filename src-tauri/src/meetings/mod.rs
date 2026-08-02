@@ -8,6 +8,7 @@ pub mod audio_test;
 pub mod capture;
 pub mod commands;
 pub mod config;
+mod diagnostics;
 pub mod jobs;
 pub mod local_whisper;
 mod model;

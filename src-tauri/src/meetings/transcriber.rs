@@ -10,6 +10,7 @@
 
 use super::{
     config::CustomSttEndpoint,
+    diagnostics::ScribeDiagnostics,
     runtime::{
         MeetingTranscriptionPort, TranscriptionFinalize, TranscriptionRepairIntent,
         TranscriptionStart, TranscriptionWorkerStatus,
@@ -406,6 +407,25 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             }
         }
         let provider = self.provider_resolver.resolve(request)?;
+        let diagnostics = ScribeDiagnostics::new(&self.data_dir, &request.meeting_id);
+        let (provider_kind, provider_model) = match &provider {
+            ResolvedTranscriptionProvider::Local { model_id } => ("local", model_id.as_str()),
+            ResolvedTranscriptionProvider::Custom { endpoint, model }
+                if is_openai_realtime_route(endpoint, model) =>
+            {
+                ("openai", model.as_str())
+            }
+            ResolvedTranscriptionProvider::Custom { model, .. } => ("custom", model.as_str()),
+        };
+        diagnostics.record(
+            "transcription.worker.start",
+            json!({
+                "provider": provider_kind,
+                "model": provider_model,
+                "firstSequence": request.first_sequence,
+                "repair": request.repair_generation.is_some(),
+            }),
+        );
 
         let (finalize_tx, finalize_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -422,6 +442,7 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
             changes: Arc::clone(&self.changes),
         };
         let failure_status = worker_status.clone();
+        let worker_diagnostics = diagnostics.clone();
         let ready_status = if matches!(provider, ResolvedTranscriptionProvider::Custom { .. }) {
             TranscriptionSessionState::Listening
         } else {
@@ -452,6 +473,17 @@ impl MeetingTranscriptionPort for NativeMeetingTranscriber {
                     let _ = startup_error.try_send(Err(message.clone()));
                     failure_status.set(TranscriptionSessionState::Failed);
                 }
+                worker_diagnostics.record(
+                    "transcription.worker.finished",
+                    match &result {
+                        Ok(completion) => json!({
+                            "ok": true,
+                            "source": completion.source,
+                            "unresolvedPartials": completion.unresolved_partial_count,
+                        }),
+                        Err(error) => json!({ "ok": false, "error": error }),
+                    },
+                );
                 result
             })
             .map_err(|error| format!("could not spawn transcription worker: {error}"))?;
@@ -590,13 +622,15 @@ fn run_worker(
     status: WorkerStatusReporter,
 ) -> Result<WorkerCompletion, String> {
     let audio =
-        PersistedAudioSource::authoritative(Arc::clone(&store), data_dir, &request.meeting_id)?;
+        PersistedAudioSource::authoritative(Arc::clone(&store), &data_dir, &request.meeting_id)?;
     let source = match &provider {
         ResolvedTranscriptionProvider::Local { .. } => "local",
         ResolvedTranscriptionProvider::Custom { .. } => "custom",
     };
+    let diagnostics = ScribeDiagnostics::new(&data_dir, &request.meeting_id);
     let mut sink = StoreBatchSink::new(
         Arc::clone(&store),
+        diagnostics.clone(),
         &request.meeting_id,
         &request.run_id,
         source,
@@ -663,6 +697,7 @@ fn run_worker(
                 finalize: &finalize,
                 ready: &ready,
                 status: &status,
+                diagnostics: &diagnostics,
             };
             let mut reporting_sink = ReportingBatchSink {
                 inner: &mut sink,
@@ -1172,6 +1207,7 @@ fn interleave_f32le(microphone: &[u8], system: &[u8]) -> Result<Vec<u8>, String>
 
 struct StoreBatchSink {
     store: Arc<MeetingStore>,
+    diagnostics: ScribeDiagnostics,
     meeting_id: String,
     provider_run_id: String,
     source: String,
@@ -1184,6 +1220,7 @@ struct StoreBatchSink {
 impl StoreBatchSink {
     fn new(
         store: Arc<MeetingStore>,
+        diagnostics: ScribeDiagnostics,
         meeting_id: &str,
         provider_run_id: &str,
         source: &str,
@@ -1194,6 +1231,7 @@ impl StoreBatchSink {
         WireId::new(provider_run_id.to_string()).map_err(|error| error.to_string())?;
         Ok(Self {
             store,
+            diagnostics,
             meeting_id: meeting_id.into(),
             provider_run_id: provider_run_id.into(),
             source: source.into(),
@@ -1207,6 +1245,20 @@ impl StoreBatchSink {
 
 impl NormalizedBatchSink for StoreBatchSink {
     fn ingest(&mut self, mut batch: NormalizedTranscriptBatch) -> Result<(), String> {
+        let received_finals = batch
+            .segments
+            .iter()
+            .filter(|segment| segment.state == SegmentState::Final)
+            .count();
+        if received_finals > 0 {
+            self.diagnostics.record(
+                "transcription.final.received",
+                json!({
+                    "providerSequence": batch.provider_sequence,
+                    "finalSegments": received_finals,
+                }),
+            );
+        }
         // Provider adapters should already suppress framing-only output, but
         // the durable boundary is the final defense. One empty partial must
         // never turn a healthy audio/provider session into a failed meeting.
@@ -1234,7 +1286,14 @@ impl NormalizedBatchSink for StoreBatchSink {
         // persistence commit together; a failed SQLite write must remain
         // replayable on reconnect.
         let mut candidate = self.accumulator.clone();
-        let report = candidate.apply(batch).map_err(|error| error.to_string())?;
+        let report = candidate.apply(batch).map_err(|error| {
+            let error = error.to_string();
+            self.diagnostics.record(
+                "transcription.batch.rejected",
+                json!({ "stage": "accumulator", "error": error }),
+            );
+            error
+        })?;
         if report.duplicate_batch {
             return Ok(());
         }
@@ -1312,8 +1371,28 @@ impl NormalizedBatchSink for StoreBatchSink {
         } else {
             self.store
                 .apply_transcript_batch(&durable)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| {
+                    let error = error.to_string();
+                    self.diagnostics.record(
+                        "transcription.batch.rejected",
+                        json!({
+                            "stage": "durable-store",
+                            "providerSequence": provider_sequence,
+                            "error": error,
+                        }),
+                    );
+                    error
+                })?;
             self.changes.changed(&self.meeting_id);
+        }
+        if accepted_finals > 0 {
+            self.diagnostics.record(
+                "transcription.final.persisted",
+                json!({
+                    "providerSequence": provider_sequence,
+                    "acceptedFinalSegments": accepted_finals,
+                }),
+            );
         }
         self.accumulator = candidate;
         self.final_segment_count = self.final_segment_count.saturating_add(accepted_finals);
@@ -1377,6 +1456,7 @@ struct OpenAiTranscriptState {
     channel: OpenAiChannel,
     pending_ranges: VecDeque<OpenAiAudioRange>,
     item_ranges: HashMap<String, OpenAiAudioRange>,
+    last_bound_range: Option<OpenAiAudioRange>,
     items: HashMap<String, OpenAiItemState>,
     completed_items: HashSet<String>,
     provider_sequence: Arc<AtomicU64>,
@@ -1394,6 +1474,7 @@ impl OpenAiTranscriptState {
             channel,
             pending_ranges: VecDeque::new(),
             item_ranges: HashMap::new(),
+            last_bound_range: None,
             items: HashMap::new(),
             completed_items: HashSet::new(),
             provider_sequence,
@@ -1412,8 +1493,22 @@ impl OpenAiTranscriptState {
         match event_type {
             "input_audio_buffer.committed" => {
                 let item_id = required_openai_string(value, "item_id")?;
-                if let Some(range) = self.pending_ranges.pop_front() {
+                // OpenAI can begin emitting transcription deltas before its
+                // committed acknowledgement reaches us. In that case
+                // `range_for` has already bound the oldest queued range to
+                // this item. The later acknowledgement is confirmation, not
+                // permission to consume and overwrite the next turn's range.
+                if !self.item_ranges.contains_key(item_id) {
+                    let range = self
+                        .pending_ranges
+                        .pop_front()
+                        .or(self.last_bound_range)
+                        .ok_or_else(|| {
+                            "OpenAI acknowledged audio before any timeline range existed"
+                                .to_string()
+                        })?;
                     self.item_ranges.insert(item_id.to_string(), range);
+                    self.last_bound_range = Some(range);
                 }
                 Ok(OpenAiEventEffect::default())
             }
@@ -1427,7 +1522,7 @@ impl OpenAiTranscriptState {
                 if delta.trim().is_empty() || self.completed_items.contains(item_id) {
                     return Ok(OpenAiEventEffect::default());
                 }
-                let range = self.range_for(item_id);
+                let range = self.range_for(item_id)?;
                 let item = self.items.entry(item_id.to_string()).or_default();
                 item.text.push_str(delta);
                 item.revision = item.revision.saturating_add(1);
@@ -1447,10 +1542,11 @@ impl OpenAiTranscriptState {
             }
             "conversation.item.input_audio_transcription.completed" => {
                 let item_id = required_openai_string(value, "item_id")?;
-                if !self.completed_items.insert(item_id.to_string()) {
+                if self.completed_items.contains(item_id) {
                     return Ok(OpenAiEventEffect::default());
                 }
-                let range = self.range_for(item_id);
+                let range = self.range_for(item_id)?;
+                self.completed_items.insert(item_id.to_string());
                 let completed = value
                     .get("transcript")
                     .and_then(serde_json::Value::as_str)
@@ -1497,16 +1593,25 @@ impl OpenAiTranscriptState {
         }
     }
 
-    fn range_for(&mut self, item_id: &str) -> OpenAiAudioRange {
+    fn range_for(&mut self, item_id: &str) -> Result<OpenAiAudioRange, String> {
         if let Some(range) = self.item_ranges.get(item_id).copied() {
-            return range;
+            return Ok(range);
         }
-        let range = self.pending_ranges.pop_front().unwrap_or(OpenAiAudioRange {
-            start_ms: 0,
-            end_ms: 1,
-        });
+        // A long-lived transcription session can emit a trailing item after
+        // the committed turn's final event but before the next two-second
+        // commit exists. It still belongs to the last confirmed audio window;
+        // terminating the worker here made live transcription freeze at four
+        // seconds while capture continued normally.
+        let range = self
+            .pending_ranges
+            .pop_front()
+            .or(self.last_bound_range)
+            .ok_or_else(|| {
+                "OpenAI transcription arrived before any timeline range existed".to_string()
+            })?;
         self.item_ranges.insert(item_id.to_string(), range);
-        range
+        self.last_bound_range = Some(range);
+        Ok(range)
     }
 
     fn batch(&self, segment: NormalizedSegment) -> Result<NormalizedTranscriptBatch, String> {
@@ -1632,6 +1737,10 @@ async fn run_openai_realtime_with_connector(
         openai_session(context.endpoint, credential, context.model, connector),
         openai_session(context.endpoint, credential, context.model, connector),
     )?;
+    context.diagnostics.record(
+        "openai.sessions.ready",
+        json!({ "channels": ["microphone", "system"] }),
+    );
     context
         .ready
         .send(Ok(()))
@@ -1648,6 +1757,7 @@ async fn run_openai_realtime_with_connector(
         batch_tx.clone(),
         Arc::clone(&sequence),
         context.request.first_sequence,
+        context.diagnostics.clone(),
     );
     let system_future = drive_openai_channel(
         system,
@@ -1657,6 +1767,7 @@ async fn run_openai_realtime_with_connector(
         batch_tx,
         sequence,
         context.request.first_sequence,
+        context.diagnostics.clone(),
     );
     tokio::pin!(microphone_future);
     tokio::pin!(system_future);
@@ -1767,6 +1878,7 @@ async fn drive_openai_channel(
     batches: tokio::sync::mpsc::UnboundedSender<NormalizedTranscriptBatch>,
     sequence: Arc<AtomicU64>,
     first_sequence: u64,
+    diagnostics: ScribeDiagnostics,
 ) -> Result<(), String> {
     let (mut writer, mut reader) = websocket.split();
     let mut transcript = OpenAiTranscriptState::new(channel, sequence);
@@ -1795,6 +1907,27 @@ async fn drive_openai_channel(
                     Message::Text(text) => {
                         let value: serde_json::Value = serde_json::from_str(&text)
                             .map_err(|_| "OpenAI realtime returned invalid JSON".to_string())?;
+                        let event_type = value.get("type")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown");
+                        if matches!(
+                            event_type,
+                            "input_audio_buffer.committed"
+                                | "conversation.item.input_audio_transcription.completed"
+                                | "conversation.item.input_audio_transcription.failed"
+                                | "error"
+                        ) {
+                            diagnostics.record(
+                                "openai.event.received",
+                                json!({
+                                    "channel": channel.id(),
+                                    "type": event_type,
+                                    "transcriptChars": value.get("transcript").and_then(serde_json::Value::as_str).map(str::len),
+                                    "errorCode": value.pointer("/error/code").or_else(|| value.pointer("/error/type")).and_then(serde_json::Value::as_str),
+                                    "errorParam": value.pointer("/error/param").and_then(serde_json::Value::as_str),
+                                }),
+                            );
+                        }
                         let effect = transcript.handle(&value)?;
                         if effect.completed_turn {
                             outstanding_turns = outstanding_turns.saturating_sub(1);
@@ -1827,15 +1960,34 @@ async fn drive_openai_channel(
                     turn_end_ms = chunk.end_ms;
                     turn_chunks = turn_chunks.saturating_add(1);
                     next_sequence = chunk.sequence.saturating_add(1);
+                    diagnostics.record(
+                        "openai.audio.appended",
+                        json!({
+                            "channel": channel.id(),
+                            "sequence": chunk.sequence,
+                            "startMs": chunk.start_ms,
+                            "endMs": chunk.end_ms,
+                        }),
+                    );
                     if turn_chunks >= OPENAI_COMMIT_CHUNKS {
+                        let committed_start_ms = turn_start_ms.take().unwrap_or(chunk.start_ms);
                         commit_openai_turn(
                             &mut writer,
                             &mut transcript,
-                            turn_start_ms.take().unwrap_or(chunk.start_ms),
+                            committed_start_ms,
                             turn_end_ms,
                         ).await?;
                         turn_chunks = 0;
                         outstanding_turns = outstanding_turns.saturating_add(1);
+                        diagnostics.record(
+                            "openai.turn.committed",
+                            json!({
+                                "channel": channel.id(),
+                                "startMs": committed_start_ms,
+                                "endMs": turn_end_ms,
+                                "outstandingTurns": outstanding_turns,
+                            }),
+                        );
                     }
                     continue;
                 }
@@ -1851,6 +2003,10 @@ async fn drive_openai_channel(
                         outstanding_turns = outstanding_turns.saturating_add(1);
                     }
                     if outstanding_turns == 0 {
+                        diagnostics.record(
+                            "openai.channel.finished",
+                            json!({ "channel": channel.id(), "nextSequence": next_sequence }),
+                        );
                         let _ = writer.send(Message::Close(None)).await;
                         return Ok(());
                     }
@@ -1892,6 +2048,7 @@ struct CustomRunContext<'a> {
     finalize: &'a Receiver<FinalizeCommand>,
     ready: &'a SyncSender<Result<(), String>>,
     status: &'a WorkerStatusReporter,
+    diagnostics: &'a ScribeDiagnostics,
 }
 
 async fn run_custom(
@@ -1935,6 +2092,7 @@ async fn run_custom_with_connector(
         finalize,
         ready,
         status,
+        diagnostics: _,
     } = context;
     let preflight = SttPreflightRequest {
         operation: TranscriptionOperation::Live,
@@ -3067,6 +3225,7 @@ mod tests {
         let changes = Arc::new(CountingChanges::default());
         let mut sink = StoreBatchSink::new(
             Arc::clone(&store),
+            ScribeDiagnostics::disabled(),
             "meeting-1",
             "run-1",
             "custom",
@@ -3113,6 +3272,7 @@ mod tests {
         let store = recording_store();
         let mut sink = StoreBatchSink::new(
             Arc::clone(&store),
+            ScribeDiagnostics::disabled(),
             "meeting-1",
             "run-whitespace",
             "custom",
@@ -3631,6 +3791,119 @@ mod tests {
     }
 
     #[test]
+    fn openai_late_commit_ack_does_not_move_an_item_onto_the_next_turn() {
+        let mut state =
+            OpenAiTranscriptState::new(OpenAiChannel::Microphone, Arc::new(AtomicU64::new(1)));
+        state.queue_commit(OpenAiAudioRange {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
+        state.queue_commit(OpenAiAudioRange {
+            start_ms: 2_000,
+            end_ms: 4_000,
+        });
+
+        // This is the ordering observed from the production API: the first
+        // delta can beat the corresponding committed acknowledgement.
+        let partial = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "turn-1",
+                "delta": "First",
+            }))
+            .unwrap();
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "turn-1",
+            }))
+            .unwrap();
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "turn-2",
+            }))
+            .unwrap();
+        let completed = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "turn-1",
+                "transcript": "First turn",
+            }))
+            .unwrap();
+        let second = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "turn-2",
+                "delta": "Second",
+            }))
+            .unwrap();
+
+        assert_eq!(
+            (
+                partial.batches[0].segments[0].start_ms,
+                partial.batches[0].segments[0].end_ms
+            ),
+            (0, 2_000)
+        );
+        assert_eq!(
+            (
+                completed.batches[0].segments[0].start_ms,
+                completed.batches[0].segments[0].end_ms
+            ),
+            (0, 2_000)
+        );
+        assert_eq!(
+            (
+                second.batches[0].segments[0].start_ms,
+                second.batches[0].segments[0].end_ms
+            ),
+            (2_000, 4_000)
+        );
+    }
+
+    #[test]
+    fn openai_trailing_item_before_the_next_commit_keeps_the_last_confirmed_range() {
+        let mut state =
+            OpenAiTranscriptState::new(OpenAiChannel::Microphone, Arc::new(AtomicU64::new(1)));
+        state.queue_commit(OpenAiAudioRange {
+            start_ms: 0,
+            end_ms: 2_000,
+        });
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "confirmed-turn",
+            }))
+            .unwrap();
+        state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "confirmed-turn",
+                "transcript": "Confirmed",
+            }))
+            .unwrap();
+
+        // Seen in the live dual-channel API session before the second commit
+        // was available. This must not terminate an otherwise healthy worker.
+        let trailing = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "trailing-item",
+                "delta": "Trailing",
+            }))
+            .unwrap();
+
+        assert_eq!(
+            (
+                trailing.batches[0].segments[0].start_ms,
+                trailing.batches[0].segments[0].end_ms,
+            ),
+            (0, 2_000)
+        );
+    }
+
+    #[test]
     fn openai_explicit_commit_keeps_continued_meeting_timestamps_on_the_existing_timeline() {
         let mut state =
             OpenAiTranscriptState::new(OpenAiChannel::Microphone, Arc::new(AtomicU64::new(1)));
@@ -4102,6 +4375,7 @@ mod tests {
                 .unwrap();
         let mut sink = StoreBatchSink::new(
             Arc::clone(&store),
+            ScribeDiagnostics::disabled(),
             "meeting-1",
             "openai-run",
             "custom",
@@ -4176,6 +4450,7 @@ mod tests {
                 finalize: &finalize_rx,
                 ready: &ready_tx,
                 status: &test_status_reporter(),
+                diagnostics: &ScribeDiagnostics::disabled(),
             },
             &mut sink,
             &connector,
@@ -4258,6 +4533,7 @@ mod tests {
                 .unwrap();
         let mut sink = StoreBatchSink::new(
             Arc::clone(&store),
+            ScribeDiagnostics::disabled(),
             "meeting-1",
             "tls-run",
             "custom",
@@ -4380,6 +4656,7 @@ mod tests {
                 finalize: &finalize_rx,
                 ready: &ready_tx,
                 status: &test_status_reporter(),
+                diagnostics: &ScribeDiagnostics::disabled(),
             },
             &mut sink,
             &connector,

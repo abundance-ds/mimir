@@ -153,7 +153,7 @@
           {{
             pending['system-audio-settings']
               ? 'Opening System Settings…'
-              : 'Set up system audio'
+              : 'Open macOS audio permissions'
           }}
         </button>
       </section>
@@ -623,7 +623,7 @@ function permissionLabel(value) {
   return ({
     granted: 'Granted',
     denied: 'Denied — use the repair action below',
-    'prompt-on-start': 'Set up before the first recording',
+    'prompt-on-start': 'Requested on first use',
     restricted: 'Restricted by macOS',
     unknown: 'Not checked',
     'development-host': 'Development host — not Mimir',

@@ -748,8 +748,13 @@ fn is_microphone_permission_remediation(value: &str) -> bool {
 /// renderer, so it cannot become a general-purpose process launcher.
 #[tauri::command]
 pub async fn meetings_open_system_audio_settings() -> Result<(), String> {
-    run_blocking("system audio permission settings", || {
-        run_system_audio_setup(arm_system_audio_permission, open_system_audio_settings)
+    let identity = super::permissions::current_permission_runtime_identity();
+    run_blocking("system audio permission settings", move || {
+        run_system_audio_setup_for_identity(
+            &identity,
+            arm_system_audio_permission,
+            open_system_audio_settings,
+        )
     })
     .await
 }
@@ -945,6 +950,15 @@ fn run_system_audio_setup(
 ) -> Result<(), String> {
     arm();
     open_settings()
+}
+
+fn run_system_audio_setup_for_identity(
+    identity: &super::permissions::PermissionRuntimeIdentity,
+    arm: impl FnOnce(),
+    open_settings: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    identity.require_installed_mimir()?;
+    run_system_audio_setup(arm, open_settings)
 }
 
 #[cfg(target_os = "macos")]
@@ -1520,6 +1534,26 @@ mod consent_tests {
         )
         .unwrap();
         assert_eq!(*actions.lock().unwrap(), ["arm", "settings"]);
+    }
+
+    #[test]
+    fn development_host_cannot_arm_system_audio_permission() {
+        let actions = std::sync::Mutex::new(Vec::new());
+        let identity =
+            super::super::permissions::PermissionRuntimeIdentity::from_bundle_identifier(None);
+
+        let error = run_system_audio_setup_for_identity(
+            &identity,
+            || actions.lock().unwrap().push("arm"),
+            || {
+                actions.lock().unwrap().push("settings");
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Open the installed Mimir application"));
+        assert!(actions.lock().unwrap().is_empty());
     }
 
     fn permission_snapshot(microphone: &str, diagnostic: Option<&str>) -> MeetingSnapshot {

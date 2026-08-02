@@ -6,6 +6,7 @@
 //! and committed only after the durable bytes exist.
 
 use super::{
+    diagnostics::ScribeDiagnostics,
     runtime::{
         CaptureStart, CaptureStop, CaptureStopResult, MeetingCaptureFailureSink, MeetingCapturePort,
     },
@@ -445,6 +446,12 @@ impl MeetingCapturePort for NativeMeetingCapture {
             startup: Arc::clone(&startup),
         };
         let meeting_id = request.meeting_id.clone();
+        let diagnostics = ScribeDiagnostics::new(&self.data_dir, &meeting_id);
+        diagnostics.record(
+            "capture.worker.start",
+            serde_json::json!({ "firstSequence": request.first_sequence }),
+        );
+        let worker_diagnostics = diagnostics.clone();
         let worker_meeting_id = meeting_id.clone();
         let worker_run_id = request.run_id.clone();
         let failure_sink = Arc::clone(&self.failure_sink);
@@ -458,6 +465,16 @@ impl MeetingCapturePort for NativeMeetingCapture {
                     runner.run(context)
                 }))
                 .unwrap_or_else(|_| Err("meeting audio worker panicked".into()));
+                worker_diagnostics.record(
+                    "capture.worker.finished",
+                    match &result {
+                        Ok(report) => serde_json::json!({
+                            "ok": true,
+                            "durationMs": report.duration_ms,
+                        }),
+                        Err(error) => serde_json::json!({ "ok": false, "error": error }),
+                    },
+                );
                 worker_startup.finish();
                 let registered = registered_rx.recv().unwrap_or(false);
                 if registered {
@@ -1413,6 +1430,16 @@ impl ChannelWriter {
         self.store
             .commit_audio_chunk(&draft.id, &now())
             .map_err(|error| error.to_string())?;
+        ScribeDiagnostics::new(&self.data_dir, &self.meeting_id).record(
+            "capture.chunk.committed",
+            serde_json::json!({
+                "channel": self.channel_id,
+                "sequence": sequence,
+                "startMs": start_ms,
+                "endMs": end_ms,
+                "byteLength": bytes.len(),
+            }),
+        );
         self.chunk_sequence = self.chunk_sequence.saturating_add(1);
         Ok(())
     }
