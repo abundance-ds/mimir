@@ -93,3 +93,10 @@ Feature: Keep recording state operable and understandable throughout Mimir
     Given recording continues while transcription reports a recoverable error
     When the error is visible
     Then Stop remains fixed, visible, and keyboard operable above the diagnostic
+
+  @MTG-213 @automated @renderer @recovery
+  Scenario: Transcript repair exposes durable progress
+    Given retained audio is safe and retranscription has been queued
+    When the meeting detail is open
+    Then the repair notice says Queued or Transcribing until the job finishes
+    And Transcribe again cannot enqueue a duplicate job while repair is active

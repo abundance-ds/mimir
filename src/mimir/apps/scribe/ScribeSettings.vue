@@ -243,13 +243,19 @@
         </div>
 
         <div v-else class="mt-3 space-y-3">
-          <p class="text-[10px] leading-relaxed text-ink-3">{{ hostedDescription }}</p>
+          <p class="text-[10px] text-ink-3">{{ hostedDescription }}</p>
           <p
             data-scribe-api-key-state
-            class="border-y border-rule-light py-2 text-[10px]"
+            class="flex items-center gap-2 border-y border-rule-light py-2 text-[10px]"
             role="status"
           >
-            {{ config.apiKeyConfigured ? 'Saved in Keychain' : 'API key required' }}
+            <span
+              class="scribe-key-status-dot"
+              :class="{ configured: config.apiKeyConfigured }"
+              aria-hidden="true"
+            ></span>
+            <span>{{ config.apiKeyConfigured ? 'Configured' : 'Not configured' }}</span>
+            <span v-if="config.apiKeyConfigured" class="font-mono text-[9px] text-ink-3">Keychain</span>
           </p>
           <form class="block" @submit.prevent="saveKey">
             <span class="scribe-settings-label">{{ hostedKeyLabel }}</span>
@@ -487,8 +493,8 @@ const isOpenAiEndpoint = computed(() => {
 })
 const hostedDescription = computed(() => (
   isOpenAiEndpoint.value
-    ? 'Sends microphone and system audio to OpenAI.'
-    : 'Sends microphone and system audio to the configured HTTPS service.'
+    ? 'Using OpenAI'
+    : 'Using hosted transcription'
 ))
 const hostedKeyLabel = computed(() => (
   isOpenAiEndpoint.value ? 'OpenAI API key' : 'Hosted transcription API key'
@@ -740,6 +746,18 @@ input[type='checkbox']:focus-visible {
 .scribe-settings-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.scribe-key-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--color-ink-4);
+}
+
+.scribe-key-status-dot.configured {
+  background: #4a9;
 }
 
 .scribe-audio-level {

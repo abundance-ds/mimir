@@ -79,7 +79,7 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Sends microphone and system audio to the configured HTTPS service')
+    expect(wrapper.text()).toContain('Using hosted transcription')
     expect(wrapper.text()).toContain('Hosted transcription API key')
     expect(wrapper.get('input[type="url"]').element.value)
       .toBe('https://speech.example.com/mimir-stt')
@@ -166,7 +166,8 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.get('[data-scribe-api-key-state]').text()).toContain('Saved in Keychain')
+    expect(wrapper.get('[data-scribe-api-key-state]').text()).toContain('Configured')
+    expect(wrapper.get('[data-scribe-api-key-state]').text()).toContain('Keychain')
     expect(wrapper.get('[data-scribe-api-key]').attributes('placeholder')).toBe('Enter replacement key')
     expect(wrapper.get('[data-scribe-save-api-key]').text()).toBe('Replace key')
     expect(wrapper.get('[data-scribe-clear-api-key]').text()).toBe('Remove key')
@@ -249,7 +250,7 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Sends microphone and system audio to OpenAI')
+    expect(wrapper.text()).toContain('Using OpenAI')
     expect(wrapper.text()).not.toContain('Detection suggests a recording')
     expect(wrapper.text()).not.toContain('This recipe is used after future meetings')
     expect(wrapper.text()).not.toContain('Stored in Keychain and never returned')

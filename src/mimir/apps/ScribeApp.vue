@@ -191,16 +191,18 @@
               role="status"
             >
               <IconAlertTriangle :size="13" class="mt-px shrink-0" />
-              <span class="min-w-0 flex-1">{{ recoveryStatus(detailMeeting) }}</span>
+              <span data-scribe-recovery-status class="min-w-0 flex-1">
+                {{ recoveryStatus(detailMeeting) }}
+              </span>
               <button
                 v-if="meetingCanRetranscribe(detailMeeting)"
                 type="button"
                 data-scribe-recover-inline
                 class="scribe-quiet-button shrink-0"
-                :disabled="Boolean(meetings.pending[`retranscribe:${detailMeeting.id}`])"
+                :disabled="meetingRecoveryPending(detailMeeting)"
                 @click="requestMeetingRecovery(detailMeeting)"
               >
-                {{ meetings.pending[`retranscribe:${detailMeeting.id}`] ? 'Starting…' : 'Transcribe again' }}
+                {{ meetingRecoveryActionLabel(detailMeeting) }}
               </button>
             </div>
 
@@ -414,7 +416,7 @@
               >
                 Setup
               </button>
-              <label class="relative min-w-36 flex-1">
+              <label class="relative min-w-0 flex-1">
                 <span class="sr-only">Search meetings</span>
                 <IconSearch
                   :size="13"
@@ -426,7 +428,7 @@
                   data-scribe-meeting-search
                   type="search"
                   class="scribe-search-input"
-                  placeholder="Search meetings"
+                  placeholder="Search"
                   autocomplete="off"
                 />
                 <button
@@ -451,7 +453,6 @@
               </button>
             </div>
             <p
-              v-if="isHosted"
               data-scribe-route-disclosure
               class="mt-2 text-[10px] leading-relaxed text-ink-3"
             >
@@ -777,7 +778,7 @@ const readyLabel = computed(() => (
     : canStart.value ? '' : 'Local model required'
 ))
 const routeDisclosure = computed(() => {
-  return `Microphone and system audio are sent to ${hostedProviderName.value} for live transcription.`
+  return isHosted.value ? `Using ${hostedProviderName.value}` : 'Using local model'
 })
 const captureStatus = computed(() => {
   const channels = meetings.activeMeeting?.channels || []
@@ -1265,6 +1266,20 @@ function meetingNeedsRecovery(meeting) {
 
 function meetingCanRetranscribe(meeting) {
   return ['ready', 'failed', 'interrupted', 'needs_repair'].includes(meeting?.lifecycle)
+}
+
+function meetingRecoveryPending(meeting) {
+  if (!meeting) return false
+  if (meetings.pending[`retranscribe:${meeting.id}`]) return true
+  return ['pending', 'queued', 'running'].includes(latestMeetingJob(meeting, 'transcription')?.status)
+}
+
+function meetingRecoveryActionLabel(meeting) {
+  if (meetings.pending[`retranscribe:${meeting?.id}`]) return 'Queuing…'
+  const status = latestMeetingJob(meeting, 'transcription')?.status
+  if (['pending', 'queued'].includes(status)) return 'Queued'
+  if (status === 'running') return 'Transcribing…'
+  return 'Transcribe again'
 }
 
 function meetingCanContinue(meeting) {

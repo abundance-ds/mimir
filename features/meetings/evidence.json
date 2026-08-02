@@ -62,7 +62,7 @@
     },
     {
       "feature": "features/meetings/04_transcription.feature",
-      "idRange": ["MTG-060", "MTG-081"],
+      "idRange": ["MTG-060", "MTG-082"],
       "owner": "meeting-transcription",
       "verificationScope": ["revisioned STT contracts", "custom transport and credentials", "verified in-process local model"]
     },
@@ -98,7 +98,7 @@
     },
     {
       "feature": "features/meetings/10_accessibility_and_workbench.feature",
-      "idRange": ["MTG-200", "MTG-212"],
+      "idRange": ["MTG-200", "MTG-213"],
       "owner": "meeting-workbench",
       "verificationScope": ["global mute/Stop and permission-repair tests", "ordered settings mutation", "bounded reviewed-tag projection and editing", "manual keyboard and assistive technology audit", "release visual matrix"]
     },
@@ -460,6 +460,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/transcriber.rs",
+      "selector": "openai_continuation_accepts_a_delta_before_its_first_explicit_commit",
+      "scenarios": ["MTG-082"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/platform.rs",
       "selector": "credential_save_succeeds_only_after_endpoint_bound_readback",
       "scenarios": ["MTG-077"]
@@ -667,6 +673,12 @@
       "path": "src/mimir/apps/ScribeApp.test.js",
       "selector": "keeps Stop visible above nonblocking transcription failure",
       "scenarios": ["MTG-212"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "keeps durable retranscription progress visible and prevents duplicate repair",
+      "scenarios": ["MTG-213"]
     },
     {
       "kind": "rust-test",

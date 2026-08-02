@@ -167,3 +167,12 @@ Feature: Produce live and batch transcripts through local or custom routes
     And a queued automatic repair is superseded before today's provider receives audio
     And the existing transcript remains authoritative through partial output or provider failure
     And only one all-final replacement generation advances the transcript revision
+
+  @MTG-082 @automated @native @recovery @contract
+  Scenario: Continued OpenAI transcription accepts words before the first explicit commit
+    Given a continued meeting already has durable transcript time
+    And OpenAI emits transcript deltas after the first appended audio chunk but before its commit
+    When the continued live worker maps the provider item onto Mimir's timeline
+    Then the words retain the continued meeting's audio time
+    And the later commit expands the same item to the complete turn
+    And the live worker remains available

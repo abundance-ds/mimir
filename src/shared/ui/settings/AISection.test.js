@@ -135,6 +135,23 @@ describe('AISection', () => {
     expect(setAiApiKey).toHaveBeenCalledWith('anthropic', 'sk-ant-new')
   })
 
+  it('removes a configured key and refreshes provider availability', async () => {
+    const { wrapper } = await render()
+    const row = wrapper.findAll('.key-row')[0]
+    expect(row.get('[data-ai-remove-key]').text()).toBe('Remove')
+
+    getAiKeyStatus.mockResolvedValue(
+      statuses({ anthropic: { configured: false, maskedPreview: null } }),
+    )
+    await row.get('[data-ai-remove-key]').trigger('click')
+    await flushPromises()
+
+    expect(setAiApiKey).toHaveBeenCalledWith('anthropic', '')
+    expect(row.get('.key-preview').text()).toBe('Not configured')
+    expect(row.find('[data-ai-remove-key]').exists()).toBe(false)
+    expect(row.get('.key-message').text()).toContain('Key removed.')
+  })
+
   it('surfaces save failures without clearing the input or refreshing status', async () => {
     const { wrapper } = await render()
     const row = wrapper.findAll('.key-row')[0]

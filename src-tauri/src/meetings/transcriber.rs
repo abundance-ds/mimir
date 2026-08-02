@@ -1455,6 +1455,8 @@ struct OpenAiItemState {
 struct OpenAiTranscriptState {
     channel: OpenAiChannel,
     pending_ranges: VecDeque<OpenAiAudioRange>,
+    buffered_range: Option<OpenAiAudioRange>,
+    buffered_items: HashSet<String>,
     item_ranges: HashMap<String, OpenAiAudioRange>,
     last_bound_range: Option<OpenAiAudioRange>,
     items: HashMap<String, OpenAiItemState>,
@@ -1473,6 +1475,8 @@ impl OpenAiTranscriptState {
         Self {
             channel,
             pending_ranges: VecDeque::new(),
+            buffered_range: None,
+            buffered_items: HashSet::new(),
             item_ranges: HashMap::new(),
             last_bound_range: None,
             items: HashMap::new(),
@@ -1481,7 +1485,30 @@ impl OpenAiTranscriptState {
         }
     }
 
+    fn observe_audio(&mut self, range: OpenAiAudioRange) {
+        let merged = self
+            .buffered_range
+            .map_or(range, |buffered| OpenAiAudioRange {
+                start_ms: buffered.start_ms.min(range.start_ms),
+                end_ms: buffered.end_ms.max(range.end_ms),
+            });
+        self.buffered_range = Some(merged);
+        for item_id in &self.buffered_items {
+            self.item_ranges.insert(item_id.clone(), merged);
+            if let Some(item) = self.items.get_mut(item_id) {
+                item.range = Some(merged);
+            }
+        }
+    }
+
     fn queue_commit(&mut self, range: OpenAiAudioRange) {
+        for item_id in self.buffered_items.drain() {
+            self.item_ranges.insert(item_id.clone(), range);
+            if let Some(item) = self.items.get_mut(&item_id) {
+                item.range = Some(range);
+            }
+        }
+        self.buffered_range = None;
         self.pending_ranges.push_back(range);
     }
 
@@ -1498,10 +1525,27 @@ impl OpenAiTranscriptState {
                 // `range_for` has already bound the oldest queued range to
                 // this item. The later acknowledgement is confirmation, not
                 // permission to consume and overwrite the next turn's range.
-                if !self.item_ranges.contains_key(item_id) {
+                if let Some(current) = self.item_ranges.get(item_id).copied() {
+                    if self
+                        .pending_ranges
+                        .front()
+                        .is_some_and(|pending| pending.start_ms == current.start_ms)
+                    {
+                        let confirmed = self
+                            .pending_ranges
+                            .pop_front()
+                            .expect("front was checked above");
+                        self.item_ranges.insert(item_id.to_string(), confirmed);
+                        if let Some(item) = self.items.get_mut(item_id) {
+                            item.range = Some(confirmed);
+                        }
+                        self.last_bound_range = Some(confirmed);
+                    }
+                } else {
                     let range = self
                         .pending_ranges
                         .pop_front()
+                        .or(self.buffered_range)
                         .or(self.last_bound_range)
                         .ok_or_else(|| {
                             "OpenAI acknowledged audio before any timeline range existed"
@@ -1602,13 +1646,16 @@ impl OpenAiTranscriptState {
         // commit exists. It still belongs to the last confirmed audio window;
         // terminating the worker here made live transcription freeze at four
         // seconds while capture continued normally.
-        let range = self
-            .pending_ranges
-            .pop_front()
+        let pending = self.pending_ranges.front().copied();
+        let range = pending
+            .or(self.buffered_range)
             .or(self.last_bound_range)
             .ok_or_else(|| {
                 "OpenAI transcription arrived before any timeline range existed".to_string()
             })?;
+        if pending.is_none() && self.buffered_range.is_some() {
+            self.buffered_items.insert(item_id.to_string());
+        }
         self.item_ranges.insert(item_id.to_string(), range);
         self.last_bound_range = Some(range);
         Ok(range)
@@ -1956,6 +2003,10 @@ async fn drive_openai_channel(
                         "audio": BASE64_STANDARD.encode(pcm),
                     }).to_string())).await
                         .map_err(|_| "could not stream audio to OpenAI".to_string())?;
+                    transcript.observe_audio(OpenAiAudioRange {
+                        start_ms: chunk.start_ms,
+                        end_ms: chunk.end_ms,
+                    });
                     turn_start_ms.get_or_insert(chunk.start_ms);
                     turn_end_ms = chunk.end_ms;
                     turn_chunks = turn_chunks.saturating_add(1);
@@ -3935,6 +3986,60 @@ mod tests {
             .unwrap();
         let segment = &completed.batches[0].segments[0];
         assert_eq!((segment.start_ms, segment.end_ms), (42_250, 44_500));
+    }
+
+    #[test]
+    fn openai_continuation_accepts_a_delta_before_its_first_explicit_commit() {
+        let mut state =
+            OpenAiTranscriptState::new(OpenAiChannel::Microphone, Arc::new(AtomicU64::new(1)));
+        state.observe_audio(OpenAiAudioRange {
+            start_ms: 51_000,
+            end_ms: 52_000,
+        });
+
+        let partial = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.delta",
+                "item_id": "continued-before-commit",
+                "delta": "We are back",
+            }))
+            .unwrap();
+        assert_eq!(
+            (
+                partial.batches[0].segments[0].start_ms,
+                partial.batches[0].segments[0].end_ms,
+            ),
+            (51_000, 52_000),
+        );
+
+        state.observe_audio(OpenAiAudioRange {
+            start_ms: 52_000,
+            end_ms: 53_000,
+        });
+        state.queue_commit(OpenAiAudioRange {
+            start_ms: 51_000,
+            end_ms: 53_000,
+        });
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "continued-before-commit",
+            }))
+            .unwrap();
+        let completed = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "continued-before-commit",
+                "transcript": "We are back after the break",
+            }))
+            .unwrap();
+        assert_eq!(
+            (
+                completed.batches[0].segments[0].start_ms,
+                completed.batches[0].segments[0].end_ms,
+            ),
+            (51_000, 53_000),
+        );
     }
 
     #[test]

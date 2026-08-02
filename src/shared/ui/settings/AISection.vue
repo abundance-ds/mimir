@@ -40,6 +40,14 @@
             :disabled="!keyInputs[prov.id]?.trim() || saving[prov.id]"
             @click="saveKey(prov.id)"
           >Save</button>
+          <button
+            v-if="keyStatus[prov.id]?.configured"
+            type="button"
+            data-ai-remove-key
+            class="key-remove-btn"
+            :disabled="saving[prov.id]"
+            @click="clearKey(prov.id)"
+          >Remove</button>
         </div>
         <div v-if="messages[prov.id]" class="key-message" :class="messages[prov.id].type">
           {{ messages[prov.id].text }}
@@ -148,10 +156,26 @@ const messages = reactive({})
 async function loadKeyStatus() {
   try {
     const statuses = await getAiKeyStatus()
+    keyStatuses.value = statuses
     for (const s of statuses) {
       keyStatus[s.provider] = s
     }
   } catch { /* ignore */ }
+}
+
+async function clearKey(providerId) {
+  saving[providerId] = true
+  messages[providerId] = null
+  try {
+    await setAiApiKey(providerId, '')
+    messages[providerId] = { type: 'success', text: 'Key removed.' }
+    await loadKeyStatus()
+    ensureGhostModelSelected()
+  } catch (err) {
+    messages[providerId] = { type: 'error', text: err?.message || 'Failed to remove key.' }
+  } finally {
+    saving[providerId] = false
+  }
 }
 
 async function saveKey(providerId) {
@@ -340,6 +364,25 @@ onUnmounted(() => {
   opacity: 0.85;
 }
 .key-save-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.key-remove-btn {
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-rule-light);
+  border-radius: 5px;
+  padding: 0 10px;
+  color: var(--color-ink-3);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+.key-remove-btn:hover:not(:disabled) {
+  color: var(--color-ink);
+  background: var(--color-chrome-mid);
+}
+.key-remove-btn:disabled {
   opacity: 0.4;
   cursor: default;
 }

@@ -173,7 +173,7 @@ describe('ScribeApp', () => {
 
     expect(wrapper.get('[data-scribe-home-toolbar]').text()).not.toContain('Record this meeting')
     expect(wrapper.text()).not.toContain('Mimir records your microphone')
-    expect(wrapper.find('[data-scribe-route-disclosure]').exists()).toBe(false)
+    expect(wrapper.get('[data-scribe-route-disclosure]').text()).toBe('Using local model')
     expect(wrapper.find('[data-scribe-consent-checkbox]').exists()).toBe(false)
     await wrapper.get('[data-scribe-new]').trigger('click')
 
@@ -204,8 +204,7 @@ describe('ScribeApp', () => {
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-new]').attributes('disabled')).toBeUndefined())
 
-    expect(wrapper.get('[data-scribe-route-disclosure]').text())
-      .toBe('Microphone and system audio are sent to OpenAI for live transcription.')
+    expect(wrapper.get('[data-scribe-route-disclosure]').text()).toBe('Using OpenAI')
     expect(wrapper.find('[data-scribe-consent]').exists()).toBe(false)
     await wrapper.get('[data-scribe-new]').trigger('click')
     await vi.waitFor(() => expect(startMeeting).toHaveBeenCalledTimes(1))
@@ -651,6 +650,25 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(retranscribeMeeting).toHaveBeenCalledWith('m1'))
   })
 
+  it('keeps durable retranscription progress visible and prevents duplicate repair', async () => {
+    const queued = meeting({
+      lifecycle: 'failed',
+      error: 'Live transcription stopped',
+      jobs: [{ id: 'repair-1', kind: 'transcription', status: 'queued', attempt: 1, error: null }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [queued] }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+
+    expect(wrapper.get('[data-scribe-recovery-status]').text()).toContain('queued')
+    expect(wrapper.get('[data-scribe-recover-inline]').text()).toBe('Queued')
+    expect(wrapper.get('[data-scribe-recover-inline]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-scribe-recover-inline]').trigger('click')
+    expect(retranscribeMeeting).not.toHaveBeenCalled()
+  })
+
   it('offers manual retranscription for a legacy repair lifecycle', async () => {
     const interrupted = meeting({ lifecycle: 'needs_repair' })
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [interrupted] }))
@@ -702,6 +720,7 @@ describe('ScribeApp', () => {
     }])
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-search]').exists()).toBe(true))
+    expect(wrapper.get('[data-scribe-meeting-search]').attributes('placeholder')).toBe('Search')
 
     await wrapper.get('[data-scribe-meeting-search]').setValue('re')
     await new Promise(resolve => setTimeout(resolve, 275))
