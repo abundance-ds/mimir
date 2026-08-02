@@ -121,7 +121,9 @@ import {
   IconZoomIn,
   IconZoomOut,
 } from '@tabler/icons-vue'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+// Legacy build required: WKWebView lacks Map.prototype.getOrInsertComputed,
+// which the modern pdf.js build calls without a polyfill.
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { readBinaryFile } from '../../../services/fileSystem.js'
 
 const props = defineProps({
@@ -159,7 +161,7 @@ async function load() {
   pdfDocument = null
   try {
     const [{ getDocument, GlobalWorkerOptions }, bytes] = await Promise.all([
-      import('pdfjs-dist'),
+      import('pdfjs-dist/legacy/build/pdf.mjs'),
       readBinaryFile(props.path),
     ])
     if (current !== generation) return

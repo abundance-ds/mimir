@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   render: vi.fn(),
 }))
 
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   getDocument: mocks.getDocument,
   GlobalWorkerOptions: {},
 }))
