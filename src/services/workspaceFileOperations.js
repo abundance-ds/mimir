@@ -20,6 +20,12 @@ export function renameWorkspaceEntry(path, newName) {
   return invoke('workspace_file_rename', { path, newName })
 }
 
+// Move an existing entry into `destination` ('' = workspace root), keeping
+// its name. Resolves to the moved WorkspaceEntry.
+export function moveWorkspaceEntry(path, destination) {
+  return invoke('workspace_file_move', { path, destination })
+}
+
 export function duplicateWorkspaceEntry(path) {
   return invoke('workspace_file_duplicate', { path })
 }

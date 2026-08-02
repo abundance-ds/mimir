@@ -167,6 +167,18 @@ pub async fn workspace_file_rename(
 }
 
 #[tauri::command]
+pub async fn workspace_file_move(
+    state: tauri::State<'_, FileIndexState>,
+    path: String,
+    destination: String,
+) -> Result<WorkspaceEntry, String> {
+    let root = state.index()?.workspace();
+    tauri::async_runtime::spawn_blocking(move || move_entry(&root, &path, &destination))
+        .await
+        .map_err(|error| format!("File move task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn workspace_file_duplicate(
     state: tauri::State<'_, FileIndexState>,
     path: String,
@@ -334,6 +346,42 @@ fn rename_entry(root: &Path, path: &str, new_name: &str) -> Result<WorkspaceEntr
         )
     })?;
     entry_for_path(&root, &destination)
+}
+
+/// Move an existing entry into `destination` (a workspace-relative folder,
+/// empty for the root), keeping its name. Unlike import this relocates the
+/// original, so it is reserved for drags that start inside the workspace.
+fn move_entry(root: &Path, path: &str, destination: &str) -> Result<WorkspaceEntry, String> {
+    let root = canonical_root(root)?;
+    let source = resolve_existing(&root, path)?;
+    ensure_not_root(&root, &source)?;
+    let target = resolve_destination_directory(&root, destination)?;
+    if target == source || target.starts_with(&source) {
+        return Err(format!(
+            "{} cannot be moved into itself.",
+            display_relative(&root, &source)
+        ));
+    }
+    let name = source
+        .file_name()
+        .ok_or_else(|| "The item has no name.".to_string())?;
+    let moved = target.join(name);
+    if moved == source {
+        return entry_for_path(&root, &source);
+    }
+    if moved.exists() {
+        return Err(format!(
+            "{} already exists.",
+            display_relative(&root, &moved)
+        ));
+    }
+    fs::rename(&source, &moved).map_err(|error| {
+        format!(
+            "Could not move {}: {error}",
+            display_relative(&root, &source)
+        )
+    })?;
+    entry_for_path(&root, &moved)
 }
 
 fn duplicate_entry(root: &Path, path: &str) -> Result<WorkspaceEntry, String> {
@@ -876,6 +924,59 @@ mod tests {
             validate_name("../moved.md").unwrap_err(),
             "A name cannot contain folder separators."
         );
+    }
+
+    #[test]
+    fn move_relocates_into_and_out_of_subfolders() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("docs")).unwrap();
+        fs::write(temp.path().join("notes.md"), "n").unwrap();
+
+        let moved = move_entry(temp.path(), "notes.md", "docs").unwrap();
+        assert_eq!(moved.relative_path, "docs/notes.md");
+        assert!(temp.path().join("docs/notes.md").exists());
+        assert!(!temp.path().join("notes.md").exists());
+
+        let back = move_entry(temp.path(), "docs/notes.md", "").unwrap();
+        assert_eq!(back.relative_path, "notes.md");
+        assert!(temp.path().join("notes.md").exists());
+    }
+
+    #[test]
+    fn move_refuses_overwrites_and_keeps_same_parent_a_no_op() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("docs")).unwrap();
+        fs::write(temp.path().join("notes.md"), "root").unwrap();
+        fs::write(temp.path().join("docs/notes.md"), "taken").unwrap();
+
+        assert!(move_entry(temp.path(), "notes.md", "docs")
+            .unwrap_err()
+            .contains("already exists"));
+        assert_eq!(fs::read_to_string(temp.path().join("docs/notes.md")).unwrap(), "taken");
+
+        let unchanged = move_entry(temp.path(), "notes.md", "").unwrap();
+        assert_eq!(unchanged.relative_path, "notes.md");
+        assert!(temp.path().join("notes.md").exists());
+    }
+
+    #[test]
+    fn move_rejects_folders_into_themselves_and_bad_destinations() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("docs/deep")).unwrap();
+        fs::write(temp.path().join("plain.md"), "p").unwrap();
+
+        assert!(move_entry(temp.path(), "docs", "docs")
+            .unwrap_err()
+            .contains("itself"));
+        assert!(move_entry(temp.path(), "docs", "docs/deep")
+            .unwrap_err()
+            .contains("itself"));
+        assert!(move_entry(temp.path(), "plain.md", "plain.md")
+            .unwrap_err()
+            .contains("not a folder"));
+        assert!(move_entry(temp.path(), "", "docs")
+            .unwrap_err()
+            .contains("workspace root"));
     }
 
     #[test]

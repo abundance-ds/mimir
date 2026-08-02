@@ -5,6 +5,7 @@ const operations = vi.hoisted(() => ({
   createWorkspaceFile: vi.fn(),
   createWorkspaceFolder: vi.fn(),
   duplicateWorkspaceEntry: vi.fn(),
+  moveWorkspaceEntry: vi.fn(),
   openWorkspaceEntryNative: vi.fn(),
   renameWorkspaceEntry: vi.fn(),
   revealWorkspaceEntry: vi.fn(),
@@ -177,5 +178,72 @@ describe('Files controllers', () => {
     expect(operations.createWorkspaceFile).toHaveBeenCalledWith('docs/brief.md')
     expect(files.loadTreeDirectory).toHaveBeenLastCalledWith('docs', { force: true })
     expect(files.refresh).not.toHaveBeenCalled()
+  })
+
+  it('moves only what a drop would change and reconciles editor, favorites, and tree', async () => {
+    const files = reactive({
+      workspacePath: '/w',
+      expandedDirectories: new Set(),
+      error: '',
+      loadTreeDirectory: vi.fn(async () => []),
+      refresh: vi.fn(async () => null),
+    })
+    const editorFiles = {
+      waitForWorkspacePaths: vi.fn(async () => {}),
+      moveWorkspacePath: vi.fn(),
+      handleWorkspaceTrash: vi.fn(),
+    }
+    const updateFavoritePaths = vi.fn()
+    const refreshGit = vi.fn(async () => {})
+    const controller = useFileMutations({
+      files,
+      editorFiles,
+      listRef: ref(null),
+      contextEntry: ref(null),
+      selectedDirectory: () => '',
+      closeContextMenu: vi.fn(),
+      clearSelection: vi.fn(),
+      updateFavoritePaths,
+      refreshGit,
+      emitOpenFile: vi.fn(),
+    })
+    operations.moveWorkspaceEntry.mockResolvedValue({
+      path: '/w/docs/notes.md',
+      relativePath: 'docs/notes.md',
+      name: 'notes.md',
+    })
+
+    const notes = { path: '/w/notes.md', relativePath: 'notes.md', name: 'notes.md' }
+    const moved = await controller.moveEntries([
+      notes,
+      // Already lives in the destination: a no-op, not a native call.
+      { path: '/w/docs/kept.md', relativePath: 'docs/kept.md', name: 'kept.md' },
+      // Travels with its dragged parent below, so it must not move twice.
+      { path: '/w/pack/inner.md', relativePath: 'pack/inner.md', name: 'inner.md' },
+      { path: '/w/pack', relativePath: 'pack', name: 'pack', isDirectory: true },
+    ], 'docs')
+
+    expect(operations.moveWorkspaceEntry.mock.calls).toEqual([
+      ['/w/notes.md', 'docs'],
+      ['/w/pack', 'docs'],
+    ])
+    expect(editorFiles.waitForWorkspacePaths).toHaveBeenCalledWith(['/w/notes.md', '/w/pack'])
+    expect(editorFiles.moveWorkspacePath).toHaveBeenCalledWith('/w/notes.md', '/w/docs/notes.md')
+    expect(updateFavoritePaths).toHaveBeenCalledWith('notes.md', 'docs/notes.md')
+    expect(files.loadTreeDirectory).toHaveBeenCalledWith('', { force: true })
+    expect(files.loadTreeDirectory).toHaveBeenCalledWith('docs', { force: true })
+    expect(moved).toHaveLength(2)
+
+    // A folder cannot land inside itself, and a refused item reports itself
+    // without failing the batch.
+    const rejected = await controller.moveEntries([
+      { path: '/w/docs', relativePath: 'docs', name: 'docs', isDirectory: true },
+    ], 'docs/deep')
+    expect(rejected).toEqual([])
+
+    operations.moveWorkspaceEntry.mockRejectedValueOnce(new Error('busy'))
+    const partial = await controller.moveEntries([notes], 'docs')
+    expect(partial).toEqual([])
+    expect(controller.operationError.value).toContain('busy')
   })
 })

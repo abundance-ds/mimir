@@ -41,6 +41,7 @@ vi.mock('../../services/workspaceFileOperations.js', () => ({
   createWorkspaceFile: vi.fn(),
   createWorkspaceFolder: vi.fn(),
   renameWorkspaceEntry: vi.fn(),
+  moveWorkspaceEntry: vi.fn(),
   duplicateWorkspaceEntry: vi.fn(),
   importWorkspaceEntries: vi.fn(),
   trashWorkspaceEntries: vi.fn(),
@@ -505,6 +506,64 @@ describe('FilesActivity', () => {
       // Even a hard failure reloads the destination: earlier sources in the
       // batch may already have landed.
       expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
+    })
+  })
+
+  describe('drag and drop inside the tree', () => {
+    // Internal drags are pointer-driven (Tauri's drag-drop interception
+    // swallows HTML5 DnD), so the test presses a row and moves the document
+    // pointer the way a user would.
+    function dragFrom(wrapper, path) {
+      return wrapper.get(`[data-file-row="${path}"]`).trigger('pointerdown', {
+        button: 0,
+        clientX: 0,
+        clientY: 0,
+      })
+    }
+
+    function pointerTo(wrapper, selector, point = { clientX: 40, clientY: 40 }) {
+      document.elementFromPoint = vi.fn(() => wrapper.get(selector).element)
+      document.dispatchEvent(Object.assign(new Event('pointermove'), point))
+    }
+
+    it('moves a row dropped onto a folder and reloads both ends', async () => {
+      operations.moveWorkspaceEntry.mockResolvedValue({
+        path: '/w/docs/new.md',
+        relativePath: 'docs/new.md',
+        name: 'new.md',
+        isDirectory: false,
+      })
+      const wrapper = render()
+      await flushPromises()
+
+      await dragFrom(wrapper, '/w/new.md')
+      pointerTo(wrapper, '[data-file-row="/w/docs"]')
+      await flushPromises()
+      expect(wrapper.get('[data-file-row="/w/docs"]').attributes('data-file-drop-target')).toBe('')
+      expect(wrapper.get('[data-files-drag-ghost]').text()).toContain('new.md')
+
+      document.dispatchEvent(new Event('pointerup'))
+      await flushPromises()
+
+      expect(operations.moveWorkspaceEntry).toHaveBeenCalledWith('/w/new.md', 'docs')
+      expect(operations.listWorkspaceDirectory).toHaveBeenCalledWith('docs')
+      expect(wrapper.find('[data-files-drag-ghost]').exists()).toBe(false)
+      expect(wrapper.find('[data-file-drop-target]').exists()).toBe(false)
+    })
+
+    it('never offers a drop that would move nothing', async () => {
+      const wrapper = render()
+      await flushPromises()
+
+      await dragFrom(wrapper, '/w/new.md')
+      // Hovering empty tree space targets the root, where new.md already is.
+      pointerTo(wrapper, '[data-files-list]')
+      await flushPromises()
+
+      expect(wrapper.get('[data-files-list]').attributes('data-files-drop-root')).toBeUndefined()
+      document.dispatchEvent(new Event('pointerup'))
+      await flushPromises()
+      expect(operations.moveWorkspaceEntry).not.toHaveBeenCalled()
     })
   })
 

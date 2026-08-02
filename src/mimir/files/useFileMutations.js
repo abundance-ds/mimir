@@ -3,6 +3,7 @@ import {
   createWorkspaceFile,
   createWorkspaceFolder,
   duplicateWorkspaceEntry,
+  moveWorkspaceEntry,
   openWorkspaceEntryNative,
   renameWorkspaceEntry,
   revealWorkspaceEntry,
@@ -260,6 +261,66 @@ export function useFileMutations({
     }
   }
 
+  /**
+   * Move entries into `destination` (workspace-relative folder, '' = root).
+   *
+   * A drag can carry a folder together with files inside it, so descendants of
+   * another dragged folder are dropped up front: they travel with their parent,
+   * and moving them again afterwards would fail on the vanished source path.
+   * Like an import, one refused item reports itself without discarding the
+   * rest. Resolves to the entries that actually moved.
+   */
+  async function moveEntries(entries, destination) {
+    const target = normalizeRelative(destination)
+    const paths = new Set(
+      entries.filter(Boolean).map(entry => normalizeRelative(entry.relativePath)),
+    )
+    const moves = entries.filter(Boolean).filter((entry) => {
+      const relativePath = normalizeRelative(entry.relativePath)
+      if (entry.missing || !relativePath) return false
+      if (parentDirectory(relativePath) === target) return false
+      if (entry.isDirectory
+        && (target === relativePath || target.startsWith(`${relativePath}/`))) return false
+      let ancestor = parentDirectory(relativePath)
+      while (ancestor) {
+        if (paths.has(ancestor)) return false
+        ancestor = parentDirectory(ancestor)
+      }
+      return true
+    })
+    if (!moves.length || operationBusy.value) return []
+    operationBusy.value = true
+    operationError.value = ''
+    operationNotice.value = ''
+    const moved = []
+    const failures = []
+    try {
+      await editorFiles.waitForWorkspacePaths(moves.map(entry => entry.path))
+      for (const entry of moves) {
+        try {
+          const result = await moveWorkspaceEntry(entry.path, target)
+          editorFiles.moveWorkspacePath(entry.path, result.path)
+          updateFavoritePaths(entry.relativePath, result.relativePath)
+          moved.push(result)
+        } catch (error) {
+          failures.push(describeFileError(error, `Could not move ${entry.name}`))
+        }
+      }
+      await reconcileMutationDirectories([
+        ...moves.map(entry => parentDirectory(entry.relativePath)),
+        target,
+      ])
+    } finally {
+      operationBusy.value = false
+    }
+    if (failures.length) {
+      operationError.value = failures.length === 1
+        ? failures[0]
+        : `${failures.length} items could not be moved. ${failures[0]}`
+    }
+    return moved
+  }
+
   async function reconcileMutationDirectories(directories) {
     const uniqueDirectories = [...new Set(directories.map(normalizeRelative))]
     await Promise.allSettled([
@@ -281,6 +342,7 @@ export function useFileMutations({
     duplicateContext,
     focusInlineInput,
     isEditing,
+    moveEntries,
     nameAction,
     nameDraft,
     openContextNative,

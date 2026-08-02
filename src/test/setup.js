@@ -87,7 +87,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'file_index_open', 'file_index_files', 'file_index_filter', 'file_index_refresh',
   'file_index_begin_search', 'file_index_cancel_search', 'file_index_search',
   'workspace_file_list_directory', 'workspace_file_inspect', 'workspace_file_create', 'workspace_file_rename',
-  'workspace_file_duplicate', 'workspace_file_import', 'workspace_file_trash',
+  'workspace_file_move', 'workspace_file_duplicate', 'workspace_file_import', 'workspace_file_trash',
   'workspace_file_open_native', 'workspace_file_reveal',
   // reveal
   'reveal_in_finder',

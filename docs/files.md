@@ -105,6 +105,30 @@ Import contract:
 - `FilesActivity.vue` reconciles the destination on every outcome including
   rejected invokes; skipping it on error would leave arrivals invisible.
 
+## Moving rows between folders
+
+Dragging rows within the Project tree moves them (`workspace_file_move`),
+unlike an outside drop, which copies. Internal drags are pointer-driven
+through `src/mimir/files/useFileTreeDrag.js` — HTML5 DnD never fires inside
+the webview (see
+[gotchas.md](gotchas.md#html5-drag-and-drop-is-dead-inside-the-webview)) —
+and reuse the external drop path's hit-testing, spring-open, and edge-scroll
+behavior.
+
+- Only the plain Project tree offers dragging. Filtered, Recent, and
+  Favorites rows are projections whose position says nothing about where a
+  drop would land.
+- Dragging a selected row carries the whole selection; descendants of another
+  dragged folder are dropped from the batch because they travel with their
+  parent.
+- A drop that would move nothing (same parent, or a target inside a dragged
+  folder) offers no drop target rather than a highlight a drop would ignore.
+- The native move refuses overwrites and keeps a same-parent drop a no-op;
+  per-item failures report themselves without discarding the rest.
+- Moves reconcile like renames: pending Editor writes are awaited first, then
+  open-tab paths and favorites are rewritten, then source parents and the
+  destination force-reload.
+
 ## Index/search concurrency
 
 The index is an in-memory projection and not a permission boundary. Its native
@@ -161,6 +185,7 @@ See [security.md](security.md).
 | favorites | `mimir/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
 | external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |
-| rename/Trash with open buffers | `mimir/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
+| rename/Trash/move with open buffers | `mimir/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
 | drag and drop from outside | `mimir/files/useFileDrop.js`, `FilesActivity.vue`, `FileTreeRow.vue`, `workspace_files.rs` | drop-composable, Files Activity, native import tests |
+| drag rows between folders | `mimir/files/useFileTreeDrag.js`, `useFileMutations.js`, `FilesActivity.vue`, `workspace_files.rs` | tree-drag composable, file-controller, Files Activity, native move tests |
 | MCP mutation surface | `tool_runtime.rs`, renderer file tool handlers, `workspace_files.rs` | tool runtime and native mutation tests |

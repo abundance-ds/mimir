@@ -6,6 +6,7 @@ import {
   duplicateWorkspaceEntry,
   inspectWorkspaceEntry,
   listWorkspaceDirectory,
+  moveWorkspaceEntry,
   openWorkspaceEntryNative,
   revealWorkspaceEntry,
   renameWorkspaceEntry,
@@ -53,6 +54,7 @@ describe('workspace file operations', () => {
     invoke.mockResolvedValue({})
 
     await renameWorkspaceEntry('/w/old.md', 'new.md')
+    await moveWorkspaceEntry('/w/new.md', 'docs')
     await duplicateWorkspaceEntry('/w/new.md')
     await trashWorkspaceEntries(['/w/new.md', '/w/archive'])
     await openWorkspaceEntryNative('/w/chart.png')
@@ -62,11 +64,15 @@ describe('workspace file operations', () => {
       path: '/w/old.md',
       newName: 'new.md',
     })
-    expect(invoke).toHaveBeenNthCalledWith(2, 'workspace_file_duplicate', { path: '/w/new.md' })
-    expect(invoke).toHaveBeenNthCalledWith(3, 'workspace_file_trash', {
+    expect(invoke).toHaveBeenNthCalledWith(2, 'workspace_file_move', {
+      path: '/w/new.md',
+      destination: 'docs',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'workspace_file_duplicate', { path: '/w/new.md' })
+    expect(invoke).toHaveBeenNthCalledWith(4, 'workspace_file_trash', {
       paths: ['/w/new.md', '/w/archive'],
     })
-    expect(invoke).toHaveBeenNthCalledWith(4, 'workspace_file_open_native', { path: '/w/chart.png' })
-    expect(invoke).toHaveBeenNthCalledWith(5, 'workspace_file_reveal', { path: '/w/chart.png' })
+    expect(invoke).toHaveBeenNthCalledWith(5, 'workspace_file_open_native', { path: '/w/chart.png' })
+    expect(invoke).toHaveBeenNthCalledWith(6, 'workspace_file_reveal', { path: '/w/chart.png' })
   })
 })

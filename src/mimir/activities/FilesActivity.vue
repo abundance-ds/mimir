@@ -118,6 +118,7 @@
       @keydown="onListKeydown"
       @contextmenu="openEmptyContextMenu"
       @scroll.passive="onListScroll"
+      @pointerdown="onRowPointerDown"
     >
       <div
         v-if="isLoading"
@@ -171,13 +172,14 @@
             :active="isActive(item.row.entry)"
             :ancestry="isActiveAncestry(item.row.entry)"
             :favorite="isFavorite(item.row.entry)"
-            :drop-target="dropTarget?.highlightPath === item.row.entry.path"
+            :drop-target="dropHighlightPath === item.row.entry.path"
+            :drag-source="treeDragging && draggedPaths.has(item.row.entry.path)"
             :editing="isEditing(item.row)"
             :edit-kind="nameAction?.kind"
             :edit-draft="nameDraft"
-            @select="selectRow(item.row, item.index, $event)"
-            @activate="activateRow(item.row, false)"
-            @toggle="toggleRow(item.row, item.index)"
+            @select="onRowSelect(item.row, item.index, $event)"
+            @activate="onRowActivate(item.row)"
+            @toggle="onRowToggle(item.row, item.index)"
             @favorite="toggleFavorite(item.row.entry)"
             @context="openContextMenu"
             @update:edit-draft="nameDraft = $event"
@@ -403,6 +405,16 @@
         </div>
       </section>
     </div>
+
+    <div
+      v-if="treeDragging"
+      data-files-drag-ghost
+      aria-hidden="true"
+      class="pointer-events-none fixed z-[280] flex h-6 max-w-56 items-center border border-rule bg-surface px-2 shadow-lg"
+      :style="{ left: `${dragPointer.x + 12}px`, top: `${dragPointer.y + 14}px` }"
+    >
+      <span class="truncate text-[11px] text-ink">{{ dragLabel }}</span>
+    </div>
   </section>
 </template>
 
@@ -438,6 +450,7 @@ import { useFileDrop } from '../files/useFileDrop.js'
 import { useFileFavorites } from '../files/useFileFavorites.js'
 import { useFileMutations } from '../files/useFileMutations.js'
 import { useFileSelection } from '../files/useFileSelection.js'
+import { useFileTreeDrag } from '../files/useFileTreeDrag.js'
 import { importWorkspaceEntries } from '../../services/workspaceFileOperations.js'
 import { basename } from '../../shared/utils/path.js'
 
@@ -600,6 +613,7 @@ const {
   deleteError,
   duplicateContext,
   isEditing,
+  moveEntries,
   nameAction,
   nameDraft,
   openContextNative,
@@ -635,9 +649,45 @@ const { dropTarget, importing } = useFileDrop({
   importPaths: importDroppedPaths,
   springOpen: expandDirectory,
 })
+
+// Rearranging rows inside the tree; only the plain Project tree offers it —
+// filtered, Recent, and Favorites rows are projections whose position says
+// nothing about where a drop would land.
+const {
+  dragging: treeDragging,
+  draggedPaths,
+  dropTarget: moveTarget,
+  entries: dragCarried,
+  pointer: dragPointer,
+  suppressClick: dragSuppressClick,
+  onPointerDown: onRowPointerDown,
+} = useFileTreeDrag({
+  listRef,
+  rows: () => renderedRows.value,
+  canDrag: () => viewMode.value === 'project' && !query.value.trim()
+    && !nameAction.value && !operationBusy.value && !importing.value,
+  dragEntries: row => (
+    selectedPaths.value.has(row.entry.path) ? selectedEntries() : [row.entry]
+  ),
+  onMove: moveDraggedEntries,
+  springOpen: expandDirectory,
+})
+const dragLabel = computed(() => (
+  dragCarried.value.length === 1
+    ? dragCarried.value[0].name
+    : `${dragCarried.value.length} items`
+))
+// External drops and internal drags never overlap: one is an OS drag the
+// webview never owns, the other exists only while the pointer is held down.
+const dropHighlightPath = computed(() => (
+  dropTarget.value?.highlightPath || moveTarget.value?.highlightPath || ''
+))
 // Marks the panel itself when the drop lands in the workspace root, where
 // there is no row to highlight.
-const rootDropActive = computed(() => Boolean(dropTarget.value) && !dropTarget.value.highlightPath)
+const rootDropActive = computed(() => {
+  const target = dropTarget.value || moveTarget.value
+  return Boolean(target) && !target.highlightPath
+})
 
 const renderedRows = computed(() => {
   const rows = [...visibleRows.value]
@@ -977,6 +1027,31 @@ function onListKeydown(event) {
     if (nameAction.value) cancelNameAction()
     else clearSelection()
   }
+}
+
+// The click released at the end of a drag must not also toggle or open the
+// row it happened to end over.
+function onRowSelect(row, index, event) {
+  if (dragSuppressClick.value) return
+  selectRow(row, index, event)
+}
+
+function onRowToggle(row, index) {
+  if (dragSuppressClick.value) return
+  void toggleRow(row, index)
+}
+
+function onRowActivate(row) {
+  if (dragSuppressClick.value) return
+  activateRow(row, false)
+}
+
+async function moveDraggedEntries(entries, destination) {
+  const moved = await moveEntries(entries, destination)
+  if (!moved.length) return
+  await files.revealTreePath(destination)
+  await expandDirectory(destination)
+  selectArrivals(moved)
 }
 
 async function toggleRow(row, index = focusedIndex.value) {

@@ -12,6 +12,7 @@
       row.secondary ? 'h-9' : 'h-7',
       selected ? 'bg-accent-soft text-ink' : 'text-ink-2 hover:bg-chrome-high',
       dropTarget ? 'bg-accent-soft ring-1 ring-inset ring-accent' : '',
+      dragSource ? 'opacity-45' : '',
     ]"
     @contextmenu.prevent="$emit('context', row, $event)"
   >
@@ -163,6 +164,7 @@ const props = defineProps({
   ancestry: { type: Boolean, default: false },
   favorite: { type: Boolean, default: false },
   dropTarget: { type: Boolean, default: false },
+  dragSource: { type: Boolean, default: false },
   editing: { type: Boolean, default: false },
   editKind: { type: String, default: 'file' },
   editDraft: { type: String, default: '' },

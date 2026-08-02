@@ -1127,6 +1127,7 @@ pub fn run() {
             workspace_files::workspace_file_inspect,
             workspace_files::workspace_file_create,
             workspace_files::workspace_file_rename,
+            workspace_files::workspace_file_move,
             workspace_files::workspace_file_duplicate,
             workspace_files::workspace_file_import,
             workspace_files::workspace_file_trash,

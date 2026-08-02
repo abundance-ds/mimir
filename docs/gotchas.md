@@ -418,6 +418,15 @@ pane — with no error. `useFileDrop.js` scales per platform and measures the
 window against the viewport so interface zoom is included; re-check
 `dropCoordinatesArePhysical()` when wry is upgraded.
 
+### HTML5 drag and drop is dead inside the webview
+
+The same Tauri drag-drop interception that delivers OS file drops (above)
+swallows the webview's native DnD, so `draggable` elements never receive
+`drop`. Disabling the interception would trade away folder drops from outside.
+Any in-app drag — Sidebar reorder, Files tree moves — must be pointer-event
+driven (`usePointerReorder.js`, `useFileTreeDrag.js`); do not reach for HTML5
+DnD when adding a new one.
+
 ### Guard platform-only window APIs
 
 macOS titlebar, traffic-light, and native spellcheck APIs require
