@@ -53,6 +53,14 @@ export function useActivityLifecycle({
     }
   }
 
+  async function archiveActivities(ids) {
+    for (const id of ids) await archiveActivity(id)
+  }
+
+  async function clearActivities(ids) {
+    for (const id of ids) await clearActivity(id)
+  }
+
   async function restoreActivity(id) {
     const activity = activities.byId(id)
     if (!activity) {
@@ -233,7 +241,9 @@ export function useActivityLifecycle({
   }
 
   return {
+    archiveActivities,
     archiveActivity,
+    clearActivities,
     clearActivity,
     closeActivity,
     closingActivityIds,

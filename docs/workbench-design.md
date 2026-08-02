@@ -78,6 +78,12 @@ The permanent rail system is the signature:
 - Closed Activities do not form a Sidebar list. Cmd/Ctrl+P History searches
   useful task/workspace metadata and bounded transcript text, then restores the
   selected Activity into the working set.
+- Expanded Sidebar Activity rows support multi-selection: Cmd/Ctrl+click
+  toggles a row, Shift+click extends a range from the last toggle (or the
+  active Activity). A selection strip above the rows names the count and
+  offers batch Archive (stopped durable rows) and Delete (stopped rows);
+  running rows are never batch-archived or batch-deleted. Escape, a plain
+  activation click, or collapsing to the rail clears the selection.
 - Activity and Editor never both remain railed.
 - Restore controls live in adjacent pane headers so the shell is recoverable.
 

@@ -43,6 +43,49 @@ const activities = [
   },
 ]
 
+const batchActivities = [
+  {
+    id: 'run:one',
+    title: 'One',
+    kind: 'agent',
+    status: 'done',
+    retention: 'durable',
+    updatedAt: '2026-07-25T10:00:00Z',
+    source: { presetId: 'codex' },
+    host: { type: 'pty' },
+  },
+  {
+    id: 'run:two',
+    title: 'Two',
+    kind: 'terminal',
+    status: 'stopped',
+    retention: 'ephemeral',
+    updatedAt: '2026-07-25T09:00:00Z',
+    source: { presetId: 'terminal' },
+    host: { type: 'pty' },
+  },
+  {
+    id: 'run:three',
+    title: 'Three',
+    kind: 'agent',
+    status: 'working',
+    retention: 'durable',
+    updatedAt: '2026-07-25T08:00:00Z',
+    source: { presetId: 'codex' },
+    host: { type: 'pty' },
+  },
+  {
+    id: 'run:four',
+    title: 'Four',
+    kind: 'agent',
+    status: 'done',
+    retention: 'durable',
+    updatedAt: '2026-07-25T07:00:00Z',
+    source: { presetId: 'codex' },
+    host: { type: 'pty' },
+  },
+]
+
 function render(collapsed = false, attach = false) {
   return mount(WorkbenchSidebar, {
     ...(attach ? { attachTo: document.body } : {}),
@@ -373,6 +416,68 @@ describe('WorkbenchSidebar', () => {
     expect(endedMenu.text()).toContain('Delete')
     await endedMenu.findAll('button').find((button) => button.text().includes('Delete')).trigger('click')
     expect(wrapper.emitted('clearActivity').at(-1)).toEqual(['terminal:two'])
+  })
+
+  it('toggles multi-selection with Cmd+click and batch-archives only eligible Activities', async () => {
+    const wrapper = render()
+    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
+
+    await wrapper.get('[data-sidebar-row="activity:run:one"]').trigger('click', { metaKey: true })
+    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
+
+    expect(wrapper.emitted('selectActivity')).toBeUndefined()
+    expect(wrapper.get('[data-sidebar-row="activity:run:one"]').attributes('data-selected')).toBe('true')
+    expect(wrapper.get('[data-sidebar-row="activity:run:two"]').attributes('data-selected')).toBe('true')
+    expect(wrapper.get('[data-activity-selection-count]').text()).toBe('2 selected')
+
+    const archive = wrapper.get('[data-activity-selection-archive]')
+    expect(archive.attributes('title')).toContain('Archive 1')
+    await archive.trigger('click')
+    expect(wrapper.emitted('archiveActivities')).toEqual([[['run:one']]])
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
+
+    await wrapper.get('[data-sidebar-row="activity:run:three"]').trigger('click', { metaKey: true })
+    expect(wrapper.get('[data-activity-selection-archive]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-activity-selection-delete]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-sidebar-row="activity:run:three"]').trigger('click', { metaKey: true })
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
+  })
+
+  it('extends selection with Shift+click and batch-deletes only stopped Activities', async () => {
+    const wrapper = render()
+    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
+
+    await wrapper.get('[data-sidebar-row="activity:run:four"]').trigger('click', { shiftKey: true })
+    expect(wrapper.get('[data-activity-selection-count]').text()).toBe('4 selected')
+
+    const remove = wrapper.get('[data-activity-selection-delete]')
+    expect(remove.attributes('title')).toContain('Delete 3')
+    await remove.trigger('click')
+    expect(wrapper.emitted('clearActivities')).toEqual([[['run:one', 'run:two', 'run:four']]])
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
+  })
+
+  it('clears selection with Escape, plain activation clicks, and vanished rows', async () => {
+    const wrapper = render()
+    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
+
+    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(true)
+    await wrapper.get('[data-sidebar-row="activity:run:two"]').find('button')
+      .trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
+
+    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
+    await wrapper.get('[data-sidebar-row="activity:run:four"]').trigger('click')
+    expect(wrapper.emitted('selectActivity').at(-1)).toEqual(['run:four'])
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
+
+    await wrapper.get('[data-sidebar-row="activity:run:one"]').trigger('click', { metaKey: true })
+    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
+    await wrapper.setProps({
+      activities: batchActivities.filter((activity) => activity.id !== 'run:one'),
+    })
+    expect(wrapper.get('[data-activity-selection-count]').text()).toBe('1 selected')
   })
 
   it('supports keyboard manual reorder and explicit useful sort modes', async () => {

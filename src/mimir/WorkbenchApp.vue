@@ -37,6 +37,8 @@
         @stop-activity="stopActivity"
         @archive-activity="archiveActivity"
         @clear-activity="clearActivity"
+        @archive-activities="archiveActivities"
+        @clear-activities="clearActivities"
         @reorder-tools="reorderTools"
         @reorder-activities="reorderActivities"
         @sort-activities="sortActivities"
@@ -328,7 +330,9 @@ const activityLifecycle = useActivityLifecycle({
   openActivityRecord,
 })
 const {
+  archiveActivities,
   archiveActivity,
+  clearActivities,
   clearActivity,
   closeActivity,
   closingActivityIds,

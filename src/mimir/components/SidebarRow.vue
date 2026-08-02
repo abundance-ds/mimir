@@ -2,16 +2,18 @@
   <div
     class="group relative flex h-8 w-full items-center text-left text-ink-2 hover:bg-chrome-mid hover:text-ink"
     :class="{
-      'bg-accent-soft text-ink': active,
-      'text-ink-4': muted && !active,
+      'bg-accent-soft text-ink': active || selected,
+      'text-ink-4': muted && !active && !selected,
     }"
-    @click="$emit('click')"
+    :data-selected="selected ? 'true' : undefined"
+    @click="$emit('click', $event)"
   >
     <button
       type="button"
       class="flex h-full min-w-0 flex-1 items-center text-left"
       :aria-label="ariaLabel || (collapsed ? label : undefined)"
       :aria-current="active ? 'page' : undefined"
+      :aria-pressed="selected ? 'true' : undefined"
       :aria-disabled="$attrs['aria-disabled']"
       :title="$attrs.title"
     >
@@ -55,6 +57,7 @@ defineProps({
   meta: { type: String, default: '' },
   collapsed: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
+  selected: { type: Boolean, default: false },
   copyId: { type: String, default: '' },
   muted: { type: Boolean, default: false },
 })

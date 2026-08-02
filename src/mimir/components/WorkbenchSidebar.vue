@@ -281,6 +281,57 @@
       </Teleport>
 
       <template v-if="collapsed || !activitiesCollapsed">
+      <div
+        v-if="!collapsed && selectedActivityIds.size"
+        data-activity-selection-bar
+        class="mx-1 mb-1 flex h-7 items-center gap-1 border-y border-rule bg-surface pl-2 pr-1"
+        role="toolbar"
+        aria-label="Selected Activities actions"
+      >
+        <span
+          data-activity-selection-count
+          role="status"
+          class="min-w-0 flex-1 truncate font-mono text-[9px] uppercase tracking-[0.06em] text-ink-3"
+        >
+          {{ selectedActivityIds.size }} selected
+        </span>
+        <button
+          type="button"
+          data-activity-selection-archive
+          class="grid size-6 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+          :disabled="!archivableSelection.length"
+          :title="archivableSelection.length
+            ? `Archive ${archivableSelection.length} ${archivableSelection.length === 1 ? 'Activity' : 'Activities'}`
+            : 'No stopped durable Activities selected'"
+          :aria-label="`Archive ${archivableSelection.length} selected Activities`"
+          @click="archiveSelection"
+        >
+          <IconArchive :size="13" :stroke-width="1.8" />
+        </button>
+        <button
+          type="button"
+          data-activity-selection-delete
+          class="grid size-6 place-items-center text-rem hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+          :disabled="!deletableSelection.length"
+          :title="deletableSelection.length
+            ? `Delete ${deletableSelection.length} ${deletableSelection.length === 1 ? 'Activity' : 'Activities'}`
+            : 'Stop running Activities before deleting them'"
+          :aria-label="`Delete ${deletableSelection.length} selected Activities`"
+          @click="deleteSelection"
+        >
+          <IconTrash :size="13" :stroke-width="1.8" />
+        </button>
+        <button
+          type="button"
+          data-activity-selection-clear
+          class="grid size-6 place-items-center text-ink-4 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          title="Clear selection"
+          aria-label="Clear selection"
+          @click="clearSelection"
+        >
+          <IconX :size="13" :stroke-width="1.8" />
+        </button>
+      </div>
       <SidebarRow
         v-for="activity in activities"
         :key="`activity:${activity.id}`"
@@ -292,12 +343,13 @@
         :meta="activity.status"
         :collapsed="collapsed"
         :active="activeActivityId === activity.id"
+        :selected="selectedActivityIds.has(activity.id)"
         :copy-id="`activity:${activity.id}`"
         @pointerdown="onActivityPointerDown($event, activity.id)"
         @dblclick.stop="beginRename(activity)"
         @contextmenu.prevent="openActivityMenu(activity.id)"
         @keydown="onActivityKeydown($event, activity)"
-        @click="selectActivity(activity.id)"
+        @click="selectActivity(activity.id, $event)"
       >
         <span
           :data-sidebar-monogram="activity.id"
@@ -447,7 +499,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconArrowDown,
   IconArrowUp,
@@ -477,6 +529,7 @@ import {
   IconPlayerStopFilled,
   IconPlayerRecordFilled,
   IconTrash,
+  IconX,
 } from '@tabler/icons-vue'
 import SidebarRow from './SidebarRow.vue'
 import ChatSidebarSection from './ChatSidebarSection.vue'
@@ -518,6 +571,8 @@ const emit = defineEmits([
   'stopActivity',
   'archiveActivity',
   'clearActivity',
+  'archiveActivities',
+  'clearActivities',
   'reorderTools',
   'reorderActivities',
   'sortActivities',
@@ -538,6 +593,8 @@ const activityCreateButtonRef = ref(null)
 const activityCreateMenuRef = ref(null)
 const activityCreateMenuOpen = ref(false)
 const activityCreateMenuStyle = ref({})
+const selectedActivityIds = ref(new Set())
+const selectionAnchorId = ref('')
 const meetingElapsed = computed(() => {
   if (!props.meetingCapture) return ''
   const started = Date.parse(props.meetingCapture.startedAt || '')
@@ -837,9 +894,89 @@ function runAction(event, id) {
   })
 }
 
-function selectActivity(id) {
-  if (!suppressClick.value) emit('selectActivity', id)
+function selectActivity(id, event) {
+  if (suppressClick.value) return
+  if (!props.collapsed && (event?.shiftKey || event?.metaKey || event?.ctrlKey)) {
+    updateSelection(id, event)
+    return
+  }
+  clearSelection()
+  emit('selectActivity', id)
 }
+
+function updateSelection(id, event) {
+  const order = props.activities.map((activity) => activity.id)
+  const next = new Set(selectedActivityIds.value)
+  if (event.shiftKey) {
+    const anchor = order.includes(selectionAnchorId.value)
+      ? selectionAnchorId.value
+      : order.includes(props.activeActivityId)
+        ? props.activeActivityId
+        : id
+    if (!event.metaKey && !event.ctrlKey) next.clear()
+    const from = order.indexOf(anchor)
+    const to = order.indexOf(id)
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i += 1) {
+      next.add(order[i])
+    }
+    selectionAnchorId.value = anchor
+  } else {
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    selectionAnchorId.value = next.has(id) ? id : ''
+  }
+  selectedActivityIds.value = next
+}
+
+function clearSelection() {
+  if (selectedActivityIds.value.size) selectedActivityIds.value = new Set()
+  selectionAnchorId.value = ''
+}
+
+const selectedActivities = computed(() => (
+  props.activities.filter((activity) => selectedActivityIds.value.has(activity.id))
+))
+const archivableSelection = computed(() => (
+  selectedActivities.value.filter(
+    (activity) => activity.retention === 'durable' && !canStop(activity),
+  )
+))
+const deletableSelection = computed(() => (
+  selectedActivities.value.filter((activity) => !canStop(activity))
+))
+
+function archiveSelection() {
+  const ids = archivableSelection.value.map((activity) => activity.id)
+  if (!ids.length) return
+  emit('archiveActivities', ids)
+  clearSelection()
+}
+
+function deleteSelection() {
+  const ids = deletableSelection.value.map((activity) => activity.id)
+  if (!ids.length) return
+  emit('clearActivities', ids)
+  clearSelection()
+}
+
+watch(
+  () => props.activities.map((activity) => activity.id).join('|'),
+  () => {
+    if (!selectedActivityIds.value.size) return
+    const ids = new Set(props.activities.map((activity) => activity.id))
+    const kept = [...selectedActivityIds.value].filter((id) => ids.has(id))
+    if (kept.length !== selectedActivityIds.value.size) {
+      selectedActivityIds.value = new Set(kept)
+    }
+    if (selectionAnchorId.value && !ids.has(selectionAnchorId.value)) {
+      selectionAnchorId.value = ''
+    }
+  },
+)
+
+watch([() => props.collapsed, activitiesCollapsed], ([collapsed, folded]) => {
+  if (collapsed || folded) clearSelection()
+})
 
 function activityIdentity(activity) {
   const source = String(
@@ -912,6 +1049,12 @@ function onToolKeydown(event, tool) {
 function onActivityKeydown(event, activity) {
   if (event.target?.tagName === 'INPUT') return
   if (navigateSidebarRows(event)) return
+  if (event.key === 'Escape' && selectedActivityIds.value.size) {
+    event.preventDefault()
+    event.stopPropagation()
+    clearSelection()
+    return
+  }
   if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
     event.preventDefault()
     event.stopPropagation()
