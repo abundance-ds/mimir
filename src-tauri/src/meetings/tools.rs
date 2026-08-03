@@ -7,7 +7,8 @@
 #[cfg(test)]
 use super::runtime::MeetingSnapshot;
 use super::runtime::{
-    MeetingLibraryCursor, MeetingLibrarySearchHit, MeetingRuntime, MeetingUpdatePatch, MeetingView,
+    MeetingDeleteMode, MeetingLibraryCursor, MeetingLibrarySearchHit, MeetingRuntime,
+    MeetingUpdatePatch, MeetingView,
 };
 use crate::tool_registry::{
     ToolCallContext, ToolDescriptor, ToolError, ToolErrorCode, ToolOwner, ToolRegistration,
@@ -118,6 +119,29 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
                 .map_err(runtime_error)
                 .and_then(|_| runtime.meeting(meeting_id).map_err(runtime_error))
                 .and_then(|meeting| get_projection(runtime, &meeting, meeting_id, 0, Some(0)))
+        }
+        "meetings.delete" => {
+            let meeting_id = required_string(&input, "meeting_id")?;
+            let expected_title = required_string(&input, "expected_title")?;
+            let meeting = runtime.meeting(meeting_id).map_err(runtime_error)?;
+            require_public_meeting(&meeting)?;
+            if meeting.title != expected_title {
+                return Err(invalid_input(
+                    "meeting title changed; call meetings_get again before deleting",
+                ));
+            }
+            let (mode, deleted) = match required_string(&input, "scope")? {
+                "audio" => (MeetingDeleteMode::Audio, "audio"),
+                "meeting" => (MeetingDeleteMode::All, "meeting"),
+                _ => return Err(invalid_input("scope must be audio or meeting")),
+            };
+            runtime.delete(meeting_id, mode).map_err(runtime_error)?;
+            Ok(json!({
+                "meetingId": meeting_id,
+                "title": meeting.title,
+                "deleted": deleted,
+                "permanent": true
+            }))
         }
         _ => Err(ToolError::new(
             ToolErrorCode::NotFound,
@@ -512,6 +536,19 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
                 &["meeting_id"],
             ),
         ),
+        (
+            "meetings.delete",
+            "meetings_delete",
+            "Permanently delete source audio or an entire stopped Mimir Scribe meeting. Call only after an explicit user request and read the meeting first.",
+            object_schema(
+                json!({
+                    "meeting_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "expected_title": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "scope": { "type": "string", "enum": ["audio", "meeting"] }
+                }),
+                &["meeting_id", "expected_title", "scope"],
+            ),
+        ),
     ]
 }
 
@@ -579,6 +616,7 @@ mod tests {
     struct TestPlatform {
         contents: Mutex<BTreeMap<String, MeetingContentProjection>>,
         content_updates: AtomicUsize,
+        deleted: Mutex<Vec<(String, MeetingDeleteMode)>>,
     }
 
     impl MeetingPlatformPort for TestPlatform {
@@ -634,11 +672,8 @@ mod tests {
         fn set_kg_decision(&self, _meeting_id: &str, _decision: &str) -> Result<(), String> {
             Ok(())
         }
-        fn delete_meeting(
-            &self,
-            _meeting_id: &str,
-            _mode: MeetingDeleteMode,
-        ) -> Result<(), String> {
+        fn delete_meeting(&self, meeting_id: &str, mode: MeetingDeleteMode) -> Result<(), String> {
+            self.deleted.lock().unwrap().push((meeting_id.into(), mode));
             Ok(())
         }
         fn export_meeting(
@@ -684,12 +719,107 @@ mod tests {
     #[test]
     fn public_projection_has_no_recording_control() {
         let definitions = definitions();
-        assert_eq!(definitions.len(), 4);
+        assert_eq!(definitions.len(), 5);
+        assert!(definitions
+            .iter()
+            .any(|definition| definition.0 == "meetings.delete"));
         assert!(definitions.iter().all(|definition| {
             !definition.0.contains("start")
                 && !definition.0.contains("stop")
                 && !definition.0.contains("record")
         }));
+    }
+
+    #[test]
+    fn agent_delete_requires_the_exact_current_title_and_explicit_scope() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let platform = Arc::new(TestPlatform::default());
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "delete-explicit-meeting".into(),
+                    title: "Original title".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: Vec::new(),
+                    metadata: json!({}),
+                },
+                "2026-07-31T00:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Failed,
+                "2026-07-31T00:00:01Z",
+                Some(&MeetingFailure {
+                    code: "fixture".into(),
+                    message: "terminal fixture".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        platform.contents.lock().unwrap().insert(
+            created.id.clone(),
+            MeetingContentProjection {
+                title: Some("Reviewed current title".into()),
+                ..MeetingContentProjection::default()
+            },
+        );
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(TestCapture),
+            Arc::new(TestTranscription),
+            platform.clone(),
+            Arc::new(TestClock),
+            Arc::new(TestEvents),
+        )
+        .unwrap();
+
+        let stale = execute(
+            &runtime,
+            "meetings.delete",
+            json!({
+                "meeting_id": created.id,
+                "expected_title": "Original title",
+                "scope": "meeting",
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, ToolErrorCode::InvalidInput);
+        assert!(platform.deleted.lock().unwrap().is_empty());
+
+        let unknown_scope = execute(
+            &runtime,
+            "meetings.delete",
+            json!({
+                "meeting_id": created.id,
+                "expected_title": "Reviewed current title",
+                "scope": "files",
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(unknown_scope.code, ToolErrorCode::InvalidInput);
+        assert!(platform.deleted.lock().unwrap().is_empty());
+
+        let deleted = execute(
+            &runtime,
+            "meetings.delete",
+            json!({
+                "meeting_id": created.id,
+                "expected_title": "Reviewed current title",
+                "scope": "meeting",
+            }),
+        )
+        .unwrap();
+        assert_eq!(deleted["meetingId"], "delete-explicit-meeting");
+        assert_eq!(deleted["title"], "Reviewed current title");
+        assert_eq!(deleted["deleted"], "meeting");
+        assert_eq!(deleted["permanent"], true);
+        assert_eq!(
+            *platform.deleted.lock().unwrap(),
+            vec![("delete-explicit-meeting".into(), MeetingDeleteMode::All)]
+        );
     }
 
     #[test]
@@ -770,6 +900,18 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.code, ToolErrorCode::Unavailable);
+        let delete_error = execute(
+            &runtime,
+            "meetings.delete",
+            json!({
+                "meeting_id": created.id,
+                "expected_title": "Live private meeting",
+                "scope": "meeting",
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(delete_error.code, ToolErrorCode::Unavailable);
+        assert!(platform.deleted.lock().unwrap().is_empty());
         assert_eq!(platform.content_updates.load(Ordering::SeqCst), 0);
         assert_eq!(
             platform

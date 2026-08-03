@@ -285,6 +285,8 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
     let meetings_stdout = stdout_of(&meetings_drawer);
     assert!(meetings_stdout.starts_with("MEETINGS\n\n"));
     assert!(meetings_stdout.contains("meetings_get"));
+    assert!(meetings_stdout.contains("meetings_delete"));
+    assert!(meetings_stdout.contains("explicit user request"));
     assert!(meetings_stdout.contains("Recording controls remain human-only"));
     assert!(!meetings_stdout.contains("meetings_start"));
     assert!(!meetings_stdout.contains("meetings_stop"));

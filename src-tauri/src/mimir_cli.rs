@@ -380,6 +380,7 @@ mod tests {
         assert!(MIMIR_GRAPH_SKILL.contains("name: mimir-graph"));
         assert!(MIMIR_MEETINGS_SKILL.contains("name: mimir-meetings"));
         assert!(MIMIR_MEETINGS_SKILL.contains("meetings_search"));
+        assert!(MIMIR_MEETINGS_SKILL.contains("meetings_delete"));
         for kind in crate::business_graph::ENTITY_KINDS {
             assert!(MIMIR_GRAPH_REFERENCE.contains(kind));
         }
