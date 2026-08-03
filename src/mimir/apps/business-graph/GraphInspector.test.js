@@ -38,15 +38,20 @@ const issue = {
     sourcePath: '/atlas/issues/evidence.md',
   },
 }
-const neighbors = [{
-  relation: 'part_of',
-  direction: 'outgoing',
-  node: project,
-}]
+const blocker = {
+  id: 'issue-infra',
+  kind: 'issue',
+  title: 'Infra migration',
+  scopeId: 'project:atlas',
+}
+const neighbors = [
+  { relation: 'part_of', direction: 'outgoing', node: project },
+  { relation: 'blocked_by', direction: 'outgoing', node: blocker },
+]
 const baseProps = {
   node: issue,
   neighbors,
-  nodes: [issue, project, person],
+  nodes: [issue, project, person, blocker],
   scopes: [
     { id: 'project:atlas', kind: 'project' },
     { id: 'team:main', kind: 'team' },
@@ -54,18 +59,95 @@ const baseProps = {
 }
 
 describe('GraphInspector', () => {
-  it('keeps Peek read-first while exposing graph context and explicit promotion', () => {
+  it('edits the operational properties of an object directly in Peek', async () => {
     const wrapper = mount(GraphInspector, {
+      attachTo: document.body,
       props: { ...baseProps, mode: 'peek' },
     })
+    await flushPromises()
 
-    expect(wrapper.get('[data-inspector-title]').element.tagName).toBe('H1')
-    expect(wrapper.find('textarea').exists()).toBe(false)
-    expect(wrapper.get('[data-graph-relationship-line]').text()).toContain('belongs to')
+    for (const selector of [
+      '[data-inspector-title]',
+      '[data-inspector-status]',
+      '[data-inspector-priority]',
+      '[data-inspector-project]',
+      '[data-inspector-assignee]',
+      '[data-inspector-due]',
+      '[data-inspector-waiting]',
+      '[data-inspector-body]',
+    ]) {
+      expect(wrapper.find(selector).exists(), `missing ${selector}`).toBe(true)
+    }
+    const contextStrip = wrapper.get('[data-graph-relationship-line]')
+    expect(contextStrip.text()).toContain('part of')
+    expect(contextStrip.text()).toContain('blocked by')
     expect(wrapper.get('[data-related-node="project-atlas"]').text()).toBe('Project Atlas')
+    expect(wrapper.get('[data-related-node="issue-infra"]').text()).toBe('Infra migration')
     expect(wrapper.get('[data-inspector-focus]').text()).toContain('Focus')
-    expect(wrapper.get('[data-inspector-status]').attributes('role')).toBe('combobox')
-    expect(wrapper.find('[data-inspector-project]').exists()).toBe(false)
+
+    await wrapper.get('[data-inspector-title]').setValue('Synthesize pivotal evidence')
+    await wrapper.get('[data-inspector-waiting]').setValue('Client confirmation')
+    wrapper.findComponent(GraphMarkdownEditor).vm.setValue('Reviewed in Peek.')
+    await flushPromises()
+    wrapper.vm.commitThen(() => {})
+
+    const patch = wrapper.emitted('save')[0][0]
+    expect(patch).toEqual(expect.objectContaining({
+      id: issue.id,
+      title: 'Synthesize pivotal evidence',
+      body: 'Reviewed in Peek.',
+      relations: expect.arrayContaining([
+        { relation: 'part_of', target: project.id, legacy: false },
+      ]),
+      setProperties: expect.objectContaining({ waitingFor: 'Client confirmation' }),
+    }))
+    wrapper.unmount()
+  })
+
+  it('keeps a legacy project label out of the relation graph so the object stays savable', async () => {
+    const legacyIssue = {
+      ...issue,
+      relations: [],
+      properties: { ...issue.properties, legacyProject: 'fde', legacyAssignee: 'Paul' },
+    }
+    const wrapper = mount(GraphInspector, {
+      attachTo: document.body,
+      props: { ...baseProps, mode: 'peek', node: legacyIssue },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-inspector-project]').text()).toBe('fde')
+    expect(wrapper.get('[data-inspector-assignee]').text()).toBe('Paul')
+
+    await wrapper.get('[data-inspector-waiting]').setValue('Anna')
+    wrapper.vm.commitThen(() => {})
+
+    const patch = wrapper.emitted('save')[0][0]
+    expect(patch.relations).toEqual([])
+    expect(patch.setProperties).toEqual(expect.objectContaining({
+      legacyProject: 'fde',
+      legacyAssignee: 'Paul',
+    }))
+    wrapper.unmount()
+  })
+
+  it('lets an explicit exit through after a rejected save instead of stranding the draft', async () => {
+    const wrapper = mount(GraphInspector, {
+      attachTo: document.body,
+      props: { ...baseProps, mode: 'peek' },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-inspector-waiting]').setValue('Anna')
+    await wrapper.get('[data-graph-control="peek-close"]').trigger('click')
+    expect(wrapper.emitted('save')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    wrapper.emitted('save')[0][1].failed()
+    await wrapper.get('[data-graph-control="peek-close"]').trigger('click')
+    expect(wrapper.emitted('save')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
   })
 
   it('dismisses the Peek action menu when attention moves elsewhere', async () => {

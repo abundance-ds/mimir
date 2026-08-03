@@ -182,13 +182,7 @@
       <button type="button" data-graph-control="retry" @click="refresh">Retry</button>
     </div>
 
-    <div v-if="graph.loading" data-graph-loading class="graph-state">
-      <span class="graph-loading-mark" aria-hidden="true" />
-      <h2>Composing your graph</h2>
-      <p>Private, project, and team knowledge are being indexed.</p>
-    </div>
-
-    <div v-else-if="!workspacePath" data-graph-no-workspace class="graph-state">
+    <div v-if="!workspacePath" data-graph-no-workspace class="graph-state">
       <IconFolderOpen :size="24" :stroke-width="1.5" />
       <h2>Open a project to begin</h2>
       <p>
@@ -367,8 +361,13 @@
             data-graph-control="board-columns-filter-clear"
             @clear="showAllBoardStatuses"
           />
+          <div v-if="composing" data-graph-loading class="graph-state">
+            <span class="graph-loading-mark" aria-hidden="true" />
+            <h2>Composing your graph</h2>
+            <p>Private, project, and team knowledge are being indexed.</p>
+          </div>
           <EntityList
-            v-if="graph.searchQuery"
+            v-else-if="graph.searchQuery"
             ref="entityList"
             :nodes="projectionNodes"
             :scopes="graph.scopes"
@@ -695,6 +694,10 @@ const deleteTitle = computed(() => (
 const deleteCopy = computed(() => (
   'The Markdown source leaves the active graph and moves to Trash. Its relationships disappear from projections until restored.'
 ))
+// The shell stays mounted while the graph mounts so the topbar, viewbar, and
+// dispatch bar paint immediately; only the projection waits for the first
+// query, and a reload keeps the nodes already on screen.
+const composing = computed(() => graph.loading && !graph.nodes.length)
 const projectionNodes = computed(() => {
   let items = graph.visibleNodes
   if (graph.section === 'work') {
@@ -1048,15 +1051,43 @@ watch(
   },
 )
 
+// Settings hydrate after the app mounts, so the team root usually arrives once
+// the first mount is already in flight. Comparing against the roots the store
+// actually opened — and serializing the starts — picks the team scope up
+// instead of leaving it silently unmounted.
+let startInFlight = false
+let queuedStart = null
+
+function mountsRoots(workspace, teamRoot) {
+  return Boolean(graph.status)
+    && graph.projectRoot === workspace
+    && graph.teamRoot === teamRoot
+}
+
+function startGraph(workspace, teamRoot) {
+  if (startInFlight) {
+    queuedStart = { workspace, teamRoot }
+    return
+  }
+  if (mountsRoots(workspace, teamRoot)) return
+  startInFlight = true
+  void graph.start(workspace, teamRoot)
+    .catch(cause => emit('diagnostic', errorMessage(cause)))
+    .finally(() => {
+      startInFlight = false
+      const queued = queuedStart
+      queuedStart = null
+      if (queued) startGraph(queued.workspace, queued.teamRoot)
+    })
+}
+
 watch(
   [() => props.active, () => props.workspacePath, () => settings.mimirTeamGraphFolder],
-  ([active, workspace], previous = []) => {
-    if (!active || !workspace) return
-    if (!graph.status || workspace !== previous[1]) {
-      void graph.start(workspace, settings.mimirTeamGraphFolder).catch(cause => {
-        emit('diagnostic', errorMessage(cause))
-      })
-    }
+  ([active, workspace, teamFolder]) => {
+    const projectRoot = String(workspace || '').trim()
+    const teamRoot = String(teamFolder || '').trim()
+    if (!active || !projectRoot || mountsRoots(projectRoot, teamRoot)) return
+    startGraph(projectRoot, teamRoot)
   },
   { immediate: true },
 )
@@ -1271,19 +1302,25 @@ async function saveNode(patch, controls) {
   } catch (cause) {
     saveError.value = errorMessage(cause)
     emit('diagnostic', errorMessage(cause))
+    controls.failed?.()
   } finally {
     saving.value = false
   }
 }
 
+// Only relations this edit introduces are checked. An edge the source already
+// carries may point outside the selected scopes, and rejecting it would make
+// every other field of that node unsavable.
 function validateIssueEntityRelations(patch) {
   if (graph.selectedNode?.kind !== 'issue' || !Array.isArray(patch.relations)) return
+  const stored = new Set((graph.selectedNode.relations || [])
+    .map(edge => `${edge.relation}::${edge.target}`))
   for (const [relation, expectedKind, label] of [
     ['part_of', 'project', 'Project'],
     ['assigned_to', 'person', 'Assignee'],
   ]) {
     const targetId = patch.relations.find(edge => edge.relation === relation)?.target
-    if (!targetId) continue
+    if (!targetId || stored.has(`${relation}::${targetId}`)) continue
     const target = graph.nodes.find(node => node.id === targetId)
     if (!target || target.kind !== expectedKind) {
       throw new Error(`${label} must resolve to a visible ${expectedKind} node, not “${targetId}”.`)

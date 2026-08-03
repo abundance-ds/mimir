@@ -11,7 +11,7 @@
     :disabled="$attrs.disabled"
     @click="toggle"
   >
-    <IconCalendar v-if="variant !== 'row'" :size="variant === 'icon' ? 14 : 13" />
+    <IconCalendar v-if="variant !== 'row'" :size="variant === 'icon' ? 14 : variant === 'quiet' ? 12 : 13" />
     <span v-if="variant !== 'icon'">{{ displayValue }}</span>
     <IconChevronDown v-if="variant === 'field'" :size="11" class="ml-auto" />
   </button>
@@ -116,7 +116,7 @@ const props = defineProps({
   variant: {
     type: String,
     default: 'field',
-    validator: value => ['field', 'icon', 'row'].includes(value),
+    validator: value => ['field', 'icon', 'row', 'quiet'].includes(value),
   },
 })
 
@@ -298,9 +298,9 @@ onUnmounted(close)
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border: 1px solid var(--color-rule-light);
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--color-surface);
   color: var(--color-ink-2);
   font-size: 11px;
@@ -320,8 +320,26 @@ onUnmounted(close)
 
 .graph-date-field {
   width: 100%;
-  min-height: 37px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+/* Ghost property control matching GraphSelect's quiet variant. */
+.graph-date-quiet {
+  min-height: 26px;
+  padding: 0 5px;
+  border-color: transparent;
+  border-radius: 2px;
+  background: transparent;
+  font-weight: 560;
+}
+
+.graph-date-quiet svg {
+  color: var(--color-ink-4);
+}
+
+.graph-date-quiet:hover {
+  background: var(--color-chrome-mid);
 }
 
 .graph-date-icon {
@@ -427,7 +445,7 @@ onUnmounted(close)
 }
 
 .graph-date-grid button {
-  border-radius: 5px;
+  border-radius: 3px;
   color: var(--color-ink-2);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -464,8 +482,8 @@ onUnmounted(close)
 }
 
 .graph-date-popover footer button {
-  min-height: 30px;
-  border-radius: 5px;
+  min-height: 28px;
+  border-radius: 3px;
   padding: 0 8px;
   color: var(--color-ink-3);
   font-size: 10px;

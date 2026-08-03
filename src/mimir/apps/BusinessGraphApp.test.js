@@ -33,6 +33,7 @@ import {
   updateGraphNode,
 } from '../../services/businessGraph.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
+import { useSettingsStore } from '../../stores/settings.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 
@@ -63,6 +64,18 @@ const summaries = [
     scopeId: 'team:main',
     sourceRevision: 'project-rev',
   },
+  {
+    id: 'issue-legacy',
+    kind: 'issue',
+    title: 'Reply to Anna',
+    summary: '',
+    tags: [],
+    status: 'review',
+    priority: 'normal',
+    projectId: 'fde',
+    scopeId: 'project:alpha',
+    sourceRevision: 'legacy-rev',
+  },
 ]
 const initialSummaries = JSON.parse(JSON.stringify(summaries))
 
@@ -74,14 +87,22 @@ function full(id) {
     relations: id === 'issue-1'
       ? [{ relation: 'part_of', target: 'project-alpha', legacy: false }]
       : [],
-    properties: id === 'issue-1'
-      ? {
-          status: 'plan',
-          priority: 'high',
-          legacyProject: 'project-alpha',
-          labels: [{ name: 'heor', color: 'blue' }],
-        }
-      : {},
+    properties: {
+      'issue-1': {
+        status: 'plan',
+        priority: 'high',
+        legacyProject: 'project-alpha',
+        labels: [{ name: 'heor', color: 'blue' }],
+      },
+      // A source written before projects were graph nodes: the project and
+      // assignee are plain labels, not ids.
+      'issue-legacy': {
+        status: 'review',
+        priority: 'normal',
+        legacyProject: 'fde',
+        legacyAssignee: 'Paul',
+      },
+    }[id] || {},
     provenance: {
       scopeId: summary.scopeId,
       sourceRevision: summary.sourceRevision,
@@ -182,8 +203,8 @@ describe('BusinessGraphApp', () => {
 
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-inspector-body-preview]').text()).toBe('Review extraction criteria.')
-    await wrapper.get('[data-inspector-body-edit]').trigger('click')
+    expect(wrapper.get('[data-inspector-body] .cm-content').text()).toBe('Review extraction criteria.')
+    await wrapper.get('[data-inspector-focus]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('focus')
     expect(wrapper.get('[data-inspector-body] .cm-content').text()).toBe('Review extraction criteria.')
@@ -194,6 +215,38 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-graph-context-trail]').text()).toContain('Extract evidence')
     expect(wrapper.findAll('[data-context-node]')).toHaveLength(2)
     expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
+    wrapper.unmount()
+  })
+
+  it('mounts the shared team root once settings resolve after the first open', async () => {
+    const settings = useSettingsStore()
+    const wrapper = render()
+    await flushPromises()
+    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha', '')
+
+    settings.mimirTeamGraphFolder = '/team'
+    await flushPromises()
+
+    expect(openBusinessGraph).toHaveBeenCalledTimes(2)
+    expect(openBusinessGraph).toHaveBeenLastCalledWith('/alpha', '/team')
+    wrapper.unmount()
+  })
+
+  it('saves an issue whose project is a legacy label instead of a graph node', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-board-card="issue-legacy"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-inspector-waiting]').setValue('Anna')
+    await wrapper.get('[data-graph-control="peek-close"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-graph-save-error]').exists()).toBe(false)
+    const patch = vi.mocked(updateGraphNode).mock.calls.at(-1)[0]
+    expect(patch.relations).toEqual([])
+    expect(patch.setProperties.legacyProject).toBe('fde')
+    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
     wrapper.unmount()
   })
 
@@ -404,7 +457,7 @@ describe('BusinessGraphApp', () => {
     }))
     await flushPromises()
     expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
-    expect(document.activeElement).toBe(wrapper.get('[data-inspector-focus]').element)
+    expect(document.activeElement).toBe(wrapper.get('[data-inspector-title]').element)
 
     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Escape',
@@ -755,7 +808,7 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-inspector-status]').attributes('role')).toBe('combobox')
-    expect(wrapper.find('[data-inspector-project]').exists()).toBe(false)
+    expect(wrapper.get('[data-inspector-project]').attributes('role')).toBe('combobox')
 
     await wrapper.get('[data-inspector-focus]').trigger('click')
     await flushPromises()

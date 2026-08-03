@@ -3,6 +3,7 @@
     ref="host"
     data-graph-markdown-editor
     class="graph-markdown-editor"
+    :class="{ 'graph-markdown-editor-unframed': !framed }"
     :style="{ '--graph-editor-min-height': `${minHeight}px` }"
     :aria-busy="disabled"
   />
@@ -31,6 +32,7 @@ const props = defineProps({
   minHeight: { type: Number, default: 320 },
   disabled: { type: Boolean, default: false },
   autofocus: { type: Boolean, default: false },
+  framed: { type: Boolean, default: true },
   controlId: { type: String, default: 'working-note-input' },
 })
 
@@ -65,17 +67,19 @@ const graphHighlightStyle = HighlightStyle.define([
   { tag: tags.contentSeparator, color: 'var(--color-ink-4)' },
 ])
 
-const graphEditorTheme = EditorView.theme({
+const graphEditorTheme = framed => EditorView.theme({
   '&': {
     minHeight: 'var(--graph-editor-min-height)',
     width: '100%',
-    borderRadius: '6px',
+    borderRadius: framed ? '3px' : '0',
     color: 'var(--color-ink)',
-    backgroundColor: 'var(--color-chrome-high)',
+    backgroundColor: framed ? 'var(--color-chrome-high)' : 'transparent',
     fontSize: '13px',
   },
   '&.cm-focused': {
-    outline: '2px solid color-mix(in srgb, var(--color-accent) 22%, transparent)',
+    outline: framed
+      ? '2px solid color-mix(in srgb, var(--color-accent) 22%, transparent)'
+      : 'none',
     outlineOffset: '1px',
   },
   '.cm-scroller': {
@@ -88,7 +92,7 @@ const graphEditorTheme = EditorView.theme({
   '.cm-content': {
     boxSizing: 'border-box',
     minHeight: 'var(--graph-editor-min-height)',
-    padding: '18px 20px 56px',
+    padding: framed ? '12px 14px 44px' : '4px 0 28px',
     caretColor: 'var(--color-accent)',
   },
   '.cm-line': {
@@ -126,7 +130,7 @@ onMounted(() => {
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       markdownListKeymap,
       syntaxHighlighting(graphHighlightStyle),
-      graphEditorTheme,
+      graphEditorTheme(props.framed),
       editorPlaceholder(props.placeholder),
       keymap.of([
         {
@@ -208,7 +212,13 @@ onUnmounted(() => {
 .graph-markdown-editor {
   min-height: var(--graph-editor-min-height);
   border: 1px solid var(--color-rule-light);
-  border-radius: 2px;
+  border-radius: 3px;
   background: var(--color-chrome-high);
+}
+
+.graph-markdown-editor-unframed {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 </style>

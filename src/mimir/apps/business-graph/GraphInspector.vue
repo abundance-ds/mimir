@@ -15,6 +15,9 @@
           <span>{{ human(node.kind) }} · {{ scopeLabel }}</span>
           <small>{{ node.id }}</small>
         </span>
+        <span class="peek-save-state" :class="saveStateClass" aria-live="polite">
+          {{ saveStateLabel }}
+        </span>
         <button
           type="button"
           data-inspector-source
@@ -64,39 +67,53 @@
         </section>
 
         <section class="peek-hero">
-          <h1 data-inspector-title>{{ node.title || node.id }}</h1>
-          <p v-if="node.summary" class="peek-summary">{{ node.summary }}</p>
+          <textarea
+            ref="titleInput"
+            v-model="draft.title"
+            data-inspector-title
+            data-graph-control="peek-title"
+            class="peek-title-input"
+            rows="1"
+            aria-label="Object title"
+            @input="changedAndGrow"
+          />
+
+          <textarea
+            v-if="node.kind !== 'issue'"
+            ref="summaryInput"
+            v-model="draft.summary"
+            data-inspector-summary
+            data-graph-control="peek-summary"
+            class="peek-summary-text"
+            rows="1"
+            aria-label="Retrieval summary"
+            placeholder="One sentence an agent can retrieve this by."
+            @input="changedAndGrow"
+          />
 
           <div v-if="node.kind === 'issue'" class="peek-quick-properties">
-            <label>
-              <span>Status</span>
-              <GraphSelect
-                :model-value="draft.status"
-                data-inspector-status
-                data-graph-control="peek-status"
-                variant="quiet"
-                aria-label="Issue status"
-                :options="statuses"
-                @update:model-value="quickUpdate('status', $event)"
-              />
-            </label>
-            <label>
-              <span>Priority</span>
-              <GraphSelect
-                :model-value="draft.priority"
-                data-inspector-priority
-                data-graph-control="peek-priority"
-                variant="quiet"
-                aria-label="Issue priority"
-                :options="priorities"
-                @update:model-value="quickUpdate('priority', $event)"
-              />
-            </label>
+            <GraphSelect
+              :model-value="draft.status"
+              data-inspector-status
+              data-graph-control="peek-status"
+              variant="quiet"
+              aria-label="Issue status"
+              :options="statuses"
+              @update:model-value="quickUpdate('status', $event)"
+            />
+            <GraphSelect
+              :model-value="draft.priority"
+              data-inspector-priority
+              data-graph-control="peek-priority"
+              variant="quiet"
+              aria-label="Issue priority"
+              :options="priorities"
+              @update:model-value="quickUpdate('priority', $event)"
+            />
           </div>
         </section>
 
         <section class="peek-section relationship-section">
-          <span class="object-section-label">In context</span>
           <GraphRelationshipLine
             :node="node"
             :neighbors="neighbors"
@@ -104,50 +121,80 @@
           />
         </section>
 
-        <section v-if="node.body" class="peek-section">
-          <div class="object-section-heading">
-            <span class="object-section-label">Working note</span>
-            <button
-              type="button"
-              data-inspector-body-edit
-              data-graph-control="peek-edit-note"
-              @click="$emit('focus')"
-            >
-              Edit in Focus
-            </button>
+        <section v-if="node.kind === 'issue'" class="peek-section">
+          <div class="peek-property-grid">
+            <div class="peek-field">
+              <span>Project</span>
+              <GraphSelect
+                :model-value="draft.projectId"
+                data-inspector-project
+                data-graph-control="peek-project"
+                variant="quiet"
+                aria-label="Issue project"
+                placeholder="No project"
+                :options="projectOptions"
+                :menu-min-width="260"
+                searchable
+                search-placeholder="Find a project"
+                @update:model-value="updateDraft('projectId', $event)"
+              />
+            </div>
+            <div class="peek-field">
+              <span>Owner</span>
+              <GraphSelect
+                :model-value="draft.assigneeId"
+                data-inspector-assignee
+                data-graph-control="peek-assignee"
+                variant="quiet"
+                aria-label="Issue assignee"
+                placeholder="Unassigned"
+                :options="personOptions"
+                :menu-min-width="260"
+                searchable
+                search-placeholder="Find a person"
+                @update:model-value="updateDraft('assigneeId', $event)"
+              />
+            </div>
+            <div class="peek-field">
+              <span>Due date</span>
+              <GraphDatePicker
+                :model-value="draft.dueDate"
+                data-inspector-due
+                data-graph-control="peek-due"
+                variant="quiet"
+                aria-label="Issue due date"
+                placeholder="No due date"
+                :class="{ attention: isOverdue(draft.dueDate) }"
+                @update:model-value="updateDraft('dueDate', $event)"
+              />
+            </div>
+            <label class="peek-field">
+              <span>Waiting for</span>
+              <input
+                v-model="draft.waitingFor"
+                data-inspector-waiting
+                data-graph-control="peek-waiting"
+                placeholder="Nobody"
+                @input="changed"
+              />
+            </label>
           </div>
-          <GraphMarkdownPreview
-            data-inspector-body-preview
-            :value="node.body"
-            compact
-            :max-blocks="6"
-          />
+          <p v-if="attentionLabel !== 'Clear'" class="peek-attention">{{ attentionLabel }}</p>
         </section>
 
-        <section v-if="node.kind === 'issue'" class="peek-section">
-          <span class="object-section-label">Operational context</span>
-          <dl class="peek-facts">
-            <div>
-              <dt>Project</dt>
-              <dd>{{ projectTitle || 'No project' }}</dd>
-            </div>
-            <div>
-              <dt>Owner</dt>
-              <dd>{{ assigneeTitle || 'Unassigned' }}</dd>
-            </div>
-            <div>
-              <dt>Due</dt>
-              <dd :class="{ attention: isOverdue(draft.dueDate) }">
-                {{ readableDate(draft.dueDate) || 'No due date' }}
-              </dd>
-            </div>
-            <div>
-              <dt>Attention</dt>
-              <dd :class="{ attention: draft.waitingFor || draft.snoozeUntil }">
-                {{ attentionLabel }}
-              </dd>
-            </div>
-          </dl>
+        <section class="peek-section peek-note-section">
+          <GraphMarkdownEditor
+            v-model="draft.body"
+            data-inspector-body
+            data-graph-control="peek-working-note"
+            :disabled="saving"
+            :min-height="150"
+            :framed="false"
+            control-id="peek-working-note"
+            aria-label="Working note in Markdown"
+            @change="changed"
+            @save="save"
+          />
         </section>
 
         <section v-if="activities.length" class="peek-section">
@@ -216,10 +263,10 @@
           type="button"
           data-inspector-focus
           data-graph-control="peek-focus"
-          class="object-primary-action"
+          class="object-secondary-action"
           @click="$emit('focus')"
         >
-          <IconMaximize :size="14" />
+          <IconMaximize :size="13" />
           Focus
           <kbd>F</kbd>
         </button>
@@ -346,75 +393,63 @@
             />
 
             <div v-if="node.kind === 'issue'" class="focus-primary-properties">
-              <label>
-                <span>Status</span>
-                <GraphSelect
-                  :model-value="draft.status"
-                  data-inspector-status
-                  data-graph-control="focus-status"
-                  variant="property"
-                  aria-label="Issue status"
-                  :options="statuses"
-                  @update:model-value="updateDraft('status', $event)"
-                />
-              </label>
-              <label>
-                <span>Priority</span>
-                <GraphSelect
-                  :model-value="draft.priority"
-                  data-inspector-priority
-                  data-graph-control="focus-priority"
-                  variant="property"
-                  aria-label="Issue priority"
-                  :options="priorities"
-                  @update:model-value="updateDraft('priority', $event)"
-                />
-              </label>
-              <label>
-                <span>Project</span>
-                <GraphSelect
-                  :model-value="draft.projectId"
-                  data-inspector-project
-                  data-graph-control="focus-project"
-                  variant="property"
-                  aria-label="Issue project"
-                  placeholder="No project"
-                  :options="projectOptions"
-                  :menu-min-width="280"
-                  searchable
-                  search-placeholder="Find a project"
-                  @update:model-value="updateDraft('projectId', $event)"
-                />
-              </label>
-              <label>
-                <span>Owner</span>
-                <GraphSelect
-                  :model-value="draft.assigneeId"
-                  data-inspector-assignee
-                  data-graph-control="focus-assignee"
-                  variant="property"
-                  aria-label="Issue assignee"
-                  placeholder="Unassigned"
-                  :options="personOptions"
-                  :menu-min-width="280"
-                  searchable
-                  search-placeholder="Find a person"
-                  @update:model-value="updateDraft('assigneeId', $event)"
-                />
-              </label>
+              <GraphSelect
+                :model-value="draft.status"
+                data-inspector-status
+                data-graph-control="focus-status"
+                variant="quiet"
+                aria-label="Issue status"
+                :options="statuses"
+                @update:model-value="updateDraft('status', $event)"
+              />
+              <GraphSelect
+                :model-value="draft.priority"
+                data-inspector-priority
+                data-graph-control="focus-priority"
+                variant="quiet"
+                aria-label="Issue priority"
+                :options="priorities"
+                @update:model-value="updateDraft('priority', $event)"
+              />
+              <GraphSelect
+                :model-value="draft.projectId"
+                data-inspector-project
+                data-graph-control="focus-project"
+                variant="quiet"
+                aria-label="Issue project"
+                placeholder="No project"
+                :options="projectOptions"
+                :menu-min-width="280"
+                searchable
+                search-placeholder="Find a project"
+                @update:model-value="updateDraft('projectId', $event)"
+              />
+              <GraphSelect
+                :model-value="draft.assigneeId"
+                data-inspector-assignee
+                data-graph-control="focus-assignee"
+                variant="quiet"
+                aria-label="Issue assignee"
+                placeholder="Unassigned"
+                :options="personOptions"
+                :menu-min-width="280"
+                searchable
+                search-placeholder="Find a person"
+                @update:model-value="updateDraft('assigneeId', $event)"
+              />
             </div>
 
-            <label v-else class="focus-summary-field">
-              <span>Retrieval summary</span>
-              <textarea
-                ref="summaryInput"
-                v-model="draft.summary"
-                data-inspector-summary
-                data-graph-control="focus-summary"
-                placeholder="A concise retrieval hint for people and agents"
-                @input="changedAndGrow"
-              />
-            </label>
+            <textarea
+              v-else
+              ref="summaryInput"
+              v-model="draft.summary"
+              data-inspector-summary
+              data-graph-control="focus-summary"
+              class="focus-summary-text"
+              aria-label="Retrieval summary"
+              placeholder="A concise retrieval hint for people and agents"
+              @input="changedAndGrow"
+            />
           </header>
 
           <ProjectStanding
@@ -426,7 +461,6 @@
           />
 
           <section class="focus-relationship">
-            <span class="focus-section-kicker">Relational context</span>
             <GraphRelationshipLine
               :node="node"
               :neighbors="neighbors"
@@ -436,13 +470,7 @@
           </section>
 
           <section class="focus-connections-section">
-            <div class="focus-section-heading">
-              <div>
-                <span class="focus-section-kicker">Connections</span>
-                <h2>Place this object in the business graph</h2>
-              </div>
-              <span>Outgoing relationships</span>
-            </div>
+            <span class="object-section-label">Connections</span>
 
             <div class="connection-composer">
               <GraphSelect
@@ -503,24 +531,19 @@
               </div>
             </div>
             <p v-else class="connection-empty">
-              No editable outgoing connections yet. Incoming links remain visible in the relationship sentence.
+              No outgoing connections yet. Incoming links appear in the context strip.
             </p>
           </section>
 
           <section class="focus-note">
-            <div class="focus-section-heading">
-              <div>
-                <span class="focus-section-kicker">Working note</span>
-                <h2>Context, reasoning, and decisions</h2>
-              </div>
-              <span>{{ draft.body.length.toLocaleString() }} characters</span>
-            </div>
+            <span class="object-section-label">Working note</span>
             <GraphMarkdownEditor
               v-model="draft.body"
               data-inspector-body
               data-graph-control="focus-working-note"
               :disabled="saving"
               :min-height="380"
+              :framed="false"
               control-id="focus-working-note"
               aria-label="Working note in Markdown"
               @change="changed"
@@ -529,12 +552,9 @@
           </section>
 
           <section class="focus-details-section">
-            <div class="focus-section-heading">
-              <div>
-                <span class="focus-section-kicker">Properties</span>
-                <h2>{{ node.kind === 'issue' ? 'Planning and attention' : 'Classification' }}</h2>
-              </div>
-            </div>
+            <span class="object-section-label">
+              {{ node.kind === 'issue' ? 'Planning' : 'Properties' }}
+            </span>
 
             <div v-if="node.kind === 'issue'" class="focus-property-grid">
               <div class="focus-field">
@@ -543,6 +563,7 @@
                   :model-value="draft.dueDate"
                   data-inspector-due
                   data-graph-control="focus-due"
+                  variant="quiet"
                   aria-label="Issue due date"
                   placeholder="No due date"
                   @update:model-value="updateDraft('dueDate', $event)"
@@ -554,6 +575,7 @@
                   :model-value="draft.remindAt"
                   data-inspector-reminder
                   data-graph-control="focus-reminder"
+                  variant="quiet"
                   aria-label="Issue reminder"
                   control-id="focus-reminder"
                   @update:model-value="updateDraft('remindAt', $event)"
@@ -575,6 +597,7 @@
                   :model-value="draft.snoozeUntil"
                   data-inspector-snooze
                   data-graph-control="focus-snooze"
+                  variant="quiet"
                   aria-label="Snooze until"
                   placeholder="Not snoozed"
                   @update:model-value="updateDraft('snoozeUntil', $event)"
@@ -614,12 +637,7 @@
             v-if="neighbors.length || activities.length || deliverableItems.length"
             class="focus-connected-section"
           >
-            <div class="focus-section-heading">
-              <div>
-                <span class="focus-section-kicker">Connected work</span>
-                <h2>Objects, Activities, and outputs</h2>
-              </div>
-            </div>
+            <span class="object-section-label">Connected work</span>
             <div class="focus-connected-grid">
               <div v-if="neighbors.length">
                 <h3>Related objects</h3>
@@ -686,11 +704,8 @@
           </section>
 
           <section class="focus-source-section">
-            <div>
-              <span class="focus-section-kicker">Source of truth</span>
-              <h2>Markdown provenance</h2>
-              <p>{{ node.provenance?.sourcePath }}</p>
-            </div>
+            <span class="object-section-label">Source</span>
+            <p>{{ node.provenance?.sourcePath }}</p>
             <dl>
               <div>
                 <dt>Scope</dt>
@@ -786,7 +801,6 @@ import {
   IconX,
 } from '@tabler/icons-vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
-import GraphMarkdownPreview from './GraphMarkdownPreview.vue'
 import GraphRelationshipLine from './GraphRelationshipLine.vue'
 import ProjectStanding from './ProjectStanding.vue'
 import GraphSelect from './GraphSelect.vue'
@@ -825,6 +839,7 @@ const inspectorRoot = ref(null)
 const summaryInput = ref(null)
 const deliverablesInput = ref(null)
 const dirty = ref(false)
+const saveBlocked = ref(false)
 const copiedFact = ref('')
 let copiedFactTimer = null
 const saved = ref(false)
@@ -938,6 +953,7 @@ const projects = computed(() => props.nodes.filter(node => node.kind === 'projec
 const people = computed(() => props.nodes.filter(node => node.kind === 'person'))
 const projectOptions = computed(() => [
   { value: '', label: 'No project', hint: 'Remove project relation' },
+  ...labelOption(draft.projectId, projects.value),
   ...projects.value.map(project => ({
     value: project.id,
     label: project.title || project.id,
@@ -946,12 +962,21 @@ const projectOptions = computed(() => [
 ])
 const personOptions = computed(() => [
   { value: '', label: 'Unassigned', hint: 'Remove assignee relation' },
+  ...labelOption(draft.assigneeId, people.value),
   ...people.value.map(person => ({
     value: person.id,
     label: person.title || person.id,
     hint: `${person.provenance?.scopeKind || person.scopeId || 'person'} · ${person.id}`,
   })),
 ])
+
+// A legacy source value is a label, not an id. Offering it keeps the control
+// showing what the Markdown actually says instead of reading as unassigned.
+function labelOption(value, candidates) {
+  const current = String(value || '').trim()
+  if (!current || candidates.some(candidate => candidate.id === current)) return []
+  return [{ value: current, label: current, hint: 'Label from the Markdown source' }]
+}
 const relationOptions = computed(() => (
   RELATION_DEFINITIONS
     .filter(definition => (
@@ -1000,14 +1025,6 @@ const canAddConnection = computed(() => (
     edge.relation === connectionRelation.value && edge.target === connectionTarget.value
   ))
 ))
-const projectTitle = computed(() => (
-  projects.value.find(project => project.id === draft.projectId)?.title
-  || draft.projectId
-))
-const assigneeTitle = computed(() => (
-  people.value.find(person => person.id === draft.assigneeId)?.title
-  || draft.assigneeId
-))
 const deliverableItems = computed(() => (
   (props.node?.properties?.deliverables || [])
     .map(item => (
@@ -1018,17 +1035,16 @@ const deliverableItems = computed(() => (
     .filter(item => item.path)
 ))
 const attentionLabel = computed(() => {
-  if (draft.waitingFor) return `Waiting for ${draft.waitingFor}`
   if (draft.snoozeUntil) return `Snoozed until ${readableDate(draft.snoozeUntil)}`
   if (isOverdue(draft.dueDate)) return 'Overdue'
   return 'Clear'
 })
 const saveStateLabel = computed(() => {
   if (props.conflict) return 'Conflict'
-  if (props.saving) return 'Saving'
-  if (dirty.value) return 'Unsaved changes'
+  if (props.saving) return 'Saving…'
+  if (dirty.value) return 'Unsaved'
   if (saved.value) return 'Saved'
-  return 'Up to date'
+  return ''
 })
 const saveStateClass = computed(() => ({
   'save-state-conflict': Boolean(props.conflict),
@@ -1052,9 +1068,8 @@ watch(
   { immediate: true },
 )
 
-watch(() => props.mode, async mode => {
+watch(() => props.mode, async () => {
   moreOpen.value = false
-  if (mode !== 'focus') return
   await nextTick()
   growAll()
 })
@@ -1096,6 +1111,7 @@ function resetDraft(node) {
   connectionRelation.value = defaultRelationFor(node.kind)
   connectionTarget.value = ''
   dirty.value = false
+  saveBlocked.value = false
   saved.value = false
   editVersion = 0
   pendingAction = null
@@ -1147,12 +1163,8 @@ function save(afterSave = null) {
   const relations = props.node.kind === 'issue'
     ? [
         ...draft.relations.filter(edge => !['part_of', 'assigned_to'].includes(edge.relation)),
-        ...(draft.projectId.trim()
-          ? [{ relation: 'part_of', target: draft.projectId.trim(), legacy: false }]
-          : []),
-        ...(draft.assigneeId.trim()
-          ? [{ relation: 'assigned_to', target: draft.assigneeId.trim(), legacy: false }]
-          : []),
+        ...entityRelation('part_of', draft.projectId, 'project'),
+        ...entityRelation('assigned_to', draft.assigneeId, 'person'),
       ]
     : draft.relations.map(edge => ({ ...edge }))
   emit('save', {
@@ -1167,6 +1179,7 @@ function save(afterSave = null) {
     removeProperties,
   }, {
     done() {
+      saveBlocked.value = false
       if (editVersion === version) {
         dirty.value = false
         saved.value = true
@@ -1180,7 +1193,29 @@ function save(afterSave = null) {
         scheduleSave()
       }
     },
+    // A rejected save must not strand the draft: drop the queued navigation so
+    // the surface stays open with its error, and let the next explicit exit
+    // leave without retrying the same failing write.
+    failed() {
+      saveBlocked.value = true
+      pendingAction = null
+      clearTimeout(autosaveTimer)
+    },
   })
+}
+
+// Legacy issue sources carry a plain label (`project: "fde"`, `assignee: "Paul"`)
+// rather than a graph id. Promoting one to a relation would point at a node that
+// does not exist, so a label stays in legacyProject/legacyAssignee and only a
+// resolvable — or already stored — target becomes an edge.
+function entityRelation(relation, value, expectedKind) {
+  const target = String(value || '').trim()
+  if (!target) return []
+  const resolves = props.nodes.some(node => node.id === target && node.kind === expectedKind)
+  const stored = (props.node?.relations || []).some(edge => (
+    edge.relation === relation && edge.target === target
+  ))
+  return resolves || stored ? [{ relation, target, legacy: false }] : []
 }
 
 function requestExit(eventName) {
@@ -1245,7 +1280,7 @@ function copyFact(fact) {
 }
 
 function commitThen(action) {
-  if (!dirty.value && !props.saving) {
+  if ((!dirty.value && !props.saving) || saveBlocked.value) {
     action()
     return
   }
@@ -1257,6 +1292,7 @@ function changed() {
   editVersion += 1
   dirty.value = true
   saved.value = false
+  saveBlocked.value = false
   scheduleSave()
 }
 
@@ -1308,10 +1344,13 @@ function growAll() {
   for (const input of [titleInput.value, summaryInput.value, deliverablesInput.value]) grow(input)
 }
 
+// Peek and Focus size the same fields differently, so the floor comes from the
+// element's own min-height rather than a mode-specific constant.
 function grow(input) {
   if (!input) return
   input.style.height = '0px'
-  input.style.height = `${Math.max(input.scrollHeight, input === titleInput.value ? 48 : 88)}px`
+  const floor = Number.parseFloat(getComputedStyle(input).minHeight) || 0
+  input.style.height = `${Math.max(input.scrollHeight, floor)}px`
 }
 
 function relationTarget(node, relation) {
@@ -1406,7 +1445,7 @@ function focusEntry() {
 function modeEntryControl() {
   return props.mode === 'focus'
     ? '[data-graph-control="focus-back"]'
-    : '[data-graph-control="peek-focus"]'
+    : '[data-graph-control="peek-title"]'
 }
 
 defineExpose({ requestClose, requestBack, commitThen, focusEntry })
@@ -1508,13 +1547,13 @@ onUnmounted(() => {
 .peek-header,
 .focus-header {
   display: flex;
-  min-height: 48px;
+  min-height: 40px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 9px;
+  gap: 6px;
   border-bottom: 1px solid var(--color-rule-light);
   background: var(--color-surface);
-  padding: 7px 9px 7px 13px;
+  padding: 5px 7px 5px 12px;
 }
 
 .peek-identity {
@@ -1543,11 +1582,11 @@ onUnmounted(() => {
 
 .object-icon-button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 3px;
   color: var(--color-ink-4);
 }
 
@@ -1633,10 +1672,18 @@ onUnmounted(() => {
 }
 
 .peek-hero {
-  padding: 22px 20px 18px;
+  padding: 13px 18px 12px;
 }
 
-.peek-hero h1 {
+.peek-title-input {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
   color: var(--color-ink);
   font-size: 19px;
   font-weight: 670;
@@ -1644,49 +1691,130 @@ onUnmounted(() => {
   line-height: 1.25;
 }
 
-.peek-summary {
+.peek-title-input:focus-visible {
+  outline: none;
+}
+
+.peek-title-input::selection {
+  background: var(--selection);
+}
+
+/* Ghost summary: plain secondary text, no box. */
+.peek-summary-text {
+  display: block;
+  width: 100%;
+  min-height: 32px;
   margin-top: 8px;
-  color: var(--color-ink-3);
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--color-ink-2);
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
-.peek-quick-properties {
+.peek-summary-text::placeholder {
+  color: var(--color-ink-4);
+}
+
+.peek-summary-text:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 2px;
+}
+
+.peek-save-state {
+  flex: 0 0 auto;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.peek-property-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 17px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+  margin-inline: -5px;
 }
 
-.peek-quick-properties label {
-  display: flex;
+.peek-field {
+  display: block;
   min-width: 0;
-  align-items: center;
-  gap: 3px;
-  border-radius: 6px;
-  background: var(--color-chrome-high);
-  padding: 2px 3px 2px 9px;
 }
 
-.peek-quick-properties label > span {
+.peek-field > span {
+  display: block;
+  margin: 0 0 1px 5px;
   color: var(--color-ink-4);
   font-size: 9px;
-  font-weight: 620;
-  letter-spacing: 0.04em;
+  font-weight: 660;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.peek-quick-properties :deep(.graph-select-trigger) {
-  flex: 1 1 auto;
+.peek-field :deep(.graph-select-quiet),
+.peek-field :deep(.graph-date-quiet) {
+  width: 100%;
+}
+
+/* Ghost text input: borderless until hover/focus. */
+.peek-field input {
+  width: 100%;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0 5px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+}
+
+.peek-field input::placeholder {
+  color: var(--color-ink-4);
+}
+
+.peek-field input:hover {
+  background: var(--color-chrome-mid);
+}
+
+.peek-field input:focus-visible {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--color-surface);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+  outline-offset: 1px;
+}
+
+.peek-attention {
+  margin-top: 8px;
+  color: var(--color-rem);
+  font-size: 10px;
+}
+
+/* Status and priority read as clickable values, not labeled form fields. */
+.peek-quick-properties {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 9px -5px 0;
+}
+
+.peek-quick-properties :deep(.graph-select-quiet) {
+  max-width: 62%;
 }
 
 .peek-section {
   border-top: 1px solid var(--color-rule-light);
-  padding: 17px 20px;
+  padding: 12px 18px;
+}
+
+.peek-note-section {
+  padding-top: 6px;
 }
 
 .relationship-section {
   background: var(--color-chrome-high);
+  padding-block: 9px;
 }
 
 .object-section-heading {
@@ -1730,41 +1858,19 @@ onUnmounted(() => {
   font-size: 9px;
 }
 
-.peek-facts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 13px 16px;
-}
-
-.peek-facts dt {
-  color: var(--color-ink-4);
-  font-size: 9px;
-  font-weight: 620;
-  text-transform: uppercase;
-}
-
-.peek-facts dd {
-  overflow: hidden;
-  margin-top: 4px;
-  color: var(--color-ink-2);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.peek-facts dd.attention {
+.peek-field :deep(.graph-date-trigger.attention) {
   color: var(--color-rem);
 }
 
 .object-link-row {
   display: grid;
   width: 100%;
-  min-height: 45px;
-  grid-template-columns: 26px minmax(0, 1fr) 16px;
+  min-height: 36px;
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
   align-items: center;
-  gap: 9px;
-  border-radius: 5px;
-  padding: 5px 7px;
+  gap: 8px;
+  border-radius: 3px;
+  padding: 4px 6px;
   text-align: left;
 }
 
@@ -1807,9 +1913,9 @@ onUnmounted(() => {
 }
 
 .activity-dot {
-  width: 7px;
-  height: 7px;
-  margin-left: 9px;
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
   border-radius: 50%;
   background: var(--color-ink-4);
 }
@@ -1829,10 +1935,10 @@ onUnmounted(() => {
 .file-mark,
 .relation-mark {
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--color-chrome-mid);
   color: var(--color-ink-3);
   font-family: var(--font-mono);
@@ -1847,7 +1953,7 @@ onUnmounted(() => {
 
 .peek-provenance {
   border-top: 1px solid var(--color-rule-light);
-  padding: 12px 20px 19px;
+  padding: 9px 18px 13px;
 }
 
 .peek-provenance summary {
@@ -1914,25 +2020,25 @@ onUnmounted(() => {
 .peek-footer,
 .focus-footer {
   display: flex;
-  min-height: 53px;
+  min-height: 43px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border-top: 1px solid var(--color-rule);
   background: var(--color-surface);
-  padding: 8px 10px;
+  padding: 6px 9px;
 }
 
 .object-primary-action,
 .object-secondary-action,
 .focus-danger-action {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 29px;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  border-radius: 5px;
-  padding: 0 10px;
+  gap: 6px;
+  border-radius: 3px;
+  padding: 0 9px;
   font-size: 10px;
   font-weight: 650;
 }
@@ -1947,9 +2053,9 @@ onUnmounted(() => {
 }
 
 .object-secondary-action {
-  border: 1px solid var(--color-rule-light);
-  background: var(--color-surface);
-  color: var(--color-ink-2);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ink-3);
 }
 
 .object-secondary-action:hover {
@@ -1958,6 +2064,7 @@ onUnmounted(() => {
 }
 
 .object-primary-action kbd,
+.object-secondary-action kbd,
 .focus-save-button kbd {
   margin-left: 2px;
   font-family: var(--font-mono);
@@ -1974,23 +2081,23 @@ onUnmounted(() => {
   position: absolute;
   z-index: 90;
   right: 0;
-  bottom: 40px;
-  width: 210px;
+  bottom: 34px;
+  width: 196px;
   border: 1px solid var(--color-rule);
   border-radius: 3px;
   background: var(--color-surface);
-  padding: 5px;
+  padding: 3px;
   box-shadow: 0 10px 30px color-mix(in srgb, var(--color-ink) 15%, transparent);
 }
 
 .peek-more-menu button {
   display: flex;
   width: 100%;
-  min-height: 38px;
+  min-height: 31px;
   align-items: center;
-  gap: 9px;
-  border-radius: 4px;
-  padding: 0 9px;
+  gap: 8px;
+  border-radius: 2px;
+  padding: 0 7px;
   color: var(--color-ink-2);
   font-size: 11px;
   text-align: left;
@@ -2005,8 +2112,8 @@ onUnmounted(() => {
 }
 
 .focus-header {
-  min-height: 50px;
-  padding-inline: 14px;
+  min-height: 42px;
+  padding-inline: 10px;
 }
 
 .focus-header-identity {
@@ -2049,12 +2156,12 @@ onUnmounted(() => {
 .focus-document {
   width: min(1080px, 100%);
   margin: 0 auto;
-  padding: 36px clamp(22px, 4cqw, 56px) 100px;
+  padding: 24px clamp(20px, 4cqw, 48px) 80px;
 }
 
 .focus-hero {
   border-bottom: 1px solid var(--color-rule-light);
-  padding-bottom: 29px;
+  padding-bottom: 16px;
 }
 
 .focus-object-id {
@@ -2071,7 +2178,7 @@ onUnmounted(() => {
   resize: none;
   border: 0;
   background: transparent;
-  padding: 9px 0 5px;
+  padding: 6px 0 4px;
   color: var(--color-ink);
   font-size: clamp(24px, 3.1cqw, 34px);
   font-weight: 690;
@@ -2087,48 +2194,53 @@ onUnmounted(() => {
   background: var(--selection);
 }
 
+/* The primary property row reads as values on the document, not a form. */
 .focus-primary-properties {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
-  gap: 8px;
-  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  margin: 8px -5px 0;
 }
 
-.focus-primary-properties label > span,
-.focus-summary-field > span,
+.focus-primary-properties :deep(.graph-select-quiet) {
+  max-width: 240px;
+}
+
 .focus-field > span,
 .focus-deliverables-field > span {
   display: block;
-  margin: 0 0 5px 2px;
+  margin: 0 0 1px 5px;
   color: var(--color-ink-4);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 670;
   letter-spacing: 0.055em;
   text-transform: uppercase;
 }
 
-.focus-summary-field {
+/* Ghost summary: plain secondary text, no box. */
+.focus-summary-text {
   display: block;
-  margin-top: 18px;
-}
-
-.focus-summary-field textarea {
   width: 100%;
-  min-height: 88px;
+  min-height: 40px;
+  margin-top: 10px;
   overflow: hidden;
   resize: none;
   border: 0;
-  border-radius: 6px;
-  background: var(--color-surface);
-  padding: 12px 14px;
+  background: transparent;
+  padding: 2px 0;
   color: var(--color-ink-2);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
-.focus-summary-field textarea:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
-  outline-offset: 1px;
+.focus-summary-text::placeholder {
+  color: var(--color-ink-4);
+}
+
+.focus-summary-text:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 2px;
 }
 
 .focus-relationship,
@@ -2137,18 +2249,18 @@ onUnmounted(() => {
 .focus-details-section,
 .focus-connected-section,
 .focus-source-section {
-  margin-top: 34px;
+  margin-top: 22px;
 }
 
 .focus-relationship {
   border-block: 1px solid var(--color-rule-light);
   background: var(--color-surface);
-  padding: 15px 2px;
+  padding: 9px 2px;
 }
 
 .focus-connections-section {
   border-bottom: 1px solid var(--color-rule-light);
-  padding-bottom: 28px;
+  padding-bottom: 20px;
 }
 
 .connection-composer {
@@ -2160,14 +2272,14 @@ onUnmounted(() => {
 
 .connection-add {
   display: inline-flex;
-  min-width: 76px;
-  min-height: 37px;
+  min-width: 68px;
+  min-height: 32px;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--color-accent);
-  padding: 0 11px;
+  padding: 0 10px;
   color: var(--color-accent-ink, white);
   font-size: 10px;
   font-weight: 650;
@@ -2198,11 +2310,11 @@ onUnmounted(() => {
 
 .connection-row {
   display: grid;
-  min-height: 44px;
-  grid-template-columns: 18px minmax(0, 1fr) auto 32px;
+  min-height: 36px;
+  grid-template-columns: 18px minmax(0, 1fr) auto 26px;
   align-items: center;
-  gap: 9px;
-  padding: 5px 6px 5px 11px;
+  gap: 8px;
+  padding: 4px 4px 4px 9px;
 }
 
 .connection-row + .connection-row {
@@ -2248,10 +2360,10 @@ onUnmounted(() => {
 
 .connection-row > button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 3px;
   color: var(--color-ink-4);
 }
 
@@ -2270,97 +2382,83 @@ onUnmounted(() => {
   line-height: 1.45;
 }
 
-.focus-section-kicker {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--color-ink-4);
-  font-size: 9px;
-  font-weight: 680;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.focus-section-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 14px;
-}
-
-.focus-section-heading h2,
-.focus-source-section h2 {
-  color: var(--color-ink);
-  font-size: 15px;
-  font-weight: 660;
-  letter-spacing: -0.015em;
-}
-
-.focus-section-heading > span {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-}
-
 .focus-property-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 8px 14px;
+  margin-inline: -5px;
+}
+
+.focus-field :deep(.graph-select-quiet),
+.focus-field :deep(.graph-date-quiet) {
+  width: 100%;
 }
 
 .focus-classification-grid {
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
+/* Ghost text inputs: borderless until hover/focus. */
 .focus-field input,
 .focus-deliverables-field textarea {
   width: 100%;
-  border: 1px solid var(--color-rule-light);
-  border-radius: 6px;
-  background: var(--color-surface);
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
   color: var(--color-ink-2);
   font-size: 12px;
 }
 
 .focus-field input {
-  height: 37px;
-  padding: 0 10px;
+  height: 27px;
+  padding: 0 5px;
+}
+
+.focus-field input::placeholder,
+.focus-deliverables-field textarea::placeholder {
+  color: var(--color-ink-4);
+}
+
+.focus-field input:hover,
+.focus-deliverables-field textarea:hover {
+  background: var(--color-chrome-mid);
 }
 
 .focus-field input:focus-visible,
 .focus-deliverables-field textarea:focus-visible {
-  border-color: var(--color-accent);
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 21%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--color-surface);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
   outline-offset: 1px;
 }
 
 .focus-field small {
   display: block;
-  margin: 5px 0 0 2px;
+  margin: 3px 0 0 5px;
   color: var(--color-ink-4);
   font-size: 9px;
 }
 
 .focus-deliverables-field {
   display: block;
-  margin-top: 18px;
+  margin: 12px -5px 0;
 }
 
 .focus-deliverables-field > small {
   display: block;
-  margin: -2px 0 7px 2px;
+  margin: 0 0 5px 5px;
   color: var(--color-ink-4);
   font-size: 9px;
 }
 
 .focus-deliverables-field textarea {
-  min-height: 104px;
+  min-height: 68px;
   overflow: hidden;
   resize: none;
-  padding: 12px;
+  padding: 4px 5px;
   font-family: var(--font-mono);
   font-size: 10px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .focus-connected-grid {
@@ -2370,23 +2468,20 @@ onUnmounted(() => {
 }
 
 .focus-connected-grid h3 {
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   color: var(--color-ink-3);
   font-size: 10px;
   font-weight: 650;
 }
 
 .focus-source-section {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.75fr);
-  gap: 28px;
   border-top: 1px solid var(--color-rule-light);
-  padding-top: 25px;
+  padding-top: 14px;
 }
 
 .focus-source-section p {
   overflow-wrap: anywhere;
-  margin-top: 8px;
+  margin-top: 2px;
   color: var(--color-ink-4);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -2394,9 +2489,16 @@ onUnmounted(() => {
 }
 
 .focus-source-section dl {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 20px;
+  margin-top: 8px;
+}
+
+.focus-source-section dl > div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .focus-source-section dt {
@@ -2408,7 +2510,6 @@ onUnmounted(() => {
 
 .focus-source-section dd {
   overflow: hidden;
-  margin-top: 5px;
   color: var(--color-ink-3);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -2417,12 +2518,12 @@ onUnmounted(() => {
 }
 
 .focus-footer {
-  min-height: 57px;
-  padding-inline: 14px;
+  min-height: 46px;
+  padding-inline: 10px;
 }
 
 .focus-danger-action {
-  width: 34px;
+  width: 29px;
   padding: 0;
   color: var(--color-ink-4);
 }
@@ -2439,7 +2540,7 @@ onUnmounted(() => {
 }
 
 .focus-save-button {
-  min-width: 130px;
+  min-width: 116px;
 }
 
 .focus-save-button:disabled {
@@ -2454,14 +2555,6 @@ onUnmounted(() => {
     z-index: 70;
     inset: 0 0 0 auto;
     width: min(430px, 100%);
-  }
-
-  .focus-primary-properties {
-    grid-template-columns: repeat(2, minmax(120px, 1fr));
-  }
-
-  .focus-source-section {
-    grid-template-columns: 1fr;
   }
 
   .connection-composer {
@@ -2482,10 +2575,9 @@ onUnmounted(() => {
   }
 
   .focus-document {
-    padding: 34px 16px 100px;
+    padding: 22px 16px 80px;
   }
 
-  .focus-primary-properties,
   .focus-property-grid,
   .connection-composer {
     grid-template-columns: 1fr;

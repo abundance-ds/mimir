@@ -21,7 +21,7 @@
     </span>
     <IconChevronDown
       v-if="chevron"
-      :size="variant === 'card' ? 8 : variant === 'row' ? 9 : 10"
+      :size="variant === 'card' ? 8 : variant === 'row' || variant === 'quiet' ? 9 : 10"
       class="graph-select-chevron shrink-0"
       :class="{ 'rotate-180': open }"
     />
@@ -227,7 +227,7 @@ function positionMenu() {
   const width = Math.max(rect.width, props.menuMinWidth)
   const estimatedHeight = Math.min(
     props.searchable ? 292 : 252,
-    filteredOptions.value.length * 34 + (props.searchable ? 42 : 8),
+    filteredOptions.value.length * 32 + (props.searchable ? 40 : 8),
   )
   const gap = 4
   const spaceBelow = window.innerHeight - rect.bottom - gap
@@ -333,9 +333,9 @@ let graphSelectCounter = 0
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 7px;
+  gap: 6px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--color-surface);
   color: var(--color-ink-2);
   font-weight: 520;
@@ -370,11 +370,11 @@ let graphSelectCounter = 0
 
 .graph-select-field {
   width: 100%;
-  min-height: 36px;
-  padding: 0 10px;
-  border-color: var(--color-rule);
+  min-height: 32px;
+  padding: 0 9px;
+  border-color: var(--color-rule-light);
   background: var(--color-surface);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-ink-2);
 }
 
@@ -385,16 +385,31 @@ let graphSelectCounter = 0
   font-size: 10px;
 }
 
+/* Ghost property control: the current value is the label. Borderless and
+   transparent at rest, a chrome-mid wash on hover, accent ring on focus. */
 .graph-select-quiet {
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 5px;
+  border-color: transparent;
+  border-radius: 2px;
   background: transparent;
+  color: var(--color-ink-2);
   font-size: 11px;
+  font-weight: 560;
+}
+
+.graph-select-quiet:hover {
+  background: var(--color-chrome-mid);
+}
+
+.graph-select-quiet[aria-expanded="true"] {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
 }
 
 .graph-select-property {
-  min-height: 32px;
-  padding: 0 9px;
+  min-height: 30px;
+  padding: 0 8px;
   border-color: var(--color-rule-light);
   background: var(--color-chrome-high);
   font-size: 11px;
@@ -424,19 +439,19 @@ let graphSelectCounter = 0
   border: 1px solid var(--color-rule);
   border-radius: 3px;
   background: var(--color-surface);
-  padding: 4px;
+  padding: 3px;
   box-shadow: 0 10px 30px color-mix(in srgb, var(--color-ink) 16%, transparent);
 }
 
 .graph-select-search-wrap {
-  margin: 0 0 4px;
-  padding: 3px 3px 6px;
+  margin: 0 0 3px;
+  padding: 2px 2px 5px;
   border-bottom: 1px solid var(--color-rule-light);
 }
 
 .graph-select-search {
   width: 100%;
-  height: 34px;
+  height: 30px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: var(--color-chrome-high);
@@ -455,18 +470,18 @@ let graphSelectCounter = 0
 }
 
 .graph-select-options {
-  max-height: 280px;
+  max-height: 264px;
   overflow-y: auto;
 }
 
 .graph-select-option {
   display: flex;
-  min-height: 38px;
+  min-height: 30px;
   width: 100%;
   align-items: center;
-  gap: 9px;
-  border-radius: 4px;
-  padding: 6px 8px;
+  gap: 8px;
+  border-radius: 2px;
+  padding: 4px 6px;
   text-align: left;
 }
 
@@ -482,12 +497,12 @@ let graphSelectCounter = 0
 
 .graph-select-check {
   display: grid;
-  width: 17px;
-  height: 17px;
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--color-rule-light);
-  border-radius: 4px;
+  border-radius: 3px;
   color: transparent;
 }
 
@@ -508,7 +523,7 @@ let graphSelectCounter = 0
   display: block;
   overflow: hidden;
   color: var(--color-ink-2);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 520;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -526,6 +541,7 @@ let graphSelectCounter = 0
 }
 
 .graph-select-chevron {
+  color: var(--color-ink-4);
   transition: transform 120ms ease;
 }
 

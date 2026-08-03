@@ -1,9 +1,10 @@
 <template>
-  <div v-bind="$attrs" class="graph-datetime-field">
+  <div v-bind="$attrs" class="graph-datetime-field" :class="`datetime-${variant}`">
     <GraphDatePicker
       :model-value="datePart"
       :aria-label="`${ariaLabel} date`"
       :data-graph-control="`${controlId}-date`"
+      :variant="variant"
       placeholder="No date"
       @update:model-value="updateDate"
     />
@@ -39,6 +40,11 @@ const props = defineProps({
   modelValue: { type: String, default: '' },
   ariaLabel: { type: String, default: 'Date and time' },
   controlId: { type: String, default: 'datetime' },
+  variant: {
+    type: String,
+    default: 'field',
+    validator: value => ['field', 'quiet'].includes(value),
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'change'])
@@ -91,17 +97,17 @@ function update(value) {
 .graph-datetime-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 92px;
-  gap: 6px;
+  gap: 4px;
 }
 
 .graph-datetime-field > label {
   position: relative;
   display: flex;
-  height: 37px;
+  height: 32px;
   align-items: center;
   gap: 5px;
   border: 1px solid var(--color-rule-light);
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--color-surface);
   padding: 0 8px;
   color: var(--color-ink-4);
@@ -111,6 +117,28 @@ function update(value) {
   border-color: var(--color-accent);
   outline: 2px solid color-mix(in srgb, var(--color-accent) 23%, transparent);
   outline-offset: 1px;
+}
+
+/* Ghost variant: borderless property control beside the quiet date picker. */
+.graph-datetime-field.datetime-quiet {
+  grid-template-columns: minmax(0, 1fr) 76px;
+}
+
+.graph-datetime-field.datetime-quiet > label {
+  height: 26px;
+  border-color: transparent;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0 5px;
+}
+
+.graph-datetime-field.datetime-quiet > label:hover {
+  background: var(--color-chrome-mid);
+}
+
+.graph-datetime-field.datetime-quiet > label:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--color-surface);
 }
 
 .graph-datetime-field input {

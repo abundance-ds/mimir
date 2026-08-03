@@ -108,6 +108,10 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     return actors
   })
 
+  // The first projection only needs the node query, so the change listener is
+  // installed before it (no file change can slip through the mount window) and
+  // diagnostics plus change history hydrate after the board is already on
+  // screen instead of holding the loading state open.
   async function start(workspace, sharedTeamRoot = '') {
     const nextProject = String(workspace || '').trim()
     const nextTeam = String(sharedTeamRoot || '').trim()
@@ -123,13 +127,18 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       teamRoot.value = nextTeam
       applyStatus(mounted)
       eventOffset.value = 0
-      await refresh()
       await startListening()
+      await loadNodes()
     } catch (cause) {
       error.value = errorMessage(cause)
-      throw cause
-    } finally {
       loading.value = false
+      throw cause
+    }
+    loading.value = false
+    try {
+      await loadAuxiliary()
+    } catch (cause) {
+      error.value = errorMessage(cause)
     }
   }
 
@@ -137,20 +146,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (!status.value) return
     if (!quiet) refreshing.value = true
     try {
-      const scopeIds = activeScopeIds.value
-      const [result, nextDiagnostics] = await Promise.all([
-        queryGraph({ scopeIds, limit: 500 }),
-        graphDiagnostics(),
-        loadEventPage(eventOffset.value),
-      ])
-      nodes.value = Array.isArray(result?.items) ? result.items : []
-      diagnostics.value = Array.isArray(nextDiagnostics) ? nextDiagnostics : []
-      status.value = {
-        ...status.value,
-        nodeCount: result?.total ?? nodes.value.length,
-        diagnosticCount: diagnostics.value.length,
-        graphRevision: result?.graphRevision ?? status.value.graphRevision,
-      }
+      await Promise.all([loadNodes(), loadAuxiliary()])
       error.value = ''
       if (searchQuery.value.trim()) await search(searchQuery.value)
       if (selectedNode.value?.id) await reloadSelected()
@@ -160,6 +156,25 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     } finally {
       refreshing.value = false
     }
+  }
+
+  async function loadNodes() {
+    const result = await queryGraph({ scopeIds: activeScopeIds.value, limit: 500 })
+    nodes.value = Array.isArray(result?.items) ? result.items : []
+    status.value = {
+      ...status.value,
+      nodeCount: result?.total ?? nodes.value.length,
+      graphRevision: result?.graphRevision ?? status.value.graphRevision,
+    }
+  }
+
+  async function loadAuxiliary() {
+    const [nextDiagnostics] = await Promise.all([
+      graphDiagnostics(),
+      loadEventPage(eventOffset.value),
+    ])
+    diagnostics.value = Array.isArray(nextDiagnostics) ? nextDiagnostics : []
+    status.value = { ...status.value, diagnosticCount: diagnostics.value.length }
   }
 
   async function loadEventPage(offset = 0) {
