@@ -8,7 +8,7 @@
   <section
     v-else
     data-external-file-preview
-    class="grid h-full min-h-0 place-items-center overflow-auto bg-surface px-8 py-12 text-ink"
+    class="grid h-full min-h-0 w-full min-w-0 flex-1 place-items-center overflow-auto bg-surface px-8 py-12 text-ink"
   >
     <div class="w-full max-w-md">
       <div class="flex items-start gap-4">

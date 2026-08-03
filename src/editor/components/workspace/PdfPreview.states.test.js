@@ -92,8 +92,8 @@ describe('PdfPreview states and controls', () => {
     await next.trigger('click')
     await flushPromises()
 
-    expect(mocks.getPage).toHaveBeenLastCalledWith(2)
-    expect(wrapper.get('canvas').attributes('aria-label')).toBe('PDF page 2 of 2')
+    expect(mocks.getPage).toHaveBeenCalledWith(2)
+    expect(wrapper.get('input[type="number"]').element.value).toBe('2')
     expect(next.attributes('disabled')).toBeDefined()
     expect(prev.attributes('disabled')).toBeUndefined()
   })
@@ -107,17 +107,17 @@ describe('PdfPreview states and controls', () => {
     input.element.value = '99'
     await input.trigger('change')
     await flushPromises()
-    expect(wrapper.get('canvas').attributes('aria-label')).toBe('PDF page 2 of 2')
+    expect(input.element.value).toBe('2')
 
     input.element.value = '0'
     await input.trigger('change')
     await flushPromises()
-    expect(wrapper.get('canvas').attributes('aria-label')).toBe('PDF page 1 of 2')
+    expect(input.element.value).toBe('1')
 
     input.element.value = 'not-a-number'
     await input.trigger('change')
     await flushPromises()
-    expect(wrapper.get('canvas').attributes('aria-label')).toBe('PDF page 1 of 2')
+    expect(input.element.value).toBe('1')
   })
 
   it('steps zoom, re-renders, and resets from the percent button', async () => {

@@ -58,4 +58,17 @@ describe('PdfPreview', () => {
       canvas: wrapper.get('canvas').element,
     }))
   })
+
+  it('lays every page out in the continuous column with a text layer host', async () => {
+    const wrapper = mount(PdfPreview, {
+      props: { path: '/w/report.pdf' },
+    })
+
+    await flushPromises()
+
+    const canvases = wrapper.findAll('canvas')
+    expect(canvases).toHaveLength(2)
+    expect(canvases[1].attributes('aria-label')).toBe('PDF page 2 of 2')
+    expect(wrapper.findAll('.pdf-text-layer')).toHaveLength(2)
+  })
 })

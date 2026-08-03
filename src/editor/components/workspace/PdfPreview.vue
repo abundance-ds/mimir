@@ -1,5 +1,5 @@
 <template>
-  <section class="flex h-full min-h-0 flex-col bg-chrome-high text-ink">
+  <section class="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-chrome-high text-ink">
     <header class="flex h-10 shrink-0 items-center gap-1 border-b border-rule bg-chrome-high px-2">
       <button
         type="button"
@@ -7,7 +7,7 @@
         aria-label="Previous page"
         :disabled="pageNumber <= 1 || loading"
         class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink disabled:opacity-30"
-        @click="pageNumber--"
+        @click="goToPage(pageNumber - 1)"
       >
         <IconChevronLeft :size="15" :stroke-width="1.8" />
       </button>
@@ -18,8 +18,8 @@
           type="number"
           min="1"
           :max="pageCount || 1"
-          class="w-7 bg-transparent text-right text-ink outline-none"
-          @change="setPage($event.target.value)"
+          class="w-7 appearance-none bg-transparent text-right text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          @change="onPageInput($event)"
         />
         <span class="mx-1 text-ink-4">/</span>
         <span>{{ pageCount || '—' }}</span>
@@ -30,7 +30,7 @@
         aria-label="Next page"
         :disabled="pageNumber >= pageCount || loading"
         class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink disabled:opacity-30"
-        @click="pageNumber++"
+        @click="goToPage(pageNumber + 1)"
       >
         <IconChevronRight :size="15" :stroke-width="1.8" />
       </button>
@@ -75,9 +75,12 @@
 
     <div
       ref="scroller"
-      class="min-h-0 flex-1 overflow-auto bg-chrome p-6"
-      @keydown.left.prevent="pageNumber = Math.max(1, pageNumber - 1)"
-      @keydown.right.prevent="pageNumber = Math.min(pageCount, pageNumber + 1)"
+      tabindex="0"
+      class="min-h-0 flex-1 overflow-auto bg-chrome p-6 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+      @scroll="onScroll"
+      @wheel="onWheel"
+      @keydown.left.prevent="goToPage(pageNumber - 1)"
+      @keydown.right.prevent="goToPage(pageNumber + 1)"
     >
       <div v-if="loading" class="grid h-full min-h-48 place-items-center text-center">
         <div>
@@ -99,19 +102,27 @@
           </button>
         </div>
       </div>
-      <div v-else class="mx-auto flex min-h-full w-max items-start justify-center">
-        <canvas
-          ref="canvas"
-          class="bg-white shadow-[0_10px_35px_rgba(0,0,0,0.16)]"
-          :aria-label="`PDF page ${pageNumber} of ${pageCount}`"
-        />
+      <div v-else class="mx-auto flex w-max min-w-full flex-col items-center gap-6">
+        <div
+          v-for="page in pages"
+          :key="page.index"
+          :ref="el => setPageEl(page.index, el)"
+          class="relative shrink-0 bg-white shadow-[0_10px_35px_rgba(0,0,0,0.16)]"
+          :style="pageStyle(page)"
+        >
+          <canvas
+            class="absolute inset-0 h-full w-full"
+            :aria-label="`PDF page ${page.index} of ${pageCount}`"
+          />
+          <div class="pdf-text-layer" />
+        </div>
       </div>
     </div>
   </section>
 </template>
 
 <script setup>
-import { nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
   IconChevronLeft,
@@ -132,21 +143,50 @@ const props = defineProps({
 
 defineEmits(['openNative'])
 
+const PADDING = 24
+const PAGE_GAP = 24
+const MAX_CANVAS_DIM = 8192
+
 const scroller = ref(null)
-const canvas = ref(null)
 const loading = ref(true)
 const error = ref('')
 const pageNumber = ref(1)
 const pageCount = ref(0)
 const zoom = ref(1)
+const fitScale = ref(1)
+const pages = ref([])
+
+const scale = computed(() => fitScale.value * zoom.value)
+
+let pdfLib = null
 let documentTask = null
 let pdfDocument = null
-let renderTask = null
 let generation = 0
+let resizeObserver = null
+let resizeTimer = 0
+let scrollQueued = false
+let suppressScrollSync = false
+const pageEls = new Map()
+const rendered = new Map()
 
 watch(() => props.path, load, { immediate: true })
-watch([pageNumber, zoom], () => {
-  if (pdfDocument) void renderPage()
+
+watch(scale, async (next, prev) => {
+  if (!pdfDocument || !prev || next === prev) return
+  const el = scroller.value
+  if (el && el.scrollTop) el.scrollTop = el.scrollTop * (next / prev)
+  await nextTick()
+  renderVisible()
+})
+
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined' || !scroller.value) return
+  resizeObserver = new ResizeObserver(() => {
+    if (!pdfDocument) return
+    clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(measureFit, 150)
+  })
+  resizeObserver.observe(scroller.value)
 })
 
 async function load() {
@@ -155,24 +195,38 @@ async function load() {
   error.value = ''
   pageNumber.value = 1
   pageCount.value = 0
-  renderTask?.cancel?.()
+  pages.value = []
+  clearRendered()
   await documentTask?.destroy?.()
   documentTask = null
   pdfDocument = null
   try {
-    const [{ getDocument, GlobalWorkerOptions }, bytes] = await Promise.all([
+    const [lib, bytes] = await Promise.all([
       import('pdfjs-dist/legacy/build/pdf.mjs'),
       readBinaryFile(props.path),
     ])
     if (current !== generation) return
-    GlobalWorkerOptions.workerSrc = workerUrl
-    documentTask = getDocument({ data: bytes })
+    pdfLib = lib
+    lib.GlobalWorkerOptions.workerSrc = workerUrl
+    documentTask = lib.getDocument({ data: bytes })
     pdfDocument = await documentTask.promise
     if (current !== generation) return
     pageCount.value = pdfDocument.numPages
+    const first = await pdfDocument.getPage(1)
+    if (current !== generation) return
+    const base = first.getViewport({ scale: 1 })
+    pages.value = Array.from({ length: pdfDocument.numPages }, (_, i) => ({
+      index: i + 1,
+      width: base.width,
+      height: base.height,
+      measured: i === 0,
+    }))
     loading.value = false
     await nextTick()
-    await renderPage()
+    if (current !== generation) return
+    measureFit()
+    if (scroller.value) scroller.value.scrollTop = 0
+    renderVisible()
   } catch (cause) {
     if (current !== generation) return
     error.value = cause instanceof Error ? cause.message : String(cause || 'The PDF could not be rendered.')
@@ -181,37 +235,184 @@ async function load() {
   }
 }
 
-async function renderPage() {
-  if (!pdfDocument || !canvas.value || !scroller.value) return
-  const current = generation
-  renderTask?.cancel?.()
-  const page = await pdfDocument.getPage(pageNumber.value)
-  if (current !== generation) return
-  const base = page.getViewport({ scale: 1 })
-  const availableWidth = Math.max(scroller.value.clientWidth - 48, 240)
-  const fitScale = Math.min(1.6, availableWidth / base.width)
-  const viewport = page.getViewport({ scale: fitScale * zoom.value })
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
-  const target = canvas.value
-  target.width = Math.floor(viewport.width * pixelRatio)
-  target.height = Math.floor(viewport.height * pixelRatio)
-  target.style.width = `${Math.floor(viewport.width)}px`
-  target.style.height = `${Math.floor(viewport.height)}px`
-  renderTask = page.render({
-    canvas: target,
-    viewport,
-    transform: pixelRatio === 1 ? null : [pixelRatio, 0, 0, pixelRatio, 0, 0],
-  })
-  try {
-    await renderTask.promise
-  } catch (cause) {
-    if (cause?.name !== 'RenderingCancelledException') throw cause
+function measureFit() {
+  const baseWidth = pages.value[0]?.width || 612
+  const available = Math.max((scroller.value?.clientWidth || 0) - PADDING * 2, 240)
+  fitScale.value = Math.min(1.6, available / baseWidth)
+}
+
+function pageStyle(page) {
+  return {
+    width: `${Math.floor(page.width * scale.value)}px`,
+    height: `${Math.floor(page.height * scale.value)}px`,
+    '--scale-factor': String(scale.value),
   }
 }
 
-function setPage(value) {
-  const page = Math.round(Number(value) || 1)
-  pageNumber.value = Math.min(Math.max(page, 1), Math.max(pageCount.value, 1))
+function pageHeight(page) {
+  return Math.floor(page.height * scale.value) + PAGE_GAP
+}
+
+function pageOffset(index) {
+  let y = 0
+  for (let i = 0; i < index - 1; i++) y += pageHeight(pages.value[i])
+  return y
+}
+
+function currentPageFromScroll() {
+  const el = scroller.value
+  if (!el || !pages.value.length) return 1
+  const focal = el.scrollTop - PADDING + el.clientHeight * 0.35
+  let y = 0
+  for (const page of pages.value) {
+    y += pageHeight(page)
+    if (focal < y) return page.index
+  }
+  return pages.value.length
+}
+
+function visibleRange() {
+  const el = scroller.value
+  if (!el || !pages.value.length) return [1, 1]
+  const top = el.scrollTop - PADDING
+  const bottom = top + el.clientHeight
+  let y = 0
+  let first = 0
+  let last = 1
+  for (const page of pages.value) {
+    const next = y + pageHeight(page)
+    if (!first && top < next) first = page.index
+    if (y <= bottom) last = page.index
+    y = next
+  }
+  first = first || pages.value.length
+  return [first, Math.max(first, last)]
+}
+
+function onScroll() {
+  if (scrollQueued) return
+  scrollQueued = true
+  const run = () => {
+    scrollQueued = false
+    if (suppressScrollSync) suppressScrollSync = false
+    else pageNumber.value = currentPageFromScroll()
+    renderVisible()
+  }
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
+  else run()
+}
+
+function onWheel(event) {
+  if (!event.ctrlKey && !event.metaKey) return
+  event.preventDefault()
+  setZoom(zoom.value - Math.sign(event.deltaY || 0) * 0.1)
+}
+
+function renderVisible() {
+  if (!pdfDocument) return
+  const [first, last] = visibleRange()
+  for (let i = Math.max(1, first - 1); i <= Math.min(pageCount.value, last + 1); i++) {
+    void renderPage(i)
+  }
+  for (const index of Array.from(rendered.keys())) {
+    if (index < first - 2 || index > last + 2) evict(index)
+  }
+}
+
+async function renderPage(index) {
+  const host = pageEls.get(index)
+  if (!pdfDocument || !host) return
+  const targetScale = scale.value
+  const existing = rendered.get(index)
+  if (existing && existing.scale === targetScale) return
+  if (existing) evict(index)
+  const entry = { scale: targetScale, task: null, textLayer: null }
+  rendered.set(index, entry)
+  const current = generation
+  try {
+    const page = await pdfDocument.getPage(index)
+    if (current !== generation || rendered.get(index) !== entry) return
+    measurePage(index, page)
+    const canvas = host.querySelector('canvas')
+    if (!canvas) return
+    const viewport = page.getViewport({ scale: targetScale })
+    let ratio = Math.min(window.devicePixelRatio || 1, 2)
+    ratio *= Math.min(1, MAX_CANVAS_DIM / (viewport.width * ratio), MAX_CANVAS_DIM / (viewport.height * ratio))
+    canvas.width = Math.floor(viewport.width * ratio)
+    canvas.height = Math.floor(viewport.height * ratio)
+    entry.task = page.render({
+      canvas,
+      viewport,
+      transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0],
+    })
+    renderTextLayer(entry, page, host, viewport)
+    await entry.task.promise
+  } catch (cause) {
+    if (cause?.name !== 'RenderingCancelledException') rendered.delete(index)
+  }
+}
+
+function measurePage(index, page) {
+  const record = pages.value[index - 1]
+  if (!record || record.measured) return
+  const base = page.getViewport({ scale: 1 })
+  pages.value[index - 1] = { ...record, width: base.width, height: base.height, measured: true }
+}
+
+function renderTextLayer(entry, page, host, viewport) {
+  const container = host.querySelector('.pdf-text-layer')
+  if (!container || !pdfLib?.TextLayer || typeof page.streamTextContent !== 'function') return
+  container.replaceChildren()
+  try {
+    entry.textLayer = new pdfLib.TextLayer({
+      textContentSource: page.streamTextContent(),
+      container,
+      viewport,
+    })
+    void entry.textLayer.render().catch(() => {})
+  } catch {
+    entry.textLayer = null
+  }
+}
+
+function evict(index) {
+  const entry = rendered.get(index)
+  if (!entry) return
+  rendered.delete(index)
+  entry.task?.cancel?.()
+  entry.textLayer?.cancel?.()
+  const host = pageEls.get(index)
+  const canvas = host?.querySelector('canvas')
+  if (canvas) {
+    canvas.width = 0
+    canvas.height = 0
+  }
+  host?.querySelector('.pdf-text-layer')?.replaceChildren()
+}
+
+function clearRendered() {
+  for (const index of Array.from(rendered.keys())) evict(index)
+}
+
+function setPageEl(index, el) {
+  if (el) pageEls.set(index, el)
+  else pageEls.delete(index)
+}
+
+function goToPage(value) {
+  const target = Math.min(Math.max(Math.round(Number(value) || 1), 1), Math.max(pageCount.value, 1))
+  pageNumber.value = target
+  const el = scroller.value
+  if (el) {
+    suppressScrollSync = true
+    el.scrollTop = Math.max(0, PADDING + pageOffset(target) - 12)
+  }
+  renderVisible()
+}
+
+function onPageInput(event) {
+  goToPage(event.target.value)
+  event.target.value = String(pageNumber.value)
 }
 
 function setZoom(value) {
@@ -220,7 +421,47 @@ function setZoom(value) {
 
 onUnmounted(() => {
   generation++
-  renderTask?.cancel?.()
+  clearTimeout(resizeTimer)
+  resizeObserver?.disconnect()
+  clearRendered()
   void documentTask?.destroy?.()
 })
 </script>
+
+<style>
+/* pdf.js TextLayer injects absolutely positioned spans; component CSS because
+   the DOM is created outside Vue templates. */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  transform-origin: 0 0;
+  caret-color: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-text-layer span,
+.pdf-text-layer br {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+
+.pdf-text-layer ::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.pdf-text-layer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+</style>
