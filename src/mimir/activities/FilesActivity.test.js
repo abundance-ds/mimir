@@ -178,6 +178,62 @@ describe('FilesActivity', () => {
     })])
   })
 
+  it('confirms a new name with Return instead of opening the focused row', async () => {
+    const store = useWorkspaceFilesStore()
+    store.refresh = vi.fn(async () => undefined)
+    const wrapper = render()
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+
+    await wrapper.get('[data-files-new-file]').trigger('click')
+    const input = wrapper.get('[data-files-inline-name]')
+    await input.setValue('brief.md')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(operations.createWorkspaceFile).toHaveBeenCalledWith('brief.md')
+    expect(wrapper.find('[data-files-inline-name]').exists()).toBe(false)
+    expect(wrapper.emitted('openFile').at(-1)).toEqual([expect.objectContaining({
+      path: '/w/brief.md',
+      preview: false,
+    })])
+  })
+
+  it('leaves typing in the name field to the field, not to row navigation', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+    const opened = wrapper.emitted('openFile').length
+
+    await wrapper.get('[data-files-new-file]').trigger('click')
+    const input = wrapper.get('[data-files-inline-name]')
+    await input.trigger('keydown', { key: ' ' })
+    await input.trigger('keydown', { key: 'a', metaKey: true })
+    await input.trigger('keydown', { key: 'F2' })
+
+    expect(wrapper.emitted('openFile').length).toBe(opened)
+    expect(wrapper.get('[data-files-inline-name]').exists()).toBe(true)
+  })
+
+  it('keeps a half-typed name when the window, not the user, takes focus away', async () => {
+    const hasFocus = vi.spyOn(document, 'hasFocus')
+    const wrapper = render()
+    document.body.appendChild(wrapper.element)
+    await wrapper.get('[data-files-new-file]').trigger('click')
+    const input = wrapper.get('[data-files-inline-name]')
+    await input.setValue('half')
+
+    hasFocus.mockReturnValue(false)
+    await input.trigger('blur')
+    expect(operations.createWorkspaceFile).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-files-inline-name]').element.value).toBe('half')
+
+    hasFocus.mockReturnValue(true)
+    await input.trigger('blur')
+    await flushPromises()
+    expect(operations.createWorkspaceFile).toHaveBeenCalledWith('half')
+    hasFocus.mockRestore()
+    wrapper.unmount()
+  })
+
   it('offers the proven row actions from a native right-click gesture', async () => {
     const wrapper = render()
     await wrapper.get('[data-file-row="/w/new.md"]').trigger('contextmenu', {

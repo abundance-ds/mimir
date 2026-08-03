@@ -615,6 +615,9 @@ function statusFromExit(reason) {
 
 .terminal-canvas :deep(.xterm-viewport) {
   overflow-y: auto;
+  /* xterm 6 themes the scroll wrapper, not this element; stock CSS leaves it
+     #000, which shows as a black strip below the last row. */
+  background-color: transparent;
 }
 
 .terminal-canvas :deep(.xterm-viewport::-webkit-scrollbar) {

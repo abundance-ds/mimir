@@ -242,12 +242,25 @@ pub struct IndexRefresh {
     pub total: usize,
 }
 
+/// One file recognized on both sides of a rescan under a new path: a move or
+/// rename performed outside Mimir (`mv`, `git mv`, Finder). Paths are absolute
+/// display paths, matching [`FileIndexEntry::path`].
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMove {
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Clone, Debug)]
 struct IndexedFile {
     /// Shared so clones of the working set and public snapshots copy a
     /// pointer, not three heap strings.
     public: Arc<FileIndexEntry>,
     disk_path: PathBuf,
+    /// Filesystem identity for move pairing across rescans; None when the
+    /// platform offers no stable identity.
+    identity: Option<(u64, u64)>,
 }
 
 #[derive(Debug)]
@@ -372,11 +385,17 @@ impl WorkspaceFileIndex {
         self.invalidate_searches();
 
         let files = scan_workspace(&root);
-        let refresh = self.install_files(previous, files);
+        // A replaced workspace shares no identity space with its predecessor,
+        // so any inode coincidences across the swap are not moves.
+        let (refresh, _moves) = self.install_files(previous, files);
         Ok(refresh)
     }
 
     pub fn refresh(&self) -> Result<IndexRefresh, FileIndexError> {
+        Ok(self.refresh_with_moves()?.0)
+    }
+
+    pub fn refresh_with_moves(&self) -> Result<(IndexRefresh, Vec<FileMove>), FileIndexError> {
         let _refresh = self
             .refresh_lock
             .lock()
@@ -406,9 +425,12 @@ impl WorkspaceFileIndex {
     /// workspace. Creates, renames, directory changes, and ignore-rule changes
     /// rebuild from disk so `.gitignore` semantics and atomic saves remain
     /// correct.
-    pub fn refresh_paths(&self, changed_paths: &[PathBuf]) -> Result<IndexRefresh, FileIndexError> {
+    pub fn refresh_paths(
+        &self,
+        changed_paths: &[PathBuf],
+    ) -> Result<(IndexRefresh, Vec<FileMove>), FileIndexError> {
         if changed_paths.is_empty() {
-            return self.refresh();
+            return self.refresh_with_moves();
         }
 
         let _refresh = self
@@ -705,8 +727,13 @@ impl WorkspaceFileIndex {
         report
     }
 
-    fn install_files(&self, previous: Vec<IndexedFile>, files: Vec<IndexedFile>) -> IndexRefresh {
+    fn install_files(
+        &self,
+        previous: Vec<IndexedFile>,
+        files: Vec<IndexedFile>,
+    ) -> (IndexRefresh, Vec<FileMove>) {
         let (added, removed, changed) = diff_files(&previous, &files);
+        let moves = paired_moves(&previous, &files);
         let total = files.len();
         let snapshot = FileIndexSnapshot::of(&files);
         {
@@ -718,13 +745,16 @@ impl WorkspaceFileIndex {
             state.snapshot = snapshot;
         }
         let generation = self.invalidate_searches();
-        IndexRefresh {
-            generation,
-            added,
-            removed,
-            changed,
-            total,
-        }
+        (
+            IndexRefresh {
+                generation,
+                added,
+                removed,
+                changed,
+                total,
+            },
+            moves,
+        )
     }
 
     fn invalidate_searches(&self) -> u64 {
@@ -857,7 +887,73 @@ fn index_file(root: &Path, disk_path: &Path) -> Option<IndexedFile> {
             text_readable: is_text_readable(disk_path),
         }),
         disk_path: disk_path.to_path_buf(),
+        identity: file_identity(&metadata),
     })
+}
+
+/// Stable filesystem identity of a file, used to recognize the same file under
+/// a new path. A same-volume move keeps (device, inode); a copy or a
+/// cross-volume move does not — those legitimately stay unpaired.
+#[cfg(unix)]
+fn file_identity(metadata: &fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_identity(_metadata: &fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// Pair paths that disappeared with paths that appeared under the same
+/// filesystem identity: those are moves (`mv`, `git mv`, Finder), not
+/// delete-plus-create. An identity must be unique on both sides to pair, so
+/// hard links and a promptly reused inode never fabricate a move.
+fn paired_moves(previous: &[IndexedFile], next: &[IndexedFile]) -> Vec<FileMove> {
+    let next_paths: HashSet<&Path> = next.iter().map(|file| file.disk_path.as_path()).collect();
+    let mut removed_by_identity: HashMap<(u64, u64), Vec<&IndexedFile>> = HashMap::new();
+    for file in previous {
+        if next_paths.contains(file.disk_path.as_path()) {
+            continue;
+        }
+        if let Some(identity) = file.identity {
+            removed_by_identity.entry(identity).or_default().push(file);
+        }
+    }
+    if removed_by_identity.is_empty() {
+        return Vec::new();
+    }
+
+    let previous_paths: HashSet<&Path> = previous
+        .iter()
+        .map(|file| file.disk_path.as_path())
+        .collect();
+    let mut added_by_identity: HashMap<(u64, u64), Vec<&IndexedFile>> = HashMap::new();
+    for file in next {
+        if previous_paths.contains(file.disk_path.as_path()) {
+            continue;
+        }
+        if let Some(identity) = file.identity {
+            added_by_identity.entry(identity).or_default().push(file);
+        }
+    }
+
+    let mut moves: Vec<FileMove> = removed_by_identity
+        .into_iter()
+        .filter_map(|(identity, removed)| {
+            let added = added_by_identity.get(&identity)?;
+            let (&removed_one, &added_one) = match (removed.as_slice(), added.as_slice()) {
+                ([removed_one], [added_one]) => (removed_one, added_one),
+                _ => return None,
+            };
+            Some(FileMove {
+                from: removed_one.public.path.clone(),
+                to: added_one.public.path.clone(),
+            })
+        })
+        .collect();
+    moves.sort_by(|left, right| left.from.cmp(&right.from));
+    moves
 }
 
 fn sort_indexed_files(files: &mut [IndexedFile]) {
@@ -1383,7 +1479,7 @@ mod tests {
         )
         .unwrap();
         write(temp.path(), "new.txt", "two");
-        let refresh = index
+        let (refresh, moves) = index
             .refresh_paths(&[
                 temp.path().join("before.txt"),
                 temp.path().join("after.txt"),
@@ -1396,12 +1492,64 @@ mod tests {
         assert!(paths.contains(&"new.txt".to_owned()));
         assert_eq!(refresh.added, 2);
         assert_eq!(refresh.removed, 1);
+        // The rename is recognized as one move; the fresh file pairs with
+        // nothing.
+        if cfg!(unix) {
+            assert_eq!(moves.len(), 1);
+            assert!(moves[0].from.ends_with("before.txt"));
+            assert!(moves[0].to.ends_with("after.txt"));
+        }
 
         fs::remove_file(temp.path().join("after.txt")).unwrap();
         index
             .refresh_paths(&[temp.path().join("after.txt")])
             .unwrap();
         assert!(!relative_paths(&index).contains(&"after.txt".to_owned()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_moves_pair_by_filesystem_identity_and_never_guess() {
+        let temp = TempDir::new().unwrap();
+        write(temp.path(), "notes.md", "keep");
+        write(temp.path(), "docs/guide.md", "guide");
+        let index = WorkspaceFileIndex::open(temp.path()).unwrap();
+
+        // An external `mv` into a subfolder pairs even when the content was
+        // edited in the same debounce window: identity, not content, matches.
+        fs::create_dir_all(temp.path().join("archive")).unwrap();
+        fs::rename(
+            temp.path().join("notes.md"),
+            temp.path().join("archive/notes.md"),
+        )
+        .unwrap();
+        write(
+            temp.path(),
+            "archive/notes.md",
+            "keep, edited after the move",
+        );
+        let (_, moves) = index
+            .refresh_paths(&[temp.path().join("notes.md"), temp.path().join("archive")])
+            .unwrap();
+        assert_eq!(moves.len(), 1);
+        assert!(moves[0].from.ends_with("notes.md"));
+        assert!(moves[0].to.ends_with("archive/notes.md"));
+
+        // Copy-then-delete allocates a new inode while the original is still
+        // alive, so it must read as delete + create, never as a move.
+        fs::copy(
+            temp.path().join("docs/guide.md"),
+            temp.path().join("docs/fresh.md"),
+        )
+        .unwrap();
+        fs::remove_file(temp.path().join("docs/guide.md")).unwrap();
+        let (_, moves) = index
+            .refresh_paths(&[
+                temp.path().join("docs/guide.md"),
+                temp.path().join("docs/fresh.md"),
+            ])
+            .unwrap();
+        assert!(moves.is_empty());
     }
 
     #[test]
@@ -1416,7 +1564,7 @@ mod tests {
             "created in another event batch",
         );
         write(temp.path(), "tracked.txt", "a much longer edit");
-        let refresh = index
+        let (refresh, moves) = index
             .refresh_paths(&[temp.path().join("tracked.txt")])
             .unwrap();
 
@@ -1425,6 +1573,7 @@ mod tests {
         assert_eq!(entries[0].relative_path, "tracked.txt");
         assert_eq!(entries[0].size, "a much longer edit".len() as u64);
         assert_eq!(refresh.changed, 1);
+        assert!(moves.is_empty());
     }
 
     #[test]

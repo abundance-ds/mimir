@@ -48,8 +48,9 @@
         autocomplete="off"
         spellcheck="false"
         @input="$emit('update:editDraft', $event.target.value)"
+        @keydown.enter="commitOnEnter"
         @keydown.esc.prevent="$emit('cancel-edit')"
-        @blur="$emit('commit-edit')"
+        @blur="commitOnBlur"
       />
     </form>
 
@@ -219,6 +220,30 @@ const gitClass = computed(() => ({
   deleted: 'text-rem',
   renamed: 'text-ink-3',
 }[props.row.gitStatus] || 'text-ink-3'))
+
+// The name field sits inside the tree, so Enter must commit here and stop:
+// left to bubble, the tree keyboard handler cancels the implicit submit and
+// opens the row it has focus on instead. An Enter that closes an IME
+// composition is the input method speaking, not the user confirming a name.
+function commitOnEnter(event) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('commit-edit')
+}
+
+// Moving focus away confirms the name, as in the Finder. But the field also
+// loses focus for reasons the user did not decide: another application takes
+// the window, the Activity surface behind it turns invisible, or the virtual
+// row window drops the row. Those keep the draft, which lives in the panel and
+// returns with the field.
+function commitOnBlur(event) {
+  const field = event.target
+  if (!document.hasFocus()) return
+  if (!field.isConnected) return
+  if (field.checkVisibility && !field.checkVisibility({ visibilityProperty: true })) return
+  emit('commit-edit')
+}
 
 function select(event) {
   if (entry.value.isDirectory) emit('toggle', props.row)

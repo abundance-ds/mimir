@@ -1,6 +1,6 @@
 use crate::file_index::{
     ContentSearchReport, ContentSearchRequest, ContentSearchToken, FileFilterHit, FileIndexEntry,
-    FileIndexSnapshot, IndexRefresh, WorkspaceFileIndex,
+    FileIndexSnapshot, FileMove, IndexRefresh, WorkspaceFileIndex,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -69,6 +69,9 @@ struct WorkspaceChanged {
     paths: Vec<String>,
     replace_all: bool,
     files: Vec<FileIndexEntry>,
+    /// Files recognized under a new path (same filesystem identity): external
+    /// moves the renderer must reconcile into open editor buffers.
+    moves: Vec<FileMove>,
 }
 
 fn watch_workspace(
@@ -111,7 +114,7 @@ fn watch_workspace(
                 let mut seen = HashSet::new();
                 changed.retain(|path| seen.insert(path.clone()));
                 match index.refresh_paths(&changed) {
-                    Ok(report) => {
+                    Ok((report, moves)) => {
                         // Ordinary content edits only replace metadata for the
                         // touched files. Structural changes are rarer and send
                         // one authoritative snapshot to preserve ignore and
@@ -132,6 +135,7 @@ fn watch_workspace(
                                 .collect(),
                             replace_all,
                             files,
+                            moves,
                         };
                         let _ = app.emit("mimir://workspace-files-changed", payload);
                     }

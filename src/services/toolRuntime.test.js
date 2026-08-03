@@ -298,6 +298,37 @@ describe('canonical renderer tool runtime', () => {
     })
   })
 
+  it('reconciles open editor state around agent renames and trashes', async () => {
+    invoke
+      .mockResolvedValueOnce({ path: '/w/docs/renamed.md', relativePath: 'docs/renamed.md' })
+      .mockResolvedValueOnce(['docs/renamed.md'])
+    const calls = []
+    const options = {
+      getWorkspacePath: () => '/w',
+      awaitWorkspaceWrites: async paths => calls.push(['await', paths]),
+      moveWorkspacePath: (from, to) => calls.push(['move', from, to]),
+      reconcileWorkspaceTrash: paths => calls.push(['trash', paths]),
+    }
+
+    await executeToolRequest({
+      tool: 'files.rename',
+      input: { path: 'docs/draft.md', new_name: 'renamed.md' },
+    }, options)
+    await executeToolRequest({
+      tool: 'files.trash',
+      input: { paths: ['docs/renamed.md'] },
+    }, options)
+
+    // Pending writes settle before each mutation; tabs repoint or release
+    // after, using absolute paths even though the agent named relative ones.
+    expect(calls).toEqual([
+      ['await', ['/w/docs/draft.md']],
+      ['move', '/w/docs/draft.md', '/w/docs/renamed.md'],
+      ['await', ['/w/docs/renamed.md']],
+      ['trash', ['/w/docs/renamed.md']],
+    ])
+  })
+
   it('exposes the complete durable Activity lifecycle', async () => {
     const autoTitleActivity = vi.fn(async (id, title) => ({ id, title }))
     const stopActivity = vi.fn(async id => ({ id, status: 'stopping' }))

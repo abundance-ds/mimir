@@ -10,6 +10,8 @@ import {
   searchIndexedContent,
 } from '../services/fileIndex.js'
 import { listWorkspaceDirectory } from '../services/workspaceFileOperations.js'
+import { useFileStore } from './files.js'
+import { useSettingsStore } from './settings.js'
 
 export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
   const workspacePath = ref('')
@@ -264,9 +266,52 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     return watchStartPromise
   }
 
+  // Files recognized under a new path by the native watcher — an external
+  // `mv`, `git mv`, or Finder drag. Open tabs, drafts, recents, and file
+  // favorites follow the file to its new path; a favorite that names a moved
+  // *directory* has no index identity and stays behind as missing, exactly as
+  // before. Applying a move twice is a no-op, so tool- or UI-initiated
+  // mutations that already reconciled synchronously are unaffected when their
+  // own watcher echo arrives.
+  function applyExternalMoves(moves) {
+    if (!Array.isArray(moves) || !moves.length) return
+    const editorFiles = useFileStore()
+    for (const move of moves) {
+      if (move?.from && move?.to) editorFiles.moveWorkspacePath(move.from, move.to)
+    }
+    rewriteMovedFavorites(moves)
+  }
+
+  function rewriteMovedFavorites(moves) {
+    const settings = useSettingsStore()
+    const workspaceKey = favoritesWorkspaceKey(workspacePath.value)
+    const records = settings.workbenchFileFavorites?.[workspaceKey]
+    if (!Array.isArray(records) || !records.length) return
+    const root = normalizeAbsolutePath(workspacePath.value)
+    const pairs = moves
+      .map((move) => [relativeToRoot(root, move?.from), relativeToRoot(root, move?.to)])
+      .filter(([from, to]) => from && to)
+    if (!pairs.length) return
+    let changed = false
+    const next = records.map((record) => {
+      const path = favoriteRelativePath(record?.relativePath)
+      const pair = pairs.find(([from]) => from === path)
+      if (!pair) return record
+      changed = true
+      return { ...record, relativePath: pair[1] }
+    })
+    if (changed) {
+      settings.set('workbenchFileFavorites', {
+        ...(settings.workbenchFileFavorites || {}),
+        [workspaceKey]: next,
+      })
+    }
+  }
+
   async function applyWorkspaceChange(payload = {}) {
     if (!workspacePath.value) return
     try {
+      applyExternalMoves(payload?.moves)
       const hasDelta = Array.isArray(payload?.files)
       files.value = hasDelta
         ? mergeIndexChange(files.value, payload)
@@ -403,4 +448,19 @@ function sortIndexedFiles(files) {
 
 function normalizeAbsolutePath(path) {
   return String(path || '').replaceAll('\\', '/').replace(/\/+$/, '')
+}
+
+// Favorites persist under the same workspace key `useFileFavorites` computes;
+// the two normalizations must stay identical or moved favorites silently miss.
+function favoritesWorkspaceKey(path) {
+  return String(path || '').replaceAll('\\', '/').replace(/\/+/g, '/').replace(/\/$/, '')
+}
+
+function favoriteRelativePath(path) {
+  return String(path || '').replaceAll('\\', '/').replace(/\/+/g, '/').replace(/\/$/, '').replace(/^\/+/, '')
+}
+
+function relativeToRoot(root, path) {
+  const normalized = normalizeAbsolutePath(path)
+  return root && normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : ''
 }

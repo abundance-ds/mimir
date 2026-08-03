@@ -821,6 +821,9 @@ const emptyBody = computed(() => {
 
 watch(() => files.workspacePath, () => {
   resetSelection()
+  // A pending name belongs to the project that is leaving: its parent folder
+  // means nothing in the arriving one.
+  cancelNameAction()
   if (files.workspacePath) void refreshGit()
 })
 
@@ -992,6 +995,10 @@ function onCommandKeydown(event) {
 
 function onListKeydown(event) {
   if (event.defaultPrevented) return
+  // The inline name field is a row of the tree. While it holds focus, typing,
+  // caret motion, and text selection belong to the field, not to row
+  // navigation.
+  if (event.target?.closest?.('input, textarea, [contenteditable="true"]')) return
   const command = event.metaKey || event.ctrlKey
   const row = visibleRows.value[focusedIndex.value]
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

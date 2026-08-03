@@ -40,7 +40,7 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 38] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 40] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -108,6 +108,18 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 38] = [
         canonical_name: "comments.resolve",
         public_name: "comments_resolve",
         description: "Resolve a document comment.",
+        group: "workbench",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    // The one file mutation agents cannot express safely in their own shell:
+    // `rm` is unrecoverable and macOS has no clean CLI route to the Trash.
+    // Everything else filesystem-shaped is deliberately left to the shell.
+    AgentToolSpec {
+        canonical_name: "files.trash",
+        public_name: "files_trash",
+        description: "Move exact workspace files or folders to the recoverable OS Trash.",
         group: "workbench",
         effect: "write",
         direct: false,
@@ -219,6 +231,15 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 38] = [
         description: "Update the reviewed title, summary, or tags of a Mimir Scribe meeting.",
         group: "meetings",
         effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "meetings.delete",
+        public_name: "meetings_delete",
+        description: "Permanently delete source audio or an entire stopped Mimir Scribe meeting.",
+        group: "meetings",
+        effect: "destructive",
         direct: false,
         connection: None,
     },
@@ -1505,7 +1526,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 38);
+        assert_eq!(AGENT_TOOLS.len(), 40);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();

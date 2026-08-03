@@ -17,6 +17,8 @@ vi.mock('../services/workspaceFileOperations.js', () => ({
 import * as api from '../services/fileIndex.js'
 import { listWorkspaceDirectory } from '../services/workspaceFileOperations.js'
 import { loadIpcFixture } from '../test/ipcFixtures.js'
+import { useFileStore } from './files.js'
+import { useSettingsStore } from './settings.js'
 import { useWorkspaceFilesStore } from './workspaceFiles.js'
 
 // Golden Rust payloads: recent-first index of /w/new.md and /w/src/old.rs, a
@@ -198,6 +200,40 @@ describe('workspace files store', () => {
 
     expect(api.listIndexedFiles).not.toHaveBeenCalled()
     expect(store.files[0]).toEqual(added)
+  })
+
+  it('follows watcher-recognized external moves into open tabs, recents, and file favorites', async () => {
+    const store = useWorkspaceFilesStore()
+    await store.openWorkspace('/w')
+    const editorFiles = useFileStore()
+    await editorFiles.openFile('/w/notes.md', 'body')
+    // Even a dirty buffer follows its file: that is the point of the
+    // reconciliation — a later save must land on the moved path.
+    editorFiles.openFiles[0].dirty = true
+    const settings = useSettingsStore()
+    settings.set('workbenchFileFavorites', {
+      '/w': [
+        { relativePath: 'notes.md', isDirectory: false },
+        { relativePath: 'docs', isDirectory: true },
+      ],
+    })
+
+    await store.applyWorkspaceChange({
+      report: { generation: 3, added: 1, removed: 1, changed: 0, total: 2 },
+      paths: ['/w/notes.md', '/w/archive/notes.md'],
+      replaceAll: true,
+      files,
+      moves: [{ from: '/w/notes.md', to: '/w/archive/notes.md' }],
+    })
+
+    expect(editorFiles.openFiles[0].path).toBe('/w/archive/notes.md')
+    expect(editorFiles.openFiles[0].dirty).toBe(true)
+    expect(editorFiles.recentFiles).toContain('/w/archive/notes.md')
+    // The moved file favorite follows; the untouched directory favorite stays.
+    expect(settings.workbenchFileFavorites['/w']).toEqual([
+      { relativePath: 'archive/notes.md', isDirectory: false },
+      { relativePath: 'docs', isDirectory: true },
+    ])
   })
 
   it('cancels the prior bounded content search before starting another', async () => {

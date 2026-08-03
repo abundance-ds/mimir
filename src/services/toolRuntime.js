@@ -234,25 +234,34 @@ export async function executeToolRequest(request, options = {}) {
           directory: true,
         }),
       }
-    case 'files.rename':
-      return {
-        entry: await invokeNativeTool('workspace_file_rename', {
-          path: input.path,
-          newName: input.new_name,
-        }),
-      }
+    // Rename and trash reconcile open Editor state the same way the Files
+    // panel does: wait out pending writes so a save cannot resurrect the old
+    // path, mutate, then repoint or release the affected buffers.
+    case 'files.rename': {
+      const source = absoluteWorkspacePath(options, input.path)
+      await options.awaitWorkspaceWrites?.([source])
+      const entry = await invokeNativeTool('workspace_file_rename', {
+        path: input.path,
+        newName: input.new_name,
+      })
+      options.moveWorkspacePath?.(source, entry.path)
+      return { entry }
+    }
     case 'files.duplicate':
       return {
         entry: await invokeNativeTool('workspace_file_duplicate', {
           path: input.path,
         }),
       }
-    case 'files.trash':
-      return {
-        trashedPaths: await invokeNativeTool('workspace_file_trash', {
-          paths: input.paths,
-        }),
-      }
+    case 'files.trash': {
+      const targets = (input.paths || []).map(path => absoluteWorkspacePath(options, path))
+      await options.awaitWorkspaceWrites?.(targets)
+      const trashedPaths = await invokeNativeTool('workspace_file_trash', {
+        paths: input.paths,
+      })
+      options.reconcileWorkspaceTrash?.(targets)
+      return { trashedPaths }
+    }
     case 'settings.get':
       return readSettings(options.settings, input.keys)
     case 'settings.update':
@@ -286,6 +295,15 @@ function normalizeRoutineDefinition(value = {}) {
       : String(value.workspace).trim(),
     interactive: value.interactive === true,
   }
+}
+
+// Editor reconciliation matches tabs by absolute path, while tool input may
+// name entries workspace-relative (both are valid native input).
+function absoluteWorkspacePath(options, path) {
+  const value = String(path || '')
+  if (!value || value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) return value
+  const root = String(options.getWorkspacePath?.() || '').replace(/[\\/]+$/, '')
+  return root ? `${root}/${value}` : value
 }
 
 async function invokeNativeTool(command, args) {
