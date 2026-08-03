@@ -1356,7 +1356,7 @@ entry = "index.html"
         let directory = tempdir().unwrap();
         write_embedded_app(directory.path(), "inspector", "Inspector");
         let catalog = load_catalog(directory.path());
-        assert_eq!(catalog.apps.len(), 4);
+        assert_eq!(catalog.apps.len(), 5);
         assert!(catalog
             .apps
             .iter()
