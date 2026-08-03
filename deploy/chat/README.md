@@ -2,7 +2,9 @@
 
 Single ops owner for the Mimir Chat deployment. Client architecture and agent
 participation are in [`docs/chat.md`](../../docs/chat.md); trust boundaries are
-in [`docs/security.md`](../../docs/security.md).
+in [`docs/security.md`](../../docs/security.md). Operator host access, secret
+locations, and deploy commands are machine-local in `.internal/deployment.md`
+(gitignored, repo root).
 
 ## Reference deployment
 
