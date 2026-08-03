@@ -7,3 +7,4 @@
   [docs/issues.md](docs/issues.md) (known defects) before changing a subsystem.
 - One owner per topic: feature detail lives in its owning doc, never
   duplicated; the README stays orientation and minimal setup.
+- Follow ASD-STE100

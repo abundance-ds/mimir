@@ -13,7 +13,8 @@ requirements; they do not replace runtime verification.
   Cmd/Ctrl+P expose sources that create a fresh run; Activities contains only
   the active working set.
 - The project switcher shows the current folder, recent folders, and an
-  explicit native folder-picker action in both Sidebar states.
+  explicit native folder-picker action in both Sidebar states. Recent folders
+  report retained Activity counts or work that needs input.
 - The Sidebar has no Archived list. Closed durable work is searchable and
   restorable through Cmd/Ctrl+P History.
 - Activity and Editor can each collapse to a mounted 44px rail.
@@ -48,6 +49,10 @@ requirements; they do not replace runtime verification.
 ## Activities and agents
 
 - Every terminal, agent, app instance, and routine run has a stable Activity.
+- Workspace-launched Activities appear only in their workspace Sidebar;
+  switching projects leaves their native tasks running unchanged. Global-cwd
+  Activities remain visible everywhere, and restoring cross-project History
+  opens its workspace before the Activity.
 - The Activities `+` menu launches every enabled dynamic Activity type,
   including Terminal, without duplicating the stable Chats workspace; it
   remains available in the collapsed Sidebar and is fully keyboard-operable.
@@ -282,14 +287,17 @@ requirements; they do not replace runtime verification.
 - Every dropdown and date/datetime control uses a styled Vue
   listbox/combobox or calendar with keyboard navigation and visible focus,
   never the platform's native `select`, `datalist`, date, or datetime UI.
-- The app follows Scan → Peek → Focus: projections remain scannable, Peek is
-  read-first with quick issue properties and a relationship sentence, and
-  Focus uses one spacious scroll with syntax-aware Markdown and auto-growing
-  text fields.
+- The app follows Scan → Peek → Focus: projections remain scannable, Peek
+  edits an object's operational properties and working note in place beside the
+  projection, and Focus uses one spacious scroll adding the remaining
+  properties, connections, and provenance.
 - The inspector preserves a context trail, commits drafts before every
   replacing navigation or scope refresh, opens sources and deliverables in the
   Editor, shows related Activities, and reports revision conflicts rather than
-  overwriting them.
+  overwriting them. A rejected save keeps its error on the surface and never
+  traps the object.
+- A legacy `project`/`assignee` label that is not a graph node stays a label:
+  it never becomes a relation, and it never blocks saving the rest of the node.
 - `graph.context` bounds bodies and node count, preserves provenance and
   selected scopes, filters hidden relations, and redacts `record` or
   `redactFromContext: true` (`sensitive: true` compatibility) content by
@@ -386,8 +394,9 @@ requirements; they do not replace runtime verification.
   Rename, Show in Finder, save-copy actions, retranscription, and confirmed
   Delete. Full-library search remains native and ordinary browsing groups
   Needs attention, Today, Previous 7 days, and Earlier.
-- Agent tools can list, get, search, and update completed/interrupted Scribe
-  records with bounded results. They cannot start, mute, stop, request
+- Agent tools can list, get, search, update, and explicitly delete
+  completed/interrupted Scribe records with bounded results. They cannot
+  start, mute, stop, request
   permission, configure a provider, or publish a graph mutation. Search terms
   are at least three characters and cover full reviewed title/summary/tags
   plus terminal transcript across the complete library, not only the latest

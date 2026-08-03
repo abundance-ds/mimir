@@ -73,8 +73,8 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
   Scenario: Meeting tools remain private by default
     Given the local MCP endpoint can be reached by trusted local processes
     When meeting capabilities are registered
-    Then recording, stop, deletion, and retention operations are absent from the public projection
-    And bounded list, get, search, and metadata update operations remain available
+    Then recording, stop, and retention operations are absent from the public projection
+    And bounded list, get, search, metadata update, and explicit deletion operations remain available
     And a live meeting update is rejected before the content projection can be written
 
   @MTG-160 @automated @desktop @legal
@@ -90,3 +90,11 @@ Feature: Minimize, retain, export, and delete sensitive meeting data deliberatel
     When explicit deletion, retention, or repair retry evaluates that meeting
     Then collecting repair blocks source-audio removal even after job attempts are exhausted
     And a retry with no committed source audio fails before any provider is started
+
+  @MTG-162 @automated @native @security @contract
+  Scenario: An agent deletes only the explicitly identified meeting data
+    Given the user explicitly requests deletion of a stopped meeting
+    And the agent has read its current meeting identifier and reviewed title
+    When the agent calls meeting deletion with that identifier, exact title, and an explicit audio or meeting scope
+    Then Mimir uses the native deletion state machine rather than filesystem removal
+    And a stale title, unknown scope, live meeting, or deletion blocked by owned work fails without deleting data

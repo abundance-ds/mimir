@@ -153,6 +153,15 @@ renderer patches that file and reloads only its loaded parent directory.
 Structural changes send one authoritative index snapshot. Files does not poll
 while idle, and Activity navigation never starts a workspace scan.
 
+A structural rescan also pairs disappeared and appeared paths that share a
+filesystem identity and reports them as `moves`: an external `mv`, `git mv`,
+or Finder drag repoints open Editor tabs, drafts, recents, and file favorites
+instead of orphaning them. Pairing is deliberately conservative — same volume,
+identity unique on both sides — so a copy-then-delete or a cross-volume move
+stays a delete plus create, and a favorite naming a moved *directory*
+(directories have no index identity) stays behind as missing, as before. See
+[gotchas.md](gotchas.md#external-move-recognition-is-identity-based-and-best-effort).
+
 ## Native and MCP boundary
 
 `workspace_files.rs` canonicalizes the indexed root and rejects traversal,
@@ -175,6 +184,14 @@ The same guarded mutation implementation backs these registry tools:
 are broader trusted APIs and do not inherit the indexed-workspace boundary.
 See [security.md](security.md).
 
+These registry tools are internal plumbing for the embedded App SDK and UI
+runtime — they are not the agent surface, and their existence here says
+nothing about what agents can call. Which file capability agents get, and
+why, is owned solely by [agent-interface.md](agent-interface.md).
+Registry-relayed `files.rename` and `files.trash` reconcile open Editor
+buffers the way the Files panel does: pending writes settle first, then tabs
+repoint or release.
+
 ## Change map
 
 | Change | Inspect together | Focused verification |
@@ -185,6 +202,7 @@ See [security.md](security.md).
 | favorites | `mimir/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
 | external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |
+| external move/rename reconciliation | `file_index.rs` (identity pairing), `file_index_commands.rs`, `stores/workspaceFiles.js`, `stores/files.js`, favorites in `stores/settings.js` | native index move tests; workspaceFiles store tests |
 | rename/Trash/move with open buffers | `mimir/files/useFileMutations.js`, `stores/files.js`, `workspace_files.rs` | file-controller, Files Activity, file-store, native mutation tests |
 | drag and drop from outside | `mimir/files/useFileDrop.js`, `FilesActivity.vue`, `FileTreeRow.vue`, `workspace_files.rs` | drop-composable, Files Activity, native import tests |
 | drag rows between folders | `mimir/files/useFileTreeDrag.js`, `useFileMutations.js`, `FilesActivity.vue`, `workspace_files.rs` | tree-drag composable, file-controller, Files Activity, native move tests |

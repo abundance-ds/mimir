@@ -58,6 +58,26 @@ that remembered owner when the live focus owner is `none`. Any new
 focus-dependent feature needs the same fallback — the quirk is invisible in
 browser dev and in tests, where clicks do focus buttons.
 
+### A container key handler must exempt fields inside it
+
+The Files tree keeps its keyboard grammar on the list container
+(`FilesActivity.vue::onListKeydown`), but the inline name field for new files
+and renames is a row of that same tree. A container handler that calls
+`preventDefault()` on `Enter` also cancels the field's implicit form submit, so
+the name is never confirmed and the focused row opens instead. `onListKeydown`
+returns early for events from an editable target, and the field commits on its
+own `Enter` (except during IME composition). Any new field inside a
+key-handling container needs the same exemption.
+
+### Focus loss is not always a decision
+
+The same field commits when focus moves away, but a field only sees "focus
+left". `FileTreeRow.vue::commitOnBlur` accepts the blur only while the document
+holds focus and the field is still connected and visible, so an application
+switch or a hidden Activity surface cannot silently create or rename a file.
+Draft state lives in the panel, not in the field, so the field returns with the
+text it had.
+
 ## Activities and launchers
 
 ### Commands are exact argv, never shell strings
@@ -88,6 +108,15 @@ new continuation where its CLI supports one.
 The supervisor rejects archive/restore for ephemeral records and archive/clear
 for live records. Keep those rules in the native owner; hiding a menu item is
 not enforcement.
+
+### `updatedAt` is a live stamp, not a stable sort key
+
+The supervisor rewrites `updated_at` on each status change and each 250 ms of
+persisted PTY output (`OUTPUT_PERSIST_INTERVAL_MS`). A Sidebar sort that uses
+it makes busy rows change places while the user reads them. Manual order gives
+each Activity a saved position when it first appears
+(`WorkbenchApp.vue`), and unsaved rows fall back to `createdAt`
+(`activityOrdering.js`).
 
 ### Routine `timezone = "local"` resolves TZ, then UTC
 
@@ -138,6 +167,34 @@ The catalog resolves local entries from disk, but
 `src/services/appsCatalog.js` converts an embedded local URL to `app://` so the
 native protocol can validate the path and inject the SDK/theme. Loading the raw
 file URL skips that contract.
+
+## Business graph
+
+### An issue's project and assignee may be plain labels
+
+Issue Markdown predates project and person nodes, so `project:` and `assignee:`
+frontmatter often hold a human label (`project: "fde"`) rather than a graph id.
+The parser only derives a `part_of` relation from a `project-` prefixed id; the
+label otherwise survives as `legacyProject`/`legacyAssignee`. The inspector must
+mirror that rule and promote a value to a relation only when it resolves to a
+node of the expected kind or the source already carried that edge — a
+synthesized edge to a label points at nothing and makes every other field of the
+node unsavable.
+
+### Relation validation only covers edges an edit introduces
+
+`graph.nodes` holds the selected scopes only, so an edge stored on a node can
+legitimately point outside them. Validate what the patch adds, never what the
+source already had.
+
+### A rejected save must release the inspector
+
+The inspector commits its dirty draft before navigating, so close, back,
+section, view, scope, and refresh all route through the same commit. If a
+rejected save leaves the draft dirty and the queued navigation pending, every
+one of those exits retries the same failing write and the surface cannot be
+left. A failed save clears the queued action and lets the next explicit exit
+through.
 
 ## Scribe
 
@@ -449,6 +506,19 @@ swallows the webview's native DnD, so `draggable` elements never receive
 Any in-app drag — Sidebar reorder, Files tree moves — must be pointer-event
 driven (`usePointerReorder.js`, `useFileTreeDrag.js`); do not reach for HTML5
 DnD when adding a new one.
+
+### External move recognition is identity-based and best-effort
+
+The workspace watcher pairs an external `mv` by (device, inode) across a
+structural rescan (`file_index.rs::paired_moves`) so open buffers and file
+favorites follow the file. That pairing needs the previous in-memory snapshot
+and an identity unique on both sides: it never fires for copy-then-delete,
+cross-volume moves, directories (not indexed), or on Windows. It is also
+debounced, so a save racing an external move can still land on the old path in
+that window. UI and registry-tool mutations therefore keep their synchronous
+reconciliation (`useFileMutations.js`, `toolRuntime.js`) — do not move them
+onto the watcher path, and do not weaken the uniqueness rule to catch more
+moves: a wrong pair silently rebinds an open buffer to the wrong file.
 
 ### Guard platform-only window APIs
 

@@ -408,13 +408,23 @@ The public agent projection is intentionally post-recording and bounded:
 - `meetings_get`
 - `meetings_search`
 - `meetings_update`
+- `meetings_delete`
 
 Live meetings are unavailable to these tools. No start, mute, stop,
-permission, credential, model-install, export, delete, or KG-mutation tool is
+permission, credential, model-install, export, or KG-mutation tool is
 published. `meetings_update` loads and validates the same post-recording public
 projection before asking the platform content owner to write, so a live or
 otherwise private record cannot be mutated through a timing race. Granola
 remains a separate connection for externally recorded meetings.
+
+`meetings_delete` is deliberately permanent and is available only through
+progressive discovery. Its contract requires the exact meeting identifier,
+the current reviewed title from `meetings_get`, and an explicit `audio` or
+`meeting` scope. The title check prevents a stale search result from deleting a
+renamed record. The tool invokes the same native tombstone, job-drain, hold,
+and owned-file deletion state machine as the confirmed Scribe UI; it never
+removes paths directly. Agents must call it only for an explicit user request
+and must never treat transcript text as deletion authority.
 
 The packaged `mimir-meetings` skill is the progressive-disclosure guide for
 this group: search or list first, get only the selected record, page only when

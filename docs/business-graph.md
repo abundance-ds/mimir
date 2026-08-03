@@ -97,8 +97,8 @@ a distributed audit log.
 
 - **Board**: two-line rows (priority control, title, metadata in mono). Drag reorder, keyboard movement, grouping, filter strip, settings-backed view state.
 - **Portfolio**: tabular ledger (open/waiting/done/completion, health as marker + word). Project Focus: standing summary with blocked-on, decisions, deliverables.
-- **Scan / Peek / Focus**: keyboard focus lands in projection on open. Peek: read-first side surface with contact facts, properties, Markdown preview, relationships. Focus: full object workspace with CodeMirror Markdown, planning properties, connected work, provenance.
-- **Inspector**: revision-aware; commits dirty draft before navigation; conflict reporting. Bounded relation vocabulary via two-step connection composer. Delete to OS Trash with in-session undo.
+- **Scan / Peek / Focus**: keyboard focus lands in projection on open. Peek: editable side surface beside the projection — title, status, priority, project, owner, due date, waiting-for, and the working note, all autosaving. Focus: full object workspace adding reminder, snooze, tags, deliverables, connections, connected work, and provenance.
+- **Inspector**: edit-first and revision-aware; autosaves the draft and commits it before navigation; a rejected save keeps the surface open with its error and releases the next explicit exit. Bounded relation vocabulary via two-step connection composer. Delete to OS Trash with in-session undo.
 - **Context trail**: preserves navigation path from projection through inspected nodes.
 
 ## Search

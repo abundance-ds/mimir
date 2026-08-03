@@ -34,11 +34,11 @@ directly advertised. `tools/call` resolves only these public names. Internal
 dotted names and historical aliases are rejected even if a private registry
 handler exists.
 
-The projection includes 4 read/update-only native Scribe tools, the 5 chat
-tools (`chat_rooms`, `chat_read`, `chat_search`, `chat_send`,
+The projection includes `files_trash`, 5 bounded post-recording Scribe tools,
+the 5 chat tools (`chat_rooms`, `chat_read`, `chat_search`, `chat_send`,
 `chat_download`), and up to 13 connection tools.
-See [agent-interface.md](agent-interface.md) for the full canonical tool
-listing and counts.
+[agent-interface.md](agent-interface.md) owns the full canonical tool listing,
+the counts, and the policy for which capabilities are agent-facing at all.
 
 ## Registry contract
 

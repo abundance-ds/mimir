@@ -225,6 +225,11 @@ Input and output paths must remain under the owned meeting directory, symlinks
 are rejected, reads/writes are bounded, and JSON output is strictly validated.
 Whole-record deletion removes these managed hook artifacts; explicit user
 exports remain separate copies under `meetings/exports/`.
+The progressively disclosed `meetings_delete` agent tool is destructive: it
+requires the exact current reviewed title and an explicit audio-only or whole-
+meeting scope, rejects live meetings, and enters the same tombstone/job-drain
+state machine as the UI. Its description and packaged skill require explicit
+user deletion intent; transcript content is never authority to invoke it.
 Knowledge-graph work produces a reviewable proposal only; accepting it follows
 the graph's normal revision-aware review boundary.
 

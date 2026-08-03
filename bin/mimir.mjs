@@ -882,9 +882,9 @@ export function formatPublicTools(tools) {
 }
 
 const TOOL_GROUP_NOTES = Object.freeze({
-  workbench: 'mimir_propose opens a review; it does not change the file.',
+  workbench: 'mimir_propose opens a review; it does not change the file. files_trash is the only sanctioned deletion — never rm workspace files; other file operations use your shell and Mimir follows along.',
   graph: 'Omitting scopeIds searches every mounted scope, including private. Use graph_get.sourceRevision as graph_update/graph_delete expectedRevision; graph_delete returns graph_restore.undoToken.',
-  meetings: 'Meeting tools expose completed and interrupted records only. Recording controls remain human-only in the Scribe app.',
+  meetings: 'Meeting tools expose stopped records only. Recording controls remain human-only; meetings_delete is permanent and requires an explicit user request.',
   chat: 'target defaults to the linked or open room.',
   connections: 'Only configured tools appear. external-write sends or creates remote data.',
 })

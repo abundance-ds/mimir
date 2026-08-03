@@ -49,6 +49,25 @@ is still eligible; an explicit launch title or manual rename wins atomically.
 The accepted rename is persisted and projected through the ordinary Activity
 upsert path.
 
+## Workspace projection
+
+The Sidebar projects the active working set for the open workspace. Activities
+launched with a workspace-cwd preset appear only for that workspace; home and
+custom-cwd launchers and direct process Apps remain global. This is presentation
+only: switching workspaces never stops, pauses, retargets, or removes a native
+Activity. Hidden terminal surfaces stay mounted and recover incremental native
+scrollback when selected again.
+
+Scope is captured in the Activity origin at launch; it does not change later
+when a launcher preset is edited. `workspacePath` names the owning project,
+while `launch.cwd` remains the process working directory.
+
+Workspace switches open Files and reset Activity Back/Forward navigation so it
+cannot cross projects implicitly. Closed History remains global; explicitly
+restoring an Activity from another workspace opens that workspace first. The
+project switcher reports retained Activity counts and `needs-input` work for
+recent workspaces.
+
 ## Lifecycle
 
 `ActivitySupervisor` owns PTYs and child processes. The runtime store keeps one
@@ -103,6 +122,7 @@ contract are owned by [agent-setup.md](agent-setup.md). The supervisor's
 - `src-tauri/src/launchers.rs`
 - `src/stores/activities.js`
 - `src/stores/activityRuntime.js`
+- `src/mimir/activityWorkspace.js`
 - `src/mimir/composables/useActivityLifecycle.js`
 - `src/mimir/composables/useWorkbenchKeyboardRouting.js`
 - `src/mimir/activities/TerminalActivity.vue`

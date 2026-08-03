@@ -65,10 +65,14 @@ The permanent rail system is the signature:
 - Stable destinations retain icons.
 - Dynamic Activities retain order and use source-specific Codex, Claude, Pi,
   Gemini, Terminal, App, and Routine icons with status overlays and native
-  tooltips.
+  tooltips. In manual order, each Activity gets a saved position at the top of
+  the list when it first appears. Output and status changes never move a row.
 - Row geometry stays aligned between expanded and collapsed Sidebar states.
 - The project mark opens the same teleported current/recent-folder switcher in
   expanded and rail states; switching never requires first expanding Sidebar.
+  Recent-project rows report retained Activity counts or `needs input`; the
+  workspace projection and background-runtime contract live in
+  [activities.md](activities.md#workspace-projection).
 - Tools remain directly available. Chats and Activities have independent
   disclosure controls in the expanded Sidebar; rail mode keeps stable
   destinations and live Activities available. The Activities `+` and
@@ -82,7 +86,10 @@ The permanent rail system is the signature:
   toggles a row, Shift+click extends a range from the last toggle (or the
   active Activity). A selection strip above the rows names the count and
   offers batch Archive (stopped durable rows) and Delete (stopped rows);
-  running rows are never batch-archived or batch-deleted. Escape, a plain
+  running rows are never batch-archived or batch-deleted. When the Sidebar
+  owns close focus, Cmd/Ctrl+W and native Close close every selected row
+  through the normal close path (stop live runs, archive durable, clear
+  ephemeral). Escape (outside menus, rename, and the content panes), a plain
   activation click, or collapsing to the rail clears the selection.
 - Activity and Editor never both remain railed.
 - Restore controls live in adjacent pane headers so the shell is recoverable.
@@ -109,4 +116,3 @@ Cmd/Ctrl+P opens a compact launcher near window top.
 
 Workbench teardown snapshots layout and Activity-order preferences before
 exit. Native quit confirms dirty documents, then flushes the settings queue.
-

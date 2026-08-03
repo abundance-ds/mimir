@@ -20,6 +20,14 @@ graph ontology.
 - Titles: system UI ~12px. Metadata: system mono 10-11px, tabular numerals. Micro labels: uppercase letterspaced mono >= 9px.
 - Rows on projection canvas separated by 1px hairlines — no wells, no raised plates.
 - Radius 0-2px; no shadows except functional overlays; no gradients.
+- Inspector (Peek/Focus) property controls are ghost fields: borderless and
+  transparent at rest, `chrome-mid` wash on hover, accent ring on focus,
+  radius 0-2px. A self-evident control (status, priority, dates, project,
+  owner) carries no visible text label — the current value is the label;
+  accessible names come from `aria-label`. No character counters, no
+  editorial section mastheads, no duplicate state banners. The working note
+  is unframed document text, not a boxed textarea. Boxed fields remain
+  correct inside dialogs (create, summarise).
 - **Banned**: colored left borders, left-edge classification devices, ALL-CAPS kicker mastheads, lit lamps, blinking flags, meter bars, reverse video, ASCII ornament, sparkles, suggestion chips, hover transforms, AI chat surfaces. Agents appear as authors/processes (initials, active count, events in Changes) — never personas.
 
 ## Tokens

@@ -86,9 +86,9 @@
     },
     {
       "feature": "features/meetings/08_retention_privacy_and_security.feature",
-      "idRange": ["MTG-150", "MTG-161"],
+      "idRange": ["MTG-150", "MTG-162"],
       "owner": "meeting-data-governance",
-      "verificationScope": ["native retention and deletion with repair holds", "safe export and paths", "human-only public tools"]
+      "verificationScope": ["native retention and deletion with repair holds", "safe export and paths", "bounded post-recording public tools"]
     },
     {
       "feature": "features/meetings/09_performance_and_backpressure.feature",
@@ -780,7 +780,13 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/tools.rs",
       "selector": "update_rejects_live_meetings_before_the_platform_can_write",
-      "scenarios": ["MTG-159"]
+      "scenarios": ["MTG-159", "MTG-162"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/tools.rs",
+      "selector": "agent_delete_requires_the_exact_current_title_and_explicit_scope",
+      "scenarios": ["MTG-162"]
     },
     {
       "kind": "js-test",

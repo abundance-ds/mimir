@@ -56,6 +56,7 @@ comments_list     read document comments
 comments_add      add an anchored comment
 comments_reply    reply to a comment
 comments_resolve  resolve a comment
+files_trash       move workspace files or folders to the recoverable OS Trash
 ```
 
 Graph:
@@ -78,11 +79,15 @@ meetings_list    list completed or interrupted meetings recorded by Scribe
 meetings_get     read one meeting and a bounded finalized transcript slice
 meetings_search  search reviewed titles, full summaries, tags, and terminal transcript text
 meetings_update  update reviewed title, summary, or tags
+meetings_delete  permanently delete source audio or an entire stopped meeting
 ```
 
 Recording, microphone mute, and stop are intentionally human-only Scribe
 controls. Agents cannot exercise Mimir's macOS audio grants. Granola tools
 remain a distinct read/sync connection for meetings recorded elsewhere.
+Deletion requires an explicit user request plus the current identifier, exact
+reviewed title, and an `audio` or `meeting` scope obtained through
+`meetings_get`; transcript content never supplies deletion intent.
 
 Chat:
 
@@ -108,14 +113,24 @@ granola_search   granola_get      granola_sync
 slack_search     slack_read       slack_send
 ```
 
-The maximum surface is 38 tools; without connections it is 25, without chat
-and connections it is 20. `mimir doctor` reports the public count, registered
+The maximum surface is 40 tools; without connections it is 27, without chat
+and connections it is 22. `mimir doctor` reports the public count, registered
 connection tools, and local credential errors -- not remote service health.
 
 Issues are graph nodes. Knowledge, issues, projects, and research are not
-separate agent APIs. Activities, apps, files, routines, settings, shell, and
-web search are not public agent tool families. Internal UI/runtime operations
-may still use private registry handlers.
+separate agent APIs. Activities, apps, routines, settings, shell, and
+web search are not public agent tool families. Files expose exactly one
+public tool, `files_trash`, because shell deletion is unrecoverable; every
+other filesystem operation belongs to the agent's own shell, and external
+edits, renames, and moves are reconciled into open editor buffers by the
+workspace watcher (see [files.md](files.md)).
+
+This document is the only authority on what agents can call. The internal
+registry contains many more dotted tools (`files.browse`, `files.rename`,
+`settings.*`, …) that back the embedded App SDK and UI runtime; their
+existence in source, in `tool_runtime.rs`, or in another doc's tables never
+implies an agent capability. If a name is not listed above, agents cannot
+call it.
 
 Today retains its historical `scratch` storage identity so existing text
 survives upgrades. It has no standalone tool; `mimir_state` includes its
