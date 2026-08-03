@@ -39,6 +39,7 @@
         @clear-activity="clearActivity"
         @archive-activities="archiveActivities"
         @clear-activities="clearActivities"
+        @selection-change="sidebarSelectedActivityIds = $event"
         @reorder-tools="reorderTools"
         @reorder-activities="reorderActivities"
         @sort-activities="sortActivities"
@@ -195,6 +196,11 @@ import { useWorkbenchKeyboardRouting } from './composables/useWorkbenchKeyboardR
 import { useWorkbenchResize } from './composables/useWorkbenchResize.js'
 import { useWorkspaceBootstrap } from './composables/useWorkspaceBootstrap.js'
 import { ACTIVITY_SORT_MODES, orderActivities } from './activityOrdering.js'
+import {
+  activityIsVisibleInWorkspace,
+  activityWorkspacePath,
+  normalizedWorkspacePath,
+} from './activityWorkspace.js'
 
 const TerminalActivity = defineAsyncComponent(
   () => import('./activities/TerminalActivity.vue').then(module => module.default),
@@ -207,6 +213,18 @@ const optionalSurfaces = {
   agent: TerminalActivity,
   routine: RoutinesActivity,
   chat: ChatActivity,
+}
+
+// Both surfaces are code-split, and an async component renders nothing while
+// its chunk loads — first open of a terminal or an app would otherwise show an
+// empty pane. Warm them once the shell is idle, never during boot.
+function prefetchOptionalSurfaces() {
+  const warm = () => {
+    void import('./activities/TerminalActivity.vue')
+    void import('./activities/AppActivity.vue')
+  }
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 4000 })
+  else setTimeout(warm, 1200)
 }
 
 const CORE_ACTIVITIES = Object.freeze([
@@ -238,6 +256,9 @@ const activitySurfaces = new Map()
 const toolRuntime = createToolRuntime({
   getEditor: () => editorRef.value,
   getWorkspacePath: () => workspaceFiles.workspacePath || null,
+  awaitWorkspaceWrites: paths => editorFiles.waitForWorkspacePaths(paths),
+  moveWorkspacePath: (from, to) => editorFiles.moveWorkspacePath(from, to),
+  reconcileWorkspaceTrash: paths => editorFiles.handleWorkspaceTrash(paths),
   getToday: async () => {
     for (const [id, surface] of activitySurfaces) {
       const activity = activities.byId(id)
@@ -299,6 +320,7 @@ const workspaceBootstrap = useWorkspaceBootstrap({
   diagnostic,
   coreActivities: CORE_ACTIVITIES,
   openCoreActivity,
+  isActivityVisible: activity => activityIsVisibleInCurrentWorkspace(activity),
   getFocusOwner: () => lastWorkbenchFocus.value.owner,
 })
 const {
@@ -336,6 +358,7 @@ const {
   archiveActivity,
   clearActivities,
   clearActivity,
+  closeActivities,
   closeActivity,
   closingActivityIds,
   renameActivity,
@@ -352,13 +375,16 @@ const activityNavigator = computed(() => {
     order: Array.isArray(saved?.order) ? saved.order.map(String) : [],
   }
 })
+const navigableActivities = computed(() => (
+  activities.visibleActivities.filter((activity) => (
+    !CORE_ACTIVITY_IDS.has(activity.id)
+    && !isToolActivity(activity)
+    && !closingActivityIds.value.has(activity.id)
+  ))
+))
 const sidebarActivities = computed(() => (
   orderActivities(
-    activities.visibleActivities.filter((activity) => (
-      !CORE_ACTIVITY_IDS.has(activity.id)
-      && !isToolActivity(activity)
-      && !closingActivityIds.value.has(activity.id)
-    )),
+    navigableActivities.value.filter(activity => activityIsVisibleInCurrentWorkspace(activity)),
     {
       mode: activityNavigator.value.mode,
       manualOrder: activityNavigator.value.order,
@@ -429,7 +455,19 @@ const meetingCapture = computed(() => {
 })
 const recentWorkspaces = computed(() => (
   (Array.isArray(settings.recentWorkspaceFolders) ? settings.recentWorkspaceFolders : [])
-    .map(path => ({ path, name: basename(path) }))
+    .map((path) => {
+      const projectActivities = navigableActivities.value.filter(
+        activity => workspaceForActivity(activity) === normalizedWorkspacePath(path),
+      )
+      return {
+        path,
+        name: basename(path),
+        activityCount: projectActivities.length,
+        needsInputCount: projectActivities.filter(
+          activity => activity.status === 'needs-input',
+        ).length,
+      }
+    })
 ))
 const editorTitle = computed(() => {
   const path = editorFiles.currentFile?.path
@@ -524,6 +562,20 @@ function isToolActivity(activity) {
     && toolAppIds.value.has(activity.source?.appId)
 }
 
+function workspaceForActivity(activity) {
+  return activityWorkspacePath(activity, id => launchers.byId(id))
+}
+
+function activityIsVisibleInCurrentWorkspace(activity) {
+  return activityIsVisibleInWorkspace(
+    activity,
+    workspaceFiles.workspacePath,
+    id => launchers.byId(id),
+  )
+}
+
+const sidebarSelectedActivityIds = ref([])
+
 const {
   closeNativeFocusedSurface,
   lastFocus: lastWorkbenchFocus,
@@ -540,9 +592,11 @@ const {
   editorFiles,
   workbench,
   sidebarActivities,
+  sidebarSelection: sidebarSelectedActivityIds,
   toggleSidebar,
   selectActivity,
   closeActivity,
+  closeActivities,
   collapseEmptyEditor,
 })
 
@@ -576,6 +630,25 @@ watch(
       void Promise.resolve(tracker.setContext(context)).catch(() => {})
     }
   },
+)
+
+// Give every row a saved position as soon as it appears, at the top where the
+// user first sees it. Without a position a row keeps its place only by
+// updatedAt, which live output rewrites constantly. Positions for Activities
+// that no longer exist are dropped in the same pass.
+watch(
+  () => sidebarActivities.value.map(activity => activity.id),
+  ids => {
+    if (!settings.settingsReady || !activityRuntime.ready) return
+    if (activityNavigator.value.mode !== 'manual') return
+    const known = new Set(activities.records.map(record => record.id))
+    const saved = activityNavigator.value.order
+    const kept = saved.filter(id => known.has(id))
+    const fresh = ids.filter(id => !kept.includes(id))
+    if (!fresh.length && kept.length === saved.length) return
+    settings.set('activityNavigator', { mode: 'manual', order: [...fresh, ...kept] })
+  },
+  { immediate: true },
 )
 
 function launcherIcon(preset) {
@@ -633,6 +706,7 @@ onMounted(async () => {
   document.addEventListener('pointerdown', rememberWorkbenchFocus, true)
   window.addEventListener('resize', syncResponsiveLayout)
   window.__mimir_activityPaste = pasteToActiveTerminal
+  prefetchOptionalSurfaces()
   await Promise.all([
     workspaceBootstrap.start(),
     meetings.initialize().catch((cause) => {
@@ -939,7 +1013,7 @@ function openSettings(section = 'appearance') {
   editorRef.value?.mimirOpenSettings?.(section || 'appearance')
 }
 
-function activateQuickOpenResult(result) {
+async function activateQuickOpenResult(result) {
   if (!result?.type) return
   if (result.type === 'file') {
     void openFileInEditor(result.path)
@@ -954,7 +1028,9 @@ function activateQuickOpenResult(result) {
     return
   }
   if (result.type === 'history') {
-    void restoreActivity(result.activityId)
+    const activity = activities.byId(result.activityId)
+    if (activity && !await ensureActivityWorkspace(activity)) return
+    await restoreActivity(result.activityId)
   }
 }
 
@@ -1021,18 +1097,33 @@ async function dispatchAppPayload(payload, { throwOnError = false } = {}) {
   return payload?.activity || null
 }
 
-function openActivityRecord(activity) {
+async function openActivityRecord(activity) {
+  let record
   if (typeof activity === 'string') {
-    if (activities.byId(activity)) selectActivity(activity)
-    else diagnostic.value = `Activity '${activity}' is no longer available.`
-    return
-  }
-  if (!activity?.id) {
+    record = activities.byId(activity)
+    if (!record) {
+      diagnostic.value = `Activity '${activity}' is no longer available.`
+      return
+    }
+  } else if (!activity?.id) {
     diagnostic.value = 'The runtime did not return a valid Activity.'
     return
+  } else {
+    record = activities.upsert(activity)
   }
-  activities.upsert(activity)
-  selectActivity(activity.id)
+  if (!await ensureActivityWorkspace(record)) return
+  selectActivity(record.id)
+}
+
+async function ensureActivityWorkspace(activity) {
+  const target = workspaceForActivity(activity)
+  if (
+    !target
+    || target === normalizedWorkspacePath(workspaceFiles.workspacePath)
+  ) {
+    return true
+  }
+  return openWorkspace(target, { revealFiles: false })
 }
 
 async function listAppsForTool() {

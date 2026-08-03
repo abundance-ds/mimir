@@ -471,7 +471,7 @@
       </SidebarRow>
 
       <div v-if="activities.length === 0 && !collapsed" class="px-3 py-3 text-[10px] leading-relaxed text-ink-3">
-        Runs stay here while you work.
+        No Activities in this project.
       </div>
 
       </template>
@@ -574,6 +574,7 @@ const emit = defineEmits([
   'clearActivity',
   'archiveActivities',
   'clearActivities',
+  'selectionChange',
   'reorderTools',
   'reorderActivities',
   'sortActivities',
@@ -641,12 +642,14 @@ const activityCreateAppStart = computed(() => {
 
 onMounted(() => {
   document.addEventListener('pointerdown', closeMenus)
+  document.addEventListener('keydown', onSelectionEscape)
   meetingClock = window.setInterval(() => {
     if (props.meetingCapture?.lifecycle === 'capturing') meetingNow.value = Date.now()
   }, 1000)
 })
 onUnmounted(() => {
   document.removeEventListener('pointerdown', closeMenus)
+  document.removeEventListener('keydown', onSelectionEscape)
   if (meetingClock) window.clearInterval(meetingClock)
   closeActivityCreateMenu()
 })
@@ -979,6 +982,28 @@ watch(
 watch([() => props.collapsed, activitiesCollapsed], ([collapsed, folded]) => {
   if (collapsed || folded) clearSelection()
 })
+
+watch(selectedActivityIds, (ids) => {
+  emit('selectionChange', [...ids])
+})
+
+// WebKit never focuses buttons on click, so after selecting rows the keydown
+// target is <body> and the row-level Escape handler never fires. Listen at the
+// document level, deferring to open menus, rename, editable targets, and the
+// content panes.
+function onSelectionEscape(event) {
+  if (event.key !== 'Escape' || !selectedActivityIds.value.size) return
+  if (
+    activityMenuId.value
+    || sortMenuOpen.value
+    || activityCreateMenuOpen.value
+    || renamingId.value
+  ) return
+  if (event.target?.closest?.(
+    '[data-pane="editor"], [data-pane="activity"], [aria-modal="true"], input, textarea, [contenteditable="true"]',
+  )) return
+  clearSelection()
+}
 
 function activityIdentity(activity) {
   const source = String(

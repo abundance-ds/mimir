@@ -172,6 +172,20 @@ describe('workbench store', () => {
     expect(store.canGoPreviousActivity).toBe(false)
   })
 
+  it('resets Activity navigation for a project switch without changing pane layout', () => {
+    const store = useWorkbenchStore()
+    store.openActivity('agent:alpha')
+    store.setPaneState('sidebar', 'rail')
+    store.setPaneWidth('editor', 700)
+
+    store.resetActivityHistory()
+
+    expect(store.activeActivityId).toBe('files')
+    expect(store.canGoPreviousActivity).toBe(false)
+    expect(store.paneLayout.sidebar).toEqual({ state: 'rail', width: 240 })
+    expect(store.paneLayout.editor).toEqual({ state: 'expanded', width: 700 })
+  })
+
   it('resets navigation and layout cleanly for a different workspace', () => {
     const store = useWorkbenchStore()
     store.openActivity('agent:alpha')

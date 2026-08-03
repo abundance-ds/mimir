@@ -15,6 +15,7 @@ export function useWorkspaceBootstrap({
   diagnostic,
   coreActivities,
   openCoreActivity,
+  isActivityVisible = () => true,
   getFocusOwner,
 }) {
   const initialized = ref(false)
@@ -63,7 +64,8 @@ export function useWorkspaceBootstrap({
     }
 
     const savedActivity = settings.workbenchLayout?.activeActivityId
-    if (savedActivity && activities.byId(savedActivity)) {
+    const savedRecord = savedActivity ? activities.byId(savedActivity) : null
+    if (savedRecord && isActivityVisible(savedRecord)) {
       workbench.openActivity(savedActivity)
     } else if (!activities.byId(workbench.activeActivityId)) {
       workbench.openActivity('files')
@@ -166,6 +168,7 @@ export function useWorkspaceBootstrap({
       if (persist) settings.set('mimirWorkspaceFolder', path)
       rememberWorkspace(path)
       diagnostic.value = graphWarning
+      workbench.resetActivityHistory('files')
       if (revealFiles) openCoreActivity('files')
       return true
     } catch (cause) {

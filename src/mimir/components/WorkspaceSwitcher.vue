@@ -75,7 +75,12 @@
             <IconHistory :size="13" :stroke-width="1.8" class="shrink-0 text-ink-3" />
             <span class="min-w-0 flex-1">
               <span class="block truncate font-sans text-[11px] text-ink-2">{{ workspace.name }}</span>
-              <span class="block truncate font-mono text-[9px] text-ink-4">{{ workspace.path }}</span>
+              <span
+                data-project-activity-summary
+                class="block truncate font-mono text-[9px] text-ink-4"
+              >
+                {{ workspaceDetail(workspace) }}
+              </span>
             </span>
           </button>
           <div class="my-1 border-t border-rule-light" />
@@ -206,6 +211,17 @@ function chooseFolder() {
 function openRecent(path) {
   closeMenu()
   emit('openWorkspace', path)
+}
+
+function workspaceDetail(workspace) {
+  const count = Math.max(0, Number(workspace?.activityCount) || 0)
+  const needsInput = Math.max(0, Number(workspace?.needsInputCount) || 0)
+  const activity = needsInput
+    ? `${needsInput} needs input`
+    : count
+      ? `${count} ${count === 1 ? 'Activity' : 'Activities'}`
+      : ''
+  return [activity, workspace?.path].filter(Boolean).join(' · ')
 }
 
 onUnmounted(() => closeMenu())

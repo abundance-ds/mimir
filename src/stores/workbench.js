@@ -139,9 +139,13 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     }
   }
 
+  function resetActivityHistory(current = 'files') {
+    activityHistory.value = createHistory(normalizedActivityId(current))
+  }
+
   function resetForWorkspace() {
     restoreLayout(DEFAULT_LAYOUT)
-    activityHistory.value = createHistory('files')
+    resetActivityHistory()
   }
 
   function normalizeLayout() {
@@ -175,6 +179,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     openActivity,
     previousActivity,
     nextActivity,
+    resetActivityHistory,
     resetForWorkspace,
   }
 })

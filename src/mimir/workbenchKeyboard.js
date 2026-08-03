@@ -5,6 +5,7 @@ export function routeWorkbenchKey({
   shift = false,
   focusOwner = 'none',
   sidebarActivityId = '',
+  sidebarSelectionCount = 0,
   activityNewTargetId = null,
 }) {
   if (!primary) return null
@@ -37,8 +38,11 @@ export function routeWorkbenchKey({
   if (!alt && !shift && normalized === 'w') {
     if (focusOwner === 'editor') return { action: 'close-editor' }
     if (focusOwner === 'activity') return { action: 'close-activity', activityId: '' }
-    if (focusOwner === 'sidebar' && sidebarActivityId) {
-      return { action: 'close-activity', activityId: sidebarActivityId }
+    if (focusOwner === 'sidebar') {
+      if (sidebarSelectionCount > 0) return { action: 'close-selected-activities' }
+      if (sidebarActivityId) {
+        return { action: 'close-activity', activityId: sidebarActivityId }
+      }
     }
   }
 

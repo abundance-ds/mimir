@@ -52,6 +52,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const resumeStrategy = normalizedResumeStrategy(resolved.resumeStrategy)
     const id = `${kind}:${crypto.randomUUID()}`
     const timestamp = new Date().toISOString()
+    const workspaceScope = presetWorkspaceScope(preset)
     const mcpUrl = activityContextUrl(
       resolved.env?.MIMIR_MCP_URL || 'http://127.0.0.1:17532/mcp',
       {
@@ -64,7 +65,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       kind,
       title: options.title || resolved.title,
       autoTitleEligible: kind === 'agent' && !options.title,
-      workspacePath: resolved.cwd,
+      workspacePath: workspaceScope === 'workspace' ? workspacePath : '',
       status: 'ready',
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -73,6 +74,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
         launcherId: resolved.agentId || resolved.presetId,
         presetId: resolved.presetId,
         ...(options.source || {}),
+        workspaceScope,
       },
       host: {
         type: 'pty',
@@ -129,6 +131,10 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const startedAt = monotonicNow()
     const resolved = await resolveLauncher(preset, activity.workspacePath)
     const resolvedAt = monotonicNow()
+    const workspaceScope = normalizedWorkspaceScope(
+      activity.source?.workspaceScope,
+      presetWorkspaceScope(preset),
+    )
     const resumeStrategy = normalizedResumeStrategy(
       activity.host?.resumeStrategy || resolved.resumeStrategy,
     )
@@ -171,7 +177,11 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       archivedAt: undefined,
       session: undefined,
       error: undefined,
-      workspacePath: resolved.cwd,
+      workspacePath: workspaceScope === 'workspace' ? activity.workspacePath : '',
+      source: {
+        ...(activity.source || {}),
+        workspaceScope,
+      },
       host: {
         type: 'pty',
         ...(resumeStrategy !== 'none'
@@ -215,22 +225,27 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     kind = 'terminal',
     retention = 'durable',
     source = {},
+    workspacePath = '',
     open = true,
   }) {
     if (!command) throw new Error('A command is required.')
     if (!cwd) throw new Error('A working directory is required.')
     const id = `${kind}:${crypto.randomUUID()}`
     const timestamp = new Date().toISOString()
+    const workspaceScope = normalizedWorkspaceScope(
+      source.workspaceScope,
+      workspacePath ? 'workspace' : 'global',
+    )
     const record = {
       id,
       kind,
       title: title || command,
-      workspacePath: cwd,
+      workspacePath: workspaceScope === 'workspace' ? (workspacePath || cwd) : '',
       status: 'ready',
       createdAt: timestamp,
       updatedAt: timestamp,
       retention,
-      source,
+      source: { ...source, workspaceScope },
       host: { type: 'pty' },
       launch: {
         command,
@@ -501,6 +516,14 @@ function withoutOptions(args, options) {
 
 function normalizedResumeStrategy(value) {
   return ['codex', 'claude', 'pi', 'gemini'].includes(value) ? value : 'none'
+}
+
+function presetWorkspaceScope(preset) {
+  return ['home', 'custom'].includes(preset?.cwd?.mode) ? 'global' : 'workspace'
+}
+
+function normalizedWorkspaceScope(value, fallback) {
+  return value === 'workspace' || value === 'global' ? value : fallback
 }
 
 function monotonicNow() {

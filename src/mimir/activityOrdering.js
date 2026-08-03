@@ -51,7 +51,12 @@ export function orderActivities(items, {
     if (!leftOrdered && rightOrdered) return -1
     if (leftOrdered && !rightOrdered) return 1
     if (leftOrdered && rightOrdered) return leftIndex - rightIndex
-    return 0
+
+    // Rank unsaved rows against each other by creation, never by updatedAt:
+    // PTY output and status changes bump that stamp several times a second,
+    // which would make live rows swap places while the user reads them.
+    return timestamp(right.createdAt) - timestamp(left.createdAt)
+      || left.id.localeCompare(right.id)
   })
 }
 

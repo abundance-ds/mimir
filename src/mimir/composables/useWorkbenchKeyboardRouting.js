@@ -12,9 +12,11 @@ export function useWorkbenchKeyboardRouting({
   editorFiles,
   workbench,
   sidebarActivities,
+  sidebarSelection = ref([]),
   toggleSidebar,
   selectActivity,
   closeActivity,
+  closeActivities,
   collapseEmptyEditor,
 }) {
   const lastFocus = ref({ owner: 'none', activityId: '' })
@@ -56,6 +58,7 @@ export function useWorkbenchKeyboardRouting({
       shift: event.shiftKey,
       focusOwner: focus.owner,
       sidebarActivityId: focus.activityId,
+      sidebarSelectionCount: sidebarSelection.value.length,
       activityNewTargetId: activityNewTargetId.value,
     })
     if (!result) return
@@ -76,6 +79,8 @@ export function useWorkbenchKeyboardRouting({
       })
     } else if (result.action === 'close-editor') {
       closeForFocus({ owner: 'editor', activityId: '' })
+    } else if (result.action === 'close-selected-activities') {
+      void closeActivities?.(sidebarSelection.value)
     } else if (result.action === 'close-activity') {
       closeForFocus({
         owner: result.activityId ? 'sidebar' : 'activity',
@@ -147,8 +152,12 @@ export function useWorkbenchKeyboardRouting({
       void closeActivity(workbench.activeActivityId)
       return
     }
-    if (focus.owner === 'sidebar' && focus.activityId) {
-      void closeActivity(focus.activityId)
+    if (focus.owner === 'sidebar') {
+      if (sidebarSelection.value.length) {
+        void closeActivities?.(sidebarSelection.value)
+        return
+      }
+      if (focus.activityId) void closeActivity(focus.activityId)
     }
   }
 

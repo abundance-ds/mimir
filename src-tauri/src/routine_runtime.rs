@@ -1,10 +1,12 @@
 use crate::{
     activities::{
         ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin, ActivityRecord,
-        ActivityRetention, ActivityStatus, ActivitySupervisor, SpawnActivityRequest,
+        ActivityRetention, ActivityStatus, ActivitySupervisor, ActivityWorkspaceScope,
+        SpawnActivityRequest,
     },
     launchers::{
         self, AgentDefinition, DetectedAgent, LauncherKind, LauncherPreset, ResolvedLaunch,
+        WorkingDirectory,
     },
     persistence::{
         load_json_optional_quarantining, write_bytes_atomic, write_json_atomic, QuarantinedLoad,
@@ -186,6 +188,7 @@ struct ResolvedRoutine {
     definition: RoutineDefinition,
     launch: ResolvedLaunch,
     args: Vec<String>,
+    workspace_scope: ActivityWorkspaceScope,
 }
 
 struct LaunchReservation {
@@ -728,7 +731,10 @@ impl RoutineRuntime {
             kind: ActivityKind::Routine,
             title: resolved.definition.title.clone(),
             auto_title_eligible: false,
-            workspace_path: Some(resolved.launch.cwd.clone()),
+            workspace_path: match resolved.workspace_scope {
+                ActivityWorkspaceScope::Workspace => resolved.definition.workspace.clone(),
+                ActivityWorkspaceScope::Global => None,
+            },
             status: ActivityStatus::Ready,
             created_at: now.clone(),
             updated_at: now,
@@ -739,6 +745,7 @@ impl RoutineRuntime {
             source: ActivityOrigin {
                 launcher_id: resolved.launch.agent_id.clone(),
                 preset_id: Some(resolved.launch.preset_id.clone()),
+                workspace_scope: Some(resolved.workspace_scope),
                 routine_id: Some(resolved.definition.id.clone()),
                 scheduled_for: Some(scheduled_for.into()),
                 ..ActivityOrigin::default()
@@ -807,7 +814,10 @@ impl RoutineRuntime {
             kind: ActivityKind::Routine,
             title: request.title.trim().to_string(),
             auto_title_eligible: false,
-            workspace_path: Some(resolved.launch.cwd.clone()),
+            workspace_path: match resolved.workspace_scope {
+                ActivityWorkspaceScope::Workspace => Some(request.workspace.clone()),
+                ActivityWorkspaceScope::Global => None,
+            },
             status: ActivityStatus::Ready,
             created_at: now.clone(),
             updated_at: now,
@@ -818,6 +828,7 @@ impl RoutineRuntime {
             source: ActivityOrigin {
                 launcher_id: resolved.launch.agent_id.clone(),
                 preset_id: Some(resolved.launch.preset_id.clone()),
+                workspace_scope: Some(resolved.workspace_scope),
                 meeting_id: Some(request.meeting_id.clone()),
                 meeting_hook_id: Some(request.hook_id.clone()),
                 meeting_transcript_revision: Some(request.transcript_revision),
@@ -1197,6 +1208,11 @@ fn resolve_routine(
             format!("Launcher preset '{}' does not exist.", definition.preset),
         )
     })?;
+    let workspace_scope = if matches!(&preset.cwd, WorkingDirectory::Workspace) {
+        ActivityWorkspaceScope::Workspace
+    } else {
+        ActivityWorkspaceScope::Global
+    };
     if preset.kind != LauncherKind::Agent {
         return Err((
             "preset".into(),
@@ -1270,6 +1286,7 @@ fn resolve_routine(
         definition: definition.clone(),
         launch,
         args,
+        workspace_scope,
     })
 }
 
@@ -2075,6 +2092,14 @@ mod tests {
         );
         assert_eq!(result.activity.source.launcher_id.as_deref(), Some("codex"));
         assert_eq!(
+            result.activity.source.workspace_scope,
+            Some(ActivityWorkspaceScope::Workspace)
+        );
+        assert_eq!(
+            result.activity.workspace_path.as_deref(),
+            harness.workspace.to_str()
+        );
+        assert_eq!(
             result.activity.source.scheduled_for.as_deref(),
             Some(result.scheduled_for.as_str())
         );
@@ -2165,6 +2190,10 @@ mod tests {
             Some("title-summary")
         );
         assert_eq!(activity.source.meeting_transcript_revision, Some(9));
+        assert_eq!(
+            activity.source.workspace_scope,
+            Some(ActivityWorkspaceScope::Workspace)
+        );
         assert!(activity.source.routine_id.is_none());
         let launch = activity.launch.as_ref().unwrap();
         assert_eq!(launch.args.last().map(String::as_str), Some(prompt));

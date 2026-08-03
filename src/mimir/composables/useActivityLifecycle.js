@@ -61,6 +61,10 @@ export function useActivityLifecycle({
     for (const id of ids) await clearActivity(id)
   }
 
+  async function closeActivities(ids) {
+    for (const id of ids) await closeActivity(id)
+  }
+
   async function restoreActivity(id) {
     const activity = activities.byId(id)
     if (!activity) {
@@ -230,6 +234,7 @@ export function useActivityLifecycle({
         kind: activity.kind || 'terminal',
         retention: activity.retention || 'durable',
         source: activity.source || {},
+        workspacePath: activity.workspacePath || workspacePath.value,
       })
     } catch (cause) {
       diagnostic.value = `${activity?.title || 'Activity'} could not restart: ${errorMessage(cause)}`
@@ -245,6 +250,7 @@ export function useActivityLifecycle({
     archiveActivity,
     clearActivities,
     clearActivity,
+    closeActivities,
     closeActivity,
     closingActivityIds,
     dispose,

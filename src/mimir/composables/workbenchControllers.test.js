@@ -301,6 +301,61 @@ describe('Workbench controllers', () => {
     expect(closeActivity).toHaveBeenCalledWith('run:a')
   })
 
+  it('closes the Sidebar multi-selection with Cmd+W and native Close instead of one row', () => {
+    const quickOpen = ref(false)
+    const closeActivity = vi.fn()
+    const closeActivities = vi.fn()
+    const sidebarSelection = ref(['run:a', 'run:b'])
+    const sidebar = document.createElement('aside')
+    sidebar.dataset.pane = 'sidebar'
+    sidebar.innerHTML = `
+      <div data-sidebar-row="activity:run:a">
+        <button data-row-button>Run</button>
+      </div>
+    `
+    document.body.appendChild(sidebar)
+    const button = sidebar.querySelector('[data-row-button]')
+    const controller = useWorkbenchKeyboardRouting({
+      quickOpen,
+      settings: { workbenchZoom: 1, set: vi.fn() },
+      editorRef: ref(null),
+      editorFiles: { openFiles: [] },
+      workbench: { activeActivityId: 'run:a' },
+      sidebarActivities: computed(() => [{ id: 'run:a' }, { id: 'run:b' }]),
+      sidebarSelection,
+      toggleSidebar: vi.fn(),
+      selectActivity: vi.fn(),
+      closeActivity,
+      closeActivities,
+      collapseEmptyEditor: vi.fn(),
+    })
+    controller.rememberWorkbenchFocus({ target: button })
+
+    controller.onKeydown({
+      key: 'w',
+      metaKey: true,
+      target: document.body,
+      preventDefault: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    })
+    expect(closeActivities).toHaveBeenCalledWith(['run:a', 'run:b'])
+    expect(closeActivity).not.toHaveBeenCalled()
+
+    controller.closeNativeFocusedSurface()
+    expect(closeActivities).toHaveBeenCalledTimes(2)
+
+    sidebarSelection.value = []
+    controller.onKeydown({
+      key: 'w',
+      metaKey: true,
+      target: document.body,
+      preventDefault: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    })
+    expect(closeActivity).toHaveBeenCalledWith('run:a')
+    sidebar.remove()
+  })
+
   it('routes native New through the focused CLI Activity and falls back to Editor New File', () => {
     const quickOpen = ref(false)
     const quickOpenInitialView = ref('root')

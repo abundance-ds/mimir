@@ -100,6 +100,8 @@ describe('activity runtime store', () => {
     expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
       id: 'agent:new-id',
       autoTitleEligible: true,
+      workspacePath: '/w',
+      source: expect.objectContaining({ workspaceScope: 'workspace' }),
       retention: 'durable',
       launch: expect.objectContaining({
         command: '/bin/codex',
@@ -113,6 +115,30 @@ describe('activity runtime store', () => {
     }), {}, null)
     expect(record.status).toBe('idle')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:new-id')
+  })
+
+  it('records project scope separately from the resolved process cwd', async () => {
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValueOnce('home-id')
+    api.resolveLauncher.mockResolvedValueOnce({
+      presetId: 'home-agent',
+      title: 'Home agent',
+      kind: 'agent',
+      agentId: 'codex',
+      resumeStrategy: 'codex',
+      command: '/bin/codex',
+      args: [],
+      cwd: '/Users/me',
+      env: {},
+    })
+    const runtime = useActivityRuntimeStore()
+
+    await runtime.launchPreset({ id: 'home-agent', cwd: { mode: 'home' } }, '/w')
+
+    expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
+      workspacePath: '',
+      source: expect.objectContaining({ workspaceScope: 'global' }),
+      launch: expect.objectContaining({ cwd: '/Users/me' }),
+    }), {}, null)
   })
 
   it('protects an explicit launch title from automatic replacement', async () => {

@@ -480,6 +480,31 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-activity-selection-count]').text()).toBe('1 selected')
   })
 
+  it('clears selection on document-level Escape and reports selection changes', async () => {
+    const wrapper = render(false, true)
+    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
+
+    await wrapper.get('[data-sidebar-row="activity:run:one"]').trigger('click', { metaKey: true })
+    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
+    expect(wrapper.emitted('selectionChange').at(-1)).toEqual([['run:one', 'run:two']])
+
+    // Escape with a row menu open closes the menu path only, not the selection.
+    await wrapper.get('[data-activity-menu-button="run:one"]').trigger('click')
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(true)
+
+    // With menus closed, Escape from anywhere outside the panes clears it,
+    // even though WebKit left focus on <body> after the clicks.
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    await nextTick()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
+    expect(wrapper.emitted('selectionChange').at(-1)).toEqual([[]])
+    wrapper.unmount()
+  })
+
   it('supports keyboard manual reorder and explicit useful sort modes', async () => {
     const wrapper = render()
     const rowButton = wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button')

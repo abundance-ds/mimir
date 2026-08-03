@@ -42,6 +42,34 @@ describe('Workbench focus-aware keyboard routing', () => {
     })).toEqual({ action: 'close-activity', activityId: 'agent:review' })
   })
 
+  it('routes close to the Sidebar multi-selection ahead of the focused row', () => {
+    expect(routeWorkbenchKey({
+      key: 'w',
+      primary: true,
+      focusOwner: 'sidebar',
+      sidebarActivityId: 'agent:review',
+      sidebarSelectionCount: 2,
+    })).toEqual({ action: 'close-selected-activities' })
+    expect(routeWorkbenchKey({
+      key: 'w',
+      primary: true,
+      focusOwner: 'sidebar',
+      sidebarSelectionCount: 1,
+    })).toEqual({ action: 'close-selected-activities' })
+    expect(routeWorkbenchKey({
+      key: 'w',
+      primary: true,
+      focusOwner: 'editor',
+      sidebarSelectionCount: 2,
+    })).toEqual({ action: 'close-editor' })
+    expect(routeWorkbenchKey({
+      key: 'w',
+      primary: true,
+      focusOwner: 'activity',
+      sidebarSelectionCount: 2,
+    })).toEqual({ action: 'close-activity', activityId: '' })
+  })
+
   it('routes New to the CLI Activity chooser without stealing Editor New File', () => {
     expect(routeWorkbenchKey({
       key: 'n',

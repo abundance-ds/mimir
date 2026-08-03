@@ -566,6 +566,97 @@ describe('WorkbenchApp', () => {
     expect(useSettingsStore().recentWorkspaceFolders[0]).toBe('/other/project')
   })
 
+  it('shows only the current project Activities while hidden tasks keep running', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
+      mimirWorkspaceFolder: '/w',
+      recentWorkspaceFolders: ['/w', '/other/project'],
+    }))
+    const wrapper = await render()
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:alpha', 'Alpha task', '2026-07-25T10:00:00Z'),
+      source: { presetId: 'review' },
+    })
+    store.upsert({
+      ...activityRecord('agent:beta', 'Beta task', '2026-07-25T09:00:00Z'),
+      workspacePath: '/other/project',
+      status: 'needs-input',
+      source: { presetId: 'review' },
+      launch: { command: '/bin/codex', args: [], cwd: '/other/project', env: {} },
+    })
+    await nextTick()
+
+    expect(wrapper.find('[data-sidebar-row="activity:agent:alpha"]').exists()).toBe(true)
+    expect(wrapper.find('[data-sidebar-row="activity:agent:beta"]').exists()).toBe(false)
+
+    await wrapper.get('[data-sidebar-row="activity:agent:alpha"]').find('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-terminal-stub="agent:alpha"]').exists()).toBe(true)
+
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    const betaProject = wrapper.get('[data-project-switcher-menu]')
+      .findAll('[data-project-menu-item]')
+      .find(item => item.text().includes('/other/project'))
+    expect(betaProject.text()).toContain('1 needs input')
+    await betaProject.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-sidebar-row="activity:agent:alpha"]').exists()).toBe(false)
+    expect(wrapper.find('[data-sidebar-row="activity:agent:beta"]').exists()).toBe(true)
+    expect(store.byId('agent:alpha').status).toBe('working')
+    expect(activityApi.stopActivity).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-terminal-stub="agent:alpha"]').attributes('data-active')).toBe('false')
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useWorkbenchStore().canGoPreviousActivity).toBe(false)
+  })
+
+  it('saves a manual position for each new Activity and drops positions for closed ones', async () => {
+    await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    const settings = useSettingsStore()
+
+    store.upsert(activityRecord('agent:alpha', 'Alpha task', '2026-07-25T10:00:00Z'))
+    await nextTick()
+    store.upsert(activityRecord('agent:beta', 'Beta task', '2026-07-25T11:00:00Z'))
+    await nextTick()
+
+    expect(settings.activityNavigator.order).toEqual(['agent:beta', 'agent:alpha'])
+
+    // Live output must not move a row that already holds a position.
+    store.reconcileStatus('agent:alpha', 'needs-input')
+    await nextTick()
+    expect(settings.activityNavigator.order).toEqual(['agent:beta', 'agent:alpha'])
+
+    store.reconcileStatus('agent:beta', 'done')
+    store.remove('agent:beta')
+    await nextTick()
+    expect(settings.activityNavigator.order).toEqual(['agent:alpha'])
+  })
+
+  it('does not restore a saved Activity from a different project at startup', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
+      mimirWorkspaceFolder: '/w',
+      recentWorkspaceFolders: ['/w', '/other/project'],
+      workbenchLayout: {
+        sidebar: { state: 'expanded', width: 240 },
+        activity: { state: 'expanded', width: 560 },
+        editor: { state: 'expanded', width: 520 },
+        activeActivityId: 'agent:beta',
+      },
+    }))
+    activityApi.listActivities.mockResolvedValueOnce([{
+      ...activityRecord('agent:beta', 'Beta task', '2026-07-25T09:00:00Z'),
+      workspacePath: '/other/project',
+      source: { presetId: 'review' },
+      launch: { command: '/bin/codex', args: [], cwd: '/other/project', env: {} },
+    }])
+
+    const wrapper = await render()
+
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(wrapper.find('[data-sidebar-row="activity:agent:beta"]').exists()).toBe(false)
+  })
+
   it('launches an available preset in the selected workspace', async () => {
     const wrapper = await render({ workspace: '/w' })
     await chooseActivitySource(wrapper, 'Review')
@@ -1244,6 +1335,38 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-sidebar-row="activity:agent:closed"]').exists()).toBe(true)
   })
 
+  it('switches projects before restoring work from global History', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:other-history', 'Other project review', '2026-07-25T12:00:00Z'),
+      workspacePath: '/other/project',
+      status: 'done',
+      archivedAt: '2026-07-25T13:00:00Z',
+      source: { presetId: 'review' },
+      host: { type: 'pty' },
+      launch: { command: '/bin/codex', args: [], cwd: '/other/project', env: {} },
+    })
+    await nextTick()
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+    const input = wrapper.get('[data-quick-open-input]')
+    await input.setValue('@Other project review')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(fileApi.openWorkspaceIndex).toHaveBeenLastCalledWith('/other/project')
+    expect(useSettingsStore().mimirWorkspaceFolder).toBe('/other/project')
+    expect(store.byId('agent:other-history').archivedAt).toBeNull()
+    expect(useWorkbenchStore().activeActivityId).toBe('agent:other-history')
+    expect(wrapper.find('[data-sidebar-row="activity:agent:other-history"]').exists()).toBe(true)
+  })
+
   it('resumes an archived PTY routine when Rust omits its null archivedAt field', async () => {
     const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
@@ -1363,7 +1486,7 @@ describe('WorkbenchApp', () => {
   })
 
   it('keeps Activity-row keyboard switching in the navigator and Editor switching horizontal', async () => {
-    const wrapper = await render()
+    const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
     store.upsert(activityRecord('agent:one', 'One', '2026-07-25T10:00:00Z'))
     store.upsert(activityRecord('agent:two', 'Two', '2026-07-25T09:00:00Z'))
@@ -1394,7 +1517,7 @@ describe('WorkbenchApp', () => {
   })
 
   it('cycles Activities after a Sidebar click that leaves focus on body (WebKit)', async () => {
-    const wrapper = await render()
+    const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
     store.upsert(activityRecord('agent:one', 'One', '2026-07-25T10:00:00Z'))
     store.upsert(activityRecord('agent:two', 'Two', '2026-07-25T09:00:00Z'))
@@ -1422,7 +1545,7 @@ describe('WorkbenchApp', () => {
   })
 
   it('closes the clicked Sidebar row with Cmd+W while focus stays on body (WebKit)', async () => {
-    const wrapper = await render()
+    const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
     store.upsert({
       ...activityRecord('agent:ended', 'Ended run', '2026-07-25T10:00:00Z'),
@@ -1476,7 +1599,7 @@ describe('WorkbenchApp', () => {
   })
 
   it('routes native-menu close by remembered focus and rails the last Activity/Editor', async () => {
-    const wrapper = await render()
+    const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
     store.upsert({
       ...activityRecord('agent:ended', 'Finished review', '2026-07-25T10:00:00Z'),

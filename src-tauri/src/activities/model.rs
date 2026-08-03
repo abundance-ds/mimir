@@ -121,6 +121,16 @@ impl ActivityRetention {
     }
 }
 
+/// Whether an Activity follows one workspace Sidebar or remains available in
+/// every workspace. Optional origin metadata keeps older persisted records
+/// readable while new launches retain their scope even if a preset changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ActivityWorkspaceScope {
+    Global,
+    Workspace,
+}
+
 /// Describes why an activity exists without introducing separate domain
 /// models for launchers, presets, apps, and schedules.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +142,8 @@ pub struct ActivityOrigin {
     pub launcher_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_scope: Option<ActivityWorkspaceScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -357,6 +369,7 @@ mod tests {
             source: ActivityOrigin {
                 launcher_id: Some("codex".into()),
                 preset_id: Some("codex-full".into()),
+                workspace_scope: Some(ActivityWorkspaceScope::Workspace),
                 source_type: Some("business-graph-work".into()),
                 graph_node_id: Some("issue-1".into()),
                 graph_scope_ids: vec!["project:test".into()],
@@ -381,6 +394,7 @@ mod tests {
         assert_eq!(value["autoTitleEligible"], true);
         assert_eq!(value["workspacePath"], "/work");
         assert_eq!(value["source"]["launcherId"], "codex");
+        assert_eq!(value["source"]["workspaceScope"], "workspace");
         assert_eq!(value["source"]["type"], "business-graph-work");
         assert_eq!(value["source"]["graphNodeId"], "issue-1");
         assert_eq!(value["source"]["graphScopeIds"][0], "project:test");

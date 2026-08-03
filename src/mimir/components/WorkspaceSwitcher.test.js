@@ -10,7 +10,12 @@ function render(props = {}) {
       workspacePath: '/work/mimir',
       recentWorkspaces: [
         { name: 'mimir', path: '/work/mimir' },
-        { name: 'other-project', path: '/work/other-project' },
+        {
+          name: 'other-project',
+          path: '/work/other-project',
+          activityCount: 2,
+          needsInputCount: 1,
+        },
       ],
       ...props,
     },
@@ -26,10 +31,25 @@ describe('WorkspaceSwitcher', () => {
     expect(menu?.textContent).toContain('Current project')
     expect(menu?.textContent).toContain('/work/mimir')
     expect(menu?.textContent).toContain('other-project')
+    expect(menu?.textContent).toContain('1 needs input · /work/other-project')
     const recent = [...menu.querySelectorAll('[data-project-menu-item]')]
       .find(item => item.textContent.includes('other-project'))
     recent.click()
     expect(wrapper.emitted('openWorkspace')).toEqual([['/work/other-project']])
+    wrapper.unmount()
+  })
+
+  it('shows quiet Activity counts when no run needs input', async () => {
+    const wrapper = render({
+      recentWorkspaces: [
+        { name: 'mimir', path: '/work/mimir' },
+        { name: 'other-project', path: '/work/other-project', activityCount: 2 },
+      ],
+    })
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+
+    expect(document.body.querySelector('[data-project-activity-summary]')?.textContent)
+      .toContain('2 Activities · /work/other-project')
     wrapper.unmount()
   })
 
