@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 674 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
+Inventory: 678 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -39,6 +39,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:atk-sys@0.18.2 | MIT | https://crates.io/api/v1/crates/atk-sys/0.18.2/download | c5e48b684b0ca77d2bbadeef17424c2ea3c897d44d566a1617e7e8f30614d086 |
 | cargo:atk@0.18.2 | MIT | https://crates.io/api/v1/crates/atk/0.18.2/download | 241b621213072e993be4f6f3a9e4b45f65b7e6faad43001be957184b7bb1824b |
 | cargo:atomic-waker@1.1.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/atomic-waker/1.1.2/download | 1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0 |
+| cargo:auto-launch@0.5.0 | MIT | https://crates.io/api/v1/crates/auto-launch/0.5.0/download | 1f012b8cc0c850f34117ec8252a44418f2e34a2cf501de89e29b241ae5f79471 |
 | cargo:autocfg@1.5.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/autocfg/1.5.1/download | f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53 |
 | cargo:axum-core@0.5.6 | MIT | https://crates.io/api/v1/crates/axum-core/0.5.6/download | 08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1 |
 | cargo:axum@0.8.9 | MIT | https://crates.io/api/v1/crates/axum/0.8.9/download | 31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90 |
@@ -120,8 +121,10 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:derive_more@2.1.1 | MIT | https://crates.io/api/v1/crates/derive_more/2.1.1/download | d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134 |
 | cargo:digest@0.10.7 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/digest/0.10.7/download | 9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292 |
 | cargo:digest@0.11.3 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/digest/0.11.3/download | f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2 |
+| cargo:dirs-sys@0.3.7 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dirs-sys/0.3.7/download | 1b1d1d91c932ef41c0f2663aa8b0ca0342d444d842c06914aa0a7e352d0bada6 |
 | cargo:dirs-sys@0.4.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dirs-sys/0.4.1/download | 520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c |
 | cargo:dirs-sys@0.5.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dirs-sys/0.5.0/download | e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab |
+| cargo:dirs@4.0.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dirs/4.0.0/download | ca3aa72a6f96ea37bbc5aa912f6788242832f75369bdfdadcb0e38423f100059 |
 | cargo:dirs@5.0.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dirs/5.0.1/download | 44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225 |
 | cargo:dirs@6.0.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/dirs/6.0.0/download | c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e |
 | cargo:dispatch2@0.3.1 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/dispatch2/0.3.1/download | 1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38 |
@@ -484,6 +487,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:tauri-build@2.6.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-build/2.6.2/download | 4aa1f9055fc23919a54e4e125052bed16ed04aef0487086e758fe01a67b451c7 |
 | cargo:tauri-codegen@2.6.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-codegen/2.6.2/download | e4a0319528a025a38c4078e7dae2c446f4e63620ddb0659a643ede1cb38f90e9 |
 | cargo:tauri-macros@2.6.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-macros/2.6.2/download | ae6cb4e3896c21d2f6da5b31251d2faea0153bba56ed0e970f918115dbee4924 |
+| cargo:tauri-plugin-autostart@2.5.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-autostart/2.5.1/download | 459383cebc193cdd03d1ba4acc40f2c408a7abce419d64bdcd2d745bc2886f70 |
 | cargo:tauri-plugin-dialog@2.7.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-dialog/2.7.1/download | 65981abb771e74e571a38196c3baa11c459379164791eba0e67abc1a5fac9884 |
 | cargo:tauri-plugin-fs@2.5.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-fs/2.5.1/download | b7ecc274121aca0c036a2b42d1cbe83d368d348f54e0bb8a735c2b1548e8f371 |
 | cargo:tauri-plugin-notification@2.3.3 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-notification/2.3.3/download | 01fc2c5ff41105bd1f7242d8201fdf3efd70749b82fa013a17f2126357d194cc |
