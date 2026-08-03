@@ -1265,7 +1265,7 @@ pub fn run() {
                             quit,
                             || api.prevent_exit(),
                             || {
-                                create_main_window(app_handle)
+                                create_main_window(app_handle, true)
                                     .map(|_| ())
                                     .map_err(|error| error.to_string())
                             },
