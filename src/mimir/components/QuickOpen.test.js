@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import QuickOpen from './QuickOpen.vue'
@@ -40,6 +40,8 @@ const history = [{
   archivedAt: '2026-07-25T12:00:00Z',
   source: { presetId: 'codex' },
 }]
+
+enableAutoUnmount(afterEach)
 
 describe('QuickOpen', () => {
   let pinia

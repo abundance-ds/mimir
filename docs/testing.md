@@ -74,6 +74,14 @@ signed, notarized macOS arm64 DMG. Linux packaging remains present but
 explicitly parked. Keep [building.md](building.md) aligned with the workflow
 and signing launcher.
 
+CI triggers only on pull requests and manual `workflow_dispatch` — the push
+trigger was removed deliberately (August 2026) to stop paying for a run on
+every push to main; do not re-add it without an explicit decision to accept
+the cost. The push-era failures were one CI-only flake: a component left
+mounted under real timers fired its pending debounce inside a later
+fake-timer test (`QuickOpen.test.js`). Test files that mount debouncing
+components call `enableAutoUnmount(afterEach)` to prevent this.
+
 ## Change-to-test routing
 
 | Change | Minimum focused verification |
