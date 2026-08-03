@@ -952,7 +952,10 @@ mod tests {
         assert!(move_entry(temp.path(), "notes.md", "docs")
             .unwrap_err()
             .contains("already exists"));
-        assert_eq!(fs::read_to_string(temp.path().join("docs/notes.md")).unwrap(), "taken");
+        assert_eq!(
+            fs::read_to_string(temp.path().join("docs/notes.md")).unwrap(),
+            "taken"
+        );
 
         let unchanged = move_entry(temp.path(), "notes.md", "").unwrap();
         assert_eq!(unchanged.relative_path, "notes.md");
