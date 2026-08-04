@@ -1359,18 +1359,15 @@ function groupMeetings(values) {
   startToday.setHours(0, 0, 0, 0)
   const previousWeek = startToday.getTime() - (7 * 24 * 60 * 60 * 1000)
   const groups = [
-    { id: 'unresolved', label: 'Needs attention', meetings: [] },
     { id: 'today', label: 'Today', meetings: [] },
+    { id: 'unresolved', label: 'Needs attention', meetings: [] },
     { id: 'previous-7-days', label: 'Previous 7 days', meetings: [] },
     { id: 'earlier', label: 'Earlier', meetings: [] },
   ]
   for (const meeting of sorted) {
-    if (meetingNeedsRecovery(meeting)) {
-      groups[0].meetings.push(meeting)
-      continue
-    }
     const timestamp = meetingTime(meeting)
-    if (timestamp >= startToday.getTime()) groups[1].meetings.push(meeting)
+    if (timestamp >= startToday.getTime()) groups[0].meetings.push(meeting)
+    else if (meetingNeedsRecovery(meeting)) groups[1].meetings.push(meeting)
     else if (timestamp >= previousWeek) groups[2].meetings.push(meeting)
     else groups[3].meetings.push(meeting)
   }

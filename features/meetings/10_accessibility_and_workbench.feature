@@ -72,7 +72,7 @@ Feature: Keep recording state operable and understandable throughout Mimir
     Given the recent snapshot is bounded and older meetings remain durable
     When the user searches at least three characters
     Then native search covers titles, summaries, tags, and transcript text across the full library
-    And ordinary browsing groups unresolved meetings before Today, Previous 7 days, and Earlier
+    And ordinary browsing shows today's meetings before older unresolved meetings, Previous 7 days, and Earlier
 
   @MTG-210 @automated @renderer @accessibility
   Scenario: Meeting actions are consistent from list and detail

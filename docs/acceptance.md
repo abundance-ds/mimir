@@ -392,8 +392,8 @@ requirements; they do not replace runtime verification.
 - Meetings with summaries open on Summary. Global settings never appear in a
   meeting detail. List and detail share accessible context/overflow actions for
   Rename, Show in Finder, save-copy actions, retranscription, and confirmed
-  Delete. Full-library search remains native and ordinary browsing groups
-  Needs attention, Today, Previous 7 days, and Earlier.
+  Delete. Full-library search remains native. Ordinary browsing shows Today
+  first, then older meetings that need attention, Previous 7 days, and Earlier.
 - Agent tools can list, get, search, update, and explicitly delete
   completed/interrupted Scribe records with bounded results. They cannot
   start, mute, stop, request

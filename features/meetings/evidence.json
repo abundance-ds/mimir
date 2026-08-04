@@ -659,6 +659,12 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "keeps today first, then groups older unresolved meetings before earlier dates",
+      "scenarios": ["MTG-209"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
       "selector": "opens the row menu by right-click and renames without entering notes editing",
       "scenarios": ["MTG-210"]
     },

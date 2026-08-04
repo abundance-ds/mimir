@@ -738,13 +738,13 @@ describe('ScribeApp', () => {
     expect(wrapper.find('[data-scribe-search-result]').exists()).toBe(false)
   })
 
-  it('keeps unresolved meetings first, then groups the rest by date', async () => {
+  it('keeps today first, then groups older unresolved meetings before earlier dates', async () => {
     const now = Date.now()
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
       meetings: [
         meeting({ id: 'week', title: 'This week', startedAt: new Date(now - 3 * 86_400_000).toISOString() }),
         meeting({ id: 'old', title: 'Older', startedAt: new Date(now - 14 * 86_400_000).toISOString() }),
-        meeting({ id: 'today', title: 'Today item', startedAt: new Date(now).toISOString() }),
+        meeting({ id: 'today', title: 'Today item', lifecycle: 'needs_repair', startedAt: new Date(now).toISOString() }),
         meeting({ id: 'repair', title: 'Interrupted', lifecycle: 'needs_repair', startedAt: new Date(now - 20 * 86_400_000).toISOString() }),
       ],
     }))
@@ -752,10 +752,10 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.findAll('[data-scribe-meeting-group]')).toHaveLength(4))
 
     expect(wrapper.findAll('[data-scribe-meeting-group]').map(group => group.attributes('data-group')))
-      .toEqual(['unresolved', 'today', 'previous-7-days', 'earlier'])
+      .toEqual(['today', 'unresolved', 'previous-7-days', 'earlier'])
     expect(wrapper.findAll('[data-scribe-meeting-row]').map(row => row.text())).toEqual([
-      expect.stringContaining('Interrupted'),
       expect.stringContaining('Today item'),
+      expect.stringContaining('Interrupted'),
       expect.stringContaining('This week'),
       expect.stringContaining('Older'),
     ])
