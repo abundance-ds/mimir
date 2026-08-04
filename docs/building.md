@@ -27,17 +27,24 @@ Run the desktop app:
 bun tauri dev
 ```
 
-`bun tauri dev` is sufficient for IPC and ordinary desktop work, but its raw
-development executable has no stable application-bundle identity and cannot
-prove Mimir's system-audio TCC path. Build an ad-hoc local `.app` for Scribe
-hardware checks without distribution signing or notarization:
+On macOS arm64, this command launches the debug executable from
+`src-tauri/target/debug/bundle/macos/Mimir.app`. The launcher refreshes the
+bundle after each Rust build, reuses the normal development build cache, and
+preserves Vite hot reload. It uses `APPLE_SIGNING_IDENTITY` from `.env` when
+available, so macOS attributes microphone and system-audio permission to Mimir
+instead of the terminal. Without that identity, it uses an ad-hoc signature
+and warns that permission can require approval again after a Rust rebuild.
+
+Do not bypass this launcher with a bare `cargo run` for Scribe audio checks.
+Build a separate ad-hoc `.app` for an isolated local hardware smoke test:
 
 ```bash
 bun run scribe:smoke-app
 open src-tauri/target/debug/bundle/macos/Mimir.app
 ```
 
-This is test-only. It does not produce or claim a release artifact.
+Both development paths are test-only. They do not produce or claim a release
+artifact.
 
 Vite binds to `127.0.0.1:1420`. If the port is busy: `lsof -nP -iTCP:1420 -sTCP:LISTEN`.
 

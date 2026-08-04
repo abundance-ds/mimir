@@ -32,13 +32,14 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   attestation or legal checkbox.
 - A persistent workbench indicator exposes elapsed time, microphone mute, and
   Stop while capture is active, including when the Scribe app is not selected.
-- Permission state is attributed only to the signed `rs.shoulde.mimir` bundle.
-  A terminal-launched development binary is labelled “development host — not
-  Mimir” even when that host has microphone access. System-audio setup creates
-  the public Core Audio process tap before opening the fixed macOS **Privacy &
-  Security → Screen & System Audio Recording** pane, which registers signed
-  Mimir with TCC. Audio checking can stream one combined microphone/system
-  level projection at no more than 10 Hz. It distinguishes open failure, no
+- Permission state is attributed only to the `rs.shoulde.mimir` application
+  bundle. The normal macOS `bun tauri dev` launcher runs through that bundle;
+  a bare terminal-launched binary is labelled “development host — not Mimir”
+  even when that host has microphone access. System-audio setup creates the
+  public Core Audio process tap before opening the fixed macOS **Privacy &
+  Security → Screen & System Audio Recording** pane, which registers Mimir
+  with TCC. Audio checking can stream one combined microphone/system level
+  projection at no more than 10 Hz. It distinguishes open failure, no
   callbacks, captured silence, and signal, reduces frames immediately to a
   bounded count and peak, discards every sample, and creates no meeting.
 - Microphone selection is persisted as CPAL's serialized Core Audio device UID,
@@ -54,8 +55,8 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 - The system tap is global: audible output from Spotify, browsers, meeting
   apps, and other processes is included unless a process is explicitly
   excluded. Hardware signal must be checked from the bundled Mimir app; the
-  raw `bun tauri dev` executable has no stable TCC bundle identity and is not
-  valid system-audio evidence.
+  development launcher provides that local app identity, but only the signed
+  installed build is valid release evidence.
 - Capture owns the realtime budget. Transcription tails committed chunks and
   cannot block an audio callback or prevent durable recording.
 - Transcription is either managed local or an explicit hosted URL. The primary

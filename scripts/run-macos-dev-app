@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -lt 1 ]; then
+  echo "The Cargo runner did not provide a debug executable." >&2
+  exit 1
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+binary_path=$1
+shift
+
+"${MIMIR_DEV_NODE:-node}" "$script_dir/prepare-macos-dev-app.mjs" "$binary_path"
+profile_dir=$(dirname -- "$binary_path")
+exec "$profile_dir/bundle/macos/Mimir.app/Contents/MacOS/mimir" "$@"

@@ -16,9 +16,11 @@ import {
   loadReleaseEnv,
   requireReleaseKeys,
 } from './release-env.mjs'
+import { configureMacDevCommand } from './prepare-macos-dev-app.mjs'
 
 const args = process.argv.slice(2)
 const env = loadReleaseEnv({ allowMissing: true })
+configureMacDevCommand({ args, env, repositoryRoot: REPOSITORY_ROOT })
 const isRelease = args[0] === 'build' || args[0] === 'bundle'
 const target = argumentValue(args, '--target')
 const isMacBuild = isRelease && (target.includes('apple-darwin') || (!target && process.platform === 'darwin'))

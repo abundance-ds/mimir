@@ -63,7 +63,7 @@ helper/runtime must carry the behavior test.
 | Rust unit/integration | `cargo test --manifest-path src-tauri/Cargo.toml` | native helpers/runtimes | real packaged webview |
 | Rust compile | `cargo check --manifest-path src-tauri/Cargo.toml` | Linux-compilable command graph | macOS-only execution |
 | Rust lint | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | lint-clean Rust | runtime behavior |
-| Desktop runtime | `bun tauri dev` | actual IPC, PTY, window, keychain, dialogs | packaged identity or system-audio TCC |
+| Desktop runtime | `bun tauri dev` | actual IPC, PTY, window, keychain, dialogs; local Mimir bundle identity and system-audio TCC on macOS arm64 | distribution signature, notarization, release provenance, or behavior on another machine |
 | Local Scribe bundle | `bun run scribe:smoke-app` | ad-hoc bundled identity, purpose strings, entitlements, local TCC/audio smoke | distribution signature, notarization, or release provenance |
 | Signing inputs | `bun run check:signing` | local `.env` completeness, aliases, permissions, Apple keychain identity | remote signing services |
 | Release package | `bun tauri build` | one exact macOS arm64 signed/notarized DMG plus a clean-commit/source-tree manifest and staged SBOM/notices | behavior on another machine |

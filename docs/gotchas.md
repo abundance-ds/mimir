@@ -380,9 +380,11 @@ OpenAI-compatible.
 
 ### Scribe permissions belong to the application bundle
 
-macOS TCC attributes a decision to the responsible application, so `cargo run`
-can observe a terminal or development host's permission. Never project that as
-Mimir permission. System-audio process taps expose no public non-prompting
+macOS TCC attributes a decision to the responsible application. The macOS
+`bun tauri dev` wrapper must keep launching the executable through its
+generated `rs.shoulde.mimir` app bundle. A bare `cargo run` can observe a
+terminal or development host's permission; never project that as Mimir
+permission. System-audio process taps expose no public non-prompting
 authorization query: create the public tap to register/prompt, label the state
 honestly, and use the bounded known-playback check to verify the signal path.
 The check must retain no samples and must identify development-host results.
