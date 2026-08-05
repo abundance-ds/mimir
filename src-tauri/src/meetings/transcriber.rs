@@ -1105,38 +1105,17 @@ fn open_committed_chunk_no_follow(
 ) -> Result<File, String> {
     use std::{
         ffi::CString,
-        os::{
-            fd::{AsRawFd, FromRawFd},
-            raw::{c_char, c_int},
-            unix::fs::OpenOptionsExt,
-        },
+        os::fd::{AsRawFd, FromRawFd},
+        os::unix::fs::OpenOptionsExt,
     };
 
-    #[cfg(target_os = "macos")]
-    const O_DIRECTORY: c_int = 0x0010_0000;
-    #[cfg(target_os = "macos")]
-    const O_NOFOLLOW: c_int = 0x0000_0100;
-    #[cfg(target_os = "macos")]
-    const O_CLOEXEC: c_int = 0x0100_0000;
-    #[cfg(not(target_os = "macos"))]
-    const O_DIRECTORY: c_int = 0x0001_0000;
-    #[cfg(not(target_os = "macos"))]
-    const O_NOFOLLOW: c_int = 0x0002_0000;
-    #[cfg(not(target_os = "macos"))]
-    const O_CLOEXEC: c_int = 0x0008_0000;
-    const O_RDONLY: c_int = 0;
-
-    unsafe extern "C" {
-        fn openat(directory_fd: c_int, path: *const c_char, flags: c_int, ...) -> c_int;
-    }
-
-    fn child(parent: &File, name: &str, flags: c_int, kind: &str) -> Result<File, String> {
+    fn child(parent: &File, name: &str, flags: libc::c_int, kind: &str) -> Result<File, String> {
         let name = CString::new(name)
             .map_err(|_| format!("committed audio {kind} contains a NUL byte"))?;
         // SAFETY: `parent` remains open for this call, `name` is a valid
         // NUL-terminated C string, and no creation flag requiring a mode is
         // passed. Ownership of a successful descriptor moves into `File`.
-        let descriptor = unsafe { openat(parent.as_raw_fd(), name.as_ptr(), flags) };
+        let descriptor = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags) };
         if descriptor < 0 {
             return Err(format!(
                 "could not open committed audio {kind} without following links: {}",
@@ -1150,18 +1129,18 @@ fn open_committed_chunk_no_follow(
     let mut options = OpenOptions::new();
     options
         .read(true)
-        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
     let root = options.open(root).map_err(|error| {
         format!("could not open committed audio root without following links: {error}")
     })?;
-    let directory_flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+    let directory_flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
     let meeting = child(&root, meeting_id, directory_flags, "meeting directory")?;
     let audio = child(&meeting, "audio", directory_flags, "audio directory")?;
     let channel = child(&audio, channel_id, directory_flags, "channel directory")?;
     child(
         &channel,
         &format!("{sequence:08}.f32le"),
-        O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
         "chunk",
     )
 }
@@ -4879,6 +4858,7 @@ mod tests {
                 },
             )
             .await;
+            Ok::<(), ProviderFailure>(())
         };
 
         let mut sink = MockSink::default();
@@ -4893,8 +4873,7 @@ mod tests {
             "model-1",
             &mut finalizing,
         );
-        let (result, ()) = tokio::join!(client_run, peer);
-        result.unwrap();
+        tokio::try_join!(client_run, peer).unwrap();
         assert_eq!(next_sequence, 1);
         assert_eq!(sink.final_segment_count(), 1);
     }
