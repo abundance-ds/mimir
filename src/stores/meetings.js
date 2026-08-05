@@ -18,6 +18,7 @@ import {
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  requestMeetingSystemAudioPermission,
   retranscribeMeeting,
   retryMeetingJob,
   runMeetingSummary,
@@ -153,6 +154,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
     return runPending('start', async () => {
       if (!['granted', 'development-host'].includes(permissions.value.microphone)) {
         applySnapshot(await requestMeetingMicrophonePermission())
+      }
+      if (['not-determined', 'unknown'].includes(permissions.value.systemAudio)) {
+        applySnapshot(await requestMeetingSystemAudioPermission())
       }
       const candidate = request?.candidateId
         ? candidates.value.find(value => value.id === request.candidateId)
@@ -292,6 +296,13 @@ export const useMeetingsStore = defineStore('meetings', () => {
     return runPending('system-audio-settings', async () => {
       await openMeetingSystemAudioSettings()
       return true
+    })
+  }
+
+  async function requestSystemAudioPermission() {
+    return runPending('system-audio-permission', async () => {
+      applySnapshot(await requestMeetingSystemAudioPermission())
+      return permissions.value.systemAudio
     })
   }
 
@@ -650,6 +661,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     initialize,
     refresh,
     requestMicrophonePermission,
+    requestSystemAudioPermission,
     checkAudio,
     refreshMicrophones,
     search,

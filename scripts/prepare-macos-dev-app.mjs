@@ -152,7 +152,7 @@ function main() {
   console.error(`Prepared ${prepared.appRoot} with ${signature}.`)
   if (prepared.signingIdentity === '-') {
     console.error(
-      'Set APPLE_SIGNING_IDENTITY to keep macOS audio permission stable across Rust rebuilds.',
+      'Set APPLE_SIGNING_IDENTITY to use Mimir\'s normal development permission identity.',
     )
   }
 }

@@ -1091,6 +1091,7 @@ pub fn run() {
             meetings::commands::meetings_search_library,
             meetings::commands::meetings_transcript_page,
             meetings::commands::meetings_request_microphone_permission,
+            meetings::commands::meetings_request_system_audio_permission,
             meetings::commands::meetings_open_system_audio_settings,
             meetings::commands::meetings_check_audio,
             meetings::commands::meetings_microphone_devices,

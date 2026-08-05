@@ -48,6 +48,10 @@ export async function requestMeetingMicrophonePermission() {
   return normalizeMeetingSnapshot(await invoke('meetings_request_microphone_permission'))
 }
 
+export async function requestMeetingSystemAudioPermission() {
+  return normalizeMeetingSnapshot(await invoke('meetings_request_system_audio_permission'))
+}
+
 export async function openMeetingSystemAudioSettings() {
   return invoke('meetings_open_system_audio_settings')
 }
@@ -657,6 +661,9 @@ function normalizeMeetingAudioTestEvent(value) {
     testId: String(event.testId ?? event.test_id ?? ''),
     sequence: nonnegativeInteger(event.sequence),
     state: String(event.state || 'running') === 'stopped' ? 'stopped' : 'running',
+    runtimeIdentity: (event.runtimeIdentity ?? event.runtime_identity) === 'mimir'
+      ? 'mimir'
+      : 'development-host',
     microphone: source(event.microphone),
     systemAudio: source(event.systemAudio ?? event.system_audio),
     microphoneDeviceId: optionalString(event.microphoneDeviceId ?? event.microphone_device_id),

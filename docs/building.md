@@ -31,9 +31,16 @@ On macOS arm64, this command launches the debug executable from
 `src-tauri/target/debug/bundle/macos/Mimir.app`. The launcher refreshes the
 bundle after each Rust build, reuses the normal development build cache, and
 preserves Vite hot reload. It uses `APPLE_SIGNING_IDENTITY` from `.env` when
-available, so macOS attributes microphone and system-audio permission to Mimir
-instead of the terminal. Without that identity, it uses an ad-hoc signature
-and warns that permission can require approval again after a Rust rebuild.
+available. Before Tauri creates threads, the debug executable performs a
+same-PID re-exec that disclaims the launching terminal as the responsible
+process. Together, the signed bundle and this handoff make macOS attribute
+microphone and system-audio permission to Mimir. If the handoff fails, Scribe
+reports a development-host identity instead of treating the bundle ID as
+proof. Without `APPLE_SIGNING_IDENTITY`, the launcher uses an ad-hoc signature
+and warns that the app does not use Mimir's normal development permission
+identity. macOS can bind a development audio grant to the current binary code
+hash, so a Rust rebuild can require one new permission click even with the
+Developer ID signature.
 
 Do not bypass this launcher with a bare `cargo run` for Scribe audio checks.
 Build a separate ad-hoc `.app` for an isolated local hardware smoke test:

@@ -46,7 +46,7 @@ describe('ScribeSettings', () => {
       props: {
         embedded: true,
         config,
-        permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+        permissions: { microphone: 'granted', systemAudio: 'not-determined' },
       },
     })
 
@@ -60,9 +60,11 @@ describe('ScribeSettings', () => {
       },
     ]])
     expect(wrapper.get('[data-scribe-openai-mode]').text()).toBe('Hosted')
-    expect(wrapper.text()).toContain('Requested on first use')
-    expect(wrapper.get('[data-scribe-open-system-audio-settings]').text())
-      .toBe('Open macOS audio permissions')
+    expect(wrapper.text()).toContain('Not requested')
+    expect(wrapper.get('[data-scribe-grant-system-audio]').text())
+      .toBe('Grant system audio access')
+    await wrapper.get('[data-scribe-grant-system-audio]').trigger('click')
+    expect(wrapper.emitted('requestSystemAudioPermission')).toHaveLength(1)
   })
 
   it('keeps an explicit custom URL visible and labels its credential honestly', () => {
@@ -75,7 +77,7 @@ describe('ScribeSettings', () => {
           customUrl: 'https://speech.example.com/mimir-stt',
           customModel: 'meeting-v2',
         },
-        permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+        permissions: { microphone: 'granted', systemAudio: 'not-determined' },
       },
     })
 
@@ -85,7 +87,7 @@ describe('ScribeSettings', () => {
       .toBe('https://speech.example.com/mimir-stt')
   })
 
-  it('shows only moving input levels while an audio test is active', async () => {
+  it('spells out live input states and development-host results', async () => {
     const wrapper = mount(ScribeSettings, {
       props: {
         embedded: true,
@@ -93,6 +95,7 @@ describe('ScribeSettings', () => {
         permissions: { microphone: 'development-host', systemAudio: 'development-host' },
         audioCheck: {
           state: 'running',
+          runtimeIdentity: 'development-host',
           microphone: { state: 'signal', level: 78 },
           systemAudio: { state: 'silent', level: 12 },
         },
@@ -100,12 +103,31 @@ describe('ScribeSettings', () => {
       },
     })
 
-    expect(wrapper.get('[data-scribe-audio-check-result]').text()).not.toContain('detected')
     expect(wrapper.get('[data-scribe-audio-level="microphone"]').attributes('aria-valuenow'))
       .toBe('78')
     expect(wrapper.get('[data-scribe-audio-level="system"]').attributes('aria-valuenow'))
       .toBe('12')
+    expect(wrapper.get('[data-scribe-audio-state="microphone"]').text()).toBe('78%')
+    expect(wrapper.get('[data-scribe-audio-state="system"]').text()).toBe('Silent')
+    expect(wrapper.text()).toContain('Development-host results')
     expect(wrapper.get('[data-scribe-check-audio]').text()).toBe('Stop test')
+
+    await wrapper.setProps({
+      audioCheck: {
+        state: 'running',
+        runtimeIdentity: 'development-host',
+        microphone: { state: 'signal', level: 22 },
+        systemAudio: {
+          state: 'open-failed',
+          level: 0,
+          error: 'System audio permission belongs to the development host.',
+        },
+      },
+    })
+    expect(wrapper.get('[data-scribe-audio-state="system"]').text()).toBe('Open failed')
+    expect(wrapper.get('[data-scribe-audio-error="system"]').text())
+      .toBe('System audio permission belongs to the development host.')
+
     await wrapper.get('[data-scribe-check-audio]').trigger('click')
     expect(wrapper.emitted('checkAudio')).toHaveLength(1)
   })

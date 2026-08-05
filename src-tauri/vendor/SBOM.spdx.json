@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "Mimir complete locked dependency inventory",
-  "documentNamespace": "https://rs.shoulde.mimir/sbom/8188f2462256d3249cdb256c87de7bd896deefd778870f9ad13d312329fa6414",
+  "documentNamespace": "https://rs.shoulde.mimir/sbom/888b5dc52acc90e340b65812e6eed9a8468ad4ae3ad58a1d4f3a4d8d7ca74b9e",
   "creationInfo": {
     "created": "2026-08-03T01:34:04Z",
     "creators": [
@@ -37778,7 +37778,7 @@
       "annotationDate": "2026-08-03T01:34:04Z",
       "annotationType": "OTHER",
       "annotator": "Tool: scripts/generate-supply-chain.mjs",
-      "comment": "mimir-lock-digest:sha256:8188f2462256d3249cdb256c87de7bd896deefd778870f9ad13d312329fa6414"
+      "comment": "mimir-lock-digest:sha256:888b5dc52acc90e340b65812e6eed9a8468ad4ae3ad58a1d4f3a4d8d7ca74b9e"
     }
   ]
 }

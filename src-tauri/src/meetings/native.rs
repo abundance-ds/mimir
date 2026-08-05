@@ -358,7 +358,9 @@ impl MeetingEnvironmentProbe for DegradedDetectionEnvironment {
         Ok(MeetingEnvironmentProjection {
             permissions: MeetingPermissions {
                 microphone: identity.project_microphone(permission.state).into(),
-                system_audio: identity.project_system_audio().into(),
+                system_audio: identity
+                    .project_system_audio(super::permissions::current_system_audio_permission())
+                    .into(),
             },
             candidates: Vec::new(),
             diagnostic: Some(
@@ -394,10 +396,10 @@ fn map_detector_snapshot(snapshot: DetectorSnapshot) -> MeetingEnvironmentProjec
             microphone: identity
                 .project_microphone(snapshot.permission.state)
                 .into(),
-            // The process-tap permission has no non-prompting preflight API.
-            // Capture reports a precise actionable failure when opening it.
             system_audio: if cfg!(target_os = "macos") {
-                identity.project_system_audio().into()
+                identity
+                    .project_system_audio(super::permissions::current_system_audio_permission())
+                    .into()
             } else {
                 "unavailable".into()
             },

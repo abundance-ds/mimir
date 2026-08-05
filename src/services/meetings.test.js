@@ -16,6 +16,7 @@ import {
   openMeetingSystemAudioSettings,
   prepareMeetingFollowUpContext,
   requestMeetingMicrophonePermission,
+  requestMeetingSystemAudioPermission,
   retranscribeMeeting,
   runMeetingSummary,
   searchMeetingLibrary,
@@ -111,6 +112,7 @@ describe('meetings service', () => {
       test_id: 'test-1',
       sequence: 7,
       state: 'running',
+      runtime_identity: 'mimir',
       microphone: { state: 'signal', level: 73 },
       system_audio: { state: 'provider-detail', level: 140, error: 'bounded' },
       microphone_device_name: 'MacBook Microphone',
@@ -119,6 +121,7 @@ describe('meetings service', () => {
       testId: 'test-1',
       sequence: 7,
       state: 'running',
+      runtimeIdentity: 'mimir',
       microphone: { state: 'signal', level: 73, error: null },
       systemAudio: { state: 'no-data', level: 100, error: 'bounded' },
       microphoneDeviceId: null,
@@ -292,15 +295,30 @@ describe('meetings service', () => {
     vi.mocked(invoke).mockResolvedValue({
       revision: 2,
       meetings: [],
-      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'granted', systemAudio: 'not-determined' },
     })
 
     await expect(requestMeetingMicrophonePermission()).resolves.toMatchObject({
       revision: 2,
-      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'granted', systemAudio: 'not-determined' },
     })
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(invoke).toHaveBeenCalledWith('meetings_request_microphone_permission')
+  })
+
+  it('exposes the deliberate system-audio permission request without starting capture', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      revision: 2,
+      meetings: [],
+      permissions: { microphone: 'granted', systemAudio: 'granted' },
+    })
+
+    await expect(requestMeetingSystemAudioPermission()).resolves.toMatchObject({
+      revision: 2,
+      permissions: { microphone: 'granted', systemAudio: 'granted' },
+    })
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith('meetings_request_system_audio_permission')
   })
 
   it('opens only the native system-audio permission repair surface', async () => {

@@ -9,6 +9,7 @@ import {
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   requestMeetingMicrophonePermission,
+  requestMeetingSystemAudioPermission,
   startMeetingAudioTest,
   runMeetingSummary,
   searchMeetingLibrary,
@@ -34,6 +35,7 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   loadMeetingSnapshot: vi.fn(),
   loadMeetingTranscriptPage: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
+  requestMeetingSystemAudioPermission: vi.fn(),
   startMeetingAudioTest: vi.fn(),
   stopMeetingAudioTest: vi.fn(),
   runMeetingSummary: vi.fn(),
@@ -104,6 +106,8 @@ describe('meetings store', () => {
     }))
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
       .mockResolvedValue(emptySnapshot)
+    vi.mocked(requestMeetingSystemAudioPermission).mockReset()
+      .mockResolvedValue(emptySnapshot)
     vi.mocked(searchMeetingLibrary).mockReset().mockResolvedValue([])
     vi.mocked(runMeetingSummary).mockReset()
     vi.mocked(dismissMeetingCandidate).mockReset()
@@ -141,6 +145,7 @@ describe('meetings store', () => {
       testId: 'audio-1',
       state: 'running',
       sequence: 1,
+      runtimeIdentity: 'mimir',
       microphone: { state: 'signal', level: 74, error: null },
       systemAudio: { state: 'signal', level: 61, error: null },
     })
@@ -148,6 +153,7 @@ describe('meetings store', () => {
       testId: 'audio-1',
       state: 'running',
       sequence: 1,
+      runtimeIdentity: 'mimir',
       microphone: { state: 'signal', level: 74, error: null },
       systemAudio: { state: 'signal', level: 61, error: null },
     })
@@ -350,6 +356,7 @@ describe('meetings store', () => {
     })
     await store.start({ title: 'Planning' })
     expect(requestMeetingMicrophonePermission).not.toHaveBeenCalled()
+    expect(requestMeetingSystemAudioPermission).not.toHaveBeenCalled()
     expect(issueMeetingStartConsent).toHaveBeenCalledWith({
       candidateId: undefined,
       candidateAppName: undefined,
@@ -406,25 +413,25 @@ describe('meetings store', () => {
     vi.mocked(requestMeetingMicrophonePermission).mockResolvedValue({
       ...emptySnapshot,
       revision: 2,
-      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'granted', systemAudio: 'not-determined' },
     })
 
     await expect(store.requestMicrophonePermission()).resolves.toBe('granted')
     expect(store.permissions).toEqual({
       microphone: 'granted',
-      systemAudio: 'prompt-on-start',
+      systemAudio: 'not-determined',
     })
   })
 
   it('requests microphone access only when the native projection is not already granted', async () => {
     vi.mocked(loadMeetingSnapshot).mockResolvedValue({
       ...emptySnapshot,
-      permissions: { microphone: 'prompt', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'prompt', systemAudio: 'not-determined' },
     })
     vi.mocked(requestMeetingMicrophonePermission).mockResolvedValue({
       ...emptySnapshot,
       revision: 2,
-      permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'granted', systemAudio: 'not-determined' },
     })
     vi.mocked(startMeeting).mockResolvedValue({
       ...emptySnapshot,
@@ -449,6 +456,7 @@ describe('meetings store', () => {
     await store.start({ title: 'Permission test' })
 
     expect(requestMeetingMicrophonePermission).toHaveBeenCalledTimes(1)
+    expect(requestMeetingSystemAudioPermission).toHaveBeenCalledTimes(1)
     expect(startMeeting).toHaveBeenCalledTimes(1)
   })
 

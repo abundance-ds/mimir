@@ -382,12 +382,21 @@ OpenAI-compatible.
 
 macOS TCC attributes a decision to the responsible application. The macOS
 `bun tauri dev` wrapper must keep launching the executable through its
-generated `rs.shoulde.mimir` app bundle. A bare `cargo run` can observe a
+generated `rs.shoulde.mimir` app bundle. Running the executable inside the
+bundle is not sufficient when the launching terminal remains the responsible
+process. The debug bootstrap must use its guarded, same-PID responsibility
+handoff before Tauri creates threads; the same PID keeps Cargo's restart
+supervision intact. Treat a missing guard as a failed handoff even when
+`NSBundle` reports the Mimir bundle ID. A bare `cargo run` can observe a
 terminal or development host's permission; never project that as Mimir
-permission. System-audio process taps expose no public non-prompting
-authorization query: create the public tap to register/prompt, label the state
-honestly, and use the bounded known-playback check to verify the signal path.
-The check must retain no samples and must identify development-host results.
+permission. System-audio process taps expose no public request or preflight
+API and can return zero-filled buffers without showing a dialog. Use the
+native TCC request only after a deliberate Record or settings action, and use
+its preflight entry point for the displayed state. Keep System Settings as the
+denied-state repair action. Use the bounded known-playback check to verify the
+signal path. The check must retain no samples and must identify
+development-host results. A development rebuild can change the code hash and
+cause one new TCC prompt; do not reuse the stale grant optimistically.
 
 ### Scribe startup must not scale with meeting history
 

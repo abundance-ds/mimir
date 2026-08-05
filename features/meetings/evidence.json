@@ -275,7 +275,13 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/commands.rs",
-      "selector": "system_audio_setup_arms_the_process_tap_before_opening_settings",
+      "selector": "system_audio_request_returns_the_authoritative_tcc_result",
+      "scenarios": ["MTG-050"]
+    },
+    {
+      "kind": "js-test",
+      "path": "scripts/macos-dev-app.test.mjs",
+      "selector": "system audio uses authoritative TCC request and preflight entry points",
       "scenarios": ["MTG-050"]
     },
     {
@@ -287,8 +293,8 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/scribe/ScribeSettings.test.js",
-      "selector": "shows only moving input levels while an audio test is active",
-      "scenarios": ["MTG-051"]
+      "selector": "spells out live input states and development-host results",
+      "scenarios": ["MTG-051", "MTG-056"]
     },
     {
       "kind": "rust-test",
@@ -803,7 +809,7 @@
     {
       "kind": "js-test",
       "path": "src/shared/ui/settings/ScribeSettingsSection.test.js",
-      "selector": "forwards both child permission actions to their narrow native owners",
+      "selector": "forwards permission grants to their narrow native owners",
       "scenarios": ["MTG-205"]
     },
     {

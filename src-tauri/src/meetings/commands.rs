@@ -706,6 +706,32 @@ pub async fn meetings_request_microphone_permission(
     .await
 }
 
+#[tauri::command]
+pub async fn meetings_request_system_audio_permission(
+    runtime: tauri::State<'_, MeetingRuntime>,
+) -> Result<MeetingSnapshot, String> {
+    let runtime = runtime.inner().clone();
+    let identity = super::permissions::current_permission_runtime_identity();
+    run_blocking("system audio permission request", move || {
+        let permission = request_system_audio_permission_for_identity(
+            &identity,
+            super::permissions::request_system_audio_permission,
+        )?;
+        let mut snapshot = runtime.snapshot().map_err(|error| error.to_string())?;
+        snapshot.permissions.system_audio = identity.project_system_audio(permission).into();
+        Ok(snapshot)
+    })
+    .await
+}
+
+fn request_system_audio_permission_for_identity(
+    identity: &super::permissions::PermissionRuntimeIdentity,
+    request: impl FnOnce() -> Result<mimir_meeting_detect::PermissionState, String>,
+) -> Result<mimir_meeting_detect::PermissionState, String> {
+    identity.require_installed_mimir()?;
+    request()
+}
+
 fn await_microphone_permission_projection(
     mut snapshot: impl FnMut() -> Result<MeetingSnapshot, String>,
     expected: &str,
@@ -750,11 +776,8 @@ fn is_microphone_permission_remediation(value: &str) -> bool {
 pub async fn meetings_open_system_audio_settings() -> Result<(), String> {
     let identity = super::permissions::current_permission_runtime_identity();
     run_blocking("system audio permission settings", move || {
-        run_system_audio_setup_for_identity(
-            &identity,
-            arm_system_audio_permission,
-            open_system_audio_settings,
-        )
+        identity.require_installed_mimir()?;
+        open_system_audio_settings()
     })
     .await
 }
@@ -943,43 +966,6 @@ fn perform_audio_signal_check(
 ) -> Result<MeetingAudioCheck, String> {
     Err("Audio checking is available only in Mimir for macOS".into())
 }
-
-fn run_system_audio_setup(
-    arm: impl FnOnce(),
-    open_settings: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    arm();
-    open_settings()
-}
-
-fn run_system_audio_setup_for_identity(
-    identity: &super::permissions::PermissionRuntimeIdentity,
-    arm: impl FnOnce(),
-    open_settings: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    identity.require_installed_mimir()?;
-    run_system_audio_setup(arm, open_settings)
-}
-
-#[cfg(target_os = "macos")]
-fn arm_system_audio_permission() {
-    // Core Audio exposes no public non-prompting authorization query. Creating
-    // the global process tap is the public API that registers the signed app
-    // with TCC and prompts when needed. Dropping it immediately records no
-    // audio; the real capture session creates its own tap after permission.
-    let result = mimir_meeting_audio::SystemAudioInput::open().and_then(|input| {
-        input.start(
-            mimir_meeting_audio::FrameDuration::DEFAULT,
-            mimir_meeting_audio::CaptureHealth::default(),
-        )
-    });
-    if let Err(error) = result {
-        log::warn!("Could not arm Scribe system-audio permission before opening settings: {error}");
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn arm_system_audio_permission() {}
 
 #[cfg(target_os = "macos")]
 fn open_system_audio_settings() -> Result<(), String> {
@@ -1523,37 +1509,28 @@ mod consent_tests {
     }
 
     #[test]
-    fn system_audio_setup_arms_the_process_tap_before_opening_settings() {
-        let actions = std::sync::Mutex::new(Vec::new());
-        run_system_audio_setup(
-            || actions.lock().unwrap().push("arm"),
-            || {
-                actions.lock().unwrap().push("settings");
-                Ok(())
-            },
-        )
+    fn system_audio_request_returns_the_authoritative_tcc_result() {
+        let identity = super::super::permissions::PermissionRuntimeIdentity::from_bundle_identifier(
+            Some(super::super::permissions::MIMIR_BUNDLE_IDENTIFIER),
+        );
+        let permission = request_system_audio_permission_for_identity(&identity, || {
+            Ok(mimir_meeting_detect::PermissionState::Granted)
+        })
         .unwrap();
-        assert_eq!(*actions.lock().unwrap(), ["arm", "settings"]);
+        assert_eq!(permission, mimir_meeting_detect::PermissionState::Granted);
     }
 
     #[test]
-    fn development_host_cannot_arm_system_audio_permission() {
-        let actions = std::sync::Mutex::new(Vec::new());
+    fn development_host_cannot_request_system_audio_permission() {
         let identity =
             super::super::permissions::PermissionRuntimeIdentity::from_bundle_identifier(None);
 
-        let error = run_system_audio_setup_for_identity(
-            &identity,
-            || actions.lock().unwrap().push("arm"),
-            || {
-                actions.lock().unwrap().push("settings");
-                Ok(())
-            },
-        )
+        let error = request_system_audio_permission_for_identity(&identity, || {
+            Ok(mimir_meeting_detect::PermissionState::Granted)
+        })
         .unwrap_err();
 
         assert!(error.contains("Open the installed Mimir application"));
-        assert!(actions.lock().unwrap().is_empty());
     }
 
     fn permission_snapshot(microphone: &str, diagnostic: Option<&str>) -> MeetingSnapshot {
@@ -1567,7 +1544,7 @@ mod consent_tests {
             config: super::super::runtime::MeetingConfig::default(),
             permissions: super::super::runtime::MeetingPermissions {
                 microphone: microphone.into(),
-                system_audio: "prompt-on-start".into(),
+                system_audio: "not-determined".into(),
             },
             models: Vec::new(),
             diagnostic: diagnostic.map(str::to_owned),

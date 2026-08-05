@@ -97,32 +97,64 @@
             class="mt-2 grid grid-cols-[130px_1fr] border-t border-rule-light text-[10px]"
           >
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">Microphone</dt>
-            <dd class="flex items-center border-b border-rule-light py-2">
-              <span
-                data-scribe-audio-level="microphone"
-                class="scribe-audio-level flex-1"
-                role="progressbar"
-                aria-label="Microphone input level"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                :aria-valuenow="audioSourceLevel(audioCheck.microphone)"
+            <dd class="border-b border-rule-light py-2">
+              <div class="flex items-center gap-2">
+                <span
+                  data-scribe-audio-level="microphone"
+                  class="scribe-audio-level flex-1"
+                  role="progressbar"
+                  aria-label="Microphone input level"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="audioSourceLevel(audioCheck.microphone)"
+                >
+                  <span :style="{ width: `${audioSourceLevel(audioCheck.microphone)}%` }" />
+                </span>
+                <span
+                  data-scribe-audio-state="microphone"
+                  class="w-16 shrink-0 text-right font-mono text-[9px]"
+                  :class="audioSourceStateClass(audioCheck.microphone)"
+                >
+                  {{ audioSourceLabel(audioCheck.microphone) }}
+                </span>
+              </div>
+              <p
+                v-if="audioCheck.microphone?.error"
+                data-scribe-audio-error="microphone"
+                class="mt-1 text-[9px] leading-relaxed text-rem"
               >
-                <span :style="{ width: `${audioSourceLevel(audioCheck.microphone)}%` }" />
-              </span>
+                {{ audioCheck.microphone.error }}
+              </p>
             </dd>
             <dt class="border-b border-rule-light py-2 font-mono text-ink-3">System audio</dt>
-            <dd class="flex items-center border-b border-rule-light py-2">
-              <span
-                data-scribe-audio-level="system"
-                class="scribe-audio-level flex-1"
-                role="progressbar"
-                aria-label="System-audio input level"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                :aria-valuenow="audioSourceLevel(audioCheck.systemAudio)"
+            <dd class="border-b border-rule-light py-2">
+              <div class="flex items-center gap-2">
+                <span
+                  data-scribe-audio-level="system"
+                  class="scribe-audio-level flex-1"
+                  role="progressbar"
+                  aria-label="System-audio input level"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="audioSourceLevel(audioCheck.systemAudio)"
+                >
+                  <span :style="{ width: `${audioSourceLevel(audioCheck.systemAudio)}%` }" />
+                </span>
+                <span
+                  data-scribe-audio-state="system"
+                  class="w-16 shrink-0 text-right font-mono text-[9px]"
+                  :class="audioSourceStateClass(audioCheck.systemAudio)"
+                >
+                  {{ audioSourceLabel(audioCheck.systemAudio) }}
+                </span>
+              </div>
+              <p
+                v-if="audioCheck.systemAudio?.error"
+                data-scribe-audio-error="system"
+                class="mt-1 text-[9px] leading-relaxed text-rem"
               >
-                <span :style="{ width: `${audioSourceLevel(audioCheck.systemAudio)}%` }" />
-              </span>
+                {{ audioCheck.systemAudio.error }}
+              </p>
             </dd>
           </dl>
           <p
@@ -143,7 +175,21 @@
           Grant microphone access
         </button>
         <button
-          v-if="!['granted', 'development-host'].includes(permissions.systemAudio)"
+          v-if="['not-determined', 'unknown'].includes(permissions.systemAudio)"
+          type="button"
+          data-scribe-grant-system-audio
+          class="scribe-settings-button mt-3"
+          :disabled="Boolean(pending['system-audio-permission'])"
+          @click="$emit('requestSystemAudioPermission')"
+        >
+          {{
+            pending['system-audio-permission']
+              ? 'Requesting…'
+              : 'Grant system audio access'
+          }}
+        </button>
+        <button
+          v-if="['denied', 'restricted', 'error'].includes(permissions.systemAudio)"
           type="button"
           data-scribe-open-system-audio-settings
           class="scribe-settings-button mt-3"
@@ -467,6 +513,7 @@ const emit = defineEmits([
   'installModel',
   'deleteModel',
   'requestMicrophonePermission',
+  'requestSystemAudioPermission',
   'openSystemAudioSettings',
   'checkAudio',
 ])
@@ -629,7 +676,7 @@ function permissionLabel(value) {
   return ({
     granted: 'Granted',
     denied: 'Denied — use the repair action below',
-    'prompt-on-start': 'Requested on first use',
+    'not-determined': 'Not requested',
     restricted: 'Restricted by macOS',
     unknown: 'Not checked',
     'development-host': 'Development host — not Mimir',
@@ -639,6 +686,23 @@ function permissionLabel(value) {
 function audioSourceLevel(value) {
   if (typeof value === 'number') return Math.min(100, Math.max(0, value))
   return Math.min(100, Math.max(0, Number(value?.level) || 0))
+}
+
+function audioSourceLabel(value) {
+  const level = audioSourceLevel(value)
+  return ({
+    signal: `${level}%`,
+    silent: 'Silent',
+    'no-data': 'No data',
+    'open-failed': 'Open failed',
+    ended: 'Ended',
+    stopped: 'Stopped',
+  })[value?.state] || 'No data'
+}
+
+function audioSourceStateClass(value) {
+  if (['open-failed', 'ended'].includes(value?.state)) return 'text-rem'
+  return value?.state === 'signal' ? 'text-ink-2' : 'text-ink-3'
 }
 
 function formatBytes(bytes) {

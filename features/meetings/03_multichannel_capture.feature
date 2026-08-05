@@ -68,17 +68,17 @@ Feature: Capture microphone and system audio without sacrificing durability
     And conversion never fabricates or silently hides missing source frames
 
   @MTG-049 @automated @native @security @packaging
-  Scenario: Permission state belongs to the installed Mimir application
-    Given Scribe is running outside the signed Mimir application bundle
+  Scenario: Permission state belongs to the responsible Mimir application
+    Given Scribe does not own the verified responsible Mimir application identity
     When native permission state is projected
     Then microphone and system-audio access are reported as unavailable for Mimir
     And permission granted to a terminal or development host is never attributed to Mimir
 
   @MTG-050 @automated @native @security
-  Scenario: System-audio setup registers Mimir before opening recovery settings
+  Scenario: First system-audio use requests access for Mimir
     Given the signed Mimir application has never requested system-audio access
     When the user starts system-audio setup
-    Then Mimir arms its native Core Audio process tap before opening System Settings
+    Then Mimir issues the native audio-capture request from the responsible application
     And only authoritative TCC state can report system-audio permission as granted
 
   @MTG-051 @automated @native @security

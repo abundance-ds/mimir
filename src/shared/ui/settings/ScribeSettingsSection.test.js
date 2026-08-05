@@ -6,6 +6,7 @@ import {
   loadMeetingSnapshot,
   openMeetingSystemAudioSettings,
   requestMeetingMicrophonePermission,
+  requestMeetingSystemAudioPermission,
   setMeetingsApiKey,
 } from '../../../services/meetings.js'
 import ScribeSettingsSection from './ScribeSettingsSection.vue'
@@ -17,6 +18,7 @@ vi.mock('../../../services/meetings.js', async importOriginal => ({
   loadMeetingTranscriptPage: vi.fn(),
   openMeetingSystemAudioSettings: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
+  requestMeetingSystemAudioPermission: vi.fn(),
   setMeetingsApiKey: vi.fn(),
 }))
 
@@ -51,10 +53,24 @@ describe('ScribeSettingsSection permission repair', () => {
       permissions: { microphone: 'granted', systemAudio: 'denied' },
     })
     vi.mocked(openMeetingSystemAudioSettings).mockReset().mockResolvedValue()
+    vi.mocked(requestMeetingSystemAudioPermission).mockReset().mockResolvedValue({
+      ...snapshot,
+      revision: 2,
+      permissions: { microphone: 'denied', systemAudio: 'granted' },
+    })
     vi.mocked(setMeetingsApiKey).mockReset()
   })
 
-  it('forwards both child permission actions to their narrow native owners', async () => {
+  it('forwards permission grants to their narrow native owners', async () => {
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...snapshot,
+      permissions: { microphone: 'denied', systemAudio: 'not-determined' },
+    })
+    vi.mocked(requestMeetingMicrophonePermission).mockResolvedValue({
+      ...snapshot,
+      revision: 2,
+      permissions: { microphone: 'granted', systemAudio: 'not-determined' },
+    })
     const wrapper = mount(ScribeSettingsSection)
     await flushPromises()
 
@@ -63,10 +79,19 @@ describe('ScribeSettingsSection permission repair', () => {
     expect(requestMeetingMicrophonePermission).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
 
+    await wrapper.get('[data-scribe-grant-system-audio]').trigger('click')
+    await flushPromises()
+    expect(requestMeetingSystemAudioPermission).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+  })
+
+  it('keeps System Settings as the denied-state repair action', async () => {
+    const wrapper = mount(ScribeSettingsSection)
+    await flushPromises()
+
     await wrapper.get('[data-scribe-open-system-audio-settings]').trigger('click')
     await flushPromises()
     expect(openMeetingSystemAudioSettings).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[role="status"]').exists()).toBe(false)
   })
 
   it('confirms a Keychain save beside the credential control', async () => {

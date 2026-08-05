@@ -48,6 +48,7 @@ pub struct MeetingAudioTestEvent {
     /// `running` for rate-limited level projections; `stopped` is the terminal
     /// lifecycle notification and is not a metering tick.
     pub state: String,
+    pub runtime_identity: String,
     pub microphone: MeetingAudioSourceLevel,
     pub system_audio: MeetingAudioSourceLevel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -417,6 +418,13 @@ fn run_native_audio_test(
             None
         }
     };
+    let runtime_identity =
+        if super::permissions::current_permission_runtime_identity().is_installed_mimir() {
+            "mimir"
+        } else {
+            "development-host"
+        }
+        .to_string();
 
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -463,6 +471,7 @@ fn run_native_audio_test(
                         test_id: spec.test_id.clone(),
                         sequence,
                         state: "running".into(),
+                        runtime_identity: runtime_identity.clone(),
                         microphone: microphone_observation.take_level(),
                         system_audio: system_observation.take_level(),
                         microphone_device_id: microphone_device_id.clone(),
@@ -480,6 +489,7 @@ fn run_native_audio_test(
             test_id: spec.test_id,
             sequence,
             state: "stopped".into(),
+            runtime_identity,
             microphone: microphone_observation.stopped_level(),
             system_audio: system_observation.stopped_level(),
             microphone_device_id,

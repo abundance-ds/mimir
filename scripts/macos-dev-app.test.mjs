@@ -33,6 +33,30 @@ test('macOS Tauri development uses the arm64 app-bundle runner', () => {
   assert.equal(env.MIMIR_DEV_NODE, process.execPath)
 })
 
+test('the debug bootstrap makes Mimir responsible before Tauri starts', () => {
+  const source = readFileSync(resolve(repositoryRoot, 'src-tauri/src/main.rs'), 'utf8')
+  const bootstrap = source.indexOf('become_own_tcc_identity()')
+  const tauri = source.indexOf('mimir::run()')
+
+  assert.notEqual(bootstrap, -1)
+  assert.notEqual(tauri, -1)
+  assert.ok(bootstrap < tauri)
+  assert.match(source, /responsibility_spawnattrs_setdisclaim/u)
+  assert.match(source, /POSIX_SPAWN_SETEXEC/u)
+  assert.match(source, /MIMIR_TCC_RESPONSIBILITY_DISCLAIMED/u)
+})
+
+test('system audio uses authoritative TCC request and preflight entry points', () => {
+  const source = readFileSync(
+    resolve(repositoryRoot, 'src-tauri/src/meetings/permissions.rs'),
+    'utf8',
+  )
+
+  assert.match(source, /TCCAccessRequest/u)
+  assert.match(source, /TCCAccessPreflight/u)
+  assert.match(source, /kTCCServiceAudioCapture/u)
+})
+
 test('non-development and custom-runner commands remain unchanged', () => {
   for (const args of [['build'], ['dev', '--runner', 'custom-cargo']]) {
     const original = [...args]

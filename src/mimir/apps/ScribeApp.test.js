@@ -12,6 +12,7 @@ import {
   openMeetingSystemAudioSettings,
   prepareMeetingFollowUpContext,
   requestMeetingMicrophonePermission,
+  requestMeetingSystemAudioPermission,
   retranscribeMeeting,
   runMeetingSummary,
   searchMeetingLibrary,
@@ -46,6 +47,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   openMeetingSystemAudioSettings: vi.fn(),
   prepareMeetingFollowUpContext: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
+  requestMeetingSystemAudioPermission: vi.fn(),
   retranscribeMeeting: vi.fn(),
   runMeetingSummary: vi.fn(),
   searchMeetingLibrary: vi.fn(),
@@ -81,7 +83,7 @@ function snapshot(overrides = {}) {
       kgPreset: '',
       retentionDays: 30,
     },
-    permissions: { microphone: 'granted', systemAudio: 'prompt-on-start' },
+    permissions: { microphone: 'granted', systemAudio: 'not-determined' },
     models: [{ id: 'whisper-small', title: 'Whisper Small', status: 'installed' }],
     diagnostic: null,
     ...overrides,
@@ -138,6 +140,9 @@ describe('ScribeApp', () => {
     vi.mocked(loadMeetingSnapshot).mockReset().mockResolvedValue(snapshot())
     vi.mocked(loadMeetingTranscriptPage).mockReset().mockResolvedValue(transcriptPage())
     vi.mocked(requestMeetingMicrophonePermission).mockReset().mockResolvedValue(snapshot())
+    vi.mocked(requestMeetingSystemAudioPermission).mockReset().mockResolvedValue(snapshot({
+      permissions: { microphone: 'granted', systemAudio: 'granted' },
+    }))
     vi.mocked(openMeetingSystemAudioSettings).mockReset().mockResolvedValue()
     vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
       token: 'native-secret',
@@ -584,7 +589,7 @@ describe('ScribeApp', () => {
 
   it('opens the one global Scribe settings surface', async () => {
     vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
-      permissions: { microphone: 'denied', systemAudio: 'prompt-on-start' },
+      permissions: { microphone: 'denied', systemAudio: 'not-determined' },
     }))
     const wrapper = mount(ScribeApp, { props: { active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-settings]').exists()).toBe(true))

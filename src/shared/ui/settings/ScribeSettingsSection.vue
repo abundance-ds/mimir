@@ -28,6 +28,9 @@
       @request-microphone-permission="
         run(meetings.requestMicrophonePermission)
       "
+      @request-system-audio-permission="
+        run(meetings.requestSystemAudioPermission)
+      "
       @open-system-audio-settings="
         run(meetings.openSystemAudioSettings)
       "
