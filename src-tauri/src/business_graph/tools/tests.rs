@@ -1,4 +1,6 @@
-use super::{execute_native_tool, native_tool_definitions};
+use super::{
+    add_private_scope_warning, execute_native_tool, native_tool_definitions, PRIVATE_SCOPE_WARNING,
+};
 use crate::business_graph::{GraphRuntime, GraphScopeKind, GraphSourceRoot};
 use crate::tool_registry::{
     ToolDescriptor, ToolErrorCode, ToolOwner, ToolRegistration, ToolRegistry, ToolResult,
@@ -309,6 +311,51 @@ fn context_tool_returns_bounded_agent_ready_provenance() {
         .as_str()
         .unwrap()
         .contains("Business graph context"));
+}
+
+#[test]
+fn private_graph_reads_add_one_short_scope_warning() {
+    let root = TempDir::new().unwrap();
+    fs::create_dir_all(root.path().join("knowledge")).unwrap();
+    fs::create_dir_all(root.path().join("issues")).unwrap();
+    fs::write(
+        root.path().join("knowledge/private-note.md"),
+        "---\ntitle: Private note\ntype: note\n---\nPrivate body",
+    )
+    .unwrap();
+    let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+        "private:local",
+        GraphScopeKind::Private,
+        root.path(),
+    )]);
+
+    let found = execute_native_tool(&runtime, "graph.find", json!({})).unwrap();
+    assert_eq!(found.value["scopeWarning"], PRIVATE_SCOPE_WARNING);
+
+    let got = execute_native_tool(&runtime, "graph.get", json!({ "id": "private-note" })).unwrap();
+    assert_eq!(got.value["scopeWarning"], PRIVATE_SCOPE_WARNING);
+
+    let context = execute_native_tool(
+        &runtime,
+        "graph.context",
+        json!({ "focusId": "private-note" }),
+    )
+    .unwrap();
+    assert!(context.value.get("scopeWarning").is_none());
+    assert!(context.value["markdown"]
+        .as_str()
+        .unwrap()
+        .starts_with(&format!(
+            "# Business graph context\n\n> {PRIVATE_SCOPE_WARNING}\n\n"
+        )));
+
+    let mut events = json!({ "items": [{ "scopeId": "private:local" }] });
+    add_private_scope_warning("graph.events", &mut events);
+    assert_eq!(events["scopeWarning"], PRIVATE_SCOPE_WARNING);
+
+    let (_root, project_runtime) = fixture();
+    let project_result = execute_native_tool(&project_runtime, "graph.find", json!({})).unwrap();
+    assert!(project_result.value.get("scopeWarning").is_none());
 }
 
 #[test]

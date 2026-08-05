@@ -24,6 +24,8 @@ use support::internal_error;
 use tauri::{Emitter, Manager};
 
 const GRAPH_CHANGED_EVENT: &str = "mimir://graph-changed";
+const PRIVATE_SCOPE_WARNING: &str =
+    "Private scope: do not put this data in another scope unless the user asked.";
 
 #[derive(Debug)]
 struct NativeExecution {
@@ -235,13 +237,60 @@ fn execute_native_tool(
     name: &str,
     input: Value,
 ) -> Result<NativeExecution, ToolError> {
-    match name.split('.').next().unwrap_or_default() {
+    let mut execution = match name.split('.').next().unwrap_or_default() {
         "graph" => graph::execute(runtime, name, input),
         "knowledge" => knowledge::execute(runtime, name, input),
         "issues" => issues::execute(runtime, name, input),
         "projects" => projects::execute(runtime, name, input),
         "research" => research::execute(runtime, name, input),
         _ => Err(unknown_tool(name)),
+    }?;
+    add_private_scope_warning(name, &mut execution.value);
+    Ok(execution)
+}
+
+fn add_private_scope_warning(name: &str, value: &mut Value) {
+    if !matches!(
+        name,
+        "graph.find" | "graph.get" | "graph.context" | "graph.events"
+    ) || !contains_private_scope(value)
+    {
+        return;
+    }
+    let Some(output) = value.as_object_mut() else {
+        return;
+    };
+    if name == "graph.context" {
+        let Some(markdown) = output.get("markdown").and_then(Value::as_str) else {
+            return;
+        };
+        let header = "# Business graph context\n\n";
+        let rest = markdown.strip_prefix(header).unwrap_or(markdown);
+        let markdown = format!("{header}> {PRIVATE_SCOPE_WARNING}\n\n{rest}");
+        output.insert("markdown".into(), Value::String(markdown));
+    } else {
+        output.insert(
+            "scopeWarning".into(),
+            Value::String(PRIVATE_SCOPE_WARNING.into()),
+        );
+    }
+}
+
+fn contains_private_scope(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(contains_private_scope),
+        Value::Object(object) => {
+            object
+                .get("scopeId")
+                .and_then(Value::as_str)
+                .is_some_and(|scope| scope.starts_with("private:"))
+                || object
+                    .get("scopeKind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind == "private")
+                || object.values().any(contains_private_scope)
+        }
+        _ => false,
     }
 }
 

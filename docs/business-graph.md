@@ -28,6 +28,7 @@ system. External collaborators share the project root without the team root.
 The workbench mounts `private:local`, `project:<root-hash>`, and optional
 `team:main`. Provenance carries `scopeId`, `scopeKind`, `sourcePath`,
 `sourceRevision`, and legacy format.
+Agent read results warn when they contain private data. Access is not blocked.
 
 ## Bounded ontology
 
