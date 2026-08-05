@@ -423,6 +423,14 @@ fn check_graph(version: &str, mimir: &Path) {
     }
 }
 
+/// An agent CLI is host tooling, not snapshot content. `detect_binary` asks the
+/// login shell for it, so a machine without the agent installed — a CI runner,
+/// for example — gets this diagnostic from a fixture that is fully correct. The
+/// snapshot must still prove that it loads and stays untouched there.
+fn is_missing_agent_binary(message: &str) -> bool {
+    message.ends_with("was not found in the login-shell environment.")
+}
+
 fn check_activities_and_routine_runtime(version: &str, home: &Path, mimir: &Path) {
     let supervisor =
         ActivitySupervisor::new(ActivitySupervisorConfig::new(mimir.join("activities")))
@@ -492,10 +500,17 @@ fn check_activities_and_routine_runtime(version: &str, home: &Path, mimir: &Path
     )
     .unwrap_or_else(|error| panic!("[{version}] routine runtime should construct: {error}"));
     let catalog = runtime.catalog();
+    let content_diagnostics = catalog
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            !(diagnostic.field.as_deref() == Some("binary")
+                && is_missing_agent_binary(&diagnostic.message))
+        })
+        .collect::<Vec<_>>();
     assert!(
-        catalog.diagnostics.is_empty(),
-        "[{version}] routine runtime should load without diagnostics: {:?}",
-        catalog.diagnostics
+        content_diagnostics.is_empty(),
+        "[{version}] routine runtime should load without diagnostics: {content_diagnostics:?}"
     );
     assert!(
         !catalog.routines.is_empty(),
@@ -503,9 +518,14 @@ fn check_activities_and_routine_runtime(version: &str, home: &Path, mimir: &Path
     );
     for routine in &catalog.routines {
         assert!(
-            routine.available,
+            routine.available
+                || routine
+                    .diagnostic
+                    .as_deref()
+                    .is_some_and(is_missing_agent_binary),
             "[{version}] routine '{}' should resolve against the fixture launchers: {:?}",
-            routine.definition.id, routine.diagnostic
+            routine.definition.id,
+            routine.diagnostic
         );
     }
     if version == "v0.1.0" {
