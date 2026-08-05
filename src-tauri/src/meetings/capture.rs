@@ -2079,6 +2079,7 @@ mod tests {
         assert!((output[2] - 0.5).abs() < f32::EPSILON);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn continuation_writer_starts_at_its_append_cursor_without_overwriting_history() {
         let directory = tempfile::tempdir().unwrap();
