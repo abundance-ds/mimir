@@ -39,6 +39,7 @@ const VAD_MIN_FRAME_RMS: f32 = 0.001_5;
 const VAD_MIN_WINDOW_RMS: f32 = 0.001_5;
 const VAD_MIN_ACTIVE_FRAMES: usize = 4;
 const VAD_MIN_CONSECUTIVE_FRAMES: usize = 2;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const MAX_NO_SPEECH_PROBABILITY: f32 = 0.60;
 const MIN_SEGMENT_CONFIDENCE: f32 = 0.30;
 const MAX_IDENTICAL_SEGMENTS_PER_WINDOW: usize = 2;

@@ -834,7 +834,7 @@ fn create_main_window<M: Manager<tauri::Wry>>(
     manager: &M,
     visible: bool,
 ) -> tauri::Result<tauri::WebviewWindow> {
-    let mut builder =
+    let builder =
         tauri::WebviewWindowBuilder::new(manager, "main", tauri::WebviewUrl::App("/".into()))
             .title("Mimir")
             .inner_size(1280.0, 800.0)
@@ -843,14 +843,12 @@ fn create_main_window<M: Manager<tauri::Wry>>(
             .visible(visible);
 
     #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition::new(
-                14.0, 14.0,
-            )));
-    }
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition::new(
+            14.0, 14.0,
+        )));
 
     let window = builder.build()?;
 

@@ -4,8 +4,11 @@
 //! `MeetingStore` is the durable authority; capture, transcription, and UI
 //! adapters can be layered over its optimistic revisions and idempotent writes.
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod audio_test;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 pub mod capture;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod commands;
 pub mod config;
 mod diagnostics;

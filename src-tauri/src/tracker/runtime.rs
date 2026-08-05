@@ -22,7 +22,9 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
 
 pub const TRACKER_CHANGED_EVENT: &str = "mimir://tracker-changed";

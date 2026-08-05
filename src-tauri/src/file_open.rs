@@ -60,6 +60,7 @@ pub fn resolve_file_args(args: &[String], cwd: &Path) -> Vec<String> {
         .collect()
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub fn file_paths_from_urls(urls: &[url::Url]) -> Vec<String> {
     urls.iter()
         .filter(|url| url.scheme() == "file")
