@@ -104,6 +104,59 @@ describe('quick open results', () => {
       .toEqual(['history'])
   })
 
+  it('browses only current-project history but searches every project', () => {
+    const local = { ...archived, id: 'agent:local' }
+    const other = {
+      ...archived,
+      id: 'agent:other',
+      title: 'Scribe review',
+      workspacePath: '/work/scribe',
+      inCurrentWorkspace: false,
+    }
+
+    expect(buildQuickOpenResults({ query: '@', history: [other, local] })
+      .map(result => result.key)).toEqual(['history:agent:local'])
+
+    expect(buildQuickOpenResults({ query: '@ work', history: [other, local] })
+      .map(result => result.key))
+      .toEqual(['history:agent:local', 'history:agent:other'])
+  })
+
+  it('keeps @ browsing empty when only other projects have history', () => {
+    const other = { ...archived, inCurrentWorkspace: false }
+    expect(buildQuickOpenResults({ query: '@', history: [other] })).toEqual([])
+    expect(buildQuickOpenResults({ query: '@ mimir', history: [other] })
+      .map(result => result.key)).toEqual(['history:agent:closed'])
+  })
+
+  it('marks other-project sessions with a project chip instead of meta text', () => {
+    const other = {
+      ...archived,
+      workspacePath: '/work/scribe',
+      inCurrentWorkspace: false,
+    }
+    const [row] = buildQuickOpenResults({ query: '@ scribe', history: [other] })
+    expect(row).toMatchObject({ project: 'scribe', verb: 'Restore transcript' })
+    expect(row.title).not.toContain('scribe')
+    expect(row.meta).not.toContain('scribe')
+
+    const [local] = buildQuickOpenResults({ query: '@', history: [archived] })
+    expect(local.project).toBe('')
+    expect(local.meta).not.toContain('mimir')
+  })
+
+  it('reopens the last closed activity from the current project only', () => {
+    const local = { ...archived, id: 'agent:local' }
+    const other = { ...archived, id: 'agent:other', inCurrentWorkspace: false }
+
+    const reopen = buildQuickOpenResults({ history: [other, local] })
+      .find(result => result.type === 'history')
+    expect(reopen).toMatchObject({ activityId: 'agent:local' })
+
+    expect(buildQuickOpenResults({ history: [other] })
+      .some(result => result.type === 'history')).toBe(false)
+  })
+
   it('finds channels and direct messages without crowding the default view', () => {
     const chats = [
       { id: '#product', kind: 'channel', title: 'product', topic: 'Product decisions' },

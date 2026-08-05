@@ -1347,6 +1347,11 @@ describe('WorkbenchApp', () => {
       host: { type: 'pty' },
       launch: { command: '/bin/codex', args: [], cwd: '/other/project', env: {} },
     })
+    store.upsert({
+      ...activityRecord('agent:local-history', 'Local review', '2026-07-25T11:00:00Z'),
+      status: 'done',
+      archivedAt: '2026-07-25T12:00:00Z',
+    })
     await nextTick()
 
     document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1356,7 +1361,14 @@ describe('WorkbenchApp', () => {
     }))
     await nextTick()
     const input = wrapper.get('[data-quick-open-input]')
+
+    await input.setValue('@')
+    expect(wrapper.find('[data-quick-open-key="history:agent:local-history"]').exists()).toBe(true)
+    expect(wrapper.find('[data-quick-open-key="history:agent:other-history"]').exists()).toBe(false)
+
     await input.setValue('@Other project review')
+    const otherRow = wrapper.get('[data-quick-open-key="history:agent:other-history"]')
+    expect(otherRow.get('[data-quick-open-project]').text()).toBe('project')
     await input.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 

@@ -103,6 +103,23 @@ describe('QuickOpen', () => {
     expect(wrapper.get('[data-quick-open]').classes()).toContain('pt-6')
   })
 
+  it('keeps keyboard selection scrolled into view', async () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView')
+    const wrapper = render()
+    await wrapper.get('[data-quick-open-input]').trigger('keydown.down')
+    await flushPromises()
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    scroll.mockRestore()
+  })
+
+  it('explains an empty project history and points to global search', async () => {
+    const wrapper = render(true, {
+      props: { history: [{ ...history[0], inCurrentWorkspace: false }] },
+    })
+    await wrapper.get('[data-quick-open-input]').setValue('@')
+    expect(wrapper.text()).toContain('No closed sessions in this project. Type to search all projects.')
+  })
+
   it('enters a focused new activity subview and returns without closing', async () => {
     const wrapper = render()
 

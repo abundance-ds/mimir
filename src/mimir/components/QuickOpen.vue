@@ -127,6 +127,13 @@
                     <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">
                       {{ result.title }}
                     </span>
+                    <span
+                      v-if="result.project"
+                      data-quick-open-project
+                      class="max-w-[30%] shrink-0 truncate bg-chrome-high px-1.5 font-mono text-[9px] text-ink-2"
+                    >
+                      {{ result.project }}
+                    </span>
                     <span class="max-w-[48%] shrink-0 truncate font-mono text-[9px] text-ink-3">
                       {{ result.meta }}
                     </span>
@@ -264,6 +271,9 @@ const resultsLabel = computed(() => (
 ))
 const emptyMessage = computed(() => {
   if (inNewActivityView.value) return 'No matching activity sources.'
+  if (scope.value === 'history' && !parsedQuery.value.term) {
+    return 'No closed sessions in this project. Type to search all projects.'
+  }
   return files.workspacePath
     ? 'No matching tools, history, or files.'
     : 'No matching tools or history.'
@@ -328,6 +338,7 @@ watch(
 function onInput() {
   cancelPendingSearch()
   selectedIndex.value = 0
+  void scrollSelectionIntoView()
   historySnippets.value = new Map()
   if (inNewActivityView.value) {
     searching.value = false
@@ -439,16 +450,24 @@ function moveSelection(delta, focusRow = false) {
   }
   selectedIndex.value = (selectedIndex.value + delta + total) % total
   if (focusRow) focusSelectedRow()
+  else void scrollSelectionIntoView()
 }
 
 function selectEdge(edge, focusRow = false) {
   selectedIndex.value = edge === 'end' ? Math.max(results.value.length - 1, 0) : 0
   if (focusRow) focusSelectedRow()
+  else void scrollSelectionIntoView()
 }
 
 async function focusSelectedRow() {
   await nextTick()
   dialog.value?.querySelector(`#${selectedResult.value?.optionId}`)?.focus()
+}
+
+async function scrollSelectionIntoView() {
+  await nextTick()
+  dialog.value?.querySelector(`#${selectedResult.value?.optionId}`)
+    ?.scrollIntoView?.({ block: 'nearest' })
 }
 
 function startsGroup(index) {

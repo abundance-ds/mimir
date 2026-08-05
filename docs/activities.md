@@ -63,8 +63,10 @@ when a launcher preset is edited. `workspacePath` names the owning project,
 while `launch.cwd` remains the process working directory.
 
 Workspace switches open Files and reset Activity Back/Forward navigation so it
-cannot cross projects implicitly. Closed History remains global; explicitly
-restoring an Activity from another workspace opens that workspace first. The
+cannot cross projects implicitly. Closed History browses the open project
+only; a search term reaches all projects, open-project matches first.
+Explicitly restoring an Activity from another workspace opens that workspace
+first. The
 project switcher reports retained Activity counts and `needs-input` work for
 recent workspaces.
 

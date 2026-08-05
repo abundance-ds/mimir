@@ -81,7 +81,8 @@ The permanent rail system is the signature:
   Shift+Alt+Up/Down. App management lives in Settings.
 - Closed Activities do not form a Sidebar list. Cmd/Ctrl+P History searches
   useful task/workspace metadata and bounded transcript text, then restores the
-  selected Activity into the working set.
+  selected Activity into the working set. Scope filters what you browse;
+  search reaches every project, labelled by where each session lives.
 - Expanded Sidebar Activity rows support multi-selection: Cmd/Ctrl+click
   toggles a row, Shift+click extends a range from the last toggle (or the
   active Activity). A selection strip above the rows names the count and
@@ -108,9 +109,10 @@ recreate an overflowing two-pane split.
 
 Cmd/Ctrl+P opens a compact launcher near window top.
 
-- Empty view: Start new activity, Tools, recent files, Reopen last closed. Entering Start new activity drills into launch sources; Back/Backspace/Escape returns.
+- Empty view: Start new activity, Tools, recent files, Reopen last closed (open project only). Entering Start new activity drills into launch sources; Back/Backspace/Escape returns.
 - Current Activities excluded (Option/Alt+Cmd/Ctrl+Left/Right cycles them).
 - Search: Tools, launch sources, closed History, indexed files. Prefix filters: `/` files, `@` History, `+` New activity.
+- `@` History browses the open project only; the empty state points to search. A search term reaches every project, open-project matches first; rows from another project carry a project chip, and selecting one switches to that project before restoring.
 - Cmd/Ctrl+N in CLI agent or terminal focus opens Go to in New activity with current launcher selected. Editor, Files, Routines keep local Cmd/Ctrl+N meanings.
 - Autocorrect, autocapitalize, autocomplete, and spellcheck disabled on search fields.
 

@@ -396,6 +396,7 @@ const historyActivities = computed(() => (
     .filter(activity => !isToolActivity(activity))
     .map(activity => ({
       ...activity,
+      inCurrentWorkspace: activityIsVisibleInCurrentWorkspace(activity),
       resumeAvailable: Boolean(
         ['agent', 'routine'].includes(activity.kind)
         && !activity.source?.appId

@@ -54,8 +54,9 @@ export function buildQuickOpenResults({
     results.push(...matchingRows(files.map(fileResult), normalized).slice(0, limit))
   }
   if (scope === 'all' || scope === 'history') {
-    if (!searching && scope === 'all' && history[0]) {
-      results.push(reopenLastResult(history[0]))
+    const lastLocal = history.find(isLocalHistory)
+    if (!searching && scope === 'all' && lastLocal) {
+      results.push(reopenLastResult(lastLocal))
     } else if (searching || scope === 'history') {
       results.push(...historyResults(history, normalized, historySnippets))
     }
@@ -134,13 +135,12 @@ function newActivityEnterResult(launchers) {
 
 function reopenLastResult(activity) {
   const provider = activityProvider(activity)
-  const workspace = basename(activity.workspacePath)
   return result({
     key: `history-reopen:${activity.id}`,
     type: 'history',
     group: 'History',
     title: 'Reopen last closed activity',
-    meta: joinMeta(historyDisplayTitle(activity), provider, workspace),
+    meta: joinMeta(historyDisplayTitle(activity), provider),
     verb: historyVerb(activity),
     icon: providerIcon(provider, activity.kind),
     activityId: activity.id,
@@ -148,44 +148,58 @@ function reopenLastResult(activity) {
   })
 }
 
+// Browsing (no term) stays in the current project; a term searches every
+// project, current-project matches first.
 function historyResults(history, term, snippets) {
-  return history
-    .map((activity) => {
-      const provider = activityProvider(activity)
-      const workspace = basename(activity.workspacePath)
-      const workspacePath = String(activity.workspacePath || '')
-      const snippet = snippets.get(activity.id) || ''
-      const candidate = result({
-        key: `history:${activity.id}`,
-        type: 'history',
-        group: 'History',
-        title: historyDisplayTitle(activity),
-        meta: joinMeta(
-          provider,
-          workspace,
-          formatActivityTime(activity.archivedAt || activity.updatedAt),
-          humanStatus(activity.status),
-        ),
-        detail: workspacePath,
-        snippet,
-        verb: historyVerb(activity),
-        icon: providerIcon(provider, activity.kind),
-        activityId: activity.id,
-        search: [
-          activity.title,
-          provider,
-          workspace,
-          workspacePath,
-          activity.id,
-          activity.status,
-          activity.createdAt,
-          activity.archivedAt,
-          snippet,
-        ],
-      })
-      return candidate
-    })
+  const rows = history
+    .map(activity => historyRow(activity, snippets))
     .filter(candidate => !term || candidate.searchText.includes(term))
+  const local = rows.filter(row => row.inWorkspace)
+  if (!term) return local
+  return [...local, ...rows.filter(row => !row.inWorkspace)]
+}
+
+function historyRow(activity, snippets) {
+  const provider = activityProvider(activity)
+  const local = isLocalHistory(activity)
+  const workspace = basename(activity.workspacePath)
+  const workspacePath = String(activity.workspacePath || '')
+  const snippet = snippets.get(activity.id) || ''
+  // Other-project rows carry the project as a visible chip, not meta text.
+  const project = local ? '' : workspace
+  return result({
+    key: `history:${activity.id}`,
+    type: 'history',
+    group: 'History',
+    title: historyDisplayTitle(activity, { includeWorkspace: !project }),
+    project,
+    meta: joinMeta(
+      provider,
+      formatActivityTime(activity.archivedAt || activity.updatedAt),
+      humanStatus(activity.status),
+    ),
+    detail: workspacePath,
+    snippet,
+    verb: historyVerb(activity),
+    icon: providerIcon(provider, activity.kind),
+    activityId: activity.id,
+    inWorkspace: local,
+    search: [
+      activity.title,
+      provider,
+      workspace,
+      workspacePath,
+      activity.id,
+      activity.status,
+      activity.createdAt,
+      activity.archivedAt,
+      snippet,
+    ],
+  })
+}
+
+function isLocalHistory(activity) {
+  return activity?.inCurrentWorkspace !== false
 }
 
 function historyVerb(activity) {
@@ -215,10 +229,12 @@ function result({ search = [], ...value }) {
   }
 }
 
-export function historyDisplayTitle(activity) {
+export function historyDisplayTitle(activity, { includeWorkspace = true } = {}) {
   if (!isGenericProviderTitle(activity)) return activity.title
+  const time = formatActivityTime(activity.createdAt || activity.updatedAt)
+  if (!includeWorkspace) return time || 'Previous activity'
   const workspace = basename(activity.workspacePath) || 'Previous activity'
-  return `${workspace} · ${formatActivityTime(activity.createdAt || activity.updatedAt)}`
+  return `${workspace} · ${time}`
 }
 
 function isGenericProviderTitle(activity) {
