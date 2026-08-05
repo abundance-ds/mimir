@@ -1560,10 +1560,7 @@ fn persistence_loop(receiver: mpsc::Receiver<PersistenceCommand>, errors: Arc<Mu
         }
 
         let deadline = Instant::now() + Duration::from_millis(20);
-        loop {
-            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-                break;
-            };
+        while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
             match receiver.recv_timeout(remaining) {
                 Ok(PersistenceCommand::Save { path, value }) => {
                     pending

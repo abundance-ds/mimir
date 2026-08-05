@@ -1505,15 +1505,10 @@ impl OpenAiTranscriptState {
                 // this item. The later acknowledgement is confirmation, not
                 // permission to consume and overwrite the next turn's range.
                 if let Some(current) = self.item_ranges.get(item_id).copied() {
-                    if self
+                    if let Some(confirmed) = self
                         .pending_ranges
-                        .front()
-                        .is_some_and(|pending| pending.start_ms == current.start_ms)
+                        .pop_front_if(|pending| pending.start_ms == current.start_ms)
                     {
-                        let confirmed = self
-                            .pending_ranges
-                            .pop_front()
-                            .expect("front was checked above");
                         self.item_ranges.insert(item_id.to_string(), confirmed);
                         if let Some(item) = self.items.get_mut(item_id) {
                             item.range = Some(confirmed);
@@ -4198,6 +4193,10 @@ mod tests {
         }
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the tungstenite handshake callback fixes this result type"
+    )]
     async fn accept_tls_websocket(
         listener: &TcpListener,
         acceptor: &TlsAcceptor,
@@ -4231,6 +4230,10 @@ mod tests {
         .unwrap()
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the tungstenite handshake callback fixes this result type"
+    )]
     async fn accept_openai_tls_websocket(
         listener: &TcpListener,
         acceptor: &TlsAcceptor,
