@@ -1917,6 +1917,7 @@ async fn openai_session(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn drive_openai_channel(
     websocket: PinnedWebSocket,
     audio: PersistedAudioSource,
