@@ -83,6 +83,7 @@ function checkRepositoryPaths(file, source) {
     ) {
       continue
     }
+    if (isGeneratedPath(candidate)) continue
     if (!fs.existsSync(path.resolve(root, candidate))) {
       fail(file, `missing repository path '${candidate}'`)
     }
@@ -91,6 +92,13 @@ function checkRepositoryPaths(file, source) {
 
 function isRepositoryPath(value) {
   return /^(?:docs\/|src\/|src-tauri\/|scripts\/|bin\/|public\/|\.github\/|package\.json$|vite\.config\.js$|vitest\.config\.js$|README\.md$)/.test(value)
+}
+
+// Build output is absent from a clean checkout. Docs name these paths to tell
+// the reader where an artifact appears, so their existence proves nothing and
+// makes the check pass or fail with the state of the local build directory.
+function isGeneratedPath(value) {
+  return /(?:^|\/)(?:target|dist|node_modules)\//.test(value)
 }
 
 function checkDocumentationRouting() {
