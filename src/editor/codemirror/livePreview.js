@@ -582,6 +582,7 @@ export function livePreviewExtension(isEnabled, getFilePath) {
           update.docChanged ||
           update.viewportChanged ||
           update.selectionSet ||
+          syntaxTree(update.state) !== syntaxTree(update.startState) ||
           update.startState.facet(EditorView.darkTheme) !== update.state.facet(EditorView.darkTheme)
         ) {
           this._enabled = nowEnabled
@@ -599,7 +600,12 @@ export function livePreviewExtension(isEnabled, getFilePath) {
     },
     update(value, tr) {
       const nowEnabled = isEnabled()
-      if (nowEnabled !== tableEnabled || tr.docChanged || tr.selection) {
+      if (
+        nowEnabled !== tableEnabled ||
+        tr.docChanged ||
+        tr.selection ||
+        syntaxTree(tr.state) !== syntaxTree(tr.startState)
+      ) {
         tableEnabled = nowEnabled
         return buildTableDecorations(tr.state, isEnabled)
       }
