@@ -253,6 +253,7 @@ import { documentIdFromPath } from '../services/ai/context.js'
 import { createAutoSaveController } from './autoSaveController.js'
 import { fileDisplayName, footerSaveStatus, tabFromFile } from './saveStatus.js'
 import { useSaveFeedbackStore } from '../stores/saveFeedback.js'
+import { useAppUpdateStore } from '../stores/appUpdate.js'
 
 import AppFooter from './components/shell/AppFooter.vue'
 import AppHeader from './components/shell/AppHeader.vue'
@@ -287,6 +288,7 @@ const { zoomIn, zoomOut, setZoomLevel } = editorUI
 const showAppMenus = platformKind() !== 'macos'
 
 const editorSettings = useSettingsStore()
+const appUpdates = useAppUpdateStore()
 const releaseEditorSettingsSync = props.embedded
   ? null
   : editorSettings.startSync()
@@ -863,6 +865,9 @@ const nativeLifecycle = useEditorNativeLifecycle({
   onError: reportSessionError,
 })
 const { requestAppQuit } = nativeLifecycle
+const releaseUpdateRestartGuard = appUpdates.setRestartGuard(
+  () => nativeLifecycle.prepareAppRelaunch(),
+)
 
 function nativeMenuActions() {
   return {
@@ -880,6 +885,7 @@ function nativeMenuActions() {
     editCommand: onEditCommand,
     rewriteSelection: onRewriteSelection,
     openSettings,
+    openUpdates: () => openSettings('updates'),
   }
 }
 
@@ -1302,6 +1308,7 @@ onUnmounted(() => {
   proposalLifecycle.dispose()
   saveFeedback.dispose()
   releaseEditorSettingsSync?.()
+  releaseUpdateRestartGuard()
   editorSession.dispose()
   documentBridge.dispose()
 })

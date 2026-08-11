@@ -37,7 +37,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // editor tests from tripping the unknown-command guard. Tracked debt —
   // see scripts/check-tauri-commands.mjs and docs/issues.md.
   'document_context_send', 'settings_changed',
-  'app_quit_confirmed',
+  'app_quit_confirmed', 'app_prepare_relaunch',
   // spell
   'spell_suggest',
   // shell_exec

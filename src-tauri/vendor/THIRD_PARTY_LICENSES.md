@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 678 Cargo packages, 316 npm packages, and 3 reviewed embedded/downloadable assets.
+Inventory: 696 Cargo packages, 318 npm packages, and 3 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -23,6 +23,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:alsa@0.11.0 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/alsa/0.11.0/download | 812947049edcd670a82cd5c73c3661d2e58468577ba8489de58e1a73c04cbd5d |
 | cargo:android_system_properties@0.1.5 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/android_system_properties/0.1.5/download | 819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311 |
 | cargo:anyhow@1.0.104 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/anyhow/1.0.104/download | 330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470 |
+| cargo:arbitrary@1.4.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/arbitrary/1.4.2/download | c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1 |
 | cargo:asn1-rs-derive@0.6.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/asn1-rs-derive/0.6.0/download | 3109e49b1e4909e9db6515a30c633684d68cdeaa252f215214cb4fa1a5bfee2c |
 | cargo:asn1-rs-impl@0.2.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/asn1-rs-impl/0.2.0/download | 7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7 |
 | cargo:asn1-rs@0.7.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/asn1-rs/0.7.2/download | b7f43a50ac4fdca5df8e885c21b835997f0a1cdee65494a6847694a98652d9d8 |
@@ -117,6 +118,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:dbus@0.9.11 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/dbus/0.9.11/download | b942602992bb7acfd1f51c49811c58a610ef9181b6e66f3e519d79b540a3bf73 |
 | cargo:der-parser@10.0.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/der-parser/10.0.0/download | 07da5016415d5a3c4dd39b11ed26f915f52fc4e0dc197d87908bc916e51bc1a6 |
 | cargo:deranged@0.5.8 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/deranged/0.5.8/download | 7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c |
+| cargo:derive_arbitrary@1.4.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/derive_arbitrary/1.4.2/download | 1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a |
 | cargo:derive_more-impl@2.1.1 | MIT | https://crates.io/api/v1/crates/derive_more-impl/2.1.1/download | 799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb |
 | cargo:derive_more@2.1.1 | MIT | https://crates.io/api/v1/crates/derive_more/2.1.1/download | d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134 |
 | cargo:digest@0.10.7 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/digest/0.10.7/download | 9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292 |
@@ -158,6 +160,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:fdeflate@0.3.7 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/fdeflate/0.3.7/download | 1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c |
 | cargo:field-offset@0.3.6 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/field-offset/0.3.6/download | 38e2275cc4e4fc009b0669731a1e5ab7ebf11f469eaede2bab9309a5b4d6057f |
 | cargo:filedescriptor@0.8.3 | MIT | https://crates.io/api/v1/crates/filedescriptor/0.8.3/download | e40758ed24c9b2eeb76c35fb0aebc66c626084edd827e07e1552279814c6682d |
+| cargo:filetime@0.2.29 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/filetime/0.2.29/download | 5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759 |
 | cargo:find-msvc-tools@0.1.9 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/find-msvc-tools/0.1.9/download | 5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582 |
 | cargo:flate2@1.1.9 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/flate2/1.1.9/download | 843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c |
 | cargo:fnv@1.0.7 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/fnv/1.0.7/download | 3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1 |
@@ -249,10 +252,12 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:itoa@1.0.18 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/itoa/1.0.18/download | 8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682 |
 | cargo:javascriptcore-rs-sys@1.1.1 | MIT | https://crates.io/api/v1/crates/javascriptcore-rs-sys/1.1.1/download | af1be78d14ffa4b75b66df31840478fef72b51f8c2465d4ca7c194da9f7a5124 |
 | cargo:javascriptcore-rs@1.1.2 | MIT | https://crates.io/api/v1/crates/javascriptcore-rs/1.1.2/download | ca5671e9ffce8ffba57afc24070e906da7fc4b1ba66f2cabebf61bf2ea257fcc |
+| cargo:jni-macros@0.22.4 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jni-macros/0.22.4/download | a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3 |
 | cargo:jni-sys-macros@0.4.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jni-sys-macros/0.4.1/download | 38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264 |
 | cargo:jni-sys@0.3.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jni-sys/0.3.1/download | 41a652e1f9b6e0275df1f15b32661cf0d4b78d4d87ddec5e0c3c20f097433258 |
 | cargo:jni-sys@0.4.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jni-sys/0.4.1/download | c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2 |
 | cargo:jni@0.21.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jni/0.21.1/download | 1a87aa2bb7d2af34197c04845522473242e1aa17c12f4935d5856491a7fb8c97 |
+| cargo:jni@0.22.4 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jni/0.22.4/download | 5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498 |
 | cargo:jobserver@0.1.34 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/jobserver/0.1.34/download | 9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33 |
 | cargo:js-sys@0.3.99 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/js-sys/0.3.99/download | 142bc4740e452c1e57ade0cbc129f139c9093e354346f0872ef985f4f5cf5f11 |
 | cargo:json-patch@3.0.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/json-patch/3.0.1/download | 863726d7afb6bc2590eeff7135d923545e5e964f004c2ccf8716c25e70a86f08 |
@@ -288,8 +293,9 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:mime@0.3.17 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/mime/0.3.17/download | 6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a |
 | cargo:mimir-meeting-audio@0.1.0 | MIT | first-party |  |
 | cargo:mimir-meeting-detect@0.1.0 | MIT | first-party |  |
-| cargo:mimir@0.1.0 | NOASSERTION | first-party |  |
+| cargo:mimir@0.2.0 | NOASSERTION | first-party |  |
 | cargo:minimal-lexical@0.2.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/minimal-lexical/0.2.1/download | 68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a |
+| cargo:minisign-verify@0.2.5 | MIT | https://crates.io/api/v1/crates/minisign-verify/0.2.5/download | 22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e |
 | cargo:miniz_oxide@0.8.9 | MIT OR Zlib OR Apache-2.0 | https://crates.io/api/v1/crates/miniz_oxide/0.8.9/download | 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316 |
 | cargo:mio@1.2.0 | MIT | https://crates.io/api/v1/crates/mio/1.2.0/download | 50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1 |
 | cargo:muda@0.19.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/muda/0.19.2/download | 47a2e3dff89cd322c66647942668faee0a2b1f88ea6cbb4d374b4a8d7e92528c |
@@ -326,6 +332,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:objc2-exception-helper@0.1.1 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/objc2-exception-helper/0.1.1/download | c7a1c5fbb72d7735b076bb47b578523aedc40f3c439bea6dfd595c089d79d98a |
 | cargo:objc2-foundation@0.3.2 | MIT | https://crates.io/api/v1/crates/objc2-foundation/0.3.2/download | e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272 |
 | cargo:objc2-io-surface@0.3.2 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/objc2-io-surface/0.3.2/download | 180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d |
+| cargo:objc2-osa-kit@0.3.2 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/objc2-osa-kit/0.3.2/download | f112d1746737b0da274ef79a23aac283376f335f4095a083a267a082f21db0c0 |
 | cargo:objc2-quartz-core@0.3.2 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/objc2-quartz-core/0.3.2/download | 96c1358452b371bf9f104e21ec536d37a650eb10f7ee379fff67d2e08d537f1f |
 | cargo:objc2-ui-kit@0.3.2 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/objc2-ui-kit/0.3.2/download | d87d638e33c06f577498cbcc50491496a3ed4246998a7fbba7ccb98b1e7eab22 |
 | cargo:objc2-user-notifications@0.3.2 | Zlib OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/objc2-user-notifications/0.3.2/download | 9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e |
@@ -339,6 +346,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:openssl-sys@0.9.116 | MIT | https://crates.io/api/v1/crates/openssl-sys/0.9.116/download | f28a22dc7140cda5f096e5e7724a6962ca81a7f8bfd2979f9b18c11af56318c4 |
 | cargo:option-ext@0.2.0 | MPL-2.0 | https://crates.io/api/v1/crates/option-ext/0.2.0/download | 04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d |
 | cargo:ordered-stream@0.2.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/ordered-stream/0.2.0/download | 9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50 |
+| cargo:osakit@0.3.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/osakit/0.3.1/download | 732c71caeaa72c065bb69d7ea08717bd3f4863a4f451402fc9513e29dbd5261b |
 | cargo:pango-sys@0.18.0 | MIT | https://crates.io/api/v1/crates/pango-sys/0.18.0/download | 436737e391a843e5933d6d9aa102cb126d501e815b83601365a948a518555dc5 |
 | cargo:pango@0.18.3 | MIT | https://crates.io/api/v1/crates/pango/0.18.3/download | 7ca27ec1eb0457ab26f3036ea52229edbdb74dee1edd29063f5b9b010e7ebee4 |
 | cargo:parking_lot_core@0.9.12 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/parking_lot_core/0.9.12/download | 2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1 |
@@ -418,6 +426,8 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:rustix@1.1.4 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://crates.io/api/v1/crates/rustix/1.1.4/download | b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190 |
 | cargo:rustls-native-certs@0.8.4 | Apache-2.0 OR ISC OR MIT | https://crates.io/api/v1/crates/rustls-native-certs/0.8.4/download | dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d |
 | cargo:rustls-pki-types@1.14.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/rustls-pki-types/1.14.1/download | 30a7197ae7eb376e574fe940d068c30fe0462554a3ddbe4eca7838e049c937a9 |
+| cargo:rustls-platform-verifier-android@0.1.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/rustls-platform-verifier-android/0.1.1/download | f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f |
+| cargo:rustls-platform-verifier@0.7.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/rustls-platform-verifier/0.7.0/download | 26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0 |
 | cargo:rustls-webpki@0.103.13 | ISC | https://crates.io/api/v1/crates/rustls-webpki/0.103.13/download | 61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e |
 | cargo:rustls@0.23.40 | Apache-2.0 OR ISC OR MIT | https://crates.io/api/v1/crates/rustls/0.23.40/download | ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b |
 | cargo:rustversion@1.0.22 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/rustversion/1.0.22/download | b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d |
@@ -462,7 +472,9 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:shell-words@1.1.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/shell-words/1.1.1/download | dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77 |
 | cargo:shlex@1.3.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/shlex/1.3.0/download | 0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64 |
 | cargo:signal-hook-registry@1.4.8 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/signal-hook-registry/1.4.8/download | c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b |
+| cargo:simd_cesu8@1.2.0 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/simd_cesu8/1.2.0/download | 11031e251abf8611c80f460e19dbdeb54a66db918e49c65a7065b46ac7aec520 |
 | cargo:simd-adler32@0.3.9 | MIT | https://crates.io/api/v1/crates/simd-adler32/0.3.9/download | 703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214 |
+| cargo:simdutf8@0.1.5 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/simdutf8/0.1.5/download | e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e |
 | cargo:siphasher@1.0.3 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/siphasher/1.0.3/download | 8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649 |
 | cargo:slab@0.4.12 | MIT | https://crates.io/api/v1/crates/slab/0.4.12/download | 0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5 |
 | cargo:smallvec@1.15.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/smallvec/1.15.1/download | 67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03 |
@@ -483,6 +495,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:system-deps@6.2.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/system-deps/6.2.2/download | a3e535eb8dded36d55ec13eddacd30dec501792ff23a0b1682c38601b8cf2349 |
 | cargo:tao-macros@0.1.3 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/tao-macros/0.1.3/download | f4e16beb8b2ac17db28eab8bca40e62dbfbb34c0fcdc6d9826b11b7b5d047dfd |
 | cargo:tao@0.35.3 | Apache-2.0 | https://crates.io/api/v1/crates/tao/0.35.3/download | d1c93047acf68669466a34690ac58cca7010bd1b201e1ec86f1fd0a75d3dd4a9 |
+| cargo:tar@0.4.46 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/tar/0.4.46/download | 3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840 |
 | cargo:target-lexicon@0.12.16 | Apache-2.0 WITH LLVM-exception | https://crates.io/api/v1/crates/target-lexicon/0.12.16/download | 61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1 |
 | cargo:tauri-build@2.6.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-build/2.6.2/download | 4aa1f9055fc23919a54e4e125052bed16ed04aef0487086e758fe01a67b451c7 |
 | cargo:tauri-codegen@2.6.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-codegen/2.6.2/download | e4a0319528a025a38c4078e7dae2c446f4e63620ddb0659a643ede1cb38f90e9 |
@@ -491,7 +504,9 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:tauri-plugin-dialog@2.7.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-dialog/2.7.1/download | 65981abb771e74e571a38196c3baa11c459379164791eba0e67abc1a5fac9884 |
 | cargo:tauri-plugin-fs@2.5.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-fs/2.5.1/download | b7ecc274121aca0c036a2b42d1cbe83d368d348f54e0bb8a735c2b1548e8f371 |
 | cargo:tauri-plugin-notification@2.3.3 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-notification/2.3.3/download | 01fc2c5ff41105bd1f7242d8201fdf3efd70749b82fa013a17f2126357d194cc |
+| cargo:tauri-plugin-process@2.3.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-process/2.3.1/download | d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a |
 | cargo:tauri-plugin-single-instance@2.4.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-single-instance/2.4.2/download | 5c8f29386f5e9fdc699182388a33ee80a56de436d91b67459e86afef426282af |
+| cargo:tauri-plugin-updater@2.10.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-updater/2.10.1/download | 806d9dac662c2e4594ff03c647a552f2c9bd544e7d0f683ec58f872f952ce4af |
 | cargo:tauri-plugin@2.6.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin/2.6.2/download | e126abc9e84e35cdfd01596140a73a1850cdb0df0a23acf0185776c30b469a6e |
 | cargo:tauri-runtime-wry@2.11.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-runtime-wry/2.11.2/download | b83849ee63ecb27a8e8d0fe51915ca215076914aca43f96db1179f0f415f6cd9 |
 | cargo:tauri-runtime@2.11.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-runtime/2.11.2/download | 48222d7116c8807eaa6fe2f372e023fae125084e61e6eca6d70b7961cdf129ef |
@@ -585,6 +600,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:web-time@1.1.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/web-time/1.1.0/download | 5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb |
 | cargo:webkit2gtk-sys@2.0.2 | MIT | https://crates.io/api/v1/crates/webkit2gtk-sys/2.0.2/download | 916a5f65c2ef0dfe12fff695960a2ec3d4565359fdbb2e9943c974e06c734ea5 |
 | cargo:webkit2gtk@2.0.2 | MIT | https://crates.io/api/v1/crates/webkit2gtk/2.0.2/download | a1027150013530fb2eaf806408df88461ae4815a45c541c8975e61d6f2fc4793 |
+| cargo:webpki-root-certs@1.0.9 | CDLA-Permissive-2.0 | https://crates.io/api/v1/crates/webpki-root-certs/1.0.9/download | b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b |
 | cargo:webpki-roots@1.0.7 | CDLA-Permissive-2.0 | https://crates.io/api/v1/crates/webpki-roots/1.0.7/download | 52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d |
 | cargo:webview2-com-macros@0.8.1 | MIT | https://crates.io/api/v1/crates/webview2-com-macros/0.8.1/download | 67a921c1b6914c367b2b823cd4cde6f96beec77d30a939c8199bb377cf9b9b54 |
 | cargo:webview2-com-sys@0.38.2 | MIT | https://crates.io/api/v1/crates/webview2-com-sys/0.38.2/download | 381336cfffd772377d291702245447a5251a2ffa5bad679c99e61bc48bacbf9c |
@@ -674,6 +690,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:x11-dl@2.21.0 | MIT | https://crates.io/api/v1/crates/x11-dl/2.21.0/download | 38735924fedd5314a6e548792904ed8c6de6636285cb9fec04d5b1db85c1516f |
 | cargo:x11@2.21.0 | MIT | https://crates.io/api/v1/crates/x11/2.21.0/download | 502da5464ccd04011667b11c435cb992822c2c0dbde1770c988480d312a0db2e |
 | cargo:x509-parser@0.18.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/x509-parser/0.18.1/download | d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202 |
+| cargo:xattr@1.6.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/xattr/1.6.1/download | 32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156 |
 | cargo:yasna@0.6.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/yasna/0.6.0/download | b5f6765e852b9b4dc8e2a76843e4d64d1cea8e79bcde0b6901aea8e7c7f08282 |
 | cargo:yoke-derive@0.8.2 | Unicode-3.0 | https://crates.io/api/v1/crates/yoke-derive/0.8.2/download | de844c262c8848816172cef550288e7dc6c7b7814b4ee56b3e1553f275f1858e |
 | cargo:yoke@0.8.2 | Unicode-3.0 | https://crates.io/api/v1/crates/yoke/0.8.2/download | abe8c5fda708d9ca3df187cae8bfb9ceda00dd96231bed36e445a1a48e66f9ca |
@@ -688,6 +705,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:zerotrie@0.2.4 | Unicode-3.0 | https://crates.io/api/v1/crates/zerotrie/0.2.4/download | 0f9152d31db0792fa83f70fb2f83148effb5c1f5b8c7686c3459e361d9bc20bf |
 | cargo:zerovec-derive@0.11.3 | Unicode-3.0 | https://crates.io/api/v1/crates/zerovec-derive/0.11.3/download | 625dc425cab0dca6dc3c3319506e6593dcb08a9f387ea3b284dbd52a92c40555 |
 | cargo:zerovec@0.11.6 | Unicode-3.0 | https://crates.io/api/v1/crates/zerovec/0.11.6/download | 90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239 |
+| cargo:zip@4.6.1 | MIT | https://crates.io/api/v1/crates/zip/4.6.1/download | caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1 |
 | cargo:zmij@1.0.21 | MIT | https://crates.io/api/v1/crates/zmij/1.0.21/download | b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa |
 | cargo:zvariant_derive@5.11.0 | MIT | https://crates.io/api/v1/crates/zvariant_derive/5.11.0/download | c7d5b780599bbde114e39d9a0799577fad1ced5105d38515745f7b3099d8ceda |
 | cargo:zvariant_utils@3.3.1 | MIT | https://crates.io/api/v1/crates/zvariant_utils/3.3.1/download | 6d464f5733ffa07a3164d656f18533caace9d0638596721355d73256a410d691 |
@@ -847,6 +865,8 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | npm:@tauri-apps/cli@2.11.1 | Apache-2.0 OR MIT | https://registry.npmjs.org/@tauri-apps/cli/-/cli-2.11.1.tgz | ae911b689fc7ccd6fa7f0b2abb0a006eadbdfd5b788000e14b8db703c7dd9302f879d274c199a807c6abecee893c32fcdf831428e0a6febac9edcf6801a11a61 |
 | npm:@tauri-apps/plugin-dialog@2.7.1 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-dialog/-/plugin-dialog-2.7.1.tgz | 38ad5405762dfa88dc9b1324b73ceeca89d8205b5af02980012a57f8203e0d318adb82a51e385823ac7688e27f4e3645e0deff0022b5a059843a3218f4887339 |
 | npm:@tauri-apps/plugin-notification@2.3.3 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.3.3.tgz | 670f991f5f1125be351b836b7c7808ba87c98b29aeb2a37eabc7c6508215eefc821fee6c4a7e5ca2a46ffcc581f6a113b14b3deef994d38e6aececac78257742 |
+| npm:@tauri-apps/plugin-process@2.3.1 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-process/-/plugin-process-2.3.1.tgz | 9c26b87c655a0cbfc1f5a8b4dd5c8f3a37c01d11d2073e6fe85fce6ec07bdebfdd0373071e166d95d68330873457fa67530f5e873af68841be5e4484c82d0924 |
+| npm:@tauri-apps/plugin-updater@2.10.1 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.10.1.tgz | 34560c83eb563993c977313f3e9163daa7eac005b0352de45eb6f5b66d609c127d998cd9e160d1af0cbcb9dcd6a009df1821cbb9e3cd2d8d565423479e1dde44 |
 | npm:@types/chai@5.2.3 | MIT | https://registry.npmjs.org/@types/chai/-/chai-5.2.3.tgz | 330e79f28780f5f15bbfae7fcb8987b570ecf5b3e714c6402ff8f174f154a4e1c72175fdd667201076d2e4b6a1afea7064547c03b19095e456788e9c1850b650 |
 | npm:@types/deep-eql@4.0.2 | MIT | https://registry.npmjs.org/@types/deep-eql/-/deep-eql-4.0.2.tgz | 73d87d75554c8a030f7386f04ef0b9771aada8967040f78fb168cf96948e9e88dba2bea91aa764e78d657c0ec0a8542be6907505176ad23b98f5d6fcd41c3217 |
 | npm:@types/estree@1.0.8 | MIT | https://registry.npmjs.org/@types/estree/-/estree-1.0.8.tgz | 7561f31dad96a845c8fced44f4e8eba1c313289976992ac4a258752289abbfa53e26e3706875ec5f1f5b2eee601bb05458520dd2c90840943f2f5ac87b1e17eb |

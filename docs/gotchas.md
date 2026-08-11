@@ -1,6 +1,6 @@
 # Gotchas
 
-Non-obvious constraints that are still current in Mimir 0.1.0.
+Non-obvious constraints that are still current in Mimir 0.2.0.
 Known defects: [issues.md](issues.md).
 
 ## Terminal

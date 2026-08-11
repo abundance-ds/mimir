@@ -878,6 +878,19 @@ fn app_quit_confirmed(
     app: tauri::AppHandle,
     meetings: tauri::State<'_, meetings::runtime::MeetingRuntime>,
 ) -> Result<(), String> {
+    stop_active_meeting(meetings.inner())?;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+fn app_prepare_relaunch(
+    meetings: tauri::State<'_, meetings::runtime::MeetingRuntime>,
+) -> Result<(), String> {
+    stop_active_meeting(meetings.inner())
+}
+
+fn stop_active_meeting(meetings: &meetings::runtime::MeetingRuntime) -> Result<(), String> {
     if let Some(meeting_id) = meetings
         .snapshot()
         .map_err(|error| error.to_string())?
@@ -887,7 +900,6 @@ fn app_quit_confirmed(
             .stop(&meeting_id)
             .map_err(|error| error.to_string())?;
     }
-    app.exit(0);
     Ok(())
 }
 
@@ -909,6 +921,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--mimir-tracker-background"]),
@@ -1084,6 +1098,7 @@ pub fn run() {
             notify_file_updated,
             settings_changed,
             app_quit_confirmed,
+            app_prepare_relaunch,
             meetings::commands::meetings_snapshot,
             meetings::commands::meetings_library_page,
             meetings::commands::meetings_search_library,

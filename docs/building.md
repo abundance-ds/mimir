@@ -1,21 +1,21 @@
 # Building Mimir
 
-Bun for the JavaScript workspace, Cargo for Rust.
+Bun owns the JavaScript workspace. Cargo owns the Rust workspace.
 
 ## Prerequisites
 
 - Bun 1.3.14
-- Node.js 22 for build/test/release wrappers
+- Node.js 22 for build, test, and release scripts
 - stable Rust with `rustfmt`
 - platform dependencies for Tauri v2
-- macOS Scribe builds: Xcode command-line tools, CMake, and libclang; the
-  embedded whisper.cpp build uses Metal
+- macOS Scribe builds: Xcode command-line tools, CMake, and libclang
 
-Ubuntu CI deps: see `.github/workflows/build.yml`.
+The embedded whisper.cpp build uses Metal on macOS arm64. Ubuntu CI
+dependencies are in `.github/workflows/build.yml`.
 
 ## Development
 
-Install from the lockfile:
+Install the locked dependencies:
 
 ```bash
 bun install --frozen-lockfile
@@ -27,39 +27,37 @@ Run the desktop app:
 bun tauri dev
 ```
 
-On macOS arm64, this command launches the debug executable from
+On macOS arm64, this command launches
 `src-tauri/target/debug/bundle/macos/Mimir.app`. The launcher refreshes the
-bundle after each Rust build, reuses the normal development build cache, and
-preserves Vite hot reload. It uses `APPLE_SIGNING_IDENTITY` from `.env` when
-available. Before Tauri creates threads, the debug executable performs a
-same-PID re-exec that disclaims the launching terminal as the responsible
-process. Together, the signed bundle and this handoff make macOS attribute
-microphone and system-audio permission to Mimir. If the handoff fails, Scribe
-reports a development-host identity instead of treating the bundle ID as
-proof. Without `APPLE_SIGNING_IDENTITY`, the launcher uses an ad-hoc signature
-and warns that the app does not use Mimir's normal development permission
-identity. macOS can bind a development audio grant to the current binary code
-hash, so a Rust rebuild can require one new permission click even with the
-Developer ID signature.
+bundle after each Rust build and keeps Vite hot reload.
 
-Do not bypass this launcher with a bare `cargo run` for Scribe audio checks.
-Build a separate ad-hoc `.app` for an isolated local hardware smoke test:
+The launcher uses `APPLE_SIGNING_IDENTITY` from `.env` when it is
+available. It uses an ad-hoc signature when the identity is absent. A Rust
+rebuild can require one new macOS audio permission click because macOS can bind
+a development grant to the binary code hash.
+
+Do not use a bare `cargo run` for Scribe audio checks. Use this isolated
+hardware smoke app when required:
 
 ```bash
 bun run scribe:smoke-app
 open src-tauri/target/debug/bundle/macos/Mimir.app
 ```
 
-Both development paths are test-only. They do not produce or claim a release
-artifact.
+Development builds are not release artifacts.
 
-Vite binds to `127.0.0.1:1420`. If the port is busy: `lsof -nP -iTCP:1420 -sTCP:LISTEN`.
+Vite binds to `127.0.0.1:1420`. If the port is busy:
 
-`bun run dev` starts only the browser frontend. PTYs, dialogs, file index, Apps, Routines, key storage, and MCP require Tauri.
+```bash
+lsof -nP -iTCP:1420 -sTCP:LISTEN
+```
+
+`bun run dev` starts only the browser frontend. PTYs, dialogs, file index,
+Apps, Routines, key storage, and the local tool server require Tauri.
 
 ## Verification
 
-Dev-loop essentials:
+Run the normal development checks:
 
 ```bash
 bun run test
@@ -68,7 +66,7 @@ bun run docs:check
 bun run check:meetings
 ```
 
-Full CI-equivalent (add Rust):
+Add the Rust checks for the complete CI set:
 
 ```bash
 cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
@@ -77,216 +75,180 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
-Run package scripts through Bun (`scripts/test.mjs`, `scripts/build.mjs` set required Node flags); do not call Vitest or Vite directly for release verification.
+Run package scripts through Bun. The wrapper scripts set required Node flags.
+Do not call Vitest or Vite directly for release verification.
 
-The first clean Scribe build compiles whisper.cpp and can take several minutes.
-The multilingual Whisper Small artifact is not stored in Git or bundled in the
-app; the verified in-product install downloads about 488 MB into
+The first clean Scribe build compiles whisper.cpp and can take several
+minutes. The multilingual Whisper Small file is not in Git or in the app. The
+verified in-product install downloads about 488 MB into
 `~/.mimir/models/stt/`.
 
-See [testing.md](testing.md) for what each command proves, environment limits, and change-to-test routing.
+See [testing.md](testing.md) for change-to-test routing.
 
-Rust development and test profiles keep line-table debugging but disable
-incremental compilation. Scribe's native audio and Whisper graph otherwise
-accumulates several gigabytes of never-pruned incremental state. Cargo still
-does not garbage-collect its native build-output directory; `cargo clean
---manifest-path src-tauri/Cargo.toml` removes only regenerable output when disk space is
-more important than the next build's warm cache.
+Rust development and test profiles keep line-table debugging and disable
+incremental compilation. Use this command only when disk space is more
+important than the next warm build:
+
+```bash
+cargo clean --manifest-path src-tauri/Cargo.toml
+```
 
 ## Packaging
 
 ### Local signed package
 
-Check macOS signing prerequisites:
+Check local signing inputs:
 
 ```bash
 bun run check:signing
 ```
 
-Build the release bundle:
+Build the release:
 
 ```bash
 bun tauri build
 ```
 
-- **macOS arm64**: Tauri imports `APPLE_CERTIFICATE`, applies Developer ID signature, submits through `notarytool`, staples and validates.
-- The bundle targets macOS 14.2+, includes microphone/system-audio purpose
-  strings, and signs with the audio-input entitlement. `bun run
-  check:meetings` statically verifies these inputs before packaging.
-- A signed build must start and finish on the same clean Git commit. The
-  wrapper removes only that version's exact expected DMG before Tauri runs,
-  notarizes that exact path, and refuses macOS architectures other than arm64.
-  It never selects the newest file from a bundle directory.
+The local release uses these credentials:
 
-The `.env` (gitignored, `0600`) holds Apple credentials. Use the Bun launcher (`bun tauri build`), not `source .env` -- avoids shell interpolation of base64 values. `.env.example` records variable names.
-
-| Platform | Required variables |
+| Purpose | Inputs |
 |---|---|
-| macOS | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` |
+| Apple signing and notarization | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` |
+| Tauri updater signing | `TAURI_SIGNING_PRIVATE_KEY` or `TAURI_SIGNING_PRIVATE_KEY_PATH`, plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
 
-GitHub Actions reads these from repository secrets; it never receives the local `.env`.
+`.env` is ignored by Git and must have mode `0600`. Use `bun tauri
+build`; do not source `.env` in a shell.
 
-### CI release candidate
+On the reference Mac, the updater recovery key is
+`~/.config/mimir/release/updater.key`. Its password is in the login Keychain
+under `rs.shoulde.mimir.updater-signing`. CI uses GitHub secrets.
 
-The manual `Verify and package` workflow builds the distribution candidate.
-It does not create a Git tag or a GitHub Release.
+The wrapper:
 
-Before the run, synchronize and commit the version in the three files listed
-under [Versioning](#versioning). The source tree must be clean. Push the exact
-commit, then start and watch the workflow:
+1. requires a clean, unchanged Git commit;
+2. builds only macOS arm64 release artifacts;
+3. signs the app with Developer ID;
+4. submits the exact DMG to Apple;
+5. staples and validates the DMG and app;
+6. creates the updater archive from the final stapled app;
+7. signs that exact archive with the Tauri updater key;
+8. writes and verifies the source-bound release stage.
 
-```bash
-gh workflow run build.yml --ref main
-gh run watch <run-id> --exit-status
-```
-
-The paid macOS job starts only after the Ubuntu verification job passes. A
-successful run uploads one Actions artifact named `mimir-macos-arm64`. The
-artifact is a temporary release candidate. It expires according to the
-repository's Actions retention policy and is not visible on the repository's
-Releases page.
-
-Download it from the run page under **Artifacts**, or use a directory outside
-the repository so the clean-source release check cannot see the download:
-
-```bash
-MIMIR_RUN_ID=<successful-run-id>
-MIMIR_RELEASE_DIR=/absolute/path/outside/repository/mimir-release-candidate
-mkdir -p "$MIMIR_RELEASE_DIR"
-gh run download "$MIMIR_RUN_ID" \
-  --name mimir-macos-arm64 \
-  --dir "$MIMIR_RELEASE_DIR"
-```
-
-The download contains exactly five files:
+The stage contains exactly eight files:
 
 - the versioned arm64 DMG;
-- its source-bound manifest;
+- the versioned `.app.tar.gz` updater;
+- its `.sig`;
+- `latest.json`;
+- the source-bound manifest;
 - `SBOM.spdx.json`;
 - `THIRD_PARTY_LICENSES.md`;
 - `THIRD_PARTY_NOTICES.md`.
 
-### Verify a downloaded macOS candidate
+## Create a release
 
-Use the version in the manifest. Do not assume that the run used the current
-`main` commit.
+The user phrase **create new release** authorizes the agent workflow in
+`AGENTS.md`. The agent selects the SemVer increment from the changes. It asks
+only when the correct increment is ambiguous.
+
+The underlying command is:
 
 ```bash
-MIMIR_MANIFEST="$MIMIR_RELEASE_DIR/Mimir_0.1.0_aarch64.manifest.json"
-MIMIR_DMG="$MIMIR_RELEASE_DIR/Mimir_0.1.0_aarch64.dmg"
-
-test "$(find "$MIMIR_RELEASE_DIR" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 5
-test -f "$MIMIR_DMG"
-test -f "$MIMIR_MANIFEST"
-test -f "$MIMIR_RELEASE_DIR/SBOM.spdx.json"
-test -f "$MIMIR_RELEASE_DIR/THIRD_PARTY_LICENSES.md"
-test -f "$MIMIR_RELEASE_DIR/THIRD_PARTY_NOTICES.md"
-
-MIMIR_SOURCE_COMMIT=$(jq -r '.source.gitCommit' "$MIMIR_MANIFEST")
-MIMIR_SOURCE_TREE=$(jq -r '.source.gitTree' "$MIMIR_MANIFEST")
-test "$(jq -r '.source.dirty' "$MIMIR_MANIFEST")" = false
-test "$(git rev-parse "$MIMIR_SOURCE_COMMIT^{tree}")" = "$MIMIR_SOURCE_TREE"
-
-(
-  cd "$MIMIR_RELEASE_DIR"
-  printf '%s  %s\n' \
-    "$(jq -r '.artifact.sha256' "$MIMIR_MANIFEST")" \
-    "$(jq -r '.artifact.file' "$MIMIR_MANIFEST")" \
-    | shasum -a 256 -c -
-  jq -r '.releaseFiles[] | "\(.sha256)  \(.file)"' "$MIMIR_MANIFEST" \
-    | shasum -a 256 -c -
-)
-
-xcrun stapler validate "$MIMIR_DMG"
-
-MIMIR_MOUNT_DIR=$(mktemp -d /tmp/mimir-release-mount.XXXXXX)
-hdiutil attach -nobrowse -readonly -mountpoint "$MIMIR_MOUNT_DIR" "$MIMIR_DMG"
-codesign --verify --deep --strict --verbose=2 "$MIMIR_MOUNT_DIR/Mimir.app"
-spctl --assess --type execute --verbose=2 "$MIMIR_MOUNT_DIR/Mimir.app"
-hdiutil detach "$MIMIR_MOUNT_DIR"
+bun run release:create -- patch
 ```
 
-Validate the stapled ticket on the DMG. The release wrapper notarizes and
-staples that exact distribution file. It also staples the build-directory app
-after the DMG exists, so the app inside the downloaded DMG does not need its
-own stapled ticket. Its signature and Gatekeeper assessment must still pass.
+Use `minor`, `major`, or an explicit `X.Y.Z` when required.
 
-### Functional smoke before publication
+The command refuses to continue unless:
 
-The package checks prove build provenance, signing, notarization, and file
-integrity. They do not prove that the installed app works on another Mac.
-Before publication, install the candidate from its DMG on a clean test Mac and
-record these results:
+- the branch is `main`;
+- the working tree is clean;
+- `main` matches `origin/main`;
+- the repository is public;
+- all Apple and updater GitHub secrets exist;
+- the three version authorities agree;
+- the tag and GitHub Release do not exist;
+- frontend, documentation, command-sync, and build checks pass.
+
+It updates the three version authorities, refreshes `Cargo.lock`, commits the
+version, creates an annotated tag, and pushes the commit and tag together.
+
+The tag starts the single `Verify and package` workflow. The workflow:
+
+1. runs the complete Ubuntu verification job;
+2. builds, signs, notarizes, and stages macOS arm64;
+3. uploads one Actions artifact;
+4. creates a temporary draft GitHub Release;
+5. uploads and validates all eight files;
+6. publishes the release without a manual action;
+7. checks the public `latest.json` and updater archive.
+
+The draft is only an atomic publication boundary. Users never see an
+incomplete release. There is no manual candidate or manual Publish step.
+
+After the workflow succeeds, run:
+
+```bash
+bun run release:verify -- v0.2.0
+```
+
+This command verifies the published asset inventory, public updater version,
+signature field, archive URL, and archive availability. Do not report release
+success before this check passes.
+
+Do not move a published tag. Do not replace published assets. If a published
+release has a defect, fix it and create a new patch version.
+
+### Manual workflow run
+
+`workflow_dispatch` remains available for CI diagnosis. It verifies and
+packages an Actions artifact, but it does not publish a GitHub Release. It is
+not part of the normal release path.
+
+### First updater-enabled release
+
+Mimir 0.1.0 has no updater code. Each user must install the first
+updater-enabled DMG once. Mimir 0.2.0 is that release.
+
+All later releases use the in-app update flow. The next real release provides
+the first installed-app end-to-end proof. Do not create a disposable test
+release only for this proof.
+
+Updater behavior, UI states, and restart safety are in
+[updates.md](updates.md).
+
+## Release acceptance
+
+The workflow proves source identity, dependency checks, signing,
+notarization, updater signing, and public asset access. It does not prove every
+runtime path on another Mac.
+
+For the first install and material runtime changes, check:
 
 - Finder opens the DMG and copies Mimir to Applications.
 - Gatekeeper opens Mimir without an unidentified-developer warning.
 - The workbench opens, quits, and opens again.
-- A project opens, a file can be edited and saved, and one terminal Activity
-  starts and stops.
-- macOS presents the expected microphone and system-audio permission flows.
+- A project opens and saves an edited file.
+- One terminal Activity starts and stops.
+- macOS shows the expected microphone and system-audio permission flows.
 - Scribe records both real channels, stops, and preserves the meeting.
-- Any release-specific checks in [acceptance.md](acceptance.md) pass.
+- [acceptance.md](acceptance.md) passes for the changed areas.
 
-Check [issues.md](issues.md) before publication. A known release gap must be
-fixed or explicitly accepted and recorded. A successful package job alone is
-not approval to publish.
+If a check fails after publication, make a fix and release a new version. Do
+not change the existing release.
 
-### Publish a GitHub Release
+## Dependency inventory and license policy
 
-Publish only the exact candidate that passed the recorded smoke checks. The
-tag must point to `source.gitCommit` from the manifest. Do not tag the current
-`HEAD` by assumption. A later documentation-only commit does not change the
-candidate's source identity.
+The locked Cargo and Bun inventory is committed as
+`src-tauri/vendor/SBOM.spdx.json`. The release-readable inventory is
+`src-tauri/vendor/THIRD_PARTY_LICENSES.md`. Both files and the Scribe notices
+are in the app and beside each release.
 
-The workflow has read-only repository permissions, so publication is a
-separate owner-approved action. For version `0.1.0`:
+`src-tauri/vendor/license-policy.json` is the review authority. Each locked
+third-party component needs a declared license expression with at least one
+permitted choice. Overrides must identify one exact component and version.
 
-```bash
-MIMIR_RELEASE_TAG=v0.1.0
-MIMIR_SOURCE_COMMIT=$(jq -r '.source.gitCommit' "$MIMIR_MANIFEST")
-MIMIR_RELEASE_NOTES=/absolute/path/to/mimir-0.1.0-release-notes.md
-
-git tag -a "$MIMIR_RELEASE_TAG" "$MIMIR_SOURCE_COMMIT" -m "Mimir 0.1.0"
-git push origin "$MIMIR_RELEASE_TAG"
-
-gh release create "$MIMIR_RELEASE_TAG" \
-  "$MIMIR_RELEASE_DIR/Mimir_0.1.0_aarch64.dmg" \
-  "$MIMIR_RELEASE_DIR/Mimir_0.1.0_aarch64.manifest.json" \
-  "$MIMIR_RELEASE_DIR/SBOM.spdx.json" \
-  "$MIMIR_RELEASE_DIR/THIRD_PARTY_LICENSES.md" \
-  "$MIMIR_RELEASE_DIR/THIRD_PARTY_NOTICES.md" \
-  --verify-tag \
-  --title "Mimir 0.1.0" \
-  --notes-file "$MIMIR_RELEASE_NOTES"
-```
-
-Release notes must record the workflow run, source commit, DMG SHA-256,
-signature result, Gatekeeper result, DMG stapler result, functional smoke
-result, and any accepted gaps. Release assets do not expire with the Actions
-artifact.
-
-Do not move or replace an existing release tag. If code changes after the
-candidate build, commit the change, run all verification again, and create a
-new candidate. If the version already exists as a tag or GitHub Release, bump
-the version before the new build.
-
-### Dependency inventory and license policy
-
-The complete locked Cargo and Bun component inventory is committed as
-`src-tauri/vendor/SBOM.spdx.json` (SPDX 2.3) and the release-readable
-`src-tauri/vendor/THIRD_PARTY_LICENSES.md`. Both files, plus the full-text
-Scribe asset notices, are bundled into the app and staged beside the release
-DMG.
-
-`src-tauri/vendor/license-policy.json` is the review authority. Every
-third-party lock identity needs a declared license expression with at least one
-permitted choice. Unknown license identifiers and expressions with only denied
-choices fail `bun run check:meetings`. Metadata omissions require a narrow,
-component-version-specific override with public evidence and a reason; adding
-a broad default is not allowed.
-
-After changing `Cargo.lock`, `bun.lock`, the policy, or a reviewed embedded
-asset:
+After a lockfile, policy, or reviewed embedded-asset change:
 
 ```bash
 bun run supply-chain:generate
@@ -294,60 +256,47 @@ bun run check:meetings
 git diff -- src-tauri/vendor
 ```
 
-Generation reads Cargo metadata and the public npm registry. The release gate
-itself is offline and verifies exact lock identities, the lock/policy digest,
-the human-readable inventory, model/vendor pins, packaged resources, and the
-license policy. Review the generated diff before committing; generated files
-are never an excuse to skip license review.
+Generation reads Cargo metadata and the public npm registry. CI verifies the
+result against the locks and policy.
 
-The deterministic inventory is complemented by a current advisory scan:
+CI also runs current advisory checks:
 
 ```bash
 cargo install cargo-audit --version 0.22.2 --locked
 bun run check:advisories
 ```
 
-CI runs this before any test or package job. It fails on RustSec
-vulnerabilities and Bun production advisories; the advisory database result
-is time-sensitive evidence and is not embedded into the reproducible SBOM.
+## Parked platforms
 
-A successful macOS release stages exactly five files in a clean
-`release-artifacts` directory under Tauri's target directory: the notarized
-versioned DMG, its source-bound manifest, SPDX SBOM, license inventory, and
-third-party notices.
-The manifest records the immutable Git commit and tree, target, exact release
-materials, byte sizes, and SHA-256 digests without local absolute paths.
-GitHub Actions uploads this directory as one artifact instead of using a DMG
-glob. Before publishing, compare the staged DMG digest with the manifest and
-record the manifest, signing, Gatekeeper, stapler, and functional smoke results
-in the release evidence.
+### Windows
 
-### Parked Windows release
+Windows release packaging is inactive. The launcher rejects Windows release
+builds. Recovery details remain in `scripts/release-env.mjs`,
+`.env.example`, and the parked workflow history.
 
-Not active. Launcher rejects Windows builds; no CI job or Azure credentials in Actions. Restoration recipe: re-enable `windowsSigningConfig(env)` in `scripts/tauri.mjs`, add Windows CI job with `artifact-signing-cli`, restore `AZURE_*` secrets from local `.env`.
+### Linux
 
-### Parked Linux release
+CI compiles and tests Linux. The disabled AppImage and Deb package job remains
+in `.github/workflows/build.yml`.
 
-CI compiles and tests but publishes no package. Disabled AppImage/Debian job in `.github/workflows/build.yml`; flip its `if` condition to restore.
-
-### Versioning
+## Versioning
 
 Keep the version synchronized in:
 
-- `package.json`
-- `src-tauri/Cargo.toml`
-- `src-tauri/tauri.conf.json`
+- `package.json`;
+- `src-tauri/Cargo.toml`;
+- `src-tauri/tauri.conf.json`.
 
-The product name is `Mimir`; the package and crate are `mimir`.
+`bun run release:create` owns the release-time change. The product name is
+`Mimir`. The package and crate name is `mimir`.
 
 ## Local runtime files
 
-Launching the desktop app installs `mimir` and its skill module into
-`~/.mimir/bin/`, plus the Pi extension under `~/.mimir/pi/`. It creates skill
-storage and native projections only as they are used. See
-[agent-setup.md](agent-setup.md) and [docs/_MAP.md](_MAP.md#local-data).
+The desktop app installs the `mimir` CLI and skills under `~/.mimir/`.
+See [agent-setup.md](agent-setup.md) and
+[docs/_MAP.md](_MAP.md#local-data).
 
-API keys saved in Settings use the OS keychain. In debug builds only, key
-resolution may also read process environment variables, the repository `.env`,
-and `~/.mimir/keys.env`. The fallback file is atomically replaced and owner-only
-on Unix; it remains a debug convenience, not release credential storage.
+API keys saved in Settings use the OS keychain. Debug builds can also read
+process environment variables, the repository `.env`, and
+`~/.mimir/keys.env`. The fallback file is a debug convenience. It is not
+release credential storage.

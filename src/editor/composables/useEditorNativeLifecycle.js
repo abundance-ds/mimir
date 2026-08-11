@@ -91,6 +91,34 @@ export function useEditorNativeLifecycle({
     })
   }
 
+  async function prepareAppRelaunch() {
+    if (!isTauriRuntime()) return true
+    return completeNativeQuit({
+      requestClose: options => windowCloseGuard.requestClose(options),
+      flushSettings: () => editorSettings.flush(),
+      confirmQuit: async () => {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const snapshot = await invoke('meetings_snapshot')
+        const activeMeetingId = snapshot?.activeMeetingId ?? snapshot?.active_meeting_id
+        if (activeMeetingId) {
+          const { confirm } = await import('@tauri-apps/plugin-dialog')
+          const accepted = await confirm(
+            'Scribe is recording a meeting. Mimir will stop capture, finish the transcript, and preserve the recording before restart.',
+            {
+              title: 'Stop recording and restart?',
+              kind: 'warning',
+              okLabel: 'Stop and restart',
+              cancelLabel: 'Keep recording',
+            },
+          )
+          if (!accepted) return false
+        }
+        await invoke('app_prepare_relaunch')
+        return true
+      },
+    })
+  }
+
   async function requestEditorWindowClose() {
     const guarded = await windowCloseGuard.requestClose()
     if (guarded !== null) return guarded
@@ -124,6 +152,7 @@ export function useEditorNativeLifecycle({
 
   return {
     dispose,
+    prepareAppRelaunch,
     requestAppQuit,
     scheduleMenuSync,
     start,

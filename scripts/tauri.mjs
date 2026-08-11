@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import {
   argumentValue,
   assertCleanReleaseSource,
@@ -15,6 +15,7 @@ import {
   REPOSITORY_ROOT,
   loadReleaseEnv,
   requireReleaseKeys,
+  requireUpdaterKeys,
 } from './release-env.mjs'
 import { configureMacDevCommand } from './prepare-macos-dev-app.mjs'
 
@@ -36,6 +37,7 @@ let macRelease
 
 if (isMacBuild) {
   requireReleaseKeys(env, APPLE_RELEASE_KEYS, 'Apple')
+  requireUpdaterKeys(env)
 }
 
 const cli = resolve(REPOSITORY_ROOT, 'node_modules/@tauri-apps/cli/tauri.js')
@@ -90,6 +92,25 @@ async function notarizeMacRelease(layout) {
   }
 }
 
+async function createMacUpdater(layout, signingEnv) {
+  if (!existsSync(layout.app)) {
+    throw new Error(`Tauri did not produce the expected application bundle: ${layout.app}`)
+  }
+  rmSync(layout.updater, { force: true })
+  rmSync(layout.updaterSignature, { force: true })
+  await run('tar', [
+    '-czf', layout.updater,
+    '-C', dirname(layout.app),
+    basename(layout.app),
+  ], {
+    env: { ...signingEnv, COPYFILE_DISABLE: '1' },
+  })
+  await run(process.execPath, [cli, 'signer', 'sign', layout.updater], { env: signingEnv })
+  if (!existsSync(layout.updaterSignature)) {
+    throw new Error('Tauri did not sign the final stapled updater archive')
+  }
+}
+
 async function main() {
   if (isWindowsRelease) {
     throw new Error('Windows releases are parked; see docs/building.md for the retained restoration path')
@@ -121,6 +142,7 @@ async function main() {
   await run(process.execPath, [cli, ...args], { env: tauriEnv })
   if (isMacBuild) {
     await notarizeMacRelease(macRelease.layout)
+    await createMacUpdater(macRelease.layout, tauriEnv)
     const after = gitSourceIdentity(REPOSITORY_ROOT)
     assertUnchangedReleaseSource(macRelease.identity, after)
     const manifest = stageRelease({

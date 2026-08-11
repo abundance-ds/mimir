@@ -2,7 +2,7 @@
   "name": "mimir",
   "private": true,
   "packageManager": "bun@1.3.14",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "bin": {
     "mimir": "bin/mimir.mjs"
@@ -18,6 +18,8 @@
     "check:signing": "node scripts/check-signing.mjs",
     "supply-chain:generate": "node scripts/generate-supply-chain.mjs",
     "preview": "vite preview --host 127.0.0.1",
+    "release:create": "node scripts/create-release.mjs",
+    "release:verify": "node scripts/check-published-release.mjs",
     "scribe:smoke-app": "node scripts/build-scribe-smoke-app.mjs",
     "tauri": "node scripts/tauri.mjs",
     "test": "node scripts/test.mjs",
@@ -53,6 +55,8 @@
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-process": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.0.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",

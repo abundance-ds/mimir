@@ -40,4 +40,16 @@ describe('native Editor menu', () => {
     await Promise.resolve()
     expect(quit).toHaveBeenCalledTimes(1)
   })
+
+  it('opens the Updates settings section from the application menu', async () => {
+    const openUpdates = vi.fn()
+    const menu = buildNativeEditorMenuItems([], { openUpdates })
+    const appMenu = menu.find((entry) => entry.text === 'Mimir')
+    const updateItem = appMenu.items.find((entry) => entry.id === 'editor:check-updates')
+
+    updateItem.action()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(openUpdates).toHaveBeenCalledTimes(1)
+  })
 })

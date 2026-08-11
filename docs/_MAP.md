@@ -49,6 +49,7 @@ resizing, rails, widths, and Activity navigation history.
 | Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
+| Installed app updates | [updates](updates.md), [building](building.md) | `stores/appUpdate.js`, `services/appUpdates.js`, update toast/settings, native restart guard, Tauri updater config | update store/UI/native-lifecycle tests; release artifact and feed tests |
 | Build/test/release | [building](building.md), [testing](testing.md) | package scripts, Vite/Vitest config, `src/test/setup.js`, CI workflow, command drift, supply-chain inventory, and source-bound release helpers | full verification set; script unit checks; `src-tauri/tests/mimir_cli_contract.rs` |
 
 ## Frontend map
@@ -107,9 +108,10 @@ resizing, rails, widths, and Activity navigation history.
   [ai-system.md](ai-system.md).
 - Shared UI/settings: `src/shared/styles/` (tokens, themes, diff styles),
   `src/shared/ui/SettingsDialog.vue`, `src/shared/ui/settings/`,
-  `src/stores/settings.js`, `src/shared/workbenchZoom.js`,
+  `src/shared/ui/UpdateToast.vue`, `src/stores/settings.js`,
+  `src/stores/appUpdate.js`, `src/services/appUpdates.js`, `src/shared/workbenchZoom.js`,
   `src/shared/fonts.js`. Docs: [design-system.md](design-system.md),
-  [settings.md](settings.md).
+  [settings.md](settings.md), [updates.md](updates.md).
 
 ## Rust map
 
@@ -199,6 +201,7 @@ ordering: [ipc.md](ipc.md).
 | [synthesis.md](synthesis.md) | product laws |
 | [acceptance.md](acceptance.md) | release behavior contract |
 | [building.md](building.md) | prerequisites, dev loop, packaging |
+| [updates.md](updates.md) | signed update feed, UI states, restart safety |
 | [testing.md](testing.md) | verification suite, test topology, change-to-test routing |
 | [runtime-architecture.md](runtime-architecture.md) | bootstrap, hydration ordering, shutdown |
 | [ipc.md](ipc.md) | service boundary, commands/events, relay ordering, proposal coordination |

@@ -1,9 +1,13 @@
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir, userInfo } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const DEFAULT_ENV_PATH = resolve(REPOSITORY_ROOT, '.env')
+export const DEFAULT_UPDATER_KEY_PATH = resolve(homedir(), '.config/mimir/release/updater.key')
+export const UPDATER_KEYCHAIN_SERVICE = 'rs.shoulde.mimir.updater-signing'
 
 function parseValue(raw) {
   const value = raw.trim()
@@ -48,6 +52,7 @@ export function loadReleaseEnv({
   env.APPLE_CERTIFICATE ||= env.CSC_LINK
   env.APPLE_CERTIFICATE_PASSWORD ||= env.CSC_KEY_PASSWORD
   env.APPLE_PASSWORD ||= env.APPLE_APP_SPECIFIC_PASSWORD
+  loadLocalUpdaterCredentials(env)
   return env
 }
 
@@ -59,6 +64,37 @@ export const APPLE_RELEASE_KEYS = [
   'APPLE_PASSWORD',
   'APPLE_TEAM_ID',
 ]
+
+export function loadLocalUpdaterCredentials(env) {
+  if (!env.TAURI_SIGNING_PRIVATE_KEY && !env.TAURI_SIGNING_PRIVATE_KEY_PATH) {
+    if (existsSync(DEFAULT_UPDATER_KEY_PATH)) {
+      env.TAURI_SIGNING_PRIVATE_KEY_PATH = DEFAULT_UPDATER_KEY_PATH
+    }
+  }
+  if (
+    !env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+    && process.platform === 'darwin'
+    && (env.TAURI_SIGNING_PRIVATE_KEY || env.TAURI_SIGNING_PRIVATE_KEY_PATH)
+  ) {
+    const password = spawnSync('security', [
+      'find-generic-password',
+      '-a', userInfo().username,
+      '-s', UPDATER_KEYCHAIN_SERVICE,
+      '-w',
+    ], { encoding: 'utf8' })
+    if (password.status === 0) {
+      env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = password.stdout.trim()
+    }
+  }
+  return env
+}
+
+export function requireUpdaterKeys(env) {
+  if (!env.TAURI_SIGNING_PRIVATE_KEY?.trim() && !env.TAURI_SIGNING_PRIVATE_KEY_PATH?.trim()) {
+    throw new Error('Updater signing is missing: TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PATH')
+  }
+  requireReleaseKeys(env, ['TAURI_SIGNING_PRIVATE_KEY_PASSWORD'], 'Updater')
+}
 
 export const WINDOWS_RELEASE_KEYS = [
   'AZURE_CODESIGN_ENDPOINT',

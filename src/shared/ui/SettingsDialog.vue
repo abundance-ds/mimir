@@ -67,6 +67,7 @@
                 @open-definition="$emit('openDefinition', $event)"
               />
               <ShortcutsSection v-else-if="activeSection === 'shortcuts'" />
+              <UpdatesSection v-else-if="activeSection === 'updates'" />
               <AboutSection v-else-if="activeSection === 'about'" />
             </div>
           </div>
@@ -88,6 +89,7 @@ import ChatSettingsSection from './settings/ChatSettingsSection.vue'
 import LaunchersSection from './settings/LaunchersSection.vue'
 import AppsSettingsSection from './settings/AppsSettingsSection.vue'
 import ShortcutsSection from './settings/ShortcutsSection.vue'
+import UpdatesSection from './settings/UpdatesSection.vue'
 import AboutSection from './settings/AboutSection.vue'
 import {
   IconX,
@@ -101,6 +103,7 @@ import {
   IconTopologyStar3,
   IconMessages,
   IconMicrophone,
+  IconRefresh,
 } from '@tabler/icons-vue'
 
 const props = defineProps({
@@ -122,6 +125,7 @@ const navGroups = [
   ],
   [
     { id: 'shortcuts',  label: 'Shortcuts',  icon: IconKeyboard },
+    { id: 'updates',    label: 'Updates',    icon: IconRefresh },
     { id: 'about',      label: 'About',      icon: IconInfoCircle },
   ],
 ]
@@ -161,6 +165,7 @@ function mapSection(section) {
   if (['launchers', 'agents'].includes(section)) return 'launchers'
   if (['apps', 'applications'].includes(section)) return 'apps'
   if (['shortcuts'].includes(section)) return 'shortcuts'
+  if (['updates', 'update'].includes(section)) return 'updates'
   if (['about', 'info'].includes(section)) return 'about'
   if (['editor', 'writing'].includes(section)) return 'editor'
   return 'appearance'

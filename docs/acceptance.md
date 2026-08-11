@@ -1,6 +1,6 @@
 # Product acceptance contract
 
-This is the release behavior contract for Mimir 0.1.0. Unit tests support these
+This is the release behavior contract for Mimir 0.2.0. Unit tests support these
 requirements; they do not replace runtime verification.
 
 ## Workbench

@@ -6,6 +6,7 @@ import {
   loadReleaseEnv,
   parseEnv,
   requireReleaseKeys,
+  requireUpdaterKeys,
   windowsSigningConfig,
 } from './release-env.mjs'
 
@@ -46,4 +47,19 @@ test('retains a credential-safe Windows signing recipe while the platform is par
   assert.match(serialized, /AZURE_CODESIGN_ENDPOINT/)
   assert.doesNotMatch(serialized, /AZURE_CLIENT_SECRET/)
   assert.doesNotMatch(serialized, /AZURE_TENANT_ID/)
+})
+
+test('updater signing accepts a secret value or a local key path and requires a password', () => {
+  assert.doesNotThrow(() => requireUpdaterKeys({
+    TAURI_SIGNING_PRIVATE_KEY: 'private',
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'password',
+  }))
+  assert.doesNotThrow(() => requireUpdaterKeys({
+    TAURI_SIGNING_PRIVATE_KEY_PATH: '/private/updater.key',
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'password',
+  }))
+  assert.throws(
+    () => requireUpdaterKeys({ TAURI_SIGNING_PRIVATE_KEY: 'private' }),
+    /TAURI_SIGNING_PRIVATE_KEY_PASSWORD/,
+  )
 })

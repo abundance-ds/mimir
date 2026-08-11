@@ -6,11 +6,13 @@ import {
   WINDOWS_RELEASE_KEYS,
   loadReleaseEnv,
   requireReleaseKeys,
+  requireUpdaterKeys,
   windowsSigningConfig,
 } from './release-env.mjs'
 
 const env = loadReleaseEnv()
 requireReleaseKeys(env, APPLE_RELEASE_KEYS, 'Apple')
+requireUpdaterKeys(env)
 const parkedWindowsValues = WINDOWS_RELEASE_KEYS.filter(key => env[key]?.trim())
 if (parkedWindowsValues.length && parkedWindowsValues.length !== WINDOWS_RELEASE_KEYS.length) {
   requireReleaseKeys(env, WINDOWS_RELEASE_KEYS, 'Parked Windows')
@@ -40,6 +42,7 @@ if (process.platform === 'darwin') {
 }
 
 console.log('Apple signing and notarization inputs are complete.')
+console.log('Tauri updater signing inputs are complete.')
 if (parkedWindowsValues.length) {
   console.log('Parked Windows signing inputs remain complete in local recovery storage.')
 }

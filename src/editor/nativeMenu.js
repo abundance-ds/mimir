@@ -78,6 +78,7 @@ export function buildNativeEditorMenuItems(recentFiles, actions) {
       text: 'Mimir',
       items: [
         { item: { About: { name: 'Mimir' } } },
+        item('editor:check-updates', 'Check for Updates...', null, actions.openUpdates),
         separator(),
         item('editor:settings', 'Settings...', 'CmdOrCtrl+,', actions.openSettings),
         separator(),

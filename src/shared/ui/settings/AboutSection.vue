@@ -2,7 +2,7 @@
   <div class="about-page">
     <div class="about-hero">
       <span class="about-title">Mimir</span>
-      <span class="about-version">v0.1.0</span>
+      <span class="about-version">{{ versionLabel }}</span>
     </div>
 
     <div class="about-links">
@@ -32,13 +32,18 @@
 </template>
 
 <script setup>
-import { onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { IconCopy } from '@tabler/icons-vue'
 import { AGENTS_STARTER, CLAUDE_ALIAS } from '../../agentInstructions.js'
+import { useAppUpdateStore } from '../../../stores/appUpdate.js'
 
+const updates = useAppUpdateStore()
 const copied = ref('')
 const error = ref('')
 let resetTimer = null
+const versionLabel = computed(() => (
+  updates.currentVersion ? `v${updates.currentVersion.replace(/^v/, '')}` : 'v—'
+))
 
 async function copy(kind) {
   error.value = ''
@@ -54,6 +59,7 @@ async function copy(kind) {
   }
 }
 
+onMounted(() => { void updates.loadVersion() })
 onUnmounted(() => clearTimeout(resetTimer))
 </script>
 

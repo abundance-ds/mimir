@@ -13,6 +13,7 @@ import test from 'node:test'
 import {
   argumentValue,
   assertUnchangedReleaseSource,
+  buildUpdaterFeed,
   macReleaseLayout,
   prepareReleaseOutput,
   stageRelease,
@@ -34,6 +35,8 @@ test('mac release layout selects one exact arm64 artifact and rejects other arch
     layout.dmg,
     '/work/mimir/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Mimir_0.1.0_aarch64.dmg',
   )
+  assert.equal(layout.updaterName, 'Mimir_0.1.0_aarch64.app.tar.gz')
+  assert.equal(layout.updaterSignatureName, 'Mimir_0.1.0_aarch64.app.tar.gz.sig')
   assert.throws(() => macReleaseLayout({
     repositoryRoot: '/work/mimir',
     bundleRoot: '/work/bundle',
@@ -61,7 +64,7 @@ test('source identity must remain clean and unchanged across packaging', () => {
   )
 })
 
-test('release staging contains only the exact artifact, manifest, SBOM, inventory, and notices', () => {
+test('release staging contains the exact installer, updater feed, evidence, and notices', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'mimir-release-test.'))
   try {
     const repositoryRoot = resolve(temporary, 'repo')
@@ -93,6 +96,9 @@ test('release staging contains only the exact artifact, manifest, SBOM, inventor
     assert.equal(existsSync(layout.dmg), false)
     assert.equal(existsSync(staleSibling), true)
     writeFileSync(layout.dmg, 'signed-notarized-dmg')
+    mkdirSync(resolve(bundleRoot, 'macos'), { recursive: true })
+    writeFileSync(layout.updater, 'signed-notarized-updater')
+    writeFileSync(layout.updaterSignature, 'signed-updater-signature')
     const manifest = stageRelease({
       repositoryRoot,
       layout,
@@ -106,6 +112,9 @@ test('release staging contains only the exact artifact, manifest, SBOM, inventor
     })
     assert.equal(manifest.source.gitCommit, 'a'.repeat(40))
     assert.equal(manifest.artifact.file, 'Mimir_0.1.0_aarch64.dmg')
+    assert.equal(manifest.updater.archive.file, 'Mimir_0.1.0_aarch64.app.tar.gz')
+    assert.equal(manifest.updater.signature.file, 'Mimir_0.1.0_aarch64.app.tar.gz.sig')
+    assert.equal(manifest.updater.feed.file, 'latest.json')
     assert.equal(manifest.artifact.sha256.length, 64)
     const serialized = readFileSync(
       resolve(layout.stage, 'Mimir_0.1.0_aarch64.manifest.json'),
@@ -132,4 +141,28 @@ test('release staging contains only the exact artifact, manifest, SBOM, inventor
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
+})
+
+test('static updater feed binds the release version, signature, and public asset URL', () => {
+  const layout = macReleaseLayout({
+    repositoryRoot: '/work/mimir',
+    bundleRoot: '/work/mimir/src-tauri/target/aarch64-apple-darwin/release/bundle',
+    productName: 'Mimir',
+    version: '0.2.0',
+    target: 'aarch64-apple-darwin',
+  })
+  const feed = buildUpdaterFeed({
+    identity: { commitTime: '2026-08-11T10:00:00.000Z' },
+    layout,
+    productName: 'Mimir',
+    version: '0.2.0',
+    signature: 'signature',
+  })
+
+  assert.equal(feed.version, '0.2.0')
+  assert.equal(feed.platforms['darwin-aarch64'].signature, 'signature')
+  assert.equal(
+    feed.platforms['darwin-aarch64'].url,
+    'https://github.com/shoulders-ai/mimir/releases/download/v0.2.0/Mimir_0.2.0_aarch64.app.tar.gz',
+  )
 })

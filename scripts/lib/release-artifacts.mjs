@@ -48,12 +48,18 @@ export function macReleaseLayout({
     throw new Error('Mimir Scribe release artifacts are supported only for macOS arm64')
   }
   const stem = `${productName.replaceAll(' ', '_')}_${version}_${architecture}`
+  const updaterStem = `${stem}.app.tar.gz`
   return {
     target: target || 'aarch64-apple-darwin',
     artifactName: `${stem}.dmg`,
     manifestName: `${stem}.manifest.json`,
     dmg: resolve(bundleRoot, 'dmg', `${stem}.dmg`),
     app: resolve(bundleRoot, 'macos', `${productName}.app`),
+    updater: resolve(bundleRoot, 'macos', `${productName}.app.tar.gz`),
+    updaterSignature: resolve(bundleRoot, 'macos', `${productName}.app.tar.gz.sig`),
+    updaterName: updaterStem,
+    updaterSignatureName: `${updaterStem}.sig`,
+    updaterFeedName: 'latest.json',
     stage: resolve(repositoryRoot, 'src-tauri', 'target', 'release-artifacts'),
   }
 }
@@ -95,6 +101,8 @@ export function prepareReleaseOutput(layout) {
   // Remove only the exact artifact expected from this invocation. A successful
   // wrapper run must recreate it; stale sibling DMGs are never candidates.
   rmSync(layout.dmg, { force: true })
+  rmSync(layout.updater, { force: true })
+  rmSync(layout.updaterSignature, { force: true })
 }
 
 export function stageRelease({
@@ -107,9 +115,26 @@ export function stageRelease({
   if (!existsSync(layout.dmg)) {
     throw new Error(`Tauri did not produce the expected release artifact: ${layout.dmg}`)
   }
+  if (!existsSync(layout.updater) || !existsSync(layout.updaterSignature)) {
+    throw new Error('Tauri did not produce the signed macOS updater archive')
+  }
   assertSafeStage(layout.stage)
   const stagedArtifact = resolve(layout.stage, layout.artifactName)
+  const stagedUpdater = resolve(layout.stage, layout.updaterName)
+  const stagedUpdaterSignature = resolve(layout.stage, layout.updaterSignatureName)
+  const stagedUpdaterFeed = resolve(layout.stage, layout.updaterFeedName)
   copyFileSync(layout.dmg, stagedArtifact)
+  copyFileSync(layout.updater, stagedUpdater)
+  copyFileSync(layout.updaterSignature, stagedUpdaterSignature)
+
+  const updaterFeed = buildUpdaterFeed({
+    identity,
+    layout,
+    productName,
+    version,
+    signature: readFileSync(stagedUpdaterSignature, 'utf8').trim(),
+  })
+  writeFileSync(stagedUpdaterFeed, `${JSON.stringify(updaterFeed, null, 2)}\n`, { mode: 0o644 })
 
   const releaseFiles = RELEASE_INPUTS.slice(3).map(relative => {
     const source = resolve(repositoryRoot, relative)
@@ -118,7 +143,7 @@ export function stageRelease({
     return fileRecord(destination)
   })
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     product: productName,
     version,
     target: layout.target,
@@ -129,6 +154,11 @@ export function stageRelease({
       dirty: false,
     },
     artifact: fileRecord(stagedArtifact),
+    updater: {
+      archive: fileRecord(stagedUpdater),
+      signature: fileRecord(stagedUpdaterSignature),
+      feed: fileRecord(stagedUpdaterFeed),
+    },
     materials: RELEASE_INPUTS.slice(0, 3).map(relative => ({
       path: relative,
       ...fileRecord(resolve(repositoryRoot, relative), false),
@@ -157,7 +187,7 @@ export function verifyReleaseStage({ repositoryRoot, layout, identity }) {
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   if (
-    manifest.schemaVersion !== 1
+    manifest.schemaVersion !== 2
     || manifest.source?.gitCommit !== identity.commit
     || manifest.source?.gitTree !== identity.tree
     || manifest.source?.dirty !== false
@@ -166,6 +196,29 @@ export function verifyReleaseStage({ repositoryRoot, layout, identity }) {
   }
   const stagedArtifact = resolve(layout.stage, layout.artifactName)
   assertFileRecord(manifest.artifact, fileRecord(stagedArtifact), 'release artifact')
+  const stagedUpdater = resolve(layout.stage, layout.updaterName)
+  const stagedUpdaterSignature = resolve(layout.stage, layout.updaterSignatureName)
+  const stagedUpdaterFeed = resolve(layout.stage, layout.updaterFeedName)
+  assertFileRecord(manifest.updater?.archive, fileRecord(stagedUpdater), 'updater archive')
+  assertFileRecord(
+    manifest.updater?.signature,
+    fileRecord(stagedUpdaterSignature),
+    'updater signature',
+  )
+  assertFileRecord(manifest.updater?.feed, fileRecord(stagedUpdaterFeed), 'updater feed')
+  const feed = JSON.parse(readFileSync(stagedUpdaterFeed, 'utf8'))
+  const expectedFeed = buildUpdaterFeed({
+    identity: {
+      commitTime: manifest.source.commitTime,
+    },
+    layout,
+    productName: manifest.product,
+    version: manifest.version,
+    signature: readFileSync(stagedUpdaterSignature, 'utf8').trim(),
+  })
+  if (JSON.stringify(feed) !== JSON.stringify(expectedFeed)) {
+    throw new Error('updater feed does not match the staged archive and signature')
+  }
 
   const expectedMaterials = new Map(RELEASE_INPUTS.slice(0, 3).map(relative => [
     relative,
@@ -222,9 +275,34 @@ function assertExpectedStageEntries(layout) {
     'THIRD_PARTY_NOTICES.md',
     layout.artifactName,
     layout.manifestName,
+    layout.updaterName,
+    layout.updaterSignatureName,
+    layout.updaterFeedName,
   ].sort()
   if (JSON.stringify(entries) !== JSON.stringify(expected)) {
     throw new Error(`release staging contains unexpected files: ${entries.join(', ')}`)
+  }
+}
+
+export function buildUpdaterFeed({
+  identity,
+  layout,
+  productName,
+  version,
+  signature,
+  repository = 'shoulders-ai/mimir',
+}) {
+  if (!signature) throw new Error('updater signature is empty')
+  return {
+    version,
+    notes: `${productName} ${version}`,
+    pub_date: identity.commitTime,
+    platforms: {
+      'darwin-aarch64': {
+        signature,
+        url: `https://github.com/${repository}/releases/download/v${version}/${layout.updaterName}`,
+      },
+    },
   }
 }
 
