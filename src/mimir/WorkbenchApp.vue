@@ -135,6 +135,7 @@
         embedded
         @close-request="closeNativeFocusedSurface"
         @new-request="newNativeFocusedSurface"
+        @quick-open-request="openQuickOpen"
         @empty="collapseEmptyEditor"
         @navigate-editor="onEditorNavigate"
         @launch-app="dispatchAppPayload"
@@ -314,6 +315,7 @@ const workspaceBootstrap = useWorkspaceBootstrap({
   activityRuntime,
   launchers,
   appsCatalog,
+  chat,
   workspaceFiles,
   editorFiles,
   toolRuntime,
@@ -582,6 +584,7 @@ const {
   lastFocus: lastWorkbenchFocus,
   newNativeFocusedSurface,
   onKeydown,
+  openQuickOpen,
   rememberWorkbenchFocus,
 } = useWorkbenchKeyboardRouting({
   quickOpen,
@@ -1124,7 +1127,7 @@ async function ensureActivityWorkspace(activity) {
   ) {
     return true
   }
-  return openWorkspace(target, { revealFiles: false })
+  return openWorkspace(target, { activate: false })
 }
 
 async function listAppsForTool() {

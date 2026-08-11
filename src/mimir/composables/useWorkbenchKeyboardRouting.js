@@ -137,6 +137,7 @@ export function useWorkbenchKeyboardRouting({
   }
 
   function openQuickOpen(view = 'root', preferredTargetId = '') {
+    if (quickOpen.value || document.querySelector('[aria-modal="true"]')) return
     quickOpenInitialView.value = view
     quickOpenPreferredTargetId.value = preferredTargetId || ''
     quickOpen.value = true
@@ -190,6 +191,7 @@ export function useWorkbenchKeyboardRouting({
     lastFocus,
     newNativeFocusedSurface,
     onKeydown,
+    openQuickOpen,
     rememberWorkbenchFocus,
   }
 }

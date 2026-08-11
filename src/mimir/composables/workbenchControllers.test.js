@@ -11,6 +11,7 @@ vi.mock('../../services/businessGraph.js', () => graph)
 import { useActivitiesStore } from '../../stores/activities.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useWorkbenchStore } from '../../stores/workbench.js'
+import { normalizedWorkspacePath } from '../activityWorkspace.js'
 import { useActivityLifecycle } from './useActivityLifecycle.js'
 import { useWorkbenchKeyboardRouting } from './useWorkbenchKeyboardRouting.js'
 import { useWorkspaceBootstrap } from './useWorkspaceBootstrap.js'
@@ -450,6 +451,171 @@ describe('Workbench controllers', () => {
     expect(workbench.paneLayout.editor.state).toBe('expanded')
     expect(toolRuntime.start).toHaveBeenCalledTimes(1)
     expect(controller.initialized.value).toBe(true)
+    controller.dispose()
+  })
+
+  it('returns to each workspace Activity for the current app session', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    const workspaceFiles = {
+      workspacePath: '/alpha',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    const editorFiles = {
+      currentFile: { path: '/alpha/notes.md' },
+      activateSessionEntry: vi.fn((entry) => {
+        editorFiles.currentFile = { ...entry }
+        return true
+      }),
+    }
+    activities.upsert(activity('files', { kind: 'files', workspacePath: '' }))
+    activities.upsert(activity('agent:alpha', { workspacePath: '/alpha' }))
+    activities.upsert(activity('agent:beta', { workspacePath: '/beta' }))
+    workbench.openActivity('agent:alpha')
+
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: { initialize: vi.fn(), error: '' },
+      launchers: { load: vi.fn() },
+      appsCatalog: { load: vi.fn() },
+      workspaceFiles,
+      editorFiles,
+      toolRuntime: { start: vi.fn() },
+      diagnostic: ref(''),
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: candidate => (
+        !candidate.workspacePath
+        || normalizedWorkspacePath(candidate.workspacePath)
+          === normalizedWorkspacePath(workspaceFiles.workspacePath)
+      ),
+      getFocusOwner: () => 'none',
+    })
+
+    await controller.openWorkspace('/beta')
+    expect(workbench.activeActivityId).toBe('files')
+    expect(workbench.canGoPreviousActivity).toBe(false)
+
+    workbench.openActivity('agent:beta')
+    editorFiles.currentFile = { path: '/beta/plan.md' }
+    await controller.openWorkspace('/alpha/')
+    expect(workbench.activeActivityId).toBe('agent:alpha')
+    expect(workbench.canGoPreviousActivity).toBe(false)
+    expect(editorFiles.currentFile.path).toBe('/alpha/notes.md')
+
+    await controller.openWorkspace('/beta')
+    expect(workbench.activeActivityId).toBe('agent:beta')
+    expect(workbench.canGoPreviousActivity).toBe(false)
+    expect(editorFiles.currentFile.path).toBe('/beta/plan.md')
+    controller.dispose()
+  })
+
+  it('returns to the selected chat for each workspace without blocking the switch', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    const workspaceFiles = {
+      workspacePath: '/alpha',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    const chat = {
+      activeTarget: '#alpha',
+      config: { enabled: true },
+      targets: [{ id: '#alpha' }, { id: '#beta' }],
+      selectTarget: vi.fn(async (target) => {
+        chat.activeTarget = target
+      }),
+    }
+    activities.upsert(activity('files', { kind: 'files', workspacePath: '' }))
+    activities.upsert(activity('chats', { kind: 'chat', workspacePath: '' }))
+    workbench.openActivity('chats')
+
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: { initialize: vi.fn(), error: '' },
+      launchers: { load: vi.fn() },
+      appsCatalog: { load: vi.fn() },
+      chat,
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn() },
+      diagnostic: ref(''),
+      coreActivities: [
+        { id: 'files', kind: 'files', title: 'Files' },
+        { id: 'chats', kind: 'chat', title: 'Chats' },
+      ],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: () => true,
+      getFocusOwner: () => 'none',
+    })
+
+    await controller.openWorkspace('/beta')
+    workbench.openActivity('chats')
+    chat.activeTarget = '#beta'
+
+    await controller.openWorkspace('/alpha')
+    expect(workbench.activeActivityId).toBe('chats')
+    expect(chat.activeTarget).toBe('#alpha')
+
+    await controller.openWorkspace('/beta')
+    expect(workbench.activeActivityId).toBe('chats')
+    expect(chat.activeTarget).toBe('#beta')
+    expect(chat.selectTarget).toHaveBeenCalledTimes(2)
+    controller.dispose()
+  })
+
+  it('uses Files when a remembered workspace Activity is no longer available', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    const workspaceFiles = {
+      workspacePath: '/alpha',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    activities.upsert(activity('files', { kind: 'files', workspacePath: '' }))
+    activities.upsert(activity('agent:alpha', { workspacePath: '/alpha' }))
+    workbench.openActivity('agent:alpha')
+
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: { initialize: vi.fn(), error: '' },
+      launchers: { load: vi.fn() },
+      appsCatalog: { load: vi.fn() },
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn() },
+      diagnostic: ref(''),
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: candidate => (
+        !candidate.workspacePath || candidate.workspacePath === workspaceFiles.workspacePath
+      ),
+      getFocusOwner: () => 'none',
+    })
+
+    await controller.openWorkspace('/beta')
+    activities.upsert({
+      ...activities.byId('agent:alpha'),
+      status: 'done',
+      archivedAt: '2026-08-11T09:00:00Z',
+    })
+    await controller.openWorkspace('/alpha')
+
+    expect(workbench.activeActivityId).toBe('files')
+    expect(workbench.canGoPreviousActivity).toBe(false)
     controller.dispose()
   })
 })

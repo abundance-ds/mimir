@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue'
 import { openBusinessGraph } from '../../services/businessGraph.js'
+import { normalizedWorkspacePath } from '../activityWorkspace.js'
 import { applyResponsiveZone, responsiveZoneFor } from '../responsiveLayout.js'
 
 export function useWorkspaceBootstrap({
@@ -9,6 +10,7 @@ export function useWorkspaceBootstrap({
   activityRuntime,
   launchers,
   appsCatalog,
+  chat = null,
   workspaceFiles,
   editorFiles,
   toolRuntime,
@@ -21,6 +23,7 @@ export function useWorkspaceBootstrap({
   const initialized = ref(false)
   const responsiveZone = ref('wide')
   const viewportWidth = ref(window.innerWidth)
+  const workspaceViewByPath = new Map()
   let desktopLayout = null
 
   const stopGraphFolderWatch = watch(
@@ -60,7 +63,7 @@ export function useWorkspaceBootstrap({
 
     const savedWorkspace = String(settings.mimirWorkspaceFolder || '').trim()
     if (savedWorkspace) {
-      await openWorkspace(savedWorkspace, { persist: false, revealFiles: false })
+      await openWorkspace(savedWorkspace, { persist: false, activate: false })
     }
 
     const savedActivity = settings.workbenchLayout?.activeActivityId
@@ -160,7 +163,8 @@ export function useWorkspaceBootstrap({
     }
   }
 
-  async function openWorkspace(path, { persist = true, revealFiles = true } = {}) {
+  async function openWorkspace(path, { persist = true, activate = true } = {}) {
+    rememberActiveActivity(workspaceFiles.workspacePath)
     try {
       await workspaceFiles.openWorkspace(path)
       const graphWarning = await mountBusinessGraph(path)
@@ -168,12 +172,83 @@ export function useWorkspaceBootstrap({
       if (persist) settings.set('mimirWorkspaceFolder', path)
       rememberWorkspace(path)
       diagnostic.value = graphWarning
-      workbench.resetActivityHistory('files')
-      if (revealFiles) openCoreActivity('files')
+      const workspaceView = rememberedWorkspaceView(path)
+      const activityId = restorableActivityId(workspaceView)
+      workbench.resetActivityHistory(activityId)
+      restoreWorkspaceDetails(workspaceView, activityId)
+      if (activate) {
+        if (activityId === 'files') openCoreActivity('files')
+        else {
+          focusNarrowPane('activity')
+          workbench.setPaneState('activity', 'expanded')
+        }
+      }
       return true
     } catch (cause) {
       diagnostic.value = `Workspace index failed: ${errorMessage(cause)}`
       return false
+    }
+  }
+
+  function rememberActiveActivity(path) {
+    const workspace = normalizedWorkspacePath(path)
+    const activityId = String(workbench.activeActivityId || '').trim()
+    if (!workspace || !activityId) return
+    const file = editorFiles.currentFile
+    workspaceViewByPath.set(workspace, {
+      activityId,
+      chatTarget: activityId === 'chats' ? String(chat?.activeTarget || '').trim() : '',
+      editorEntry: file?.path
+        ? { path: file.path }
+        : file?.draftId
+          ? { draftId: file.draftId }
+          : null,
+    })
+  }
+
+  function rememberedWorkspaceView(path) {
+    return workspaceViewByPath.get(normalizedWorkspacePath(path)) || null
+  }
+
+  function restorableActivityId(workspaceView) {
+    const activityId = workspaceView?.activityId
+    if (!activityId) return 'files'
+    try {
+      const activity = activities.byId(activityId)
+      if (
+        activity
+        && !activity.archivedAt
+        && !activity.closeRequestedAt
+        && isActivityVisible(activity)
+      ) {
+        return activityId
+      }
+    } catch {
+      // Session memory is optional. A bad candidate must not block a workspace switch.
+    }
+    return 'files'
+  }
+
+  function restoreWorkspaceDetails(workspaceView, activityId) {
+    try {
+      if (workspaceView?.editorEntry) {
+        editorFiles.activateSessionEntry?.(workspaceView.editorEntry)
+      }
+    } catch {
+      // A closed or malformed editor tab does not affect workspace navigation.
+    }
+    if (
+      activityId !== 'chats'
+      || !workspaceView?.chatTarget
+      || !chat?.config?.enabled
+      || !chat.targets?.some(target => target.id === workspaceView.chatTarget)
+    ) {
+      return
+    }
+    try {
+      void Promise.resolve(chat.selectTarget(workspaceView.chatTarget)).catch(() => {})
+    } catch {
+      // Chat restore is best-effort and must never block the Activity surface.
     }
   }
 

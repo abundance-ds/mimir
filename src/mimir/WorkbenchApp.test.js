@@ -30,7 +30,7 @@ vi.mock('../editor/App.vue', async () => {
         hideSidebar: Boolean,
         embedded: Boolean,
       },
-      emits: ['closeRequest', 'empty', 'navigateEditor', 'newRequest'],
+      emits: ['closeRequest', 'empty', 'navigateEditor', 'newRequest', 'quickOpenRequest'],
       setup(_props, { expose }) {
         expose({
           mimirOpen: editorOpen,
@@ -1196,6 +1196,26 @@ describe('WorkbenchApp', () => {
     }))
     await nextTick()
     expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
+  })
+
+  it('opens Quick Open from native macOS Go to unless a modal owns input', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const modal = document.createElement('div')
+    modal.setAttribute('aria-modal', 'true')
+    document.body.append(modal)
+
+    try {
+      wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('quickOpenRequest')
+      await nextTick()
+      expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    } finally {
+      modal.remove()
+    }
+
+    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('quickOpenRequest')
+    await nextTick()
+
+    expect(wrapper.get('[data-quick-open]').exists()).toBe(true)
   })
 
   it('opens New activity on Cmd+N in a CLI panel with its launcher selected', async () => {
