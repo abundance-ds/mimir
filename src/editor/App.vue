@@ -277,6 +277,7 @@ const emit = defineEmits([
   'launchApp',
   'navigateEditor',
   'newRequest',
+  'quickOpenRequest',
 ])
 const editorShellRef = ref(null)
 
@@ -697,6 +698,10 @@ function requestEmbeddedNew() {
   emit('newRequest')
 }
 
+function requestEmbeddedQuickOpen() {
+  emit('quickOpenRequest')
+}
+
 function focusModal(container) {
   if (!container) return
   if (!modalReturnFocus || !modalReturnFocus.isConnected) {
@@ -861,6 +866,7 @@ const { requestAppQuit } = nativeLifecycle
 
 function nativeMenuActions() {
   return {
+    openQuickOpen: props.embedded ? requestEmbeddedQuickOpen : undefined,
     newFile: props.embedded ? requestEmbeddedNew : createBlankFile,
     openFile: onOpenDialog,
     openRecent: onOpenRecent,

@@ -145,7 +145,7 @@ describe('Editor Apps Settings bridge', () => {
     wrapper.unmount()
   })
 
-  it('hands native New to the Workbench when the Editor is embedded', async () => {
+  it('hands native Go to and New to the Workbench when the Editor is embedded', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(App, {
@@ -171,8 +171,10 @@ describe('Editor Apps Settings bridge', () => {
     const actions = nativeMenu.install.mock.calls.at(-1)[0].actions
     const initialFiles = useFileStore().openFiles.length
 
+    actions.openQuickOpen()
     actions.newFile()
 
+    expect(wrapper.emitted('quickOpenRequest')).toHaveLength(1)
     expect(wrapper.emitted('newRequest')).toHaveLength(1)
     expect(useFileStore().openFiles).toHaveLength(initialFiles)
     wrapper.unmount()

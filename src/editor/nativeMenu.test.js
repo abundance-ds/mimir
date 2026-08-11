@@ -2,6 +2,19 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildNativeEditorMenuItems } from './nativeMenu.js'
 
 describe('native Editor menu', () => {
+  it('bridges the macOS Go to accelerator to the embedded Workbench', async () => {
+    const openQuickOpen = vi.fn()
+    const menu = buildNativeEditorMenuItems([], { openQuickOpen })
+    const fileMenu = menu.find((entry) => entry.text === 'File')
+    const goToItem = fileMenu.items.find((entry) => entry.id === 'workbench:go-to')
+
+    expect(goToItem.accelerator).toBe('CmdOrCtrl+P')
+    goToItem.action()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(openQuickOpen).toHaveBeenCalledTimes(1)
+  })
+
   it('delegates the macOS close accelerator through the supplied focus-aware action', async () => {
     const closeTab = vi.fn()
     const menu = buildNativeEditorMenuItems([], { closeTab })

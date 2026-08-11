@@ -91,6 +91,12 @@ export function buildNativeEditorMenuItems(recentFiles, actions) {
     {
       text: 'File',
       items: [
+        ...(actions.openQuickOpen
+          ? [
+              item('workbench:go-to', 'Go to...', 'CmdOrCtrl+P', actions.openQuickOpen),
+              separator(),
+            ]
+          : []),
         item('editor:new-file', 'New File', 'CmdOrCtrl+N', actions.newFile),
         item('editor:open-file', 'Open File...', 'CmdOrCtrl+O', actions.openFile),
         {
