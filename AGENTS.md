@@ -8,7 +8,4 @@
 - One owner per topic: feature detail lives in its owning doc, never
   duplicated; the README stays orientation and minimal setup.
 - Follow ASD-STE100 in ALL user communication. Without exception.
-- If the user says “create new release,” follow `docs/building.md`, select the
-  next SemVer version, and run the tag release flow.
-- Do not report release success until the GitHub Release and public updater
-  feed pass the post-publication checks.
+- If the user asks to create a release, follow `docs/building.md`.
