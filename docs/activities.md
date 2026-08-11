@@ -62,11 +62,14 @@ Scope is captured in the Activity origin at launch; it does not change later
 when a launcher preset is edited. `workspacePath` names the owning project,
 while `launch.cwd` remains the process working directory.
 
-Workspace switches open Files and reset Activity Back/Forward navigation so it
-cannot cross projects implicitly. Closed History browses the open project
-only; a search term reaches all projects, open-project matches first.
-Explicitly restoring an Activity from another workspace opens that workspace
-first. The
+For the current app session, each workspace remembers its active Activity, its
+selected chat when Chats is active, and its active open Editor tab. Returning
+to a workspace restores the available parts of that view and opens Files when
+the Activity is no longer available. Each switch resets Activity Back/Forward
+navigation, so it cannot cross projects implicitly. This memory is not
+persisted. Closed History browses the open project only; a search term reaches
+all projects, open-project matches first. Explicitly restoring an Activity
+from another workspace opens that workspace first. The
 project switcher reports retained Activity counts and `needs-input` work for
 recent workspaces.
 
