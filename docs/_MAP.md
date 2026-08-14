@@ -58,7 +58,7 @@ resizing, rails, widths, and Activity navigation history.
   `src/mimir/components/` (shell, rails, sidebar, project switcher,
   quick-open, pane host), `src/mimir/composables/` (Activity lifecycle,
   bootstrap, keyboard routing, resize, pointer reorder),
-  `src/mimir/quickOpenResults.js` (`/`, `@`, `+` scopes). Docs:
+  `src/mimir/quickOpenResults.js` (grouping, scope grammar, ranking, bounds). Docs:
   [workbench-design.md](workbench-design.md).
 - Activities: `src/mimir/activities/` (Terminal, Files, App, Routines, Chat
   surfaces), `src/stores/activities.js` (records),

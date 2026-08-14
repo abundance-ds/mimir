@@ -17,6 +17,11 @@ production-verified again.
 ## Everyday interaction
 
 - Unread: one dot per room, aggregate dot on Chats header, dock badge follows total. Muting suppresses alerts, not unread state.
+- When the Sidebar is a rail, one Chats hub opens the last room and an anchored
+  switcher beside the rail. The switcher lists every channel and DM with its
+  active, presence, and unread state, then offers New channel or message. It
+  supports Arrow keys, Home/End, Enter/Space, Escape, and Tab without trapping
+  focus.
 - Cmd/Ctrl+P finds rooms by name/topic when query present; rooms do not crowd default results.
 - Dense transcript layout; consecutive messages group. Sender groups open with a monogram chip (robot glyph in accent for agents); hover/focus on a grouped message reveals its gutter timestamp. Message bodies are selectable. One-level replies with jump. Day boundaries, New messages marker, timestamps, agent provenance, code blocks, links.
 - Hover/focus message toolbar: one-level reply, five-reaction toggle, inline edit (author, short), deliberate delete confirmation (stable tombstone). Copied `mimir://chat/<target>/<message>` link opens exact cached message.

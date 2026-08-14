@@ -70,12 +70,19 @@ The permanent rail system is the signature:
 - Row geometry stays aligned between expanded and collapsed Sidebar states.
 - The project mark opens the same teleported current/recent-folder switcher in
   expanded and rail states; switching never requires first expanding Sidebar.
-  Recent-project rows report retained Activity counts or `needs input`; the
-  workspace projection and background-runtime contract live in
+  The trigger alone identifies the current project. Its anchored switcher
+  focuses the filter immediately, shows a bounded recent set when empty, and
+  searches the complete retained project history by name or path. Project rows
+  contain only name and parent path. Projects with live Activities remain
+  searchable without exposing Activity counts or status. Open project and
+  Create project remain keyboard-accessible final actions. The display bound
+  lives in `WorkspaceSwitcher.vue`.
+  The workspace projection and background-runtime contract live in
   [activities.md](activities.md#workspace-projection).
 - Tools remain directly available. Chats and Activities have independent
-  disclosure controls in the expanded Sidebar; rail mode keeps stable
-  destinations and live Activities available. The Activities `+` and
+  disclosure controls in the expanded Sidebar. Rail mode keeps one Chats hub,
+  whose room switcher is defined in [chat.md](chat.md), plus stable destinations
+  and live Activities. The Activities `+` and
   Cmd/Ctrl+P expose fresh-run sources without duplicating them as permanent
   rows. Tools keep a persistent manual order via pointer drag or
   Shift+Alt+Up/Down. App management lives in Settings.
@@ -86,12 +93,14 @@ The permanent rail system is the signature:
 - Expanded Sidebar Activity rows support multi-selection: Cmd/Ctrl+click
   toggles a row, Shift+click extends a range from the last toggle (or the
   active Activity). A selection strip above the rows names the count and
-  offers batch Archive (stopped durable rows) and Delete (stopped rows);
+  offers batch Archive (stopped durable or terminal rows) and Delete (stopped
+  rows);
   running rows are never batch-archived or batch-deleted. When the Sidebar
   owns close focus, Cmd/Ctrl+W and native Close close every selected row
-  through the normal close path (stop live runs, archive durable, clear
-  ephemeral). Escape (outside menus, rename, and the content panes), a plain
-  activation click, or collapsing to the rail clears the selection.
+  through the normal close path (stop live runs, archive durable and terminal
+  rows, clear other ephemeral rows). Escape (outside menus, rename, and the
+  content panes), a plain activation click, or collapsing to the rail clears
+  the selection.
 - Activity and Editor never both remain railed.
 - Restore controls live in adjacent pane headers so the shell is recoverable.
 
@@ -107,12 +116,27 @@ recreate an overflowing two-pane split.
 
 ## Go to
 
-Cmd/Ctrl+P opens a compact launcher near window top.
+Cmd/Ctrl+P opens a compact grouped launcher near window top.
 
-- Empty view: Start new activity, Tools, recent files, Reopen last closed (open project only). Entering Start new activity drills into launch sources; Back/Backspace/Escape returns.
+- Empty view: Start new activity, Tools, recent projects, recent files, and
+  Reopen last closed (open project only). Entering Start new activity drills
+  into launch sources; Back/Backspace/Escape returns.
 - Current Activities excluded (Option/Alt+Cmd/Ctrl+Left/Right cycles them).
-- Search: Tools, launch sources, closed History, indexed files. Prefix filters: `/` files, `@` History, `+` New activity.
-- `@` History browses the open project only; the empty state points to search. A search term reaches every project, open-project matches first; rows from another project carry a project chip, and selecting one switches to that project before restoring.
+- Without a prefix, typing filters New activity, Tools, Projects, Files, Chats,
+  and History together. A group is present only when it has a match. Groups
+  keep that order and show a bounded mixed result set; exact and name-prefix
+  matches rank first inside a group. Arrow keys cross group boundaries and
+  skip headings. Result bounds live in `quickOpenResults.js`.
+- Typed scopes are `n:` New activity, `t:` Tools, `p:` Projects, `f:` Files,
+  `c:` Chats, and `h:` History. A scoped search shows the full bounded result
+  set for that group. Group headings teach their scope prefix.
+- `h:` History browses the open project only; the empty state points to search.
+  A search term reaches every project, open-project matches first; rows from
+  another project carry a project chip, and selecting one switches to that
+  project before restoring.
+- `p:` browses every retained project except the current one. With an empty
+  term it also offers Open project and Create project. A project result
+  switches directly.
 - Cmd/Ctrl+N in CLI agent or terminal focus opens Go to in New activity with current launcher selected. Editor, Files, Routines keep local Cmd/Ctrl+N meanings.
 - Autocorrect, autocapitalize, autocomplete, and spellcheck disabled on search fields.
 

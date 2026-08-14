@@ -87,8 +87,9 @@ Do not bypass these queues with a direct invoke or assignment.
 
 `createSessionSnapshot` stores:
 
-- clean named files as path only;
-- dirty named files as path + recovery content + `dirty: true`;
+- clean named files as path plus optional project owner;
+- dirty named files as path + recovery content + `dirty: true` plus optional
+  project owner;
 - nonempty drafts as content + stable `draftId`;
 - recent files, active persisted index, and zoom.
 

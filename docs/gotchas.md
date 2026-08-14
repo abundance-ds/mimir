@@ -103,11 +103,13 @@ Durable Activity metadata and bounded scrollback survive. PTY and child handles
 do not. A record restored after Mimir exits becomes interrupted and can start a
 new continuation where its CLI supports one.
 
-### Archive and clear require an ended durable Activity
+### Archive and clear require an ended Activity
 
-The supervisor rejects archive/restore for ephemeral records and archive/clear
-for live records. Keep those rules in the native owner; hiding a menu item is
-not enforcement.
+The supervisor rejects restore for all ephemeral records, archive for ephemeral
+non-terminal records, and archive/clear for live records. Explicit archive or
+Close promotes a plain terminal from ephemeral to durable before it enters
+History. Keep those rules in the native owner; hiding a menu item is not
+enforcement.
 
 ### `updatedAt` is a live stamp, not a stable sort key
 
@@ -264,6 +266,15 @@ The Editor diff is presentation; the native proposal coordinator is lifecycle
 authority. Proposal-backed accept/reject paths must report their outcome before
 dismissing the review. If reporting fails, leave the diff open with a visible
 retryable error.
+
+### Visible Editor tab indexes are projection indexes
+
+The embedded tab strip contains the active project's tabs plus global files
+and drafts. Its indexes are not indexes into `openFiles`; translate through
+each visible tab's `fileIndex`. Flush CodeMirror before changing the project
+projection. Bind a single-file diff to the file id, not only the project or
+path, or an accept action can change the wrong buffer. The full contract is in
+[editor-system.md](editor-system.md).
 
 ### Ghost positions become stale on any edit
 

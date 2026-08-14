@@ -12,9 +12,10 @@ requirements; they do not replace runtime verification.
 - Tools contains stable singleton surfaces. The Activities `+` and
   Cmd/Ctrl+P expose sources that create a fresh run; Activities contains only
   the active working set.
-- The project switcher shows the current folder, recent folders, and an
-  explicit native folder-picker action in both Sidebar states. Recent folders
-  report retained Activity counts or work that needs input.
+- Project switching and Cmd/Ctrl+P follow the shell navigation contract in
+  [workbench-design.md](workbench-design.md#rail-contract) and
+  [workbench-design.md](workbench-design.md#go-to). This acceptance contract
+  does not duplicate their result limits, scope grammar, or row content.
 - The Sidebar has no Archived list. Closed durable work is searchable and
   restorable through Cmd/Ctrl+P History.
 - Activity and Editor can each collapse to a mounted 44px rail.
@@ -30,13 +31,9 @@ requirements; they do not replace runtime verification.
   snapshot order on Workbench teardown and before confirmed native quit.
 - Changing Activity leaves Editor tabs, selection, unsaved state, and review
   state intact.
-- Cmd/Ctrl+B toggles the Sidebar and Cmd/Ctrl+P opens the compact Go to panel.
-- Empty Go to shows Start new activity first, then Tools, recent files, and
-  Reopen last closed. Entering Start new activity replaces the root results
-  with only launch sources; Back, empty-query Backspace, or Escape returns.
-  `/` scopes files, `@` scopes closed History, and `+` scopes fresh-run
-  sources; a typed query can find chat rooms without adding them to the empty
-  default view; live Activities stay on the cycle shortcut.
+- Cmd/Ctrl+B toggles the Sidebar and Cmd/Ctrl+P opens the grouped Go to panel
+  defined in [workbench-design.md](workbench-design.md#go-to). Live Activities
+  stay on the cycle shortcut.
 - Go to traps and restores focus, ignores stale async results, and contains
   workbench shortcuts; Escape or Cmd/Ctrl+W closes it first from the root. Its
   top edge stays at a fixed near-window-top offset while subviews replace
@@ -57,8 +54,9 @@ requirements; they do not replace runtime verification.
   including Terminal, without duplicating the stable Chats workspace; it
   remains available in the collapsed Sidebar and is fully keyboard-operable.
 - Native PTY launches preserve exact argv boundaries, cwd, and environment.
-- Plain terminals are ephemeral. Agent and routine Activities persist bounded
-  scrollback and final state across relaunch.
+- Plain terminals start ephemeral and become durable when the user archives or
+  closes them. Agent and routine Activities are durable from launch. Durable
+  Activities persist bounded scrollback and final state across relaunch.
 - Live output streams once, replay is ordered, resize reaches the PTY, and stop
   is idempotent.
 - Terminal and agent surfaces use xterm 6 WebGL when available and remain
@@ -170,13 +168,25 @@ requirements; they do not replace runtime verification.
 
 - Opening a workspace builds a native reviewable-file index sorted by most
   recently modified first with deterministic tie-breaking.
-- Path filtering remains responsive and supports keyboard selection.
-- Content search is cancellable and bounded by result, file, and byte limits.
+- The adaptive file ledger shows Git state, modification time, file size, and
+  an always-visible favorite control. Lower-priority metadata leaves as the
+  Activity pane narrows, without changing row geometry.
+- Path filtering remains responsive and supports keyboard selection. A visible
+  scope control exposes cancellable content search bounded by result, file,
+  and byte limits.
 - Project is the default and exposes a lazy expandable directory tree; Recent
   follows Editor-open history, and Favorites persists relative paths per
   workspace.
+- Switching projects hides tabs owned by other projects without closing them.
+  Dirty buffers, previews, and reviews return with their project. Global files
+  and untitled drafts stay visible. Closing the last visible tab does not close
+  a hidden project tab.
+- Recent shows and clears only the active project's entries. A single-file
+  review renders and applies only when its exact target tab is active.
 - A Project query uses the complete native file index rather than only loaded
   tree branches.
+- Git folders show changed-descendant counts. The footer summary opens a named,
+  one-click-clearable Git-change queue that also represents deleted paths.
 - Single-click opens or reuses a clean preview tab; Enter/double-click pins the
   tab. Text mounts CodeMirror, PDFs render in the Editor, and unsupported
   resources expose metadata plus default-app/reveal actions.

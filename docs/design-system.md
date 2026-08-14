@@ -7,8 +7,10 @@ This document defines the current visual and interaction rules for Mimir.
 
 - Every property change has an on-surface control; chords accelerate, never gate.
 - No hidden/sticky filters; every active filter named, announced, one-click cleared.
-- Spell states out (`overdue`, `waiting`, `due 7d`). Type floor: 9px UI, 10px row data.
-- Color never sole meaning carrier — always paired with glyph, word, or position. Accent = selection/active agents; `rem` = overdue/diagnostics; rest is ink hierarchy.
+- Spell states out (`overdue`, `waiting`, `due 7d`) except in the learned,
+  fixed-position Activity meta instrument. Type floor: 9px UI, 10px row data.
+- Color is paired with a glyph, word, or stable instrument position. Accent =
+  selection/active agents; `rem` = overdue/diagnostics; rest is ink hierarchy.
 - Hover: full-width `chrome-mid` band, full-ink text. Never reveals content, moves geometry, or erases surface separation. Selection: `accent-soft` band.
 - Native desktop behavior: fast hover, visible keyboard focus, stable geometry.
 
@@ -54,6 +56,8 @@ primary text to quiet metadata. Do not invent ad-hoc gray values.
 - `accent` and `accent-soft`: selection, current state, focus, primary action
 - `add`: successful state and inserted diff content
 - `rem`: failure state and removed diff content
+- `attn`: orange intervention marker
+- `info`: blue unread/new-information marker
 - `rule` and `rule-light`: major and row-level structure
 
 ### Themes
@@ -73,13 +77,16 @@ Active stacks are defined in `src/shared/styles/app.css` and
 |---|---|
 | UI, status, and prose | native system UI |
 | paths, code, terminal, flags, metadata | native system monospace |
+| Editor authoring and diff text | bundled Commit Mono variable font |
 
 There is no serif choice. Editor font choices are the single source in
 `src/shared/fonts.js`; an old saved `serif` preference migrates to system Sans.
-Unused IBM Plex Sans and Mono faces remain in `fonts.css` only as reversible
-experiment assets and are not selected by active tokens. UI type is usually
-9–13px. Metadata may be uppercase only when short; sentences remain normal
-case.
+Commit Mono uses weight 450 on light themes and 400 on dark themes. The Editor
+uses a 1.35 line-height ratio and disables discretionary ligatures. System Mono
+and Sans remain selectable alternatives. Unused IBM Plex Sans and Mono faces
+remain in `fonts.css` only as reversible experiment assets and are not selected
+by active tokens. UI type is usually 9–13px. Metadata may be uppercase only
+when short; sentences remain normal case.
 
 ## Components
 
@@ -95,6 +102,9 @@ Sidebar, Files, Apps, and Routines rows use full-width hover backgrounds.
 Selection uses `accent-soft`, not an accent-filled card. Primary labels use
 Sans at 12px; paths, time, schedule, and status detail use Mono at 9px or
 larger. Sidebar rows are 32px high; denser Files rows are 28px high.
+Activity rows reserve the right meta position for the working grid or one
+signal dot plus compact relative time. Activity identity icons have no status
+overlays.
 
 ### Buttons and inputs
 
@@ -138,6 +148,6 @@ Tailwind utilities.
   meaning alone.
 - Keyboard collections expose selection and Enter activation.
 - Use `aria-live` or status roles for asynchronous feedback.
-- Reduced-motion users receive state changes without decorative animation.
+- Reduced-motion variants are optional, not a product requirement.
 - Never encode status by color alone; pair it with label, shape, title, or
   position.

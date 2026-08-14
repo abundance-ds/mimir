@@ -21,9 +21,12 @@ directory structure would disappear and expansion would require a full scan.
 - Project flattens `treeChildren` according to `expandedDirectories`. Expanding
   a directory lazy-loads only that directory. A non-empty Project query
   switches to flat native index results rather than filtering the loaded tree.
-- Recent is `files.recentFiles` from the Editor store, not index modification
-  order. Indexed metadata enriches a path when available; a fallback row keeps
-  an editor recent visible when it is absent from the current index.
+- Recent is the active workspace subset of `files.recentFiles` from the Editor
+  store, not index modification order. Indexed metadata enriches a path when
+  available; a fallback row keeps an in-workspace editor recent visible when
+  it is absent from the current index. Paths from another project are retained
+  in history but do not appear as missing rows in the open project. Clear
+  Recent removes only the active project's entries in the embedded Workbench.
 - Favorites persist under
   `settings.workbenchFileFavorites[normalizedWorkspacePath]` as
   `{ relativePath, isDirectory }` records. They resolve against the loaded
@@ -31,8 +34,22 @@ directory structure would disappear and expansion would require a full scan.
   UI prove a fallback is missing.
 - Favorite directories can expose their loaded descendants. Renaming a
   directory rewrites favorites for the directory and every descendant.
-- Git status is loaded independently by `FilesActivity.vue`; directory status
-  is a derived descendant marker and is not stored in either file projection.
+- Files is an adaptive ledger. At ordinary Activity widths each row aligns
+  Name, Git, Modified, Size, and Favorite. Size leaves first as the pane
+  narrows, then Modified; the selected file's metadata moves to the footer at
+  the minimum pane width. Directory time and size show `—` because a folder
+  timestamp is not a reliable summary of its descendants. Favorite controls
+  remain visible instead of appearing only on hover.
+- Paths filters names and relative paths. Contents runs the bounded native
+  content search and shows file, line, column, and excerpt. The scope control
+  remains visible, and Recent/Favorites content results stay inside their
+  current projection.
+- Git status is loaded independently by `FilesActivity.vue`; folders show a
+  changed-descendant count rather than one inherited status. The footer count
+  is a visible filter control. In Project it opens a complete flat Git-change
+  queue with parent paths, including deleted or not-yet-loaded entries. The
+  named `Git changes` filter composes with path/content search and clears from
+  the surface.
 
 `FilesActivity.vue` composes ephemeral surface state while focused controllers
 under `src/mimir/files/` own selection/navigation, context-menu lifetime,
@@ -61,7 +78,9 @@ files are not sent through the UTF-8 command.
 
 Single-click requests `preview: true` (reuses an existing clean preview tab).
 Enter/double-click pins. Editing a preview or reopening it pinned clears
-preview status. Resource previews bypass CodeMirror and inline AI.
+preview status. Preview reuse is limited to the visible workspace projection,
+so switching projects does not replace a hidden preview. Resource previews
+bypass CodeMirror and inline AI.
 
 For Editor reconciliation, preview lifecycle, and save semantics see
 [editor-system.md](editor-system.md).
@@ -198,7 +217,7 @@ repoint or release.
 |---|---|---|
 | scan, ordering, ignore, path/content query | `file_index.rs`, `file_index_commands.rs`, `fileIndex.js`, `workspaceFiles.js`, Quick Open | native index tests; store and Quick Open tests |
 | tree load/expand/refresh | `workspace_files.rs`, `workspaceFileOperations.js`, `workspaceFiles.js`, `FilesActivity.vue` | native workspace-file, service, store, Files Activity tests |
-| row visuals, focus, selection, context actions | `FilesActivity.vue`, `mimir/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity and file-controller tests |
+| row ledger, metadata formatting, focus, selection, context actions | `FilesActivity.vue`, `mimir/files/fileLedger.js`, `mimir/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity, ledger, and file-controller tests |
 | favorites | `mimir/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
 | external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |

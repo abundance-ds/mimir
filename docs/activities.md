@@ -63,15 +63,16 @@ when a launcher preset is edited. `workspacePath` names the owning project,
 while `launch.cwd` remains the process working directory.
 
 For the current app session, each workspace remembers its active Activity, its
-selected chat when Chats is active, and its active open Editor tab. Returning
+selected chat when Chats is active, and its active visible Editor tab. Returning
 to a workspace restores the available parts of that view and opens Files when
 the Activity is no longer available. Each switch resets Activity Back/Forward
-navigation, so it cannot cross projects implicitly. This memory is not
-persisted. Closed History browses the open project only; a search term reaches
-all projects, open-project matches first. Explicitly restoring an Activity
-from another workspace opens that workspace first. The
-project switcher reports retained Activity counts and `needs-input` work for
-recent workspaces.
+navigation, so it cannot cross projects implicitly. This view memory is not
+persisted. Editor tab projection is owned by
+[editor-system.md](editor-system.md). Closed History browses the open project
+only; a search term reaches all projects, open-project matches first.
+Explicitly restoring an Activity from another workspace opens that workspace
+first. Project-switcher presentation and search behavior are owned by
+[workbench-design.md](workbench-design.md#rail-contract).
 
 ## Lifecycle
 
@@ -92,9 +93,11 @@ ordered record subscription for upserts, status, and exit.
   token prevents rapid active/inactive switching from stranding a surface
   without a listener.
 
-Plain terminals are ephemeral. Agent and routine runs are durable and persist
-bounded scrollback under `~/.mimir/activities/`. Retained scrollback defaults to
-1 MB for terminals and 2 MB for durable agent/routine runs
+Plain terminals start ephemeral. Archive or Close (Cmd/Ctrl+W) promotes a
+terminal to durable retention and preserves it in History. Agent and routine
+runs are durable from launch. Durable Activities persist bounded scrollback under
+`~/.mimir/activities/`. Retained scrollback defaults to 1 MB for terminals and
+2 MB for durable agent/routine runs
 (`DEFAULT_TERMINAL_SCROLLBACK_BYTES` / `DEFAULT_DURABLE_SCROLLBACK_BYTES` in
 `supervisor.rs`); `ActivitySpawnRequest.scrollback_byte_cap` overrides the cap
 per spawn. Durable records restore after relaunch; any process that was live
@@ -106,6 +109,23 @@ Events project upsert/status/exit, while the initial list closes the startup
 gap. Native persistence uses a single batching worker that keeps the latest
 save/delete per Activity path; `activity_flush` and shutdown wait for its
 acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
+
+## Sidebar presentation
+
+The Sidebar presents observable conversation state, not every supervisor
+status. It deliberately does not distinguish `done` from `idle`:
+
+- `starting` or `working`: animated 3×3 working grid;
+- `needs-input`: orange `attn` dot and relative time;
+- output received while another Activity is selected: pale blue `info` dot
+  and relative time, cleared when selected;
+- any exposed process, provider, or resume error: red `rem` dot and relative
+  time;
+- all other states: relative time only.
+
+Activity icons remain clean. The right meta position is the only status
+instrument. Compact time uses `now` for the first minute, then whole minutes,
+hours, days, weeks, months, or years, refreshed by one minute ticker.
 
 ## Terminal surface
 
@@ -119,6 +139,14 @@ Launcher detection, session identity, continuation adapters, and the respawn
 contract are owned by [agent-setup.md](agent-setup.md). The supervisor's
 `activity_respawn` replaces only ended PTY records; the terminal surface watches
 `runId` to reset replay to the new session's first byte.
+
+At app startup, Mimir resumes unarchived interrupted agent rows from the opened
+project in the background. It excludes History, global Activities, other
+projects, process Apps, terminals, and routines. Two exact-session resumes run
+at once, with no total limit, and startup does not wait for them. Each row gets
+one attempt per launch. A missing continuation requirement or failed attempt
+leaves the row interrupted, records the cause as an error, and does not show a
+second Resume action. Deliberately stopped Activities never enter this flow.
 
 ## Relevant code
 

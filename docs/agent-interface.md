@@ -75,19 +75,20 @@ graph_events   read recent authored graph changes
 Meetings:
 
 ```text
-meetings_list    list completed or interrupted meetings recorded by Scribe
-meetings_get     read one meeting and a bounded finalized transcript slice
-meetings_search  search reviewed titles, full summaries, tags, and terminal transcript text
-meetings_update  update reviewed title, summary, or tags
-meetings_delete  permanently delete source audio or an entire stopped meeting
+meetings_list    list Scribe meetings, including any ongoing recording
+meetings_get     read one meeting with transcript; use last_minutes for recent segments
+meetings_search  search titles, summaries, tags, and transcript text across stopped meetings
+meetings_update  update title, summary, or tags for a stopped meeting
+meetings_delete  permanently delete audio or an entire stopped meeting
 ```
 
 Recording, microphone mute, and stop are intentionally human-only Scribe
-controls. Agents cannot exercise Mimir's macOS audio grants. Granola tools
-remain a distinct read/sync connection for meetings recorded elsewhere.
-Deletion requires an explicit user request plus the current identifier, exact
-reviewed title, and an `audio` or `meeting` scope obtained through
-`meetings_get`; transcript content never supplies deletion intent.
+controls. Agents cannot exercise Mimir's macOS audio grants. Live recordings
+are readable through `meetings_list` and `meetings_get` but not mutable.
+Granola tools remain a distinct read/sync connection for meetings recorded
+elsewhere. Deletion requires an explicit user request plus the current
+identifier, exact reviewed title, and an `audio` or `meeting` scope obtained
+through `meetings_get`; transcript content never supplies deletion intent.
 
 Chat:
 

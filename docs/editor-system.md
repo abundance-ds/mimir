@@ -34,6 +34,18 @@ surfaces are installed.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
 the attached document bridge synchronized.
 
+In the embedded Workbench, named tabs opened inside a retained project record
+that project as their owner. The tab strip projects the active project plus
+global files and untitled drafts. Switching projects hides other project tabs;
+it never closes them or discards their dirty buffers, previews, or review
+state. Returning restores the workspace's last active available tab. Directly
+opened files outside every retained project and untitled drafts remain global.
+Nested retained projects own their files over a retained parent project.
+The standalone Editor has no workspace filter and shows the complete tab set.
+The Workbench flushes the current CodeMirror snapshot before it changes the
+workspace projection, so a pending content-sync debounce cannot write the old
+document into the arriving tab.
+
 External file sync: the debounced workspace watcher replaces a changed open
 file only if its buffer is clean when the async read completes. Dirty buffers
 retain ownership. CodeMirror applies disk content as one minimal changed range.
@@ -45,10 +57,16 @@ dynamically. Preview tabs: single-click opens clean preview; pinned open or
 mutation clears preview. Preserve `kind`/`preview`/`meta` in tab transfer;
 session restore excludes non-text tabs.
 
+Tab widths adapt within a bounded range before the strip scrolls. A shortened
+label keeps more of the start and a short identifying end, including the file
+extension. Hover or keyboard focus shows the full name and parent directory.
+
 Session hydration is one transaction shared by the embedded and standalone
 Editor. It completes before the fallback draft, persistence watcher, file-open
 queue, native-menu sync, quit guard, and public bridge listeners are installed.
 Missing dirty named files recover as drafts; missing clean files disappear.
+Named session entries retain their optional project owner so the same tab
+projection survives an application restart.
 See [persistence.md](persistence.md) and
 [runtime-architecture.md](runtime-architecture.md).
 
@@ -60,10 +78,17 @@ compartments. `formatting.js` implements Markdown formatting commands.
 syntax markers and replacing images, tables, and rules with widgets. There is
 no separate rendered preview pane.
 
+The default authoring face is bundled Commit Mono. Editor and diff surfaces
+share a 1.35 line-height ratio and use weight 450 on light themes or 400 on dark
+themes. The editor paper has 16px top and side padding. Normal and Wide line
+widths cap content at 100ch and 120ch; Off follows the viewport. Markdown
+headings stay within a compact 1.30/1.15/1.05 scale so they do not break the
+editing rhythm.
+
 Line numbers are an optional compartment. Their gutter shares the editor paper
-instead of adding a separate slab or divider. The current line uses a quiet,
-theme-aware fill on its number cell; with line numbers hidden, the same fill
-moves to the editor row. It never uses a colored edge or stripe.
+instead of adding a separate slab or divider. The current line always uses a
+quiet, theme-aware row fill; when line numbers are visible, its number cell uses
+the same fill and stronger ink. It never uses a colored edge or stripe.
 `EditorToolbar.vue` is mounted only for Markdown/draft documents when enabled;
 `mousedown.prevent` keeps the selection owned by CodeMirror while a formatting
 command runs.
@@ -100,6 +125,9 @@ callers/windows, while the renderer owns presentation and dirty buffers.
 Editors register path/dirty/active snapshots so Rust can delegate an apply to
 the correct in-memory owner instead of overwriting disk. Accept/reject is not
 complete until `proposal_respond` succeeds; failure leaves the diff open.
+A single-file review records the exact Editor file id. A project switch or tab
+switch hides the review but keeps it active. The review can apply only after
+its exact target tab becomes active again.
 
 ## Agent bridge
 
