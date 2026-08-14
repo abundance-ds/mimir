@@ -910,8 +910,9 @@ impl ActivitySupervisor {
         Ok(record)
     }
 
-    /// Archive and restore only durable, ended activities. Running processes
-    /// remain visible and ephemeral terminals never acquire false durability.
+    /// Archive and restore ended activities. Explicitly archiving an ephemeral
+    /// terminal promotes it to durable retention so the user's History intent
+    /// survives restart; other ephemeral records remain non-archivable.
     pub fn set_archived(
         &self,
         activity_id: &str,
@@ -922,7 +923,10 @@ impl ActivitySupervisor {
             let dispatch = lock(&self.inner.dispatch);
             let mut record = lock(&activity.record);
             let scrollback = lock(&activity.scrollback);
-            if record.retention != ActivityRetention::Durable {
+            let promotes_terminal = archived
+                && record.kind == ActivityKind::Terminal
+                && record.retention == ActivityRetention::Ephemeral;
+            if record.retention != ActivityRetention::Durable && !promotes_terminal {
                 return Err(SupervisorError::NotDurable(activity_id.to_string()));
             }
             if !record.is_clearable() {
@@ -935,6 +939,9 @@ impl ActivitySupervisor {
                 return Ok(record.clone());
             }
             let now = timestamp();
+            if promotes_terminal {
+                record.retention = ActivityRetention::Durable;
+            }
             record.archived_at = archived.then(|| now.clone());
             record.close_requested_at = None;
             record.updated_at = now;
@@ -956,13 +963,18 @@ impl ActivitySupervisor {
         Ok(record)
     }
 
-    /// Persist the user's close intent before terminating a durable PTY.
+    /// Persist the user's close intent before terminating an archivable PTY.
+    /// Closing an ephemeral terminal first promotes it to durable retention.
     /// Completion atomically turns that intent into an archive timestamp, and
     /// hydration does the same if the app exits before completion is observed.
     pub fn request_close(&self, activity_id: &str) -> Result<ActivityRecord, SupervisorError> {
         let activity = self.activity(activity_id)?;
         let live = lock(&activity.command_tx).is_some();
-        if lock(&activity.record).retention != ActivityRetention::Durable {
+        let retains_history = {
+            let record = lock(&activity.record);
+            record.retention == ActivityRetention::Durable || record.kind == ActivityKind::Terminal
+        };
+        if !retains_history {
             if live {
                 self.kill_with_intent(activity_id, &activity, USER_STOP_INTENT)?;
             }
@@ -977,6 +989,9 @@ impl ActivitySupervisor {
                 return Ok(record.clone());
             }
             let now = timestamp();
+            if record.retention == ActivityRetention::Ephemeral {
+                record.retention = ActivityRetention::Durable;
+            }
             if live {
                 record.close_requested_at = Some(now.clone());
             } else {
@@ -2715,14 +2730,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn durable_close_intent_survives_restart_and_becomes_archived() {
+    fn terminal_close_promotes_retention_and_survives_restart_as_archived() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
-        let record = durable_record(
+        let mut record = durable_record(
             "close-intent",
             "/bin/sh",
             vec!["-c".into(), "while :; do sleep 1; done".into()],
         );
+        record.kind = ActivityKind::Terminal;
+        record.retention = ActivityRetention::Ephemeral;
         supervisor
             .spawn(SpawnActivityRequest::new(record, 80, 24))
             .unwrap();
@@ -2730,6 +2747,7 @@ mod tests {
         supervisor.subscribe(Arc::new(event_tx));
 
         let requested = supervisor.request_close("close-intent").unwrap();
+        assert_eq!(requested.retention, ActivityRetention::Durable);
         assert!(requested.close_requested_at.is_some());
         assert!(requested.archived_at.is_none());
         assert!(matches!(
@@ -2966,7 +2984,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn lifecycle_rejects_empty_titles_running_sessions_and_ephemeral_archives() {
+    fn lifecycle_rejects_running_and_non_terminal_ephemeral_archives() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
         let running = durable_record(
@@ -3011,6 +3029,23 @@ mod tests {
             Err(SupervisorError::NotDurable(id)) if id == "ephemeral"
         ));
         assert_eq!(supervisor.clear("ephemeral").unwrap().id, "ephemeral");
+
+        let mut terminal = durable_record(
+            "terminal-history",
+            "/bin/sh",
+            vec!["-c".into(), "true".into()],
+        );
+        terminal.kind = ActivityKind::Terminal;
+        terminal.retention = ActivityRetention::Ephemeral;
+        supervisor
+            .spawn(SpawnActivityRequest::new(terminal, 80, 24))
+            .unwrap();
+        wait_for_end(&supervisor, "terminal-history");
+        let archived = supervisor.set_archived("terminal-history", true).unwrap();
+        assert_eq!(archived.retention, ActivityRetention::Durable);
+        assert!(archived.archived_at.is_some());
+        supervisor.flush_persistence().unwrap();
+        assert!(activity_persistence_path(temp.path(), "terminal-history").exists());
     }
 
     #[test]

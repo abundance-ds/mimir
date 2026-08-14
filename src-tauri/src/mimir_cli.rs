@@ -379,8 +379,9 @@ mod tests {
         assert!(MIMIR_CONFIG_SKILL.contains("name: mimir-config"));
         assert!(MIMIR_GRAPH_SKILL.contains("name: mimir-graph"));
         assert!(MIMIR_MEETINGS_SKILL.contains("name: mimir-meetings"));
-        assert!(MIMIR_MEETINGS_SKILL.contains("meetings_search"));
-        assert!(MIMIR_MEETINGS_SKILL.contains("meetings_delete"));
+        assert!(MIMIR_MEETINGS_SKILL.contains("meetings_get"));
+        assert!(MIMIR_MEETINGS_SKILL.contains("last_minutes"));
+        assert!(MIMIR_MEETINGS_SKILL.contains("delete requires explicit user request"));
         for kind in crate::business_graph::ENTITY_KINDS {
             assert!(MIMIR_GRAPH_REFERENCE.contains(kind));
         }

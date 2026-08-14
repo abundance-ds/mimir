@@ -81,16 +81,23 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
         "meetings.get" => {
             let meeting_id = required_string(&input, "meeting_id")?;
             let meeting = runtime.meeting(meeting_id).map_err(runtime_error)?;
-            get_projection(
-                runtime,
-                &meeting,
-                meeting_id,
-                input
-                    .get("transcript_offset")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-                input.get("transcript_limit").and_then(Value::as_u64),
-            )
+            require_visible(&meeting)?;
+            let last_minutes = input.get("last_minutes").and_then(Value::as_u64);
+            if let Some(minutes) = last_minutes {
+                let since_ms = meeting.duration_ms.saturating_sub(minutes * 60_000);
+                get_projection_since(runtime, &meeting, meeting_id, since_ms, &input)
+            } else {
+                get_projection(
+                    runtime,
+                    &meeting,
+                    meeting_id,
+                    input
+                        .get("transcript_offset")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    input.get("transcript_limit").and_then(Value::as_u64),
+                )
+            }
         }
         "meetings.search" => {
             let query = required_string(&input, "query")?;
@@ -108,7 +115,7 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
         "meetings.update" => {
             let meeting_id = required_string(&input, "meeting_id")?;
             let meeting = runtime.meeting(meeting_id).map_err(runtime_error)?;
-            require_public_meeting(&meeting)?;
+            require_editable(&meeting)?;
             let patch = MeetingUpdatePatch {
                 title: optional_string(&input, "title")?,
                 summary: optional_string(&input, "summary")?,
@@ -124,7 +131,7 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
             let meeting_id = required_string(&input, "meeting_id")?;
             let expected_title = required_string(&input, "expected_title")?;
             let meeting = runtime.meeting(meeting_id).map_err(runtime_error)?;
-            require_public_meeting(&meeting)?;
+            require_editable(&meeting)?;
             if meeting.title != expected_title {
                 return Err(invalid_input(
                     "meeting title changed; call meetings_get again before deleting",
@@ -156,14 +163,14 @@ fn list_projection(snapshot: &MeetingSnapshot, limit: Option<u64>) -> Result<Val
     let meetings = snapshot
         .meetings
         .iter()
-        .filter(|meeting| is_public_meeting(meeting))
+        .filter(|meeting| is_visible(meeting))
         .take(limit)
         .map(meeting_metadata)
         .collect::<Result<Vec<_>, _>>()?;
     let available = snapshot
         .meetings
         .iter()
-        .filter(|meeting| is_public_meeting(meeting))
+        .filter(|meeting| is_visible(meeting))
         .count();
     Ok(json!({
         "meetings": meetings,
@@ -182,7 +189,7 @@ fn list_page_projection(
 ) -> Result<Value, ToolError> {
     let meetings = page
         .iter()
-        .filter(|meeting| is_public_meeting(meeting))
+        .filter(|meeting| is_visible(meeting))
         .map(meeting_metadata)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({
@@ -201,7 +208,6 @@ fn get_projection(
     offset: u64,
     limit: Option<u64>,
 ) -> Result<Value, ToolError> {
-    require_public_meeting(meeting)?;
     let limit = bounded_limit(limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT)?;
     let page = if limit == 0 {
         None
@@ -241,6 +247,58 @@ fn get_projection(
             "total": total,
             "hasMore": has_more,
             "nextOffset": has_more.then_some(offset.saturating_add(returned as u64))
+        }),
+    );
+    Ok(value)
+}
+
+fn get_projection_since(
+    runtime: &MeetingRuntime,
+    meeting: &MeetingView,
+    meeting_id: &str,
+    since_ms: u64,
+    input: &Value,
+) -> Result<Value, ToolError> {
+    let limit = bounded_limit(
+        input.get("transcript_limit").and_then(Value::as_u64),
+        DEFAULT_TRANSCRIPT_LIMIT,
+        MAX_TRANSCRIPT_LIMIT,
+    )?;
+    let page = if limit == 0 {
+        None
+    } else {
+        Some(
+            runtime
+                .transcript_slice_since(meeting_id, since_ms, limit as u32)
+                .map_err(runtime_error)?,
+        )
+    };
+    let mut value = serde_json::to_value(meeting).map_err(serialization_error)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| serialization_error("meeting projection was not an object"))?;
+    object.insert(
+        "segments".into(),
+        serde_json::to_value(
+            page.as_ref()
+                .map(|page| page.segments.as_slice())
+                .unwrap_or_default(),
+        )
+        .map_err(serialization_error)?,
+    );
+    if let Some(summary) = page.as_ref().and_then(|page| page.summary.as_ref()) {
+        object.insert("summary".into(), Value::String(summary.clone()));
+    }
+    let returned = page.as_ref().map_or(0, |page| page.segments.len());
+    let total = page
+        .as_ref()
+        .map_or(meeting.segment_count, |page| page.total_segments);
+    object.insert(
+        "transcriptPage".into(),
+        json!({
+            "returned": returned,
+            "total": total,
+            "hasMore": page.as_ref().is_some_and(|page| page.has_more)
         }),
     );
     Ok(value)
@@ -333,17 +391,34 @@ fn meeting_metadata(meeting: &MeetingView) -> Result<Value, ToolError> {
     Ok(Value::Object(object))
 }
 
-fn require_public_meeting(meeting: &MeetingView) -> Result<(), ToolError> {
-    if !is_public_meeting(meeting) {
+fn require_visible(meeting: &MeetingView) -> Result<(), ToolError> {
+    if !is_visible(meeting) {
         return Err(ToolError::new(
             ToolErrorCode::Unavailable,
-            "the meeting becomes available to agents after recording and finalization stop",
+            "this meeting is not yet available",
         ));
     }
     Ok(())
 }
 
-fn is_public_meeting(meeting: &MeetingView) -> bool {
+fn require_editable(meeting: &MeetingView) -> Result<(), ToolError> {
+    if !is_editable(meeting) {
+        return Err(ToolError::new(
+            ToolErrorCode::Unavailable,
+            "this meeting can only be updated after recording stops",
+        ));
+    }
+    Ok(())
+}
+
+fn is_visible(meeting: &MeetingView) -> bool {
+    matches!(
+        meeting.lifecycle.as_str(),
+        "capturing" | "stopping" | "finalizing" | "ready" | "interrupted" | "failed"
+    )
+}
+
+fn is_editable(meeting: &MeetingView) -> bool {
     matches!(
         meeting.lifecycle.as_str(),
         "ready" | "interrupted" | "failed"
@@ -476,10 +551,10 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
         (
             "meetings.list",
             "meetings_list",
-            "List completed and interrupted meetings recorded natively by Mimir Scribe. This is distinct from meetings synced from Granola.",
+            "Includes any ongoing recording.",
             object_schema(
                 json!({
-                    "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT },
+                    "limit": { "type": "integer", "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT },
                     "before": {
                         "type": "object",
                         "properties": {
@@ -496,12 +571,13 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
         (
             "meetings.get",
             "meetings_get",
-            "Read one Mimir Scribe meeting with a bounded finalized transcript slice. This never starts or controls recording.",
+            "Works during recording. Use last_minutes for recent transcript only.",
             object_schema(
                 json!({
-                    "meeting_id": { "type": "string", "minLength": 1, "maxLength": 200 },
-                    "transcript_offset": { "type": "integer", "minimum": 0, "default": 0 },
-                    "transcript_limit": { "type": "integer", "minimum": 0, "maximum": MAX_TRANSCRIPT_LIMIT, "default": DEFAULT_TRANSCRIPT_LIMIT }
+                    "meeting_id": { "type": "string" },
+                    "transcript_offset": { "type": "integer", "default": 0 },
+                    "transcript_limit": { "type": "integer", "maximum": MAX_TRANSCRIPT_LIMIT, "default": DEFAULT_TRANSCRIPT_LIMIT },
+                    "last_minutes": { "type": "integer", "minimum": 1 }
                 }),
                 &["meeting_id"],
             ),
@@ -509,11 +585,11 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
         (
             "meetings.search",
             "meetings_search",
-            "Search reviewed titles, full summaries, tags, and finalized transcript text across the complete Mimir Scribe library.",
+            "Stopped meetings only.",
             object_schema(
                 json!({
-                    "query": { "type": "string", "minLength": 3, "maxLength": MAX_QUERY_BYTES },
-                    "limit": { "type": "integer", "minimum": 0, "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT }
+                    "query": { "type": "string", "minLength": 3 },
+                    "limit": { "type": "integer", "maximum": MAX_LIST_LIMIT, "default": DEFAULT_LIST_LIMIT }
                 }),
                 &["query"],
             ),
@@ -521,17 +597,13 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
         (
             "meetings.update",
             "meetings_update",
-            "Update reviewed metadata for one Mimir Scribe meeting. Recording controls are deliberately not exposed to agents.",
+            "Stopped meetings only.",
             object_schema(
                 json!({
-                    "meeting_id": { "type": "string", "minLength": 1, "maxLength": 200 },
-                    "title": { "type": "string", "maxLength": 200 },
-                    "summary": { "type": "string", "maxLength": 100000 },
-                    "tags": {
-                        "type": "array",
-                        "maxItems": 64,
-                        "items": { "type": "string", "minLength": 1, "maxLength": 80 }
-                    }
+                    "meeting_id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "summary": { "type": "string" },
+                    "tags": { "type": "array", "items": { "type": "string" } }
                 }),
                 &["meeting_id"],
             ),
@@ -539,11 +611,11 @@ fn definitions() -> Vec<(&'static str, &'static str, &'static str, Value)> {
         (
             "meetings.delete",
             "meetings_delete",
-            "Permanently delete source audio or an entire stopped Mimir Scribe meeting. Call only after an explicit user request and read the meeting first.",
+            "Only for explicit user request. Stopped meetings only.",
             object_schema(
                 json!({
-                    "meeting_id": { "type": "string", "minLength": 1, "maxLength": 200 },
-                    "expected_title": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "meeting_id": { "type": "string" },
+                    "expected_title": { "type": "string" },
                     "scope": { "type": "string", "enum": ["audio", "meeting"] }
                 }),
                 &["meeting_id", "expected_title", "scope"],
@@ -685,11 +757,23 @@ mod tests {
         }
     }
 
-    struct TestClock;
+    struct TestClock(String);
+
+    impl TestClock {
+        fn new(time: &str) -> Self {
+            Self(time.into())
+        }
+    }
+
+    impl Default for TestClock {
+        fn default() -> Self {
+            Self::new("2026-07-31T00:00:00Z")
+        }
+    }
 
     impl MeetingClock for TestClock {
         fn now(&self) -> String {
-            "2026-07-31T00:00:00Z".into()
+            self.0.clone()
         }
     }
 
@@ -771,7 +855,7 @@ mod tests {
             Arc::new(TestCapture),
             Arc::new(TestTranscription),
             platform.clone(),
-            Arc::new(TestClock),
+            Arc::new(TestClock::default()),
             Arc::new(TestEvents),
         )
         .unwrap();
@@ -826,7 +910,7 @@ mod tests {
     fn list_projection_is_bounded_and_distinguishes_native_meetings() {
         let value = list_projection(&snapshot(), Some(100)).unwrap();
         assert_eq!(value["returned"], 0);
-        assert!(definitions()[0].2.contains("recorded natively"));
+        assert!(definitions()[0].2.contains("ongoing"));
         assert_eq!(
             list_projection(&snapshot(), Some(101)).unwrap_err().code,
             ToolErrorCode::InvalidInput
@@ -852,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn update_rejects_live_meetings_before_the_platform_can_write() {
+    fn live_meetings_are_readable_but_not_mutable() {
         let store = Arc::new(MeetingStore::open_in_memory().unwrap());
         let platform = Arc::new(TestPlatform::default());
         let runtime = MeetingRuntime::new(
@@ -860,7 +944,7 @@ mod tests {
             Arc::new(TestCapture),
             Arc::new(TestTranscription),
             platform.clone(),
-            Arc::new(TestClock),
+            Arc::new(TestClock::new("2026-07-31T00:20:00Z")),
             Arc::new(TestEvents),
         )
         .unwrap();
@@ -885,6 +969,44 @@ mod tests {
                 None,
             )
             .unwrap();
+        store
+            .apply_transcript_batch(&TranscriptBatch {
+                meeting_id: created.id.clone(),
+                batch_id: "live-batch".into(),
+                base_revision: 0,
+                source: "test".into(),
+                observed_at: "2026-07-31T00:00:02Z".into(),
+                marks_final: false,
+                changes: vec![
+                    TranscriptChange::UpsertSegment {
+                        segment: TranscriptSegmentInput {
+                            id: "early".into(),
+                            start_ms: 1_000,
+                            end_ms: 5_000,
+                            text: "First minute.".into(),
+                            channel_id: None,
+                            speaker: None,
+                            confidence: Some(1.0),
+                            is_final: true,
+                            metadata: json!({}),
+                        },
+                    },
+                    TranscriptChange::UpsertSegment {
+                        segment: TranscriptSegmentInput {
+                            id: "recent".into(),
+                            start_ms: 600_000,
+                            end_ms: 605_000,
+                            text: "Ten minutes in.".into(),
+                            channel_id: None,
+                            speaker: None,
+                            confidence: Some(0.9),
+                            is_final: false,
+                            metadata: json!({}),
+                        },
+                    },
+                ],
+            })
+            .unwrap();
         platform.contents.lock().unwrap().insert(
             created.id.clone(),
             MeetingContentProjection {
@@ -892,14 +1014,25 @@ mod tests {
                 ..MeetingContentProjection::default()
             },
         );
+
+        let fetched = execute(
+            &runtime,
+            "meetings.get",
+            json!({"meeting_id": created.id, "transcript_limit": 10}),
+        )
+        .unwrap();
+        assert_eq!(fetched["id"], "live-private");
+        assert_eq!(fetched["lifecycle"], "capturing");
+        assert_eq!(fetched["segments"].as_array().unwrap().len(), 2);
+
         let error = execute(
             &runtime,
             "meetings.update",
             json!({"meeting_id": created.id, "title": "Agent-authored live title"}),
         )
         .unwrap_err();
-
         assert_eq!(error.code, ToolErrorCode::Unavailable);
+
         let delete_error = execute(
             &runtime,
             "meetings.delete",
@@ -913,15 +1046,118 @@ mod tests {
         assert_eq!(delete_error.code, ToolErrorCode::Unavailable);
         assert!(platform.deleted.lock().unwrap().is_empty());
         assert_eq!(platform.content_updates.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            platform
-                .contents
-                .lock()
-                .unwrap()
-                .get("live-private")
-                .and_then(|content| content.title.as_deref()),
-            Some("Live private meeting")
+    }
+
+    #[test]
+    fn last_minutes_returns_only_recent_transcript_segments() {
+        let store = Arc::new(MeetingStore::open_in_memory().unwrap());
+        let platform = Arc::new(TestPlatform::default());
+        let runtime = MeetingRuntime::new(
+            Arc::clone(&store),
+            Arc::new(TestCapture),
+            Arc::new(TestTranscription),
+            platform.clone(),
+            Arc::new(TestClock::default()),
+            Arc::new(TestEvents),
+        )
+        .unwrap();
+        let created = store
+            .create_meeting(
+                &MeetingDraft {
+                    id: "timed-meeting".into(),
+                    title: "Timed meeting".into(),
+                    origin: MeetingOrigin::default(),
+                    channels: Vec::new(),
+                    metadata: json!({}),
+                },
+                "2026-07-31T00:00:00Z",
+            )
+            .unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                created.revision,
+                MeetingStatus::Recording,
+                "2026-07-31T00:00:00Z",
+                None,
+            )
+            .unwrap();
+        store
+            .apply_transcript_batch(&TranscriptBatch {
+                meeting_id: created.id.clone(),
+                batch_id: "timed-batch".into(),
+                base_revision: 0,
+                source: "test".into(),
+                observed_at: "2026-07-31T00:20:00Z".into(),
+                marks_final: true,
+                changes: vec![
+                    TranscriptChange::UpsertSegment {
+                        segment: TranscriptSegmentInput {
+                            id: "early".into(),
+                            start_ms: 1_000,
+                            end_ms: 5_000,
+                            text: "First minute.".into(),
+                            channel_id: None,
+                            speaker: None,
+                            confidence: Some(1.0),
+                            is_final: true,
+                            metadata: json!({}),
+                        },
+                    },
+                    TranscriptChange::UpsertSegment {
+                        segment: TranscriptSegmentInput {
+                            id: "recent".into(),
+                            start_ms: 600_000,
+                            end_ms: 605_000,
+                            text: "Ten minutes in.".into(),
+                            channel_id: None,
+                            speaker: None,
+                            confidence: Some(1.0),
+                            is_final: true,
+                            metadata: json!({}),
+                        },
+                    },
+                ],
+            })
+            .unwrap();
+        let recording = store.get_meeting(&created.id).unwrap();
+        store
+            .transition_meeting(
+                &created.id,
+                recording.revision,
+                MeetingStatus::Failed,
+                "2026-07-31T00:20:00Z",
+                Some(&MeetingFailure {
+                    code: "fixture".into(),
+                    message: "terminal fixture".into(),
+                    retryable: false,
+                }),
+            )
+            .unwrap();
+        platform.contents.lock().unwrap().insert(
+            created.id.clone(),
+            MeetingContentProjection {
+                title: Some("Timed meeting".into()),
+                ..MeetingContentProjection::default()
+            },
         );
+
+        let recent = execute(
+            &runtime,
+            "meetings.get",
+            json!({"meeting_id": "timed-meeting", "last_minutes": 15}),
+        )
+        .unwrap();
+        assert_eq!(recent["segments"].as_array().unwrap().len(), 1);
+        assert_eq!(recent["segments"][0]["text"], "Ten minutes in.");
+
+        let all = execute(
+            &runtime,
+            "meetings.get",
+            json!({"meeting_id": "timed-meeting", "last_minutes": 25}),
+        )
+        .unwrap();
+        assert_eq!(all["segments"].as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -1006,7 +1242,7 @@ mod tests {
             Arc::new(TestCapture),
             Arc::new(TestTranscription),
             platform.clone(),
-            Arc::new(TestClock),
+            Arc::new(TestClock::default()),
             Arc::new(TestEvents),
         )
         .unwrap();

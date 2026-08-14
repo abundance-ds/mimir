@@ -107,8 +107,8 @@ impl ActivityStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ActivityRetention {
-    /// The process and record disappear when the terminal is closed or Mimir
-    /// exits. Plain terminals use this policy.
+    /// The process and record disappear when Mimir exits unless the user closes
+    /// or archives a plain terminal, which promotes that record to durable.
     Ephemeral,
     /// Metadata and bounded scrollback survive restart until explicitly
     /// archived or cleared.

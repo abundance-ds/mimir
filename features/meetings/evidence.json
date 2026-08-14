@@ -791,7 +791,7 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/tools.rs",
-      "selector": "update_rejects_live_meetings_before_the_platform_can_write",
+      "selector": "live_meetings_are_readable_but_not_mutable",
       "scenarios": ["MTG-159", "MTG-162"]
     },
     {

@@ -158,6 +158,56 @@ impl MeetingRuntime {
         })
     }
 
+    pub fn transcript_slice_since(
+        &self,
+        meeting_id: &str,
+        since_ms: u64,
+        limit: u32,
+    ) -> Result<MeetingTranscriptPage, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let record = self.inner.store.get_meeting(meeting_id)?;
+        let content = self
+            .inner
+            .platform
+            .content(meeting_id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        if content.deleted {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is deleted"
+            )));
+        }
+        let since = i64::try_from(since_ms).map_err(|_| {
+            MeetingRuntimeError::Validation("since_ms exceeds the durable range".into())
+        })?;
+        let page = self
+            .inner
+            .store
+            .transcript_slice_since(meeting_id, since, limit)?;
+        let channel_names = record
+            .channels
+            .iter()
+            .map(|channel| {
+                (
+                    channel.definition.id.as_str(),
+                    channel.definition.kind.to_string(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        Ok(MeetingTranscriptPage {
+            meeting_id: page.meeting_id,
+            revision: page.revision,
+            total_segments: page.total_segments,
+            has_more: page.has_more,
+            next_before: None,
+            segments: page
+                .segments
+                .iter()
+                .map(|segment| segment_view(segment, &channel_names))
+                .collect(),
+            summary: None,
+        })
+    }
+
     pub fn search_transcript(
         &self,
         query: &str,

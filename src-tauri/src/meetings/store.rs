@@ -1738,6 +1738,51 @@ impl MeetingStore {
         })
     }
 
+    pub fn transcript_slice_since(
+        &self,
+        meeting_id: &str,
+        since_ms: i64,
+        limit: u32,
+    ) -> Result<TranscriptPage, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let limit = limit.clamp(1, MAX_TRANSCRIPT_PAGE_SEGMENTS);
+        let connection = self.lock()?;
+        let meeting = load_meeting(&connection, meeting_id)?;
+        let total_segments = connection.query_row(
+            "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id=?1",
+            [meeting_id],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let matching_segments = connection.query_row(
+            "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id=?1 AND start_ms>=?2",
+            params![meeting_id, since_ms],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let mut statement = connection.prepare(
+            "SELECT segment_id,start_ms,end_ms,text,channel_id,speaker,confidence,
+                    is_final,metadata_json,created_revision,updated_revision
+             FROM transcript_segments
+             WHERE meeting_id=?1 AND start_ms>=?2
+             ORDER BY start_ms,end_ms,segment_id
+             LIMIT ?3",
+        )?;
+        let segments = statement
+            .query_map(
+                params![meeting_id, since_ms, i64::from(limit)],
+                current_segment_from_row,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let returned = segments.len() as u64;
+        Ok(TranscriptPage {
+            meeting_id: meeting_id.into(),
+            revision: meeting.transcript_revision,
+            total_segments,
+            has_more: returned < matching_segments,
+            next_before: None,
+            segments,
+        })
+    }
+
     /// Return only the bounded transcript metadata required by a library row.
     pub fn transcript_overview(
         &self,
