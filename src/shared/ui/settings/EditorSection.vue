@@ -55,7 +55,7 @@
     <div class="setting-row">
       <div class="setting-label">
         Font
-        <span class="setting-desc">Typeface for Markdown editing</span>
+        <span class="setting-desc">Typeface for editor and diff text</span>
       </div>
       <div style="position: relative" ref="dropdownRef">
         <button class="dropdown-trigger" @click="fontOpen = !fontOpen">

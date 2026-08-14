@@ -19,7 +19,8 @@
   --syntax-string: #2e7d32;
   --syntax-number: #e65100;
   --editor-size: 14px;
-  --editor-line-height: 22px;
+  --editor-line-height: 18.9px;
+  --editor-font-weight: 450;
 }
 
 /* Ghost suggestion decorations */

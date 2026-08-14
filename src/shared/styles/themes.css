@@ -39,6 +39,8 @@
   --color-accent-tint: rgba(192, 93, 60, 0.06);
   --color-add:         #5e8b3e;
   --color-rem:         #c05d3c;
+  --color-attn:        #c97a3a;
+  --color-info:        #4d7fae;
   --color-rule:        #d8d7d2;
   --color-rule-light:  #eae9e5;
   --color-line-soft:   rgba(0, 0, 0, 0.04);
@@ -72,6 +74,8 @@
   --color-accent-tint: rgba(232, 100, 32, 0.06);
   --color-add:         #3A7D44;
   --color-rem:         #C0392B;
+  --color-attn:        #C27B28;
+  --color-info:        #3E78A8;
   --color-rule:        #CBCBC9;
   --color-rule-light:  #DCDCDA;
   --color-line-soft:   rgba(0, 0, 0, 0.04);
@@ -104,6 +108,8 @@
   --color-accent-tint: rgba(74, 124, 155, 0.06);
   --color-add:         #3a8a4a;
   --color-rem:         #c05050;
+  --color-attn:        #c57732;
+  --color-info:        #376fbd;
   --color-rule:        #d0d5db;
   --color-rule-light:  #e2e6eb;
   --color-line-soft:   rgba(0, 0, 0, 0.03);
@@ -136,6 +142,8 @@
   --color-accent-tint: rgba(90, 158, 143, 0.10);
   --color-add:         #7cc68a;
   --color-rem:         #e07070;
+  --color-attn:        #d09a62;
+  --color-info:        #7aaed6;
   --color-rule:        #383838;
   --color-rule-light:  #333333;
   --color-line-soft:   rgba(255, 255, 255, 0.04);
@@ -169,6 +177,8 @@
   --color-accent-tint: rgba(249, 115, 22, 0.10);
   --color-add:         #a6e22e;
   --color-rem:         #f92672;
+  --color-attn:        #e6a23c;
+  --color-info:        #66aaf2;
   --color-rule:        #3e3d32;
   --color-rule-light:  #353429;
   --color-line-soft:   rgba(255, 255, 255, 0.04);
@@ -203,6 +213,8 @@
   --color-accent-tint: rgba(189, 147, 249, 0.10);
   --color-add:         #50fa7b;
   --color-rem:         #ff5555;
+  --color-attn:        #ffb86c;
+  --color-info:        #6ca8ff;
   --color-rule:        #33344a;
   --color-rule-light:  #2a2b3e;
   --color-line-soft:   rgba(255, 255, 255, 0.04);
@@ -236,6 +248,8 @@
   --color-accent-tint: rgba(34, 211, 238, 0.12);
   --color-add:         #4ade80;
   --color-rem:         #f87171;
+  --color-attn:        #f59e42;
+  --color-info:        #4f83ff;
   --color-rule:        #283848;
   --color-rule-light:  #1e2e3c;
   --color-line-soft:   rgba(255, 255, 255, 0.04);
@@ -269,6 +283,8 @@
   --color-accent-tint: rgba(198, 120, 221, 0.10);
   --color-add:         #72f1b8;
   --color-rem:         #ff5572;
+  --color-attn:        #ff9f43;
+  --color-info:        #4aa8ff;
   --color-rule:        #2a2a30;
   --color-rule-light:  #232328;
   --color-line-soft:   rgba(255, 255, 255, 0.04);

@@ -25,6 +25,8 @@
   --color-accent-tint: rgba(192, 93, 60, 0.06);
   --color-add:         #5e8b3e;
   --color-rem:         #c05d3c;
+  --color-attn:        #c97a3a;
+  --color-info:        #4d7fae;
 
   --font-sans:  -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono:  ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;

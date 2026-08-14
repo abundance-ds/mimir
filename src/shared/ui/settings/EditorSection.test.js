@@ -84,14 +84,14 @@ describe('EditorSection', () => {
     const { wrapper, store } = await render()
     const trigger = wrapper.get('.dropdown-trigger')
 
-    expect(trigger.text()).toContain('Mono') // default editorFontFamily
+    expect(trigger.text()).toContain('Commit Mono')
     expect(wrapper.find('.dropdown-menu').exists()).toBe(false)
 
     await trigger.trigger('click')
     const items = wrapper.findAll('.dropdown-item')
-    expect(items.map((item) => item.text())).toEqual(['Sans', 'Mono'])
+    expect(items.map((item) => item.text())).toEqual(['Commit Mono', 'System Mono', 'Sans'])
 
-    await items[0].trigger('click')
+    await items[2].trigger('click')
     expect(store.editorFontFamily).toBe('sans')
     expect(wrapper.find('.dropdown-menu').exists()).toBe(false)
     expect(trigger.text()).toContain('Sans')
