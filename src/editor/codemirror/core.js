@@ -153,7 +153,7 @@ export const editorTheme = EditorView.theme({
 }, { dark: false })
 
 export const editorHighlightStyle = HighlightStyle.define([
-  { tag: t.heading1, fontWeight: '650', fontSize: '1.3em', color: 'var(--ink-strong)' },
+  { tag: t.heading1, fontWeight: '650', fontSize: '1.3em', lineHeight: '1.1', color: 'var(--ink-strong)' },
   { tag: t.heading2, fontWeight: '650', fontSize: '1.15em', color: 'var(--ink-strong)' },
   { tag: t.heading3, fontWeight: '650', fontSize: '1.05em', color: 'var(--ink-strong)' },
   { tag: [t.strong], fontWeight: '700', color: 'var(--ink-strong)' },

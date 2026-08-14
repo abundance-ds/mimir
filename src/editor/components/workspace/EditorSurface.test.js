@@ -1,11 +1,82 @@
 import { EditorView } from '@codemirror/view'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { useSettingsStore } from '../../../stores/settings.js'
 import EditorSurface from './EditorSurface.vue'
 
 describe('EditorSurface feature extensions', () => {
+  it('remeasures CodeMirror after Commit Mono becomes ready', async () => {
+    let resolveFont
+    const fontReady = new Promise(resolve => { resolveFont = resolve })
+    const load = vi.fn(() => fontReady)
+    const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { load },
+    })
+
+    let wrapper
+    try {
+      wrapper = mount(EditorSurface, {
+        props: {
+          content: 'Draft',
+          path: '/work/draft.md',
+        },
+        global: { plugins: [createPinia()] },
+      })
+      const requestMeasure = vi.spyOn(wrapper.vm.getView(), 'requestMeasure')
+
+      expect(load).toHaveBeenCalledWith('450 16px "Commit Mono"')
+      expect(requestMeasure).not.toHaveBeenCalled()
+
+      resolveFont([])
+      await fontReady
+      await wrapper.vm.$nextTick()
+      expect(requestMeasure).toHaveBeenCalledOnce()
+
+      await wrapper.setProps({ zoomLevel: 125 })
+      await Promise.resolve()
+      await wrapper.vm.$nextTick()
+      expect(load).toHaveBeenLastCalledWith('450 20px "Commit Mono"')
+      expect(requestMeasure).toHaveBeenCalledTimes(2)
+    } finally {
+      wrapper?.unmount()
+      if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts)
+      else delete document.fonts
+    }
+  })
+
+  it('does not remeasure a destroyed editor after font loading finishes', async () => {
+    let resolveFont
+    const fontReady = new Promise(resolve => { resolveFont = resolve })
+    const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { load: () => fontReady },
+    })
+
+    let wrapper
+    try {
+      wrapper = mount(EditorSurface, {
+        props: { content: 'Draft' },
+        global: { plugins: [createPinia()] },
+      })
+      const requestMeasure = vi.spyOn(wrapper.vm.getView(), 'requestMeasure')
+      wrapper.unmount()
+      wrapper = null
+
+      resolveFont([])
+      await fontReady
+      await Promise.resolve()
+      expect(requestMeasure).not.toHaveBeenCalled()
+    } finally {
+      wrapper?.unmount()
+      if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts)
+      else delete document.fonts
+    }
+  })
+
   it('applies the compact typography scale and theme-aware Commit Mono weight', async () => {
     const pinia = createPinia()
     const wrapper = mount(EditorSurface, {

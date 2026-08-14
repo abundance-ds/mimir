@@ -21,7 +21,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue'
 import { Compartment } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { undo, redo, selectAll } from '@codemirror/commands'
@@ -59,6 +59,7 @@ const settings = useSettingsStore()
 const cmHost = ref(null)
 const view = shallowRef(null)
 let applyingExternalContent = false
+let typographyMeasureGeneration = 0
 const featureCompartment = new Compartment()
 
 const ctxMenu = reactive({ show: false, x: 0, y: 0, hasSelection: false })
@@ -190,6 +191,26 @@ const wrapperStyle = computed(() => {
   return s
 })
 
+async function remeasureTypography() {
+  const generation = ++typographyMeasureGeneration
+  const currentView = view.value
+  if (!currentView) return
+
+  const style = wrapperStyle.value
+  if (style['--font-mono'].startsWith('"Commit Mono"') && document.fonts?.load) {
+    const descriptor = `${style['--editor-font-weight']} ${style['--editor-size']} "Commit Mono"`
+    try {
+      await document.fonts.load(descriptor)
+    } catch {
+      // Keep the fallback stack usable if the browser font API rejects.
+    }
+  }
+
+  await nextTick()
+  if (generation !== typographyMeasureGeneration || view.value !== currentView) return
+  currentView.requestMeasure()
+}
+
 function onCMChange() {
   if (applyingExternalContent) return
   emit('change')
@@ -230,9 +251,11 @@ onMounted(() => {
       isDark: settings.isDarkTheme,
     },
   })
+  void remeasureTypography()
 })
 
 onUnmounted(() => {
+  typographyMeasureGeneration++
   if (view.value) {
     view.value.destroy()
     view.value = null
@@ -275,6 +298,15 @@ watch(() => settings.isDarkTheme, (dark) => {
     effects: darkModeCompartment.reconfigure(dark ? EditorView.darkTheme.of(true) : []),
   })
 })
+
+watch([
+  () => settings.editorFontFamily,
+  () => settings.editorFontSize,
+  () => settings.isDarkTheme,
+  () => props.zoomLevel,
+], () => {
+  void remeasureTypography()
+}, { flush: 'post' })
 
 watch(() => props.extensions, (extensions) => {
   if (!view.value) return
