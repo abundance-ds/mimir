@@ -25,10 +25,10 @@
 //!   loader that migrates is expected to rewrite. The harness checks parse
 //!   compatibility with the current serde schema, which is the part that must
 //!   never break.
-//! - Activity hydration rewrites a persisted record only when it was saved in
-//!   a live status (marking it interrupted). Snapshots persist ended
-//!   activities, so hydration is read-only; the harness asserts no bytes
-//!   changed and would surface any new rewrite-on-load behavior.
+//! - Activity hydration imports a v1 JSON record into
+//!   `activities/activities.sqlite3` once. The migration keeps the source JSON
+//!   byte-for-byte for one-version rollback. A live record is marked
+//!   interrupted in SQLite; snapshots contain ended activities.
 //! - `launchers::load_config`, settings, and session loaders write only when
 //!   the file is missing or quarantined; snapshots always provide valid files.
 
@@ -163,10 +163,27 @@ fn every_shipped_snapshot_loads_cleanly_and_is_left_untouched() {
         check_activities_and_routine_runtime(&version, &home, &mimir);
 
         let after = tree_bytes(&mimir);
+        let added = after
+            .keys()
+            .filter(|path| !before.contains_key(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed = before
+            .keys()
+            .filter(|path| !after.contains_key(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let expected_added = (!before.contains_key("activities/activities.sqlite3"))
+            .then(|| "activities/activities.sqlite3".to_string())
+            .into_iter()
+            .collect::<Vec<_>>();
         assert_eq!(
-            before.keys().collect::<Vec<_>>(),
-            after.keys().collect::<Vec<_>>(),
-            "[{version}] loading must not create or delete files (quarantine or rewrite artifacts)"
+            added, expected_added,
+            "[{version}] only the Activity SQLite migration may create a file"
+        );
+        assert!(
+            removed.is_empty(),
+            "[{version}] loading must not delete files"
         );
         for (path, bytes) in &before {
             assert!(

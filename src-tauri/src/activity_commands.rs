@@ -1,6 +1,7 @@
 use crate::activities::{
     ActivityEvent, ActivityEventSink, ActivityHistorySearchHit, ActivityRecord, ActivitySnapshot,
-    ActivitySupervisor, SpawnActivityRequest,
+    ActivitySupervisor, ActivityTerminalAttachment, ActivityTerminalCheckpointRequest,
+    SavedTerminalCheckpoint, SpawnActivityRequest,
 };
 use std::sync::Arc;
 use tauri::Emitter;
@@ -90,6 +91,76 @@ pub fn activity_snapshot(
 ) -> Result<ActivitySnapshot, String> {
     supervisor
         .snapshot(&activity_id, after_sequence)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn activity_terminal_attach(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+    owner_id: String,
+) -> Result<ActivityTerminalAttachment, String> {
+    let supervisor = supervisor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        supervisor
+            .terminal_attach(&activity_id, owner_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Terminal attach task failed: {error}"))?
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn activity_terminal_checkpoint(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+    run_id: String,
+    owner_id: String,
+    lease_generation: u64,
+    base_revision: u64,
+    through_sequence: u64,
+    cols: u16,
+    rows: u16,
+    format_version: u32,
+    engine_version: String,
+    unicode_version: String,
+    data: String,
+    search_text: String,
+) -> Result<SavedTerminalCheckpoint, String> {
+    let supervisor = supervisor.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        supervisor
+            .save_terminal_checkpoint(ActivityTerminalCheckpointRequest {
+                activity_id,
+                run_id,
+                owner_id,
+                lease_generation,
+                base_revision,
+                through_sequence,
+                cols,
+                rows,
+                format_version,
+                engine_version,
+                unicode_version,
+                data,
+                search_text,
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Terminal checkpoint task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn activity_terminal_release(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+    owner_id: String,
+    lease_generation: u64,
+) -> Result<bool, String> {
+    supervisor
+        .release_terminal_lease(&activity_id, &owner_id, lease_generation)
         .map_err(|error| error.to_string())
 }
 

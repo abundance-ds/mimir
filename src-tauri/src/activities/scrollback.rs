@@ -71,17 +71,27 @@ impl RawScrollback {
     /// Append bytes and return the stable sequence assigned to this read.
     pub fn append(&mut self, bytes: &[u8]) -> u64 {
         let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.saturating_add(1);
+        self.append_with_sequence(sequence, bytes);
+        sequence
+    }
+
+    /// Append bytes with a sequence from the ordered terminal event stream.
+    /// Resize events can create gaps between output chunks.
+    pub fn append_with_sequence(&mut self, sequence: u64, bytes: &[u8]) {
+        self.observe_sequence(sequence);
 
         if bytes.is_empty() {
-            return sequence;
+            return;
         }
 
         self.push_existing(OutputChunk {
             sequence,
             bytes: bytes.to_vec(),
         });
-        sequence
+    }
+
+    pub fn observe_sequence(&mut self, sequence: u64) {
+        self.next_sequence = self.next_sequence.max(sequence.saturating_add(1));
     }
 
     fn push_existing(&mut self, mut chunk: OutputChunk) {

@@ -20,8 +20,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::persistence::{
-    load_json_optional_quarantining, quarantine_corrupt_file, write_json_atomic, PersistenceError,
-    QuarantinedLoad,
+    load_json_optional_quarantining, quarantine_corrupt_file, PersistenceError, QuarantinedLoad,
 };
 
 use super::{
@@ -31,6 +30,10 @@ use super::{
     },
     scrollback::{OutputChunk, RawScrollback, ScrollbackReplay},
     status::{AgentStatusChange, AgentStatusTracker, AgentStatusTrackerConfig},
+    store::{
+        ActivityStore, LegacyActivity, SaveTerminalCheckpoint, SavedTerminalCheckpoint,
+        TerminalCheckpoint, TerminalEvent,
+    },
 };
 
 pub const DEFAULT_TERMINAL_SCROLLBACK_BYTES: usize = 1024 * 1024;
@@ -40,7 +43,7 @@ const PERSISTED_VERSION: u32 = 1;
 const NO_STOP_INTENT: u8 = 0;
 const USER_STOP_INTENT: u8 = 1;
 const QUIT_INTERRUPT_INTENT: u8 = 2;
-const OUTPUT_PERSIST_INTERVAL_MS: u64 = 250;
+const OUTPUT_RECORD_PERSIST_INTERVAL_MS: u64 = 2_000;
 /// Coalescing window for PTY output events: bytes read within one frame are
 /// published as a single `ActivityEvent::Output`. The first bytes after a
 /// quiet period flush immediately, so interactive echo never waits a frame.
@@ -141,6 +144,42 @@ pub struct ActivityAttachment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityTerminalAttachment {
+    pub record: ActivityRecord,
+    pub live: bool,
+    pub run_id: String,
+    pub owner_id: String,
+    pub lease_generation: u64,
+    pub checkpoint: Option<TerminalCheckpoint>,
+    pub revision: u64,
+    pub base_sequence: u64,
+    pub first_sequence: Option<u64>,
+    pub last_sequence: u64,
+    pub truncated: bool,
+    pub cols: u16,
+    pub rows: u16,
+    pub events: Vec<TerminalEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActivityTerminalCheckpointRequest {
+    pub activity_id: String,
+    pub run_id: String,
+    pub owner_id: String,
+    pub lease_generation: u64,
+    pub base_revision: u64,
+    pub through_sequence: u64,
+    pub cols: u16,
+    pub rows: u16,
+    pub format_version: u32,
+    pub engine_version: String,
+    pub unicode_version: String,
+    pub data: String,
+    pub search_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "kebab-case",
@@ -154,6 +193,12 @@ pub enum ActivityEvent {
         activity_id: String,
         sequence: u64,
         bytes: Vec<u8>,
+    },
+    Resize {
+        activity_id: String,
+        sequence: u64,
+        cols: u16,
+        rows: u16,
     },
     Status {
         activity_id: String,
@@ -244,7 +289,7 @@ struct SupervisorInner {
     activities: Mutex<HashMap<String, Arc<ManagedActivity>>>,
     spawning_ids: Mutex<HashSet<String>>,
     dispatch: Mutex<DispatchState>,
-    persistence: PersistenceQueue,
+    store: ActivityStore,
     quarantined_files: Mutex<Vec<PathBuf>>,
 }
 
@@ -279,11 +324,31 @@ struct ManagedActivity {
     stop_intent: AtomicU8,
     process_id: AtomicU32,
     last_output_persist_ms: AtomicU64,
+    next_event_sequence: AtomicU64,
+    terminal_order: Mutex<()>,
+    terminal_size: Mutex<(u16, u16)>,
+    checkpoint_lease: Mutex<Option<CheckpointLease>>,
+    next_lease_generation: AtomicU64,
+    terminal_search: Mutex<TerminalSearchState>,
     tracker: Mutex<Option<AgentStatusTracker>>,
     runtime_started: Instant,
     /// Live only while a session runs; completion takes and joins it so all
     /// buffered output is published before the exit event.
     output_flush: Mutex<Option<OutputFlushHandle>>,
+}
+
+#[derive(Debug, Clone)]
+struct CheckpointLease {
+    owner_id: String,
+    run_id: String,
+    generation: u64,
+    minimum_sequence: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TerminalSearchState {
+    checkpoint_through_sequence: u64,
+    checkpoint_text: String,
 }
 
 /// Accumulates PTY reads between frame flushes. The reader thread appends and
@@ -398,24 +463,6 @@ struct CodexSessionMeta {
     cwd: String,
 }
 
-#[derive(Clone)]
-struct PersistenceQueue {
-    tx: mpsc::Sender<PersistenceCommand>,
-    errors: Arc<Mutex<Vec<String>>>,
-}
-
-enum PersistenceCommand {
-    Save {
-        path: PathBuf,
-        value: Box<PersistedActivity>,
-    },
-    Delete {
-        path: PathBuf,
-        ack: mpsc::Sender<Result<(), String>>,
-    },
-    Flush(mpsc::Sender<()>),
-}
-
 impl ActivitySupervisor {
     pub fn new(config: ActivitySupervisorConfig) -> Result<Self, SupervisorError> {
         fs::create_dir_all(&config.persistence_dir).map_err(|source| PersistenceError::Io {
@@ -424,7 +471,8 @@ impl ActivitySupervisor {
             source,
         })?;
 
-        let persistence = PersistenceQueue::start();
+        let store = ActivityStore::start(&config.persistence_dir)
+            .map_err(SupervisorError::PersistenceWorker)?;
         let supervisor = Self {
             inner: Arc::new(SupervisorInner {
                 config,
@@ -434,7 +482,7 @@ impl ActivitySupervisor {
                     next_subscription_id: 1,
                     sinks: HashMap::new(),
                 }),
-                persistence,
+                store,
                 quarantined_files: Mutex::new(Vec::new()),
             }),
         };
@@ -612,6 +660,12 @@ impl ActivitySupervisor {
             stop_intent: AtomicU8::new(NO_STOP_INTENT),
             process_id: AtomicU32::new(process_id.unwrap_or(0)),
             last_output_persist_ms: AtomicU64::new(0),
+            next_event_sequence: AtomicU64::new(1),
+            terminal_order: Mutex::new(()),
+            terminal_size: Mutex::new((request.cols.max(1), request.rows.max(1))),
+            checkpoint_lease: Mutex::new(None),
+            next_lease_generation: AtomicU64::new(1),
+            terminal_search: Mutex::new(TerminalSearchState::default()),
             tracker: Mutex::new(tracker),
             runtime_started: Instant::now(),
             output_flush: Mutex::new(None),
@@ -621,6 +675,12 @@ impl ActivitySupervisor {
             let mut activities = lock(&self.inner.activities);
             activities.insert(lock(&activity.record).id.clone(), activity.clone());
         }
+        self.inner.store.begin_run(
+            lock(&activity.record).clone(),
+            byte_cap,
+            request.cols.max(1),
+            request.rows.max(1),
+        );
         reservation.release();
 
         let inner_for_commands = self.inner.clone();
@@ -707,12 +767,21 @@ impl ActivitySupervisor {
             .filter_map(|activity| {
                 let record = lock(&activity.record).clone();
                 record.archived_at.as_ref()?;
+                let search = lock(&activity.terminal_search).clone();
                 let bytes = lock(&activity.scrollback)
                     .persisted_chunks()
                     .into_iter()
+                    .filter(|chunk| chunk.sequence > search.checkpoint_through_sequence)
                     .flat_map(|chunk| chunk.bytes)
                     .collect::<Vec<_>>();
-                let text = terminal_search_text(&bytes);
+                let tail = terminal_search_text(&bytes);
+                let text = if search.checkpoint_text.is_empty() {
+                    tail
+                } else if tail.is_empty() {
+                    search.checkpoint_text
+                } else {
+                    format!("{}\n{}", search.checkpoint_text, tail)
+                };
                 let snippet = if needle.is_empty() {
                     recent_snippet(&text)
                 } else {
@@ -789,6 +858,119 @@ impl ActivitySupervisor {
             .is_some()
     }
 
+    /// Acquire the single renderer checkpoint lease for one terminal run and
+    /// return a durable checkpoint plus its ordered event tail. A later attach
+    /// replaces this lease, so a stale WebView cannot compact newer output.
+    pub fn terminal_attach(
+        &self,
+        activity_id: &str,
+        owner_id: String,
+    ) -> Result<ActivityTerminalAttachment, SupervisorError> {
+        let activity = self.activity(activity_id)?;
+        let record = lock(&activity.record).clone();
+        let run_id = record
+            .session
+            .as_ref()
+            .map(|session| session.run_id.clone())
+            .ok_or_else(|| SupervisorError::NotRunning(activity_id.to_string()))?;
+        let generation = activity
+            .next_lease_generation
+            .fetch_add(1, Ordering::AcqRel);
+        let mut lease = lock(&activity.checkpoint_lease);
+        *lease = Some(CheckpointLease {
+            owner_id: owner_id.clone(),
+            run_id: run_id.clone(),
+            generation,
+            minimum_sequence: 0,
+        });
+        let restore = self
+            .inner
+            .store
+            .restore(activity_id, &run_id)
+            .map_err(SupervisorError::PersistenceWorker)?;
+        if let Some(current) = lease.as_mut() {
+            current.minimum_sequence = restore.base_sequence;
+        }
+        let live = lock(&activity.command_tx).is_some() && record.status.is_live();
+        Ok(ActivityTerminalAttachment {
+            record,
+            live,
+            run_id,
+            owner_id,
+            lease_generation: generation,
+            checkpoint: restore.checkpoint,
+            revision: restore.revision,
+            base_sequence: restore.base_sequence,
+            first_sequence: restore.first_sequence,
+            last_sequence: restore.last_sequence,
+            truncated: restore.truncated,
+            cols: restore.cols,
+            rows: restore.rows,
+            events: restore.events,
+        })
+    }
+
+    pub fn save_terminal_checkpoint(
+        &self,
+        request: ActivityTerminalCheckpointRequest,
+    ) -> Result<SavedTerminalCheckpoint, SupervisorError> {
+        let activity = self.activity(&request.activity_id)?;
+        let lease = lock(&activity.checkpoint_lease);
+        let valid = lease.as_ref().is_some_and(|lease| {
+            lease.owner_id == request.owner_id
+                && lease.run_id == request.run_id
+                && lease.generation == request.lease_generation
+                && request.through_sequence >= lease.minimum_sequence
+        });
+        if !valid {
+            return Err(SupervisorError::PersistenceWorker(
+                "Terminal checkpoint lease is stale".into(),
+            ));
+        }
+        // Keep the lease lock through the store commit. A concurrent attach
+        // cannot replace the owner between validation and compaction.
+        let saved = self
+            .inner
+            .store
+            .save_checkpoint(SaveTerminalCheckpoint {
+                activity_id: request.activity_id,
+                run_id: request.run_id,
+                base_revision: request.base_revision,
+                through_sequence: request.through_sequence,
+                cols: request.cols,
+                rows: request.rows,
+                format_version: request.format_version,
+                engine_version: request.engine_version,
+                unicode_version: request.unicode_version,
+                data: request.data,
+                search_text: request.search_text.clone(),
+            })
+            .map_err(SupervisorError::PersistenceWorker)?;
+        *lock(&activity.terminal_search) = TerminalSearchState {
+            checkpoint_through_sequence: saved.through_sequence,
+            checkpoint_text: request.search_text,
+        };
+        drop(lease);
+        Ok(saved)
+    }
+
+    pub fn release_terminal_lease(
+        &self,
+        activity_id: &str,
+        owner_id: &str,
+        lease_generation: u64,
+    ) -> Result<bool, SupervisorError> {
+        let activity = self.activity(activity_id)?;
+        let mut lease = lock(&activity.checkpoint_lease);
+        let matches = lease.as_ref().is_some_and(|lease| {
+            lease.owner_id == owner_id && lease.generation == lease_generation
+        });
+        if matches {
+            lease.take();
+        }
+        Ok(matches)
+    }
+
     pub fn write(
         &self,
         activity_id: &str,
@@ -854,9 +1036,10 @@ impl ActivitySupervisor {
             record.auto_title_eligible = false;
             record.updated_at = timestamp();
             let snapshot = record.clone();
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
-                self.inner.persistence.save(path, value);
+            if record.retention.should_persist() {
+                self.inner
+                    .store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
             (snapshot, sinks)
@@ -894,9 +1077,10 @@ impl ActivitySupervisor {
             record.auto_title_eligible = false;
             record.updated_at = timestamp();
             let snapshot = record.clone();
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
-                self.inner.persistence.save(path, value);
+            if record.retention.should_persist() {
+                self.inner
+                    .store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
             (snapshot, sinks)
@@ -946,14 +1130,18 @@ impl ActivitySupervisor {
             record.close_requested_at = None;
             record.updated_at = now;
             let snapshot = record.clone();
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
-                self.inner.persistence.save(path, value);
+            if record.retention.should_persist() {
+                self.inner
+                    .store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
             (snapshot, sinks)
         };
-        self.inner.persistence.flush()?;
+        self.inner
+            .store
+            .flush()
+            .map_err(SupervisorError::PersistenceWorker)?;
         publish_to_sinks(
             &sinks,
             &ActivityEvent::Upsert {
@@ -1000,9 +1188,10 @@ impl ActivitySupervisor {
             }
             record.updated_at = now;
             let snapshot = record.clone();
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.inner.persistence_path_and_value(persisted) {
-                self.inner.persistence.save(path, value);
+            if record.retention.should_persist() {
+                self.inner
+                    .store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             let sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
             (snapshot, sinks)
@@ -1010,7 +1199,10 @@ impl ActivitySupervisor {
 
         // A successful close acknowledgement means the intent survives a
         // process restart. Do not terminate or hide the row before this fence.
-        self.inner.persistence.flush()?;
+        self.inner
+            .store
+            .flush()
+            .map_err(SupervisorError::PersistenceWorker)?;
         publish_to_sinks(
             &sinks,
             &ActivityEvent::Upsert {
@@ -1040,11 +1232,10 @@ impl ActivitySupervisor {
                 record.close_requested_at = None;
                 record.updated_at = timestamp();
                 let snapshot = record.clone();
-                if let Some((path, value)) = self
-                    .inner
-                    .persistence_path_and_value(persisted_snapshot(&record, &scrollback))
-                {
-                    self.inner.persistence.save(path, value);
+                if record.retention.should_persist() {
+                    self.inner
+                        .store
+                        .save_record(record.clone(), scrollback.byte_cap());
                 }
                 Some((
                     snapshot,
@@ -1055,7 +1246,10 @@ impl ActivitySupervisor {
         let Some((record, sinks)) = rollback else {
             return Ok(());
         };
-        self.inner.persistence.flush()?;
+        self.inner
+            .store
+            .flush()
+            .map_err(SupervisorError::PersistenceWorker)?;
         publish_to_sinks(&sinks, &ActivityEvent::Upsert { record });
         Ok(())
     }
@@ -1087,8 +1281,19 @@ impl ActivitySupervisor {
         let removed = record.clone();
         drop(record);
 
-        let path = activity_persistence_path(&self.inner.config.persistence_dir, activity_id);
-        self.inner.persistence.delete(path)?;
+        let legacy_path =
+            activity_persistence_path(&self.inner.config.persistence_dir, activity_id);
+        if legacy_path.exists() {
+            fs::remove_file(&legacy_path).map_err(|source| PersistenceError::Io {
+                operation: "delete legacy Activity persistence file",
+                path: legacy_path,
+                source,
+            })?;
+        }
+        self.inner
+            .store
+            .delete(activity_id)
+            .map_err(SupervisorError::PersistenceWorker)?;
         activities.remove(activity_id);
         Ok(removed)
     }
@@ -1114,7 +1319,10 @@ impl ActivitySupervisor {
     }
 
     pub fn flush_persistence(&self) -> Result<(), SupervisorError> {
-        self.inner.persistence.flush()
+        self.inner
+            .store
+            .flush()
+            .map_err(SupervisorError::PersistenceWorker)
     }
 
     /// Interrupt live PTYs, give their readers a short bounded window to
@@ -1140,7 +1348,7 @@ impl ActivitySupervisor {
     }
 
     pub fn take_persistence_errors(&self) -> Vec<String> {
-        std::mem::take(&mut *lock(&self.inner.persistence.errors))
+        self.inner.store.take_errors()
     }
 
     pub fn quarantined_files(&self) -> Vec<PathBuf> {
@@ -1199,6 +1407,16 @@ impl ActivitySupervisor {
     }
 
     fn hydrate(&self) -> Result<(), SupervisorError> {
+        // Import v1 JSON once. The source files stay in place for one-version
+        // rollback, but SQLite is authoritative as soon as the source marker
+        // commits. Do not parse a retained large JSON file on later starts.
+        let imported_sources: HashSet<_> = self
+            .inner
+            .store
+            .legacy_sources()
+            .map_err(SupervisorError::PersistenceWorker)?
+            .into_iter()
+            .collect();
         let entries = fs::read_dir(&self.inner.config.persistence_dir).map_err(|source| {
             PersistenceError::Io {
                 operation: "read activity persistence directory",
@@ -1206,8 +1424,6 @@ impl ActivitySupervisor {
                 source,
             }
         })?;
-        let mut corrected_records = false;
-
         for entry in entries {
             let entry = entry.map_err(|source| PersistenceError::Io {
                 operation: "read activity persistence directory entry",
@@ -1216,6 +1432,16 @@ impl ActivitySupervisor {
             })?;
             let path = entry.path();
             if !is_activity_persistence_file(&path) {
+                continue;
+            }
+            let Some(source_name) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            if imported_sources.contains(&source_name) {
                 continue;
             }
 
@@ -1236,8 +1462,42 @@ impl ActivitySupervisor {
             if persisted.record.retention != ActivityRetention::Durable {
                 continue;
             }
+            let byte_cap = if matches!(
+                persisted.record.kind,
+                ActivityKind::Agent | ActivityKind::Routine
+            ) {
+                self.inner.config.durable_scrollback_bytes
+            } else {
+                self.inner.config.terminal_scrollback_bytes
+            };
+            self.inner
+                .store
+                .import_legacy(LegacyActivity {
+                    source_name,
+                    record: persisted.record,
+                    byte_cap,
+                    chunks: persisted.scrollback.chunks,
+                    next_sequence: persisted.scrollback.next_sequence,
+                    truncated: persisted.scrollback.truncated,
+                })
+                .map_err(SupervisorError::PersistenceWorker)?;
+        }
 
-            let mut record = persisted.record;
+        let stored = self
+            .inner
+            .store
+            .load_all()
+            .map_err(SupervisorError::PersistenceWorker)?;
+        let mut corrected_records = false;
+        for loaded in stored {
+            let mut record = loaded.record;
+            if record.retention != ActivityRetention::Durable {
+                self.inner
+                    .store
+                    .delete(&record.id)
+                    .map_err(SupervisorError::PersistenceWorker)?;
+                continue;
+            }
             let mut corrected = false;
             if capture_cli_session_id(&self.inner.config.persistence_dir, &mut record) {
                 corrected = true;
@@ -1267,17 +1527,16 @@ impl ActivitySupervisor {
                 record.archived_at = Some(close_requested_at);
             }
 
-            let byte_cap = if matches!(record.kind, ActivityKind::Agent | ActivityKind::Routine) {
-                self.inner.config.durable_scrollback_bytes
-            } else {
-                self.inner.config.terminal_scrollback_bytes
-            };
             let scrollback = RawScrollback::from_persisted(
-                byte_cap,
-                persisted.scrollback.chunks,
-                persisted.scrollback.next_sequence,
-                persisted.scrollback.truncated,
+                loaded.byte_cap,
+                loaded.chunks,
+                loaded.next_sequence,
+                loaded.truncated,
             );
+            if let Some(session) = record.session.as_mut() {
+                session.last_output_sequence = loaded.next_sequence.saturating_sub(1);
+                session.scrollback_bytes = scrollback.retained_bytes() as u64;
+            }
             let activity = Arc::new(ManagedActivity {
                 record: Mutex::new(record),
                 scrollback: Mutex::new(scrollback),
@@ -1286,6 +1545,15 @@ impl ActivitySupervisor {
                 stop_intent: AtomicU8::new(NO_STOP_INTENT),
                 process_id: AtomicU32::new(0),
                 last_output_persist_ms: AtomicU64::new(0),
+                next_event_sequence: AtomicU64::new(loaded.next_sequence.max(1)),
+                terminal_order: Mutex::new(()),
+                terminal_size: Mutex::new((loaded.cols, loaded.rows)),
+                checkpoint_lease: Mutex::new(None),
+                next_lease_generation: AtomicU64::new(1),
+                terminal_search: Mutex::new(TerminalSearchState {
+                    checkpoint_through_sequence: loaded.checkpoint_through_sequence,
+                    checkpoint_text: loaded.checkpoint_search_text,
+                }),
                 tracker: Mutex::new(None),
                 runtime_started: Instant::now(),
                 output_flush: Mutex::new(None),
@@ -1298,7 +1566,10 @@ impl ActivitySupervisor {
             }
         }
         if corrected_records {
-            self.inner.persistence.flush()?;
+            self.inner
+                .store
+                .flush()
+                .map_err(SupervisorError::PersistenceWorker)?;
         }
         Ok(())
     }
@@ -1314,6 +1585,7 @@ impl SupervisorInner {
     /// their read order, and the whole batch takes a single scrollback
     /// sequence, so attach snapshots and live events never split a batch.
     fn record_output(&self, activity: &Arc<ManagedActivity>, bytes: Vec<u8>) {
+        let _terminal_order = lock(&activity.terminal_order);
         let output_elapsed_ms = elapsed_ms(activity.runtime_started);
         let status_change = {
             let mut tracker = lock(&activity.tracker);
@@ -1331,7 +1603,8 @@ impl SupervisorInner {
             let dispatch = lock(&self.dispatch);
             let mut record = lock(&activity.record);
             let mut scrollback = lock(&activity.scrollback);
-            let sequence = scrollback.append(&bytes);
+            let sequence = activity.next_event_sequence.fetch_add(1, Ordering::AcqRel);
+            scrollback.append_with_sequence(sequence, &bytes);
             let retained_bytes = scrollback.retained_bytes() as u64;
             if let Some(session) = record.session.as_mut() {
                 session.last_output_sequence = sequence;
@@ -1347,8 +1620,22 @@ impl SupervisorInner {
                 record.updated_at = timestamp();
             }
             apply_status_change(&mut record, status_change.as_ref());
+            let activity_id = record.id.clone();
+            let run_id = record
+                .session
+                .as_ref()
+                .map(|session| session.run_id.clone())
+                .unwrap_or_default();
+            self.store.append_event(
+                activity_id.clone(),
+                run_id,
+                TerminalEvent::Output {
+                    sequence,
+                    bytes: bytes.clone(),
+                },
+            );
             events.push(ActivityEvent::Output {
-                activity_id: record.id.clone(),
+                activity_id,
                 sequence,
                 bytes,
             });
@@ -1361,9 +1648,9 @@ impl SupervisorInner {
                 });
             }
             if persist_output {
-                let persisted = persisted_snapshot(&record, &scrollback);
-                if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-                    self.persistence.save(path, value);
+                if record.retention.should_persist() {
+                    self.store
+                        .save_record(record.clone(), scrollback.byte_cap());
                 }
             }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
@@ -1371,6 +1658,49 @@ impl SupervisorInner {
         for event in events {
             publish_to_sinks(&sinks, &event);
         }
+    }
+
+    fn record_resize(&self, activity: &Arc<ManagedActivity>, cols: u16, rows: u16) {
+        let cols = cols.max(1);
+        let rows = rows.max(1);
+        let event;
+        let sinks;
+        {
+            let dispatch = lock(&self.dispatch);
+            let record = lock(&activity.record);
+            if lock(&activity.command_tx).is_none() {
+                return;
+            }
+            let mut size = lock(&activity.terminal_size);
+            if *size == (cols, rows) {
+                return;
+            }
+            *size = (cols, rows);
+            let sequence = activity.next_event_sequence.fetch_add(1, Ordering::AcqRel);
+            lock(&activity.scrollback).observe_sequence(sequence);
+            let run_id = record
+                .session
+                .as_ref()
+                .map(|session| session.run_id.clone())
+                .unwrap_or_default();
+            self.store.append_event(
+                record.id.clone(),
+                run_id,
+                TerminalEvent::Resize {
+                    sequence,
+                    cols,
+                    rows,
+                },
+            );
+            event = ActivityEvent::Resize {
+                activity_id: record.id.clone(),
+                sequence,
+                cols,
+                rows,
+            };
+            sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
+        }
+        publish_to_sinks(&sinks, &event);
     }
 
     fn record_agent_status(&self, activity: &Arc<ManagedActivity>, change: AgentStatusChange) {
@@ -1391,9 +1721,9 @@ impl SupervisorInner {
                 title_hint: change.title_hint,
                 needs_input_is_blocking: change.needs_input_is_blocking,
             };
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-                self.persistence.save(path, value);
+            if record.retention.should_persist() {
+                self.store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
         }
@@ -1452,16 +1782,19 @@ impl SupervisorInner {
             if let Some(session) = record.session.as_mut() {
                 session.ended_at = Some(now);
                 session.exit = Some(exit.clone());
-                session.last_output_sequence = scrollback.next_sequence().saturating_sub(1);
+                session.last_output_sequence = activity
+                    .next_event_sequence
+                    .load(Ordering::Acquire)
+                    .saturating_sub(1);
                 session.scrollback_bytes = scrollback.retained_bytes() as u64;
             }
             if let Some(change) = status_change {
                 debug_assert_eq!(change.status, record.status);
             }
             record_snapshot = record.clone();
-            let persisted = persisted_snapshot(&record, &scrollback);
-            if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-                self.persistence.save(path, value);
+            if record.retention.should_persist() {
+                self.store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
         }
@@ -1481,146 +1814,8 @@ impl SupervisorInner {
             return;
         }
         let scrollback = lock(&activity.scrollback);
-        let persisted = persisted_snapshot(&record, &scrollback);
-        if let Some((path, value)) = self.persistence_path_and_value(persisted) {
-            self.persistence.save(path, value);
-        }
-    }
-
-    fn persistence_path_and_value(
-        &self,
-        persisted: Option<PersistedActivity>,
-    ) -> Option<(PathBuf, PersistedActivity)> {
-        persisted.map(|value| {
-            let path = activity_persistence_path(&self.config.persistence_dir, &value.record.id);
-            (path, value)
-        })
-    }
-}
-
-impl PersistenceQueue {
-    fn start() -> Self {
-        let (tx, rx) = mpsc::channel();
-        let errors = Arc::new(Mutex::new(Vec::new()));
-        let worker_errors = errors.clone();
-        thread::spawn(move || persistence_loop(rx, worker_errors));
-        Self { tx, errors }
-    }
-
-    fn save(&self, path: PathBuf, value: PersistedActivity) {
-        let _ = self.tx.send(PersistenceCommand::Save {
-            path,
-            value: Box::new(value),
-        });
-    }
-
-    fn delete(&self, path: PathBuf) -> Result<(), SupervisorError> {
-        let (ack_tx, ack_rx) = mpsc::channel();
-        self.tx
-            .send(PersistenceCommand::Delete { path, ack: ack_tx })
-            .map_err(|_| SupervisorError::PersistenceWorker("worker channel closed".into()))?;
-        ack_rx
-            .recv()
-            .map_err(|_| {
-                SupervisorError::PersistenceWorker("worker stopped before deleting activity".into())
-            })?
-            .map_err(SupervisorError::PersistenceWorker)
-    }
-
-    fn flush(&self) -> Result<(), SupervisorError> {
-        let (ack_tx, ack_rx) = mpsc::channel();
-        self.tx
-            .send(PersistenceCommand::Flush(ack_tx))
-            .map_err(|_| SupervisorError::PersistenceWorker("worker channel closed".into()))?;
-        ack_rx.recv().map_err(|_| {
-            SupervisorError::PersistenceWorker("worker stopped before flush".into())
-        })?;
-        let errors = lock(&self.errors);
-        if let Some(error) = errors.last() {
-            return Err(SupervisorError::PersistenceWorker(error.clone()));
-        }
-        Ok(())
-    }
-}
-
-fn persistence_loop(receiver: mpsc::Receiver<PersistenceCommand>, errors: Arc<Mutex<Vec<String>>>) {
-    struct PendingPersistence {
-        value: Option<Box<PersistedActivity>>,
-        delete_acks: Vec<mpsc::Sender<Result<(), String>>>,
-    }
-
-    while let Ok(first) = receiver.recv() {
-        let mut pending: HashMap<PathBuf, PendingPersistence> = HashMap::new();
-        let mut flush_acks = Vec::new();
-        match first {
-            PersistenceCommand::Save { path, value } => {
-                pending.insert(
-                    path,
-                    PendingPersistence {
-                        value: Some(value),
-                        delete_acks: Vec::new(),
-                    },
-                );
-            }
-            PersistenceCommand::Delete { path, ack } => {
-                pending.insert(
-                    path,
-                    PendingPersistence {
-                        value: None,
-                        delete_acks: vec![ack],
-                    },
-                );
-            }
-            PersistenceCommand::Flush(ack) => flush_acks.push(ack),
-        }
-
-        let deadline = Instant::now() + Duration::from_millis(20);
-        while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-            match receiver.recv_timeout(remaining) {
-                Ok(PersistenceCommand::Save { path, value }) => {
-                    pending
-                        .entry(path)
-                        .and_modify(|action| action.value = Some(value.clone()))
-                        .or_insert(PendingPersistence {
-                            value: Some(value),
-                            delete_acks: Vec::new(),
-                        });
-                }
-                Ok(PersistenceCommand::Delete { path, ack }) => {
-                    pending
-                        .entry(path)
-                        .and_modify(|action| {
-                            action.value = None;
-                            action.delete_acks.push(ack.clone());
-                        })
-                        .or_insert(PendingPersistence {
-                            value: None,
-                            delete_acks: vec![ack],
-                        });
-                }
-                Ok(PersistenceCommand::Flush(ack)) => flush_acks.push(ack),
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-        }
-
-        for (path, action) in pending {
-            let result = match action.value {
-                Some(value) => write_json_atomic(&path, &value).map_err(|error| error.to_string()),
-                None if !path.exists() => Ok(()),
-                None => fs::remove_file(&path)
-                    .map_err(|error| format!("Could not delete {}: {}", path.display(), error)),
-            };
-            if let Err(error) = &result {
-                lock(&errors).push(error.clone());
-            }
-            for ack in action.delete_acks {
-                let _ = ack.send(result.clone());
-            }
-        }
-        for ack in flush_acks {
-            let _ = ack.send(());
-        }
+        self.store
+            .save_record(record.clone(), scrollback.byte_cap());
     }
 }
 
@@ -1628,8 +1823,8 @@ fn command_loop(
     master: Box<dyn MasterPty + Send>,
     mut writer: Box<dyn Write + Send>,
     receiver: mpsc::Receiver<SessionCommand>,
-    _inner: Arc<SupervisorInner>,
-    _activity: Arc<ManagedActivity>,
+    inner: Arc<SupervisorInner>,
+    activity: Arc<ManagedActivity>,
 ) {
     while let Ok(command) = receiver.recv() {
         match command {
@@ -1641,7 +1836,13 @@ fn command_loop(
                 let _ = ack.send(result);
             }
             SessionCommand::Resize(size, ack) => {
+                let _terminal_order = lock(&activity.terminal_order);
+                let cols = size.cols;
+                let rows = size.rows;
                 let result = master.resize(size).map_err(|error| error.to_string());
+                if result.is_ok() {
+                    inner.record_resize(&activity, cols, rows);
+                }
                 let _ = ack.send(result);
             }
             SessionCommand::Close => break,
@@ -1849,24 +2050,6 @@ fn receive_command_ack(
         })
 }
 
-fn persisted_snapshot(
-    record: &ActivityRecord,
-    scrollback: &RawScrollback,
-) -> Option<PersistedActivity> {
-    record
-        .retention
-        .should_persist()
-        .then(|| PersistedActivity {
-            version: PERSISTED_VERSION,
-            record: record.clone(),
-            scrollback: PersistedScrollback {
-                chunks: scrollback.persisted_chunks(),
-                next_sequence: scrollback.next_sequence(),
-                truncated: scrollback.was_truncated(),
-            },
-        })
-}
-
 fn activity_persistence_path(directory: &Path, activity_id: &str) -> PathBuf {
     let digest = Sha256::digest(activity_id.as_bytes());
     directory.join(format!("{digest:x}.activity.json"))
@@ -2045,7 +2228,7 @@ fn claim_periodic_persistence(last_persist_ms: &AtomicU64, elapsed_ms: u64) -> b
     let stamp = elapsed_ms.saturating_add(1);
     loop {
         let previous = last_persist_ms.load(Ordering::Acquire);
-        if previous != 0 && stamp.saturating_sub(previous) < OUTPUT_PERSIST_INTERVAL_MS {
+        if previous != 0 && stamp.saturating_sub(previous) < OUTPUT_RECORD_PERSIST_INTERVAL_MS {
             return false;
         }
         if last_persist_ms
@@ -2157,6 +2340,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use super::*;
     use crate::activities::model::{ActivityLaunchSpec, ActivityOrigin};
+    use rusqlite::{params, Connection};
     use std::collections::BTreeMap;
     use tempfile::TempDir;
 
@@ -2200,6 +2384,29 @@ mod tests {
         ActivitySupervisor::new(config).unwrap()
     }
 
+    fn rewrite_stored_record(
+        temp: &TempDir,
+        activity_id: &str,
+        mutate: impl FnOnce(&mut ActivityRecord),
+    ) {
+        let connection = Connection::open(ActivityStore::database_path(temp.path())).unwrap();
+        let bytes: Vec<u8> = connection
+            .query_row(
+                "SELECT record_json FROM activity_records WHERE activity_id = ?1",
+                params![activity_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut record: ActivityRecord = serde_json::from_slice(&bytes).unwrap();
+        mutate(&mut record);
+        connection
+            .execute(
+                "UPDATE activity_records SET record_json = ?2 WHERE activity_id = ?1",
+                params![activity_id, serde_json::to_vec(&record).unwrap()],
+            )
+            .unwrap();
+    }
+
     fn wait_for_end(supervisor: &ActivitySupervisor, id: &str) -> ActivitySnapshot {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
@@ -2228,19 +2435,19 @@ mod tests {
         assert!(claim_periodic_persistence(&last, 0));
         assert!(!claim_periodic_persistence(
             &last,
-            OUTPUT_PERSIST_INTERVAL_MS - 1
+            OUTPUT_RECORD_PERSIST_INTERVAL_MS - 1
         ));
         assert!(claim_periodic_persistence(
             &last,
-            OUTPUT_PERSIST_INTERVAL_MS
+            OUTPUT_RECORD_PERSIST_INTERVAL_MS
         ));
         assert!(!claim_periodic_persistence(
             &last,
-            OUTPUT_PERSIST_INTERVAL_MS * 2 - 1
+            OUTPUT_RECORD_PERSIST_INTERVAL_MS * 2 - 1
         ));
         assert!(claim_periodic_persistence(
             &last,
-            OUTPUT_PERSIST_INTERVAL_MS * 2
+            OUTPUT_RECORD_PERSIST_INTERVAL_MS * 2
         ));
     }
 
@@ -2528,6 +2735,63 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn terminal_checkpoint_lease_rejects_stale_renderers_and_restores_the_winner() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        supervisor
+            .spawn(SpawnActivityRequest::new(
+                durable_record(
+                    "checkpoint-lease",
+                    "/bin/sh",
+                    vec!["-c".into(), "printf state".into()],
+                ),
+                80,
+                24,
+            ))
+            .unwrap();
+        wait_for_end(&supervisor, "checkpoint-lease");
+        supervisor.flush_persistence().unwrap();
+
+        let stale = supervisor
+            .terminal_attach("checkpoint-lease", "old-webview".into())
+            .unwrap();
+        let current = supervisor
+            .terminal_attach("checkpoint-lease", "new-webview".into())
+            .unwrap();
+        let request = |attachment: &ActivityTerminalAttachment, owner_id: &str| {
+            ActivityTerminalCheckpointRequest {
+                activity_id: "checkpoint-lease".into(),
+                run_id: attachment.run_id.clone(),
+                owner_id: owner_id.into(),
+                lease_generation: attachment.lease_generation,
+                base_revision: attachment.revision,
+                through_sequence: attachment.last_sequence,
+                cols: 80,
+                rows: 24,
+                format_version: 1,
+                engine_version: "6.0.0".into(),
+                unicode_version: "11".into(),
+                data: "serialized state".into(),
+                search_text: "state".into(),
+            }
+        };
+        assert!(supervisor
+            .save_terminal_checkpoint(request(&stale, "old-webview"))
+            .is_err());
+        let saved = supervisor
+            .save_terminal_checkpoint(request(&current, "new-webview"))
+            .unwrap();
+        assert_eq!(saved.revision, 1);
+
+        let restored = supervisor
+            .terminal_attach("checkpoint-lease", "third-webview".into())
+            .unwrap();
+        assert_eq!(restored.checkpoint.unwrap().data, "serialized state");
+        assert!(restored.events.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn reconciles_failure_and_explicit_stop_reasons() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
@@ -2709,15 +2973,12 @@ mod tests {
         assert_eq!(snapshot.record.status, ActivityStatus::Done);
         assert_eq!(replay_bytes(&snapshot), replay_bytes(&finished));
 
-        let path = activity_persistence_path(temp.path(), "persisted");
-        let mut persisted: PersistedActivity = crate::persistence::load_json_optional(&path)
-            .unwrap()
-            .unwrap();
-        persisted.record.status = ActivityStatus::Working;
-        persisted.record.session.as_mut().unwrap().exit = None;
-        persisted.record.session.as_mut().unwrap().ended_at = None;
-        write_json_atomic(&path, &persisted).unwrap();
         drop(hydrated);
+        rewrite_stored_record(&temp, "persisted", |record| {
+            record.status = ActivityStatus::Working;
+            record.session.as_mut().unwrap().exit = None;
+            record.session.as_mut().unwrap().ended_at = None;
+        });
 
         let restarted = create_supervisor(&temp);
         let snapshot = restarted.snapshot("persisted", None).unwrap();
@@ -2761,19 +3022,16 @@ mod tests {
         assert!(ended.record.archived_at.is_some());
         supervisor.flush_persistence().unwrap();
 
-        let path = activity_persistence_path(temp.path(), "close-intent");
-        let mut persisted: PersistedActivity = crate::persistence::load_json_optional(&path)
-            .unwrap()
-            .unwrap();
-        persisted.record.status = ActivityStatus::Working;
-        persisted.record.archived_at = None;
-        persisted.record.close_requested_at = Some("2026-07-25T12:00:00Z".into());
-        if let Some(session) = persisted.record.session.as_mut() {
-            session.ended_at = None;
-            session.exit = None;
-        }
-        write_json_atomic(&path, &persisted).unwrap();
         drop(supervisor);
+        rewrite_stored_record(&temp, "close-intent", |record| {
+            record.status = ActivityStatus::Working;
+            record.archived_at = None;
+            record.close_requested_at = Some("2026-07-25T12:00:00Z".into());
+            if let Some(session) = record.session.as_mut() {
+                session.ended_at = None;
+                session.exit = None;
+            }
+        });
 
         let restarted = create_supervisor(&temp);
         let recovered = restarted.snapshot("close-intent", None).unwrap();
@@ -3045,7 +3303,7 @@ mod tests {
         assert_eq!(archived.retention, ActivityRetention::Durable);
         assert!(archived.archived_at.is_some());
         supervisor.flush_persistence().unwrap();
-        assert!(activity_persistence_path(temp.path(), "terminal-history").exists());
+        assert!(ActivityStore::database_path(temp.path()).exists());
     }
 
     #[test]
@@ -3060,5 +3318,77 @@ mod tests {
         assert_eq!(quarantined.len(), 1);
         assert!(quarantined[0].exists());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn imported_legacy_source_is_not_parsed_again() {
+        let temp = TempDir::new().unwrap();
+        let path = activity_persistence_path(temp.path(), "legacy-marker");
+        let mut record = durable_record("legacy-marker", "/bin/sh", vec![]);
+        record.status = ActivityStatus::Done;
+        let persisted = PersistedActivity {
+            version: PERSISTED_VERSION,
+            record,
+            scrollback: PersistedScrollback {
+                chunks: vec![OutputChunk {
+                    sequence: 1,
+                    bytes: b"legacy terminal state".to_vec(),
+                }],
+                next_sequence: 2,
+                truncated: false,
+            },
+        };
+        fs::write(&path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+
+        let supervisor = create_supervisor(&temp);
+        assert_eq!(supervisor.list().len(), 1);
+        assert_eq!(
+            replay_bytes(&supervisor.snapshot("legacy-marker", None).unwrap()),
+            b"legacy terminal state"
+        );
+        drop(supervisor);
+
+        // The source stays for rollback. Its contents are no longer on the
+        // startup path after the import marker commits.
+        fs::write(&path, b"{not valid JSON anymore").unwrap();
+        let restored = create_supervisor(&temp);
+        assert_eq!(restored.list().len(), 1);
+        assert!(restored.quarantined_files().is_empty());
+        assert_eq!(fs::read(&path).unwrap(), b"{not valid JSON anymore");
+        assert_eq!(restored.clear("legacy-marker").unwrap().id, "legacy-marker");
+        assert!(!path.exists());
+        drop(restored);
+        assert!(create_supervisor(&temp).list().is_empty());
+    }
+
+    #[test]
+    fn failed_legacy_file_delete_keeps_the_sqlite_activity() {
+        let temp = TempDir::new().unwrap();
+        let path = activity_persistence_path(temp.path(), "legacy-delete-failure");
+        let mut record = durable_record("legacy-delete-failure", "/bin/sh", vec![]);
+        record.status = ActivityStatus::Done;
+        let persisted = PersistedActivity {
+            version: PERSISTED_VERSION,
+            record,
+            scrollback: PersistedScrollback {
+                chunks: Vec::new(),
+                next_sequence: 1,
+                truncated: false,
+            },
+        };
+        fs::write(&path, serde_json::to_vec(&persisted).unwrap()).unwrap();
+        let supervisor = create_supervisor(&temp);
+        assert_eq!(supervisor.list().len(), 1);
+
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(supervisor.clear("legacy-delete-failure").is_err());
+        assert_eq!(supervisor.list().len(), 1);
+
+        fs::remove_dir(&path).unwrap();
+        drop(supervisor);
+        let restored = create_supervisor(&temp);
+        assert_eq!(restored.list().len(), 1);
+        assert_eq!(restored.list()[0].id, "legacy-delete-failure");
     }
 }
