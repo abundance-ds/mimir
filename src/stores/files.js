@@ -10,6 +10,9 @@ let nextDraftId = 1
 export const useFileStore = defineStore('files', () => {
   const openFiles = ref([])
   const recentFiles = ref([])
+  const workspaceProjectionEnabled = ref(false)
+  const workspaceScope = ref('')
+  const knownWorkspacePaths = ref([])
   // Each entry: { id, path, content, dirty, saveState, saveError }
   // path is null for unsaved/new files
 
@@ -18,7 +21,92 @@ export const useFileStore = defineStore('files', () => {
   let sessionHydrationPromise = null
   const writesByFileId = new Map()
 
-  const currentFile = computed(() => openFiles.value[activeFileIndex.value] || null)
+  const visibleOpenFiles = computed(() => openFiles.value.filter(isFileVisible))
+  const visibleRecentFiles = computed(() => {
+    if (!workspaceProjectionEnabled.value) return recentFiles.value
+    if (!workspaceScope.value) return []
+    return recentFiles.value.filter(path => workspaceForPath(path) === workspaceScope.value)
+  })
+  const activeVisibleFileIndex = computed(() => {
+    const file = openFiles.value[activeFileIndex.value]
+    return file && isFileVisible(file) ? visibleOpenFiles.value.indexOf(file) : -1
+  })
+  const currentFile = computed(() => {
+    const file = openFiles.value[activeFileIndex.value]
+    return file && isFileVisible(file) ? file : null
+  })
+
+  function setWorkspaceScope(path, workspacePaths = []) {
+    const nextScope = normalizeWorkspacePath(path)
+    const scopeChanged = !workspaceProjectionEnabled.value || workspaceScope.value !== nextScope
+    workspaceProjectionEnabled.value = true
+    workspaceScope.value = nextScope
+    knownWorkspacePaths.value = normalizeWorkspacePaths([
+      path,
+      ...(Array.isArray(workspacePaths) ? workspacePaths : []),
+    ])
+    reconcileWorkspaceOwnership()
+    ensureWorkspaceSelection({ preferScoped: scopeChanged })
+  }
+
+  function clearWorkspaceScope() {
+    workspaceProjectionEnabled.value = false
+    workspaceScope.value = ''
+    knownWorkspacePaths.value = []
+    ensureWorkspaceSelection()
+  }
+
+  function workspaceForPath(path) {
+    return owningWorkspacePath(path, knownWorkspacePaths.value)
+  }
+
+  function workspaceForFile(file) {
+    if (!file?.path) return ''
+    return owningWorkspacePath(file.path, [
+      file.workspacePath,
+      ...knownWorkspacePaths.value,
+    ])
+  }
+
+  function reconcileWorkspaceOwnership() {
+    for (const file of openFiles.value) {
+      if (!file.path) continue
+      const owner = workspaceForFile(file)
+      if (owner) file.workspacePath = owner
+    }
+  }
+
+  function isFileVisible(file) {
+    if (!workspaceProjectionEnabled.value) return true
+    const owner = workspaceForFile(file)
+    return !owner || owner === workspaceScope.value
+  }
+
+  function pathIsVisible(path) {
+    if (!workspaceProjectionEnabled.value) return true
+    const openFile = openFiles.value.find(file => (
+      normalizeWorkspacePath(file.path) === normalizeWorkspacePath(path)
+    ))
+    const owner = openFile ? workspaceForFile(openFile) : workspaceForPath(path)
+    return !owner || owner === workspaceScope.value
+  }
+
+  function ensureWorkspaceSelection({ preferScoped = false } = {}) {
+    if (!workspaceProjectionEnabled.value) {
+      if (!currentFile.value && openFiles.value.length) activeFileIndex.value = 0
+      return Boolean(currentFile.value)
+    }
+    const active = openFiles.value[activeFileIndex.value]
+    const scopedIndex = openFiles.value.findIndex(file => (
+      workspaceForFile(file) === workspaceScope.value
+    ))
+    if (!preferScoped && active && isFileVisible(active)) return true
+    const visibleIndex = scopedIndex >= 0
+      ? scopedIndex
+      : openFiles.value.findIndex(isFileVisible)
+    if (visibleIndex >= 0) activeFileIndex.value = visibleIndex
+    return visibleIndex >= 0
+  }
 
   function makeFile({
     path,
@@ -29,7 +117,11 @@ export const useFileStore = defineStore('files', () => {
     kind = 'text',
     preview = false,
     meta = null,
+    workspacePath,
   }) {
+    const owner = path
+      ? owningWorkspacePath(path, [workspacePath, ...knownWorkspacePaths.value])
+      : ''
     return {
       id: nextFileId++,
       path,
@@ -40,6 +132,7 @@ export const useFileStore = defineStore('files', () => {
       kind,
       preview,
       meta,
+      workspacePath: owner,
       saveState: dirty ? SAVE_STATE.dirty : SAVE_STATE.idle,
       saveError: null,
       reviews: null,
@@ -138,12 +231,23 @@ export const useFileStore = defineStore('files', () => {
       .slice(0, RECENT_LIMIT)
   }
 
+  function clearVisibleRecentFiles() {
+    if (!workspaceProjectionEnabled.value) {
+      recentFiles.value = []
+      return
+    }
+    recentFiles.value = recentFiles.value.filter(path => (
+      workspaceForPath(path) !== workspaceScope.value
+    ))
+  }
+
   // Open a file from disk path. If already open, just switch to it.
   // If the active tab is a newTab landing page, replace it in-place.
   async function openFile(path, content, {
     kind = 'text',
     preview = false,
     meta = null,
+    workspacePath,
   } = {}) {
     const active = currentFile.value
     const existingIdx = openFiles.value.findIndex(f => f.path === path)
@@ -160,12 +264,14 @@ export const useFileStore = defineStore('files', () => {
       existing.kind = kind
       existing.meta = meta
       if (!preview) existing.preview = false
+      const owner = owningWorkspacePath(path, [workspacePath, ...knownWorkspacePaths.value])
+      if (owner) existing.workspacePath = owner
       addRecentFile(path)
       return existing
     }
 
     const reusablePreviewIndex = preview
-      ? openFiles.value.findIndex(file => file.preview && !file.dirty)
+      ? openFiles.value.findIndex(file => file.preview && !file.dirty && isFileVisible(file))
       : -1
     const replacementIndex = active?.newTab
       ? activeFileIndex.value
@@ -179,6 +285,10 @@ export const useFileStore = defineStore('files', () => {
       replacement.kind = kind
       replacement.preview = preview
       replacement.meta = meta
+      replacement.workspacePath = owningWorkspacePath(path, [
+        workspacePath,
+        ...knownWorkspacePaths.value,
+      ])
       replacement.dirty = false
       replacement.saveState = SAVE_STATE.idle
       replacement.saveError = null
@@ -188,7 +298,7 @@ export const useFileStore = defineStore('files', () => {
       return replacement
     }
 
-    const file = makeFile({ path, content, kind, preview, meta })
+    const file = makeFile({ path, content, kind, preview, meta, workspacePath })
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
     addRecentFile(path)
@@ -219,14 +329,19 @@ export const useFileStore = defineStore('files', () => {
     return file
   }
 
-  function restorePath({ path, content = '', dirty = false } = {}) {
+  function restorePath({ path, content = '', dirty = false, workspacePath } = {}) {
     if (!path) return null
     const existing = openFiles.value.find((file) => file.path === path)
     if (existing) {
       activeFileIndex.value = openFiles.value.indexOf(existing)
       return existing
     }
-    const file = makeFile({ path, content: String(content), dirty: Boolean(dirty) })
+    const file = makeFile({
+      path,
+      content: String(content),
+      dirty: Boolean(dirty),
+      workspacePath,
+    })
     openFiles.value.push(file)
     activeFileIndex.value = openFiles.value.length - 1
     return file
@@ -251,6 +366,10 @@ export const useFileStore = defineStore('files', () => {
     sessionHydrated.value = true
     const pending = Promise.resolve()
       .then(() => hydrate())
+      .then((result) => {
+        ensureWorkspaceSelection()
+        return result
+      })
       .then(() => true)
       .catch((error) => {
         openFiles.value = beforeFiles
@@ -272,6 +391,10 @@ export const useFileStore = defineStore('files', () => {
       ? openFiles.value.findIndex((file) => file.path === entry.path)
       : openFiles.value.findIndex((file) => file.draftId === entry.draftId)
     if (index < 0) return false
+    if (!isFileVisible(openFiles.value[index])) {
+      ensureWorkspaceSelection()
+      return false
+    }
     activeFileIndex.value = index
     return true
   }
@@ -324,9 +447,8 @@ export const useFileStore = defineStore('files', () => {
     markFileDirty(file)
   }
 
-  function markDirty() {
-    const file = currentFile.value
-    if (!file || file.kind !== 'text') return
+  function markDirty(file = currentFile.value) {
+    if (!file || !openFiles.value.includes(file) || file.kind !== 'text') return
     file.preview = false
     markFileDirty(file)
   }
@@ -355,9 +477,16 @@ export const useFileStore = defineStore('files', () => {
 
   // Switch tab
   function setActiveTab(idx) {
-    if (idx >= 0 && idx < openFiles.value.length) {
+    if (idx >= 0 && idx < openFiles.value.length && isFileVisible(openFiles.value[idx])) {
       activeFileIndex.value = idx
     }
+  }
+
+  function setActiveVisibleTab(idx) {
+    const file = visibleOpenFiles.value[idx]
+    if (!file) return false
+    activeFileIndex.value = openFiles.value.indexOf(file)
+    return true
   }
 
   // Close tab without confirmation (caller is responsible for confirming).
@@ -376,6 +505,7 @@ export const useFileStore = defineStore('files', () => {
     } else if (activeFileIndex.value === idx) {
       activeFileIndex.value = Math.min(idx, openFiles.value.length - 1)
     }
+    ensureWorkspaceSelection()
   }
 
   // Save current file
@@ -397,6 +527,7 @@ export const useFileStore = defineStore('files', () => {
     if (!openFiles.value.includes(file)) return false
     file.path = path
     file.draftId = null
+    file.workspacePath = workspaceForPath(path)
     return await writeFile(file)
   }
 
@@ -431,6 +562,7 @@ export const useFileStore = defineStore('files', () => {
       kind: file.kind,
       preview: file.preview,
       meta: file.meta,
+      workspacePath: file.workspacePath,
     }
     openFiles.value.splice(idx, 1)
     if (activeFileIndex.value >= openFiles.value.length) {
@@ -440,10 +572,20 @@ export const useFileStore = defineStore('files', () => {
     } else if (activeFileIndex.value === idx) {
       activeFileIndex.value = Math.min(idx, openFiles.value.length - 1)
     }
+    ensureWorkspaceSelection()
     return removed
   }
 
-  function addFileFromTransfer({ path, content, dirty, draftId, kind = 'text', preview = false, meta = null }) {
+  function addFileFromTransfer({
+    path,
+    content,
+    dirty,
+    draftId,
+    kind = 'text',
+    preview = false,
+    meta = null,
+    workspacePath,
+  }) {
     openFiles.value.push(makeFile({
       path: path || null,
       content: content || '',
@@ -452,6 +594,7 @@ export const useFileStore = defineStore('files', () => {
       kind,
       preview,
       meta,
+      workspacePath,
     }))
     activeFileIndex.value = openFiles.value.length - 1
   }
@@ -519,6 +662,7 @@ export const useFileStore = defineStore('files', () => {
     ))
     if (!openFiles.value.length) newFile()
     activeFileIndex.value = Math.min(activeFileIndex.value, openFiles.value.length - 1)
+    ensureWorkspaceSelection()
   }
 
   function setFileReviews(file, reviews) {
@@ -532,9 +676,15 @@ export const useFileStore = defineStore('files', () => {
   return {
     openFiles,
     recentFiles,
+    workspaceProjectionEnabled,
+    workspaceScope,
+    knownWorkspacePaths,
     activeFileIndex,
     sessionHydrated,
     currentFile,
+    visibleOpenFiles,
+    visibleRecentFiles,
+    activeVisibleFileIndex,
     tabList,
     hasOpenFiles,
     openFile,
@@ -549,10 +699,17 @@ export const useFileStore = defineStore('files', () => {
     markDirty,
     replaceCleanContent,
     setActiveTab,
+    setActiveVisibleTab,
+    setWorkspaceScope,
+    clearWorkspaceScope,
+    ensureWorkspaceSelection,
+    workspaceForPath,
+    pathIsVisible,
     closeFile,
     addRecentFile,
     removeRecentFile,
     setRecentFiles,
+    clearVisibleRecentFiles,
     save,
     saveAs,
     openDialog,
@@ -569,4 +726,33 @@ export const useFileStore = defineStore('files', () => {
 
 function createDraftId() {
   return globalThis.crypto?.randomUUID?.() || `draft-${nextDraftId++}`
+}
+
+export function pathIsInsideWorkspace(path, workspacePath) {
+  const candidate = normalizeWorkspacePath(path)
+  const root = normalizeWorkspacePath(workspacePath)
+  return Boolean(candidate && root) && (
+    candidate === root || candidate.startsWith(`${root}/`)
+  )
+}
+
+export function owningWorkspacePath(path, workspacePaths = []) {
+  const candidate = normalizeWorkspacePath(path)
+  if (!candidate) return ''
+  return normalizeWorkspacePaths(workspacePaths)
+    .find(root => candidate === root || candidate.startsWith(`${root}/`)) || ''
+}
+
+function normalizeWorkspacePaths(paths) {
+  return [...new Set((Array.isArray(paths) ? paths : [])
+    .map(normalizeWorkspacePath)
+    .filter(Boolean))]
+    .sort((a, b) => b.length - a.length)
+}
+
+function normalizeWorkspacePath(value) {
+  return String(value || '')
+    .replaceAll('\\', '/')
+    .replace(/\/+/g, '/')
+    .replace(/\/$/, '')
 }

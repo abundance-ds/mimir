@@ -29,6 +29,7 @@
       :workspace-path="workspacePath"
       :recent-workspaces="recentWorkspaces"
       @choose-workspace="$emit('chooseWorkspace')"
+      @create-workspace="$emit('createWorkspace')"
       @open-workspace="$emit('openWorkspace', $event)"
     />
 
@@ -150,7 +151,7 @@
         :active="activeActivityId === 'chats'"
         :unread-total="chatUnreadTotal"
         :section-collapsed="chatSectionCollapsed"
-        @select-chat="$emit('selectChat', $event)"
+        @select-chat="forwardChatSelection"
         @new-chat="$emit('newChat')"
         @toggle-collapsed="$emit('toggleChatCollapse')"
       />
@@ -302,7 +303,7 @@
           :disabled="!archivableSelection.length"
           :title="archivableSelection.length
             ? `Archive ${archivableSelection.length} ${archivableSelection.length === 1 ? 'Activity' : 'Activities'}`
-            : 'No stopped durable Activities selected'"
+            : 'No stopped archivable Activities selected'"
           :aria-label="`Archive ${archivableSelection.length} selected Activities`"
           @click="archiveSelection"
         >
@@ -339,8 +340,8 @@
         :data-activity-key="activity.id"
         :data-drop-position="dropPosition(activity.id)"
         :title="activityTitle(activity)"
+        :aria-label="activityAriaLabel(activity)"
         :label="activity.title"
-        :meta="activity.status"
         :collapsed="collapsed"
         :active="activeActivityId === activity.id"
         :selected="selectedActivityIds.has(activity.id)"
@@ -354,7 +355,7 @@
         <span
           :data-sidebar-monogram="activity.id"
           :data-activity-identity="activityIdentity(activity)"
-          class="relative grid size-7 place-items-center font-mono text-[10px] font-semibold"
+          class="grid size-7 place-items-center font-mono text-[10px] font-semibold"
         >
           <component
             :is="activityIcon(activity)"
@@ -362,18 +363,6 @@
             :stroke-width="1.7"
             :monochrome="true"
             aria-hidden="true"
-          />
-          <span
-            :data-activity-status="activity.status"
-            class="absolute -bottom-px -right-px size-2 rounded-full border-2 border-chrome"
-            :class="statusClass(activity.status)"
-            :title="activity.status"
-          />
-          <span
-            v-if="activity.unread"
-            :data-activity-unread="activity.id"
-            class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-accent"
-            aria-label="Unread activity"
           />
         </span>
         <template #label>
@@ -389,6 +378,38 @@
             @blur="commitRename(activity)"
           />
           <span v-else>{{ activity.title }}</span>
+        </template>
+        <template #meta>
+          <span
+            v-if="activityHasError(activity)"
+            class="flex items-center gap-1.5 lowercase tabular-nums tracking-normal"
+          >
+            <span
+              :data-activity-error="activity.id"
+              class="size-1.5 shrink-0 rounded-full bg-rem"
+            />
+            <span>{{ activityRelativeTime(activity) }}</span>
+          </span>
+          <WorkingIndicator
+            v-else-if="activityIsResponding(activity)"
+            :data-activity-working="activity.id"
+          />
+          <span
+            v-else
+            class="flex items-center gap-1.5 lowercase tabular-nums tracking-normal"
+          >
+            <span
+              v-if="activity.status === 'needs-input'"
+              :data-activity-attention="activity.id"
+              class="size-1.5 shrink-0 rounded-full bg-attn/65"
+            />
+            <span
+              v-else-if="activity.unread"
+              :data-activity-unread="activity.id"
+              class="size-1.5 shrink-0 rounded-full bg-info/60"
+            />
+            <span>{{ activityRelativeTime(activity) }}</span>
+          </span>
         </template>
         <template #trailing>
           <button
@@ -427,7 +448,7 @@
               <IconPlayerStop :size="12" /> Stop / kill
             </button>
             <button
-              v-if="activity.retention === 'durable'"
+              v-if="canArchive(activity)"
               class="activity-menu-item"
               :class="{ 'cursor-not-allowed opacity-45': canStop(activity) }"
               role="menuitem"
@@ -534,9 +555,11 @@ import {
 } from '@tabler/icons-vue'
 import SidebarRow from './SidebarRow.vue'
 import ChatSidebarSection from './ChatSidebarSection.vue'
+import WorkingIndicator from './WorkingIndicator.vue'
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 import { moveActivityId } from '../activityOrdering.js'
 import { usePointerReorder } from '../composables/usePointerReorder.js'
+import { relativeTime } from '../../shared/time.js'
 import IconProviderAnthropic from '../../shared/icons/IconProviderAnthropic.vue'
 import IconProviderGoogle from '../../shared/icons/IconProviderGoogle.vue'
 import IconProviderOpenAI from '../../shared/icons/IconProviderOpenAI.vue'
@@ -556,6 +579,7 @@ const props = defineProps({
   chatUnreadTotal: { type: Number, default: 0 },
   chatSectionCollapsed: { type: Boolean, default: false },
   activeActivityId: { type: String, default: '' },
+  resumingActivityIds: { type: [Array, Set], default: () => new Set() },
   activitySort: { type: String, default: 'manual' },
   meetingCapture: { type: Object, default: null },
 })
@@ -566,6 +590,7 @@ const emit = defineEmits([
   'selectChat',
   'newChat',
   'chooseWorkspace',
+  'createWorkspace',
   'openWorkspace',
   'toggleCollapse',
   'renameActivity',
@@ -586,6 +611,12 @@ const emit = defineEmits([
 ])
 const activityMenuId = ref('')
 const meetingNow = ref(Date.now())
+const activityNow = ref(Date.now())
+
+function forwardChatSelection(target, options) {
+  if (options === undefined) emit('selectChat', target)
+  else emit('selectChat', target, options)
+}
 const sortMenuOpen = ref(false)
 const activitiesCollapsed = ref(false)
 const renamingId = ref('')
@@ -617,6 +648,7 @@ const meetingCaptureLabel = computed(() => (
     : 'Finalizing'
 ))
 let meetingClock = null
+let activityClock = null
 const LIVE_STATUSES = new Set(['ready', 'starting', 'working', 'needs-input', 'idle'])
 const SORT_OPTIONS = Object.freeze([
   { id: 'manual', label: 'Manual' },
@@ -646,11 +678,15 @@ onMounted(() => {
   meetingClock = window.setInterval(() => {
     if (props.meetingCapture?.lifecycle === 'capturing') meetingNow.value = Date.now()
   }, 1000)
+  activityClock = window.setInterval(() => {
+    activityNow.value = Date.now()
+  }, 60_000)
 })
 onUnmounted(() => {
   document.removeEventListener('pointerdown', closeMenus)
   document.removeEventListener('keydown', onSelectionEscape)
   if (meetingClock) window.clearInterval(meetingClock)
+  if (activityClock) window.clearInterval(activityClock)
   closeActivityCreateMenu()
 })
 
@@ -713,25 +749,48 @@ function toolIsActive(tool) {
 }
 
 function activityTitle(activity) {
-  return `${activity.title} — ${activityIdentity(activity)} · ${String(activity.status).replace('-', ' ')}`
+  const state = activityStateLabel(activity)
+  return `${activity.title} — ${activityIdentity(activity)}${state ? ` · ${state}` : ''} · ${activityRelativeTime(activity)}`
 }
 
-function statusClass(status) {
-  return {
-    working: 'bg-accent',
-    starting: 'bg-accent',
-    'needs-input': 'bg-rem',
-    error: 'bg-rem',
-    done: 'bg-add',
-    ready: 'bg-ink-3',
-    idle: 'bg-ink-3',
-    stopped: 'bg-ink-4',
-    interrupted: 'bg-ink-4',
-  }[status] || 'bg-ink-4'
+function activityAriaLabel(activity) {
+  return activityTitle(activity)
+}
+
+function activityRelativeTime(activity) {
+  return relativeTime(activity.updatedAt, activityNow.value, { compact: true })
+}
+
+function activityHasError(activity) {
+  return activity.status === 'error' || Boolean(activity.error)
+}
+
+function activityIsResponding(activity) {
+  return ['starting', 'working'].includes(activity.status)
+    || collectionHas(props.resumingActivityIds, activity.id)
+}
+
+function activityStateLabel(activity) {
+  if (activityHasError(activity)) return 'error'
+  if (activityIsResponding(activity)) return 'responding'
+  if (activity.status === 'needs-input') return 'needs input'
+  if (activity.unread) return 'new response'
+  return ''
+}
+
+function collectionHas(collection, id) {
+  return typeof collection?.has === 'function'
+    ? collection.has(id)
+    : Array.isArray(collection) && collection.includes(id)
 }
 
 function canStop(activity) {
   return activity?.host?.type === 'pty' && LIVE_STATUSES.has(activity.status)
+}
+
+function canArchive(activity) {
+  return activity?.retention === 'durable'
+    || (activity?.kind === 'terminal' && activity?.host?.type === 'pty')
 }
 
 async function toggleActivityMenu(id) {
@@ -943,7 +1002,7 @@ const selectedActivities = computed(() => (
 ))
 const archivableSelection = computed(() => (
   selectedActivities.value.filter(
-    (activity) => activity.retention === 'durable' && !canStop(activity),
+    (activity) => canArchive(activity) && !canStop(activity),
   )
 ))
 const deletableSelection = computed(() => (

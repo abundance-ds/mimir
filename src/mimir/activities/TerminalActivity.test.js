@@ -201,6 +201,16 @@ function writtenBytes(terminal) {
 }
 
 describe('TerminalActivity', () => {
+  it('queues workbench entry focus until xterm is ready', async () => {
+    const wrapper = render()
+
+    expect(wrapper.vm.focusEntry()).toBe(false)
+    await initialize(wrapper)
+
+    expect(xterm.terminals[0].focus).toHaveBeenCalled()
+    expect(wrapper.vm.focusEntry()).toBe(true)
+  })
+
   it('subscribes before snapshot and replays raw bytes without decoding', async () => {
     const order = []
     api.listen.mockImplementationOnce(async (callback) => {
@@ -263,6 +273,25 @@ describe('TerminalActivity', () => {
     expect(wrapper.find('[data-terminal-paste]').exists()).toBe(false)
     expect(wrapper.get('[data-terminal-interrupt]').exists()).toBe(true)
     expect(wrapper.get('[data-terminal-stop]').exists()).toBe(true)
+  })
+
+  it('explains an automatic resume failure without asking for another Resume click', async () => {
+    const interrupted = {
+      ...agent,
+      status: 'interrupted',
+      error: 'Automatic resume failed: provider session unavailable',
+    }
+    api.snapshot.mockResolvedValueOnce(snapshot({
+      record: interrupted,
+      live: false,
+    }))
+
+    const wrapper = await initialize(render({ activity: interrupted }))
+
+    expect(wrapper.get('[data-terminal-error]').text()).toContain('provider session unavailable')
+    expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
+    expect(wrapper.find('[data-terminal-interrupt]').exists()).toBe(false)
+    expect(wrapper.find('[data-terminal-stop]').exists()).toBe(false)
   })
 
   it('places active process controls in the shared Activity header target', async () => {
@@ -507,7 +536,7 @@ describe('TerminalActivity', () => {
       record: { ...first, status: 'interrupted', session: { runId: 'run-1', exit: { reason: 'interrupted' } } },
     })
     await nextTick()
-    expect(wrapper.find('[data-terminal-restart]').exists()).toBe(true)
+    expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
 
     api.snapshot.mockResolvedValueOnce(snapshot({
       record: { ...agent, status: 'idle', session: { runId: 'run-2' } },

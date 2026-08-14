@@ -80,10 +80,14 @@
             <template v-for="(result, index) in results" :key="result.key">
               <div
                 v-if="startsGroup(index)"
-                class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4"
+                :data-quick-open-group="result.group"
+                class="flex items-center justify-between px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4"
                 role="presentation"
               >
-                {{ result.group }}
+                <span>{{ result.group }}</span>
+                <span v-if="prefixForGroup(result.group)" class="normal-case tracking-normal">
+                  {{ prefixForGroup(result.group) }}
+                </span>
               </div>
               <button
                 type="button"
@@ -192,7 +196,7 @@
             <span>↑↓ select</span>
             <span>↵ {{ selectedResult?.verb || 'open' }}</span>
             <span class="ml-auto">
-              {{ inNewActivityView ? 'Esc back · choose a source' : '/ files · @ history · + new' }}
+              {{ inNewActivityView ? 'Esc back · choose a source' : 'p: projects · f: files · n: new · h: history' }}
             </span>
           </div>
         </div>
@@ -210,6 +214,9 @@ import {
   IconTimeline,
   IconFile,
   IconFileStack,
+  IconFolder,
+  IconFolderOpen,
+  IconFolderPlus,
   IconFocus2,
   IconHash,
   IconMathPi,
@@ -238,6 +245,8 @@ const props = defineProps({
   preferredTargetId: { type: String, default: '' },
   tools: { type: Array, default: () => [] },
   chats: { type: Array, default: () => [] },
+  projects: { type: Array, default: () => [] },
+  currentProjectPath: { type: String, default: '' },
   newActivity: { type: Array, default: () => [] },
   history: { type: Array, default: () => [] },
 })
@@ -262,12 +271,12 @@ const dialogTitle = computed(() => (
 const inputPlaceholder = computed(() => (
   inNewActivityView.value
     ? 'Find an activity source…'
-    : 'Go to tools, files, or history…'
+    : 'Go to activities, tools, projects, files, chats, or history…'
 ))
 const resultsLabel = computed(() => (
   inNewActivityView.value
     ? 'New activity sources'
-    : 'Tools, new activities, history, and files'
+    : 'New activities, tools, projects, files, chats, and history'
 ))
 const emptyMessage = computed(() => {
   if (inNewActivityView.value) return 'No matching activity sources.'
@@ -275,18 +284,23 @@ const emptyMessage = computed(() => {
     return 'No closed sessions in this project. Type to search all projects.'
   }
   return files.workspacePath
-    ? 'No matching tools, history, or files.'
-    : 'No matching tools or history.'
+    ? 'No matching activities, tools, projects, files, chats, or history.'
+    : 'No matching activities, tools, projects, chats, or history.'
 })
 const scopeLabel = computed(() => ({
+  projects: 'Projects',
   files: 'Files',
   history: 'History',
   'new-activity': 'New activity',
+  tools: 'Tools',
+  chats: 'Chats',
 }[scope.value] || 'All'))
 const results = computed(() => buildQuickOpenResults({
   query: query.value,
   tools: props.tools,
   chats: props.chats,
+  projects: props.projects,
+  currentProjectPath: props.currentProjectPath,
   newActivity: props.newActivity,
   history: props.history,
   files: files.visibleFiles,
@@ -474,6 +488,17 @@ function startsGroup(index) {
   return index === 0 || results.value[index - 1]?.group !== results.value[index]?.group
 }
 
+function prefixForGroup(group) {
+  return {
+    'New activity': 'n:',
+    Tools: 't:',
+    Projects: 'p:',
+    Files: 'f:',
+    Chats: 'c:',
+    History: 'h:',
+  }[group] || ''
+}
+
 function onDialogKeydown(event) {
   if (event.key === 'Escape') {
     event.preventDefault()
@@ -527,6 +552,9 @@ const icons = {
   graph: IconTopologyStar3,
   tracker: IconTimeline,
   routines: IconClockPlay,
+  project: IconFolder,
+  'project-open': IconFolderOpen,
+  'project-create': IconFolderPlus,
   'chat-channel': IconHash,
   'chat-direct': IconUser,
   'new-activity': IconPlus,

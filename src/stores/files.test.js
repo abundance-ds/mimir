@@ -89,6 +89,77 @@ describe('files store', () => {
     })
   })
 
+  it('projects project tabs while retaining other workspaces and global drafts', async () => {
+    const store = useFileStore()
+    await store.openFile('/alpha/notes.md', 'alpha', { workspacePath: '/alpha' })
+    await store.openFile('/beta/plan.md', 'beta', { workspacePath: '/beta' })
+    await store.openFile('/tmp/global.md', 'global')
+    store.newFile()
+    store.openFiles[1].dirty = true
+
+    store.setWorkspaceScope('/alpha', ['/alpha', '/beta'])
+    expect(store.visibleOpenFiles.map(file => file.path)).toEqual([
+      '/alpha/notes.md',
+      '/tmp/global.md',
+      null,
+    ])
+    expect(store.currentFile.path).toBe('/alpha/notes.md')
+
+    store.setWorkspaceScope('/beta', ['/alpha', '/beta'])
+    expect(store.visibleOpenFiles.map(file => file.path)).toEqual([
+      '/beta/plan.md',
+      '/tmp/global.md',
+      null,
+    ])
+    expect(store.currentFile.path).toBe('/beta/plan.md')
+    expect(store.openFiles.find(file => file.path === '/alpha/notes.md')).toBeTruthy()
+    expect(store.openFiles.find(file => file.path === '/beta/plan.md').dirty).toBe(true)
+  })
+
+  it('assigns a file to the most specific retained project', async () => {
+    const store = useFileStore()
+    await store.openFile('/repo/packages/editor/notes.md', 'nested', {
+      workspacePath: '/repo',
+    })
+
+    store.setWorkspaceScope('/repo/packages/editor', [
+      '/repo',
+      '/repo/packages/editor',
+    ])
+
+    expect(store.visibleOpenFiles.map(file => file.path)).toEqual([
+      '/repo/packages/editor/notes.md',
+    ])
+    expect(store.currentFile.workspacePath).toBe('/repo/packages/editor')
+  })
+
+  it('scopes recents and does not reuse a hidden project preview', async () => {
+    const store = useFileStore()
+    store.setRecentFiles(['/alpha/a.md', '/beta/b.md', '/tmp/global.md'])
+    store.setWorkspaceScope('/alpha', ['/alpha', '/beta'])
+    expect(store.visibleRecentFiles).toEqual(['/alpha/a.md'])
+    store.clearVisibleRecentFiles()
+    expect(store.recentFiles).toEqual(['/beta/b.md', '/tmp/global.md'])
+
+    store.setRecentFiles(['/alpha/a.md', '/beta/b.md', '/tmp/global.md'])
+
+    await store.openFile('/alpha/preview.md', 'alpha', {
+      preview: true,
+      workspacePath: '/alpha',
+    })
+    store.setWorkspaceScope('/beta', ['/alpha', '/beta'])
+    await store.openFile('/beta/preview.md', 'beta', {
+      preview: true,
+      workspacePath: '/beta',
+    })
+
+    expect(store.openFiles.filter(file => file.preview).map(file => file.path)).toEqual([
+      '/alpha/preview.md',
+      '/beta/preview.md',
+    ])
+    expect(store.visibleRecentFiles).toEqual(['/beta/preview.md', '/beta/b.md'])
+  })
+
   it('keeps PDF and external resource tabs read-only and out of the save pipeline', async () => {
     const store = useFileStore()
     await store.openFile('/tmp/report.pdf', '', {

@@ -44,7 +44,14 @@ export function useWorkbenchKeyboardRouting({
       quickOpen.value = false
       return
     }
-    if (quickOpen.value || document.querySelector('[aria-modal="true"]')) return
+    if (quickOpen.value) return
+    if (document.querySelector('[aria-modal="true"]')) {
+      // A modal that is still moving focus must never leak keystrokes into
+      // CodeMirror or xterm behind it. Zoom was handled above and remains the
+      // one deliberate global chord while a dialog is open.
+      if (!event.target?.closest?.('[aria-modal="true"]')) consume(event)
+      return
+    }
 
     // WebKit never focuses buttons on click, so after a Sidebar click the
     // keydown target is <body>. Route by the last remembered pane instead of
@@ -145,7 +152,8 @@ export function useWorkbenchKeyboardRouting({
 
   function closeForFocus(focus) {
     if (focus.owner === 'editor') {
-      if (!editorFiles.openFiles.length) collapseEmptyEditor()
+      const visibleFiles = editorFiles.visibleOpenFiles || editorFiles.openFiles
+      if (!visibleFiles.length) collapseEmptyEditor()
       else void editorRef.value?.mimirCloseActiveTab?.()
       return
     }

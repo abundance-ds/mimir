@@ -1,5 +1,7 @@
 import { computed, nextTick, reactive, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
+import { save } from '@tauri-apps/plugin-dialog'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const graph = vi.hoisted(() => ({
@@ -23,10 +25,14 @@ describe('Workbench controllers', () => {
     window.innerWidth = 1280
   })
 
-  it('owns durable close finalization and core-pane collapse semantics', async () => {
+  it('archives durable and terminal closes and owns core-pane collapse semantics', async () => {
     const records = reactive([
       activity('run:a', { retention: 'durable', status: 'idle' }),
-      activity('run:b', { retention: 'ephemeral', status: 'idle' }),
+      activity('run:b', {
+        retention: 'ephemeral',
+        status: 'done',
+        host: { type: 'pty' },
+      }),
     ])
     const activities = {
       records,
@@ -68,6 +74,10 @@ describe('Workbench controllers', () => {
     expect(workbench.activeActivityId).toBe('run:b')
     expect(activityRuntime.setArchived).toHaveBeenCalledWith('run:a', true)
     expect(controller.closingActivityIds.value.size).toBe(0)
+
+    expect(await controller.closeActivity('run:b')).toBe(true)
+    expect(activityRuntime.setArchived).toHaveBeenCalledWith('run:b', true)
+    expect(activityRuntime.clear).not.toHaveBeenCalled()
 
     records.push(activity('files', { kind: 'files' }))
     expect(await controller.closeActivity('files')).toBe(false)
@@ -404,6 +414,38 @@ describe('Workbench controllers', () => {
     editorPane.remove()
   })
 
+  it('consumes a keystroke that targets content behind a modal', () => {
+    const controller = useWorkbenchKeyboardRouting({
+      quickOpen: ref(false),
+      settings: { workbenchZoom: 1, set: vi.fn() },
+      editorRef: ref(null),
+      editorFiles: { openFiles: [] },
+      workbench: { activeActivityId: 'files' },
+      sidebarActivities: computed(() => []),
+      toggleSidebar: vi.fn(),
+      selectActivity: vi.fn(),
+      closeActivity: vi.fn(),
+      collapseEmptyEditor: vi.fn(),
+    })
+    const background = document.createElement('div')
+    const modal = document.createElement('section')
+    modal.setAttribute('aria-modal', 'true')
+    document.body.append(background, modal)
+    const event = {
+      key: 'Enter',
+      target: background,
+      preventDefault: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    }
+
+    controller.onKeydown(event)
+
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce()
+    background.remove()
+    modal.remove()
+  })
+
   it('owns startup hydration, core Activities, and responsive Editor visibility', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()
@@ -454,6 +496,127 @@ describe('Workbench controllers', () => {
     controller.dispose()
   })
 
+  it('resumes only current-project sidebar agents in the background, two at a time', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    settings.settingsReady = true
+    settings.mimirWorkspaceFolder = '/w'
+    const preset = { id: 'codex', cwd: { mode: 'workspace' } }
+
+    for (let index = 0; index < 10; index += 1) {
+      activities.upsert(activity(`agent:${index}`, {
+        kind: 'agent',
+        status: 'interrupted',
+        workspacePath: '/w',
+        source: { presetId: 'codex', workspaceScope: 'workspace' },
+        host: { type: 'pty', resumeStrategy: 'codex' },
+        session: { cliSessionId: `session-${index}` },
+      }))
+    }
+    activities.upsert(activity('agent:archived', {
+      kind: 'agent',
+      status: 'interrupted',
+      workspacePath: '/w',
+      archivedAt: '2026-08-14T10:00:00Z',
+      source: { presetId: 'codex', workspaceScope: 'workspace' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: { cliSessionId: 'archived-session' },
+    }))
+    activities.upsert(activity('agent:global', {
+      kind: 'agent',
+      status: 'interrupted',
+      workspacePath: '',
+      source: { presetId: 'codex', workspaceScope: 'global' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: { cliSessionId: 'global-session' },
+    }))
+    activities.upsert(activity('agent:other', {
+      kind: 'agent',
+      status: 'interrupted',
+      workspacePath: '/other',
+      source: { presetId: 'codex', workspaceScope: 'workspace' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: { cliSessionId: 'other-session' },
+    }))
+    activities.upsert(activity('agent:missing-session', {
+      kind: 'agent',
+      status: 'interrupted',
+      workspacePath: '/w',
+      source: { presetId: 'codex', workspaceScope: 'workspace' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+    }))
+
+    let activeResumes = 0
+    let maxActiveResumes = 0
+    const releases = []
+    const resumePreset = vi.fn((_, candidate) => new Promise((resolve) => {
+      activeResumes += 1
+      maxActiveResumes = Math.max(maxActiveResumes, activeResumes)
+      releases.push(() => {
+        activeResumes -= 1
+        resolve({ ...candidate, status: 'idle' })
+      })
+    }))
+    const markAutomaticResumeFailure = vi.fn()
+    const workspaceFiles = {
+      workspacePath: '',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: {
+        initialize: vi.fn(async () => {}),
+        resumePreset,
+        markAutomaticResumeFailure,
+        error: '',
+      },
+      launchers: {
+        load: vi.fn(async () => {}),
+        byId: id => (id === 'codex' ? preset : null),
+      },
+      appsCatalog: { load: vi.fn(async () => {}) },
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn(async () => {}) },
+      diagnostic: ref(''),
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: candidate => !candidate.workspacePath || candidate.workspacePath === '/w',
+      getFocusOwner: () => 'none',
+    })
+
+    await controller.start()
+
+    expect(resumePreset).toHaveBeenCalledTimes(2)
+    expect(maxActiveResumes).toBe(2)
+    expect(markAutomaticResumeFailure).toHaveBeenCalledWith(
+      'agent:missing-session',
+      'The exact provider session id is unavailable.',
+    )
+
+    for (let completed = 0; completed < 10; completed += 1) {
+      while (!releases.length) await Promise.resolve()
+      releases.shift()()
+      await Promise.resolve()
+      await nextTick()
+    }
+
+    expect(resumePreset).toHaveBeenCalledTimes(10)
+    expect(maxActiveResumes).toBe(2)
+    expect(resumePreset.mock.calls.every(([, , options]) => (
+      options.automatic === true && options.open === false
+    ))).toBe(true)
+    expect(resumePreset.mock.calls.map(([, candidate]) => candidate.id)).not.toContain('agent:archived')
+    expect(resumePreset.mock.calls.map(([, candidate]) => candidate.id)).not.toContain('agent:global')
+    expect(resumePreset.mock.calls.map(([, candidate]) => candidate.id)).not.toContain('agent:other')
+    controller.dispose()
+  })
+
   it('returns to each workspace Activity for the current app session', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()
@@ -471,6 +634,7 @@ describe('Workbench controllers', () => {
         return true
       }),
     }
+    const prepareEditorWorkspaceSwitch = vi.fn()
     activities.upsert(activity('files', { kind: 'files', workspacePath: '' }))
     activities.upsert(activity('agent:alpha', { workspacePath: '/alpha' }))
     activities.upsert(activity('agent:beta', { workspacePath: '/beta' }))
@@ -495,9 +659,14 @@ describe('Workbench controllers', () => {
           === normalizedWorkspacePath(workspaceFiles.workspacePath)
       ),
       getFocusOwner: () => 'none',
+      prepareEditorWorkspaceSwitch,
     })
 
     await controller.openWorkspace('/beta')
+    expect(prepareEditorWorkspaceSwitch).toHaveBeenCalledTimes(1)
+    expect(prepareEditorWorkspaceSwitch.mock.invocationCallOrder[0]).toBeLessThan(
+      workspaceFiles.openWorkspace.mock.invocationCallOrder[0],
+    )
     expect(workbench.activeActivityId).toBe('files')
     expect(workbench.canGoPreviousActivity).toBe(false)
 
@@ -513,6 +682,122 @@ describe('Workbench controllers', () => {
     expect(workbench.canGoPreviousActivity).toBe(false)
     expect(editorFiles.currentFile.path).toBe('/beta/plan.md')
     controller.dispose()
+  })
+
+  it('creates an empty project folder and retains the complete project history', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    const workspaceFiles = {
+      workspacePath: '/work/current',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    activities.upsert(activity('files', { kind: 'files', workspacePath: '' }))
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: { initialize: vi.fn(), error: '' },
+      launchers: { load: vi.fn() },
+      appsCatalog: { load: vi.fn() },
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn() },
+      diagnostic: ref(''),
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: () => true,
+      getFocusOwner: () => 'none',
+    })
+
+    window.__TAURI_INTERNALS__ = {}
+    vi.mocked(save).mockResolvedValueOnce('/work/new-project')
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(undefined)
+    try {
+      await expect(controller.createWorkspace()).resolves.toBe(true)
+      expect(save).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Create project',
+        defaultPath: '/work/Untitled project',
+      }))
+      expect(invoke).toHaveBeenNthCalledWith(1, 'path_exists', { path: '/work/new-project' })
+      expect(invoke).toHaveBeenNthCalledWith(2, 'create_dir', { path: '/work/new-project' })
+      expect(workspaceFiles.openWorkspace).toHaveBeenCalledWith('/work/new-project')
+
+      for (let index = 0; index < 10; index++) {
+        await controller.openWorkspace(`/work/project-${index}`)
+      }
+      expect(settings.recentWorkspaceFolders).toHaveLength(11)
+      expect(settings.recentWorkspaceFolders[0]).toBe('/work/project-9')
+      expect(settings.recentWorkspaceFolders).toContain('/work/new-project')
+    } finally {
+      delete window.__TAURI_INTERNALS__
+      controller.dispose()
+    }
+  })
+
+  it('keeps Create project cancellation and failures recoverable', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    const diagnostic = ref('')
+    const workspaceFiles = {
+      workspacePath: '/work/current',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    activities.upsert(activity('files', { kind: 'files', workspacePath: '' }))
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: { initialize: vi.fn(), error: '' },
+      launchers: { load: vi.fn() },
+      appsCatalog: { load: vi.fn() },
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn() },
+      diagnostic,
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: () => true,
+      getFocusOwner: () => 'none',
+    })
+
+    window.__TAURI_INTERNALS__ = {}
+    try {
+      vi.mocked(save).mockResolvedValueOnce(null)
+      await expect(controller.createWorkspace()).resolves.toBe(false)
+      expect(invoke).not.toHaveBeenCalled()
+      expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
+      expect(diagnostic.value).toBe('')
+
+      vi.mocked(save).mockResolvedValueOnce('/work/existing')
+      vi.mocked(invoke).mockResolvedValueOnce(true)
+      await expect(controller.createWorkspace()).resolves.toBe(false)
+      expect(invoke).toHaveBeenLastCalledWith('path_exists', { path: '/work/existing' })
+      expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
+      expect(diagnostic.value).toBe(
+        'The project folder already exists. Use Open project instead.',
+      )
+
+      diagnostic.value = ''
+      vi.mocked(save).mockResolvedValueOnce('/work/broken')
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(false)
+        .mockRejectedValueOnce(new Error('Disk is full'))
+      await expect(controller.createWorkspace()).resolves.toBe(false)
+      expect(invoke).toHaveBeenLastCalledWith('create_dir', { path: '/work/broken' })
+      expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
+      expect(diagnostic.value).toBe('Project could not be created: Disk is full')
+    } finally {
+      delete window.__TAURI_INTERNALS__
+      controller.dispose()
+    }
   })
 
   it('returns to the selected chat for each workspace without blocking the switch', async () => {

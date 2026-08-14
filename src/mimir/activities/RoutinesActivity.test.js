@@ -580,6 +580,24 @@ describe('RoutinesActivity', () => {
     expect(wrapper.get('[data-routine-form-error]').text()).toContain('at least one day')
   })
 
+  it('keeps Tab focus inside the routine editor dialog', async () => {
+    const wrapper = render()
+    document.body.appendChild(wrapper.element)
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+    const title = wrapper.get('[data-routine-title-input]')
+    const submit = wrapper.get('[data-routine-form-submit]')
+    expect(document.activeElement).toBe(title.element)
+
+    await title.trigger('keydown', { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(submit.element)
+    await submit.trigger('keydown', { key: 'Tab' })
+    expect(document.activeElement).toBe(title.element)
+    wrapper.unmount()
+  })
+
   it('offers row and surface context menus, paused duplication, and recoverable Trash confirmation', async () => {
     const wrapper = render()
     await flushPromises()
@@ -613,6 +631,25 @@ describe('RoutinesActivity', () => {
     await wrapper.get('[data-routine-list]').trigger('contextmenu', { clientX: 12, clientY: 12 })
     expect(wrapper.get('[data-routines-context-menu]').text()).toContain('New routine')
     expect(wrapper.get('[data-routines-context-menu]').text()).toContain('Reveal definitions folder')
+  })
+
+  it('keeps Trash confirmation focus inside the dialog and accepts Return', async () => {
+    const wrapper = render()
+    document.body.appendChild(wrapper.element)
+    await flushPromises()
+
+    await wrapper.get('[data-routine-row="morning"]').trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await wrapper.get('[data-routine-action="trash"]').trigger('click')
+
+    const confirm = wrapper.get('[data-routine-confirm-trash]')
+    expect(document.activeElement).toBe(confirm.element)
+    await confirm.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(trashRoutineDefinition).toHaveBeenCalledWith('morning', 'rev-morning')
+    expect(wrapper.find('[data-routine-trash-dialog]').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('[data-routine-list]').element)
+    wrapper.unmount()
   })
 
   it('stops all focused routine runs and supports keyboard-first edit, open, menu, and Trash', async () => {

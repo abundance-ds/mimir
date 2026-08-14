@@ -9,6 +9,7 @@ export const useDiffStore = defineStore('diff', () => {
   const originalContent = ref('')
   const modifiedContent = ref('')
   const filePath = ref('')
+  const fileId = ref(null)
   const proposalIds = ref([])
   const batchId = ref(null)
   const reviewMeta = ref(null)
@@ -32,11 +33,12 @@ export const useDiffStore = defineStore('diff', () => {
   const resolvedCount = computed(() => files.value.filter(f => f.status !== 'pending').length)
   const allResolved = computed(() => files.value.length > 0 && pendingFiles.value.length === 0)
 
-  function activate({ original, modified, path = '', proposals = [], batch = null, review = null }) {
+  function activate({ original, modified, path = '', fileId: targetFileId = null, proposals = [], batch = null, review = null }) {
     mode.value = 'single'
     originalContent.value = original
     modifiedContent.value = modified
     filePath.value = path
+    fileId.value = targetFileId
     proposalIds.value = proposals
     batchId.value = batch
     reviewMeta.value = review || null
@@ -66,6 +68,7 @@ export const useDiffStore = defineStore('diff', () => {
     originalContent.value = ''
     modifiedContent.value = ''
     filePath.value = ''
+    fileId.value = null
     proposalIds.value = []
     focusedFile.value = null
     viewMode.value = 'diff'
@@ -81,6 +84,7 @@ export const useDiffStore = defineStore('diff', () => {
     originalContent.value = ''
     modifiedContent.value = ''
     filePath.value = ''
+    fileId.value = null
     proposalIds.value = []
     batchId.value = null
     reviewMeta.value = null
@@ -213,7 +217,7 @@ export const useDiffStore = defineStore('diff', () => {
 
   return {
     active, mode, isBatch,
-    originalContent, modifiedContent, filePath,
+    originalContent, modifiedContent, filePath, fileId,
     proposalIds, batchId, reviewMeta, reviewError,
     focusedFile, isBatchFileFocused,
     files, pendingFiles, resolvedCount, allResolved,

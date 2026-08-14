@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
 
 function render(props = {}) {
@@ -9,63 +9,96 @@ function render(props = {}) {
       workspaceName: 'mimir',
       workspacePath: '/work/mimir',
       recentWorkspaces: [
-        { name: 'mimir', path: '/work/mimir' },
-        {
-          name: 'other-project',
-          path: '/work/other-project',
-          activityCount: 2,
-          needsInputCount: 1,
-        },
+        { name: 'mimir', path: '/work/mimir', current: true },
+        { name: 'other-project', path: '/work/other-project' },
       ],
       ...props,
     },
   })
 }
 
+afterEach(() => {
+  document.body.innerHTML = ''
+})
+
 describe('WorkspaceSwitcher', () => {
-  it('shows the current project and switches directly to a recent project', async () => {
+  it('opens as a focused project filter without repeating current-project detail', async () => {
     const wrapper = render()
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
 
-    const menu = document.body.querySelector('[data-project-switcher-menu]')
-    expect(menu?.textContent).toContain('Current project')
-    expect(menu?.textContent).toContain('/work/mimir')
-    expect(menu?.textContent).toContain('other-project')
-    expect(menu?.textContent).toContain('1 needs input · /work/other-project')
-    const recent = [...menu.querySelectorAll('[data-project-menu-item]')]
-      .find(item => item.textContent.includes('other-project'))
-    recent.click()
+    const popover = document.body.querySelector('[data-project-switcher-menu]')
+    const input = popover.querySelector('[data-project-search]')
+    expect(document.activeElement).toBe(input)
+    expect(popover.textContent).not.toContain('Current project')
+    expect(popover.textContent).not.toContain('Activities')
+    expect(popover.textContent).toContain('other-project')
+    expect(popover.textContent).toContain('/work')
+
+    popover.querySelector('[data-project-path="/work/other-project"]').click()
     expect(wrapper.emitted('openWorkspace')).toEqual([['/work/other-project']])
     wrapper.unmount()
   })
 
-  it('shows quiet Activity counts when no run needs input', async () => {
-    const wrapper = render({
-      recentWorkspaces: [
-        { name: 'mimir', path: '/work/mimir' },
-        { name: 'other-project', path: '/work/other-project', activityCount: 2 },
-      ],
-    })
+  it('shows eight recent projects but filters the complete retained list', async () => {
+    const projects = [
+      { name: 'mimir', path: '/work/mimir', current: true },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        name: index === 9 ? 'deep-archive' : `project-${index}`,
+        path: `/work/${index === 9 ? 'deep-archive' : `project-${index}`}`,
+      })),
+    ]
+    const wrapper = render({ recentWorkspaces: projects })
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
 
-    expect(document.body.querySelector('[data-project-activity-summary]')?.textContent)
-      .toContain('2 Activities · /work/other-project')
+    const popover = document.body.querySelector('[data-project-switcher-menu]')
+    expect(popover.querySelectorAll('[data-project-path]')).toHaveLength(8)
+
+    const input = popover.querySelector('[data-project-search]')
+    input.value = 'archive'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+
+    expect(popover.querySelectorAll('[data-project-path]')).toHaveLength(1)
+    expect(popover.textContent).toContain('deep-archive')
     wrapper.unmount()
   })
 
-  it('offers the native folder picker and supports roving keyboard focus', async () => {
+  it('uses Arrow keys and Return across projects and actions', async () => {
     const wrapper = render()
-    const trigger = wrapper.get('[data-sidebar-workspace]')
-    trigger.element.focus()
-    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    const input = document.body.querySelector('[data-project-search]')
 
-    const menu = document.body.querySelector('[data-project-switcher-menu]')
-    const items = [...menu.querySelectorAll('[data-project-menu-item]')]
-    expect(document.activeElement).toBe(items[0])
-    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
-    expect(document.activeElement).toBe(items.at(-1))
-    items.at(-1).click()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(wrapper.emitted('openWorkspace')).toEqual([['/work/other-project']])
+
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    const reopenedInput = document.body.querySelector('[data-project-search]')
+    reopenedInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    reopenedInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(wrapper.emitted('createWorkspace')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('offers open and create project actions', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    document.body.querySelector('[data-project-open-folder]').click()
     expect(wrapper.emitted('chooseWorkspace')).toHaveLength(1)
+
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    document.body.querySelector('[data-project-create]').click()
+    expect(wrapper.emitted('createWorkspace')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('closes without trapping Tab focus', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    const input = document.body.querySelector('[data-project-search]')
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    await wrapper.vm.$nextTick()
+
+    expect(document.body.querySelector('[data-project-switcher-menu]')).toBeNull()
     wrapper.unmount()
   })
 

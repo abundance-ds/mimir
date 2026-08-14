@@ -7,6 +7,10 @@ import {
 
 const tool = { id: 'core:files', title: 'Files', icon: 'files' }
 const launcher = { id: 'preset:review', title: 'Review with Codex', icon: 'codex' }
+const projects = [
+  { name: 'mimir', path: '/work/mimir', current: true },
+  { name: 'scribe', path: '/work/scribe' },
+]
 const archived = {
   id: 'agent:closed',
   kind: 'agent',
@@ -27,14 +31,20 @@ const files = Array.from({ length: 10 }, (_, index) => ({
 describe('quick open results', () => {
   it('parses optional scopes without requiring them', () => {
     expect(parseQuickOpenQuery('review')).toEqual({ scope: 'all', term: 'review' })
-    expect(parseQuickOpenQuery('/ README')).toEqual({ scope: 'files', term: 'README' })
-    expect(parseQuickOpenQuery('@ closed')).toEqual({ scope: 'history', term: 'closed' })
-    expect(parseQuickOpenQuery('+ codex')).toEqual({ scope: 'new-activity', term: 'codex' })
+    expect(parseQuickOpenQuery('p:mimir')).toEqual({ scope: 'projects', term: 'mimir' })
+    expect(parseQuickOpenQuery('f:README')).toEqual({ scope: 'files', term: 'README' })
+    expect(parseQuickOpenQuery('h:closed')).toEqual({ scope: 'history', term: 'closed' })
+    expect(parseQuickOpenQuery('n:codex')).toEqual({ scope: 'new-activity', term: 'codex' })
+    expect(parseQuickOpenQuery('t:files')).toEqual({ scope: 'tools', term: 'files' })
+    expect(parseQuickOpenQuery('c:product')).toEqual({ scope: 'chats', term: 'product' })
+    expect(parseQuickOpenQuery('.env')).toEqual({ scope: 'all', term: '.env' })
   })
 
-  it('keeps navigation compact and preserves eight recent files in the default view', () => {
+  it('keeps every useful default group compact', () => {
     const results = buildQuickOpenResults({
       tools: [tool],
+      projects,
+      currentProjectPath: '/work/mimir',
       newActivity: [launcher],
       history: [archived],
       files,
@@ -43,10 +53,36 @@ describe('quick open results', () => {
     expect(results.map(result => result.type)).toEqual([
       'new-activity-enter',
       'tool',
-      ...Array(8).fill('file'),
+      'project',
+      ...Array(5).fill('file'),
       'history',
     ])
+    expect(results.find(result => result.type === 'project')).toMatchObject({
+      title: 'scribe',
+      meta: '/work',
+    })
     expect(results.find(result => result.type === 'history').title).toBe('Reopen last closed activity')
+  })
+
+  it('retains matching groups and ranks exact titles inside each group', () => {
+    const results = buildQuickOpenResults({
+      query: 'codex',
+      tools: [{ id: 'app:notes', title: 'Codex notes', icon: 'apps' }],
+      projects: [{ name: 'codex', path: '/work/codex' }],
+      newActivity: [launcher, { id: 'preset:codex', title: 'Codex', icon: 'codex' }],
+      history: [archived],
+      files: [{ path: '/work/codex.md', name: 'codex.md', relativePath: 'codex.md' }],
+    })
+
+    expect(results.map(result => result.group)).toEqual([
+      'New activity',
+      'New activity',
+      'Tools',
+      'Projects',
+      'Files',
+      'History',
+    ])
+    expect(results[0].title).toBe('Codex')
   })
 
   it('enters a focused new activity result set without other navigation rows', () => {
@@ -65,7 +101,7 @@ describe('quick open results', () => {
   it('uses workspace and time instead of a provider-only history title', () => {
     expect(historyDisplayTitle(archived)).toMatch(/^mimir · /)
     const result = buildQuickOpenResults({
-      query: '@',
+      query: 'h:',
       history: [archived],
       historySnippets: new Map([['agent:closed', 'Finished the sidebar ordering review.']]),
     })[0]
@@ -82,26 +118,31 @@ describe('quick open results', () => {
       ...archived,
       session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
     }
-    expect(buildQuickOpenResults({ query: '@', history: [exact] })[0].verb).toBe('Resume')
+    expect(buildQuickOpenResults({ query: 'h:', history: [exact] })[0].verb).toBe('Resume')
     expect(buildQuickOpenResults({
-      query: '@',
+      query: 'h:',
       history: [{ ...exact, resumeAvailable: false }],
     })[0].verb).toBe('Restore transcript')
   })
 
-  it('limits symbol scopes to the requested result family', () => {
+  it('limits typed scopes to the requested result family', () => {
     const common = {
       tools: [tool],
+      projects,
       newActivity: [launcher],
       history: [archived],
       files,
     }
-    expect(buildQuickOpenResults({ ...common, query: '+ codex' }).map(result => result.type))
+    expect(buildQuickOpenResults({ ...common, query: 'n:codex' }).map(result => result.type))
       .toEqual(['new-activity'])
-    expect(buildQuickOpenResults({ ...common, query: '/ 1' }).map(result => result.type))
+    expect(buildQuickOpenResults({ ...common, query: 'f:1' }).map(result => result.type))
       .toEqual(['file'])
-    expect(buildQuickOpenResults({ ...common, query: '@ mimir' }).map(result => result.type))
+    expect(buildQuickOpenResults({ ...common, query: 'h:mimir' }).map(result => result.type))
       .toEqual(['history'])
+    expect(buildQuickOpenResults({ ...common, query: 't:files' }).map(result => result.type))
+      .toEqual(['tool'])
+    expect(buildQuickOpenResults({ ...common, query: 'p:' }).map(result => result.type))
+      .toEqual(['project', 'project-open', 'project-create'])
   })
 
   it('browses only current-project history but searches every project', () => {
@@ -114,18 +155,18 @@ describe('quick open results', () => {
       inCurrentWorkspace: false,
     }
 
-    expect(buildQuickOpenResults({ query: '@', history: [other, local] })
+    expect(buildQuickOpenResults({ query: 'h:', history: [other, local] })
       .map(result => result.key)).toEqual(['history:agent:local'])
 
-    expect(buildQuickOpenResults({ query: '@ work', history: [other, local] })
+    expect(buildQuickOpenResults({ query: 'h:work', history: [other, local] })
       .map(result => result.key))
       .toEqual(['history:agent:local', 'history:agent:other'])
   })
 
-  it('keeps @ browsing empty when only other projects have history', () => {
+  it('keeps empty h: browsing local when only other projects have history', () => {
     const other = { ...archived, inCurrentWorkspace: false }
-    expect(buildQuickOpenResults({ query: '@', history: [other] })).toEqual([])
-    expect(buildQuickOpenResults({ query: '@ mimir', history: [other] })
+    expect(buildQuickOpenResults({ query: 'h:', history: [other] })).toEqual([])
+    expect(buildQuickOpenResults({ query: 'h:mimir', history: [other] })
       .map(result => result.key)).toEqual(['history:agent:closed'])
   })
 
@@ -135,12 +176,12 @@ describe('quick open results', () => {
       workspacePath: '/work/scribe',
       inCurrentWorkspace: false,
     }
-    const [row] = buildQuickOpenResults({ query: '@ scribe', history: [other] })
+    const [row] = buildQuickOpenResults({ query: 'h:scribe', history: [other] })
     expect(row).toMatchObject({ project: 'scribe', verb: 'Restore transcript' })
     expect(row.title).not.toContain('scribe')
     expect(row.meta).not.toContain('scribe')
 
-    const [local] = buildQuickOpenResults({ query: '@', history: [archived] })
+    const [local] = buildQuickOpenResults({ query: 'h:', history: [archived] })
     expect(local.project).toBe('')
     expect(local.meta).not.toContain('mimir')
   })
@@ -179,5 +220,7 @@ describe('quick open results', () => {
         title: 'Anna Example',
       }),
     )
+    expect(buildQuickOpenResults({ query: 'c:', chats }).map(result => result.type))
+      .toEqual(['chat', 'chat'])
   })
 })

@@ -369,6 +369,69 @@ describe('activity runtime store', () => {
     expect(useActivitiesStore().byId('agent:one').status).toBe('done')
   })
 
+  it('marks real output unread only while an agent row is inactive', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    const workbench = useWorkbenchStore()
+    await runtime.initialize()
+
+    eventCallback({ type: 'output', activityId: 'agent:one', sequence: 1, bytes: [65] })
+    expect(store.byId('agent:one')).toMatchObject({ unread: true })
+
+    store.upsert({ ...store.byId('agent:one'), unread: false })
+    workbench.openActivity('agent:one')
+    eventCallback({ type: 'output', activityId: 'agent:one', sequence: 2, bytes: [66] })
+    expect(store.byId('agent:one').unread).toBe(false)
+
+    eventCallback({ type: 'output', activityId: 'agent:one', sequence: 3, bytes: [] })
+    expect(store.byId('agent:one').unread).toBe(false)
+  })
+
+  it('resumes automatically without stealing focus and records a failed cause', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    await runtime.initialize()
+    const interrupted = store.upsert({
+      ...backendRecord,
+      status: 'interrupted',
+      session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
+    })
+    api.respawnActivity.mockRejectedValueOnce(new Error('provider session unavailable'))
+
+    const resume = runtime.resumePreset({ id: 'review' }, interrupted, {
+      automatic: true,
+      open: false,
+    })
+    expect(runtime.resumingActivityIds.has(interrupted.id)).toBe(true)
+    await expect(resume).rejects.toThrow('provider session unavailable')
+
+    expect(runtime.resumingActivityIds.has(interrupted.id)).toBe(false)
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(store.byId(interrupted.id)).toMatchObject({
+      status: 'interrupted',
+      error: 'Automatic resume failed: provider session unavailable',
+    })
+  })
+
+  it('does not activate an automatically resumed background Activity', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    await runtime.initialize()
+    const interrupted = store.upsert({
+      ...backendRecord,
+      status: 'interrupted',
+      session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
+    })
+
+    await runtime.resumePreset({ id: 'review' }, interrupted, {
+      automatic: true,
+      open: false,
+    })
+
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(store.byId(interrupted.id).status).toBe('idle')
+  })
+
   it('stops through the supervisor and waits for authoritative exit', async () => {
     const runtime = useActivityRuntimeStore()
     await runtime.initialize()

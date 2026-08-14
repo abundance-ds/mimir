@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { openBusinessGraph } from '../../services/businessGraph.js'
-import { normalizedWorkspacePath } from '../activityWorkspace.js'
+import { activityWorkspacePath, normalizedWorkspacePath } from '../activityWorkspace.js'
 import { applyResponsiveZone, responsiveZoneFor } from '../responsiveLayout.js'
 
 export function useWorkspaceBootstrap({
@@ -19,12 +19,14 @@ export function useWorkspaceBootstrap({
   openCoreActivity,
   isActivityVisible = () => true,
   getFocusOwner,
+  prepareEditorWorkspaceSwitch = () => {},
 }) {
   const initialized = ref(false)
   const responsiveZone = ref('wide')
   const viewportWidth = ref(window.innerWidth)
   const workspaceViewByPath = new Map()
   let desktopLayout = null
+  let automaticResumeGeneration = 0
 
   const stopGraphFolderWatch = watch(
     () => settings.mimirTeamGraphFolder,
@@ -45,7 +47,7 @@ export function useWorkspaceBootstrap({
     workbench.setPaneState('editor', 'expanded')
     syncResponsiveLayout({ force: true, preferEditor: true })
 
-    const [, runtimeResult, toolRuntimeResult, appsResult] = await Promise.allSettled([
+    const [launchersResult, runtimeResult, toolRuntimeResult, appsResult] = await Promise.allSettled([
       launchers.load(),
       activityRuntime.initialize(),
       toolRuntime.start(),
@@ -75,6 +77,59 @@ export function useWorkspaceBootstrap({
     }
     initialized.value = true
     persistWorkbench()
+    if (launchersResult.status === 'fulfilled' && runtimeResult.status === 'fulfilled') {
+      void resumeInterruptedAgentsAtStartup()
+    }
+  }
+
+  async function resumeInterruptedAgentsAtStartup() {
+    const projectPath = normalizedWorkspacePath(workspaceFiles.workspacePath)
+    if (!projectPath) return
+    const generation = ++automaticResumeGeneration
+    const queue = []
+
+    for (const activity of activities.visibleActivities) {
+      if (!isCurrentProjectInterruptedAgent(activity, projectPath)) continue
+      const presetId = activity.source?.presetId || activity.source?.launcherId
+      const preset = presetId ? launchers.byId(presetId) : null
+      const unavailable = automaticResumeUnavailableReason(activity, preset)
+      if (unavailable) {
+        activityRuntime.markAutomaticResumeFailure(activity.id, unavailable)
+        continue
+      }
+      queue.push({ activity, preset })
+    }
+
+    let nextIndex = 0
+    async function worker() {
+      while (generation === automaticResumeGeneration && nextIndex < queue.length) {
+        const item = queue[nextIndex]
+        nextIndex += 1
+        try {
+          await activityRuntime.resumePreset(item.preset, item.activity, {
+            automatic: true,
+            open: false,
+          })
+        } catch {
+          // The runtime keeps the interrupted row and records the exact cause.
+        }
+      }
+    }
+
+    await Promise.all(Array.from(
+      { length: Math.min(2, queue.length) },
+      () => worker(),
+    ))
+  }
+
+  function isCurrentProjectInterruptedAgent(activity, projectPath) {
+    if (
+      activity.kind !== 'agent'
+      || activity.status !== 'interrupted'
+      || activity.source?.appId
+      || activity.host?.type !== 'pty'
+    ) return false
+    return activityWorkspacePath(activity, id => launchers.byId(id)) === projectPath
   }
 
   function ensureCoreActivities(workspacePath = workspaceFiles.workspacePath) {
@@ -163,7 +218,36 @@ export function useWorkspaceBootstrap({
     }
   }
 
+  async function createWorkspace() {
+    if (!window.__TAURI_INTERNALS__) {
+      diagnostic.value = 'Project creation is available in the Mimir desktop app.'
+      return false
+    }
+    try {
+      const [{ invoke }, { save }] = await Promise.all([
+        import('@tauri-apps/api/core'),
+        import('@tauri-apps/plugin-dialog'),
+      ])
+      const selection = await save({
+        title: 'Create project',
+        defaultPath: newProjectDefaultPath(workspaceFiles.workspacePath),
+      })
+      const path = typeof selection === 'string' ? selection : selection?.path
+      if (!path) return false
+      if (await invoke('path_exists', { path })) {
+        diagnostic.value = 'The project folder already exists. Use Open project instead.'
+        return false
+      }
+      await invoke('create_dir', { path })
+      return openWorkspace(path)
+    } catch (cause) {
+      diagnostic.value = `Project could not be created: ${errorMessage(cause)}`
+      return false
+    }
+  }
+
   async function openWorkspace(path, { persist = true, activate = true } = {}) {
+    await prepareEditorWorkspaceSwitch()
     rememberActiveActivity(workspaceFiles.workspacePath)
     try {
       await workspaceFiles.openWorkspace(path)
@@ -171,6 +255,7 @@ export function useWorkspaceBootstrap({
       ensureCoreActivities(path)
       if (persist) settings.set('mimirWorkspaceFolder', path)
       rememberWorkspace(path)
+      editorFiles.setWorkspaceScope?.(path, settings.recentWorkspaceFolders)
       diagnostic.value = graphWarning
       const workspaceView = rememberedWorkspaceView(path)
       const activityId = restorableActivityId(workspaceView)
@@ -272,16 +357,18 @@ export function useWorkspaceBootstrap({
       : []
     settings.set(
       'recentWorkspaceFolders',
-      [normalized, ...previous.filter(candidate => candidate !== normalized)].slice(0, 8),
+      [normalized, ...previous.filter(candidate => candidate !== normalized)],
     )
   }
 
   function dispose() {
+    automaticResumeGeneration += 1
     stopGraphFolderWatch()
   }
 
   return {
     chooseWorkspace,
+    createWorkspace,
     dispose,
     ensureCoreActivities,
     focusNarrowPane,
@@ -294,6 +381,24 @@ export function useWorkspaceBootstrap({
     syncResponsiveLayout,
     viewportWidth,
   }
+}
+
+function automaticResumeUnavailableReason(activity, preset) {
+  if (!preset) return 'The launcher preset is unavailable.'
+  if (!activity.host?.resumeStrategy || activity.host.resumeStrategy === 'none') {
+    return 'The launcher does not support exact session resume.'
+  }
+  if (!String(activity.session?.cliSessionId || '').trim()) {
+    return 'The exact provider session id is unavailable.'
+  }
+  return ''
+}
+
+function newProjectDefaultPath(currentPath) {
+  const value = String(currentPath || '').replace(/[\\/]+$/, '')
+  const separatorIndex = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'))
+  if (separatorIndex < 0) return 'Untitled project'
+  return `${value.slice(0, separatorIndex + 1)}Untitled project`
 }
 
 function errorMessage(error) {

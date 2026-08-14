@@ -9,7 +9,9 @@ const editorOpenSettings = vi.hoisted(() => vi.fn())
 const editorClose = vi.hoisted(() => vi.fn())
 const editorCycle = vi.hoisted(() => vi.fn())
 const editorNew = vi.hoisted(() => vi.fn())
+const editorPrepareWorkspaceSwitch = vi.hoisted(() => vi.fn())
 const terminalPaste = vi.hoisted(() => vi.fn())
+const terminalFocus = vi.hoisted(() => vi.fn())
 const toolRuntimeStart = vi.hoisted(() => vi.fn())
 const toolRuntimeStop = vi.hoisted(() => vi.fn())
 const toolRuntimeConfig = vi.hoisted(() => ({ current: null }))
@@ -29,6 +31,8 @@ vi.mock('../editor/App.vue', async () => {
       props: {
         hideSidebar: Boolean,
         embedded: Boolean,
+        workspacePath: String,
+        workspacePaths: Array,
       },
       emits: ['closeRequest', 'empty', 'navigateEditor', 'newRequest', 'quickOpenRequest'],
       setup(_props, { expose }) {
@@ -38,6 +42,7 @@ vi.mock('../editor/App.vue', async () => {
           mimirCloseActiveTab: editorClose,
           mimirCycleTab: editorCycle,
           mimirNewFile: editorNew,
+          mimirPrepareWorkspaceSwitch: editorPrepareWorkspaceSwitch,
         })
         return () => h('div', { 'data-editor-stub': '', tabindex: '0' }, 'Editor')
       },
@@ -53,7 +58,7 @@ vi.mock('./activities/TerminalActivity.vue', async () => {
       props: { activity: Object, active: Boolean },
       emits: ['restart'],
       setup(props, { expose }) {
-        expose({ pasteText: terminalPaste })
+        expose({ focusEntry: terminalFocus, pasteText: terminalPaste })
         return () => h('div', {
           'data-terminal-stub': props.activity.id,
           'data-active': String(props.active),
@@ -192,6 +197,7 @@ describe('WorkbenchApp', () => {
     editorNew.mockReset()
     terminalPaste.mockReset()
     terminalPaste.mockResolvedValue(true)
+    terminalFocus.mockReset()
     toolRuntimeStart.mockReset()
     toolRuntimeStop.mockReset()
     toolRuntimeConfig.current = null
@@ -358,6 +364,15 @@ describe('WorkbenchApp', () => {
     )
     expect(review).toBeTruthy()
     expect(review.querySelector('svg').getAttribute('viewBox')).toBe('0 0 256 260')
+  })
+
+  it('focuses a new CLI Activity launched from the plus menu', async () => {
+    const wrapper = await render({ workspace: '/w' })
+
+    await chooseActivitySource(wrapper, 'Review with Codex')
+
+    expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
+    expect(terminalFocus).toHaveBeenCalled()
   })
 
   it('routes the persistent sidebar microphone control through the human meeting store', async () => {
@@ -557,13 +572,15 @@ describe('WorkbenchApp', () => {
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
     const recent = wrapper.get('[data-project-switcher-menu]')
       .findAll('[data-project-menu-item]')
-      .find(item => item.text().includes('/other/project'))
+      .find(item => item.attributes('data-project-path') === '/other/project')
     await recent.trigger('click')
     await flushPromises()
 
     expect(fileApi.openWorkspaceIndex).toHaveBeenCalledWith('/other/project')
     expect(useSettingsStore().mimirWorkspaceFolder).toBe('/other/project')
     expect(useSettingsStore().recentWorkspaceFolders[0]).toBe('/other/project')
+    expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePath')).toBe('/other/project')
+    expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toContain('/w')
   })
 
   it('shows only the current project Activities while hidden tasks keep running', async () => {
@@ -596,8 +613,8 @@ describe('WorkbenchApp', () => {
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
     const betaProject = wrapper.get('[data-project-switcher-menu]')
       .findAll('[data-project-menu-item]')
-      .find(item => item.text().includes('/other/project'))
-    expect(betaProject.text()).toContain('1 needs input')
+      .find(item => item.attributes('data-project-path') === '/other/project')
+    expect(betaProject.text()).not.toContain('needs input')
     await betaProject.trigger('click')
     await flushPromises()
 

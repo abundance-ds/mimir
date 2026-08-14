@@ -7,7 +7,7 @@
     :aria-level="row.depth + 1"
     :aria-expanded="entry.isDirectory ? String(row.expanded) : undefined"
     :aria-selected="selected"
-    class="group relative flex min-w-max items-center"
+    class="files-ledger-grid group relative grid w-full min-w-[248px] items-center border-b border-rule-light"
     :class="[
       row.secondary ? 'h-9' : 'h-7',
       selected ? 'bg-accent-soft text-ink' : 'text-ink-2 hover:bg-chrome-high',
@@ -57,9 +57,10 @@
     <button
       v-else
       type="button"
-      class="flex h-full min-w-0 flex-1 items-center pr-12 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+      class="flex h-full min-w-0 items-center text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       :style="{ paddingLeft: `${4 + row.depth * 17}px` }"
       :title="entry.relativePath || entry.name"
+      :aria-label="entryAriaLabel"
       @click="select"
       @dblclick.prevent="activate"
     >
@@ -107,32 +108,53 @@
       </span>
       <span
         v-if="row.missing"
-        class="ml-2 shrink-0 font-mono text-[9px] uppercase tracking-[0.08em] text-rem"
+        class="mr-2 shrink-0 font-mono text-[9px] uppercase tracking-[0.08em] text-rem"
       >
         Missing
       </span>
-      <span
-        v-else-if="row.gitStatus"
-        class="ml-2 shrink-0 font-mono text-[9px] font-semibold uppercase"
-        :class="gitClass"
-      >
-        {{ gitMark }}
-      </span>
     </button>
+
+    <span
+      data-file-git
+      class="px-1 text-right font-mono text-[9px] font-semibold tabular-nums"
+      :class="gitClass"
+      :title="gitTitle"
+      :aria-label="gitTitle || 'No Git change'"
+    >
+      {{ gitDisplay || '—' }}
+    </span>
+
+    <time
+      data-file-modified
+      class="files-ledger-modified px-1 text-right font-mono text-[9px] tabular-nums text-ink-3"
+      :datetime="modifiedDateTime(entry.mtime) || undefined"
+      :title="modifiedTitle"
+    >
+      {{ modifiedDisplay }}
+    </time>
+
+    <span
+      data-file-size
+      class="files-ledger-size px-1 text-right font-mono text-[9px] tabular-nums text-ink-3"
+    >
+      {{ sizeDisplay }}
+    </span>
 
     <button
       v-if="!editing"
       type="button"
       data-file-favorite
-      :aria-label="favorite ? `Remove ${entry.name} from Favorites` : `Add ${entry.name} to Favorites`"
-      :title="favorite ? 'Remove from Favorites' : 'Add to Favorites'"
-      class="absolute right-1 grid size-6 place-items-center outline-none focus-visible:ring-1 focus-visible:ring-accent"
-      :class="favorite ? 'text-accent' : 'text-ink-4 opacity-0 hover:text-ink group-hover:opacity-100 focus-visible:opacity-100'"
+      :aria-label="favorite ? `Remove ${entry.name} from Favorites` : row.missing ? `${entry.name} is missing` : `Add ${entry.name} to Favorites`"
+      :title="favorite ? 'Remove from Favorites' : row.missing ? 'Missing files cannot be added to Favorites' : 'Add to Favorites'"
+      :disabled="row.missing && !favorite"
+      class="grid size-7 place-items-center outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-4"
+      :class="favorite ? 'text-accent' : 'text-ink-4'"
       @click.stop="$emit('favorite', row)"
     >
       <IconStarFilled v-if="favorite" :size="12" />
       <IconStar v-else :size="13" :stroke-width="1.7" />
     </button>
+    <span v-else aria-hidden="true" />
   </div>
 </template>
 
@@ -157,6 +179,13 @@ import {
   IconStar,
   IconStarFilled,
 } from '@tabler/icons-vue'
+import {
+  formatFileSize,
+  formatModifiedTime,
+  gitLabel,
+  gitMark,
+  modifiedDateTime,
+} from '../files/fileLedger.js'
 
 const props = defineProps({
   row: { type: Object, required: true },
@@ -169,6 +198,7 @@ const props = defineProps({
   editing: { type: Boolean, default: false },
   editKind: { type: String, default: 'file' },
   editDraft: { type: String, default: '' },
+  now: { type: Number, default: () => Date.now() },
 })
 
 const emit = defineEmits([
@@ -203,23 +233,47 @@ const iconClass = computed(() => {
   if (entry.value.openBehavior === 'pdf' || extension.value === 'pdf') return 'text-rem'
   return props.active ? 'text-accent' : 'text-ink-3'
 })
+const modifiedDisplay = computed(() => (
+  entry.value.isDirectory ? '—' : formatModifiedTime(entry.value.mtime, props.now)
+))
+const modifiedTitle = computed(() => {
+  const dateTime = modifiedDateTime(entry.value.mtime)
+  return dateTime ? `Modified ${new Date(dateTime).toLocaleString()}` : 'Modification time unavailable'
+})
+const sizeDisplay = computed(() => (
+  entry.value.isDirectory ? '—' : formatFileSize(entry.value.size)
+))
 const secondaryPath = computed(() => {
   const value = String(entry.value.relativePath || '')
   const index = value.lastIndexOf('/')
   return index < 0 ? 'workspace' : value.slice(0, index)
 })
-const gitMark = computed(() => ({
-  new: 'A',
-  modified: 'M',
-  deleted: 'D',
-  renamed: 'R',
-}[props.row.gitStatus] || ''))
+const gitDisplay = computed(() => (
+  entry.value.isDirectory
+    ? (props.row.gitCount ? String(props.row.gitCount) : gitMark(props.row.gitStatus))
+    : gitMark(props.row.gitStatus)
+))
+const gitTitle = computed(() => (
+  entry.value.isDirectory && props.row.gitCount
+    ? `${props.row.gitCount} changed ${props.row.gitCount === 1 ? 'file' : 'files'} inside`
+    : gitLabel(props.row.gitStatus)
+))
 const gitClass = computed(() => ({
   new: 'text-add',
   modified: 'text-accent',
   deleted: 'text-rem',
   renamed: 'text-ink-3',
-}[props.row.gitStatus] || 'text-ink-3'))
+}[props.row.gitStatus] || (props.row.gitCount ? 'text-accent' : 'text-ink-4')))
+const entryAriaLabel = computed(() => {
+  const parts = [entry.value.name]
+  if (props.row.missing) parts.push('Missing')
+  if (gitTitle.value) parts.push(gitTitle.value)
+  if (!entry.value.isDirectory) {
+    parts.push(`Modified ${modifiedDisplay.value}`)
+    parts.push(sizeDisplay.value)
+  }
+  return parts.join(', ')
+})
 
 // The name field sits inside the tree, so Enter must commit here and stop:
 // left to bubble, the tree keyboard handler cancels the implicit submit and
@@ -255,3 +309,29 @@ function activate() {
   else emit('activate', props.row)
 }
 </script>
+
+<style scoped>
+.files-ledger-grid {
+  grid-template-columns: minmax(180px, 1fr) 40px 78px 60px 28px;
+}
+
+@container files (max-width: 519px) {
+  .files-ledger-grid {
+    grid-template-columns: minmax(180px, 1fr) 40px 78px 28px;
+  }
+
+  .files-ledger-size {
+    display: none;
+  }
+}
+
+@container files (max-width: 399px) {
+  .files-ledger-grid {
+    grid-template-columns: minmax(180px, 1fr) 40px 28px;
+  }
+
+  .files-ledger-modified {
+    display: none;
+  }
+}
+</style>

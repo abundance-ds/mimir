@@ -15,6 +15,9 @@
       :aria-current="active ? 'page' : undefined"
       :aria-pressed="selected ? 'true' : undefined"
       :aria-disabled="$attrs['aria-disabled']"
+      :aria-expanded="ariaExpanded"
+      :aria-haspopup="ariaHaspopup || undefined"
+      :aria-controls="ariaControls || undefined"
       :title="$attrs.title"
     >
       <span class="ml-3 grid size-7 shrink-0 place-items-center">
@@ -33,11 +36,12 @@
           <slot name="label">{{ label }}</slot>
         </span>
         <span
-          v-if="meta"
+          v-if="$slots.meta || meta"
           data-sidebar-meta
-          class="shrink-0 font-mono text-[9px] uppercase tracking-[0.06em] text-ink-4"
+          class="shrink-0 font-mono text-[9px] text-ink-4"
+          :class="{ 'uppercase tracking-[0.06em]': !$slots.meta }"
         >
-          {{ meta }}
+          <slot name="meta">{{ meta }}</slot>
         </span>
       </span>
     </button>
@@ -60,6 +64,9 @@ defineProps({
   selected: { type: Boolean, default: false },
   copyId: { type: String, default: '' },
   muted: { type: Boolean, default: false },
+  ariaExpanded: { type: [Boolean, String], default: undefined },
+  ariaHaspopup: { type: String, default: '' },
+  ariaControls: { type: String, default: '' },
 })
 
 defineEmits(['click'])

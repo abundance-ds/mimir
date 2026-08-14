@@ -411,10 +411,12 @@
       @pointerdown.self="closeDialog"
     >
       <section
+        ref="dialogRef"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="dialogHeadingId"
         class="flex max-h-full w-full max-w-xl flex-col border border-rule bg-surface"
+        @keydown="onDialogKeydown"
       >
         <header class="flex h-10 shrink-0 items-center border-b border-rule bg-chrome-high px-4">
           <h2 :id="dialogHeadingId" class="text-[12px] font-semibold">{{ dialogTitle }}</h2>
@@ -811,7 +813,14 @@
       class="fixed inset-0 z-[270] grid place-items-center bg-black/25 px-4"
       @pointerdown.self="closeTrashDialog"
     >
-      <section role="alertdialog" aria-modal="true" aria-label="Move routine to Trash" class="w-full max-w-sm border border-rule bg-surface">
+      <section
+        ref="trashDialogRef"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Move routine to Trash"
+        class="w-full max-w-sm border border-rule bg-surface"
+        @keydown="onTrashDialogKeydown"
+      >
         <header class="flex h-10 items-center border-b border-rule bg-chrome-high px-4">
           <h2 class="text-[12px] font-semibold">Move {{ trashTarget.title }} to Trash?</h2>
         </header>
@@ -821,12 +830,14 @@
           </p>
           <p v-if="trashError" class="text-[10px] leading-relaxed text-rem">{{ trashError }}</p>
           <div class="flex justify-end gap-2">
-            <button type="button" class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome" @click="closeTrashDialog">Cancel</button>
+            <button type="button" class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent" @click="closeTrashDialog">Cancel</button>
             <button
+              ref="trashConfirmRef"
               type="button"
               data-routine-confirm-trash
               :disabled="trashBusy"
-              class="h-7 bg-rem px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 disabled:opacity-40"
+              class="h-7 bg-rem px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rem disabled:opacity-40"
+              @keydown.enter.prevent.stop="confirmTrash"
               @click="confirmTrash"
             >
               {{ trashBusy ? 'Moving…' : 'Move to Trash' }}
@@ -926,12 +937,15 @@ const contextMenuRef = ref(null)
 const contextRoutine = ref(null)
 const contextOpen = ref(false)
 const contextPosition = ref({ x: 12, y: 12 })
+const dialogRef = ref(null)
 const dialogMode = ref('')
 const dialogTarget = ref(null)
 const titleInputRef = ref(null)
 const dialogBusy = ref(false)
 const formError = ref('')
 const draft = ref(emptyDraft())
+const trashDialogRef = ref(null)
+const trashConfirmRef = ref(null)
 const trashTarget = ref(null)
 const trashError = ref('')
 const trashBusy = ref(false)
@@ -1227,12 +1241,53 @@ function promptTrash(routine = routines.selectedRoutine) {
   routines.select(routine.id)
   trashTarget.value = routine
   trashError.value = ''
+  nextTick(() => trashConfirmRef.value?.focus())
 }
 
 function closeTrashDialog() {
   if (trashBusy.value) return
   trashTarget.value = null
   trashError.value = ''
+  nextTick(() => listRef.value?.focus())
+}
+
+function onDialogKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeDialog()
+  } else if (event.key === 'Tab') {
+    trapDialogFocus(event, dialogRef.value)
+  }
+}
+
+function onTrashDialogKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeTrashDialog()
+  } else if (event.key === 'Tab') {
+    trapDialogFocus(event, trashDialogRef.value)
+  }
+}
+
+function trapDialogFocus(event, dialog) {
+  const focusable = [...(dialog?.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex]:not([tabindex="-1"])',
+  ) || [])]
+  if (!focusable.length) {
+    event.preventDefault()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable.at(-1)
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 async function confirmTrash() {

@@ -14,6 +14,7 @@ describe('diff store', () => {
     expect(store.originalContent).toBe('')
     expect(store.modifiedContent).toBe('')
     expect(store.filePath).toBe('')
+    expect(store.fileId).toBeNull()
     expect(store.proposalIds).toEqual([])
     expect(store.batchId).toBeNull()
     expect(store.viewMode).toBe('diff')
@@ -30,6 +31,7 @@ describe('diff store', () => {
       original: 'before',
       modified: 'after',
       path: '/test.md',
+      fileId: 42,
       proposals: ['p1', 'p2'],
       batch: 'b1',
     })
@@ -38,6 +40,7 @@ describe('diff store', () => {
     expect(store.originalContent).toBe('before')
     expect(store.modifiedContent).toBe('after')
     expect(store.filePath).toBe('/test.md')
+    expect(store.fileId).toBe(42)
     expect(store.proposalIds).toEqual(['p1', 'p2'])
     expect(store.batchId).toBe('b1')
     expect(store.viewMode).toBe('diff')
@@ -65,6 +68,7 @@ describe('diff store', () => {
       original: 'before',
       modified: 'after',
       path: '/test.md',
+      fileId: 42,
       proposals: ['p1'],
       batch: 'b1',
     })
@@ -77,6 +81,7 @@ describe('diff store', () => {
     expect(store.originalContent).toBe('')
     expect(store.modifiedContent).toBe('')
     expect(store.filePath).toBe('')
+    expect(store.fileId).toBeNull()
     expect(store.proposalIds).toEqual([])
     expect(store.batchId).toBeNull()
     expect(store.chunkCount).toBe(0)
@@ -182,6 +187,8 @@ describe('diff store', () => {
   it('activateBatch sets batch mode with files', () => {
     const store = useDiffStore()
 
+    store.activate({ original: 'old', modified: 'new', fileId: 42 })
+
     store.activateBatch({
       fileList: [
         { path: 'a.md', original: 'old-a', modified: 'new-a', proposalId: 'p1' },
@@ -197,6 +204,7 @@ describe('diff store', () => {
     expect(store.files[0].path).toBe('a.md')
     expect(store.files[0].status).toBe('pending')
     expect(store.batchId).toBe('batch-1')
+    expect(store.fileId).toBeNull()
   })
 
   it('acceptFile marks a file as accepted', () => {

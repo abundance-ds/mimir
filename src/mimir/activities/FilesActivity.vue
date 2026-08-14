@@ -1,7 +1,7 @@
 <template>
   <section
     data-files-activity
-    class="relative flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
+    class="files-activity relative flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
     aria-label="Files"
     @keydown.capture="onCommandKeydown"
   >
@@ -70,53 +70,110 @@
       </button>
     </header>
 
-    <label
+    <div
       v-if="files.workspacePath"
-      class="mx-2 my-2 flex h-8 shrink-0 items-center gap-2 border border-rule-light bg-chrome-high px-2 focus-within:border-accent/60"
+      class="mx-2 my-2 flex h-8 shrink-0 items-center"
     >
-      <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-4" />
-      <input
-        ref="queryInput"
-        v-model="query"
-        data-files-search
-        type="search"
-        autocapitalize="off"
-        autocomplete="off"
-        autocorrect="off"
-        spellcheck="false"
-        :placeholder="searchPlaceholder"
-        class="h-full min-w-0 flex-1 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-4"
-        @input="onQueryInput"
-        @keydown.down.prevent="focusList(1)"
-        @keydown.up.prevent="focusList(-1)"
-        @keydown.esc.prevent="clearQuery"
-      />
-      <kbd v-if="!query" class="font-mono text-[9px] text-ink-4">⌘F</kbd>
-      <button
-        v-else
-        type="button"
-        title="Clear filter"
-        aria-label="Clear filter"
-        class="grid size-5 place-items-center text-ink-4 hover:text-ink"
-        @click="clearQuery"
+      <div
+        class="flex h-full shrink-0 border border-r-0 border-rule-light bg-chrome-high p-0.5"
+        role="group"
+        aria-label="Search scope"
       >
-        <IconX :size="12" :stroke-width="1.8" />
+        <button
+          v-for="scope in searchScopes"
+          :key="scope.id"
+          type="button"
+          :data-files-search-scope="scope.id"
+          :aria-pressed="searchScope === scope.id"
+          class="h-full px-2 font-mono text-[9px] text-ink-4 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+          :class="{ 'bg-surface text-ink': searchScope === scope.id }"
+          @click="setSearchScope(scope.id)"
+        >
+          {{ scope.label }}
+        </button>
+      </div>
+      <label class="flex h-full min-w-0 flex-1 items-center gap-2 border border-rule-light bg-chrome-high px-2 focus-within:border-accent/60">
+        <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-4" />
+        <input
+          ref="queryInput"
+          v-model="query"
+          data-files-search
+          type="search"
+          autocapitalize="off"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          :placeholder="searchPlaceholder"
+          class="h-full min-w-0 flex-1 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-4"
+          @input="onQueryInput"
+          @keydown.down.prevent="enterSearchResults(1)"
+          @keydown.up.prevent="enterSearchResults(-1)"
+          @keydown.esc.prevent="clearQuery"
+        />
+        <span
+          v-if="contentMode && files.contentSearching"
+          class="font-mono text-[9px] text-ink-4"
+        >
+          Searching
+        </span>
+        <kbd v-else-if="!query" class="font-mono text-[9px] text-ink-4">⌘F</kbd>
+        <button
+          v-else
+          type="button"
+          title="Clear search"
+          aria-label="Clear search"
+          class="grid size-5 place-items-center text-ink-4 hover:text-ink"
+          @click="clearQuery"
+        >
+          <IconX :size="12" :stroke-width="1.8" />
+        </button>
+      </label>
+    </div>
+
+    <div
+      v-if="gitOnly"
+      data-files-active-filter
+      role="status"
+      class="flex h-7 shrink-0 items-center gap-2 border-y border-rule-light bg-chrome-high px-3 font-mono text-[9px] text-ink-3"
+    >
+      <span class="font-semibold text-accent">Git changes</span>
+      <span>{{ gitChanges.length }}</span>
+      <button
+        type="button"
+        data-files-clear-git-filter
+        class="ml-auto text-ink-4 outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+        @click="toggleGitFilter(false)"
+      >
+        Clear
       </button>
-    </label>
+    </div>
+
+    <div
+      v-if="files.workspacePath && !contentMode"
+      data-files-ledger-header
+      aria-hidden="true"
+      class="files-ledger-grid grid h-7 min-w-[248px] shrink-0 items-center border-b border-rule-light bg-chrome-high px-0 font-mono text-[9px] text-ink-4"
+    >
+      <span class="pl-3">Name</span>
+      <span class="px-1 text-right">Git</span>
+      <span class="files-ledger-modified px-1 text-right">Modified</span>
+      <span class="files-ledger-size px-1 text-right">Size</span>
+      <IconStar :size="11" :stroke-width="1.7" class="mx-auto" />
+    </div>
 
     <div
       v-if="files.workspacePath"
       ref="listRef"
       data-files-list
-      role="tree"
+      :role="contentMode ? 'listbox' : 'tree'"
       aria-label="Workspace files"
-      aria-multiselectable="true"
+      :aria-multiselectable="contentMode ? undefined : 'true'"
       tabindex="0"
       :data-files-drop-root="rootDropActive ? '' : undefined"
       class="scrollbar-thin min-h-0 flex-1 overflow-auto bg-surface outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       :class="{ 'ring-1 ring-inset ring-accent': rootDropActive }"
       @keydown="onListKeydown"
-      @contextmenu="openEmptyContextMenu"
+      @contextmenu="onListContextMenu"
       @scroll.passive="onListScroll"
       @pointerdown="onRowPointerDown"
     >
@@ -156,6 +213,53 @@
         </div>
       </div>
 
+      <template v-else-if="contentMode">
+        <button
+          v-for="(match, index) in contentMatches"
+          :key="`${match.path}:${match.line}:${match.column}`"
+          type="button"
+          data-content-match
+          role="option"
+          :aria-selected="contentFocusedIndex === index"
+          class="block h-11 w-full border-b border-rule-light px-3 text-left outline-none hover:bg-chrome-high focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+          :class="{ 'bg-accent-soft': contentFocusedIndex === index }"
+          @click="openContentMatch(match, index, true)"
+          @dblclick.prevent="openContentMatch(match, index, false)"
+        >
+          <span class="flex min-w-0 items-center gap-2 font-mono text-[9px] text-accent">
+            <span class="min-w-0 flex-1 truncate">{{ match.relativePath }}</span>
+            <span class="shrink-0 tabular-nums text-ink-4">{{ match.line }}:{{ match.column }}</span>
+          </span>
+          <span class="mt-0.5 block truncate font-mono text-[10px] text-ink-2">{{ match.excerpt }}</span>
+        </button>
+
+        <div
+          v-if="query.trim() && !files.contentSearching && !contentMatches.length"
+          data-files-empty
+          class="grid h-40 place-items-center px-8 text-center text-[11px] text-ink-3"
+        >
+          No content matches. Try another phrase.
+        </div>
+        <div
+          v-else-if="!query.trim()"
+          data-files-empty
+          class="grid h-40 place-items-center px-8 text-center"
+        >
+          <div>
+            <IconSearch :size="21" :stroke-width="1.5" class="mx-auto text-ink-3" />
+            <p class="mt-3 text-[11px] font-semibold">Search file contents</p>
+            <p class="mt-1 text-[10px] text-ink-3">Matches show the file, line, and excerpt.</p>
+          </div>
+        </div>
+        <div
+          v-if="files.contentTruncated"
+          role="status"
+          class="border-t border-rule bg-chrome-high px-3 py-2 text-[10px] text-ink-3"
+        >
+          The search limit was reached. Use a more specific phrase.
+        </div>
+      </template>
+
       <template v-else>
         <template v-for="item in renderPlan" :key="item.key">
           <div
@@ -177,6 +281,7 @@
             :editing="isEditing(item.row)"
             :edit-kind="nameAction?.kind"
             :edit-draft="nameDraft"
+            :now="clockNow"
             @select="onRowSelect(item.row, item.index, $event)"
             @activate="onRowActivate(item.row)"
             @toggle="onRowToggle(item.row, item.index)"
@@ -250,20 +355,34 @@
       v-if="files.workspacePath"
       class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[9px] text-ink-4"
     >
-      <span>{{ selectedPaths.size ? `${selectedPaths.size} selected` : `${visibleRows.length} visible` }}</span>
-      <span v-if="importing" data-files-importing class="text-accent">Adding dropped items…</span>
-      <span v-else-if="gitChanges.length" class="text-accent">
-        {{ gitChanges.length }} changed
+      <span>{{ footerCount }}</span>
+      <span
+        v-if="selectedFileSummary"
+        data-files-selection-detail
+        class="files-selected-detail min-w-0 truncate text-ink-3"
+      >
+        {{ selectedFileSummary }}
       </span>
+      <span v-if="importing" data-files-importing class="text-accent">Adding dropped items…</span>
       <button
-        v-if="viewMode === 'project' && files.expandedDirectories.size"
+        v-else-if="gitChanges.length || gitOnly"
         type="button"
-        class="ml-auto text-ink-4 hover:text-ink"
+        data-files-git-filter
+        :aria-pressed="gitOnly"
+        class="shrink-0 whitespace-nowrap text-accent outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+        @click="toggleGitFilter()"
+      >
+        {{ gitChanges.length }} Git {{ gitChanges.length === 1 ? 'change' : 'changes' }}
+      </button>
+      <button
+        v-if="viewMode === 'project' && !gitOnly && !contentMode && files.expandedDirectories.size"
+        type="button"
+        class="files-footer-secondary ml-auto text-ink-4 hover:text-ink"
         @click="collapseAll"
       >
         Collapse all
       </button>
-      <span v-else class="ml-auto truncate">{{ workspaceName }}</span>
+      <span v-else class="files-footer-secondary ml-auto truncate">{{ workspaceName }}</span>
     </footer>
 
     <div
@@ -327,6 +446,16 @@
           <ContextAction label="Refresh workspace" action="refresh" @select="refreshFromMenu" />
           <ContextAction label="Collapse all folders" action="collapse-all" @select="collapseAllFromMenu" />
         </template>
+        <template v-else-if="contextEntry && contextEntry.missing">
+          <ContextAction
+            v-if="isFavorite(contextEntry)"
+            label="Remove from Favorites"
+            action="favorite"
+            @select="favoriteContextEntry"
+          />
+          <ContextAction label="Copy path" action="copy-path" @select="copyContextPath(false)" />
+          <ContextAction label="Copy relative path" action="copy-relative-path" @select="copyContextPath(true)" />
+        </template>
         <template v-else-if="contextEntry">
           <ContextAction
             :label="contextEntry.isDirectory ? 'Expand or collapse' : 'Open in Mimir'"
@@ -369,10 +498,12 @@
       @pointerdown.self="closeDeleteDialog"
     >
       <section
+        ref="deleteDialogRef"
         role="alertdialog"
         aria-modal="true"
         aria-label="Move items to Trash"
         class="w-full max-w-sm border border-rule bg-surface shadow-xl"
+        @keydown="onDeleteDialogKeydown"
       >
         <header class="flex h-10 items-center border-b border-rule bg-chrome-high px-4">
           <h2 class="text-[12px] font-semibold">
@@ -387,16 +518,18 @@
           <div class="flex justify-end gap-2">
             <button
               type="button"
-              class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome"
+              class="h-7 border border-rule px-3 text-[10px] hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
               @click="closeDeleteDialog"
             >
               Cancel
             </button>
             <button
+              ref="deleteConfirmRef"
               type="button"
               data-files-confirm-delete
               :disabled="operationBusy"
-              class="h-7 bg-rem px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 disabled:opacity-40"
+              class="h-7 bg-rem px-3 text-[10px] font-semibold text-accent-ink hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rem disabled:opacity-40"
+              @keydown.enter.prevent.stop="confirmDelete"
               @click="confirmDelete"
             >
               {{ operationBusy ? 'Moving…' : 'Move to Trash' }}
@@ -433,7 +566,7 @@ import {
   IconX,
 } from '@tabler/icons-vue'
 import FileTreeRow from '../components/FileTreeRow.vue'
-import { useFileStore } from '../../stores/files.js'
+import { pathIsInsideWorkspace, useFileStore } from '../../stores/files.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import { loadGitChanges } from '../../services/gitChanges.js'
@@ -451,6 +584,7 @@ import { useFileFavorites } from '../files/useFileFavorites.js'
 import { useFileMutations } from '../files/useFileMutations.js'
 import { useFileSelection } from '../files/useFileSelection.js'
 import { useFileTreeDrag } from '../files/useFileTreeDrag.js'
+import { formatFileSize, formatModifiedTime, gitLabel } from '../files/fileLedger.js'
 import { importWorkspaceEntries } from '../../services/workspaceFileOperations.js'
 import { basename } from '../../shared/utils/path.js'
 
@@ -489,12 +623,19 @@ const files = useWorkspaceFilesStore()
 const editorFiles = useFileStore()
 const settings = useSettingsStore()
 const viewMode = ref('project')
+const searchScope = ref('paths')
 const query = ref('')
 const queryInput = ref(null)
 const listRef = ref(null)
 const contextMenuRef = ref(null)
+const deleteDialogRef = ref(null)
+const deleteConfirmRef = ref(null)
 const gitChanges = ref([])
+const gitOnly = ref(false)
+const contentFocusedIndex = ref(-1)
+const clockNow = ref(Date.now())
 let queryTimer = null
+let clockTimer = null
 
 const SEARCH_DEBOUNCE_MS = 130
 // Windowed rendering: only trees larger than this render behind spacers.
@@ -510,6 +651,11 @@ const views = Object.freeze([
   { id: 'recent', label: 'Recent', icon: IconClock },
   { id: 'favorites', label: 'Favorites', icon: IconStar },
 ])
+const searchScopes = Object.freeze([
+  { id: 'paths', label: 'Paths' },
+  { id: 'contents', label: 'Contents' },
+])
+const contentMode = computed(() => searchScope.value === 'contents')
 
 const workspaceName = computed(() => basename(files.workspacePath) || 'workspace')
 const {
@@ -527,7 +673,7 @@ const indexedByPath = computed(() => new Map(
 // Only the Favorites view resolves entries by relative path; skip the full
 // tree flatten (every loaded directory) for the Project and Recent views.
 const loadedByRelativePath = computed(() => {
-  if (viewMode.value !== 'favorites') return new Map()
+  if (viewMode.value !== 'favorites' && !gitOnly.value) return new Map()
   const map = new Map()
   for (const entries of Object.values(files.treeChildren)) {
     for (const entry of entries) {
@@ -539,32 +685,62 @@ const loadedByRelativePath = computed(() => {
 const gitByPath = computed(() => new Map(
   gitChanges.value.map((change) => [normalizeRelative(change.path), change.status]),
 ))
-// Directory badge lookup precomputed once per git refresh: each changed file
-// walks up its ancestors, first change (in gitChanges order) wins — the same
-// status the previous per-row prefix scan displayed.
-const gitDirectoryStatus = computed(() => {
-  const statuses = new Map()
-  for (const [path, status] of gitByPath.value) {
+// A folder reports the number of changed descendants. One inherited status
+// letter can misrepresent a folder that contains mixed Git states.
+const gitDirectoryCounts = computed(() => {
+  const counts = new Map()
+  for (const path of gitByPath.value.keys()) {
     let parent = path
     let cut = parent.lastIndexOf('/')
     while (cut > 0) {
       parent = parent.slice(0, cut)
-      if (statuses.has(parent)) break
-      statuses.set(parent, status)
+      counts.set(parent, (counts.get(parent) || 0) + 1)
       cut = parent.lastIndexOf('/')
     }
   }
-  return statuses
+  return counts
 })
 const activePath = computed(() => normalizePath(editorFiles.currentFile?.path))
 
 const visibleRows = computed(() => {
-  if (viewMode.value === 'recent') return recentRows()
-  if (viewMode.value === 'favorites') return favoriteRows()
-  if (query.value.trim()) return searchRows()
-  const rows = []
-  flattenDirectory('', 0, rows)
-  return rows
+  if (contentMode.value) return []
+  if (gitOnly.value && viewMode.value === 'project' && !query.value.trim()) {
+    return gitChangeRows()
+  }
+  let rows
+  if (viewMode.value === 'recent') rows = recentRows()
+  else if (viewMode.value === 'favorites') rows = favoriteRows()
+  else if (query.value.trim()) rows = searchRows()
+  else {
+    rows = []
+    flattenDirectory('', 0, rows)
+  }
+  return gitOnly.value ? rows.filter(rowHasGitChange) : rows
+})
+
+const contentMatches = computed(() => {
+  let matches = files.contentMatches
+  if (viewMode.value === 'recent') {
+    const recent = new Set(editorFiles.recentFiles
+      .filter(path => pathIsInsideWorkspace(path, files.workspacePath))
+      .map(normalizePath))
+    matches = matches.filter(match => recent.has(normalizePath(match.path)))
+  } else if (viewMode.value === 'favorites') {
+    const favoritePaths = favorites.value.map(record => ({
+      path: normalizeRelative(record.relativePath),
+      directory: Boolean(record.isDirectory),
+    }))
+    matches = matches.filter((match) => {
+      const path = normalizeRelative(match.relativePath)
+      return favoritePaths.some(favorite => (
+        favorite.directory ? path.startsWith(`${favorite.path}/`) : path === favorite.path
+      ))
+    })
+  }
+  if (gitOnly.value) {
+    matches = matches.filter(match => gitByPath.value.has(normalizeRelative(match.relativePath)))
+  }
+  return matches
 })
 
 const {
@@ -642,6 +818,45 @@ const {
   emitOpenFile: payload => emit('openFile', payload),
 })
 
+watch(deleteEntries, async (entries, previous = []) => {
+  if (entries.length) {
+    await nextTick()
+    deleteConfirmRef.value?.focus()
+  } else if (previous.length) {
+    await nextTick()
+    listRef.value?.focus()
+  }
+}, { flush: 'post' })
+
+function onDeleteDialogKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeDeleteDialog()
+  } else if (event.key === 'Tab') {
+    trapDialogFocus(event, deleteDialogRef.value)
+  }
+}
+
+function trapDialogFocus(event, dialog) {
+  const focusable = [...(dialog?.querySelectorAll(
+    'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  ) || [])]
+  if (!focusable.length) {
+    event.preventDefault()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable.at(-1)
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
 const { dropTarget, importing } = useFileDrop({
   listRef,
   rows: () => renderedRows.value,
@@ -665,6 +880,7 @@ const {
   listRef,
   rows: () => renderedRows.value,
   canDrag: () => viewMode.value === 'project' && !query.value.trim()
+    && !gitOnly.value && !contentMode.value
     && !nameAction.value && !operationBusy.value && !importing.value,
   dragEntries: row => (
     selectedPaths.value.has(row.entry.path) ? selectedEntries() : [row.entry]
@@ -796,30 +1012,62 @@ watch(listRef, (element, previous) => {
 }, { flush: 'post' })
 
 const isLoading = computed(() => files.loading || (
-  viewMode.value === 'project'
+  !contentMode.value
+  && viewMode.value === 'project'
   && !query.value.trim()
   && !Object.prototype.hasOwnProperty.call(files.treeChildren, '')
 ))
 const surfaceError = computed(() => files.error || files.treeErrors[''] || '')
-const searchPlaceholder = computed(() => ({
-  project: 'Filter project files',
-  recent: 'Filter recent files',
-  favorites: 'Filter favorites',
-}[viewMode.value]))
+const searchPlaceholder = computed(() => {
+  if (contentMode.value) return ({
+    project: 'Search project contents',
+    recent: 'Search recent file contents',
+    favorites: 'Search favorite contents',
+  })[viewMode.value]
+  return ({
+    project: 'Filter project files',
+    recent: 'Filter recent files',
+    favorites: 'Filter favorites',
+  })[viewMode.value]
+})
 const emptyTitle = computed(() => {
+  if (gitOnly.value && !query.value.trim()) return 'No visible Git changes'
   if (query.value.trim()) return 'No matching files'
   if (viewMode.value === 'favorites') return 'No favorites yet'
   if (viewMode.value === 'recent') return 'No recent files'
   return 'This workspace is empty'
 })
 const emptyBody = computed(() => {
+  if (gitOnly.value && !query.value.trim()) return 'Clear the Git filter to see all project files.'
   if (query.value.trim()) return 'Try a shorter filename or path.'
   if (viewMode.value === 'favorites') return 'Star files or folders you return to often.'
   if (viewMode.value === 'recent') return 'Files you open in Mimir appear here.'
   return 'Create a file to start working here.'
 })
+const footerCount = computed(() => {
+  if (contentMode.value) return `${contentMatches.value.length} ${contentMatches.value.length === 1 ? 'match' : 'matches'}`
+  return selectedPaths.value.size
+    ? `${selectedPaths.value.size} selected`
+    : `${visibleRows.value.length} visible`
+})
+const selectedFileSummary = computed(() => {
+  if (contentMode.value || selectedPaths.value.size !== 1) return ''
+  const row = visibleRows.value.find(item => selectedPaths.value.has(item.entry.path))
+  if (!row || row.entry.isDirectory) return ''
+  const parts = [row.entry.name]
+  if (row.gitStatus) parts.push(gitLabel(row.gitStatus))
+  parts.push(formatModifiedTime(row.entry.mtime, clockNow.value))
+  parts.push(formatFileSize(row.entry.size))
+  return parts.join(' · ')
+})
 
 watch(() => files.workspacePath, () => {
+  clearTimeout(queryTimer)
+  query.value = ''
+  gitOnly.value = false
+  contentFocusedIndex.value = -1
+  void files.setQuery('')
+  void files.searchContent('')
   resetSelection()
   // A pending name belongs to the project that is leaving: its parent folder
   // means nothing in the arriving one.
@@ -830,9 +1078,14 @@ watch(() => files.workspacePath, () => {
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
   if (files.workspacePath) void refreshGit()
+  clockTimer = setInterval(() => {
+    clockNow.value = Date.now()
+  }, 60_000)
+  clockTimer?.unref?.()
 })
 onUnmounted(() => {
   clearTimeout(queryTimer)
+  clearInterval(clockTimer)
   listResizeObserver?.disconnect()
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
 })
@@ -848,16 +1101,18 @@ function normalizeEntry(entry) {
 
 function makeRow(entry, depth, options = {}) {
   const normalized = normalizeEntry(entry)
+  const missing = Boolean(options.missing || normalized.missing)
   return {
     key: options.key || normalized.path,
-    entry: normalized,
+    entry: missing ? { ...normalized, missing: true } : normalized,
     depth,
     expanded: normalized.isDirectory && files.expandedDirectories.has(normalizeRelative(normalized.relativePath)),
     loading: normalized.isDirectory && files.treeLoadingPaths.has(normalizeRelative(normalized.relativePath)),
     gitStatus: gitStatusFor(normalized),
+    gitCount: gitCountFor(normalized),
     secondary: Boolean(options.secondary),
     favoriteRoot: Boolean(options.favoriteRoot),
-    missing: Boolean(options.missing),
+    missing,
     editing: Boolean(options.editing),
   }
 }
@@ -882,6 +1137,7 @@ function searchRows() {
 function recentRows() {
   const needle = query.value.trim().toLowerCase()
   return editorFiles.recentFiles
+    .filter(path => pathIsInsideWorkspace(path, files.workspacePath))
     .map((path) => indexedByPath.value.get(normalizePath(path)) || fallbackFileEntry(path))
     .filter((entry) => matchesEntry(entry, needle))
     .map((entry) => makeRow(entry, 0, { secondary: true, missing: !indexedByPath.value.has(normalizePath(entry.path)) }))
@@ -905,6 +1161,21 @@ function favoriteRows() {
     }
   }
   return rows
+}
+
+function gitChangeRows() {
+  return gitChanges.value.map((change) => {
+    const relativePath = normalizeRelative(change.path)
+    const absolute = absolutePath(relativePath)
+    const entry = loadedByRelativePath.value.get(relativePath)
+      || indexedByPath.value.get(normalizePath(absolute))
+      || fallbackFileEntry(absolute)
+    return makeRow(entry, 0, {
+      key: `git:${relativePath}`,
+      secondary: true,
+      missing: change.status === 'deleted',
+    })
+  })
 }
 
 function resolveFavorite(record) {
@@ -943,20 +1214,41 @@ function setViewMode(mode) {
   viewMode.value = mode
   query.value = ''
   void files.setQuery('')
+  void files.searchContent('')
+  contentFocusedIndex.value = -1
   clearSelection()
   nextTick(() => listRef.value?.focus())
 }
 
+function setSearchScope(scope) {
+  if (!searchScopes.some(option => option.id === scope) || searchScope.value === scope) return
+  clearTimeout(queryTimer)
+  searchScope.value = scope
+  query.value = ''
+  void files.setQuery('')
+  void files.searchContent('')
+  contentFocusedIndex.value = -1
+  clearSelection()
+  nextTick(() => queryInput.value?.focus())
+}
+
 function onQueryInput() {
   clearTimeout(queryTimer)
-  if (viewMode.value !== 'project') return
   queryTimer = setTimeout(async () => {
     try {
-      await files.setQuery(query.value)
-      focusedIndex.value = 0
+      if (contentMode.value) {
+        await files.searchContent(query.value)
+        contentFocusedIndex.value = -1
+      } else if (viewMode.value === 'project') {
+        await files.setQuery(query.value)
+        focusedIndex.value = 0
+      }
       selectedPaths.value = new Set()
     } catch (error) {
-      operationError.value = describeError(error, 'File filter failed')
+      operationError.value = describeError(
+        error,
+        contentMode.value ? 'Content search failed' : 'File filter failed',
+      )
     }
   }, SEARCH_DEBOUNCE_MS)
 }
@@ -965,9 +1257,35 @@ function clearQuery() {
   clearTimeout(queryTimer)
   query.value = ''
   void files.setQuery('')
+  void files.searchContent('')
   focusedIndex.value = 0
+  contentFocusedIndex.value = -1
   selectedPaths.value = new Set()
   queryInput.value?.focus()
+}
+
+function focusSearchResults(delta) {
+  const matches = contentMatches.value
+  if (!matches.length) return
+  contentFocusedIndex.value = contentFocusedIndex.value < 0
+    ? (delta > 0 ? 0 : matches.length - 1)
+    : (contentFocusedIndex.value + delta + matches.length) % matches.length
+  listRef.value?.focus()
+  scrollContentMatchIntoView()
+}
+
+function enterSearchResults(delta) {
+  if (contentMode.value) {
+    contentFocusedIndex.value = -1
+    focusSearchResults(delta)
+    return
+  }
+  const rows = visibleRows.value
+  if (!rows.length) return
+  // focusList moves relative to the current row. Seed the opposite edge so
+  // Down enters at the first result and Up enters at the last result.
+  focusedIndex.value = delta > 0 ? rows.length - 1 : 0
+  focusList(delta)
 }
 
 function onCommandKeydown(event) {
@@ -995,6 +1313,10 @@ function onCommandKeydown(event) {
 
 function onListKeydown(event) {
   if (event.defaultPrevented) return
+  if (contentMode.value) {
+    onContentListKeydown(event)
+    return
+  }
   // The inline name field is a row of the tree. While it holds focus, typing,
   // caret motion, and text selection belong to the field, not to row
   // navigation.
@@ -1034,6 +1356,40 @@ function onListKeydown(event) {
     if (nameAction.value) cancelNameAction()
     else clearSelection()
   }
+}
+
+function onContentListKeydown(event) {
+  const matches = contentMatches.value
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    focusSearchResults(event.key === 'ArrowDown' ? 1 : -1)
+  } else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    const match = matches[contentFocusedIndex.value]
+    if (match) openContentMatch(match, contentFocusedIndex.value, event.key === ' ')
+  } else if (event.key === 'Escape') {
+    clearQuery()
+  }
+}
+
+function openContentMatch(match, index, preview) {
+  contentFocusedIndex.value = index
+  const entry = indexedByPath.value.get(normalizePath(match.path)) || fallbackFileEntry(match.path)
+  emit('openFile', { path: match.path, preview, entry })
+}
+
+function scrollContentMatchIntoView() {
+  nextTick(() => {
+    const matches = listRef.value?.querySelectorAll?.('[data-content-match]') || []
+    const row = matches[contentFocusedIndex.value]
+    row?.scrollIntoView?.({ block: 'nearest' })
+    row?.focus?.({ preventScroll: true })
+  })
+}
+
+function onListContextMenu(event) {
+  if (contentMode.value) return
+  openEmptyContextMenu(event)
 }
 
 // The click released at the end of a drag must not also toggle or open the
@@ -1156,9 +1512,23 @@ async function refreshGit() {
 function gitStatusFor(entry) {
   const relativePath = normalizeRelative(entry.relativePath)
   const exact = gitByPath.value.get(relativePath)
-  if (exact) return exact
-  if (!entry.isDirectory) return ''
-  return gitDirectoryStatus.value.get(relativePath) || ''
+  return exact || ''
+}
+
+function gitCountFor(entry) {
+  if (!entry.isDirectory) return 0
+  return gitDirectoryCounts.value.get(normalizeRelative(entry.relativePath)) || 0
+}
+
+function rowHasGitChange(row) {
+  return Boolean(row.gitStatus || row.gitCount)
+}
+
+function toggleGitFilter(force) {
+  gitOnly.value = typeof force === 'boolean' ? force : !gitOnly.value
+  clearSelection()
+  contentFocusedIndex.value = -1
+  nextTick(() => listRef.value?.focus())
 }
 
 function collapseAll() {
@@ -1218,3 +1588,46 @@ function relativeFromAbsolute(path) {
 }
 
 </script>
+
+<style scoped>
+.files-activity {
+  container: files / inline-size;
+}
+
+.files-ledger-grid {
+  grid-template-columns: minmax(180px, 1fr) 40px 78px 60px 28px;
+}
+
+.files-selected-detail {
+  display: none;
+}
+
+@container files (max-width: 519px) {
+  .files-ledger-grid {
+    grid-template-columns: minmax(180px, 1fr) 40px 78px 28px;
+  }
+
+  .files-ledger-size {
+    display: none;
+  }
+}
+
+@container files (max-width: 399px) {
+  .files-ledger-grid {
+    grid-template-columns: minmax(180px, 1fr) 40px 28px;
+  }
+
+  .files-ledger-modified {
+    display: none;
+  }
+
+  .files-selected-detail {
+    display: inline;
+    flex: 1;
+  }
+
+  .files-footer-secondary {
+    display: none;
+  }
+}
+</style>

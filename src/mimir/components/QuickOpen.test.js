@@ -29,6 +29,10 @@ const tools = [
 const launchers = [
   { id: 'preset:codex', title: 'Codex', icon: 'codex' },
 ]
+const projects = [
+  { name: 'current', path: '/w', current: true },
+  { name: 'other-project', path: '/work/other-project' },
+]
 const history = [{
   id: 'agent:closed',
   kind: 'agent',
@@ -65,6 +69,8 @@ describe('QuickOpen', () => {
       props: {
         open,
         tools,
+        projects,
+        currentProjectPath: '/w',
         newActivity: launchers,
         history,
         ...(options.props || {}),
@@ -88,6 +94,7 @@ describe('QuickOpen', () => {
       'new-activity-enter',
       'tool',
       'tool',
+      'project',
       'file',
       'file',
       'history',
@@ -116,7 +123,7 @@ describe('QuickOpen', () => {
     const wrapper = render(true, {
       props: { history: [{ ...history[0], inCurrentWorkspace: false }] },
     })
-    await wrapper.get('[data-quick-open-input]').setValue('@')
+    await wrapper.get('[data-quick-open-input]').setValue('h:')
     expect(wrapper.text()).toContain('No closed sessions in this project. Type to search all projects.')
   })
 
@@ -226,7 +233,7 @@ describe('QuickOpen', () => {
     const wrapper = render()
     const input = wrapper.get('[data-quick-open-input]')
 
-    await input.setValue('/ a')
+    await input.setValue('f:a')
     expect(wrapper.get('[data-quick-open-scope]').text()).toBe('Files')
     expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
       .toEqual(['file'])
@@ -240,11 +247,37 @@ describe('QuickOpen', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('uses @ for closed history rather than current activities', async () => {
+  it('retains every matching group while typing and labels its prefix', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-quick-open-input]').setValue('codex')
+
+    expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
+      .toEqual(['new-activity', 'history'])
+    expect(wrapper.get('[data-quick-open-group="New activity"]').text()).toContain('n:')
+    expect(wrapper.get('[data-quick-open-group="History"]').text()).toContain('h:')
+  })
+
+  it('switches a project directly from p: results', async () => {
+    const wrapper = render()
+    const input = wrapper.get('[data-quick-open-input]')
+    await input.setValue('p:other')
+
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('Projects')
+    expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
+      .toEqual(['project'])
+    await input.trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({
+      type: 'project',
+      path: '/work/other-project',
+    })
+  })
+
+  it('uses h: for closed history rather than current activities', async () => {
     const wrapper = render()
     const input = wrapper.get('[data-quick-open-input]')
 
-    await input.setValue('@')
+    await input.setValue('h:')
 
     expect(wrapper.get('[data-quick-open-scope]').text()).toBe('History')
     expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
@@ -260,7 +293,7 @@ describe('QuickOpen', () => {
         snippet: 'Implemented richer history rows and verified restore.',
       }])
       const wrapper = render()
-      await wrapper.get('[data-quick-open-input]').setValue('@')
+      await wrapper.get('[data-quick-open-input]').setValue('h:')
 
       await vi.advanceTimersByTimeAsync(140)
       await flushPromises()
@@ -337,7 +370,7 @@ describe('QuickOpen', () => {
     }))
     const wrapper = render()
     const input = wrapper.get('[data-quick-open-input]')
-    await input.setValue('/')
+    await input.setValue('f:')
 
     expect(wrapper.findAll('[data-quick-open-type="file"]')).toHaveLength(100)
     await input.trigger('keydown', { key: 'ArrowUp' })

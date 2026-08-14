@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import WorkbenchSidebar from './WorkbenchSidebar.vue'
 
@@ -107,6 +107,10 @@ function render(collapsed = false, attach = false) {
 }
 
 describe('WorkbenchSidebar', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders Tools, one flat Chats list, and live Activities without launcher rows', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-sidebar-row]').map((row) => row.attributes('data-sidebar-row'))
@@ -122,7 +126,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.text()).toContain('mimir')
     expect(wrapper.text()).toContain('Tools')
     expect(wrapper.text()).not.toContain('New activity')
-    expect(wrapper.get('[data-activity-status="working"]').exists()).toBe(true)
+    expect(wrapper.get('[data-activity-working="agent:one"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"] svg').attributes('viewBox')).toBe('0 0 256 260')
     expect(wrapper.find('[data-sidebar-row="tool:files"] [data-sidebar-meta]').exists()).toBe(false)
   })
@@ -185,7 +189,7 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').element).toBe(activityRow)
     expect(wrapper.get('[data-sidebar-monogram="agent:one"]').attributes('data-activity-identity')).toBe('Codex')
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').attributes('title')).toContain('Review API')
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button').attributes('aria-label')).toBe('Review API')
+    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button').attributes('aria-label')).toContain('Review API')
     expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
     expect(wrapper.get('[data-sidebar-copy="activity:agent:one"]').attributes('aria-hidden')).toBe('true')
   })
@@ -238,12 +242,98 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
   })
 
-  it('uses status and unread overlays without duplicating rows', () => {
+  it('keeps Activity identity icons clean in rail mode', () => {
     const wrapper = render(true)
 
     expect(wrapper.findAll('[data-sidebar-row="activity:agent:one"]')).toHaveLength(1)
-    expect(wrapper.get('[data-activity-status="working"]').classes()).toContain('bg-accent')
-    expect(wrapper.get('[data-activity-unread="agent:one"]').exists()).toBe(true)
+    expect(wrapper.get('[data-activity-working="agent:one"]').exists()).toBe(true)
+    expect(wrapper.find('[data-sidebar-monogram="agent:one"] [data-activity-unread]').exists()).toBe(false)
+    expect(wrapper.find('[data-sidebar-monogram="agent:one"] [data-activity-status]').exists()).toBe(false)
+  })
+
+  it('shows one clear meta treatment without exposing done or idle', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-08-14T12:00:30Z')
+    const updatedAt = '2026-08-14T12:00:00Z'
+    const states = [
+      { id: 'working', status: 'working' },
+      { id: 'attention', status: 'needs-input' },
+      { id: 'error', status: 'error' },
+      { id: 'api-error', status: 'idle', error: 'API authentication failed' },
+      { id: 'working-error', status: 'working', error: 'API rate limit exceeded' },
+      { id: 'unread', status: 'idle', unread: true },
+      { id: 'done', status: 'done' },
+      { id: 'idle', status: 'idle' },
+      { id: 'interrupted', status: 'interrupted' },
+      { id: 'resuming', status: 'interrupted' },
+    ].map(state => ({
+      title: state.id,
+      kind: 'agent',
+      retention: 'durable',
+      updatedAt,
+      source: { presetId: 'codex' },
+      host: { type: 'pty' },
+      ...state,
+    }))
+    const wrapper = mount(WorkbenchSidebar, {
+      props: {
+        activities: states,
+        resumingActivityIds: new Set(['resuming']),
+      },
+    })
+
+    expect(wrapper.get('[data-activity-working="working"]').exists()).toBe(true)
+    expect(wrapper.get('[data-activity-working="resuming"]').exists()).toBe(true)
+    expect(wrapper.get('[data-activity-attention="attention"]').classes()).toContain('bg-attn/65')
+    expect(wrapper.get('[data-activity-error="error"]').classes()).toContain('bg-rem')
+    expect(wrapper.get('[data-activity-error="api-error"]').exists()).toBe(true)
+    expect(wrapper.get('[data-activity-error="working-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-activity-working="working-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-activity-unread="unread"]').classes()).toContain('bg-info/60')
+
+    for (const id of ['done', 'idle', 'interrupted']) {
+      const row = wrapper.get(`[data-sidebar-row="activity:${id}"]`)
+      expect(row.get('[data-sidebar-meta]').text()).toBe('now')
+      expect(row.attributes('title')).not.toContain(`· ${id}`)
+      expect(row.find('[data-activity-unread], [data-activity-attention], [data-activity-error]').exists()).toBe(false)
+    }
+    wrapper.unmount()
+  })
+
+  it('refreshes all compact times with one minute ticker', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-08-14T12:00:30Z')
+    const wrapper = mount(WorkbenchSidebar, {
+      props: {
+        activities: [{
+          id: 'agent:quiet',
+          title: 'Quiet',
+          kind: 'agent',
+          status: 'idle',
+          retention: 'durable',
+          updatedAt: '2026-08-14T12:00:00Z',
+          source: {},
+          host: { type: 'pty' },
+        }],
+      },
+    })
+
+    expect(wrapper.get('[data-sidebar-meta]').text()).toBe('now')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(wrapper.get('[data-sidebar-meta]').text()).toBe('1m')
+    wrapper.unmount()
+  })
+
+  it('activates the rail chat hub without moving focus out of its room switcher', async () => {
+    const wrapper = render(true, true)
+    await wrapper.get('[data-sidebar-row="chat:hub"] button').trigger('click')
+
+    expect(wrapper.emitted('selectChat')).toEqual([
+      ['#general', { focus: false }],
+    ])
+    expect(document.body.querySelector('[data-chat-rail-switcher]')).not.toBeNull()
+    wrapper.unmount()
+    document.body.innerHTML = ''
   })
 
   it('keeps unavailable launchers out of the compact creation menu', async () => {
@@ -413,8 +503,14 @@ describe('WorkbenchSidebar', () => {
     })
     await wrapper.get('[data-activity-menu-button="terminal:two"]').trigger('click')
     const endedMenu = wrapper.get('[data-activity-menu="terminal:two"]')
+    expect(endedMenu.text()).toContain('Archive')
     expect(endedMenu.text()).toContain('Delete')
-    await endedMenu.findAll('button').find((button) => button.text().includes('Delete')).trigger('click')
+    await endedMenu.findAll('button').find((button) => button.text().includes('Archive')).trigger('click')
+    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['terminal:two'])
+
+    await wrapper.get('[data-activity-menu-button="terminal:two"]').trigger('click')
+    const reopenedMenu = wrapper.get('[data-activity-menu="terminal:two"]')
+    await reopenedMenu.findAll('button').find((button) => button.text().includes('Delete')).trigger('click')
     expect(wrapper.emitted('clearActivity').at(-1)).toEqual(['terminal:two'])
   })
 
@@ -431,9 +527,9 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.get('[data-activity-selection-count]').text()).toBe('2 selected')
 
     const archive = wrapper.get('[data-activity-selection-archive]')
-    expect(archive.attributes('title')).toContain('Archive 1')
+    expect(archive.attributes('title')).toContain('Archive 2')
     await archive.trigger('click')
-    expect(wrapper.emitted('archiveActivities')).toEqual([[['run:one']]])
+    expect(wrapper.emitted('archiveActivities')).toEqual([[['run:one', 'run:two']]])
     expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
 
     await wrapper.get('[data-sidebar-row="activity:run:three"]').trigger('click', { metaKey: true })

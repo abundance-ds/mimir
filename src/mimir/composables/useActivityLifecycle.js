@@ -166,7 +166,7 @@ export function useActivityLifecycle({
     if (finalizingClosures.has(activity.id)) return
     finalizingClosures.add(activity.id)
     try {
-      if (activity.retention === 'durable') {
+      if (isArchivableActivity(activity)) {
         await activityRuntime.setArchived(activity.id, true)
       } else {
         await activityRuntime.clear(activity.id)
@@ -264,6 +264,11 @@ export function useActivityLifecycle({
 export function isLiveActivity(activity) {
   return activity?.host?.type === 'pty'
     && ['ready', 'starting', 'working', 'needs-input', 'idle'].includes(activity?.status)
+}
+
+export function isArchivableActivity(activity) {
+  return activity?.retention === 'durable'
+    || (activity?.kind === 'terminal' && activity?.host?.type === 'pty')
 }
 
 function continuationPreset(activity, launchers) {

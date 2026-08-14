@@ -24,6 +24,7 @@
         :chat-unread-total="chat.unreadTotal"
         :chat-section-collapsed="settings.sidebarChatsCollapsed"
         :active-activity-id="workbench.activeActivityId || ''"
+        :resuming-activity-ids="activityRuntime.resumingActivityIds"
         :activity-sort="activityNavigator.mode"
         :meeting-capture="meetingCapture"
         @launch="onLaunch"
@@ -31,6 +32,7 @@
         @select-chat="openChatTarget"
         @new-chat="openNewChat"
         @choose-workspace="chooseWorkspace"
+        @create-workspace="createWorkspace"
         @open-workspace="openWorkspace"
         @toggle-collapse="toggleSidebar"
         @rename-activity="renameActivity"
@@ -133,6 +135,8 @@
         ref="editorRef"
         hide-sidebar
         embedded
+        :workspace-path="workspaceFiles.workspacePath"
+        :workspace-paths="workspaceProjectPaths"
         @close-request="closeNativeFocusedSurface"
         @new-request="newNativeFocusedSurface"
         @quick-open-request="openQuickOpen"
@@ -149,6 +153,8 @@
     :preferred-target-id="quickOpenPreferredTargetId"
     :tools="toolRows"
     :chats="chat.config.enabled ? chat.targets : []"
+    :projects="recentWorkspaces"
+    :current-project-path="workspaceFiles.workspacePath"
     :new-activity="newActivityRows"
     :history="historyActivities"
     @close="quickOpen = false"
@@ -324,9 +330,11 @@ const workspaceBootstrap = useWorkspaceBootstrap({
   openCoreActivity,
   isActivityVisible: activity => activityIsVisibleInCurrentWorkspace(activity),
   getFocusOwner: () => lastWorkbenchFocus.value.owner,
+  prepareEditorWorkspaceSwitch: () => editorRef.value?.mimirPrepareWorkspaceSwitch?.(),
 })
 const {
   chooseWorkspace,
+  createWorkspace,
   ensureCoreActivities,
   focusNarrowPane,
   initialized,
@@ -457,21 +465,31 @@ const meetingCapture = computed(() => {
   }
 })
 const recentWorkspaces = computed(() => (
-  (Array.isArray(settings.recentWorkspaceFolders) ? settings.recentWorkspaceFolders : [])
-    .map((path) => {
-      const projectActivities = navigableActivities.value.filter(
-        activity => workspaceForActivity(activity) === normalizedWorkspacePath(path),
-      )
-      return {
-        path,
-        name: basename(path),
-        activityCount: projectActivities.length,
-        needsInputCount: projectActivities.filter(
-          activity => activity.status === 'needs-input',
-        ).length,
-      }
-    })
+  projectPaths().map(path => ({
+    path,
+    name: basename(path),
+    current: normalizedWorkspacePath(path)
+      === normalizedWorkspacePath(workspaceFiles.workspacePath),
+  }))
 ))
+const workspaceProjectPaths = computed(() => recentWorkspaces.value.map(workspace => workspace.path))
+
+function projectPaths() {
+  const paths = []
+  const seen = new Set()
+  const add = (path) => {
+    const normalized = normalizedWorkspacePath(path)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    paths.push(path)
+  }
+  add(workspaceFiles.workspacePath)
+  for (const path of Array.isArray(settings.recentWorkspaceFolders)
+    ? settings.recentWorkspaceFolders
+    : []) add(path)
+  for (const activity of navigableActivities.value) add(workspaceForActivity(activity))
+  return paths
+}
 const editorTitle = computed(() => {
   const path = editorFiles.currentFile?.path
   return path ? basename(path) : 'Editor'
@@ -479,7 +497,8 @@ const editorTitle = computed(() => {
 const editorMeta = computed(() => {
   const file = editorFiles.currentFile
   if (!file) return 'No document'
-  return file.dirty ? 'Unsaved' : `${editorFiles.openFiles.length} tab${editorFiles.openFiles.length === 1 ? '' : 's'}`
+  const count = editorFiles.visibleOpenFiles.length
+  return file.dirty ? 'Unsaved' : `${count} tab${count === 1 ? '' : 's'}`
 })
 
 const availableApps = computed(() => appsCatalog.apps.filter(
@@ -791,8 +810,8 @@ async function onLaunch(id) {
 
   try {
     diagnostic.value = ''
-    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath)
-    workbench.setPaneState('activity', 'expanded')
+    const record = await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath)
+    selectActivity(record.id)
   } catch (cause) {
     diagnostic.value = `${preset.title} did not launch: ${errorMessage(cause)}`
   }
@@ -814,7 +833,7 @@ async function setMeetingMicrophoneMuted(muted) {
   }
 }
 
-async function openChatTarget(target = '') {
+async function openChatTarget(target = '', options = {}) {
   if (!chat.config.enabled) return
   ensureCoreActivities()
   if (target) {
@@ -827,7 +846,7 @@ async function openChatTarget(target = '') {
   workbench.openActivity('chats')
   focusNarrowPane('activity')
   workbench.setPaneState('activity', 'expanded')
-  requestEntryFocus('chats')
+  if (options.focus !== false) requestEntryFocus('chats')
 }
 
 async function openNewChat() {
@@ -866,7 +885,7 @@ async function startChatAgent(presetId) {
   ].join(' ')
   try {
     diagnostic.value = ''
-    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
+    const record = await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
       title: `${preset.title} · ${target}`,
       seedInput: `${prompt} Task: `,
       retention: 'durable',
@@ -877,7 +896,7 @@ async function startChatAgent(presetId) {
       },
       beforeSpawn: record => chat.linkActivity(record.id, target, agentLabel),
     })
-    workbench.setPaneState('activity', 'expanded')
+    selectActivity(record.id)
   } catch (cause) {
     diagnostic.value = `Could not start ${preset.title} in ${target}: ${errorMessage(cause)}`
   }
@@ -906,7 +925,7 @@ async function startGraphWork(request) {
       : request.background
         ? request.title || 'Dispatch'
         : `Work · ${request.title || request.nodeId}`
-    await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
+    const record = await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
       title,
       args: [String(request.prompt || '')],
       retention: 'durable',
@@ -928,7 +947,7 @@ async function startGraphWork(request) {
           : {}),
       },
     })
-    if (!request.background) workbench.setPaneState('activity', 'expanded')
+    if (!request.background) selectActivity(record.id)
   } catch (cause) {
     diagnostic.value = `Could not start work on ${request?.title || request?.nodeId || 'graph item'}: ${errorMessage(cause)}`
   }
@@ -1019,6 +1038,18 @@ function openSettings(section = 'appearance') {
 
 async function activateQuickOpenResult(result) {
   if (!result?.type) return
+  if (result.type === 'project') {
+    await openWorkspace(result.path)
+    return
+  }
+  if (result.type === 'project-open') {
+    await chooseWorkspace()
+    return
+  }
+  if (result.type === 'project-create') {
+    await createWorkspace()
+    return
+  }
   if (result.type === 'file') {
     void openFileInEditor(result.path)
     return

@@ -1,18 +1,32 @@
-const DEFAULT_RECENT_FILE_LIMIT = 8
-const MIXED_FILE_LIMIT = 12
+const DEFAULT_GROUP_LIMIT = 5
+const FILE_SCOPE_LIMIT = 100
+
+const TYPED_SCOPES = {
+  'p:': 'projects',
+  'f:': 'files',
+  'h:': 'history',
+  'n:': 'new-activity',
+  't:': 'tools',
+  'c:': 'chats',
+}
+
+const LEGACY_SCOPES = {
+  '/': 'files',
+  '@': 'history',
+  '+': 'new-activity',
+}
 
 export function parseQuickOpenQuery(value) {
   const query = String(value || '')
   const trimmedStart = query.trimStart()
-  const prefix = trimmedStart[0]
-  const scope = {
-    '/': 'files',
-    '@': 'history',
-    '+': 'new-activity',
-  }[prefix] || 'all'
+  const typedPrefix = trimmedStart.slice(0, 2).toLocaleLowerCase()
+  const typedScope = TYPED_SCOPES[typedPrefix]
+  const legacyScope = LEGACY_SCOPES[trimmedStart[0]]
+  const scope = typedScope || legacyScope || 'all'
+  const prefixLength = typedScope ? 2 : legacyScope ? 1 : 0
   return {
     scope,
-    term: (scope === 'all' ? query : trimmedStart.slice(1)).trim(),
+    term: (scope === 'all' ? query : trimmedStart.slice(prefixLength)).trim(),
   }
 }
 
@@ -20,6 +34,8 @@ export function buildQuickOpenResults({
   query = '',
   tools = [],
   chats = [],
+  projects = [],
+  currentProjectPath = '',
   newActivity = [],
   history = [],
   files = [],
@@ -36,29 +52,50 @@ export function buildQuickOpenResults({
   const searching = Boolean(normalized)
   const results = []
 
-  if (scope === 'all' && !searching) {
-    results.push(newActivityEnterResult(newActivity))
-  } else if (scope === 'all' || scope === 'new-activity') {
+  if (scope === 'all') {
+    if (!searching) results.push(newActivityEnterResult(newActivity))
+    else results.push(...mixedMatches(newActivity.map(newActivityResult), normalized))
+  } else if (scope === 'new-activity') {
     results.push(...matchingRows(newActivity.map(newActivityResult), normalized))
   }
-  if (scope === 'all') {
-    results.push(...matchingRows(tools.map(toolResult), normalized))
-    if (searching) results.push(...matchingRows(chats.map(chatResult), normalized))
+
+  if (scope === 'all' || scope === 'tools') {
+    const matches = matchingRows(tools.map(toolResult), normalized)
+    results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
   }
+
+  if (scope === 'all' || scope === 'projects') {
+    const rows = projects
+      .filter(project => (
+        project?.path
+        && !samePath(project.path, currentProjectPath)
+        && project.current !== true
+      ))
+      .map(projectResult)
+    const matches = matchingRows(rows, normalized)
+    results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
+    if (scope === 'projects' && !searching) {
+      results.push(openProjectResult(), createProjectResult())
+    }
+  }
+
   if (scope === 'all' || scope === 'files') {
-    const limit = scope === 'files'
-      ? 100
-      : searching
-        ? MIXED_FILE_LIMIT
-        : DEFAULT_RECENT_FILE_LIMIT
+    const limit = scope === 'files' ? FILE_SCOPE_LIMIT : DEFAULT_GROUP_LIMIT
     results.push(...matchingRows(files.map(fileResult), normalized).slice(0, limit))
   }
+
+  if ((scope === 'all' && searching) || scope === 'chats') {
+    const matches = matchingRows(chats.map(chatResult), normalized)
+    results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
+  }
+
   if (scope === 'all' || scope === 'history') {
     const lastLocal = history.find(isLocalHistory)
     if (!searching && scope === 'all' && lastLocal) {
       results.push(reopenLastResult(lastLocal))
     } else if (searching || scope === 'history') {
-      results.push(...historyResults(history, normalized, historySnippets))
+      const matches = historyResults(history, normalized, historySnippets)
+      results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
     }
   }
 
@@ -74,7 +111,26 @@ function withOptionIds(results) {
 
 function matchingRows(rows, term) {
   if (!term) return rows
-  return rows.filter(result => result.searchText.includes(term))
+  return rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.searchText.includes(term))
+    .sort((left, right) => (
+      matchRank(left.row, term) - matchRank(right.row, term)
+      || left.index - right.index
+    ))
+    .map(({ row }) => row)
+}
+
+function mixedMatches(rows, term) {
+  return matchingRows(rows, term).slice(0, DEFAULT_GROUP_LIMIT)
+}
+
+function matchRank(row, term) {
+  const title = String(row.title || '').toLocaleLowerCase()
+  if (title === term) return 0
+  if (title.startsWith(term)) return 1
+  if (title.split(/\s+/).some(part => part.startsWith(term))) return 2
+  return 3
 }
 
 function toolResult(tool) {
@@ -103,6 +159,46 @@ function chatResult(chat) {
     icon: direct ? 'chat-direct' : 'chat-channel',
     target: chat.id,
     search: [chat.id, chat.title, chat.topic],
+  })
+}
+
+function projectResult(project) {
+  return result({
+    key: `project:${project.path}`,
+    type: 'project',
+    group: 'Projects',
+    title: project.name || basename(project.path),
+    meta: parentPath(project.path),
+    verb: 'Switch',
+    icon: 'project',
+    path: project.path,
+    search: [project.name, project.path],
+  })
+}
+
+function openProjectResult() {
+  return result({
+    key: 'project:open',
+    type: 'project-open',
+    group: 'Project actions',
+    title: 'Open project…',
+    meta: 'Choose an existing folder',
+    verb: 'Open',
+    icon: 'project-open',
+    search: ['open project folder'],
+  })
+}
+
+function createProjectResult() {
+  return result({
+    key: 'project:create',
+    type: 'project-create',
+    group: 'Project actions',
+    title: 'Create project…',
+    meta: 'Create an empty folder',
+    verb: 'Create',
+    icon: 'project-create',
+    search: ['create new project folder'],
   })
 }
 
@@ -151,9 +247,7 @@ function reopenLastResult(activity) {
 // Browsing (no term) stays in the current project; a term searches every
 // project, current-project matches first.
 function historyResults(history, term, snippets) {
-  const rows = history
-    .map(activity => historyRow(activity, snippets))
-    .filter(candidate => !term || candidate.searchText.includes(term))
+  const rows = matchingRows(history.map(activity => historyRow(activity, snippets)), term)
   const local = rows.filter(row => row.inWorkspace)
   if (!term) return local
   return [...local, ...rows.filter(row => !row.inWorkspace)]
@@ -296,6 +390,17 @@ function formatActivityTime(value) {
 
 function basename(path) {
   return String(path || '').replaceAll('\\', '/').split('/').filter(Boolean).at(-1) || ''
+}
+
+function parentPath(path) {
+  const normalized = String(path || '').replaceAll('\\', '/').replace(/\/+$/, '')
+  const name = basename(normalized)
+  return normalized.slice(0, Math.max(0, normalized.length - name.length)).replace(/\/$/, '') || '/'
+}
+
+function samePath(left, right) {
+  const normalize = value => String(value || '').replaceAll('\\', '/').replace(/\/+$/, '')
+  return Boolean(left && right) && normalize(left) === normalize(right)
 }
 
 function joinMeta(...parts) {

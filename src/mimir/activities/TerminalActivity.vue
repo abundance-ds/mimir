@@ -39,7 +39,7 @@
           <IconPlayerStop :size="13" :stroke-width="1.7" />
         </button>
         <button
-          v-else-if="ended"
+          v-else-if="ended && status !== 'interrupted'"
           type="button"
           data-terminal-restart
           :data-resume-emphasis="canResume ? 'accent' : 'neutral'"
@@ -79,12 +79,12 @@
     </div>
 
     <div
-      v-if="error"
+      v-if="displayError"
       data-terminal-error
       role="alert"
       class="shrink-0 border-t border-rem/30 bg-rem/5 px-3 py-2 text-[10px] text-rem"
     >
-      {{ error }}
+      {{ displayError }}
     </div>
   </section>
 </template>
@@ -138,7 +138,7 @@ const emit = defineEmits([
 const surface = ref(null)
 const status = ref(props.activity.status || 'starting')
 const hasExited = ref(Boolean(props.activity.session?.exit))
-const live = ref(!hasExited.value)
+const live = ref(status.value !== 'interrupted' && !hasExited.value)
 const loading = ref(true)
 const stopping = ref(false)
 const error = ref('')
@@ -147,6 +147,7 @@ const renderer = ref('dom')
 const activityId = computed(() => props.activity.id)
 const mode = computed(() => props.activity.kind === 'agent' ? 'agent' : 'terminal')
 const ended = computed(() => hasExited.value || (!live.value && isEndedStatus(status.value)))
+const displayError = computed(() => error.value || props.activity.error || '')
 const canResume = computed(() => (
   mode.value === 'agent'
   && Boolean(props.activity.host?.resumeStrategy)
@@ -174,6 +175,7 @@ let pendingEvents = []
 let inputQueue = Promise.resolve()
 let resizeFrame = 0
 let lastSize = { cols: 0, rows: 0 }
+let entryFocusRequested = false
 
 onMounted(initialize)
 
@@ -208,6 +210,8 @@ async function initialize() {
     terminal.unicode.activeVersion = '11'
     terminal.attachCustomKeyEventHandler(handleCustomKey)
     terminal.open(surface.value)
+    if (entryFocusRequested && props.active) focusTerminal()
+    else entryFocusRequested = false
     installWebglRenderer()
     dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
     if (props.active) await attachActiveSurface()
@@ -289,7 +293,9 @@ function applySnapshot(snapshot) {
   hasExited.value = Boolean(record?.session?.exit)
   // Agent status "done" can be a live completion pulse that settles back to
   // idle. A session without an exit record remains interactive.
-  live.value = Boolean(snapshot?.live) || Boolean(record?.session && !record.session.exit)
+  live.value = status.value !== 'interrupted' && (
+    Boolean(snapshot?.live) || Boolean(record?.session && !record.session.exit)
+  )
   for (const chunk of orderedReplayChunks(snapshot)) writeOutput(chunk)
   lastSequence = Math.max(
     lastSequence,
@@ -313,7 +319,7 @@ function applyEvent(event) {
   }
   if (event.type === 'status') {
     status.value = event.status
-    if (!hasExited.value) live.value = true
+    if (!hasExited.value) live.value = event.status !== 'interrupted'
     emit('status', {
       activityId: activityId.value,
       status: event.status,
@@ -436,7 +442,17 @@ async function pasteText(value = '') {
 }
 
 function focusTerminal() {
+  if (!props.active) {
+    entryFocusRequested = false
+    return false
+  }
+  if (!terminal) {
+    entryFocusRequested = true
+    return false
+  }
+  entryFocusRequested = false
   terminal?.focus()
+  return true
 }
 
 function activityPaneOwnsFocus() {
@@ -528,7 +544,10 @@ watch(
   ([nextStatus, sessionExit]) => {
     if (!nextStatus) return
     status.value = nextStatus
-    if (sessionExit) {
+    if (nextStatus === 'interrupted') {
+      live.value = false
+      stopping.value = false
+    } else if (sessionExit) {
       hasExited.value = true
       live.value = false
       stopping.value = false
@@ -580,6 +599,7 @@ onBeforeUnmount(() => {
 })
 
 defineExpose({
+  focusEntry: focusTerminal,
   focus: focusTerminal,
   pasteText,
   fit: scheduleFit,

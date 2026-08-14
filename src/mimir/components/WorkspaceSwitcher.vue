@@ -6,11 +6,12 @@
       data-sidebar-workspace
       class="no-drag group flex h-11 w-full min-w-0 items-center text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       :aria-label="workspacePath ? `Switch project: ${workspaceName}` : 'Open project folder'"
-      :aria-expanded="menuOpen"
-      aria-haspopup="menu"
+      :aria-expanded="popoverOpen"
+      aria-haspopup="dialog"
+      aria-controls="project-switcher-popover"
       :title="workspacePath || 'Open project folder'"
-      @click.stop="toggleMenu"
-      @keydown.down.prevent="openMenu"
+      @click.stop="togglePopover"
+      @keydown.down.prevent="openPopover"
     >
       <span class="ml-3 grid size-7 shrink-0 place-items-center border border-rule-light bg-chrome-mid font-sans text-[10px] font-semibold uppercase text-ink-2 group-hover:border-rule">
         {{ monogram }}
@@ -33,83 +34,115 @@
 
     <Teleport to="body">
       <div
-        v-if="menuOpen"
-        ref="menuRef"
+        v-if="popoverOpen"
+        id="project-switcher-popover"
+        ref="popoverRef"
         data-project-switcher-menu
-        role="menu"
-        aria-label="Projects"
-        class="fixed z-[220] w-[320px] max-w-[calc(100vw-16px)] overflow-hidden border border-rule bg-surface p-1 shadow-lg"
-        :style="menuStyle"
-        @keydown="onMenuKeydown"
+        role="dialog"
+        aria-label="Switch project"
+        class="fixed z-[220] flex max-h-[min(420px,calc(100vh-16px))] w-[360px] max-w-[calc(100vw-16px)] flex-col overflow-hidden border border-rule bg-surface shadow-lg"
+        :style="popoverStyle"
+        @keydown="onPopoverKeydown"
       >
-        <div v-if="workspacePath" class="border-b border-rule-light px-2.5 pb-2 pt-1.5">
-          <div class="font-sans text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-4">
-            Current project
-          </div>
-          <div class="mt-1 flex min-w-0 items-center gap-2">
-            <span class="grid size-6 shrink-0 place-items-center bg-accent-soft font-sans text-[9px] font-semibold uppercase text-accent">
-              {{ monogram }}
-            </span>
-            <span class="min-w-0 flex-1">
-              <span class="block truncate font-sans text-[11px] font-semibold text-ink">{{ workspaceName }}</span>
-              <span class="block truncate font-mono text-[9px] text-ink-3">{{ workspacePath }}</span>
-            </span>
-            <IconCheck :size="14" :stroke-width="2" class="shrink-0 text-accent" />
-          </div>
+        <div class="flex h-10 shrink-0 items-center gap-2 border-b border-rule px-2.5">
+          <IconSearch :size="14" :stroke-width="1.8" class="shrink-0 text-ink-3" />
+          <input
+            ref="inputRef"
+            v-model="query"
+            data-project-search
+            type="search"
+            placeholder="Switch project…"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls="project-switcher-results"
+            :aria-expanded="options.length > 0"
+            :aria-activedescendant="selectedOption?.id"
+            class="h-full min-w-0 flex-1 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-4"
+            @input="onInput"
+            @keydown.down.prevent="moveSelection(1)"
+            @keydown.up.prevent="moveSelection(-1)"
+            @keydown.home.prevent="selectEdge('start')"
+            @keydown.end.prevent="selectEdge('end')"
+            @keydown.enter.prevent="activateSelected"
+            @keydown.tab="closePopover"
+          />
+          <kbd class="font-mono text-[9px] text-ink-4">ESC</kbd>
         </div>
 
-        <template v-if="otherWorkspaces.length">
-          <div class="px-2.5 pb-1 pt-2 font-sans text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-4">
-            Recent projects
+        <div
+          id="project-switcher-results"
+          class="min-h-0 overflow-y-auto p-1"
+          role="listbox"
+          aria-label="Projects and project actions"
+        >
+          <div
+            v-if="filteredWorkspaces.length === 0"
+            data-project-empty
+            class="px-2.5 py-3 text-[10px] text-ink-3"
+            role="status"
+          >
+            No matching projects.
           </div>
+
           <button
-            v-for="workspace in otherWorkspaces"
-            :key="workspace.path"
+            v-for="(option, index) in options"
+            :id="option.id"
+            :key="option.key"
             type="button"
             data-project-menu-item
-            role="menuitem"
-            class="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-chrome-high focus:bg-chrome-high focus:outline-none"
-            :title="workspace.path"
-            @click="openRecent(workspace.path)"
+            :data-project-path="option.path || undefined"
+            :data-project-open-folder="option.type === 'open' ? '' : undefined"
+            :data-project-create="option.type === 'create' ? '' : undefined"
+            role="option"
+            :aria-selected="index === selectedIndex"
+            tabindex="-1"
+            class="flex h-8 w-full min-w-0 items-center px-2.5 text-left hover:bg-chrome-high focus:outline-none"
+            :class="[
+              { 'bg-accent-soft': index === selectedIndex },
+              option.divider ? 'mt-1 border-t border-rule-light pt-px' : '',
+            ]"
+            :title="option.path || option.title"
+            @mouseenter="selectIndex(index)"
+            @click="activateOption(option)"
           >
-            <IconHistory :size="13" :stroke-width="1.8" class="shrink-0 text-ink-3" />
-            <span class="min-w-0 flex-1">
-              <span class="block truncate font-sans text-[11px] text-ink-2">{{ workspace.name }}</span>
-              <span
-                data-project-activity-summary
-                class="block truncate font-mono text-[9px] text-ink-4"
-              >
-                {{ workspaceDetail(workspace) }}
+            <template v-if="option.type === 'project'">
+              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">
+                {{ option.title }}
               </span>
-            </span>
+              <span class="ml-3 max-w-[55%] shrink-0 truncate font-mono text-[9px] text-ink-4">
+                {{ option.meta }}
+              </span>
+            </template>
+            <template v-else>
+              <component
+                :is="option.type === 'open' ? IconFolderOpen : IconFolderPlus"
+                :size="14"
+                :stroke-width="1.8"
+                class="mr-2 shrink-0 text-ink-3"
+              />
+              <span class="text-[11px] font-medium text-ink-2">{{ option.title }}</span>
+            </template>
           </button>
-          <div class="my-1 border-t border-rule-light" />
-        </template>
-
-        <button
-          type="button"
-          data-project-menu-item
-          data-project-open-folder
-          role="menuitem"
-          class="flex w-full items-center gap-2 px-2.5 py-2 text-left font-sans text-[11px] font-medium text-ink-2 hover:bg-chrome-high hover:text-ink focus:bg-chrome-high focus:outline-none"
-          @click="chooseFolder"
-        >
-          <IconFolderOpen :size="14" :stroke-width="1.8" class="shrink-0" />
-          <span>{{ workspacePath ? 'Open another folder…' : 'Open project folder…' }}</span>
-        </button>
+        </div>
       </div>
     </Teleport>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import {
-  IconCheck,
   IconChevronDown,
   IconFolderOpen,
-  IconHistory,
+  IconFolderPlus,
+  IconSearch,
 } from '@tabler/icons-vue'
+
+const DEFAULT_PROJECT_LIMIT = 8
 
 const props = defineProps({
   collapsed: { type: Boolean, default: false },
@@ -118,11 +151,14 @@ const props = defineProps({
   recentWorkspaces: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['chooseWorkspace', 'openWorkspace'])
+const emit = defineEmits(['chooseWorkspace', 'createWorkspace', 'openWorkspace'])
 const triggerRef = ref(null)
-const menuRef = ref(null)
-const menuOpen = ref(false)
-const menuStyle = ref({})
+const popoverRef = ref(null)
+const inputRef = ref(null)
+const popoverOpen = ref(false)
+const popoverStyle = ref({})
+const query = ref('')
+const selectedIndex = ref(0)
 
 const monogram = computed(() => {
   const parts = String(props.workspaceName || 'Project').trim().split(/[^a-zA-Z0-9]+/).filter(Boolean)
@@ -131,98 +167,172 @@ const monogram = computed(() => {
     : parts[0]?.slice(0, 2)
   return String(mark || 'P').toUpperCase()
 })
+
 const otherWorkspaces = computed(() => props.recentWorkspaces.filter(
-  workspace => workspace?.path && workspace.path !== props.workspacePath,
+  workspace => workspace?.path && !samePath(workspace.path, props.workspacePath),
 ))
 
-function toggleMenu() {
-  if (menuOpen.value) closeMenu()
-  else openMenu()
+const filteredWorkspaces = computed(() => {
+  const term = query.value.trim().toLocaleLowerCase()
+  const rows = otherWorkspaces.value
+  if (!term) return rows.slice(0, DEFAULT_PROJECT_LIMIT)
+  return rows
+    .map((workspace, index) => ({ workspace, index }))
+    .filter(({ workspace }) => projectSearchText(workspace).includes(term))
+    .sort((left, right) => (
+      projectMatchRank(left.workspace, term) - projectMatchRank(right.workspace, term)
+      || left.index - right.index
+    ))
+    .map(({ workspace }) => workspace)
+})
+
+const options = computed(() => [
+  ...filteredWorkspaces.value.map((workspace, index) => ({
+    id: `project-switcher-option-${index}`,
+    key: `project:${workspace.path}`,
+    type: 'project',
+    title: workspace.name || basename(workspace.path),
+    meta: parentPath(workspace.path),
+    path: workspace.path,
+  })),
+  {
+    id: `project-switcher-option-${filteredWorkspaces.value.length}`,
+    key: 'project:open',
+    type: 'open',
+    title: 'Open project…',
+    divider: true,
+  },
+  {
+    id: `project-switcher-option-${filteredWorkspaces.value.length + 1}`,
+    key: 'project:create',
+    type: 'create',
+    title: 'Create project…',
+  },
+])
+
+const selectedOption = computed(() => options.value[selectedIndex.value] || null)
+
+watch(
+  () => options.value.map(option => option.key).join('|'),
+  () => {
+    selectedIndex.value = Math.min(selectedIndex.value, Math.max(options.value.length - 1, 0))
+  },
+)
+
+function togglePopover() {
+  if (popoverOpen.value) closePopover()
+  else void openPopover()
 }
 
-async function openMenu() {
-  if (menuOpen.value) return
-  menuOpen.value = true
+async function openPopover() {
+  if (popoverOpen.value) return
+  query.value = ''
+  selectedIndex.value = 0
+  popoverOpen.value = true
   document.addEventListener('pointerdown', onPointerDown)
-  window.addEventListener('resize', positionMenu)
-  window.addEventListener('scroll', positionMenu, true)
+  window.addEventListener('resize', positionPopover)
+  window.addEventListener('scroll', positionPopover, true)
   await nextTick()
-  positionMenu()
-  menuItems()[0]?.focus()
+  positionPopover()
+  inputRef.value?.focus()
 }
 
-function closeMenu({ restoreFocus = false } = {}) {
-  if (!menuOpen.value) return
-  menuOpen.value = false
+function closePopover({ restoreFocus = false } = {}) {
+  if (!popoverOpen.value) return
+  popoverOpen.value = false
   document.removeEventListener('pointerdown', onPointerDown)
-  window.removeEventListener('resize', positionMenu)
-  window.removeEventListener('scroll', positionMenu, true)
+  window.removeEventListener('resize', positionPopover)
+  window.removeEventListener('scroll', positionPopover, true)
   if (restoreFocus) nextTick(() => triggerRef.value?.focus())
 }
 
-function positionMenu() {
+function positionPopover() {
   const trigger = triggerRef.value
-  if (!trigger) return
+  const popover = popoverRef.value
+  if (!trigger || !popover) return
   const rect = trigger.getBoundingClientRect()
-  const width = Math.min(320, window.innerWidth - 16)
+  const width = Math.min(360, window.innerWidth - 16)
+  const height = popover.getBoundingClientRect().height
   const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
-  menuStyle.value = {
-    left: `${left}px`,
-    top: `${Math.min(rect.bottom + 4, window.innerHeight - 12)}px`,
-    width: `${width}px`,
-  }
+  const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - height - 8))
+  popoverStyle.value = { left: `${left}px`, top: `${top}px`, width: `${width}px` }
 }
 
 function onPointerDown(event) {
   const target = event.target
-  if (triggerRef.value?.contains(target) || menuRef.value?.contains(target)) return
-  closeMenu()
+  if (triggerRef.value?.contains(target) || popoverRef.value?.contains(target)) return
+  closePopover()
 }
 
-function menuItems() {
-  return Array.from(menuRef.value?.querySelectorAll('[data-project-menu-item]') || [])
+function onInput() {
+  selectedIndex.value = 0
+  void scrollSelectionIntoView()
 }
 
-function onMenuKeydown(event) {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    closeMenu({ restoreFocus: true })
-    return
-  }
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+function selectIndex(index) {
+  selectedIndex.value = Math.min(Math.max(index, 0), Math.max(options.value.length - 1, 0))
+}
+
+function moveSelection(delta) {
+  if (!options.value.length) return
+  selectedIndex.value = (selectedIndex.value + delta + options.value.length) % options.value.length
+  void scrollSelectionIntoView()
+}
+
+function selectEdge(edge) {
+  selectedIndex.value = edge === 'end' ? Math.max(options.value.length - 1, 0) : 0
+  void scrollSelectionIntoView()
+}
+
+async function scrollSelectionIntoView() {
+  await nextTick()
+  popoverRef.value?.querySelector(`#${selectedOption.value?.id}`)
+    ?.scrollIntoView?.({ block: 'nearest' })
+}
+
+function activateSelected() {
+  if (selectedOption.value) activateOption(selectedOption.value)
+}
+
+function activateOption(option) {
+  closePopover()
+  if (option.type === 'project') emit('openWorkspace', option.path)
+  else if (option.type === 'open') emit('chooseWorkspace')
+  else if (option.type === 'create') emit('createWorkspace')
+}
+
+function onPopoverKeydown(event) {
+  if (event.key !== 'Escape') return
   event.preventDefault()
-  const items = menuItems()
-  if (!items.length) return
-  let index = items.indexOf(document.activeElement)
-  if (event.key === 'Home') index = 0
-  else if (event.key === 'End') index = items.length - 1
-  else {
-    const delta = event.key === 'ArrowDown' ? 1 : -1
-    index = (Math.max(index, 0) + delta + items.length) % items.length
-  }
-  items[index]?.focus()
+  event.stopPropagation()
+  closePopover({ restoreFocus: true })
 }
 
-function chooseFolder() {
-  closeMenu()
-  emit('chooseWorkspace')
+function projectSearchText(workspace) {
+  return `${workspace?.name || ''} ${workspace?.path || ''}`.toLocaleLowerCase()
 }
 
-function openRecent(path) {
-  closeMenu()
-  emit('openWorkspace', path)
+function projectMatchRank(workspace, term) {
+  const name = String(workspace?.name || basename(workspace?.path)).toLocaleLowerCase()
+  if (name === term) return 0
+  if (name.startsWith(term)) return 1
+  return 2
 }
 
-function workspaceDetail(workspace) {
-  const count = Math.max(0, Number(workspace?.activityCount) || 0)
-  const needsInput = Math.max(0, Number(workspace?.needsInputCount) || 0)
-  const activity = needsInput
-    ? `${needsInput} needs input`
-    : count
-      ? `${count} ${count === 1 ? 'Activity' : 'Activities'}`
-      : ''
-  return [activity, workspace?.path].filter(Boolean).join(' · ')
+function basename(path) {
+  return String(path || '').replaceAll('\\', '/').split('/').filter(Boolean).at(-1) || ''
 }
 
-onUnmounted(() => closeMenu())
+function parentPath(path) {
+  const normalized = String(path || '').replaceAll('\\', '/').replace(/\/+$/, '')
+  const name = basename(normalized)
+  return normalized.slice(0, Math.max(0, normalized.length - name.length)).replace(/\/$/, '') || '/'
+}
+
+function samePath(left, right) {
+  const normalize = value => String(value || '').replaceAll('\\', '/').replace(/\/+$/, '')
+  return Boolean(left && right) && normalize(left) === normalize(right)
+}
+
+onUnmounted(() => closePopover())
 </script>

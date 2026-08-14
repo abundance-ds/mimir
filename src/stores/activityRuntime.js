@@ -22,6 +22,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   const ready = ref(false)
   const error = ref('')
   const lastLaunchMetrics = ref(null)
+  const resumingActivityIds = ref(new Set())
   let unlisten = null
   let nextArchiveMutation = 0
   const archiveMutations = new Map()
@@ -118,16 +119,25 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   // Resume continues the interrupted agent inside its existing Activity row.
   // The backend respawn preserves the record id and creation time; only the
   // launch spec, session, and scrollback restart.
-  function resumePreset(preset, activity) {
+  function resumePreset(preset, activity, options = {}) {
     const existing = resumePromises.get(activity.id)
     if (existing) return existing
-    const promise = resumePresetExact(preset, activity)
-      .finally(() => resumePromises.delete(activity.id))
+    setResumePending(activity.id, true)
+    clearActivityError(activity.id)
+    const promise = resumePresetExact(preset, activity, options)
+      .catch((cause) => {
+        if (options.automatic) markAutomaticResumeFailure(activity.id, cause)
+        throw cause
+      })
+      .finally(() => {
+        resumePromises.delete(activity.id)
+        setResumePending(activity.id, false)
+      })
     resumePromises.set(activity.id, promise)
     return promise
   }
 
-  async function resumePresetExact(preset, activity) {
+  async function resumePresetExact(preset, activity, options) {
     const startedAt = monotonicNow()
     const resolved = await resolveLauncher(preset, activity.workspacePath)
     const resolvedAt = monotonicNow()
@@ -205,7 +215,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const snapshot = await respawnActivity(record, {}, cliSessionId)
     const spawnedAt = monotonicNow()
     upsertBackendRecord(snapshot.record)
-    workbench.openActivity(activity.id)
+    if (options.open !== false) workbench.openActivity(activity.id)
     recordLaunchMetrics({
       presetId: resolved.presetId,
       kind: activity.kind,
@@ -214,6 +224,16 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       totalMs: spawnedAt - startedAt,
     })
     return snapshot.record
+  }
+
+  function markAutomaticResumeFailure(id, cause) {
+    const activity = activities.byId(id)
+    if (!activity) return null
+    return activities.upsert({
+      ...activity,
+      error: `Automatic resume failed: ${message(cause)}`,
+      updatedAt: new Date().toISOString(),
+    })
   }
 
   async function launchCommand({
@@ -327,15 +347,35 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       activities.reconcileStatus(event.activityId, event.status)
       return
     }
+    if (event.type === 'output') {
+      recordInactiveAgentOutput(event)
+      return
+    }
     if (event.type === 'exit' && event.record) {
       upsertBackendRecord(event.record)
     }
+  }
+
+  function recordInactiveAgentOutput(event) {
+    if (!outputHasBytes(event.bytes)) return
+    const activity = activities.byId(event.activityId)
+    if (!activity || activity.kind !== 'agent') return
+    if (workbench.activeActivityId === activity.id) return
+
+    if (activity.unread) return
+    const now = Date.now()
+    activities.upsert({
+      ...activity,
+      unread: true,
+      updatedAt: new Date(now).toISOString(),
+    })
   }
 
   async function dispose() {
     if (unlisten) unlisten()
     unlisten = null
     archiveMutations.clear()
+    resumingActivityIds.value = new Set()
     ready.value = false
   }
 
@@ -343,9 +383,11 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     ready,
     error,
     lastLaunchMetrics,
+    resumingActivityIds,
     initialize,
     launchPreset,
     resumePreset,
+    markAutomaticResumeFailure,
     launchCommand,
     stop,
     close,
@@ -371,6 +413,19 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       // The reactive metric remains available in WebViews without MeasureOptions.
     }
   }
+
+  function setResumePending(id, pending) {
+    const next = new Set(resumingActivityIds.value)
+    if (pending) next.add(id)
+    else next.delete(id)
+    resumingActivityIds.value = next
+  }
+
+  function clearActivityError(id) {
+    const activity = activities.byId(id)
+    if (!activity?.error) return
+    activities.upsert({ ...activity, error: null })
+  }
 })
 
 function canonicalBackendRecord(record) {
@@ -383,7 +438,14 @@ function canonicalBackendRecord(record) {
     autoTitleEligible: Boolean(record.autoTitleEligible),
     archivedAt: record.archivedAt ?? null,
     closeRequestedAt: record.closeRequestedAt ?? null,
+    error: record.error ?? null,
   }
+}
+
+function outputHasBytes(value) {
+  return Array.isArray(value) || ArrayBuffer.isView(value)
+    ? value.length > 0
+    : false
 }
 
 function message(error) {
