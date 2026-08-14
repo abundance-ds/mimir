@@ -25,6 +25,85 @@ describe('TabStrip', () => {
     expect(tabs[1].text()).toContain('notes.md')
   })
 
+  it('keeps the identifying end of a long tab name separate from its flexible start', () => {
+    const name = 'datei mit ein paar charts und nummer 1.md'
+    const w = mountStrip({ tabs: [{ id: 'long-tab', name, dirty: false }] })
+    const tab = fileTabs(w)[0]
+    expect(tab.get('.tab-name-leading').element.textContent).toBe('datei mit ein paar charts und nummer ')
+    expect(tab.get('.tab-name-trailing').text()).toBe('1.md')
+    expect(tab.attributes('aria-label')).toBe(name)
+    expect(w.get('.file-tab-wrap').attributes('style')).toContain('--tab-ideal-width: 188px')
+  })
+
+  it('shows the full name and parent directory on hover or keyboard focus', async () => {
+    vi.useFakeTimers()
+    const name = 'datei mit ein paar charts und nummer 1.md'
+    const path = `/project/charts/${name}`
+    const w = mountStrip({
+      tabs: [{ id: 'long-tab', name, path, dirty: false }],
+    }, { attachTo: document.body })
+    const tab = fileTabs(w)[0]
+    const leading = tab.get('.tab-name-leading').element
+    Object.defineProperties(leading, {
+      clientWidth: { configurable: true, value: 80 },
+      scrollWidth: { configurable: true, value: 240 },
+    })
+
+    await tab.trigger('mouseenter')
+    vi.advanceTimersByTime(240)
+    await w.vm.$nextTick()
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain(name)
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('/project/charts')
+
+    await tab.trigger('mouseleave')
+    await w.vm.$nextTick()
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
+
+    await tab.trigger('focus')
+    await w.vm.$nextTick()
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain(name)
+    expect(tab.attributes('aria-describedby')).toBe('editor-tab-tooltip')
+    w.unmount()
+    vi.useRealTimers()
+  })
+
+  it('does not add a redundant tooltip when a unique name fits', async () => {
+    const w = mountStrip({}, { attachTo: document.body })
+    const tab = fileTabs(w)[0]
+    const leading = tab.get('.tab-name-leading').element
+    Object.defineProperties(leading, {
+      clientWidth: { configurable: true, value: 80 },
+      scrollWidth: { configurable: true, value: 40 },
+    })
+
+    await tab.trigger('focus')
+    await w.vm.$nextTick()
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
+    w.unmount()
+  })
+
+  it('shows the directory for duplicate names even when the label fits', async () => {
+    const w = mountStrip({
+      tabs: [
+        { id: 'first', name: 'report.md', path: '/project/one/report.md', dirty: false },
+        { id: 'second', name: 'report.md', path: '/project/two/report.md', dirty: false },
+      ],
+    }, { attachTo: document.body })
+    const tab = fileTabs(w)[0]
+    const leading = tab.get('.tab-name-leading').element
+    Object.defineProperties(leading, {
+      clientWidth: { configurable: true, value: 80 },
+      scrollWidth: { configurable: true, value: 60 },
+    })
+
+    await tab.trigger('focus')
+    await w.vm.$nextTick()
+    const tooltip = document.body.querySelector('[role="tooltip"]')
+    expect(tooltip?.textContent).toContain('/project/one')
+    expect(w.get('[role="tablist"]').element.contains(tooltip)).toBe(false)
+    w.unmount()
+  })
+
   it('shows dirty indicator for modified files', () => {
     const w = mountStrip()
     const tabs = fileTabs(w)

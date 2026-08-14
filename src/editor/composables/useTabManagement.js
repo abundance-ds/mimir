@@ -4,6 +4,7 @@ import { basename } from '../../shared/utils/path.js'
 export function useTabManagement({
   fileManager,
   diffStore,
+  diffActive = computed(() => diffStore.active),
   displayTabs,
   reviewTabActive,
   inlineAIState,
@@ -32,17 +33,18 @@ export function useTabManagement({
       return
     }
     reviewTabActive.value = false
-    if (diffStore.active && diffStore.isBatch) {
+    const fileIndex = tabFileIndex(tab, idx)
+    if (diffActive.value && diffStore.isBatch) {
       flushEditorContent({ bridge: 'flush' })
-      fileManager.setActiveTab(idx)
-      const file = fileManager.openFiles[idx]
+      fileManager.setActiveTab(fileIndex)
+      const file = fileManager.openFiles[fileIndex]
       if (file?.path) diffStore.focusBatchFile(file.path)
       return
     }
-    if (diffStore.active && !diffStore.isBatch) diffStore.deactivate()
+    if (diffActive.value && !diffStore.isBatch) diffStore.deactivate()
     inlineAIState.value = null
     flushEditorContent({ bridge: 'flush' })
-    fileManager.setActiveTab(idx)
+    fileManager.setActiveTab(fileIndex)
   }
 
   async function onCloseTab(idx) {
@@ -53,26 +55,32 @@ export function useTabManagement({
       return
     }
 
-    if (idx === activeFileIndex.value) flushEditorContent({ bridge: 'flush' })
+    const fileIndex = tabFileIndex(tab, idx)
+    if (fileIndex === activeFileIndex.value) flushEditorContent({ bridge: 'flush' })
 
-    const file = fileManager.openFiles[idx]
+    const file = fileManager.openFiles[fileIndex]
     if (!file) return
 
     const decision = await confirmFileClose(file)
     if (decision === 'cancel') return false
 
-    if (fileManager.openFiles.length === 1) {
-      if (!embedded) {
+    const visibleFileCount = displayTabs.value.filter(candidate => candidate.type === 'file').length
+    if (visibleFileCount === 1) {
+      if (!embedded && fileManager.openFiles.length === 1) {
         return await requestWindowClose?.({
           confirmedFiles: [file],
           discardedFiles: decision === 'discard' ? [file] : [],
         })
           ?? await closeEditorWindow()
       }
-      fileManager.closeFile(idx, { ensureOne: false })
-      onEmpty?.()
+      if (embedded) {
+        fileManager.closeFile(fileIndex, { ensureOne: false })
+        onEmpty?.()
+      } else {
+        fileManager.closeFile(fileIndex)
+      }
     } else {
-      fileManager.closeFile(idx)
+      fileManager.closeFile(fileIndex)
     }
     return true
   }
@@ -124,8 +132,11 @@ export function useTabManagement({
   }
 
   function onReorderTab(from, to) {
+    const source = displayTabs.value[from]
+    const target = displayTabs.value[to]
+    if (source?.type !== 'file' || target?.type !== 'file') return
     flushEditorContent({ bridge: 'flush' })
-    fileManager.moveTab(from, to)
+    fileManager.moveTab(tabFileIndex(source, from), tabFileIndex(target, to))
   }
 
   return {
@@ -139,4 +150,8 @@ export function useTabManagement({
     onNewFile,
     onReorderTab,
   }
+}
+
+function tabFileIndex(tab, displayIndex) {
+  return Number.isInteger(tab?.fileIndex) ? tab.fileIndex : displayIndex
 }

@@ -1,5 +1,6 @@
 <template>
     <div
+        v-bind="$attrs"
         ref="stripEl"
         role="tablist"
         aria-label="Open editor tabs"
@@ -17,12 +18,13 @@
             <div
                 v-for="(tab, i) in tabs"
                 :key="tab.id"
-                class="file-tab-wrap no-drag min-w-[80px] h-[28px] relative"
+                class="file-tab-wrap no-drag h-[28px] relative"
                 :class="[
                     dragState.active && dragState.fromIndex === i ? 'tab-dragging' : '',
                     dragState.dropTarget === i ? 'tab-drop-gap' : '',
                     arrivedTabIndex === i ? 'tab-arrived' : '',
                 ]"
+                :style="{ '--tab-ideal-width': `${tabIdealWidth(tab.name)}px` }"
             >
               <button
                 class="file-tab w-full h-full flex items-center gap-1 pl-2 pr-7 rounded-t-[5px] select-none whitespace-nowrap overflow-hidden font-mono text-[11.5px] relative"
@@ -33,7 +35,13 @@
                 ]"
                 role="tab"
                 :aria-selected="activeTab === i"
+                :aria-label="tab.name"
+                :aria-describedby="tooltip.visible && tooltip.index === i ? 'editor-tab-tooltip' : undefined"
                 :tabindex="activeTab === i ? 0 : -1"
+                @mouseenter="scheduleTooltip(i, $event.currentTarget)"
+                @mouseleave="hideTooltip(i)"
+                @focus="showTooltip(i, $event.currentTarget)"
+                @blur="hideTooltip(i)"
                 @pointerdown="onPointerDown(i, $event)"
                 @keydown.left.prevent.stop="selectKeyboardTab(i, -1)"
                 @keydown.right.prevent.stop="selectKeyboardTab(i, 1)"
@@ -42,10 +50,10 @@
                 @keydown.enter.prevent.stop="selectKeyboardTab(i, 0)"
                 @keydown.space.prevent.stop="selectKeyboardTab(i, 0)"
               >
-                <span
-                    class="flex-1 min-w-0 overflow-hidden text-ellipsis"
-                    >{{ tab.name }}</span
-                >
+                <span class="tab-name flex-1 min-w-0" aria-hidden="true">
+                    <span class="tab-name-leading">{{ splitTabName(tab.name).leading }}</span>
+                    <span v-if="splitTabName(tab.name).trailing" class="tab-name-trailing">{{ splitTabName(tab.name).trailing }}</span>
+                </span>
                 <span
                     v-if="tab.dirty"
                     class="w-[5px] h-[5px] rounded-full shrink-0"
@@ -78,11 +86,31 @@
             </button>
         </TransitionGroup>
     </div>
+
+    <Teleport to="body">
+        <Transition name="tab-tooltip">
+            <div
+                v-if="tooltip.visible"
+                id="editor-tab-tooltip"
+                ref="tooltipEl"
+                role="tooltip"
+                class="editor-tab-tooltip"
+                :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
+            >
+                <span class="editor-tab-tooltip-name">{{ tooltip.name }}</span>
+                <span v-if="tooltip.directory" class="editor-tab-tooltip-directory">{{ tooltip.directory }}</span>
+            </div>
+        </Transition>
+    </Teleport>
 </template>
 
 <script setup>
 import { IconPlus } from "@tabler/icons-vue";
-import { ref, reactive, computed, watch, nextTick, onUnmounted } from "vue";
+import { ref, reactive, watch, nextTick, onUnmounted } from "vue";
+import { dirname } from "../../../shared/utils/path.js";
+import { splitTabName, tabIdealWidth } from "../../tabPresentation.js";
+
+defineOptions({ inheritAttrs: false });
 
 const DRAG_THRESHOLD = 5;
 
@@ -101,6 +129,16 @@ const emit = defineEmits([
 
 const stripEl = ref(null);
 const scrollRef = ref(null);
+const tooltipEl = ref(null);
+const tooltip = reactive({
+    visible: false,
+    index: -1,
+    name: "",
+    directory: "",
+    left: 0,
+    top: 0,
+});
+let tooltipTimer = null;
 
 const dragState = reactive({
     fromIndex: -1,
@@ -124,6 +162,7 @@ function getScrollEl() {
 function onTabWheel(e) {
     const el = getScrollEl();
     if (!el || el.scrollWidth <= el.clientWidth) return;
+    hideTooltip();
     if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
     e.preventDefault();
     el.scrollLeft += e.deltaY;
@@ -156,6 +195,58 @@ watch(
 function getTabButtons() {
     if (!stripEl.value) return [];
     return Array.from(stripEl.value.querySelectorAll("button.file-tab"));
+}
+
+function positionTooltip(anchor) {
+    const tooltipNode = tooltipEl.value;
+    if (!anchor || !tooltipNode) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const tooltipRect = tooltipNode.getBoundingClientRect();
+    const edgeGap = 8;
+    const halfWidth = tooltipRect.width / 2;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    tooltip.left = Math.min(
+        viewportWidth - halfWidth - edgeGap,
+        Math.max(halfWidth + edgeGap, anchorRect.left + anchorRect.width / 2),
+    );
+    tooltip.top = anchorRect.bottom + 6;
+}
+
+function needsTooltip(tab, anchor) {
+    const leading = anchor?.querySelector(".tab-name-leading");
+    const clipped = Boolean(leading && leading.scrollWidth > leading.clientWidth);
+    const duplicateName = props.tabs.some((candidate) => (
+        candidate.id !== tab.id && candidate.name === tab.name
+    ));
+    return clipped || duplicateName;
+}
+
+function openTooltip(index, anchor) {
+    const tab = props.tabs[index];
+    if (!tab || dragState.active || !needsTooltip(tab, anchor)) return;
+    tooltip.index = index;
+    tooltip.name = tab.name;
+    tooltip.directory = tab.path ? dirname(tab.path) : "";
+    tooltip.visible = true;
+    nextTick(() => positionTooltip(anchor));
+}
+
+function scheduleTooltip(index, anchor) {
+    clearTimeout(tooltipTimer);
+    tooltipTimer = setTimeout(() => openTooltip(index, anchor), 240);
+}
+
+function showTooltip(index, anchor) {
+    clearTimeout(tooltipTimer);
+    openTooltip(index, anchor);
+}
+
+function hideTooltip(index) {
+    clearTimeout(tooltipTimer);
+    tooltipTimer = null;
+    if (index !== undefined && tooltip.index !== index) return;
+    tooltip.visible = false;
+    tooltip.index = -1;
 }
 
 /* ── Ghost ── */
@@ -202,6 +293,7 @@ function removeGhost() {
 
 function onPointerDown(index, e) {
     if (e.button !== 0) return;
+    hideTooltip();
     if (props.tabs[index]?.type === "review") {
         emit("select-tab", index);
         return;
@@ -345,6 +437,7 @@ function resetDrag() {
 }
 
 onUnmounted(() => {
+    hideTooltip();
     cancelDrag();
 });
 </script>
@@ -386,16 +479,37 @@ onUnmounted(() => {
     opacity: 0;
 }
 
-/* Tab sizing: equal share of available space, clamped 80–172px */
+/* Content-aware preferred widths share spare room, then shrink to a firm floor. */
 .file-tab-wrap {
-    flex-grow: 1;
-    flex-shrink: 1;
-    flex-basis: 0;
-    max-width: 172px;
+    flex: 1 1 var(--tab-ideal-width, 148px);
+    min-width: 92px;
+    max-width: 188px;
 }
 
 .file-tab {
     min-width: 0;
+}
+
+.file-tab:focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+.tab-name {
+    display: flex;
+    align-items: baseline;
+    overflow: hidden;
+}
+
+.tab-name-leading {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tab-name-trailing {
+    flex: 0 0 auto;
 }
 
 /* Tab separator line — pseudo-element + :has() require vanilla CSS */
@@ -505,6 +619,59 @@ onUnmounted(() => {
 .tab-review.tab-active {
     font-weight: 600;
     color: var(--color-accent);
+}
+
+.editor-tab-tooltip {
+    position: fixed;
+    z-index: 100;
+    display: flex;
+    max-width: min(440px, calc(100vw - 16px));
+    transform: translateX(-50%);
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--color-rule);
+    border-radius: 4px;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-chrome) 45%, transparent);
+    pointer-events: none;
+}
+
+.editor-tab-tooltip-name,
+.editor-tab-tooltip-directory {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-tab-tooltip-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.editor-tab-tooltip-directory {
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    font-size: 9px;
+}
+
+.tab-tooltip-enter-active,
+.tab-tooltip-leave-active {
+    transition: opacity 90ms ease, transform 90ms ease;
+}
+
+.tab-tooltip-enter-from,
+.tab-tooltip-leave-to {
+    opacity: 0;
+    transform: translate(-50%, -2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tab-tooltip-enter-active,
+    .tab-tooltip-leave-active {
+        transition: none;
+    }
 }
 </style>
 

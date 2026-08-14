@@ -32,8 +32,12 @@ export const editorTheme = EditorView.theme({
   },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono)',
+    fontWeight: 'var(--editor-font-weight)',
     lineHeight: 'var(--editor-line-height)',
     letterSpacing: '0',
+    fontFeatureSettings: "'liga' 0, 'calt' 0",
+    fontSynthesis: 'none',
+    WebkitFontSmoothing: 'auto',
     backgroundColor: 'var(--editor-paper)',
   },
   '.cm-content': {
@@ -42,7 +46,7 @@ export const editorTheme = EditorView.theme({
     boxSizing: 'border-box',
     minHeight: '100%',
     margin: '0',
-    padding: '24px clamp(8px, 3vw, 24px) clamp(72px, 20vh, 100px)',
+    padding: '16px clamp(10px, 2vw, 16px) clamp(56px, 15vh, 80px)',
     color: 'var(--color-ink)',
     textAlign: 'left',
   },
@@ -54,21 +58,22 @@ export const editorTheme = EditorView.theme({
   },
   '.cm-gutters': {
     backgroundColor: 'var(--editor-paper)',
-    color: 'var(--color-ink-4)',
+    color: 'var(--color-ink-3)',
     border: 'none',
     fontFamily: 'var(--font-mono)',
-    fontSize: '0.72em',
+    fontSize: '0.78em',
+    fontWeight: 'var(--editor-font-weight)',
     lineHeight: 'var(--editor-line-height)',
     fontVariantNumeric: 'tabular-nums',
     userSelect: 'none',
   },
   '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 10px 0 14px',
-    minWidth: '40px',
+    padding: '0 8px 0 10px',
+    minWidth: '38px',
   },
   '.cm-activeLineGutter': {
     backgroundColor: 'var(--active-line)',
-    color: 'var(--color-ink-2)',
+    color: 'var(--color-ink)',
   },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
     backgroundColor: 'var(--selection) !important',
@@ -78,7 +83,7 @@ export const editorTheme = EditorView.theme({
   },
   '.cm-cursor': {
     borderLeftColor: 'var(--color-accent)',
-    borderLeftWidth: '2px',
+    borderLeftWidth: '1px',
   },
   '.cm-tooltip': {
     border: '1px solid var(--line-strong)',
@@ -148,9 +153,9 @@ export const editorTheme = EditorView.theme({
 }, { dark: false })
 
 export const editorHighlightStyle = HighlightStyle.define([
-  { tag: t.heading1, fontWeight: '650', fontSize: '1.55em', color: 'var(--ink-strong)' },
-  { tag: t.heading2, fontWeight: '650', fontSize: '1.25em', color: 'var(--ink-strong)' },
-  { tag: t.heading3, fontWeight: '650', color: 'var(--ink-strong)' },
+  { tag: t.heading1, fontWeight: '650', fontSize: '1.3em', color: 'var(--ink-strong)' },
+  { tag: t.heading2, fontWeight: '650', fontSize: '1.15em', color: 'var(--ink-strong)' },
+  { tag: t.heading3, fontWeight: '650', fontSize: '1.05em', color: 'var(--ink-strong)' },
   { tag: [t.strong], fontWeight: '700', color: 'var(--ink-strong)' },
   { tag: [t.emphasis], fontStyle: 'italic' },
   { tag: [t.monospace], fontFamily: 'var(--font-mono)', backgroundColor: 'var(--inline-code-bg)', color: 'var(--code)' },
@@ -171,7 +176,7 @@ export const darkModeCompartment = new Compartment()
 
 export function lineIndicatorExtensions(showLineNumbers = false) {
   return showLineNumbers
-    ? [lineNumbers(), highlightActiveLineGutter()]
+    ? [lineNumbers(), highlightActiveLine(), highlightActiveLineGutter()]
     : highlightActiveLine()
 }
 

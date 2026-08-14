@@ -30,6 +30,7 @@ export function tabFromFile(file, options = {}) {
   return {
     id: file.id,
     name: fileDisplayName(file, options),
+    path: file.path || '',
     dirty: saveTone !== 'clean',
     saveTone,
     preview: Boolean(file.preview),

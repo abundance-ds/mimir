@@ -12,6 +12,7 @@ describe('editor save status presentation', () => {
 
     expect(tab).toMatchObject({
       name: 'doc.md',
+      path: '/tmp/doc.md',
       dirty: false,
       saveTone: 'clean',
     })

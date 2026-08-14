@@ -1,3 +1,4 @@
+import { singleDiffTargetsFile } from '../workspaceDiffProjection.js'
 
 export function proposalIdsFromReviewMeta(meta) {
   if (!meta) return []
@@ -18,13 +19,40 @@ export function useDiffReview({
   scheduleContentSync,
   flushEditorContent,
 }) {
-  function applyDiffResult(content) {
-    diffStore.deactivate()
-    if (content != null && currentFile.value) {
-      currentFile.value.content = content
-      fileManager.markDirty()
-      scheduleContentSync()
+  function resolveSingleDiffTarget() {
+    const files = fileManager.openFiles || []
+    if (diffStore.fileId != null) {
+      return files.find(file => file.id === diffStore.fileId) || null
     }
+    if (diffStore.filePath) {
+      return files.find(file => file.path === diffStore.filePath) || null
+    }
+    return currentFile.value && !currentFile.value.path ? currentFile.value : null
+  }
+
+  function requireActiveSingleDiffTarget() {
+    const target = resolveSingleDiffTarget()
+    if (target && singleDiffTargetsFile(diffStore, currentFile.value)) {
+      return { ok: true, target }
+    }
+    const error = 'This review belongs to another file. Open its tab before you respond.'
+    diffStore.setReviewError?.(error)
+    return { ok: false, error }
+  }
+
+  function applyDiffResult(content, target = resolveSingleDiffTarget()) {
+    if (!target || !(fileManager.openFiles || []).includes(target)) {
+      const error = 'The review target is no longer open. Reopen the proposal before you respond.'
+      diffStore.setReviewError?.(error)
+      return { ok: false, error }
+    }
+    diffStore.deactivate()
+    if (content != null) {
+      target.content = content
+      fileManager.markDirty(target)
+      if (currentFile.value === target) scheduleContentSync()
+    }
+    return { ok: true }
   }
 
   async function respondToDiffReview(status) {
@@ -148,23 +176,29 @@ export function useDiffReview({
     if (diffStore.isBatch) {
       diffStore.acceptAllFiles()
       await onBatchAllResolved()
-    } else if (diffStore.reviewMeta?.type === 'history') {
-      restoreConfirmMeta.value = diffStore.reviewMeta
-    } else if (diffStore.reviewMeta?.type === 'inline-ai') {
-      applyDiffResult(diffStore.modifiedContent)
-      inlineAIState.value = null
     } else {
-      const lifecycle = await respondToDiffReview('applied')
-      if (!lifecycle.ok) return lifecycle
-      fileManager.clearFileReviews(currentFile.value)
-      applyDiffResult(diffStore.modifiedContent)
-      return { ok: true }
+      const targetResult = requireActiveSingleDiffTarget()
+      if (!targetResult.ok) return targetResult
+      const target = targetResult.target
+      if (diffStore.reviewMeta?.type === 'history') {
+        restoreConfirmMeta.value = diffStore.reviewMeta
+      } else if (diffStore.reviewMeta?.type === 'inline-ai') {
+        applyDiffResult(diffStore.modifiedContent, target)
+        inlineAIState.value = null
+      } else {
+        const lifecycle = await respondToDiffReview('applied')
+        if (!lifecycle.ok) return lifecycle
+        fileManager.clearFileReviews(target)
+        return applyDiffResult(diffStore.modifiedContent, target)
+      }
     }
   }
 
   function onRestoreConfirm(action) {
     if (action === 'restore') {
-      applyDiffResult(diffStore.originalContent)
+      const targetResult = requireActiveSingleDiffTarget()
+      if (!targetResult.ok) return targetResult
+      applyDiffResult(diffStore.originalContent, targetResult.target)
     }
     restoreConfirmMeta.value = null
   }
@@ -181,16 +215,20 @@ export function useDiffReview({
     if (diffStore.isBatch) {
       diffStore.rejectAllFiles()
       await onBatchAllResolved()
-    } else if (diffStore.reviewMeta?.type === 'history') {
-      diffStore.deactivate()
-    } else if (diffStore.reviewMeta?.type === 'inline-ai') {
-      diffStore.deactivate()
     } else {
-      const lifecycle = await respondToDiffReview('rejected')
-      if (!lifecycle.ok) return lifecycle
-      fileManager.clearFileReviews(currentFile.value)
-      applyDiffResult(diffStore.originalContent)
-      return { ok: true }
+      const targetResult = requireActiveSingleDiffTarget()
+      if (!targetResult.ok) return targetResult
+      const target = targetResult.target
+      if (diffStore.reviewMeta?.type === 'history') {
+        diffStore.deactivate()
+      } else if (diffStore.reviewMeta?.type === 'inline-ai') {
+        diffStore.deactivate()
+      } else {
+        const lifecycle = await respondToDiffReview('rejected')
+        if (!lifecycle.ok) return lifecycle
+        fileManager.clearFileReviews(target)
+        return applyDiffResult(diffStore.originalContent, target)
+      }
     }
   }
 
@@ -205,14 +243,17 @@ export function useDiffReview({
       if (diffStore.allResolved) await onBatchAllResolved()
       return
     }
+    const targetResult = requireActiveSingleDiffTarget()
+    if (!targetResult.ok) return targetResult
+    const target = targetResult.target
     if (diffStore.reviewMeta?.type === 'inline-ai') inlineAIState.value = null
     else if (proposalIdsFromReviewMeta(diffStore.reviewMeta).length > 0) {
       const status = content === diffStore.originalContent ? 'rejected' : 'applied'
       const lifecycle = await respondToDiffReview(status)
       if (!lifecycle.ok) return lifecycle
-      fileManager.clearFileReviews(currentFile.value)
+      fileManager.clearFileReviews(target)
     }
-    applyDiffResult(content)
+    return applyDiffResult(content, target)
   }
 
   function onDiffNavigateChunk(index) {
@@ -224,9 +265,16 @@ export function useDiffReview({
   }
 
   function activateDiffForCurrentFile(original, modified, opts) {
-    const path = currentFile.value?.path || ''
+    const file = currentFile.value
+    const path = file?.path || ''
     flushEditorContent({ bridge: 'flush' })
-    diffStore.activate({ original, modified, path, review: opts?.review || null })
+    diffStore.activate({
+      original,
+      modified,
+      path,
+      fileId: file?.id ?? null,
+      review: opts?.review || null,
+    })
   }
 
   function activateBatchDiff(fileList, meta) {

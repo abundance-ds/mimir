@@ -23,7 +23,7 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
       // "Don't Save" means disk is authoritative for path-backed files and
       // an untitled draft must not resurrect on the next launch.
       if (file.path) {
-        persistedFiles.push({ path: file.path })
+        persistedFiles.push(pathSessionEntry(file))
         sourceIndexes.push(sourceIndex)
       }
       continue
@@ -31,8 +31,8 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
     if (!file.path && !file.content) continue
     persistedFiles.push(file.path
       ? file.dirty
-        ? { path: file.path, content: file.content, dirty: true }
-        : { path: file.path }
+        ? pathSessionEntry(file, { content: file.content, dirty: true })
+        : pathSessionEntry(file)
       : { path: null, content: file.content, draftId: file.draftId })
     sourceIndexes.push(sourceIndex)
   }
@@ -50,6 +50,14 @@ export function createSessionSnapshot(state, { discardedFiles = [] } = {}) {
     recentFiles: [...state.recentFiles.value],
     activeFileIndex: persistedActiveIndex,
     zoomLevel: state.zoomLevel.value,
+  }
+}
+
+function pathSessionEntry(file, extra = {}) {
+  return {
+    path: file.path,
+    ...(file.workspacePath ? { workspacePath: file.workspacePath } : {}),
+    ...extra,
   }
 }
 

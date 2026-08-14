@@ -77,13 +77,13 @@ export function useKeyboardShortcuts({
     if (mod && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       if (!editorHasFocus()) return
       e.preventDefault()
-      const len = files.openFiles.length
+      const len = files.visibleOpenFiles.length
       if (len > 1) {
-        const cur = files.activeFileIndex
+        const cur = files.activeVisibleFileIndex
         const next = e.key === 'ArrowLeft'
           ? (cur - 1 + len) % len
           : (cur + 1) % len
-        files.setActiveTab(next)
+        files.setActiveVisibleTab(next)
       }
       return
     }

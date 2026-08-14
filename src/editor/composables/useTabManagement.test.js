@@ -6,9 +6,11 @@ function setup({
   files = [{ id: 1, path: '/a.md', dirty: true }],
   embedded = false,
   saveResult = true,
+  visibleIds = null,
+  activeIndex = 0,
 } = {}) {
   const openFiles = reactive(files)
-  const activeFileIndex = ref(0)
+  const activeFileIndex = ref(activeIndex)
   const fileManager = {
     openFiles,
     setActiveTab: vi.fn(index => {
@@ -33,10 +35,14 @@ function setup({
   const manager = useTabManagement({
     fileManager,
     diffStore,
-    displayTabs: computed(() => openFiles.map(file => ({
-      id: file.id,
-      type: 'file',
-    }))),
+    displayTabs: computed(() => openFiles
+      .map((file, fileIndex) => ({ file, fileIndex }))
+      .filter(({ file }) => !visibleIds || visibleIds.includes(file.id))
+      .map(({ file, fileIndex }) => ({
+        id: file.id,
+        fileIndex,
+        type: 'file',
+      }))),
     reviewTabActive: ref(false),
     inlineAIState: ref(null),
     activeFileIndex,
@@ -115,5 +121,38 @@ describe('useTabManagement close safety', () => {
     expect(h.fileManager.closeFile).toHaveBeenCalledWith(0, { ensureOne: false })
     expect(h.requestWindowClose).not.toHaveBeenCalled()
     expect(h.onEmpty).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the visible project tab while retaining hidden workspace tabs', async () => {
+    const hidden = { id: 1, path: '/alpha/hidden.md', dirty: false }
+    const visible = { id: 2, path: '/beta/visible.md', dirty: false }
+    const h = setup({
+      files: [hidden, visible],
+      embedded: true,
+      visibleIds: [2],
+      activeIndex: 1,
+    })
+
+    await expect(h.manager.onCloseTab(0)).resolves.toBe(true)
+
+    expect(h.fileManager.closeFile).toHaveBeenCalledWith(1, { ensureOne: false })
+    expect(h.fileManager.openFiles).toEqual([hidden])
+    expect(h.onEmpty).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps visible reorder positions around retained hidden tabs', () => {
+    const h = setup({
+      files: [
+        { id: 1, path: '/beta/one.md', dirty: false },
+        { id: 2, path: '/alpha/hidden.md', dirty: false },
+        { id: 3, path: '/beta/two.md', dirty: false },
+      ],
+      embedded: true,
+      visibleIds: [1, 3],
+    })
+
+    h.manager.onReorderTab(0, 1)
+
+    expect(h.fileManager.moveTab).toHaveBeenCalledWith(0, 2)
   })
 })

@@ -28,6 +28,7 @@ vi.mock('./sessionPersist.js', () => ({
 }))
 
 import { useFileStore } from '../stores/files.js'
+import { useDiffStore } from '../stores/diff.js'
 import { useSettingsStore } from '../stores/settings.js'
 import App from './App.vue'
 
@@ -311,6 +312,64 @@ describe('Editor Apps Settings bridge', () => {
     files.currentFile.path = '/work/notes.md'
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('hides a review outside its exact project tab and restores it on return', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const files = useFileStore(pinia)
+    const diff = useDiffStore(pinia)
+    const alpha = await files.openFile('/alpha/a.md', '', { workspacePath: '/alpha' })
+    await files.openFile('/beta/b.md', '', { workspacePath: '/beta' })
+    diff.activate({
+      original: 'old',
+      modified: 'new',
+      path: alpha.path,
+      fileId: alpha.id,
+    })
+    const DiffViewStub = defineComponent({
+      template: '<div data-diff-view-stub />',
+    })
+    const wrapper = mount(App, {
+      props: {
+        embedded: true,
+        workspacePath: '/alpha',
+        workspacePaths: ['/alpha', '/beta'],
+      },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppHeader: true,
+          AppFooter: true,
+          SettingsDialog: SettingsDialogStub,
+          EditorSurface: EditorSurfaceStub,
+          InlineAI: true,
+          DiffBar: true,
+          DiffView: DiffViewStub,
+          BatchDiffView: true,
+          NewTabPage: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(files.currentFile.id).toBe(alpha.id)
+    expect(wrapper.find('[data-diff-view-stub]').exists()).toBe(true)
+
+    await wrapper.setProps({ workspacePath: '/beta' })
+    await flushPromises()
+    expect(files.currentFile.path).toBe('/beta/b.md')
+    expect(wrapper.find('[data-diff-view-stub]').exists()).toBe(false)
+    expect(diff.active).toBe(true)
+
+    await wrapper.setProps({ workspacePath: '/alpha' })
+    await flushPromises()
+    expect(files.currentFile.id).toBe(alpha.id)
+    expect(wrapper.find('[data-diff-view-stub]').exists()).toBe(true)
+    expect(diff.active).toBe(true)
     wrapper.unmount()
   })
 })

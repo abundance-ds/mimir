@@ -47,6 +47,29 @@ describe('session restore normalization', () => {
     expect(result.changed).toBe(true)
   })
 
+  it('retains project ownership on clean and dirty path entries', () => {
+    const result = normalizeSessionEntries([
+      { path: '/alpha/clean.md', workspacePath: '/alpha' },
+      {
+        path: '/beta/dirty.md',
+        workspacePath: '/beta',
+        content: 'unsaved',
+        dirty: true,
+      },
+    ], 1)
+
+    expect(result.entries).toEqual([
+      { path: '/alpha/clean.md', workspacePath: '/alpha' },
+      {
+        path: '/beta/dirty.md',
+        content: 'unsaved',
+        dirty: true,
+        workspacePath: '/beta',
+      },
+    ])
+    expect(result.changed).toBe(false)
+  })
+
   it('loads saved paths concurrently while preserving exact tab order and failures', async () => {
     const pending = new Map()
     const calls = []

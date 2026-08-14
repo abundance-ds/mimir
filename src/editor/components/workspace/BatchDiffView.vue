@@ -20,7 +20,7 @@ import { computed } from 'vue'
 import { useDiffStore } from '../../../stores/diff.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
-import { fontFamilyForKey } from '../../../shared/fonts.js'
+import { editorTypographyVars } from '../../../shared/fonts.js'
 import { disambiguateFilenames } from '../../../shared/lineDelta.js'
 import BatchFileDiff from './BatchFileDiff.vue'
 
@@ -35,13 +35,12 @@ const fileDisplayNames = computed(() => {
 })
 
 const wrapperStyle = computed(() => {
-  const baseFontSize = settings.editorFontSize
-  const zoom = editorUI.zoomLevel / 100
-  return {
-    '--editor-size': (baseFontSize * zoom) + 'px',
-    '--editor-line-height': ((23 * baseFontSize / 12) * zoom) + 'px',
-    '--font-mono': fontFamilyForKey(settings.editorFontFamily),
-  }
+  return editorTypographyVars({
+    fontSize: settings.editorFontSize,
+    zoom: editorUI.zoomLevel / 100,
+    fontKey: settings.editorFontFamily,
+    dark: settings.isDarkTheme,
+  })
 })
 
 function onAcceptFile(path) {

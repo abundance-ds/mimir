@@ -8,6 +8,7 @@ import { proposalIdsFromReviewMeta, useDiffReview } from './useDiffReview.js'
 function makeReviewHarness() {
   const diffStore = useDiffStore()
   const currentFile = ref({
+    id: 7,
     path: '/doc.md',
     content: 'old text',
     reviews: [{ proposalId: 'p1' }],
@@ -43,6 +44,40 @@ describe('useDiffReview proposal responses', () => {
     expect(proposalIdsFromReviewMeta({ id: 'p1' })).toEqual(['p1'])
     expect(proposalIdsFromReviewMeta({ ids: ['p1', '', 'p2'] })).toEqual(['p1', 'p2'])
     expect(proposalIdsFromReviewMeta(null)).toEqual([])
+  })
+
+  it('binds a new single-file review to the active tab id', () => {
+    const { diffStore, review } = makeReviewHarness()
+
+    review.activateDiffForCurrentFile('old text', 'new text')
+
+    expect(diffStore.fileId).toBe(7)
+    expect(diffStore.filePath).toBe('/doc.md')
+  })
+
+  it('does not resolve a single-file review against another active tab', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    const target = currentFile.value
+    diffStore.activate({
+      original: 'old text',
+      modified: 'new text',
+      path: '/doc.md',
+      fileId: target.id,
+      review: { id: 'p1', sessionId: 's1', path: '/doc.md' },
+    })
+    currentFile.value = { id: 8, path: '/other.md', content: 'other text' }
+    fileManager.openFiles.push(currentFile.value)
+
+    const result = await review.onDiffAcceptAll()
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining('another file'),
+    })
+    expect(target.content).toBe('old text')
+    expect(currentFile.value.content).toBe('other text')
+    expect(invoke).not.toHaveBeenCalled()
+    expect(diffStore.active).toBe(true)
   })
 
   it('reports single editor accept back to the proposal lifecycle', async () => {

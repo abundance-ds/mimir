@@ -98,7 +98,7 @@ function fuzzyMatch(text, pattern) {
 }
 
 const items = computed(() => {
-  return files.recentFiles.map(p => ({
+  return files.visibleRecentFiles.map(p => ({
     path: p,
     name: fileNameFromPath(p),
     dir: dirFromPath(p),

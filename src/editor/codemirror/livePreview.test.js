@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { EditorState } from '@codemirror/state'
+import { EditorState, StateEffect } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { Strikethrough } from '@lezer/markdown'
 import { syntaxTree, ensureSyntaxTree } from '@codemirror/language'
-import { _buildDecorations, _parseMarkdownTable, _resolveImagePath } from './livePreview.js'
+import { livePreviewExtension, _buildDecorations, _parseMarkdownTable, _resolveImagePath } from './livePreview.js'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -165,6 +165,52 @@ describe('livePreview', () => {
 
       view.destroy()
       view2.destroy()
+    })
+  })
+
+  describe('deferred syntax tree', () => {
+    // The Markdown parser runs asynchronously: when a file first opens, the
+    // plugin builds before the tree exists. A parse-progress transaction has
+    // no doc/selection change, so the plugin must rebuild on tree identity.
+    function mountWithoutLanguage(doc, cursorPos) {
+      const parent = document.createElement('div')
+      document.body.appendChild(parent)
+      const state = EditorState.create({
+        doc,
+        selection: { anchor: cursorPos },
+        extensions: [livePreviewExtension(() => true, () => '/test/file.md')],
+      })
+      const view = new EditorView({ state, parent })
+      return view
+    }
+
+    function attachLanguage(view) {
+      view.dispatch({
+        effects: StateEffect.appendConfig.of(
+          markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+        ),
+      })
+    }
+
+    it('renders inline decorations once the tree arrives without doc or selection changes', () => {
+      const doc = '**bold**\n\nother'
+      const view = mountWithoutLanguage(doc, doc.indexOf('other'))
+      expect(view.contentDOM.textContent).toContain('**')
+
+      attachLanguage(view)
+      expect(view.contentDOM.textContent).not.toContain('**')
+      expect(view.contentDOM.textContent).toContain('bold')
+      view.destroy()
+    })
+
+    it('renders the table widget once the tree arrives without doc or selection changes', () => {
+      const doc = '| A | B |\n| --- | --- |\n| 1 | 2 |\n\nother'
+      const view = mountWithoutLanguage(doc, doc.indexOf('other'))
+      expect(view.dom.querySelector('.cm-lp-table')).toBeNull()
+
+      attachLanguage(view)
+      expect(view.dom.querySelector('.cm-lp-table')).not.toBeNull()
+      view.destroy()
     })
   })
 

@@ -53,6 +53,7 @@ export function useEditorSessionLifecycle({
             path: entry.path,
             content: entry.dirty ? entry.content : content,
             dirty: entry.dirty,
+            workspacePath: entry.workspacePath,
           })
         } else if (entry.dirty) {
           fileManager.restoreDraft({ content: entry.content })

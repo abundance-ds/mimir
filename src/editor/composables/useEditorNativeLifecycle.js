@@ -17,9 +17,12 @@ export function useEditorNativeLifecycle({
   let unlistenFocus = null
   let unlistenQuitRequested = null
   let disposed = false
+  const projectedRecentFiles = () => (
+    fileManager.visibleRecentFiles || fileManager.recentFiles || []
+  )
 
   const stopRecentWatch = watch(
-    () => fileManager.recentFiles.slice(),
+    () => projectedRecentFiles().slice(),
     scheduleMenuSync,
   )
 
@@ -34,7 +37,7 @@ export function useEditorNativeLifecycle({
 
   async function syncMenu() {
     await installNativeEditorMenu({
-      recentFiles: fileManager.recentFiles,
+      recentFiles: projectedRecentFiles(),
       actions: getActions(),
     })
   }

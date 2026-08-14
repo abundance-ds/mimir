@@ -12,7 +12,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { EditorView } from '@codemirror/view'
 import { useDiffStore } from '../../../stores/diff.js'
 import { useSettingsStore } from '../../../stores/settings.js'
-import { fontFamilyForKey } from '../../../shared/fonts.js'
+import { editorTypographyVars } from '../../../shared/fonts.js'
 import { useEditorUIStore } from '../../../stores/editorUI.js'
 import {
   createUnifiedDiffView,
@@ -33,13 +33,12 @@ let currentView = null
 let currentType = null // 'unified' | 'split' | 'readonly'
 
 const wrapperStyle = computed(() => {
-  const baseFontSize = settings.editorFontSize
-  const zoom = editorUI.zoomLevel / 100
-  return {
-    '--editor-size': (baseFontSize * zoom) + 'px',
-    '--editor-line-height': ((23 * baseFontSize / 12) * zoom) + 'px',
-    '--font-mono': fontFamilyForKey(settings.editorFontFamily),
-  }
+  return editorTypographyVars({
+    fontSize: settings.editorFontSize,
+    zoom: editorUI.zoomLevel / 100,
+    fontKey: settings.editorFontFamily,
+    dark: settings.isDarkTheme,
+  })
 })
 
 const hostClass = computed(() => {

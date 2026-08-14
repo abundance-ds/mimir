@@ -28,7 +28,7 @@ import { undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
 import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
-import { fontFamilyForKey } from '../../../shared/fonts.js'
+import { editorTypographyVars } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
 import EditorContextMenu from './EditorContextMenu.vue'
 
@@ -178,13 +178,12 @@ defineExpose({
 })
 
 const wrapperStyle = computed(() => {
-  const baseFontSize = settings.editorFontSize
-  const zoom = props.zoomLevel / 100
-  const s = {
-    '--editor-size': (baseFontSize * zoom) + 'px',
-    '--editor-line-height': ((22 * baseFontSize / 12) * zoom) + 'px',
-    '--font-mono': fontFamilyForKey(settings.editorFontFamily),
-  }
+  const s = editorTypographyVars({
+    fontSize: settings.editorFontSize,
+    zoom: props.zoomLevel / 100,
+    fontKey: settings.editorFontFamily,
+    dark: settings.isDarkTheme,
+  })
   if (props.maxWidth) {
     s['--editor-max-width'] = props.maxWidth
   }

@@ -6,7 +6,7 @@
     <AppHeader
       :embedded="embedded"
       :showAppMenus="showAppMenus"
-      :recentFiles="fileManager.recentFiles"
+      :recentFiles="fileManager.visibleRecentFiles"
       :canSave="Boolean(currentFile) && currentFile?.kind !== 'pdf' && currentFile?.kind !== 'external'"
       :hasSelection="Boolean(selectionText)"
       :tabs="displayTabs"
@@ -17,7 +17,7 @@
       @open-file="onOpenDialog"
       @save="onSave"
       @save-as="onSaveAs"
-      @close-file="() => closeEditorTab(activeFileIndex)"
+      @close-file="closeActiveEditorTab"
       @open-recent="onOpenRecent"
       @clear-recent="onClearRecent"
       @edit-command="onEditCommand"
@@ -45,7 +45,7 @@
           @configure-models="openSettings('models')"
         />
         <DiffBar
-          v-else-if="diffStore.active && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
+          v-else-if="visibleDiffActive && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
           @accept-all="acceptDiffAndFocus"
           @reject-all="rejectDiffAndFocus"
           @navigate-chunk="onDiffNavigateChunk"
@@ -61,26 +61,26 @@
         />
         <div class="editor-panes flex-1 flex min-h-0 overflow-hidden">
           <BatchDiffView
-            v-if="diffStore.active && diffStore.isBatch && reviewTabActive"
+            v-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
             ref="batchDiffViewRef"
             @all-resolved="onBatchAllResolved"
           />
           <DiffView
-            v-else-if="diffStore.active && (!diffStore.isBatch || diffStore.isBatchFileFocused)"
+            v-else-if="visibleDiffActive && (!diffStore.isBatch || diffStore.isBatchFileFocused)"
             ref="diffViewRef"
             @accept="onDiffChunksResolved"
           />
           <FilePreviewPage
-            v-if="isResourcePreview && !diffStore.active"
+            v-if="isResourcePreview && !visibleDiffActive"
             :file="currentFile"
           />
           <NewTabPage
-            v-else-if="isNewTabPage && !diffStore.active"
+            v-else-if="isNewTabPage && !visibleDiffActive"
             @activated="restoreEditorFocus"
           />
           <EditorSurface
             ref="editorSurfaceRef"
-            v-show="!isResourcePreview && !isNewTabPage && (!diffStore.active || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
+            v-show="!isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :zoomLevel="state.zoomLevel"
@@ -254,6 +254,7 @@ import { createAutoSaveController } from './autoSaveController.js'
 import { fileDisplayName, footerSaveStatus, tabFromFile } from './saveStatus.js'
 import { useSaveFeedbackStore } from '../stores/saveFeedback.js'
 import { useAppUpdateStore } from '../stores/appUpdate.js'
+import { diffIsVisibleForFile } from './workspaceDiffProjection.js'
 
 import AppFooter from './components/shell/AppFooter.vue'
 import AppHeader from './components/shell/AppHeader.vue'
@@ -271,6 +272,8 @@ import { useDiffStore } from '../stores/diff.js'
 const props = defineProps({
   hideSidebar: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
+  workspacePath: { type: String, default: '' },
+  workspacePaths: { type: Array, default: () => [] },
 })
 const emit = defineEmits([
   'closeRequest',
@@ -294,12 +297,26 @@ const releaseEditorSettingsSync = props.embedded
   : editorSettings.startSync()
 
 const fileManager = useFileStore()
-const { currentFile, openFiles, activeFileIndex } = storeToRefs(fileManager)
+const {
+  activeFileIndex,
+  activeVisibleFileIndex,
+  currentFile,
+  openFiles,
+  visibleOpenFiles,
+} = storeToRefs(fileManager)
 
 const commentManager = useCommentsStore()
 const diffStore = useDiffStore()
 const diffViewRef = ref(null)
 const batchDiffViewRef = ref(null)
+
+const visibleDiffActive = computed(() => {
+  return diffIsVisibleForFile(
+    diffStore,
+    currentFile.value,
+    path => fileManager.pathIsVisible(path),
+  )
+})
 
 const selectionText = ref('')
 const cursorLine = ref(0)
@@ -309,13 +326,18 @@ const editorSurfaceRef = ref(null)
 const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
+watch(() => props.workspacePath, (path, previous) => {
+  if (path === previous) return
+  inlineAIState.value = null
+  selectionText.value = ''
+})
 const isNewTabPage = computed(() => currentFile.value?.newTab === true)
 const isResourcePreview = computed(() => ['pdf', 'external'].includes(currentFile.value?.kind))
 const editorToolbarVisible = computed(() => (
   editorSettings.editorToolbarMode !== 'none'
   && !isNewTabPage.value
   && !isResourcePreview.value
-  && !diffStore.active
+  && !visibleDiffActive.value
   && isMarkdownPath(currentFile.value?.path)
 ))
 const inlineAIProjectPath = computed(() => parentPath(currentFile.value?.path))
@@ -356,8 +378,8 @@ const nativeFileOpen = useFileOpen({
 })
 
 const editorLineWidthMap = {
-  normal: '80ch',
-  wide: '100ch',
+  normal: '100ch',
+  wide: '120ch',
   off: '',
 }
 
@@ -400,9 +422,12 @@ const editorContentMaxWidth = computed(() => (
 
 const editorTabs = computed(() => {
   let untitledCount = 0
-  return openFiles.value.map(file => tabFromFile(file, {
-    autoSaveEnabled: editorSettings.editorAutoSave,
-    untitledIndex: file.path ? 0 : ++untitledCount,
+  return visibleOpenFiles.value.map(file => ({
+    ...tabFromFile(file, {
+      autoSaveEnabled: editorSettings.editorAutoSave,
+      untitledIndex: file.path ? 0 : ++untitledCount,
+    }),
+    fileIndex: openFiles.value.indexOf(file),
   }))
 })
 
@@ -410,7 +435,7 @@ const reviewTabActive = ref(false)
 
 const displayTabs = computed(() => {
   const fileTabs = editorTabs.value.map(t => ({ ...t, type: 'file' }))
-  if (!diffStore.isBatch || !diffStore.active) return fileTabs
+  if (!diffStore.isBatch || !visibleDiffActive.value) return fileTabs
   const pending = diffStore.pendingFiles.length
   const total = diffStore.files.length
   return [
@@ -426,10 +451,10 @@ const displayTabs = computed(() => {
 })
 
 const displayActiveTab = computed(() => {
-  if (reviewTabActive.value && diffStore.isBatch && diffStore.active) {
+  if (reviewTabActive.value && diffStore.isBatch && visibleDiffActive.value) {
     return displayTabs.value.length - 1
   }
-  return fileManager.activeFileIndex
+  return activeVisibleFileIndex.value
 })
 
 const saveFeedback = useSaveFeedbackStore()
@@ -515,12 +540,22 @@ const contentSync = useContentSync({
 })
 const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenFileSnapshot } = contentSync
 
+watch(
+  () => [props.embedded, props.workspacePath, props.workspacePaths],
+  ([embedded, workspacePath, workspacePaths]) => {
+    prepareWorkspaceSwitch()
+    if (embedded) fileManager.setWorkspaceScope(workspacePath, workspacePaths)
+    else fileManager.clearWorkspaceScope()
+  },
+  { immediate: true, deep: true },
+)
+
 const externalFileSync = useExternalFileSync({
   fileManager,
   readFile,
   onReloaded: (file) => {
     if (fileManager.currentFile !== file) return
-    if (diffStore.active) diffStore.deactivate()
+    if (visibleDiffActive.value) diffStore.deactivate()
     syncOpenFileSnapshot()
   },
 })
@@ -584,6 +619,7 @@ watch(() => fileManager.activeFileIndex, () => {
 const tabMgmt = useTabManagement({
   fileManager,
   diffStore,
+  diffActive: visibleDiffActive,
   displayTabs,
   reviewTabActive,
   inlineAIState,
@@ -636,8 +672,16 @@ async function closeEditorTab(index) {
   if (closed) {
     await editorSession.flush().catch(reportSessionError)
   }
-  if (openFiles.value.length) restoreEditorFocus()
+  if (visibleOpenFiles.value.length) restoreEditorFocus()
   return closed
+}
+
+function closeActiveEditorTab() {
+  return closeEditorTab(displayActiveTab.value)
+}
+
+function prepareWorkspaceSwitch() {
+  flushEditorContent({ bridge: 'flush' })
 }
 
 function restoreEditorFocus() {
@@ -682,7 +726,7 @@ async function dismissEditorSurface() {
     restoreEditorFocus()
     return true
   }
-  if (diffStore.active) {
+  if (visibleDiffActive.value) {
     await onDiffRejectAll()
     restoreEditorFocus()
     return true
@@ -788,7 +832,7 @@ async function onOpenRecent(path) {
 }
 
 function onClearRecent() {
-  fileManager.setRecentFiles([])
+  fileManager.clearVisibleRecentFiles()
 }
 
 async function onSave() {
@@ -880,7 +924,7 @@ function nativeMenuActions() {
     saveAs: onSaveAs,
     closeTab: props.embedded
       ? requestEmbeddedClose
-      : () => closeEditorTab(activeFileIndex.value),
+      : closeActiveEditorTab,
     quit: requestAppQuit,
     editCommand: onEditCommand,
     rewriteSelection: onRewriteSelection,
@@ -1134,7 +1178,9 @@ const editorCommands = useEditorCommandApi({
   fileManager,
   currentFile,
   openFiles,
+  visibleOpenFiles,
   activeFileIndex,
+  activeVisibleFileIndex,
   editorTabs,
   editorSurfaceRef,
   editorShellRef,
@@ -1185,6 +1231,7 @@ defineExpose({
   mimirOwnsFocus,
   mimirCycleTab,
   mimirCloseActiveTab,
+  mimirPrepareWorkspaceSwitch: prepareWorkspaceSwitch,
   mimirOpenSettings,
 })
 
@@ -1213,13 +1260,13 @@ useKeyboardShortcuts({
   onOpenDialog,
   onNewFile: createBlankFile,
   onNewTab: openNewTabPage,
-  onCloseTab: () => closeEditorTab(activeFileIndex.value),
+  onCloseTab: closeActiveEditorTab,
   onRewriteSelection,
   editorHasFocus: () => Boolean(editorSurfaceRef.value?.hasFocus?.()),
 })
 
 function onEditorKeydown(event) {
-  if (event.key === 'Escape' && diffStore.active) {
+  if (event.key === 'Escape' && visibleDiffActive.value) {
     event.preventDefault()
     void rejectDiffAndFocus().catch((error) => {
       diffStore.setReviewError(error?.message || error)
@@ -1227,7 +1274,7 @@ function onEditorKeydown(event) {
     return
   }
   if (
-    diffStore.active
+    visibleDiffActive.value
     && event.key === 'Enter'
     && (event.metaKey || event.ctrlKey)
   ) {
@@ -1237,7 +1284,7 @@ function onEditorKeydown(event) {
     })
     return
   }
-  if (diffStore.active && diffStore.viewMode === 'diff') {
+  if (visibleDiffActive.value && diffStore.viewMode === 'diff') {
     if (event.key === '[' || (event.key === 'ArrowUp' && event.altKey)) {
       event.preventDefault()
       diffStore.prevChunk()

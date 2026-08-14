@@ -95,11 +95,11 @@ describe('languageExtensionForPath', () => {
 })
 
 describe('lineIndicatorExtensions', () => {
-  it('renders line numbers with a gutter highlight when enabled', () => {
+  it('renders line numbers with gutter and row highlights when enabled', () => {
     const view = makeView(lineIndicatorExtensions(true))
     expect(view.dom.querySelector('.cm-lineNumbers')).toBeTruthy()
     expect(view.dom.querySelector('.cm-activeLineGutter')).toBeTruthy()
-    expect(view.dom.querySelector('.cm-activeLine')).toBeFalsy()
+    expect(view.dom.querySelector('.cm-activeLine')).toBeTruthy()
   })
 
   it('falls back to the active-line row highlight when disabled', () => {

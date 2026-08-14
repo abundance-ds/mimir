@@ -93,10 +93,14 @@ function normalizeEntry(raw) {
   if (!raw || typeof raw !== 'object') return null
   const path = typeof raw.path === 'string' ? raw.path.trim() : ''
   if (path) {
+    const workspacePath = typeof raw.workspacePath === 'string'
+      ? raw.workspacePath.trim()
+      : ''
+    const ownership = workspacePath ? { workspacePath } : {}
     if (raw.dirty === true && typeof raw.content === 'string') {
-      return { path, content: raw.content, dirty: true }
+      return { path, ...ownership, content: raw.content, dirty: true }
     }
-    return { path }
+    return { path, ...ownership }
   }
   const content = typeof raw.content === 'string' ? raw.content : ''
   if (!content) return null

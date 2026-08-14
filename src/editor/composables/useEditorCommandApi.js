@@ -9,7 +9,9 @@ export function useEditorCommandApi({
   fileManager,
   currentFile,
   openFiles,
+  visibleOpenFiles = openFiles,
   activeFileIndex,
+  activeVisibleFileIndex = activeFileIndex,
   editorTabs,
   editorSurfaceRef,
   editorShellRef,
@@ -61,11 +63,11 @@ export function useEditorCommandApi({
     const content = editorSurfaceRef.value?.getContent?.() ?? file.content ?? ''
     return {
       path: file.path || null,
-      name: editorTabs.value[activeFileIndex.value]?.name || basename(file.path),
+      name: editorTabs.value[activeVisibleFileIndex.value]?.name || basename(file.path),
       dirty: Boolean(file.dirty),
       kind: file.kind || 'text',
       preview: Boolean(file.preview),
-      index: activeFileIndex.value,
+      index: activeVisibleFileIndex.value,
       cursor: editorSurfaceRef.value?.getCursor?.() || null,
       content: includeContent ? content : undefined,
     }
@@ -73,12 +75,12 @@ export function useEditorCommandApi({
 
   function mimirTabs() {
     flushEditorContent({ bridge: 'flush' })
-    return openFiles.value.map((file, index) => ({
+    return visibleOpenFiles.value.map((file, index) => ({
       index,
       path: file.path || null,
       name: editorTabs.value[index]?.name || basename(file.path),
       dirty: Boolean(file.dirty),
-      active: index === activeFileIndex.value,
+      active: index === activeVisibleFileIndex.value,
     }))
   }
 
@@ -246,16 +248,16 @@ export function useEditorCommandApi({
   }
 
   function mimirCycleTab(direction = 1) {
-    const length = openFiles.value.length
+    const length = visibleOpenFiles.value.length
     if (length < 2) return false
-    const next = (activeFileIndex.value + direction + length) % length
-    fileManager.setActiveTab(next)
+    const next = (activeVisibleFileIndex.value + direction + length) % length
+    fileManager.setActiveVisibleTab(next)
     return true
   }
 
   async function mimirCloseActiveTab() {
     if (await dismissEditorSurface()) return true
-    return closeEditorTab(activeFileIndex.value)
+    return closeEditorTab(activeVisibleFileIndex.value)
   }
 
   function mimirOpenSettings(section = 'appearance') {

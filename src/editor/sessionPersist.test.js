@@ -96,6 +96,20 @@ describe('sessionPersist', () => {
     ])
   })
 
+  it('persists project ownership without adding it to global files', () => {
+    const state = makeState({
+      openFiles: ref([
+        { path: '/alpha/a.md', content: 'a', workspacePath: '/alpha' },
+        { path: '/tmp/global.md', content: 'global', workspacePath: '' },
+      ]),
+    })
+
+    expect(createSessionSnapshot(state).openFiles).toEqual([
+      { path: '/alpha/a.md', workspacePath: '/alpha' },
+      { path: '/tmp/global.md' },
+    ])
+  })
+
   it('keeps transient PDF and external previews out of the restored editor session', () => {
     const state = makeState({
       openFiles: ref([

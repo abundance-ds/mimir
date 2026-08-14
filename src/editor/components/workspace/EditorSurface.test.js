@@ -6,6 +6,30 @@ import { useSettingsStore } from '../../../stores/settings.js'
 import EditorSurface from './EditorSurface.vue'
 
 describe('EditorSurface feature extensions', () => {
+  it('applies the compact typography scale and theme-aware Commit Mono weight', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(EditorSurface, {
+      props: {
+        content: 'Draft',
+        path: '/work/draft.md',
+        zoomLevel: 125,
+      },
+      global: { plugins: [pinia] },
+    })
+    const settings = useSettingsStore(pinia)
+    const surface = wrapper.get('.editor-wrap').element
+
+    expect(surface.style.getPropertyValue('--editor-size')).toBe('20px')
+    expect(surface.style.getPropertyValue('--editor-line-height')).toBe('27px')
+    expect(surface.style.getPropertyValue('--editor-font-weight')).toBe('450')
+    expect(surface.style.getPropertyValue('--font-mono')).toContain('"Commit Mono"')
+
+    settings.set('editorTheme', 'monokai')
+    await wrapper.vm.$nextTick()
+    expect(surface.style.getPropertyValue('--editor-font-weight')).toBe('400')
+    wrapper.unmount()
+  })
+
   it('reconfigures an already-mounted editor when AI/editor features change', async () => {
     const feature = value => EditorView.contentAttributes.of({ 'data-live-feature': value })
     const wrapper = mount(EditorSurface, {
@@ -25,7 +49,7 @@ describe('EditorSurface feature extensions', () => {
     wrapper.unmount()
   })
 
-  it('moves the active-line highlight between the row and line-number cell', async () => {
+  it('keeps the row highlight and adds the line-number highlight', async () => {
     const pinia = createPinia()
     const wrapper = mount(EditorSurface, {
       props: {
@@ -43,7 +67,7 @@ describe('EditorSurface feature extensions', () => {
     settings.set('editorLineNumbers', true)
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.cm-lineNumbers').exists()).toBe(true)
-    expect(wrapper.find('.cm-activeLine').exists()).toBe(false)
+    expect(wrapper.find('.cm-activeLine').exists()).toBe(true)
     expect(wrapper.find('.cm-activeLineGutter').exists()).toBe(true)
 
     settings.set('editorLineNumbers', false)
