@@ -83,7 +83,12 @@ share a 1.35 line-height ratio and use weight 450 on light themes or 400 on dark
 themes. The editor paper has 16px top and side padding. Normal and Wide line
 widths cap content at 100ch and 120ch; Off follows the viewport. Markdown
 headings stay within a compact 1.30/1.15/1.05 scale so they do not break the
-editing rhythm.
+editing rhythm. H1 uses explicit leading so its larger glyph box cannot crowd
+the next row.
+
+`EditorSurface.vue` asks CodeMirror to measure again after Commit Mono loads and
+after a font, size, theme weight, or zoom change. Font loading does not block the
+surface, and a completed load cannot measure a destroyed editor.
 
 Line numbers are an optional compartment. Their gutter shares the editor paper
 instead of adding a separate slab or divider. The current line always uses a

@@ -128,7 +128,7 @@ before native exit:
 6. Rust disconnects Chat; stops Tracker, closes its live interval, persists
    shutdown time, and checkpoints SQLite; then stops the Routine background
    loop, interrupts live Activities, persists their final state, and flushes
-   the Activity writer.
+   the Activity SQLite store.
 
 Direct window close uses `windowCloseGuard.js`; its `allowNativeClose` flag
 permits exactly the close initiated after confirmation. Reentrant close

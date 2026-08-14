@@ -116,7 +116,7 @@ resizing, rails, widths, and Activity navigation history.
 ## Rust map
 
 - Activity runtime: `src-tauri/src/activities/` (model, supervisor,
-  scrollback, status), `src-tauri/src/activity_commands.rs`,
+  scrollback, store, status), `src-tauri/src/activity_commands.rs`,
   `src-tauri/src/launchers.rs` (presets, detection, argv, MCP injection),
   `src-tauri/src/mimir_cli.rs` (installs `mimir`, skills, Pi extension).
   Docs: [activities.md](activities.md), [agent-setup.md](agent-setup.md).
@@ -173,7 +173,7 @@ ordering: [ipc.md](ipc.md).
 | Path | Owner |
 |---|---|
 | `~/.mimir/launchers.json` | launcher presets |
-| `~/.mimir/activities/` | durable Activity records and scrollback |
+| `~/.mimir/activities/` | Activity SQLite event/checkpoint store and legacy v1 migration files |
 | `~/.mimir/apps/` | local app TOML and app directories |
 | `~/.mimir/app-data/` | app-owned JSON values |
 | `~/.mimir/graph/private/` | private local Business graph Markdown |

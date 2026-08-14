@@ -81,12 +81,11 @@ Active stacks are defined in `src/shared/styles/app.css` and
 
 There is no serif choice. Editor font choices are the single source in
 `src/shared/fonts.js`; an old saved `serif` preference migrates to system Sans.
-Commit Mono uses weight 450 on light themes and 400 on dark themes. The Editor
-uses a 1.35 line-height ratio and disables discretionary ligatures. System Mono
-and Sans remain selectable alternatives. Unused IBM Plex Sans and Mono faces
-remain in `fonts.css` only as reversible experiment assets and are not selected
-by active tokens. UI type is usually 9–13px. Metadata may be uppercase only
-when short; sentences remain normal case.
+System Mono and Sans remain selectable alternatives. Unused IBM Plex Sans and
+Mono faces remain in `fonts.css` only as reversible experiment assets and are
+not selected by active tokens. UI type is usually 9–13px. Metadata may be
+uppercase only when short; sentences remain normal case. See
+[editor-system.md](editor-system.md#codemirror-surface) for Editor typography.
 
 ## Components
 

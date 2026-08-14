@@ -13,7 +13,8 @@ crash.
 | `~/.mimir/session.json` | `session.rs`, `sessionPersist.js` | contains recovery content only for dirty named files and nonempty drafts |
 | `~/.mimir/models.json` | `ai_models.rs` | embedded product defaults replace known model/provider metadata on version migration; unknown user models survive |
 | `~/.mimir/launchers.json` | `launchers.rs` | versioned whole-file config; malformed/unsupported input recovers to defaults with diagnostics |
-| `~/.mimir/activities/*.activity.json` | Activity persistence worker | only durable records; scrollback chunks and sequence state share the same snapshot |
+| `~/.mimir/activities/activities.sqlite3` | Activity store worker | WAL database; compact records, binary ordered terminal events, versioned xterm checkpoints, and normalized search text |
+| `~/.mimir/activities/*.activity.json` | Activity v1 migration only | imported idempotently; a SQLite source marker prevents later reparsing; kept unchanged for one-version rollback and deleted with its Activity |
 | `~/.mimir/routines/*.toml` | user, Routine UI | source files are the database; mutation is revision-guarded |
 | `~/.mimir/routines-state.json` | `routine_runtime.rs` | planner cursor only; definitions remain TOML authority |
 | `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
@@ -27,8 +28,8 @@ is `rs.shoulde.mimir`, keyed by the provider environment-variable name.
 
 ## Atomic writer
 
-All durable writes go through `src-tauri/src/persistence.rs` helpers -- never
-raw `fs::write`. The primitive serializes first, writes to a temp sibling,
+Durable whole-file writes go through `src-tauri/src/persistence.rs` helpers --
+never raw `fs::write`. The primitive serializes first, writes to a temp sibling,
 flushes+syncs, then atomically renames. Existing file permissions survive
 replacement; secret fallback writes apply owner-only permissions before bytes
 enter the temp file. Parent-directory fsync is debounced (~2s); a crash inside
@@ -42,7 +43,7 @@ valid, and malformed state. Malformed bytes are renamed untouched to a unique
 Filesystem errors still fail the operation.
 
 Quarantine currently applies to settings, session, model registry, launchers,
-Activity snapshots, Routine planner state, and business-graph event logs
+legacy Activity migration files, Routine planner state, and business-graph event logs
 (`business_graph/runtime.rs`). Tracker separately runs SQLite `quick_check`;
 an unreadable/damaged database and its WAL/SHM siblings move to a timestamped
 `.corrupt-*` sibling before a clean database is created, while a newer schema
@@ -55,9 +56,10 @@ files remain untouched and appear in graph diagnostics. Delete moves the exact
 source to system Trash and keeps a bounded in-memory backup/undo token for
 immediate restore; the operating system remains the durable recovery surface.
 
-An unsupported Activity persistence version is quarantined even when its JSON
-is valid. Restored live durable Activities are rewritten as interrupted because
-process/PTY handles are intentionally not persisted.
+An unsupported legacy Activity version is quarantined even when its JSON is
+valid. SQLite is authoritative after import. Restored live durable Activities
+are rewritten as interrupted because process/PTY handles are intentionally not
+persisted.
 
 ## Write serialization
 
@@ -69,9 +71,16 @@ snapshot from winning. Each high-frequency owner adds ordering:
 - `src/editor/sessionPersist.js` chains saves after a one-second debounce.
   Cleanup returns the current chain; explicit close flush appends the final
   snapshot.
-- Activity persistence uses one native worker. It batches 20ms of commands and
-  keeps only the latest save/delete per path. Delete and flush acknowledgements
-  are issued only after that batch is applied.
+- Activity persistence uses one bounded native worker queue and one SQLite
+  connection. It batches 20ms of commands into ordered transactions. PTY bytes
+  remain binary BLOBs; Activity record JSON stays compact and never contains
+  the raw terminal tail. Queue saturation applies backpressure to PTY capture.
+- Terminal persistence work must depend on new output, not on total session
+  history. Never serialize the complete scrollback from an output path.
+- Output and resize events share one sequence. A checkpoint transaction checks
+  run id, renderer lease, base revision, and durable watermark, then stores the
+  xterm state and deletes only events that it covers. WAL auto-checkpointing is
+  enabled. Delete and flush acknowledgements follow the committing transaction.
 - Routine planner updates are written atomically after calculation; TOML
   mutations require the caller's source revision to match current bytes.
 - Graph updates compare an optional source revision and use same-directory
@@ -110,7 +119,7 @@ starting the persistence watcher. See `sessionRestore.js`, `sessionPersist.js`,
 
 ## Shutdown durability
 
-Activity worker flush must complete before native exit returns. Full shutdown
+Activity store flush must complete before native exit returns. Full shutdown
 sequence is owned by [runtime-architecture.md](runtime-architecture.md).
 
 ## Change map
@@ -120,7 +129,7 @@ sequence is owned by [runtime-architecture.md](runtime-architecture.md).
 | Atomic persistence primitive | `persistence.rs` and every caller needing special permissions | `persistence.rs` tests, caller recovery tests |
 | Settings shape/write | `local_settings.rs`, `dataDir.js`, `stores/settings.js` | Rust settings tests, `settings.test.js`, `settings.tauri.test.js` |
 | Session shape/recovery | `session.rs`, `sessionPersist.js`, `sessionRestore.js`, Editor hydration | corresponding Rust/JS tests and close-guard tests |
-| Activity persisted record | `activities/model.rs`, `supervisor.rs`, `scrollback.rs` | supervisor restore/quarantine/shutdown tests |
+| Activity record/event/checkpoint | `activities/model.rs`, `supervisor.rs`, `scrollback.rs`, `store.rs` | store CAS/compaction tests; supervisor restore/lease/migration/shutdown tests |
 | Routine planner state | `routines.rs`, `routine_runtime.rs` | planner corruption/restart tests |
 | Business graph source/revision | `business_graph/markdown.rs`, `store.rs`, `runtime.rs` | golden round-trip, conflict, Trash/restore, watcher, migration-no-write tests |
 | Tracker schema/timeline/import | `tracker/store.rs`, `engine.rs`, `report.rs`, `import.rs`, `runtime.rs` | reopen/quarantine, transitions, DST/range, import idempotence/transaction, shutdown tests |

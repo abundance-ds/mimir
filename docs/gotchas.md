@@ -17,6 +17,23 @@ The Unicode 11 addon supplies correct emoji/wide-character cell widths and
 requires `allowProposedApi: true`. Without it xterm throws at load and the
 surface shows an attach error instead of a terminal.
 
+### Terminal checkpoints follow xterm completion, not delivery
+
+`Terminal.write()` parses asynchronously. Do not advance the applied sequence
+when code calls `write`; advance it only in xterm's completion callback. Output
+and resize events must stay in one queue. Restore the checkpoint at its recorded
+columns and rows before applying later resize events. Fit may propose dimensions,
+but only the ordered native resize event may resize the xterm model.
+
+The first visit creates the run's only xterm model. Hidden surfaces keep that
+model subscribed and stop only layout/theme observers. Do not add a hidden
+headless terminal or rebuild the model on selection. The native renderer lease
+and checkpoint revision protect WebView reload/HMR races.
+
+The xterm core, serializer, and Unicode addon are exact-version dependencies.
+A checkpoint is a versioned Mimir format even though its payload is a VT stream.
+Change those versions together with checkpoint compatibility tests.
+
 ### Font readiness and pixel snap
 
 Terminal initialization selects the native system monospace stack and waits for
@@ -99,9 +116,9 @@ the generic name `mimir` or reuse it for another transport.
 
 ### Durable does not mean a process survives relaunch
 
-Durable Activity metadata and bounded scrollback survive. PTY and child handles
-do not. A record restored after Mimir exits becomes interrupted and can start a
-new continuation where its CLI supports one.
+Durable Activity metadata, terminal checkpoint, and bounded event tail survive.
+PTY and child handles do not. A record restored after Mimir exits becomes
+interrupted and can start a new continuation where its CLI supports one.
 
 ### Archive and clear require an ended Activity
 
@@ -113,8 +130,8 @@ enforcement.
 
 ### `updatedAt` is a live stamp, not a stable sort key
 
-The supervisor rewrites `updated_at` on each status change and each 250 ms of
-persisted PTY output (`OUTPUT_PERSIST_INTERVAL_MS`). A Sidebar sort that uses
+The supervisor rewrites `updated_at` on each status change and each 2 seconds of
+persisted PTY output (`OUTPUT_RECORD_PERSIST_INTERVAL_MS`). A Sidebar sort that uses
 it makes busy rows change places while the user reads them. Manual order gives
 each Activity a saved position when it first appears
 (`WorkbenchApp.vue`), and unsaved rows fall back to `createdAt`

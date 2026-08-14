@@ -55,8 +55,8 @@ The Sidebar projects the active working set for the open workspace. Activities
 launched with a workspace-cwd preset appear only for that workspace; home and
 custom-cwd launchers and direct process Apps remain global. This is presentation
 only: switching workspaces never stops, pauses, retargets, or removes a native
-Activity. Hidden terminal surfaces stay mounted and recover incremental native
-scrollback when selected again.
+Activity. A visited terminal surface stays mounted and keeps its one xterm
+model current while hidden.
 
 Scope is captured in the Activity origin at launch; it does not change later
 when a launcher preset is edited. `workspacePath` names the owning project,
@@ -79,25 +79,30 @@ first. Project-switcher presentation and search behavior are owned by
 `ActivitySupervisor` owns PTYs and child processes. The runtime store keeps one
 ordered record subscription for upserts, status, and exit.
 
-- PTY output is stored as raw byte chunks so split UTF-8 sequences survive.
-- Replay uses monotonically increasing sequence numbers and can continue after
-  the last renderer-seen chunk.
-- Resize updates the native PTY.
+- PTY output stays as raw bytes so split UTF-8 sequences survive transport.
+- Output and resize operations share one monotonically increasing event
+  sequence. Replay therefore restores the geometry in which output occurred.
+- The native journal is the recovery transport. xterm.js is the terminal state
+  engine; Mimir does not implement a second VT parser.
 - Stop is safe to repeat.
 - Live agent status is inferred from output and silence without changing PTY
   ownership.
-- Activity surfaces mount on first visit, not once per saved record.
-- Only the active terminal surface owns an output subscription, resize
-  observer, and theme observer. A hidden surface releases them and requests
-  sequence-incremental native scrollback when selected again. A generation
-  token prevents rapid active/inactive switching from stranding a surface
-  without a listener.
+- Activity surfaces mount on first visit, not once per saved record. Each
+  mounted PTY run owns exactly one xterm model. It continues to apply output
+  while hidden; only its layout and theme observers stop.
+- xterm write completion advances the applied event watermark. It never
+  advances when output is only queued.
+- After a quiet period, xterm's serializer produces a versioned terminal
+  checkpoint. Native compare-and-set revision checks, run checks, durable
+  sequence checks, and a single-owner lease prevent stale WebViews from
+  overwriting or trimming newer state.
 
 Plain terminals start ephemeral. Archive or Close (Cmd/Ctrl+W) promotes a
 terminal to durable retention and preserves it in History. Agent and routine
-runs are durable from launch. Durable Activities persist bounded scrollback under
-`~/.mimir/activities/`. Retained scrollback defaults to 1 MB for terminals and
-2 MB for durable agent/routine runs
+runs are durable from launch. `~/.mimir/activities/activities.sqlite3` stores
+compact Activity metadata, binary terminal events, and terminal checkpoints.
+The uncheckpointed event tail defaults to 1 MB for terminals and 2 MB for
+durable agent/routine runs
 (`DEFAULT_TERMINAL_SCROLLBACK_BYTES` / `DEFAULT_DURABLE_SCROLLBACK_BYTES` in
 `supervisor.rs`); `ActivitySpawnRequest.scrollback_byte_cap` overrides the cap
 per spawn. Durable records restore after relaunch; any process that was live
@@ -105,10 +110,11 @@ becomes interrupted because Mimir does not pretend that an old PTY is still
 attached.
 
 The renderer installs `mimir://activity-event` before calling `activity_list`.
-Events project upsert/status/exit, while the initial list closes the startup
-gap. Native persistence uses a single batching worker that keeps the latest
-save/delete per Activity path; `activity_flush` and shutdown wait for its
-acknowledgement. See [persistence.md](persistence.md) and [ipc.md](ipc.md).
+Events project upsert/status/output/resize/exit, while the initial list closes
+the startup gap. A terminal surface also listens before it atomically acquires
+its checkpoint lease and durable restore state. `activity_flush` and shutdown
+wait for the SQLite worker. See [persistence.md](persistence.md) and
+[ipc.md](ipc.md).
 
 ## Sidebar presentation
 
@@ -119,8 +125,8 @@ status. It deliberately does not distinguish `done` from `idle`:
 - `needs-input`: orange `attn` dot and relative time;
 - output received while another Activity is selected: pale blue `info` dot
   and relative time, cleared when selected;
-- any exposed process, provider, or resume error: red `rem` dot and relative
-  time;
+- any exposed process, surface/API, provider/authentication, or resume error:
+  red `rem` dot and relative time;
 - all other states: relative time only.
 
 Activity icons remain clean. The right meta position is the only status
@@ -130,7 +136,11 @@ hours, days, weeks, months, or years, refreshed by one minute ticker.
 ## Terminal surface
 
 `src/mimir/activities/TerminalActivity.vue` hosts xterm.js for terminal and
-agent Activities. Non-obvious constraints are in
+agent Activities. The xterm core, serializer, Unicode, Fit, Web Links, and WebGL
+packages use exact compatible versions because a checkpoint records its format,
+engine, and Unicode versions. History search uses normalized xterm buffer text
+from the last checkpoint plus the uncheckpointed event tail; overwritten raw
+TUI redraws are not the durable search model. Non-obvious constraints are in
 [gotchas.md](gotchas.md#terminal).
 
 ## Resume
@@ -162,6 +172,6 @@ second Resume action. Deliberately stopped Activities never enter this flow.
 - `src/mimir/components/WorkbenchSidebar.vue`
 
 Primary tests are colocated native tests in `activities/model.rs`,
-`scrollback.rs`, `status.rs`, and `supervisor.rs`, plus
+`scrollback.rs`, `store.rs`, `status.rs`, and `supervisor.rs`, plus
 `src/stores/activityRuntime.test.js`, `activities.test.js`, and Activity
 surface/sidebar tests.
