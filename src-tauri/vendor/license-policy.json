@@ -15,6 +15,7 @@
     "MIT-0",
     "MPL-2.0",
     "NCSA",
+    "OFL-1.1",
     "OpenSSL",
     "Python-2.0",
     "Unicode-3.0",
@@ -53,6 +54,15 @@
       "license": "MIT",
       "downloadLocation": "https://github.com/ggerganov/whisper.cpp/tree/v1.8.3",
       "purl": "pkg:github/ggerganov/whisper.cpp@v1.8.3"
+    },
+    {
+      "id": "vendor:commit-mono@1.143",
+      "name": "Commit Mono variable webfont",
+      "version": "1.143",
+      "license": "OFL-1.1",
+      "downloadLocation": "https://raw.githubusercontent.com/eigilnikolajsen/commit-mono/d407cd2bf8e01ca1db70544052fbbb9606406c3b/src/fonts/fontlab/CommitMonoV143-VF.woff2",
+      "sha256": "f342ca6c3f2597e6c0fcd84b3f3ed64d3ce5bdb6d0af19d190d645a558b1cf29",
+      "purl": "pkg:github/eigilnikolajsen/commit-mono@d407cd2bf8e01ca1db70544052fbbb9606406c3b"
     },
     {
       "id": "model:ggml-small.bin@c521a4b02f422512d734391fdf08bb08c0862f68",

@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 696 Cargo packages, 318 npm packages, and 3 reviewed embedded/downloadable assets.
+Inventory: 696 Cargo packages, 318 npm packages, and 4 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -1030,4 +1030,5 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | npm:ws@8.21.1 | MIT | https://registry.npmjs.org/ws/-/ws-8.21.1.tgz | fb43539d6efb7c537f0e3422ea4fd2abf62f9384a06a3c3bbab5bc57e6ac8d79d1803b3d8321a475bec4ce07e10388285ec44864a136f1fcc85c11c4ce1ba25b |
 | npm:zod@4.4.3 | MIT | https://registry.npmjs.org/zod/-/zod-4.4.3.tgz | cad10d163209165d94c1882575eda37215b61f09b818914b0e249759d4eb25004837d15cca9ee7e0387124489634024c575fc1a967d6fe4920ef55037072724d |
 | vendor:anarlog@08aad83f0c5cef1317d74a31519ae3190d726504 | MIT | https://github.com/fastrepl/anarlog/tree/08aad83f0c5cef1317d74a31519ae3190d726504 |  |
+| vendor:commit-mono@1.143 | OFL-1.1 | https://raw.githubusercontent.com/eigilnikolajsen/commit-mono/d407cd2bf8e01ca1db70544052fbbb9606406c3b/src/fonts/fontlab/CommitMonoV143-VF.woff2 | f342ca6c3f2597e6c0fcd84b3f3ed64d3ce5bdb6d0af19d190d645a558b1cf29 |
 | vendor:whisper.cpp@1.8.3 | MIT | https://github.com/ggerganov/whisper.cpp/tree/v1.8.3 |  |
