@@ -84,4 +84,38 @@ describe('activity spawn sizing', () => {
       limit: 12,
     })
   })
+
+  it('passes terminal lease and checkpoint revisions without reshaping them', async () => {
+    const api = await freshModule()
+    const checkpoint = {
+      activityId: 'agent:one',
+      runId: 'run-1',
+      ownerId: 'webview-1',
+      leaseGeneration: 2,
+      baseRevision: 3,
+      throughSequence: 40,
+      cols: 100,
+      rows: 30,
+      formatVersion: 1,
+      engineVersion: '6.0.0',
+      unicodeVersion: '11',
+      data: 'state',
+      searchText: 'visible',
+    }
+
+    await api.attachTerminalActivity('agent:one', 'webview-1')
+    await api.checkpointTerminalActivity(checkpoint)
+    await api.releaseTerminalActivity('agent:one', 'webview-1', 2)
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'activity_terminal_attach', {
+      activityId: 'agent:one',
+      ownerId: 'webview-1',
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'activity_terminal_checkpoint', checkpoint)
+    expect(invoke).toHaveBeenNthCalledWith(3, 'activity_terminal_release', {
+      activityId: 'agent:one',
+      ownerId: 'webview-1',
+      leaseGeneration: 2,
+    })
+  })
 })

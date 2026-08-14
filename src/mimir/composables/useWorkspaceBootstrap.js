@@ -56,6 +56,9 @@ export function useWorkspaceBootstrap({
     if (runtimeResult.status === 'rejected') {
       diagnostic.value = activityRuntime.error || errorMessage(runtimeResult.reason)
     }
+    const launcherLoadFailure = launchersResult.status === 'rejected'
+      ? `Launcher catalog could not load: ${errorMessage(launchersResult.reason)}`
+      : ''
     if (toolRuntimeResult.status === 'rejected') {
       diagnostic.value = `MCP tools could not start: ${errorMessage(toolRuntimeResult.reason)}`
     }
@@ -77,12 +80,12 @@ export function useWorkspaceBootstrap({
     }
     initialized.value = true
     persistWorkbench()
-    if (launchersResult.status === 'fulfilled' && runtimeResult.status === 'fulfilled') {
-      void resumeInterruptedAgentsAtStartup()
+    if (runtimeResult.status === 'fulfilled') {
+      void resumeInterruptedAgentsAtStartup({ launcherLoadFailure })
     }
   }
 
-  async function resumeInterruptedAgentsAtStartup() {
+  async function resumeInterruptedAgentsAtStartup({ launcherLoadFailure = '' } = {}) {
     const projectPath = normalizedWorkspacePath(workspaceFiles.workspacePath)
     if (!projectPath) return
     const generation = ++automaticResumeGeneration
@@ -91,8 +94,9 @@ export function useWorkspaceBootstrap({
     for (const activity of activities.visibleActivities) {
       if (!isCurrentProjectInterruptedAgent(activity, projectPath)) continue
       const presetId = activity.source?.presetId || activity.source?.launcherId
-      const preset = presetId ? launchers.byId(presetId) : null
-      const unavailable = automaticResumeUnavailableReason(activity, preset)
+      const preset = !launcherLoadFailure && presetId ? launchers.byId(presetId) : null
+      const unavailable = launcherLoadFailure
+        || automaticResumeUnavailableReason(activity, preset)
       if (unavailable) {
         activityRuntime.markAutomaticResumeFailure(activity.id, unavailable)
         continue

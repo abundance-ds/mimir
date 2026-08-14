@@ -105,6 +105,7 @@
                 @open-settings="openSettings"
                 @start-work="startGraphWork"
                 @diagnostic="showDiagnostic"
+                @surface-error="recordActivitySurfaceError"
               />
             </template>
           </ActivityHost>
@@ -1300,6 +1301,11 @@ async function launchExternalAppActivity(app, plan, activity) {
 
 function showDiagnostic(message) {
   diagnostic.value = String(message || '')
+}
+
+function recordActivitySurfaceError(payload) {
+  if (!payload?.activityId || !payload.error) return
+  activityRuntime.markActivityError(payload.activityId, payload.error)
 }
 
 function setActivitySurface(id, surface) {

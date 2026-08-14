@@ -94,6 +94,7 @@ import '@xterm/xterm/css/xterm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -103,8 +104,10 @@ import {
   IconRefresh,
 } from '@tabler/icons-vue'
 import {
-  activitySnapshot,
+  attachTerminalActivity,
+  checkpointTerminalActivity,
   listenToActivityEvents,
+  releaseTerminalActivity,
   resizeActivity,
   stopActivity,
   writeActivity,
@@ -112,7 +115,6 @@ import {
 import {
   eventActivityId,
   isEndedStatus,
-  orderedReplayChunks,
   prepareTerminalFonts,
   readTerminalTheme,
   terminalBytes,
@@ -133,6 +135,7 @@ const emit = defineEmits([
   'stop',
   'restart',
   'restart-ready',
+  'surface-error',
 ])
 
 const surface = ref(null)
@@ -143,6 +146,13 @@ const loading = ref(true)
 const stopping = ref(false)
 const error = ref('')
 const renderer = ref('dom')
+
+const CHECKPOINT_FORMAT_VERSION = 1
+const XTERM_VERSION = '6.0.0'
+const UNICODE_VERSION = '11'
+const CHECKPOINT_QUIET_MS = 750
+const CHECKPOINT_MAX_MS = 30_000
+const CHECKPOINT_OUTPUT_BYTES = 512 * 1024
 
 const activityId = computed(() => props.activity.id)
 const mode = computed(() => props.activity.kind === 'agent' ? 'agent' : 'terminal')
@@ -162,6 +172,7 @@ const restartTitle = computed(() => (
 ))
 let terminal = null
 let fitAddon = null
+let serializeAddon = null
 let webglAddon = null
 let webglContextLossDisposable = null
 let dataDisposable = null
@@ -170,12 +181,24 @@ let themeObserver = null
 let unlistenEvents = null
 let disposed = false
 let hydrated = false
-let lastSequence = 0
+let appliedSequence = 0
+let queuedSequence = 0
 let pendingEvents = []
 let inputQueue = Promise.resolve()
+let terminalEventQueue = Promise.resolve()
 let resizeFrame = 0
 let lastSize = { cols: 0, rows: 0 }
 let entryFocusRequested = false
+let ownerId = crypto.randomUUID()
+let runId = ''
+let leaseGeneration = 0
+let checkpointRevision = 0
+let checkpointThroughSequence = 0
+let checkpointTimer = 0
+let checkpointInFlight = null
+let checkpointAgain = false
+let outputBytesSinceCheckpoint = 0
+let lastCheckpointAt = performance.now()
 
 onMounted(initialize)
 
@@ -204,103 +227,107 @@ async function initialize() {
       allowProposedApi: true,
     })
     fitAddon = new FitAddon()
+    serializeAddon = new SerializeAddon()
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(new WebLinksAddon())
     terminal.loadAddon(new Unicode11Addon())
-    terminal.unicode.activeVersion = '11'
+    terminal.loadAddon(serializeAddon)
+    terminal.unicode.activeVersion = UNICODE_VERSION
     terminal.attachCustomKeyEventHandler(handleCustomKey)
+
+    // Listen before reading the durable restore state. Events that arrive
+    // during the native read stay queued and are de-duplicated by sequence.
+    const stopListening = await listenToActivityEvents(handleActivityEvent)
+    if (disposed) {
+      stopListening()
+      return
+    }
+    unlistenEvents = stopListening
+    await attachTerminalRun()
+    if (disposed || !surface.value) return
     terminal.open(surface.value)
     if (entryFocusRequested && props.active) focusTerminal()
     else entryFocusRequested = false
     installWebglRenderer()
     dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
-    if (props.active) await attachActiveSurface()
+    if (props.active) activateSurface()
+    loading.value = false
+    emit('ready', { activityId: activityId.value, snapshot: null })
+    if (ended.value) {
+      emit('restart-ready', {
+        activityId: activityId.value,
+        record: props.activity,
+      })
+    }
   } catch (cause) {
     loading.value = false
-    error.value = errorMessage(cause, 'Could not attach to this Activity.')
+    exposeSurfaceError(cause, 'Could not attach to this Activity.')
   }
 }
 
-let attachPromise = null
-let attachEpoch = 0
-function attachActiveSurface() {
-  if (disposed || unlistenEvents) return attachPromise || Promise.resolve()
-  if (attachPromise) return attachPromise
-  const epoch = ++attachEpoch
-  const pending = (async () => {
-    installResizeObserver()
-    installThemeObserver()
-
-    // Subscribe before snapshotting. Inactive surfaces have no listener or
-    // observers; native scrollback catches them up from `lastSequence` when
-    // selected again without rebuilding their xterm instance.
-    const stopListening = await listenToActivityEvents(handleActivityEvent)
-    if (disposed || !props.active || epoch !== attachEpoch) {
-      stopListening()
-      return
-    }
-    unlistenEvents = stopListening
-    hydrated = false
-    pendingEvents = []
-
-    scheduleFit()
-    const snapshot = await activitySnapshot(
+async function attachTerminalRun() {
+  hydrated = false
+  const attachment = await attachTerminalActivity(activityId.value, ownerId)
+  if (disposed) {
+    await releaseTerminalActivity(
       activityId.value,
-      lastSequence > 0 ? lastSequence : null,
-    )
-    if (disposed || !props.active || epoch !== attachEpoch) return
-    applySnapshot(snapshot)
-    const snapshotEnded = ended.value
-    hydrated = true
-    const queued = pendingEvents
-    pendingEvents = []
-    for (const event of queued) applyEvent(event)
-    loading.value = false
-    emit('ready', { activityId: activityId.value, snapshot })
-    if (snapshotEnded) {
-      emit('restart-ready', {
-        activityId: activityId.value,
-        record: snapshot.record,
-      })
-    }
+      ownerId,
+      Number(attachment.leaseGeneration || 0),
+    ).catch(() => {})
+    return
+  }
+  runId = attachment.runId
+  leaseGeneration = Number(attachment.leaseGeneration || 0)
+  checkpointRevision = Number(attachment.revision || 0)
+  checkpointThroughSequence = Number(attachment.checkpoint?.throughSequence || 0)
+  appliedSequence = Number(attachment.baseSequence || 0)
+  queuedSequence = appliedSequence
+  outputBytesSinceCheckpoint = 0
+  lastCheckpointAt = performance.now()
 
-    await nextTick()
-    scheduleFit()
-    if (activityPaneOwnsFocus()) terminal?.focus()
-  })().finally(() => {
-    if (attachPromise === pending) attachPromise = null
-  })
-  attachPromise = pending
-  return attachPromise
+  const record = attachment.record
+  status.value = record?.status || status.value
+  hasExited.value = Boolean(record?.session?.exit)
+  live.value = status.value !== 'interrupted' && (
+    Boolean(attachment.live) || Boolean(record?.session && !record.session.exit)
+  )
+
+  const checkpoint = attachment.checkpoint
+  if (checkpoint) {
+    if (Number(checkpoint.formatVersion) !== CHECKPOINT_FORMAT_VERSION) {
+      throw new Error(`Unsupported terminal checkpoint format ${checkpoint.formatVersion}.`)
+    }
+    terminal.resize(Number(checkpoint.cols || 80), Number(checkpoint.rows || 24))
+    await terminalWrite(String(checkpoint.data || ''))
+    appliedSequence = Number(checkpoint.throughSequence || 0)
+    queuedSequence = appliedSequence
+  } else {
+    terminal.resize(Number(attachment.cols || 80), Number(attachment.rows || 24))
+  }
+
+  for (const event of attachment.events || []) queueTerminalEvent(event)
+  await terminalEventQueue
+  hydrated = true
+  const queued = pendingEvents
+  pendingEvents = []
+  for (const event of queued) applyEvent(event)
 }
 
-function detachInactiveSurface() {
-  attachEpoch += 1
-  attachPromise = null
-  hydrated = false
-  pendingEvents = []
-  unlistenEvents?.()
-  unlistenEvents = null
+function activateSurface() {
+  if (disposed) return
+  installResizeObserver()
+  installThemeObserver()
+  nextTick().then(() => {
+    scheduleFit()
+    if (activityPaneOwnsFocus()) terminal?.focus()
+  })
+}
+
+function deactivateSurface() {
   resizeObserver?.disconnect()
   resizeObserver = null
   themeObserver?.disconnect()
   themeObserver = null
-}
-
-function applySnapshot(snapshot) {
-  const record = snapshot?.record
-  status.value = record?.status || status.value
-  hasExited.value = Boolean(record?.session?.exit)
-  // Agent status "done" can be a live completion pulse that settles back to
-  // idle. A session without an exit record remains interactive.
-  live.value = status.value !== 'interrupted' && (
-    Boolean(snapshot?.live) || Boolean(record?.session && !record.session.exit)
-  )
-  for (const chunk of orderedReplayChunks(snapshot)) writeOutput(chunk)
-  lastSequence = Math.max(
-    lastSequence,
-    Number(snapshot?.scrollback?.lastSequence || 0),
-  )
 }
 
 function handleActivityEvent(event) {
@@ -313,8 +340,8 @@ function handleActivityEvent(event) {
 }
 
 function applyEvent(event) {
-  if (event.type === 'output') {
-    writeOutput(event)
+  if (event.type === 'output' || event.type === 'resize') {
+    queueTerminalEvent(event)
     return
   }
   if (event.type === 'status') {
@@ -338,15 +365,125 @@ function applyEvent(event) {
       activityId: activityId.value,
       record: event.record || null,
     })
+    void persistCheckpoint(true)
   }
 }
 
-function writeOutput(chunk) {
-  const sequence = Number(chunk?.sequence || 0)
-  if (sequence && sequence <= lastSequence) return
-  const bytes = terminalBytes(chunk?.bytes)
-  if (bytes.byteLength) terminal?.write(bytes)
-  if (sequence) lastSequence = sequence
+function queueTerminalEvent(event) {
+  const sequence = Number(event?.sequence || 0)
+  if (!sequence || sequence <= queuedSequence) return terminalEventQueue
+  queuedSequence = sequence
+  terminalEventQueue = terminalEventQueue.then(async () => {
+    if (event.type === 'resize') {
+      const cols = Number(event.cols || 0)
+      const rows = Number(event.rows || 0)
+      if (cols > 0 && rows > 0 && (terminal.cols !== cols || terminal.rows !== rows)) {
+        terminal.resize(cols, rows)
+      }
+    } else {
+      const bytes = terminalBytes(event.bytes)
+      if (bytes.byteLength) {
+        await terminalWrite(bytes)
+        outputBytesSinceCheckpoint += bytes.byteLength
+      }
+    }
+    // Terminal.write parses asynchronously. This watermark moves only from
+    // its completion callback, after the model contains the event.
+    appliedSequence = sequence
+    scheduleCheckpoint()
+  }).catch((cause) => {
+    exposeSurfaceError(cause, 'Could not apply terminal output.')
+  })
+  return terminalEventQueue
+}
+
+function terminalWrite(value) {
+  if (!value?.length) return Promise.resolve()
+  return new Promise((resolve) => terminal.write(value, resolve))
+}
+
+function scheduleCheckpoint() {
+  if (!serializeAddon || appliedSequence <= checkpointThroughSequence) return
+  if (checkpointTimer) clearTimeout(checkpointTimer)
+  const elapsed = performance.now() - lastCheckpointAt
+  const immediate = outputBytesSinceCheckpoint >= CHECKPOINT_OUTPUT_BYTES
+    || elapsed >= CHECKPOINT_MAX_MS
+  checkpointTimer = window.setTimeout(() => {
+    checkpointTimer = 0
+    void persistCheckpoint()
+  }, immediate ? 0 : Math.min(CHECKPOINT_QUIET_MS, CHECKPOINT_MAX_MS - elapsed))
+}
+
+async function persistCheckpoint(force = false) {
+  if (!serializeAddon || !runId || !leaseGeneration) return null
+  if (checkpointInFlight) {
+    checkpointAgain = checkpointAgain || force || appliedSequence > checkpointThroughSequence
+    return checkpointInFlight
+  }
+  await terminalEventQueue
+  if (!force && appliedSequence <= checkpointThroughSequence) return null
+  if (appliedSequence < checkpointThroughSequence) return null
+
+  const expectedRunId = runId
+  const expectedLease = leaseGeneration
+  const throughSequence = appliedSequence
+  const baseRevision = checkpointRevision
+  const request = {
+    activityId: activityId.value,
+    runId: expectedRunId,
+    ownerId,
+    leaseGeneration: expectedLease,
+    baseRevision,
+    throughSequence,
+    cols: terminal.cols,
+    rows: terminal.rows,
+    formatVersion: CHECKPOINT_FORMAT_VERSION,
+    engineVersion: XTERM_VERSION,
+    unicodeVersion: UNICODE_VERSION,
+    data: serializeAddon.serialize({ scrollback: 10_000 }),
+    searchText: terminalSearchText(),
+  }
+  const pending = checkpointTerminalActivity(request)
+    .then((saved) => {
+      if (runId !== expectedRunId || leaseGeneration !== expectedLease) return saved
+      checkpointRevision = Number(saved.revision || baseRevision)
+      checkpointThroughSequence = Number(saved.throughSequence || throughSequence)
+      outputBytesSinceCheckpoint = 0
+      lastCheckpointAt = performance.now()
+      return saved
+    })
+    .catch((cause) => {
+      // A new WebView or respawn intentionally invalidates the old owner.
+      if (!disposed && runId === expectedRunId && leaseGeneration === expectedLease) {
+        exposeSurfaceError(cause, 'Could not save terminal state.')
+      }
+      return null
+    })
+    .finally(() => {
+      if (checkpointInFlight === pending) checkpointInFlight = null
+      if (checkpointAgain) {
+        checkpointAgain = false
+        scheduleCheckpoint()
+      }
+    })
+  checkpointInFlight = pending
+  return pending
+}
+
+function terminalSearchText() {
+  const buffer = terminal?.buffer?.active
+  if (!buffer) return ''
+  const encoder = new TextEncoder()
+  const lines = []
+  let bytes = 0
+  for (let index = buffer.length - 1; index >= 0; index -= 1) {
+    const line = buffer.getLine(index)?.translateToString(true) || ''
+    const lineBytes = encoder.encode(`${line}\n`).byteLength
+    if (bytes + lineBytes > 4 * 1024 * 1024) break
+    lines.push(line)
+    bytes += lineBytes
+  }
+  return lines.reverse().join('\n').replace(/\n+$/, '')
 }
 
 function enqueueInput(bytes) {
@@ -355,7 +492,7 @@ function enqueueInput(bytes) {
     .then(() => writeActivity(activityId.value, bytes))
     .then(() => true)
     .catch((cause) => {
-      error.value = errorMessage(cause, 'Could not send terminal input.')
+      exposeSurfaceError(cause, 'Could not send terminal input.')
       return false
     })
   return inputQueue
@@ -421,7 +558,7 @@ async function stop() {
     emit('stop', { activityId: activityId.value })
   } catch (cause) {
     stopping.value = false
-    error.value = errorMessage(cause, 'Could not stop this Activity.')
+    exposeSurfaceError(cause, 'Could not stop this Activity.')
   }
 }
 
@@ -461,7 +598,7 @@ function activityPaneOwnsFocus() {
 }
 
 function installResizeObserver() {
-  if (typeof ResizeObserver === 'undefined') return
+  if (resizeObserver || typeof ResizeObserver === 'undefined') return
   resizeObserver = new ResizeObserver(scheduleFit)
   resizeObserver.observe(surface.value)
 }
@@ -475,8 +612,9 @@ function scheduleFit() {
     surface.value.style.transform = ''
     const rect = surface.value.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return
+    let proposed
     try {
-      fitAddon.fit()
+      proposed = fitAddon.proposeDimensions()
     } catch {
       return
     }
@@ -484,11 +622,18 @@ function scheduleFit() {
       .querySelector('.xterm-screen canvas, .xterm-screen')
       ?.getBoundingClientRect() || rect
     snapToDeviceGrid(renderRect)
-    const size = { cols: terminal.cols, rows: terminal.rows }
+    const size = {
+      cols: Number(proposed?.cols || 0),
+      rows: Number(proposed?.rows || 0),
+    }
     if (size.cols <= 0 || size.rows <= 0) return
     if (size.cols === lastSize.cols && size.rows === lastSize.rows) return
     lastSize = size
-    resizeActivity(activityId.value, size.cols, size.rows).catch(() => {})
+    resizeActivity(activityId.value, size.cols, size.rows).catch(() => {
+      if (lastSize.cols === size.cols && lastSize.rows === size.rows) {
+        lastSize = { cols: 0, rows: 0 }
+      }
+    })
   })
 }
 
@@ -507,7 +652,7 @@ function snapDelta(value, scale) {
 }
 
 function installThemeObserver() {
-  if (typeof MutationObserver === 'undefined') return
+  if (themeObserver || typeof MutationObserver === 'undefined') return
   themeObserver = new MutationObserver(() => {
     if (terminal) terminal.options.theme = readTerminalTheme()
   })
@@ -522,20 +667,35 @@ function installThemeObserver() {
 // run's screen and sequence watermark before hydrating again.
 watch(
   () => props.activity.session?.runId,
-  async (runId, previousRunId) => {
-    if (!runId || !previousRunId || runId === previousRunId || disposed) return
+  async (nextRunId, previousRunId) => {
+    if (!nextRunId || !previousRunId || nextRunId === previousRunId || disposed) return
+    hydrated = false
+    pendingEvents = []
+    await terminalEventQueue
+    await persistCheckpoint(true)
+    if (runId && leaseGeneration) {
+      await releaseTerminalActivity(activityId.value, ownerId, leaseGeneration).catch(() => {})
+    }
     hasExited.value = false
     live.value = true
     stopping.value = false
     error.value = ''
-    lastSequence = 0
+    appliedSequence = 0
+    queuedSequence = 0
+    checkpointRevision = 0
+    checkpointThroughSequence = 0
+    leaseGeneration = 0
+    runId = ''
     lastSize = { cols: 0, rows: 0 }
     terminal?.reset()
-    if (props.active) {
-      detachInactiveSurface()
-      loading.value = true
-      await attachActiveSurface()
+    loading.value = true
+    try {
+      await attachTerminalRun()
+    } catch (cause) {
+      exposeSurfaceError(cause, 'Could not attach to the resumed Activity.')
     }
+    loading.value = false
+    if (props.active) activateSurface()
   },
 )
 
@@ -559,13 +719,13 @@ watch(
 
 watch(
   () => props.active,
-  async (active) => {
+  (active) => {
     if (disposed) return
     if (!active) {
-      detachInactiveSurface()
+      deactivateSurface()
       return
     }
-    await attachActiveSurface()
+    activateSurface()
   },
 )
 
@@ -580,18 +740,35 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  const finalCheckpoint = persistCheckpoint(true)
+  const finalRunId = runId
+  const finalLeaseGeneration = leaseGeneration
   disposed = true
   hydrated = false
   pendingEvents = []
+  if (checkpointTimer) clearTimeout(checkpointTimer)
+  checkpointTimer = 0
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
   resizeFrame = 0
-  detachInactiveSurface()
+  deactivateSurface()
+  unlistenEvents?.()
+  unlistenEvents = null
   dataDisposable?.dispose()
   dataDisposable = null
   webglContextLossDisposable?.dispose()
   webglContextLossDisposable = null
-  terminal?.dispose()
-  terminal = null
+  void finalCheckpoint.finally(async () => {
+    if (finalRunId && finalLeaseGeneration) {
+      await releaseTerminalActivity(
+        activityId.value,
+        ownerId,
+        finalLeaseGeneration,
+      ).catch(() => {})
+    }
+    terminal?.dispose()
+    terminal = null
+    serializeAddon = null
+  })
   webglAddon = null
   renderer.value = 'dom'
   // ActivitySupervisor owns the process. Detaching this renderer surface must
@@ -611,6 +788,15 @@ function clampFontSize(value) {
 
 function errorMessage(cause, fallback) {
   return cause instanceof Error ? cause.message : String(cause || fallback)
+}
+
+function exposeSurfaceError(cause, fallback) {
+  error.value = errorMessage(cause, fallback)
+  emit('surface-error', {
+    activityId: activityId.value,
+    error: error.value,
+  })
+  return error.value
 }
 
 function statusFromExit(reason) {

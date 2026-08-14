@@ -12,6 +12,7 @@ const editorNew = vi.hoisted(() => vi.fn())
 const editorPrepareWorkspaceSwitch = vi.hoisted(() => vi.fn())
 const terminalPaste = vi.hoisted(() => vi.fn())
 const terminalFocus = vi.hoisted(() => vi.fn())
+const chatFocus = vi.hoisted(() => vi.fn())
 const toolRuntimeStart = vi.hoisted(() => vi.fn())
 const toolRuntimeStop = vi.hoisted(() => vi.fn())
 const toolRuntimeConfig = vi.hoisted(() => ({ current: null }))
@@ -56,11 +57,28 @@ vi.mock('./activities/TerminalActivity.vue', async () => {
     default: defineComponent({
       name: 'TerminalActivity',
       props: { activity: Object, active: Boolean },
-      emits: ['restart'],
+      emits: ['restart', 'surfaceError'],
       setup(props, { expose }) {
         expose({ focusEntry: terminalFocus, pasteText: terminalPaste })
         return () => h('div', {
           'data-terminal-stub': props.activity.id,
+          'data-active': String(props.active),
+        })
+      },
+    }),
+  }
+})
+
+vi.mock('./activities/ChatActivity.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      name: 'ChatActivity',
+      props: { activity: Object, active: Boolean },
+      setup(props, { expose }) {
+        expose({ focusEntry: chatFocus })
+        return () => h('div', {
+          'data-chat-stub': '',
           'data-active': String(props.active),
         })
       },
@@ -163,6 +181,7 @@ import * as launcherApi from '../services/launchers.js'
 import * as appsApi from '../services/appsCatalog.js'
 import * as routinesApi from '../services/routines.js'
 import { useActivitiesStore } from '../stores/activities.js'
+import { useChatStore } from '../stores/chat.js'
 import { useFileStore } from '../stores/files.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useMeetingsStore } from '../stores/meetings.js'
@@ -198,6 +217,7 @@ describe('WorkbenchApp', () => {
     terminalPaste.mockReset()
     terminalPaste.mockResolvedValue(true)
     terminalFocus.mockReset()
+    chatFocus.mockReset()
     toolRuntimeStart.mockReset()
     toolRuntimeStop.mockReset()
     toolRuntimeConfig.current = null
@@ -373,6 +393,72 @@ describe('WorkbenchApp', () => {
 
     expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
     expect(terminalFocus).toHaveBeenCalled()
+  })
+
+  it('promotes a terminal API failure to the Activity row error state', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:surface-error', 'Surface error', '2026-08-14T12:00:00Z'),
+      status: 'idle',
+    })
+    useWorkbenchStore().openActivity('agent:surface-error')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    await nextTick()
+
+    wrapper.findAllComponents({ name: 'TerminalActivity' })
+      .find(component => component.props('activity').id === 'agent:surface-error')
+      .vm.$emit('surfaceError', {
+        activityId: 'agent:surface-error',
+        error: 'Could not send terminal input.',
+      })
+    await nextTick()
+
+    expect(store.byId('agent:surface-error').error).toBe('Could not send terminal input.')
+    expect(wrapper.get('[data-activity-error="agent:surface-error"]').exists()).toBe(true)
+  })
+
+  it('keeps the rail room switcher open without focusing chat after delayed activation', async () => {
+    const wrapper = await render()
+    const chat = useChatStore()
+    chat.status = {
+      state: 'connected',
+      endpoint: 'wss://chat.shoulde.rs/webirc',
+      account: 'waqr',
+      relayReady: true,
+      diagnostic: null,
+    }
+    chat.targets = [{
+      id: '#general',
+      kind: 'channel',
+      title: 'general',
+      unreadCount: 0,
+      muted: false,
+    }]
+    chat.activeTarget = '#general'
+    let finishSelection
+    vi.spyOn(chat, 'selectTarget').mockImplementation(() => new Promise(resolve => {
+      finishSelection = resolve
+    }))
+    useWorkbenchStore().setPaneState('sidebar', 'rail')
+    await nextTick()
+
+    await wrapper.get('[data-sidebar-row="chat:hub"] button').trigger('click')
+    await flushPromises()
+    await nextTick()
+    const room = wrapper.get('[data-chat-target="#general"]').element
+    room.focus()
+    expect(document.activeElement).toBe(room)
+    expect(chatFocus).not.toHaveBeenCalled()
+
+    finishSelection('')
+    await flushPromises()
+    await nextTick()
+
+    expect(useWorkbenchStore().activeActivityId).toBe('chats')
+    expect(chatFocus).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-chat-rail-switcher]').exists()).toBe(true)
   })
 
   it('routes the persistent sidebar microphone control through the human meeting store', async () => {

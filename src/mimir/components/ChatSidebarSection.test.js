@@ -160,6 +160,38 @@ describe('ChatSidebarSection', () => {
     wrapper.unmount()
   })
 
+  it('lets Tab move focus before it closes the rail switcher', async () => {
+    const wrapper = mount(ChatSidebarSection, {
+      attachTo: document.body,
+      props: {
+        targets,
+        collapsed: true,
+        selectedTarget: '#general',
+        active: true,
+      },
+    })
+    const outside = document.createElement('button')
+    outside.type = 'button'
+    document.body.append(outside)
+    await wrapper.get('[data-sidebar-row="chat:hub"] button').trigger('click')
+
+    const activeRow = document.body.querySelector('[data-chat-target="#general"]')
+    const tab = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    })
+    activeRow.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(false)
+    outside.focus()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await wrapper.vm.$nextTick()
+
+    expect(document.body.querySelector('[data-chat-rail-switcher]')).toBeNull()
+    expect(document.activeElement).toBe(outside)
+    wrapper.unmount()
+  })
+
   it('offers the new-chat flow when the rail has no rooms', async () => {
     const wrapper = mount(ChatSidebarSection, {
       attachTo: document.body,

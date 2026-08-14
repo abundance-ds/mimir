@@ -496,6 +496,63 @@ describe('Workbench controllers', () => {
     controller.dispose()
   })
 
+  it('marks current-project interrupted agents when the launcher catalog cannot load', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    settings.settingsReady = true
+    settings.mimirWorkspaceFolder = '/w'
+    activities.upsert(activity('agent:one', {
+      kind: 'agent',
+      status: 'interrupted',
+      workspacePath: '/w',
+      source: { presetId: 'codex', workspaceScope: 'workspace' },
+      host: { type: 'pty', resumeStrategy: 'codex' },
+      session: { cliSessionId: 'session-one' },
+    }))
+    const markAutomaticResumeFailure = vi.fn()
+    const workspaceFiles = {
+      workspacePath: '',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: {
+        initialize: vi.fn(async () => {}),
+        resumePreset: vi.fn(),
+        markAutomaticResumeFailure,
+        error: '',
+      },
+      launchers: {
+        load: vi.fn(async () => {
+          throw new Error('invalid launcher configuration')
+        }),
+        byId: vi.fn(),
+      },
+      appsCatalog: { load: vi.fn(async () => {}) },
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn(async () => {}) },
+      diagnostic: ref(''),
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: candidate => !candidate.workspacePath || candidate.workspacePath === '/w',
+      getFocusOwner: () => 'none',
+    })
+
+    await controller.start()
+
+    expect(markAutomaticResumeFailure).toHaveBeenCalledWith(
+      'agent:one',
+      'Launcher catalog could not load: invalid launcher configuration',
+    )
+    controller.dispose()
+  })
+
   it('resumes only current-project sidebar agents in the background, two at a time', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()
@@ -550,12 +607,13 @@ describe('Workbench controllers', () => {
     let activeResumes = 0
     let maxActiveResumes = 0
     const releases = []
-    const resumePreset = vi.fn((_, candidate) => new Promise((resolve) => {
+    const resumePreset = vi.fn((_, candidate) => new Promise((resolve, reject) => {
       activeResumes += 1
       maxActiveResumes = Math.max(maxActiveResumes, activeResumes)
       releases.push(() => {
         activeResumes -= 1
-        resolve({ ...candidate, status: 'idle' })
+        if (candidate.id === 'agent:0') reject(new Error('provider unavailable'))
+        else resolve({ ...candidate, status: 'idle' })
       })
     }))
     const markAutomaticResumeFailure = vi.fn()

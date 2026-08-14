@@ -42,6 +42,22 @@ export function activitySnapshot(activityId, afterSequence = null) {
   return invoke('activity_snapshot', { activityId, afterSequence })
 }
 
+export function attachTerminalActivity(activityId, ownerId) {
+  return invoke('activity_terminal_attach', { activityId, ownerId })
+}
+
+export function checkpointTerminalActivity(checkpoint) {
+  return invoke('activity_terminal_checkpoint', checkpoint)
+}
+
+export function releaseTerminalActivity(activityId, ownerId, leaseGeneration) {
+  return invoke('activity_terminal_release', {
+    activityId,
+    ownerId,
+    leaseGeneration,
+  })
+}
+
 export function writeActivity(activityId, value) {
   const bytes = typeof value === 'string'
     ? Array.from(encoder.encode(value))

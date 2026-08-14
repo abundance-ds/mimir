@@ -5,13 +5,19 @@ import { nextTick } from 'vue'
 const xterm = vi.hoisted(() => ({
   terminals: [],
   fits: [],
+  serializers: [],
   webglAddons: [],
   failWebgl: false,
+  deferWrites: false,
+  pendingWriteCallbacks: [],
+  proposedSize: null,
 }))
 const api = vi.hoisted(() => ({
   callback: null,
   unlisten: vi.fn(),
-  snapshot: vi.fn(),
+  attach: vi.fn(),
+  checkpoint: vi.fn(),
+  release: vi.fn(),
   listen: vi.fn(),
   resize: vi.fn(),
   stop: vi.fn(),
@@ -26,7 +32,15 @@ vi.mock('@xterm/xterm', () => ({
       this.rows = 30
       this.loadAddon = vi.fn()
       this.open = vi.fn()
-      this.write = vi.fn()
+      this.write = vi.fn((_value, callback) => {
+        if (!callback) return
+        if (xterm.deferWrites) xterm.pendingWriteCallbacks.push(callback)
+        else callback()
+      })
+      this.resize = vi.fn((cols, rows) => {
+        this.cols = cols
+        this.rows = rows
+      })
       this.focus = vi.fn()
       this.reset = vi.fn()
       this.dispose = vi.fn()
@@ -36,6 +50,12 @@ vi.mock('@xterm/xterm', () => ({
         return this.dataDisposable
       })
       this.unicode = { activeVersion: '6' }
+      this.buffer = {
+        active: {
+          length: 1,
+          getLine: () => ({ translateToString: () => 'visible screen' }),
+        },
+      }
       this.attachCustomKeyEventHandler = vi.fn((handler) => {
         this.customKeyHandler = handler
       })
@@ -48,7 +68,20 @@ vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class MockFitAddon {
     constructor() {
       this.fit = vi.fn()
+      this.proposeDimensions = vi.fn(() => {
+        const terminal = xterm.terminals.at(-1)
+        return xterm.proposedSize || { cols: terminal.cols, rows: terminal.rows }
+      })
       xterm.fits.push(this)
+    }
+  },
+}))
+
+vi.mock('@xterm/addon-serialize', () => ({
+  SerializeAddon: class MockSerializeAddon {
+    constructor() {
+      this.serialize = vi.fn(() => 'serialized terminal')
+      xterm.serializers.push(this)
     }
   },
 }))
@@ -77,8 +110,10 @@ vi.mock('@xterm/addon-unicode11', () => ({
 }))
 
 vi.mock('../../services/activities.js', () => ({
-  activitySnapshot: api.snapshot,
+  attachTerminalActivity: api.attach,
+  checkpointTerminalActivity: api.checkpoint,
   listenToActivityEvents: api.listen,
+  releaseTerminalActivity: api.release,
   resizeActivity: api.resize,
   stopActivity: api.stop,
   writeActivity: api.write,
@@ -105,14 +140,20 @@ beforeEach(() => {
   vi.clearAllMocks()
   xterm.terminals.length = 0
   xterm.fits.length = 0
+  xterm.serializers.length = 0
   xterm.webglAddons.length = 0
   xterm.failWebgl = false
+  xterm.deferWrites = false
+  xterm.pendingWriteCallbacks.length = 0
+  xterm.proposedSize = null
   api.callback = null
   api.listen.mockImplementation(async (callback) => {
     api.callback = callback
     return api.unlisten
   })
-  api.snapshot.mockResolvedValue(snapshot())
+  api.attach.mockResolvedValue(snapshot())
+  api.checkpoint.mockResolvedValue({ revision: 1, throughSequence: 2 })
+  api.release.mockResolvedValue(true)
   api.resize.mockResolvedValue()
   api.stop.mockResolvedValue()
   api.write.mockResolvedValue()
@@ -151,16 +192,21 @@ beforeEach(() => {
 function snapshot(overrides = {}) {
   return {
     record: { ...agent },
-    scrollback: {
-      chunks: [
-        { sequence: 1, bytes: [0xf0, 0x9f] },
-        { sequence: 2, bytes: [0x99, 0x82] },
-      ],
-      lastSequence: 2,
-      retainedBytes: 4,
-      byteCap: 2_097_152,
-      truncated: false,
-    },
+    runId: 'run-1',
+    ownerId: 'owner',
+    leaseGeneration: 1,
+    checkpoint: null,
+    revision: 0,
+    baseSequence: 0,
+    firstSequence: 1,
+    lastSequence: 2,
+    truncated: false,
+    cols: 100,
+    rows: 30,
+    events: [
+      { type: 'output', sequence: 1, bytes: [0xf0, 0x9f] },
+      { type: 'output', sequence: 2, bytes: [0x99, 0x82] },
+    ],
     live: true,
     ...overrides,
   }
@@ -211,23 +257,23 @@ describe('TerminalActivity', () => {
     expect(wrapper.vm.focusEntry()).toBe(true)
   })
 
-  it('subscribes before snapshot and replays raw bytes without decoding', async () => {
+  it('subscribes before restore and replays raw bytes without decoding', async () => {
     const order = []
     api.listen.mockImplementationOnce(async (callback) => {
       order.push('listen')
       api.callback = callback
       return api.unlisten
     })
-    api.snapshot.mockImplementationOnce(async () => {
-      order.push('snapshot')
+    api.attach.mockImplementationOnce(async () => {
+      order.push('attach')
       return snapshot()
     })
     const wrapper = await initialize()
 
-    expect(order).toEqual(['listen', 'snapshot'])
+    expect(order).toEqual(['listen', 'attach'])
     expect(writtenBytes(xterm.terminals[0])).toEqual([[0xf0, 0x9f], [0x99, 0x82]])
     expect(wrapper.emitted('ready')[0][0]).toMatchObject({ activityId: 'agent:one' })
-    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(4)
+    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(5)
     expect(xterm.terminals[0].unicode.activeVersion).toBe('11')
     expect(xterm.terminals[0].options).toMatchObject({
       fontWeight: '400',
@@ -257,7 +303,7 @@ describe('TerminalActivity', () => {
 
     const wrapper = await initialize()
 
-    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(3)
+    expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(4)
     expect(xterm.webglAddons).toHaveLength(0)
     expect(wrapper.get('[data-terminal-surface]').attributes('data-renderer')).toBe('dom')
     expect(wrapper.find('[data-terminal-error]').exists()).toBe(false)
@@ -281,7 +327,7 @@ describe('TerminalActivity', () => {
       status: 'interrupted',
       error: 'Automatic resume failed: provider session unavailable',
     }
-    api.snapshot.mockResolvedValueOnce(snapshot({
+    api.attach.mockResolvedValueOnce(snapshot({
       record: interrupted,
       live: false,
     }))
@@ -311,15 +357,15 @@ describe('TerminalActivity', () => {
   })
 
   it('queues hydration output, filters by id, and removes replay duplicates', async () => {
-    let resolveSnapshot
-    api.snapshot.mockReturnValueOnce(new Promise((resolve) => {
-      resolveSnapshot = resolve
+    let resolveAttachment
+    api.attach.mockReturnValueOnce(new Promise((resolve) => {
+      resolveAttachment = resolve
     }))
     const wrapper = render()
     await flushPromises()
     api.callback({ type: 'output', activityId: 'other', sequence: 3, bytes: [99] })
     api.callback({ type: 'output', activityId: 'agent:one', sequence: 3, bytes: [3] })
-    resolveSnapshot(snapshot())
+    resolveAttachment(snapshot())
     await initialize(wrapper)
 
     expect(writtenBytes(xterm.terminals[0])).toEqual([
@@ -329,6 +375,69 @@ describe('TerminalActivity', () => {
     ])
     api.callback({ type: 'output', activityId: 'agent:one', sequence: 2, bytes: [2] })
     expect(xterm.terminals[0].write).toHaveBeenCalledTimes(3)
+  })
+
+  it('advances checkpoint progress only after xterm finishes each asynchronous write', async () => {
+    xterm.deferWrites = true
+    api.attach.mockResolvedValueOnce(snapshot({
+      events: [{ type: 'output', sequence: 1, bytes: [1] }],
+      lastSequence: 1,
+    }))
+    const wrapper = render()
+    await flushPromises()
+
+    api.callback({ type: 'output', activityId: 'agent:one', sequence: 2, bytes: [2] })
+    api.callback({
+      type: 'exit',
+      activityId: 'agent:one',
+      exit: { reason: 'completed', code: 0 },
+      record: { ...agent, status: 'done' },
+    })
+    expect(api.checkpoint).not.toHaveBeenCalled()
+
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    expect(api.checkpoint).not.toHaveBeenCalled()
+    expect(xterm.pendingWriteCallbacks).toHaveLength(1)
+
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    expect(api.checkpoint).toHaveBeenCalledWith(expect.objectContaining({
+      throughSequence: 2,
+      baseRevision: 0,
+    }))
+    wrapper.unmount()
+    await flushPromises()
+  })
+
+  it('restores a checkpoint at its original size before ordered resize and output events', async () => {
+    api.attach.mockResolvedValueOnce(snapshot({
+      checkpoint: {
+        revision: 4,
+        throughSequence: 5,
+        cols: 80,
+        rows: 24,
+        formatVersion: 1,
+        engineVersion: '6.0.0',
+        unicodeVersion: '11',
+        data: '\u001b[2Jrestored',
+      },
+      revision: 4,
+      baseSequence: 5,
+      firstSequence: 6,
+      lastSequence: 7,
+      events: [
+        { type: 'resize', sequence: 6, cols: 132, rows: 42 },
+        { type: 'output', sequence: 7, bytes: [65] },
+      ],
+    }))
+
+    await initialize()
+    const terminal = xterm.terminals[0]
+    expect(terminal.resize.mock.calls[0]).toEqual([80, 24])
+    expect(terminal.resize.mock.calls[1]).toEqual([132, 42])
+    expect(terminal.write.mock.calls[0][0]).toBe('\u001b[2Jrestored')
+    expect(Array.from(terminal.write.mock.calls[1][0])).toEqual([65])
   })
 
   it('reports agent attention without obscuring the terminal and renders authoritative exit state', async () => {
@@ -394,6 +503,21 @@ describe('TerminalActivity', () => {
     await flushPromises()
     expect(api.write).toHaveBeenCalledTimes(2)
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
+  })
+
+  it('reports a local terminal API failure to the Activity owner', async () => {
+    api.write.mockRejectedValueOnce(new Error('terminal transport unavailable'))
+    const wrapper = await initialize()
+
+    await expect(wrapper.vm.pasteText('retry')).resolves.toBe(false)
+
+    expect(wrapper.get('[data-terminal-error]').text()).toBe('terminal transport unavailable')
+    expect(wrapper.emitted('surface-error')).toEqual([[
+      {
+        activityId: 'agent:one',
+        error: 'terminal transport unavailable',
+      },
+    ]])
   })
 
   it('snaps the surface onto the device pixel grid so WebGL glyphs stay crisp', async () => {
@@ -480,12 +604,22 @@ describe('TerminalActivity', () => {
     const terminal = xterm.terminals[0]
     expect(api.resize).toHaveBeenCalledWith('agent:one', 100, 30)
 
-    terminal.cols = 132
-    terminal.rows = 42
+    xterm.proposedSize = { cols: 132, rows: 42 }
     resizeObservers[0].callback()
     flushRaf()
     await flushPromises()
     expect(api.resize).toHaveBeenLastCalledWith('agent:one', 132, 42)
+    expect(terminal.resize).not.toHaveBeenCalledWith(132, 42)
+
+    api.callback({
+      type: 'resize',
+      activityId: 'agent:one',
+      sequence: 3,
+      cols: 132,
+      rows: 42,
+    })
+    await flushPromises()
+    expect(terminal.resize).toHaveBeenLastCalledWith(132, 42)
 
     await wrapper.setProps({
       activity: { ...agent, status: 'idle' },
@@ -495,31 +629,27 @@ describe('TerminalActivity', () => {
     flushRaf()
     await flushPromises()
     expect(xterm.terminals).toHaveLength(1)
-    expect(api.snapshot).toHaveBeenCalledTimes(1)
+    expect(api.attach).toHaveBeenCalledTimes(1)
     expect(terminal.options.fontSize).toBe(14)
     expect(terminal.focus).toHaveBeenCalled()
   })
 
-  it('suspends hidden listeners and observers, then catches up from native scrollback', async () => {
+  it('keeps one hidden xterm model current while suspending layout observers', async () => {
     const wrapper = await initialize()
     const terminal = xterm.terminals[0]
     const firstObserver = resizeObservers[0]
 
     await wrapper.setProps({ active: false })
-    expect(api.unlisten).toHaveBeenCalledTimes(1)
+    expect(api.unlisten).not.toHaveBeenCalled()
     expect(firstObserver.disconnect).toHaveBeenCalledTimes(1)
 
-    api.snapshot.mockResolvedValueOnce(snapshot({
-      scrollback: {
-        chunks: [{ sequence: 3, bytes: [65] }],
-        lastSequence: 3,
-      },
-    }))
+    api.callback({ type: 'output', activityId: 'agent:one', sequence: 3, bytes: [65] })
+    await flushPromises()
     await wrapper.setProps({ active: true })
     await flushPromises()
 
-    expect(api.listen).toHaveBeenCalledTimes(2)
-    expect(api.snapshot).toHaveBeenLastCalledWith('agent:one', 2)
+    expect(api.listen).toHaveBeenCalledTimes(1)
+    expect(api.attach).toHaveBeenCalledTimes(1)
     expect(writtenBytes(terminal).at(-1)).toEqual([65])
     expect(xterm.terminals).toHaveLength(1)
   })
@@ -538,12 +668,11 @@ describe('TerminalActivity', () => {
     await nextTick()
     expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
 
-    api.snapshot.mockResolvedValueOnce(snapshot({
+    api.attach.mockResolvedValueOnce(snapshot({
       record: { ...agent, status: 'idle', session: { runId: 'run-2' } },
-      scrollback: {
-        chunks: [{ sequence: 1, bytes: [66] }],
-        lastSequence: 1,
-      },
+      runId: 'run-2',
+      events: [{ type: 'output', sequence: 1, bytes: [66] }],
+      lastSequence: 1,
     }))
     await wrapper.setProps({
       activity: { ...agent, status: 'idle', session: { runId: 'run-2' } },
@@ -552,41 +681,24 @@ describe('TerminalActivity', () => {
 
     expect(terminal.reset).toHaveBeenCalledTimes(1)
     expect(xterm.terminals).toHaveLength(1)
-    expect(api.snapshot).toHaveBeenLastCalledWith('agent:one', null)
+    expect(api.attach).toHaveBeenLastCalledWith('agent:one', expect.any(String))
     expect(writtenBytes(terminal).at(-1)).toEqual([66])
     expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
     expect(wrapper.find('[data-terminal-stop]').exists()).toBe(true)
   })
 
-  it('cannot strand a rapid active-inactive-active surface without a listener', async () => {
-    let releaseFirst
-    const firstStop = vi.fn()
-    const secondStop = vi.fn()
-    api.listen
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        releaseFirst = () => resolve(firstStop)
-      }))
-      .mockImplementationOnce(async (callback) => {
-        api.callback = callback
-        return secondStop
-      })
-
-    const wrapper = render({ active: true })
-    await flushPromises()
+  it('keeps the event owner stable across rapid active changes', async () => {
+    const wrapper = await initialize(render({ active: true }))
     await wrapper.setProps({ active: false })
     await wrapper.setProps({ active: true })
     await flushPromises()
 
-    expect(api.listen).toHaveBeenCalledTimes(2)
-    expect(api.snapshot).toHaveBeenCalledTimes(1)
-
-    releaseFirst()
-    await flushPromises()
-    expect(firstStop).toHaveBeenCalledTimes(1)
-    expect(secondStop).not.toHaveBeenCalled()
-    expect(api.snapshot).toHaveBeenCalledTimes(1)
+    expect(api.listen).toHaveBeenCalledTimes(1)
+    expect(api.attach).toHaveBeenCalledTimes(1)
+    expect(api.unlisten).not.toHaveBeenCalled()
 
     api.callback({ type: 'output', activityId: 'agent:one', sequence: 3, bytes: [65] })
+    await flushPromises()
     expect(writtenBytes(xterm.terminals[0]).at(-1)).toEqual([65])
   })
 
@@ -596,12 +708,15 @@ describe('TerminalActivity', () => {
     const addon = xterm.webglAddons[0]
     const observer = resizeObservers[0]
     wrapper.unmount()
+    await flushPromises()
 
     expect(api.unlisten).toHaveBeenCalledTimes(1)
     expect(terminal.dataDisposable.dispose).toHaveBeenCalledTimes(1)
     expect(observer.disconnect).toHaveBeenCalledTimes(1)
     expect(addon.contextLossDisposable.dispose).toHaveBeenCalledTimes(1)
     expect(terminal.dispose).toHaveBeenCalledTimes(1)
+    expect(api.checkpoint).toHaveBeenCalled()
+    expect(api.release).toHaveBeenCalledWith('agent:one', expect.any(String), 1)
     expect(api.stop).not.toHaveBeenCalled()
     expect(api.write).not.toHaveBeenCalled()
   })

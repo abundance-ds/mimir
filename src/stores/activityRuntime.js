@@ -227,11 +227,15 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   }
 
   function markAutomaticResumeFailure(id, cause) {
+    return markActivityError(id, `Automatic resume failed: ${message(cause)}`)
+  }
+
+  function markActivityError(id, cause) {
     const activity = activities.byId(id)
     if (!activity) return null
     return activities.upsert({
       ...activity,
-      error: `Automatic resume failed: ${message(cause)}`,
+      error: message(cause),
       updatedAt: new Date().toISOString(),
     })
   }
@@ -387,6 +391,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     initialize,
     launchPreset,
     resumePreset,
+    markActivityError,
     markAutomaticResumeFailure,
     launchCommand,
     stop,

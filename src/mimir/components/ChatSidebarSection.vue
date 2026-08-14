@@ -251,6 +251,7 @@ const railAnchorRef = ref(null)
 const railPopoverRef = ref(null)
 const railPopoverOpen = ref(false)
 const railPopoverStyle = ref({})
+let railTabCloseTimer = null
 
 const channels = computed(() => props.targets.filter(target => target.kind === 'channel'))
 const directs = computed(() => props.targets.filter(target => target.kind === 'direct'))
@@ -290,6 +291,10 @@ async function openRailPopover() {
 }
 
 function closeRailPopover({ restoreFocus = false } = {}) {
+  if (railTabCloseTimer !== null) {
+    clearTimeout(railTabCloseTimer)
+    railTabCloseTimer = null
+  }
   if (!railPopoverOpen.value) return
   railPopoverOpen.value = false
   document.removeEventListener('pointerdown', onRailPointerDown)
@@ -348,7 +353,11 @@ function onRailPopoverKeydown(event) {
     return
   }
   if (event.key === 'Tab') {
-    closeRailPopover()
+    if (railTabCloseTimer !== null) clearTimeout(railTabCloseTimer)
+    railTabCloseTimer = setTimeout(() => {
+      railTabCloseTimer = null
+      closeRailPopover()
+    }, 0)
     return
   }
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
