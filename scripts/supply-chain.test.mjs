@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
   assertAllowedLicense,
@@ -7,7 +8,10 @@ import {
   evaluateLicense,
   parseBunLock,
   parseCargoLock,
+  sha256,
 } from './lib/supply-chain.mjs'
+
+const repositoryRoot = new URL('../', import.meta.url)
 
 const policy = {
   allowedLicenses: ['Apache-2.0', 'ISC', 'MIT'],
@@ -121,4 +125,34 @@ test('license policy refuses broad, stale, or unevidenced overrides', () => {
       },
     },
   }, new Set(['npm:package@1.0.0'])), /substantive reason and public HTTPS evidence/)
+})
+
+test('bundled Commit Mono matches its reviewed asset and license policy', async () => {
+  const policySource = await readFile(
+    new URL('src-tauri/vendor/license-policy.json', repositoryRoot),
+    'utf8',
+  )
+  const repositoryPolicy = JSON.parse(policySource)
+  const component = repositoryPolicy.vendorComponents.find(
+    candidate => candidate.id === 'vendor:commit-mono@1.143',
+  )
+  assert.ok(component, 'Commit Mono must remain in the reviewed vendor inventory')
+  assert.equal(component.license, 'OFL-1.1')
+
+  const font = await readFile(
+    new URL('public/fonts/CommitMonoV143-VF.woff2', repositoryRoot),
+  )
+  assert.equal(sha256(font), component.sha256)
+
+  const license = await readFile(
+    new URL('public/fonts/CommitMono-LICENSE.txt', repositoryRoot),
+    'utf8',
+  )
+  assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/u)
+
+  const fontCss = await readFile(
+    new URL('src/shared/styles/fonts.css', repositoryRoot),
+    'utf8',
+  )
+  assert.match(fontCss, /url\('\/fonts\/CommitMonoV143-VF\.woff2'\)/u)
 })
