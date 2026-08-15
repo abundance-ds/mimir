@@ -25,7 +25,7 @@ vi.mock('../../../services/appsCatalog.js', async (importOriginal) => ({
 const builtIn = {
   id: 'scratch',
   title: 'Today',
-  description: 'Keep one top priority in view',
+  description: 'Write today in a focused Markdown journal.',
   mode: 'embedded',
   builtin: true,
   manifestPath: 'builtin:scratch',

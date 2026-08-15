@@ -140,7 +140,7 @@ pub fn builtin_apps() -> Vec<InstalledApp> {
                 // reopens with its durable text intact.
                 id: "scratch".into(),
                 title: "Today".into(),
-                description: "Keep one top priority in view.".into(),
+                description: "Write today in a focused Markdown journal.".into(),
                 mode: AppMode::Embedded,
                 entry: Some("mimir://builtin/scratch".into()),
                 command: None,

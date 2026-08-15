@@ -90,8 +90,12 @@ describe('canonical renderer tool runtime', () => {
       mimirState: vi.fn(() => state),
     }
     const getToday = vi.fn(async () => ({
-      text: 'Ship the focused review flow',
+      artifactType: 'today',
+      date: '2026-07-25',
+      mediaType: 'text/markdown',
+      content: 'Ship the focused review flow',
       updatedAt: '2026-07-25T10:00:00.000Z',
+      live: true,
     }))
 
     await expect(executeToolRequest({
@@ -100,8 +104,12 @@ describe('canonical renderer tool runtime', () => {
     }, { editor, getToday })).resolves.toEqual({
       ...state,
       today: {
-        text: 'Ship the focused review flow',
+        artifactType: 'today',
+        date: '2026-07-25',
+        mediaType: 'text/markdown',
+        content: 'Ship the focused review flow',
         updatedAt: '2026-07-25T10:00:00.000Z',
+        live: true,
       },
     })
     expect(editor.mimirState).toHaveBeenCalledWith({ includeContent: true })
