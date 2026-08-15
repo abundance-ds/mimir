@@ -252,6 +252,12 @@ describe('mimir MCP client', () => {
     expect(output).not.toContain('inputSchema')
   })
 
+  it('points an empty Connections drawer to the Settings journey', () => {
+    expect(formatToolGroup([], 'connections')).toBe(
+      'CONNECTIONS\n\nNo connections tools are currently available. Open Mimir Settings → Connections to connect Google, Slack, or Granola.',
+    )
+  })
+
   it('finds the one public name and renders focused tool input', async () => {
     const tools = [{
       name: 'graph_create',

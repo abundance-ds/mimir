@@ -65,6 +65,12 @@ export const APPLE_RELEASE_KEYS = [
   'APPLE_TEAM_ID',
 ]
 
+export const CONNECTION_RELEASE_KEYS = [
+  'MIMIR_GOOGLE_OAUTH_CLIENT_ID',
+  'MIMIR_GOOGLE_OAUTH_CLIENT_SECRET',
+  'MIMIR_SLACK_CLIENT_ID',
+]
+
 export function loadLocalUpdaterCredentials(env) {
   if (!env.TAURI_SIGNING_PRIVATE_KEY && !env.TAURI_SIGNING_PRIVATE_KEY_PATH) {
     if (existsSync(DEFAULT_UPDATER_KEY_PATH)) {

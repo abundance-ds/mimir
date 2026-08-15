@@ -38,6 +38,9 @@ for (const secret of [
   'APPLE_ID',
   'APPLE_PASSWORD',
   'APPLE_TEAM_ID',
+  'MIMIR_GOOGLE_OAUTH_CLIENT_ID',
+  'MIMIR_GOOGLE_OAUTH_CLIENT_SECRET',
+  'MIMIR_SLACK_CLIENT_ID',
   'TAURI_SIGNING_PRIVATE_KEY',
   'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
 ]) {
@@ -102,7 +105,7 @@ run('git', ['push', '--atomic', 'origin', 'main', tag])
 console.log(`Release ${tag} started. Watch it with:`)
 console.log(`  gh run list --workflow build.yml --branch ${tag}`)
 console.log(`After it succeeds, verify it with:`)
-console.log(`  bun run release:verify -- ${tag}`)
+console.log('  bun run release:verify')
 
 function run(command, args, options = {}) {
   try {

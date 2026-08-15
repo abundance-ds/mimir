@@ -212,7 +212,7 @@ const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS: [&str; 3] =
     [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26"];
 const MIMIR_INSTRUCTIONS: &str =
-    "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`.";
+    "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`. If a work connection is missing, ask the user to open Mimir Settings → Connections.";
 
 fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
     requested
@@ -461,6 +461,27 @@ async fn handle_mcp_request(
                 .into_response();
             };
             if state.registry.descriptor(tool.canonical_name).is_none() {
+                if let Some(connection) = tool.connection {
+                    let provider = match connection {
+                        "gmail" | "calendar" | "drive" => "Google",
+                        "slack" => "Slack",
+                        "granola" => "Granola",
+                        _ => connection,
+                    };
+                    return Json(jsonrpc_err(
+                        id,
+                        -32602,
+                        &format!(
+                            "{provider} is not connected. Connect {provider} in Mimir Settings → Connections."
+                        ),
+                        Some(serde_json::json!({
+                            "name": name,
+                            "connection": connection,
+                            "settingsSection": "connections"
+                        })),
+                    ))
+                    .into_response();
+                }
                 return Json(jsonrpc_err(
                     id,
                     -32602,
@@ -720,7 +741,7 @@ mod tests {
         assert_eq!(list["tools"][0]["name"], "mimir_state");
         assert_eq!(
             list["tools"][0]["description"],
-            "Active editor, selection, comments, and Today priority."
+            "Active editor state and available Today artifact context."
         );
         assert_eq!(list["tools"][0]["_meta"]["mimir/group"], "workbench");
         assert_eq!(list["tools"][0]["_meta"]["mimir/effect"], "read");
@@ -995,5 +1016,30 @@ mod tests {
             assert_eq!(private_json["error"]["message"], "Unknown tool");
             assert_eq!(private_json["error"]["data"]["name"], private_name);
         }
+
+        let disconnected_response = handle_mcp(
+            State(state),
+            Json(json!({
+                "jsonrpc": "2.0",
+                "id": "missing-google",
+                "method": "tools/call",
+                "params": { "name": "gmail_search", "arguments": {} }
+            })),
+        )
+        .await
+        .into_response();
+        let disconnected_body = axum::body::to_bytes(disconnected_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let disconnected_json: serde_json::Value =
+            serde_json::from_slice(&disconnected_body).unwrap();
+        assert_eq!(
+            disconnected_json["error"]["message"],
+            "Google is not connected. Connect Google in Mimir Settings → Connections."
+        );
+        assert_eq!(
+            disconnected_json["error"]["data"]["settingsSection"],
+            "connections"
+        );
     }
 }

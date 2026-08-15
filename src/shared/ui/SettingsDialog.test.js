@@ -31,6 +31,7 @@ describe('SettingsDialog Apps ownership', () => {
           AppearanceSection: true,
           EditorSection: true,
           AISection: true,
+          ConnectionsSettingsSection: true,
           LaunchersSection: true,
           AppsSettingsSection: AppsSettingsStub,
           ShortcutsSection: true,

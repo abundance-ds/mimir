@@ -906,6 +906,8 @@ fn stop_active_meeting(meetings: &meetings::runtime::MeetingRuntime) -> Result<(
 pub fn run() {
     let tool_registry = tool_registry::ToolRegistry::default();
     let tool_runtime = tool_runtime::ToolRuntime::new(tool_registry.clone());
+    let connection_manager = connections::ConnectionManager::new(tool_registry.clone())
+        .expect("connection manager must initialize");
     let chat_runtime = chat::ChatRuntime::new().expect("chat runtime must initialize");
     let activity_supervisor =
         activities::ActivitySupervisor::new(activities::ActivitySupervisorConfig::default())
@@ -943,6 +945,7 @@ pub fn run() {
         .manage(tool_server::ToolServerState::default())
         .manage(tool_registry)
         .manage(tool_runtime)
+        .manage(connection_manager)
         .manage(chat_runtime)
         .manage(meetings::commands::MeetingStartConsentAuthority::default())
         .setup(|app| {
@@ -1007,6 +1010,9 @@ pub fn run() {
             app.state::<tool_runtime::ToolRuntime>()
                 .initialize(app.handle())
                 .map_err(std::io::Error::other)?;
+            app.state::<connections::ConnectionManager>()
+                .install()
+                .map_err(std::io::Error::other)?;
             app.state::<chat::ChatRuntime>()
                 .install(
                     app.handle(),
@@ -1064,6 +1070,11 @@ pub fn run() {
             local_settings::settings_load,
             local_settings::settings_save,
             local_settings::settings_save_editor,
+            connections::connections_status,
+            connections::connections_connect_google,
+            connections::connections_connect_slack,
+            connections::connections_connect_granola,
+            connections::connections_disconnect,
             read_text_file,
             read_binary_file,
             write_text_file,
@@ -1144,6 +1155,7 @@ pub fn run() {
             activity_commands::activity_close,
             activity_commands::activity_rename,
             activity_commands::activity_auto_title,
+            activity_commands::activity_provisional_title,
             activity_commands::activity_set_archived,
             activity_commands::activity_clear,
             activity_commands::activity_interrupt_all,

@@ -892,7 +892,12 @@ const TOOL_GROUP_NOTES = Object.freeze({
 export function formatToolGroup(tools, group) {
   const normalized = String(group || '').toLowerCase()
   const header = normalized.toUpperCase()
-  if (!tools.length) return `${header}\n\nNo ${normalized} tools are currently available.`
+  if (!tools.length) {
+    const remedy = normalized === 'connections'
+      ? ' Open Mimir Settings → Connections to connect Google, Slack, or Granola.'
+      : ''
+    return `${header}\n\nNo ${normalized} tools are currently available.${remedy}`
+  }
   const rows = tools.map((tool) => {
     const schema = tool?.inputSchema || {}
     const properties = Object.keys(schema.properties || {})

@@ -1,13 +1,10 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use reqwest::{header::RETRY_AFTER, Client, Method, StatusCode};
-use rusqlite::{params, params_from_iter, Connection};
+use serde::Serialize;
 use serde_json::{json, Value};
-use std::{
-    collections::HashSet,
-    fs,
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use sha2::{Digest, Sha256};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::tool_registry::{
     ToolAnnotations, ToolCallContext, ToolDescriptor, ToolError, ToolErrorCode, ToolOwner,
@@ -15,8 +12,10 @@ use crate::tool_registry::{
 };
 
 const MIMIR_KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
-const LEGACY_KEYCHAIN_SERVICE: &str = concat!("M", "i", "m");
 const DEFAULT_ACCOUNT: &str = "default";
+const GOOGLE_SCOPES: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly";
+const SLACK_USER_SCOPES: &str = "search:read,channels:read,channels:history,groups:read,groups:history,im:read,im:history,mpim:read,mpim:history,chat:write";
+const GRANOLA_API_ROOT: &str = "https://public-api.granola.ai/v1";
 
 #[derive(Clone)]
 struct ConnectionRuntime {
@@ -31,123 +30,449 @@ struct Secret {
     service: &'static str,
 }
 
-pub(crate) fn register_native_tools(registry: &ToolRegistry) -> Result<(), String> {
-    let settings = read_connection_settings();
-    let legacy_defaults = read_legacy_connection_defaults();
-    let google_account = connection_account(&settings, &legacy_defaults, "google");
-    let slack_account = connection_account(&settings, &legacy_defaults, "slack");
-    let runtime = ConnectionRuntime {
-        http: Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|error| error.to_string())?,
-        google_account: google_account.clone(),
-        slack_account: slack_account.clone(),
-    };
+pub struct ConnectionManager {
+    registry: ToolRegistry,
+    runtime: ConnectionRuntime,
+}
 
-    // Credential-backed connections must be explicitly configured before
-    // startup probes Keychain. The old unconditional probe produced multiple
-    // password dialogs even though no Google or Slack tools were registered.
-    if credential_connection_declared(&settings, &legacy_defaults, "google") {
-        if let Some(bundle) = google_bundle(&google_account).ok().flatten() {
-            register_google_tools(registry, &runtime, &bundle)?;
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionStatus {
+    provider: &'static str,
+    name: &'static str,
+    state: &'static str,
+    account: Option<String>,
+    detail: String,
+}
+
+impl ConnectionManager {
+    pub fn new(registry: ToolRegistry) -> Result<Self, String> {
+        Ok(Self {
+            registry,
+            runtime: ConnectionRuntime {
+                http: Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .map_err(|error| error.to_string())?,
+                google_account: DEFAULT_ACCOUNT.to_string(),
+                slack_account: DEFAULT_ACCOUNT.to_string(),
+            },
+        })
+    }
+
+    pub fn install(&self) -> Result<(), String> {
+        for provider in ["google", "slack", "granola"] {
+            self.refresh_provider(provider)?;
         }
+        Ok(())
     }
-    if credential_connection_declared(&settings, &legacy_defaults, "slack")
-        && slack_token(&slack_account).ok().flatten().is_some()
-    {
-        register_slack_tools(registry, &runtime)?;
+
+    fn refresh_provider(&self, provider: &str) -> Result<(), String> {
+        self.registry
+            .unregister_owner(&ToolOwner::Provider(provider.to_string()));
+        match provider {
+            "google" => {
+                if let Some(bundle) = google_bundle(DEFAULT_ACCOUNT)? {
+                    if !google_needs_sign_in(&bundle) {
+                        register_google_tools(&self.registry, &self.runtime, &bundle)?;
+                    }
+                }
+            }
+            "slack" => {
+                if slack_bundle(DEFAULT_ACCOUNT)?
+                    .is_some_and(|bundle| !slack_needs_sign_in(&bundle))
+                {
+                    register_slack_tools(&self.registry, &self.runtime)?;
+                }
+            }
+            "granola" => {
+                if granola_bundle()?.is_some() {
+                    register_granola_tools(&self.registry, &self.runtime)?;
+                }
+            }
+            _ => return Err(format!("Unknown connection provider: {provider}")),
+        }
+        Ok(())
     }
-    if enabled(&settings, "granola") {
-        register_granola_tools(registry, &runtime)?;
+
+    fn statuses(&self) -> Vec<ConnectionStatus> {
+        vec![google_status(), slack_status(), granola_status()]
     }
-    Ok(())
+}
+
+#[tauri::command]
+pub fn connections_status(manager: tauri::State<'_, ConnectionManager>) -> Vec<ConnectionStatus> {
+    manager.statuses()
+}
+
+#[tauri::command]
+pub async fn connections_connect_google(
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    let client_id = configured_google_client_id().ok_or_else(|| {
+        "This Mimir build has no Google sign-in client. Add MIMIR_GOOGLE_OAUTH_CLIENT_ID when you build the app."
+            .to_string()
+    })?;
+    let oauth = OauthLoopback::new().await?;
+    let mut authorize = url::Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
+        .map_err(|error| error.to_string())?;
+    authorize
+        .query_pairs_mut()
+        .append_pair("client_id", &client_id)
+        .append_pair("redirect_uri", &oauth.redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair("scope", GOOGLE_SCOPES)
+        .append_pair("access_type", "offline")
+        .append_pair("prompt", "consent")
+        .append_pair("code_challenge", &oauth.challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("state", &oauth.state);
+    open_system_browser(authorize.as_str())?;
+    let code = oauth.receive_code().await?;
+
+    let form = {
+        let mut form = url::form_urlencoded::Serializer::new(String::new());
+        form.append_pair("client_id", &client_id)
+            .append_pair("code", &code)
+            .append_pair("code_verifier", &oauth.verifier)
+            .append_pair("redirect_uri", &oauth.redirect_uri)
+            .append_pair("grant_type", "authorization_code");
+        if let Some(secret) = configured_google_client_secret() {
+            form.append_pair("client_secret", &secret);
+        }
+        form.finish()
+    };
+    let response = manager
+        .runtime
+        .http
+        .post("https://oauth2.googleapis.com/token")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(form)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Google returned invalid sign-in data: {error}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "Google sign-in failed with HTTP {status}{}",
+            remote_error_suffix(&value.to_string())
+        ));
+    }
+    let access_token = required_json_string(&value, "access_token")?;
+    let identity = manager
+        .runtime
+        .http
+        .get("https://openidconnect.googleapis.com/v1/userinfo")
+        .bearer_auth(&access_token)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !identity.status().is_success() {
+        return Err(
+            "Google sign-in succeeded, but Mimir could not read the account identity.".into(),
+        );
+    }
+    let identity: Value = identity
+        .json()
+        .await
+        .map_err(|error| format!("Google returned invalid account data: {error}"))?;
+    let bundle = GoogleBundle {
+        access_token,
+        refresh_token: value
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        expires_at: Some(
+            unix_seconds()
+                + value
+                    .get("expires_in")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(3600),
+        ),
+        scope: value
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or(GOOGLE_SCOPES)
+            .to_string(),
+        auth: Some(json!({
+            "client_id": client_id,
+            "email": identity.get("email").and_then(Value::as_str),
+            "name": identity.get("name").and_then(Value::as_str),
+        })),
+        service: MIMIR_KEYCHAIN_SERVICE,
+    };
+    write_secret(
+        MIMIR_KEYCHAIN_SERVICE,
+        "google:default",
+        &serde_json::to_string(&bundle.as_stored()).map_err(|error| error.to_string())?,
+    )?;
+    manager.refresh_provider("google")?;
+    Ok(google_status())
+}
+
+#[tauri::command]
+pub async fn connections_connect_slack(
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    let client_id = configured_slack_client_id().ok_or_else(|| {
+        "This Mimir build has no Slack sign-in client. Add MIMIR_SLACK_CLIENT_ID when you build the app."
+            .to_string()
+    })?;
+    let oauth = OauthLoopback::new().await?;
+    let mut authorize = url::Url::parse("https://slack.com/oauth/v2/authorize")
+        .map_err(|error| error.to_string())?;
+    authorize
+        .query_pairs_mut()
+        .append_pair("client_id", &client_id)
+        .append_pair("redirect_uri", &oauth.redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair("user_scope", SLACK_USER_SCOPES)
+        .append_pair("code_challenge", &oauth.challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("state", &oauth.state);
+    open_system_browser(authorize.as_str())?;
+    let code = oauth.receive_code().await?;
+    let form = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("client_id", &client_id)
+        .append_pair("code", &code)
+        .append_pair("code_verifier", &oauth.verifier)
+        .append_pair("redirect_uri", &oauth.redirect_uri)
+        .finish();
+    let response = manager
+        .runtime
+        .http
+        .post("https://slack.com/api/oauth.v2.access")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(form)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Slack returned invalid sign-in data: {error}"))?;
+    if !status.is_success() || value.get("ok") == Some(&Value::Bool(false)) {
+        let reason = value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown_error");
+        return Err(format!("Slack sign-in failed: {reason}"));
+    }
+    let access_token = value
+        .pointer("/authed_user/access_token")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("access_token").and_then(Value::as_str))
+        .ok_or_else(|| "Slack sign-in returned no user access token.".to_string())?;
+    let account = value
+        .pointer("/team/name")
+        .and_then(Value::as_str)
+        .unwrap_or("Slack workspace");
+    let stored = json!({
+        "access_token": access_token,
+        "refresh_token": slack_oauth_optional(&value, "refresh_token"),
+        "account": account,
+        "team_id": value.pointer("/team/id").and_then(Value::as_str),
+        "user_id": value.pointer("/authed_user/id").and_then(Value::as_str),
+        "expires_at": slack_oauth_i64(&value, "expires_in").map(|seconds| unix_seconds() + seconds),
+    });
+    write_secret(
+        MIMIR_KEYCHAIN_SERVICE,
+        "slack:default",
+        &serde_json::to_string(&stored).map_err(|error| error.to_string())?,
+    )?;
+    manager.refresh_provider("slack")?;
+    Ok(slack_status())
+}
+
+#[tauri::command]
+pub async fn connections_connect_granola(
+    api_key: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    let api_key = api_key.trim();
+    if !api_key.starts_with("grn_") {
+        return Err("Enter a Granola API key that starts with grn_.".into());
+    }
+    let response = manager
+        .runtime
+        .http
+        .get(format!("{GRANOLA_API_ROOT}/notes"))
+        .bearer_auth(api_key)
+        .query(&[("page_size", "1")])
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Granola returned invalid connection data: {error}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "Granola rejected this API key with HTTP {status}{}",
+            remote_error_suffix(&value.to_string())
+        ));
+    }
+    let account = value
+        .pointer("/notes/0/owner/email")
+        .and_then(Value::as_str)
+        .unwrap_or("Personal API key");
+    let stored = json!({ "api_key": api_key, "account": account });
+    write_secret(
+        MIMIR_KEYCHAIN_SERVICE,
+        "granola:default",
+        &serde_json::to_string(&stored).map_err(|error| error.to_string())?,
+    )?;
+    manager.refresh_provider("granola")?;
+    Ok(granola_status())
+}
+
+#[tauri::command]
+pub fn connections_disconnect(
+    provider: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<Vec<ConnectionStatus>, String> {
+    let account = match provider.as_str() {
+        "google" => "google:default",
+        "slack" => "slack:default",
+        "granola" => "granola:default",
+        _ => return Err(format!("Unknown connection provider: {provider}")),
+    };
+    delete_secret(account)?;
+    manager.refresh_provider(&provider)?;
+    Ok(manager.statuses())
+}
+
+fn google_status() -> ConnectionStatus {
+    match google_bundle(DEFAULT_ACCOUNT) {
+        Ok(Some(bundle)) if google_needs_sign_in(&bundle) => ConnectionStatus {
+            provider: "google",
+            name: "Google",
+            state: "needs_sign_in",
+            account: google_account_label(&bundle),
+            detail: "Sign in again to restore Gmail, Calendar, and Drive.".into(),
+        },
+        Ok(Some(bundle)) => ConnectionStatus {
+            provider: "google",
+            name: "Google",
+            state: "connected",
+            account: google_account_label(&bundle),
+            detail: "Gmail, Calendar, and Drive are available to agents.".into(),
+        },
+        Ok(None) => disconnected_status("google", "Google", "Gmail, Calendar, and Drive"),
+        Err(error) => needs_sign_in_status("google", "Google", error),
+    }
+}
+
+fn slack_status() -> ConnectionStatus {
+    match slack_bundle(DEFAULT_ACCOUNT) {
+        Ok(Some(bundle)) if slack_needs_sign_in(&bundle) => ConnectionStatus {
+            provider: "slack",
+            name: "Slack",
+            state: "needs_sign_in",
+            account: bundle.account,
+            detail: "Sign in again to restore Slack access.".into(),
+        },
+        Ok(Some(bundle)) => ConnectionStatus {
+            provider: "slack",
+            name: "Slack",
+            state: "connected",
+            account: bundle.account,
+            detail: "Search, read, and send tools are available to agents.".into(),
+        },
+        Ok(None) => disconnected_status("slack", "Slack", "Search, read, and send messages"),
+        Err(error) => needs_sign_in_status("slack", "Slack", error),
+    }
+}
+
+fn granola_status() -> ConnectionStatus {
+    match granola_bundle() {
+        Ok(Some(bundle)) => ConnectionStatus {
+            provider: "granola",
+            name: "Granola",
+            state: "connected",
+            account: bundle.account,
+            detail: "Meeting notes and transcripts are available to agents.".into(),
+        },
+        Ok(None) => disconnected_status("granola", "Granola", "Meeting notes and transcripts"),
+        Err(error) => needs_sign_in_status("granola", "Granola", error),
+    }
+}
+
+fn disconnected_status(
+    provider: &'static str,
+    name: &'static str,
+    capability: &str,
+) -> ConnectionStatus {
+    ConnectionStatus {
+        provider,
+        name,
+        state: "not_connected",
+        account: None,
+        detail: format!("Connect to use {capability}."),
+    }
+}
+
+fn needs_sign_in_status(
+    provider: &'static str,
+    name: &'static str,
+    error: String,
+) -> ConnectionStatus {
+    ConnectionStatus {
+        provider,
+        name,
+        state: "needs_sign_in",
+        account: None,
+        detail: truncate(&error, 160),
+    }
+}
+
+fn google_needs_sign_in(bundle: &GoogleBundle) -> bool {
+    bundle
+        .expires_at
+        .is_some_and(|expires| expires <= unix_seconds() + 60)
+        && bundle.refresh_token.is_none()
+}
+
+fn google_account_label(bundle: &GoogleBundle) -> Option<String> {
+    bundle
+        .auth
+        .as_ref()
+        .and_then(|auth| auth.get("email"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn slack_needs_sign_in(bundle: &SlackBundle) -> bool {
+    bundle
+        .expires_at
+        .is_some_and(|expires| expires <= unix_seconds() + 60)
+        && bundle.refresh_token.is_none()
 }
 
 pub(crate) fn local_diagnostics() -> Value {
-    let settings = read_connection_settings();
-    let legacy_defaults = read_legacy_connection_defaults();
-    let google_account = connection_account(&settings, &legacy_defaults, "google");
-    let slack_account = connection_account(&settings, &legacy_defaults, "slack");
-
-    let google = if !enabled(&settings, "google") {
-        connection_diagnostic("disabled", "disabled in settings", Some(&google_account))
-    } else {
-        match google_bundle(&google_account) {
-            Ok(Some(_)) => connection_diagnostic(
-                "configured",
-                "credentials found; remote service not checked",
-                Some(&google_account),
-            ),
-            Ok(None) => {
-                connection_diagnostic("missing", "credentials not found", Some(&google_account))
-            }
-            Err(error) => connection_diagnostic(
-                "error",
-                &format!("keychain or credential error: {}", truncate(&error, 160)),
-                Some(&google_account),
-            ),
-        }
+    let manager = ConnectionManager::new(ToolRegistry::default());
+    let statuses = manager
+        .map(|manager| manager.statuses())
+        .unwrap_or_else(|_| vec![google_status(), slack_status(), granola_status()]);
+    let diagnostic = |provider: &str| {
+        let status = statuses.iter().find(|status| status.provider == provider);
+        json!({
+            "status": status.map(|status| status.state).unwrap_or("error"),
+            "detail": status.map(|status| status.detail.as_str()).unwrap_or("status unavailable"),
+            "account": status.and_then(|status| status.account.as_deref()),
+        })
     };
-    let slack = if !enabled(&settings, "slack") {
-        connection_diagnostic("disabled", "disabled in settings", Some(&slack_account))
-    } else {
-        match slack_token(&slack_account) {
-            Ok(Some(_)) => connection_diagnostic(
-                "configured",
-                "credential found; remote service not checked",
-                Some(&slack_account),
-            ),
-            Ok(None) => {
-                connection_diagnostic("missing", "credential not found", Some(&slack_account))
-            }
-            Err(error) => connection_diagnostic(
-                "error",
-                &format!("keychain error: {}", truncate(&error, 160)),
-                Some(&slack_account),
-            ),
-        }
-    };
-    let granola = if !enabled(&settings, "granola") {
-        connection_diagnostic("disabled", "disabled in settings", None)
-    } else {
-        let cache = granola_db_path().exists();
-        let token_path = granola_token_path();
-        let token = granola_has_token(&token_path);
-        match (cache, token, token_path.exists()) {
-            (true, true, _) => {
-                connection_diagnostic("configured", "local cache and sync credential found", None)
-            }
-            (true, false, _) => {
-                connection_diagnostic("configured", "local cache found; sync unavailable", None)
-            }
-            (false, true, _) => connection_diagnostic(
-                "configured",
-                "sync credential found; local cache not created yet",
-                None,
-            ),
-            (false, false, true) => {
-                connection_diagnostic("error", "local token state is not usable", None)
-            }
-            (false, false, false) => {
-                connection_diagnostic("missing", "cache and credential not found", None)
-            }
-        }
-    };
-
     json!({
         "remoteChecked": false,
-        "google": google,
-        "slack": slack,
-        "granola": granola,
-    })
-}
-
-fn connection_diagnostic(status: &str, detail: &str, account: Option<&str>) -> Value {
-    json!({
-        "status": status,
-        "detail": detail,
-        "account": account,
+        "google": diagnostic("google"),
+        "slack": diagnostic("slack"),
+        "granola": diagnostic("granola"),
     })
 }
 
@@ -359,72 +684,39 @@ fn register_granola_tools(
     registry: &ToolRegistry,
     runtime: &ConnectionRuntime,
 ) -> Result<(), String> {
-    let cache = granola_db_path();
-    let token = granola_token_path();
-    let (reads_available, sync_available) =
-        granola_capabilities(cache.exists(), granola_has_token(&token));
-    if reads_available {
-        register(
-            registry,
-            runtime,
-            "granola.search",
-            "granola_search",
-            "Search synced Granola meetings.",
-            object_schema(
-                json!({
-                    "query": { "type": "string" },
-                    "attendee": { "type": "string" },
-                    "from": { "type": "string" },
-                    "to": { "type": "string" },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
-                    "offset": { "type": "integer", "minimum": 0, "default": 0 }
-                }),
-                &[],
-            ),
-        )?;
-        register(
-            registry,
-            runtime,
-            "granola.get",
-            "granola_get",
-            "Read one synced Granola meeting.",
-            object_schema(
-                json!({
-                    "id": { "type": "string", "minLength": 1 },
-                    "transcript": { "type": "boolean", "default": false },
-                    "transcript_limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
-                    "max_chars": { "type": "integer", "minimum": 1000, "maximum": 50000, "default": 20000 }
-                }),
-                &["id"],
-            ),
-        )?;
-    }
-    if sync_available {
-        register(
-            registry,
-            runtime,
-            "granola.sync",
-            "granola_sync",
-            "Sync Granola meetings or one transcript.",
-            object_schema(
-                json!({
-                    "full": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "Fetch the complete remote set and prune deleted cached meetings only when every page is received."
-                    },
-                    "max_pages": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
-                    "transcript_id": { "type": "string" }
-                }),
-                &[],
-            ),
-        )?;
-    }
+    register(
+        registry,
+        runtime,
+        "granola.search",
+        "granola_search",
+        "Find Granola meeting notes by title or owner.",
+        object_schema(
+            json!({
+                "query": { "type": "string" },
+                "from": { "type": "string", "description": "Only notes created on or after this ISO date." },
+                "to": { "type": "string", "description": "Only notes created before this ISO date." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 30, "default": 10 },
+                "cursor": { "type": "string" }
+            }),
+            &[],
+        ),
+    )?;
+    register(
+        registry,
+        runtime,
+        "granola.get",
+        "granola_get",
+        "Read one Granola meeting note and, when requested, its transcript.",
+        object_schema(
+            json!({
+                "id": { "type": "string", "minLength": 1 },
+                "transcript": { "type": "boolean", "default": false },
+                "max_chars": { "type": "integer", "minimum": 1000, "maximum": 50000, "default": 20000 }
+            }),
+            &["id"],
+        ),
+    )?;
     Ok(())
-}
-
-fn granola_capabilities(cache_exists: bool, token_exists: bool) -> (bool, bool) {
-    (cache_exists || token_exists, token_exists)
 }
 
 fn register(
@@ -436,14 +728,21 @@ fn register(
     schema: Value,
 ) -> Result<(), String> {
     let runtime = runtime.clone();
+    let provider = if canonical.starts_with("slack.") {
+        "slack"
+    } else if canonical.starts_with("granola.") {
+        "granola"
+    } else {
+        "google"
+    };
     let registration = ToolRegistration::new(
         ToolDescriptor::new(
             canonical,
             alias,
             description,
             schema,
-            ToolOwner::Core,
-            ToolSource::Native,
+            ToolOwner::Provider(provider.to_string()),
+            ToolSource::Integration(provider.to_string()),
         )
         .with_annotations(connection_annotations(canonical)),
         move |_context: ToolCallContext, input: Value| {
@@ -476,9 +775,8 @@ impl ConnectionRuntime {
             "slack.search" => self.slack_search(&input).await,
             "slack.read" => self.slack_read(&input).await,
             "slack.send" => self.slack_send(&input).await,
-            "granola.search" => granola_search(&input),
-            "granola.get" => granola_get(&input),
-            "granola.sync" => self.granola_sync(&input).await,
+            "granola.search" => self.granola_search(&input).await,
+            "granola.get" => self.granola_get(&input).await,
             _ => Err(format!("Unknown connection tool: {tool}")),
         }
     }
@@ -532,15 +830,27 @@ impl ConnectionRuntime {
         {
             return Ok(bundle.access_token);
         }
-        let client = google_client(&self.google_account)?
-            .ok_or_else(|| "Google OAuth client is not configured.".to_string())?;
+        let client_id = bundle
+            .auth
+            .as_ref()
+            .and_then(|auth| auth.get("client_id"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(configured_google_client_id)
+            .ok_or_else(|| {
+                "Google needs sign-in. Connect Google in Settings → Connections.".to_string()
+            })?;
         let refresh_token = bundle.refresh_token.clone().unwrap_or_default();
-        let form = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("client_id", &client.0)
-            .append_pair("client_secret", &client.1)
-            .append_pair("refresh_token", &refresh_token)
-            .append_pair("grant_type", "refresh_token")
-            .finish();
+        let form = {
+            let mut form = url::form_urlencoded::Serializer::new(String::new());
+            form.append_pair("client_id", &client_id)
+                .append_pair("refresh_token", &refresh_token)
+                .append_pair("grant_type", "refresh_token");
+            if let Some(secret) = configured_google_client_secret() {
+                form.append_pair("client_secret", &secret);
+            }
+            form.finish()
+        };
         let response = self
             .http
             .post("https://oauth2.googleapis.com/token")
@@ -891,9 +1201,7 @@ impl ConnectionRuntime {
         query: &[(&str, String)],
         body: Option<Value>,
     ) -> Result<Value, String> {
-        let token = slack_token(&self.slack_account)?
-            .ok_or_else(|| "Slack is not connected.".to_string())?
-            .value;
+        let token = self.slack_access_token().await?;
         let send = || {
             let mut request = self
                 .http
@@ -934,6 +1242,53 @@ impl ConnectionRuntime {
             return Err(format!("Slack {method}: {reason}"));
         }
         Ok(value)
+    }
+
+    async fn slack_access_token(&self) -> Result<String, String> {
+        let mut bundle = slack_bundle(&self.slack_account)?.ok_or_else(|| {
+            "Slack is not connected. Connect Slack in Settings → Connections.".to_string()
+        })?;
+        if bundle.expires_at.unwrap_or(i64::MAX) > unix_seconds() + 60 {
+            return Ok(bundle.access_token);
+        }
+        let refresh_token = bundle.refresh_token.clone().ok_or_else(|| {
+            "Slack needs sign-in. Connect Slack in Settings → Connections.".to_string()
+        })?;
+        let client_id = configured_slack_client_id().ok_or_else(|| {
+            "Slack needs sign-in. Connect Slack in Settings → Connections.".to_string()
+        })?;
+        let form = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("grant_type", "refresh_token")
+            .append_pair("refresh_token", &refresh_token)
+            .append_pair("client_id", &client_id)
+            .finish();
+        let response = self
+            .http
+            .post("https://slack.com/api/oauth.v2.access")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(form)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        let status = response.status();
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|error| format!("Slack returned invalid refresh data: {error}"))?;
+        if !status.is_success() || value.get("ok") == Some(&Value::Bool(false)) {
+            return Err("Slack needs sign-in. Connect Slack in Settings → Connections.".into());
+        }
+        bundle.access_token = slack_oauth_value(&value, "access_token")?;
+        bundle.refresh_token =
+            slack_oauth_optional(&value, "refresh_token").or(bundle.refresh_token);
+        bundle.expires_at =
+            slack_oauth_i64(&value, "expires_in").map(|seconds| unix_seconds() + seconds);
+        write_secret(
+            MIMIR_KEYCHAIN_SERVICE,
+            &format!("slack:{}", self.slack_account),
+            &serde_json::to_string(&bundle.as_stored()).map_err(|error| error.to_string())?,
+        )?;
+        Ok(bundle.access_token)
     }
 
     async fn slack_search(&self, input: &Value) -> Result<Value, String> {
@@ -979,146 +1334,19 @@ impl ConnectionRuntime {
         .await
     }
 
-    async fn granola_sync(&self, input: &Value) -> Result<Value, String> {
-        let transcript_id = string(input, "transcript_id");
-        let mut tokens = load_granola_tokens()?;
-        let access_token = self.granola_access_token(&mut tokens).await?;
-        if let Some(id) = transcript_id {
-            let data = self
-                .granola_api(
-                    &access_token,
-                    "/v1/get-document-transcript",
-                    json!({ "document_id": id }),
-                )
-                .await?;
-            let entries = data
-                .as_array()
-                .cloned()
-                .or_else(|| data.get("transcript").and_then(Value::as_array).cloned())
-                .unwrap_or_default();
-            let mut db = open_granola_db()?;
-            let tx = db.transaction().map_err(|error| error.to_string())?;
-            tx.execute("DELETE FROM transcripts WHERE note_id = ?1", [&id])
-                .map_err(|error| error.to_string())?;
-            for entry in &entries {
-                tx.execute(
-                    "INSERT INTO transcripts (note_id, text, start_time, source) VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        id,
-                        entry.get("text").and_then(Value::as_str).unwrap_or(""),
-                        entry
-                            .get("start_timestamp")
-                            .and_then(Value::as_str)
-                            .unwrap_or(""),
-                        entry.get("source").and_then(Value::as_str).unwrap_or("")
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
-            }
-            tx.commit().map_err(|error| error.to_string())?;
-            return Ok(json!({ "ok": true, "transcriptId": id, "segments": entries.len() }));
-        }
-
-        let full = input.get("full").and_then(Value::as_bool).unwrap_or(false);
-        let max_pages = int(input, "max_pages", 20, 1, 100);
-        let db = open_granola_db()?;
-        let last_updated = if full {
-            None
-        } else {
-            db.query_row("SELECT MAX(updated_at) FROM notes", [], |row| {
-                row.get::<_, Option<String>>(0)
-            })
-            .map_err(|error| error.to_string())?
-        };
-        let mut synced = 0usize;
-        let mut fetched = 0usize;
-        let mut pages = 0usize;
-        let mut remote_ids = HashSet::new();
-        let mut complete = false;
-        for page in 0..max_pages {
-            pages += 1;
-            let data = self
-                .granola_api(
-                    &access_token,
-                    "/v2/get-documents",
-                    json!({
-                        "limit": 100,
-                        "offset": page * 100,
-                        "include_last_viewed_panel": true
-                    }),
-                )
-                .await?;
-            let documents = data
-                .get("docs")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            fetched += documents.len();
-            remote_ids.extend(documents.iter().filter_map(|document| {
-                document
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            }));
-            let fresh = documents
-                .iter()
-                .filter(|document| {
-                    last_updated.as_ref().is_none_or(|last| {
-                        document
-                            .get("updated_at")
-                            .and_then(Value::as_str)
-                            .is_some_and(|updated| updated > last.as_str())
-                    })
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            if !fresh.is_empty() {
-                granola_upsert_documents(&db, &fresh)?;
-                synced += fresh.len();
-            }
-            if documents.len() < 100 {
-                complete = true;
-                break;
-            }
-            if !full && fresh.is_empty() {
-                break;
-            }
-        }
-        let pruned = granola_prune_if_complete(&db, full, complete, &remote_ids)?;
-        let synced_at = chrono::Utc::now().to_rfc3339();
-        db.execute(
-            "INSERT INTO meta (key, value) VALUES ('last_sync_at', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [&synced_at],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(json!({
-            "ok": true,
-            "synced": synced,
-            "fetched": fetched,
-            "pages": pages,
-            "full": full,
-            "complete": complete,
-            "pruned": pruned,
-            "syncedAt": synced_at
-        }))
-    }
-
-    async fn granola_api(
+    async fn granola_json(
         &self,
-        access_token: &str,
         endpoint: &str,
-        body: Value,
+        query: &[(&str, String)],
     ) -> Result<Value, String> {
+        let bundle = granola_bundle()?.ok_or_else(|| {
+            "Granola is not connected. Connect Granola in Settings → Connections.".to_string()
+        })?;
         let response = self
             .http
-            .post(format!("https://api.granola.ai{endpoint}"))
-            .bearer_auth(access_token)
-            .header("content-type", "application/json")
-            .header("user-agent", "Granola/7.319.1")
-            .header("x-client-version", "7.319.1")
-            .header("x-granola-platform", std::env::consts::OS)
-            .json(&body)
+            .get(format!("{GRANOLA_API_ROOT}{endpoint}"))
+            .bearer_auth(bundle.api_key)
+            .query(query)
             .send()
             .await
             .map_err(|error| error.to_string())?;
@@ -1128,65 +1356,63 @@ impl ConnectionRuntime {
             .await
             .map_err(|error| format!("Granola returned invalid JSON: {error}"))?;
         if !status.is_success() {
-            return Err(format!("Granola API {endpoint} failed with HTTP {status}"));
+            return Err(format!(
+                "Granola request failed with HTTP {status}{}",
+                remote_error_suffix(&value.to_string())
+            ));
         }
         Ok(value)
     }
 
-    async fn granola_access_token(&self, tokens: &mut GranolaTokens) -> Result<String, String> {
-        if tokens.expires_at() > unix_seconds() + 120 {
-            return Ok(tokens.access_token.clone());
+    async fn granola_search(&self, input: &Value) -> Result<Value, String> {
+        let limit = int(input, "limit", 10, 1, 30);
+        let mut query = vec![("page_size", limit.to_string())];
+        if let Some(value) = string(input, "from") {
+            query.push(("created_after", value));
         }
-        let response = self
-            .http
-            .post("https://api.granola.ai/v1/refresh-access-token")
-            .bearer_auth(&tokens.access_token)
-            .json(&json!({ "refresh_token": tokens.refresh_token }))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        let value = if response.status().is_success() {
-            response
-                .json::<Value>()
-                .await
-                .map_err(|error| error.to_string())?
-        } else {
-            let client_id = std::env::var("GRANOLA_WORKOS_CLIENT_ID")
-                .unwrap_or_else(|_| "client_01JZJ0XBDAT8PHJWQY09Y0VD61".into());
-            let response = self
-                .http
-                .post("https://api.workos.com/user_management/authenticate")
-                .json(&json!({
-                    "client_id": client_id,
-                    "grant_type": "refresh_token",
-                    "refresh_token": tokens.refresh_token
-                }))
-                .send()
-                .await
-                .map_err(|error| error.to_string())?;
-            let status = response.status();
-            let value = response
-                .json::<Value>()
-                .await
-                .map_err(|error| error.to_string())?;
-            if !status.is_success() {
-                return Err(format!("Granola token refresh failed with HTTP {status}"));
+        if let Some(value) = string(input, "to") {
+            query.push(("created_before", value));
+        }
+        if let Some(value) = string(input, "cursor") {
+            query.push(("cursor", value));
+        }
+        let mut value = self.granola_json("/notes", &query).await?;
+        if let Some(needle) = string(input, "query").map(|value| value.to_lowercase()) {
+            if let Some(notes) = value.get_mut("notes").and_then(Value::as_array_mut) {
+                notes.retain(|note| {
+                    [
+                        note.get("title").and_then(Value::as_str),
+                        note.pointer("/owner/name").and_then(Value::as_str),
+                        note.pointer("/owner/email").and_then(Value::as_str),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .any(|field| field.to_lowercase().contains(&needle))
+                });
             }
-            value
-        };
-        tokens.access_token = required_json_string(&value, "access_token")?;
-        tokens.refresh_token = value
-            .get("refresh_token")
-            .and_then(Value::as_str)
-            .unwrap_or(&tokens.refresh_token)
-            .to_string();
-        tokens.expires_in = value
-            .get("expires_in")
-            .and_then(Value::as_i64)
-            .unwrap_or(21_600);
-        tokens.obtained_at = unix_millis();
-        store_granola_tokens(tokens)?;
-        Ok(tokens.access_token.clone())
+        }
+        Ok(value)
+    }
+
+    async fn granola_get(&self, input: &Value) -> Result<Value, String> {
+        let id = required_string(input, "id")?;
+        let query = input
+            .get("transcript")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .then(|| ("include", "transcript".to_string()))
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut value = self
+            .granola_json(&format!("/notes/{}", url_encode(&id)), &query)
+            .await?;
+        let max_chars = int(input, "max_chars", 20_000, 1_000, 50_000) as usize;
+        if let Some(markdown) = value.get_mut("summary_markdown") {
+            if let Some(text) = markdown.as_str() {
+                *markdown = Value::String(truncate(text, max_chars));
+            }
+        }
+        Ok(value)
     }
 }
 
@@ -1243,40 +1469,120 @@ fn google_bundle(account: &str) -> Result<Option<GoogleBundle>, String> {
     }))
 }
 
-fn google_client(account: &str) -> Result<Option<(String, String)>, String> {
-    if let (Ok(id), Ok(secret)) = (
-        std::env::var("MIMIR_GOOGLE_OAUTH_CLIENT_ID"),
-        std::env::var("MIMIR_GOOGLE_OAUTH_CLIENT_SECRET"),
-    ) {
-        if !id.trim().is_empty() && !secret.trim().is_empty() {
-            return Ok(Some((id, secret)));
-        }
+fn configured_google_client_id() -> Option<String> {
+    std::env::var("MIMIR_GOOGLE_OAUTH_CLIENT_ID")
+        .ok()
+        .or_else(|| option_env!("MIMIR_GOOGLE_OAUTH_CLIENT_ID").map(str::to_string))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_google_client_secret() -> Option<String> {
+    std::env::var("MIMIR_GOOGLE_OAUTH_CLIENT_SECRET")
+        .ok()
+        .or_else(|| option_env!("MIMIR_GOOGLE_OAUTH_CLIENT_SECRET").map(str::to_string))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_slack_client_id() -> Option<String> {
+    std::env::var("MIMIR_SLACK_CLIENT_ID")
+        .ok()
+        .or_else(|| option_env!("MIMIR_SLACK_CLIENT_ID").map(str::to_string))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[derive(Clone)]
+struct SlackBundle {
+    access_token: String,
+    refresh_token: Option<String>,
+    account: Option<String>,
+    expires_at: Option<i64>,
+}
+
+impl SlackBundle {
+    fn as_stored(&self) -> Value {
+        json!({
+            "access_token": self.access_token,
+            "refresh_token": self.refresh_token,
+            "account": self.account,
+            "expires_at": self.expires_at,
+        })
     }
-    let Some(secret) = read_secret(&format!("google-client:{account}"))? else {
+}
+
+fn slack_bundle(account: &str) -> Result<Option<SlackBundle>, String> {
+    let Some(secret) = read_secret(&format!("slack:{account}"))? else {
         return Ok(None);
     };
     let value: Value = serde_json::from_str(&secret.value)
-        .map_err(|_| "Invalid Google OAuth client.".to_string())?;
-    Ok(Some((
-        required_json_string(&value, "client_id")?,
-        required_json_string(&value, "client_secret")?,
-    )))
+        .map_err(|_| "Invalid Slack token bundle.".to_string())?;
+    Ok(Some(SlackBundle {
+        access_token: required_json_string(&value, "access_token")?,
+        refresh_token: value
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        account: value
+            .get("account")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        expires_at: value.get("expires_at").and_then(Value::as_i64),
+    }))
 }
 
-fn slack_token(account: &str) -> Result<Option<Secret>, String> {
-    read_secret(&format!("slack:{account}"))
+fn slack_oauth_optional(value: &Value, key: &str) -> Option<String> {
+    value
+        .pointer(&format!("/authed_user/{key}"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get(key).and_then(Value::as_str))
+        .map(str::to_string)
+}
+
+fn slack_oauth_value(value: &Value, key: &str) -> Result<String, String> {
+    slack_oauth_optional(value, key).ok_or_else(|| format!("Slack returned no {key}."))
+}
+
+fn slack_oauth_i64(value: &Value, key: &str) -> Option<i64> {
+    value
+        .pointer(&format!("/authed_user/{key}"))
+        .and_then(Value::as_i64)
+        .or_else(|| value.get(key).and_then(Value::as_i64))
+}
+
+#[derive(Clone)]
+struct GranolaBundle {
+    api_key: String,
+    account: Option<String>,
+}
+
+fn granola_bundle() -> Result<Option<GranolaBundle>, String> {
+    let Some(secret) = read_secret("granola:default")? else {
+        return Ok(None);
+    };
+    let value: Value = serde_json::from_str(&secret.value)
+        .map_err(|_| "Invalid Granola credential.".to_string())?;
+    Ok(Some(GranolaBundle {
+        api_key: required_json_string(&value, "api_key")?,
+        account: value
+            .get("account")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }))
 }
 
 fn read_secret(account: &str) -> Result<Option<Secret>, String> {
-    for service in [MIMIR_KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_SERVICE] {
-        let entry = keyring::Entry::new(service, account).map_err(|error| error.to_string())?;
-        match entry.get_password() {
-            Ok(value) if !value.trim().is_empty() => return Ok(Some(Secret { value, service })),
-            Ok(_) | Err(keyring::Error::NoEntry) => {}
-            Err(error) => return Err(error.to_string()),
-        }
+    let entry =
+        keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
+    match entry.get_password() {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(Secret {
+            value,
+            service: MIMIR_KEYCHAIN_SERVICE,
+        })),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
-    Ok(None)
 }
 
 fn write_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
@@ -1284,6 +1590,15 @@ fn write_secret(service: &str, account: &str, value: &str) -> Result<(), String>
         .map_err(|error| error.to_string())?
         .set_password(value)
         .map_err(|error| error.to_string())
+}
+
+fn delete_secret(account: &str) -> Result<(), String> {
+    let entry =
+        keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn object_schema(properties: Value, required: &[&str]) -> Value {
@@ -1296,71 +1611,12 @@ fn object_schema(properties: Value, required: &[&str]) -> Value {
 }
 
 fn connection_annotations(canonical: &str) -> ToolAnnotations {
-    let write = matches!(
-        canonical,
-        "gmail.send" | "calendar.create" | "slack.send" | "granola.sync"
-    );
+    let write = matches!(canonical, "gmail.send" | "calendar.create" | "slack.send");
     ToolAnnotations {
         read_only_hint: Some(!write),
         destructive_hint: Some(false),
         idempotent_hint: (!write).then_some(true),
     }
-}
-
-fn read_connection_settings() -> Value {
-    let Some(home) = dirs::home_dir() else {
-        return json!({});
-    };
-    fs::read_to_string(home.join(".mimir").join("settings.json"))
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_else(|| json!({}))
-}
-
-fn read_legacy_connection_defaults() -> Value {
-    let Some(home) = dirs::home_dir() else {
-        return json!({});
-    };
-    let path = home
-        .join(format!(".{}", concat!("m", "i", "m")))
-        .join("config.yaml");
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_yaml::from_str::<Value>(&raw).ok())
-        .and_then(|value| value.get("defaults").cloned())
-        .unwrap_or_else(|| json!({}))
-}
-
-fn connection_account(settings: &Value, legacy_defaults: &Value, name: &str) -> String {
-    settings
-        .pointer(&format!("/connections/{name}/account"))
-        .and_then(Value::as_str)
-        .or_else(|| legacy_defaults.get(name).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|account| !account.is_empty())
-        .unwrap_or(DEFAULT_ACCOUNT)
-        .to_string()
-}
-
-fn enabled(settings: &Value, name: &str) -> bool {
-    match settings.pointer(&format!("/connections/{name}")) {
-        Some(Value::Bool(value)) => *value,
-        Some(Value::Object(value)) => value
-            .get("enabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(true),
-        _ => true,
-    }
-}
-
-fn credential_connection_declared(settings: &Value, legacy_defaults: &Value, name: &str) -> bool {
-    if settings.pointer(&format!("/connections/{name}")).is_some() {
-        return enabled(settings, name);
-    }
-    legacy_defaults
-        .get(name)
-        .and_then(Value::as_str)
-        .is_some_and(|account| !account.trim().is_empty())
 }
 
 fn gmail_summary(message: &Value) -> Value {
@@ -1555,644 +1811,131 @@ fn unix_seconds() -> i64 {
         .as_secs() as i64
 }
 
-fn unix_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+struct OauthLoopback {
+    listener: tokio::net::TcpListener,
+    redirect_uri: String,
+    state: String,
+    verifier: String,
+    challenge: String,
 }
 
-#[derive(Clone)]
-struct GranolaTokens {
-    access_token: String,
-    refresh_token: String,
-    expires_in: i64,
-    obtained_at: i64,
-    token_path: PathBuf,
-    root: Value,
-}
-
-impl GranolaTokens {
-    fn expires_at(&self) -> i64 {
-        self.obtained_at / 1000 + self.expires_in
-    }
-}
-
-fn granola_token_path() -> PathBuf {
-    std::env::var_os("GRANOLA_TOKEN_PATH")
-        .map(PathBuf::from)
-        .or_else(|| {
-            dirs::home_dir().map(|home| {
-                home.join("Library")
-                    .join("Application Support")
-                    .join("Granola")
-                    .join("supabase.json")
-            })
-        })
-        .unwrap_or_default()
-}
-
-fn granola_db_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("GRANOLA_MIMIR_DB_PATH") {
-        return PathBuf::from(path);
-    }
-    let Some(home) = dirs::home_dir() else {
-        return PathBuf::new();
-    };
-    let native = home
-        .join(".mimir")
-        .join("connections")
-        .join("granola.sqlite");
-    if native.exists() {
-        return native;
-    }
-    let legacy = home
-        .join(format!(".{}", concat!("m", "i", "m")))
-        .join("private")
-        .join("granola")
-        .join("granola.sqlite");
-    if legacy.exists() {
-        legacy
-    } else {
-        native
-    }
-}
-
-fn granola_has_token(path: &Path) -> bool {
-    read_json(path)
-        .and_then(|value| value.get("workos_tokens").cloned())
-        .and_then(|value| value.as_str().map(str::to_string))
-        .and_then(|value| serde_json::from_str::<Value>(&value).ok())
-        .is_some_and(|value| value.get("access_token").and_then(Value::as_str).is_some())
-        || stored_granola_tokens(path).is_some()
-}
-
-fn load_granola_tokens() -> Result<GranolaTokens, String> {
-    let token_path = granola_token_path();
-    let root = read_json(&token_path)
-        .ok_or_else(|| "Granola token file is unavailable. Open Granola once.".to_string())?;
-    let primary = root
-        .get("workos_tokens")
-        .and_then(Value::as_str)
-        .and_then(|value| serde_json::from_str::<Value>(value).ok());
-    let value = primary
-        .or_else(|| stored_granola_tokens(&token_path))
-        .ok_or_else(|| "Granola token file has no usable token.".to_string())?;
-    Ok(GranolaTokens {
-        access_token: required_json_string(&value, "access_token")?,
-        refresh_token: required_json_string(&value, "refresh_token")?,
-        expires_in: value
-            .get("expires_in")
-            .and_then(Value::as_i64)
-            .unwrap_or(21_600),
-        obtained_at: value
-            .get("obtained_at")
-            .and_then(Value::as_i64)
-            .unwrap_or_else(unix_millis),
-        token_path,
-        root,
-    })
-}
-
-fn stored_granola_tokens(token_path: &Path) -> Option<Value> {
-    let root = read_json(&token_path.parent()?.join("stored-accounts.json"))?;
-    let accounts = root.get("accounts")?.as_str()?;
-    let accounts: Value = serde_json::from_str(accounts).ok()?;
-    let token = accounts.as_array()?.first()?.get("tokens")?;
-    match token {
-        Value::String(value) => serde_json::from_str(value).ok(),
-        Value::Object(_) => Some(token.clone()),
-        _ => None,
-    }
-}
-
-fn store_granola_tokens(tokens: &mut GranolaTokens) -> Result<(), String> {
-    let value = json!({
-        "access_token": tokens.access_token,
-        "refresh_token": tokens.refresh_token,
-        "expires_in": tokens.expires_in,
-        "obtained_at": tokens.obtained_at
-    });
-    tokens.root["workos_tokens"] =
-        Value::String(serde_json::to_string(&value).map_err(|error| error.to_string())?);
-    crate::persistence::write_bytes_atomic(
-        &tokens.token_path,
-        serde_json::to_vec_pretty(&tokens.root)
+impl OauthLoopback {
+    async fn new() -> Result<Self, String> {
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .map_err(|error| format!("Mimir could not start the sign-in callback: {error}"))?;
+        let port = listener
+            .local_addr()
             .map_err(|error| error.to_string())?
-            .as_slice(),
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn open_granola_db() -> Result<Connection, String> {
-    let path = granola_db_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let db = Connection::open(path).map_err(|error| error.to_string())?;
-    db.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA foreign_keys = ON;
-         CREATE TABLE IF NOT EXISTS notes (
-           id TEXT PRIMARY KEY, title TEXT, created_at TEXT, updated_at TEXT,
-           owner_name TEXT, owner_email TEXT, summary_markdown TEXT,
-           notes_markdown TEXT, calendar_start TEXT, calendar_end TEXT,
-           synced_at INTEGER DEFAULT (unixepoch())
-         );
-         CREATE TABLE IF NOT EXISTS attendees (
-           note_id TEXT REFERENCES notes(id) ON DELETE CASCADE, name TEXT, email TEXT
-         );
-         CREATE TABLE IF NOT EXISTS transcripts (
-           note_id TEXT REFERENCES notes(id) ON DELETE CASCADE,
-           text TEXT, start_time TEXT, source TEXT
-         );
-         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-         CREATE INDEX IF NOT EXISTS idx_attendees_note ON attendees(note_id);
-         CREATE INDEX IF NOT EXISTS idx_transcripts_note ON transcripts(note_id);
-         CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC);",
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(db)
-}
-
-fn granola_search(input: &Value) -> Result<Value, String> {
-    let db = open_granola_db()?;
-    let mut clauses = Vec::new();
-    let mut values = Vec::<rusqlite::types::Value>::new();
-    for term in string(input, "query")
-        .unwrap_or_default()
-        .split_whitespace()
-        .take(8)
-    {
-        clauses.push(
-            "(LOWER(COALESCE(n.title,'') || ' ' || COALESCE(n.summary_markdown,'') || ' ' || COALESCE(n.notes_markdown,'')) LIKE ? ESCAPE '\\'
-              OR EXISTS (SELECT 1 FROM attendees ax WHERE ax.note_id = n.id AND LOWER(COALESCE(ax.name,'') || ' ' || COALESCE(ax.email,'')) LIKE ? ESCAPE '\\'))"
-                .to_string(),
+            .port();
+        let verifier = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
         );
-        let pattern = like_pattern(term);
-        values.push(pattern.clone().into());
-        values.push(pattern.into());
+        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+        Ok(Self {
+            listener,
+            redirect_uri: format!("http://127.0.0.1:{port}/callback"),
+            state: uuid::Uuid::new_v4().simple().to_string(),
+            verifier,
+            challenge,
+        })
     }
-    if let Some(attendee) = string(input, "attendee") {
-        clauses.push(
-            "EXISTS (SELECT 1 FROM attendees aa WHERE aa.note_id = n.id AND LOWER(COALESCE(aa.name,'') || ' ' || COALESCE(aa.email,'')) LIKE ? ESCAPE '\\')"
-                .to_string(),
+
+    async fn receive_code(&self) -> Result<String, String> {
+        let (mut stream, _) =
+            tokio::time::timeout(Duration::from_secs(180), self.listener.accept())
+                .await
+                .map_err(|_| "Sign-in timed out. Try Connect again.".to_string())?
+                .map_err(|error| {
+                    format!("Mimir could not receive the sign-in callback: {error}")
+                })?;
+        let mut request = vec![0u8; 8192];
+        let length = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut request))
+            .await
+            .map_err(|_| "The sign-in callback did not finish.".to_string())?
+            .map_err(|error| error.to_string())?;
+        let request = String::from_utf8_lossy(&request[..length]);
+        let target = request
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .ok_or_else(|| "The sign-in callback was invalid.".to_string())?;
+        let callback = url::Url::parse(&format!("http://127.0.0.1{target}"))
+            .map_err(|_| "The sign-in callback URL was invalid.".to_string())?;
+        let values = callback
+            .query_pairs()
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let success = values.get("state") == Some(&self.state) && values.contains_key("code");
+        let body = if success {
+            "<!doctype html><meta charset=\"utf-8\"><title>Mimir connected</title><p>Connected. You can close this page and return to Mimir.</p>"
+        } else {
+            "<!doctype html><meta charset=\"utf-8\"><title>Mimir sign-in stopped</title><p>Mimir could not complete sign-in. Return to Mimir and try again.</p>"
+        };
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
         );
-        values.push(like_pattern(&attendee).into());
-    }
-    if let Some(from) = string(input, "from") {
-        clauses.push("COALESCE(n.calendar_start,n.created_at,n.updated_at) >= ?".into());
-        values.push(date_bound(&from, false).into());
-    }
-    if let Some(to) = string(input, "to") {
-        clauses.push("COALESCE(n.calendar_start,n.created_at,n.updated_at) <= ?".into());
-        values.push(date_bound(&to, true).into());
-    }
-    let limit = int(input, "limit", 10, 1, 50);
-    let offset = int(input, "offset", 0, 0, 100_000);
-    values.push(limit.into());
-    values.push(offset.into());
-    let where_clause = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", clauses.join(" AND "))
-    };
-    let sql = format!(
-        "SELECT n.id,n.title,n.created_at,n.updated_at,n.calendar_start,n.calendar_end,
-                n.owner_name,n.owner_email,n.summary_markdown,
-                GROUP_CONCAT(a.name, char(31))
-         FROM notes n LEFT JOIN attendees a ON a.note_id=n.id
-         {where_clause}
-         GROUP BY n.id
-         ORDER BY COALESCE(n.calendar_start,n.created_at,n.updated_at) DESC
-         LIMIT ? OFFSET ?"
-    );
-    let mut statement = db.prepare(&sql).map_err(|error| error.to_string())?;
-    let notes = statement
-        .query_map(params_from_iter(values), |row| {
-            let attendees: String = row.get::<_, Option<String>>(9)?.unwrap_or_default();
-            Ok(json!({
-                "id": row.get::<_, String>(0)?,
-                "title": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                "createdAt": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                "updatedAt": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                "calendarStart": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                "calendarEnd": row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                "owner": {
-                    "name": row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                    "email": row.get::<_, Option<String>>(7)?.unwrap_or_default()
-                },
-                "summary": truncate(&row.get::<_, Option<String>>(8)?.unwrap_or_default(), 1000),
-                "attendees": attendees.split('\u{1f}').filter(|value| !value.is_empty()).collect::<Vec<_>>()
-            }))
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    Ok(json!({ "notes": notes, "limit": limit, "offset": offset }))
-}
-
-fn granola_get(input: &Value) -> Result<Value, String> {
-    let id = required_string(input, "id")?;
-    let db = open_granola_db()?;
-    let note = db
-        .query_row(
-            "SELECT id,title,created_at,updated_at,calendar_start,calendar_end,
-                    owner_name,owner_email,summary_markdown,notes_markdown
-             FROM notes WHERE id=?1",
-            [&id],
-            |row| {
-                Ok(json!({
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    "createdAt": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    "updatedAt": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    "calendarStart": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                    "calendarEnd": row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    "owner": {
-                        "name": row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                        "email": row.get::<_, Option<String>>(7)?.unwrap_or_default()
-                    },
-                    "summary": row.get::<_, Option<String>>(8)?.unwrap_or_default(),
-                    "notes": row.get::<_, Option<String>>(9)?.unwrap_or_default()
-                }))
-            },
-        )
-        .map_err(|error| {
-            if matches!(error, rusqlite::Error::QueryReturnedNoRows) {
-                format!("Granola meeting '{id}' was not found.")
-            } else {
-                error.to_string()
-            }
-        })?;
-    let attendees = db
-        .prepare("SELECT name,email FROM attendees WHERE note_id=?1 ORDER BY name,email")
-        .map_err(|error| error.to_string())?
-        .query_map([&id], |row| {
-            Ok(json!({
-                "name": row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                "email": row.get::<_, Option<String>>(1)?.unwrap_or_default()
-            }))
-        })
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let max_chars = int(input, "max_chars", 20_000, 1_000, 50_000) as usize;
-    let markdown = format!(
-        "{}{}",
-        note.get("summary")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(|value| format!("## Summary\n\n{value}\n\n"))
-            .unwrap_or_default(),
-        note.get("notes").and_then(Value::as_str).unwrap_or("")
-    );
-    let mut output = note;
-    output["attendees"] = Value::Array(attendees);
-    output["markdown"] = Value::String(truncate(&markdown, max_chars));
-    if input
-        .get("transcript")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        let limit = int(input, "transcript_limit", 100, 1, 500);
-        let transcript = db
-            .prepare(
-                "SELECT text,start_time,source FROM transcripts
-                 WHERE note_id=?1 ORDER BY start_time LIMIT ?2",
-            )
-            .map_err(|error| error.to_string())?
-            .query_map(params![id, limit], |row| {
-                Ok(json!({
-                    "text": row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                    "startTime": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    "source": row.get::<_, Option<String>>(2)?.unwrap_or_default()
-                }))
-            })
-            .map_err(|error| error.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        output["transcript"] = Value::Array(transcript);
-    }
-    Ok(output)
-}
-
-fn granola_upsert_documents(db: &Connection, documents: &[Value]) -> Result<(), String> {
-    db.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|error| error.to_string())?;
-    let result = (|| {
-        for document in documents {
-            let id = document.get("id").and_then(Value::as_str).unwrap_or("");
-            if id.is_empty() {
-                continue;
-            }
-            let summary = document
-                .pointer("/last_viewed_panel/content")
-                .map(prosemirror_markdown)
-                .unwrap_or_default();
-            db.execute(
-                "INSERT INTO notes (
-                   id,title,created_at,updated_at,owner_name,owner_email,
-                   summary_markdown,notes_markdown,calendar_start,calendar_end,synced_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,unixepoch())
-                 ON CONFLICT(id) DO UPDATE SET
-                   title=excluded.title,created_at=excluded.created_at,
-                   updated_at=excluded.updated_at,owner_name=excluded.owner_name,
-                   owner_email=excluded.owner_email,summary_markdown=excluded.summary_markdown,
-                   notes_markdown=excluded.notes_markdown,calendar_start=excluded.calendar_start,
-                   calendar_end=excluded.calendar_end,synced_at=excluded.synced_at",
-                params![
-                    id,
-                    document.get("title").and_then(Value::as_str).unwrap_or(""),
-                    document
-                        .get("created_at")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    document
-                        .get("updated_at")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    document
-                        .pointer("/people/creator/name")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    document
-                        .pointer("/people/creator/email")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    summary,
-                    document
-                        .get("notes_markdown")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    document
-                        .pointer("/google_calendar_event/start/dateTime")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    document
-                        .pointer("/google_calendar_event/end/dateTime")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-            db.execute("DELETE FROM attendees WHERE note_id=?1", [id])
-                .map_err(|error| error.to_string())?;
-            for attendee in document
-                .pointer("/google_calendar_event/attendees")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                db.execute(
-                    "INSERT INTO attendees (note_id,name,email) VALUES (?1,?2,?3)",
-                    params![
-                        id,
-                        attendee
-                            .get("displayName")
-                            .and_then(Value::as_str)
-                            .unwrap_or(""),
-                        attendee.get("email").and_then(Value::as_str).unwrap_or("")
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
-            }
+        let _ = stream.write_all(response.as_bytes()).await;
+        if values.get("state") != Some(&self.state) {
+            return Err("Sign-in returned an invalid security state. Try again.".into());
         }
-        Ok::<(), String>(())
-    })();
-    if result.is_ok() {
-        db.execute_batch("COMMIT")
-            .map_err(|error| error.to_string())?;
-    } else {
-        let _ = db.execute_batch("ROLLBACK");
-    }
-    result
-}
-
-fn granola_prune_if_complete(
-    db: &Connection,
-    full: bool,
-    complete: bool,
-    remote_ids: &HashSet<String>,
-) -> Result<usize, String> {
-    if !full || !complete {
-        return Ok(0);
-    }
-    db.execute_batch(
-        "BEGIN IMMEDIATE;
-         CREATE TEMP TABLE IF NOT EXISTS granola_remote_ids (
-           id TEXT PRIMARY KEY
-         );
-         DELETE FROM granola_remote_ids;",
-    )
-    .map_err(|error| error.to_string())?;
-    let result = (|| {
-        for id in remote_ids {
-            db.execute(
-                "INSERT OR IGNORE INTO granola_remote_ids (id) VALUES (?1)",
-                [id],
-            )
-            .map_err(|error| error.to_string())?;
+        if let Some(error) = values.get("error") {
+            return Err(format!("Sign-in was not completed: {error}"));
         }
-        db.execute(
-            "DELETE FROM notes WHERE id NOT IN (SELECT id FROM granola_remote_ids)",
-            [],
-        )
-        .map_err(|error| error.to_string())
-    })();
-    if result.is_ok() {
-        db.execute_batch("COMMIT")
-            .map_err(|error| error.to_string())?;
-    } else {
-        let _ = db.execute_batch("ROLLBACK");
+        values
+            .get("code")
+            .cloned()
+            .ok_or_else(|| "Sign-in returned no authorization code.".to_string())
     }
-    result
 }
 
-fn prosemirror_markdown(node: &Value) -> String {
-    if let Some(text) = node.as_str() {
-        return text.to_string();
-    }
-    let kind = node.get("type").and_then(Value::as_str).unwrap_or("");
-    let children = node
-        .get("content")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let inline = || {
-        children
-            .iter()
-            .map(prosemirror_markdown)
-            .collect::<String>()
+fn open_system_browser(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut command = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
     };
-    match kind {
-        "doc" => children
-            .iter()
-            .map(prosemirror_markdown)
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-        "heading" => format!(
-            "{} {}",
-            "#".repeat(
-                node.pointer("/attrs/level")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1)
-                    .clamp(1, 6) as usize
-            ),
-            inline()
-        ),
-        "paragraph" => inline(),
-        "text" => node
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        "hardBreak" => "\n".into(),
-        _ => inline(),
-    }
-}
-
-fn like_pattern(value: &str) -> String {
-    format!(
-        "%{}%",
-        value
-            .to_lowercase()
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_")
-    )
-}
-
-fn date_bound(value: &str, upper: bool) -> String {
-    if value.len() == 10
-        && value.as_bytes().get(4) == Some(&b'-')
-        && value.as_bytes().get(7) == Some(&b'-')
-    {
-        format!(
-            "{value}T{}",
-            if upper {
-                "23:59:59.999"
-            } else {
-                "00:00:00.000"
-            }
-        )
-    } else {
-        value.to_string()
-    }
-}
-
-fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&fs::read(path).ok()?).ok()
+    command
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Mimir could not open the sign-in page: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn settings_are_enabled_by_default_and_accept_boolean_or_object_disables() {
-        assert!(enabled(&json!({}), "google"));
-        assert!(!enabled(
-            &json!({ "connections": { "google": false } }),
-            "google"
-        ));
-        assert!(!enabled(
-            &json!({ "connections": { "google": { "enabled": false } } }),
-            "google"
-        ));
+    fn google_bundle_for_test(expires_at: Option<i64>, refresh: Option<&str>) -> GoogleBundle {
+        GoogleBundle {
+            access_token: "token".into(),
+            refresh_token: refresh.map(str::to_string),
+            expires_at,
+            scope: GOOGLE_SCOPES.into(),
+            auth: Some(json!({ "email": "work@example.com", "client_id": "client" })),
+            service: MIMIR_KEYCHAIN_SERVICE,
+        }
     }
 
     #[test]
-    fn startup_probes_only_declared_credential_connections() {
-        assert!(!credential_connection_declared(
-            &json!({}),
-            &json!({}),
-            "google"
-        ));
-        assert!(credential_connection_declared(
-            &json!({ "connections": { "google": true } }),
-            &json!({}),
-            "google"
-        ));
-        assert!(!credential_connection_declared(
-            &json!({ "connections": { "google": false } }),
-            &json!({ "google": "legacy@example.com" }),
-            "google"
-        ));
-        assert!(credential_connection_declared(
-            &json!({}),
-            &json!({ "google": "legacy@example.com" }),
-            "google"
-        ));
-    }
-
-    #[test]
-    fn connection_accounts_prefer_mimir_then_predecessor_then_default() {
-        let legacy = serde_yaml::from_str::<Value>(
-            "defaults:\n  google: work@example.com\n  slack: team-one\n",
-        )
-        .unwrap();
-        let legacy = legacy.get("defaults").unwrap();
-        assert_eq!(
-            connection_account(&json!({}), legacy, "google"),
-            "work@example.com"
-        );
-        assert_eq!(
-            connection_account(
-                &json!({ "connections": { "google": { "account": "new-account" } } }),
-                legacy,
-                "google",
-            ),
-            "new-account"
-        );
-        assert_eq!(
-            connection_account(&json!({}), &json!({}), "slack"),
-            DEFAULT_ACCOUNT
-        );
-    }
-
-    #[test]
-    fn granola_token_exposes_reads_before_the_first_cache_sync() {
-        assert_eq!(granola_capabilities(false, true), (true, true));
-        assert_eq!(granola_capabilities(true, false), (true, false));
-        assert_eq!(granola_capabilities(false, false), (false, false));
-    }
-
-    #[test]
-    fn granola_full_sync_prunes_only_after_a_complete_remote_walk() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(
-            "CREATE TABLE notes (id TEXT PRIMARY KEY);
-             INSERT INTO notes (id) VALUES ('keep'), ('stale');",
-        )
-        .unwrap();
-        let remote_ids = HashSet::from(["keep".to_string()]);
-
-        assert_eq!(
-            granola_prune_if_complete(&db, true, false, &remote_ids).unwrap(),
-            0
-        );
-        assert_eq!(
-            db.query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))
-                .unwrap(),
-            2
-        );
-
-        assert_eq!(
-            granola_prune_if_complete(&db, true, true, &remote_ids).unwrap(),
-            1
-        );
-        assert_eq!(
-            db.query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            db.query_row("SELECT id FROM notes", [], |row| row.get::<_, String>(0))
-                .unwrap(),
-            "keep"
-        );
+    fn expired_google_connection_only_needs_sign_in_without_refresh_token() {
+        assert!(google_needs_sign_in(&google_bundle_for_test(
+            Some(unix_seconds() - 1),
+            None,
+        )));
+        assert!(!google_needs_sign_in(&google_bundle_for_test(
+            Some(unix_seconds() - 1),
+            Some("refresh"),
+        )));
     }
 
     #[test]
@@ -2204,21 +1947,17 @@ mod tests {
     }
 
     #[test]
-    fn prose_mirror_conversion_keeps_basic_meeting_structure() {
-        let value = json!({
-            "type": "doc",
-            "content": [
-                { "type": "heading", "attrs": { "level": 2 }, "content": [
-                    { "type": "text", "text": "Decisions" }
-                ]},
-                { "type": "paragraph", "content": [
-                    { "type": "text", "text": "Ship the release." }
-                ]}
-            ]
-        });
-        assert_eq!(
-            prosemirror_markdown(&value),
-            "## Decisions\n\nShip the release."
-        );
+    fn provider_tools_have_provider_ownership() {
+        let registry = ToolRegistry::default();
+        let runtime = ConnectionRuntime {
+            http: Client::new(),
+            google_account: DEFAULT_ACCOUNT.into(),
+            slack_account: DEFAULT_ACCOUNT.into(),
+        };
+        register_slack_tools(&registry, &runtime).unwrap();
+        assert!(registry.snapshot().tools.iter().all(|tool| {
+            tool.owner == ToolOwner::Provider("slack".into())
+                && tool.source == ToolSource::Integration("slack".into())
+        }));
     }
 }

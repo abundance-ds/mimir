@@ -39,7 +39,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 url = "2"
 futures-util = "0.3"
 fs2 = "0.4"
-tokio = { version = "1", features = ["fs", "macros", "sync", "rt", "time", "net"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "sync", "rt", "time", "net"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 irc-proto = { version = "1.1", default-features = false }
 dirs = "5"

@@ -12,6 +12,7 @@ import {
 } from './lib/release-artifacts.mjs'
 import {
   APPLE_RELEASE_KEYS,
+  CONNECTION_RELEASE_KEYS,
   REPOSITORY_ROOT,
   loadReleaseEnv,
   requireReleaseKeys,
@@ -37,6 +38,7 @@ let macRelease
 
 if (isMacBuild) {
   requireReleaseKeys(env, APPLE_RELEASE_KEYS, 'Apple')
+  requireReleaseKeys(env, CONNECTION_RELEASE_KEYS, 'Connection client')
   requireUpdaterKeys(env)
 }
 

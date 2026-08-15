@@ -19,6 +19,9 @@ const VALID_TAURI_COMMANDS = new Set([
   'session_load', 'session_save',
   // local workbench/editor settings persistence
   'settings_load', 'settings_save', 'settings_save_editor',
+  // first-party connections
+  'connections_status', 'connections_connect_google', 'connections_connect_slack',
+  'connections_connect_granola', 'connections_disconnect',
   // filesystem (top-level)
   'read_text_file', 'read_binary_file', 'write_text_file', 'write_binary_file',
   'path_exists', 'create_dir', 'list_dir',
@@ -32,11 +35,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // IPC / window coordination (top-level)
   'proposal_create', 'proposal_list', 'proposal_register_editor', 'proposal_apply', 'proposal_reject',
   'proposal_respond', 'push_proposals', 'notify_file_updated', 'get_proposals_for_path',
-  // document_context_send has no Rust command but is still invoked by
-  // useDocumentBridge.js behind a silent catch; keeping it mocked stops
-  // editor tests from tripping the unknown-command guard. Tracked debt —
-  // see scripts/check-tauri-commands.mjs and docs/issues.md.
-  'document_context_send', 'settings_changed',
+  'settings_changed',
   'app_quit_confirmed', 'app_prepare_relaunch',
   // spell
   'spell_suggest',
@@ -46,7 +45,8 @@ const VALID_TAURI_COMMANDS = new Set([
   'activity_list', 'activity_search_history', 'activity_spawn', 'activity_respawn', 'activity_snapshot', 'activity_write',
   'activity_terminal_attach', 'activity_terminal_checkpoint', 'activity_terminal_release',
   'activity_resize', 'activity_stop', 'activity_close', 'activity_interrupt_all', 'activity_flush',
-  'activity_rename', 'activity_auto_title', 'activity_set_archived', 'activity_clear',
+  'activity_rename', 'activity_auto_title', 'activity_provisional_title',
+  'activity_set_archived', 'activity_clear',
   'launcher_detect_agents', 'launcher_load_config', 'launcher_save_config', 'launcher_resolve',
   // team chat
   'chat_status', 'chat_config', 'chat_configure', 'chat_update_config', 'chat_reconnect',

@@ -40,11 +40,11 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 40] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
-        description: "Active editor, selection, comments, and Today priority.",
+        description: "Active editor state and available Today artifact context.",
         group: "workbench",
         effect: "read",
         direct: true,
@@ -309,7 +309,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 40] = [
     AgentToolSpec {
         canonical_name: "granola.search",
         public_name: "granola_search",
-        description: "Search synced Granola meetings.",
+        description: "Find Granola meeting notes by title or owner.",
         group: "connections",
         effect: "read",
         direct: false,
@@ -318,18 +318,9 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 40] = [
     AgentToolSpec {
         canonical_name: "granola.get",
         public_name: "granola_get",
-        description: "Read one synced Granola meeting.",
+        description: "Read one Granola meeting note and its transcript.",
         group: "connections",
         effect: "read",
-        direct: false,
-        connection: Some("granola"),
-    },
-    AgentToolSpec {
-        canonical_name: "granola.sync",
-        public_name: "granola_sync",
-        description: "Sync Granola meetings or one transcript.",
-        group: "connections",
-        effect: "external",
         direct: false,
         connection: Some("granola"),
     },
@@ -544,7 +535,6 @@ impl ToolRuntime {
             .map_err(|error| error.to_string())?;
         crate::business_graph::tools::register_native_tools(&self.registry, app)?;
         crate::meetings::tools::register_native_tools(&self.registry, app)?;
-        crate::connections::register_native_tools(&self.registry)?;
         *self
             .core_ui
             .lock()
@@ -1526,7 +1516,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 40);
+        assert_eq!(AGENT_TOOLS.len(), 39);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();

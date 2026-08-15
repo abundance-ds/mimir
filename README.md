@@ -22,6 +22,8 @@ small trusted team.
   [Routines](docs/routines.md) — scheduled agent or command runs.
 - [Scribe](docs/meetings.md) — local-first meeting detection, dual-channel
   recording, transcription, and reviewable follow-up Activities.
+- [Connections](docs/agent-interface.md#connections) — connect Google, Slack,
+  and Granola once, then use their tools from any agent.
 
 ## Develop
 
