@@ -19,8 +19,8 @@ use serde_json::{json, Map};
 
 use crate::activities::{
     ActivityHistorySearchHit, ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin,
-    ActivityRecord, ActivityRetention, ActivitySessionRecord, ActivityStatus, SessionExitReason,
-    SessionExitRecord,
+    ActivityRecord, ActivityRetention, ActivitySessionRecord, ActivityStatus, ActivityTitleSource,
+    SessionExitReason, SessionExitRecord,
 };
 use crate::apps::{
     AppCatalog, AppDefinition, AppDiagnostic, AppMode, AppToolDefinition, InstalledApp,
@@ -72,7 +72,8 @@ fn activity_list() -> Vec<ActivityRecord> {
             id: "agent:01HZX3R8KQ".into(),
             kind: ActivityKind::Agent,
             title: "Codex — fix sidebar ordering".into(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Agent,
+            legacy_auto_title_eligible: None,
             workspace_path: Some("/Users/me/work/mimir".into()),
             status: ActivityStatus::Working,
             created_at: "2026-07-25T10:00:00.000Z".into(),
@@ -113,7 +114,8 @@ fn activity_list() -> Vec<ActivityRecord> {
             id: "terminal:01HZX40000".into(),
             kind: ActivityKind::Terminal,
             title: "Terminal".into(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: None,
             status: ActivityStatus::Stopped,
             created_at: "2026-07-24T18:30:00.000Z".into(),

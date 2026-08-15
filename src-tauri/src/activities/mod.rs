@@ -6,8 +6,8 @@ pub mod supervisor;
 
 pub use model::{
     ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin, ActivityRecord,
-    ActivityRetention, ActivitySessionRecord, ActivityStatus, ActivityWorkspaceScope,
-    SessionExitReason, SessionExitRecord,
+    ActivityRetention, ActivitySessionRecord, ActivityStatus, ActivityTitleSource,
+    ActivityWorkspaceScope, SessionExitReason, SessionExitRecord,
 };
 pub use scrollback::{OutputChunk, RawScrollback, ScrollbackReplay};
 pub use status::{

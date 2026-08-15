@@ -250,6 +250,17 @@ pub fn activity_auto_title(
 }
 
 #[tauri::command]
+pub fn activity_provisional_title(
+    supervisor: tauri::State<'_, ActivitySupervisor>,
+    activity_id: String,
+    title: String,
+) -> Result<ActivityRecord, String> {
+    supervisor
+        .provisional_title(&activity_id, title)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn activity_set_archived(
     supervisor: tauri::State<'_, ActivitySupervisor>,
     activity_id: String,
@@ -299,7 +310,7 @@ mod tests {
     use super::*;
     use crate::activities::{
         ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin, ActivityRetention,
-        ActivityStatus, ActivitySupervisorConfig,
+        ActivityStatus, ActivitySupervisorConfig, ActivityTitleSource,
     };
     use std::{collections::BTreeMap, thread, time::Duration};
     use tauri::Manager;
@@ -309,7 +320,8 @@ mod tests {
             id: id.into(),
             kind: ActivityKind::Agent,
             title: id.into(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: None,
             status: ActivityStatus::Ready,
             created_at: "2026-07-25T00:00:00Z".into(),
@@ -337,7 +349,7 @@ mod tests {
         let supervisor =
             ActivitySupervisor::new(ActivitySupervisorConfig::new(temp.path())).unwrap();
         let mut record = completed_record("command-lifecycle");
-        record.auto_title_eligible = true;
+        record.title_source = ActivityTitleSource::Launcher;
         supervisor
             .spawn(SpawnActivityRequest::new(record, 80, 24))
             .unwrap();
@@ -354,6 +366,15 @@ mod tests {
         let app = tauri::test::mock_app();
         app.manage(supervisor);
 
+        let provisional = activity_provisional_title(
+            app.state(),
+            "command-lifecycle".into(),
+            "Provisional command title".into(),
+        )
+        .unwrap();
+        assert_eq!(provisional.title, "Provisional command title");
+        assert_eq!(provisional.title_source, ActivityTitleSource::Provisional);
+
         let automatic = activity_auto_title(
             app.state(),
             "command-lifecycle".into(),
@@ -361,7 +382,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(automatic.title, "Automatic command title");
-        assert!(!automatic.auto_title_eligible);
+        assert_eq!(automatic.title_source, ActivityTitleSource::Agent);
 
         let renamed = activity_rename(
             app.state(),
@@ -370,6 +391,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(renamed.title, "Command title");
+        assert_eq!(renamed.title_source, ActivityTitleSource::Manual);
 
         let ignored = activity_auto_title(
             app.state(),

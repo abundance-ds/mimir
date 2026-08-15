@@ -118,4 +118,15 @@ describe('activity spawn sizing', () => {
       leaseGeneration: 2,
     })
   })
+
+  it('sends a provisional title through its dedicated native command', async () => {
+    const api = await freshModule()
+
+    await api.proposeActivityTitle('agent:one', 'Restore Activity titles')
+
+    expect(invoke).toHaveBeenCalledWith('activity_provisional_title', {
+      activityId: 'agent:one',
+      title: 'Restore Activity titles',
+    })
+  })
 })

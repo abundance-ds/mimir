@@ -11,6 +11,7 @@ const base = {
   id: 'agent:one',
   kind: 'agent',
   title: 'Codex',
+  titleSource: 'launcher',
   workspacePath: '/work',
   status: 'ready',
   createdAt: '2026-07-25T10:00:00.000Z',
@@ -63,6 +64,27 @@ describe('activities store', () => {
 
     expect(store.activities.map((item) => item.id)).toEqual(['terminal:two', 'agent:one'])
     expect(JSON.parse(JSON.stringify(store.byId('agent:one')))).toEqual(store.byId('agent:one'))
+  })
+
+  it('migrates the old automatic-title eligibility field', () => {
+    const store = useActivitiesStore()
+
+    const migrated = store.upsert({
+      ...base,
+      titleSource: undefined,
+      autoTitleEligible: true,
+    })
+
+    expect(migrated.titleSource).toBe('launcher')
+    expect(migrated).not.toHaveProperty('autoTitleEligible')
+
+    const locked = store.upsert({
+      ...base,
+      id: 'agent:locked-legacy',
+      titleSource: undefined,
+      autoTitleEligible: false,
+    })
+    expect(locked.titleSource).toBe('manual')
   })
 
   it('skips the write when the backend re-emits an identical record', () => {

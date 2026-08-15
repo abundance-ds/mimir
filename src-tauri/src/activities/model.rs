@@ -283,6 +283,18 @@ pub struct ActivitySessionRecord {
     pub scrollback_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ActivityTitleSource {
+    /// Compatibility value for records written before title provenance existed.
+    #[default]
+    Legacy,
+    Launcher,
+    Provisional,
+    Agent,
+    Manual,
+}
+
 /// Complete serializable record shared with the renderer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,10 +302,11 @@ pub struct ActivityRecord {
     pub id: String,
     pub kind: ActivityKind,
     pub title: String,
-    /// True only while a newly launched agent still has its launcher title.
-    /// The first automatic or explicit rename permanently consumes it.
     #[serde(default)]
-    pub auto_title_eligible: bool,
+    pub title_source: ActivityTitleSource,
+    /// Read-only bridge for records written before `titleSource` existed.
+    #[serde(default, rename = "autoTitleEligible", skip_serializing)]
+    pub legacy_auto_title_eligible: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
     pub status: ActivityStatus,
@@ -325,6 +338,40 @@ impl ActivityRecord {
     pub fn is_clearable(&self) -> bool {
         !self.status.is_live()
     }
+
+    /// Migrate records written before title provenance existed. Known built-in
+    /// launcher placeholders stay eligible. Every other legacy title is locked
+    /// so an old explicit or manual title can never be replaced.
+    pub fn normalize_legacy_title_source(&mut self) -> bool {
+        if self.title_source != ActivityTitleSource::Legacy {
+            return false;
+        }
+        let was_eligible = self.legacy_auto_title_eligible.take();
+        self.title_source = if was_eligible != Some(false)
+            && self.kind == ActivityKind::Agent
+            && self
+                .source
+                .launcher_id
+                .as_deref()
+                .is_some_and(|agent_id| launcher_title_matches(agent_id, &self.title))
+        {
+            ActivityTitleSource::Launcher
+        } else {
+            ActivityTitleSource::Manual
+        };
+        true
+    }
+}
+
+fn launcher_title_matches(agent_id: &str, title: &str) -> bool {
+    let expected = match agent_id.trim().to_ascii_lowercase().as_str() {
+        "codex" => "Codex",
+        "claude" => "Claude",
+        "pi" => "Pi",
+        "gemini" => "Gemini",
+        _ => return false,
+    };
+    title.trim() == expected
 }
 
 #[cfg(test)]
@@ -357,7 +404,8 @@ mod tests {
             id: "agent:one".into(),
             kind: ActivityKind::Agent,
             title: "Codex".into(),
-            auto_title_eligible: true,
+            title_source: ActivityTitleSource::Launcher,
+            legacy_auto_title_eligible: None,
             workspace_path: Some("/work".into()),
             status: ActivityStatus::Ready,
             created_at: "2026-07-25T10:00:00Z".into(),
@@ -391,7 +439,8 @@ mod tests {
         };
 
         let value = serde_json::to_value(&record).unwrap();
-        assert_eq!(value["autoTitleEligible"], true);
+        assert_eq!(value["titleSource"], "launcher");
+        assert!(value.get("autoTitleEligible").is_none());
         assert_eq!(value["workspacePath"], "/work");
         assert_eq!(value["source"]["launcherId"], "codex");
         assert_eq!(value["source"]["workspaceScope"], "workspace");
@@ -410,6 +459,47 @@ mod tests {
 
         let round_trip: ActivityRecord = serde_json::from_value(value).unwrap();
         assert_eq!(round_trip, record);
+    }
+
+    #[test]
+    fn migrates_only_known_legacy_launcher_placeholders() {
+        let mut launcher = serde_json::from_value::<ActivityRecord>(serde_json::json!({
+            "id": "agent:legacy",
+            "kind": "agent",
+            "title": "Codex",
+            "autoTitleEligible": true,
+            "status": "idle",
+            "createdAt": "2026-07-25T10:00:00Z",
+            "updatedAt": "2026-07-25T10:00:00Z",
+            "retention": "durable",
+            "source": { "launcherId": "codex" },
+            "host": { "type": "pty" }
+        }))
+        .unwrap();
+        assert!(launcher.normalize_legacy_title_source());
+        assert_eq!(launcher.title_source, ActivityTitleSource::Launcher);
+
+        let mut locked_launcher = serde_json::from_value::<ActivityRecord>(serde_json::json!({
+            "id": "agent:locked-legacy",
+            "kind": "agent",
+            "title": "Codex",
+            "autoTitleEligible": false,
+            "status": "idle",
+            "createdAt": "2026-07-25T10:00:00Z",
+            "updatedAt": "2026-07-25T10:00:00Z",
+            "retention": "durable",
+            "source": { "launcherId": "codex" },
+            "host": { "type": "pty" }
+        }))
+        .unwrap();
+        assert!(locked_launcher.normalize_legacy_title_source());
+        assert_eq!(locked_launcher.title_source, ActivityTitleSource::Manual);
+
+        let mut explicit = launcher.clone();
+        explicit.title_source = ActivityTitleSource::Legacy;
+        explicit.title = "My task".into();
+        assert!(explicit.normalize_legacy_title_source());
+        assert_eq!(explicit.title_source, ActivityTitleSource::Manual);
     }
 
     #[test]

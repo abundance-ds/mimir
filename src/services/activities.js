@@ -82,6 +82,10 @@ export function renameActivity(activityId, title) {
   return invoke('activity_rename', { activityId, title })
 }
 
+export function proposeActivityTitle(activityId, title) {
+  return invoke('activity_provisional_title', { activityId, title })
+}
+
 export function setActivityArchived(activityId, archived) {
   return invoke('activity_set_archived', { activityId, archived })
 }

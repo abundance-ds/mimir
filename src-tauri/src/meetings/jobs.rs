@@ -1329,7 +1329,7 @@ mod tests {
     use super::*;
     use crate::activities::{
         ActivityHost, ActivityKind, ActivityOrigin, ActivityRetention, ActivitySessionRecord,
-        SessionExitRecord,
+        ActivityTitleSource, SessionExitRecord,
     };
     use crate::meetings::{FollowUpJobDraft, JobState};
 
@@ -1399,7 +1399,8 @@ mod tests {
             id: id.into(),
             kind: ActivityKind::Routine,
             title: "Scribe hook".into(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: None,
             status,
             created_at: "2026-07-30T10:00:00Z".into(),

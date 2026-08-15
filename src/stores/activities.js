@@ -23,11 +23,14 @@ export const ACTIVITY_STATUSES = Object.freeze([
 ])
 
 const RETENTIONS = new Set(['ephemeral', 'durable'])
+const TITLE_SOURCES = new Set(['legacy', 'launcher', 'provisional', 'agent', 'manual'])
 const LIVE_STATUSES = new Set(['ready', 'starting', 'working', 'needs-input', 'idle'])
 const KNOWN_FIELDS = new Set([
   'id',
   'kind',
   'title',
+  'titleSource',
+  // Accepted only while old renderer fixtures and stored snapshots migrate.
   'autoTitleEligible',
   'workspacePath',
   'status',
@@ -199,12 +202,13 @@ function normalizeRecord(value) {
 
   const createdAt = nonEmptyString(value.createdAt, 'Activity createdAt')
   const updatedAt = nonEmptyString(value.updatedAt, 'Activity updatedAt')
+  const titleSource = normalizeTitleSource(value)
 
   return {
     id,
     kind,
     title: nonEmptyString(value.title, 'Activity title'),
-    autoTitleEligible: Boolean(value.autoTitleEligible),
+    titleSource,
     workspacePath: typeof value.workspacePath === 'string' ? value.workspacePath : '',
     status,
     createdAt,
@@ -222,6 +226,13 @@ function normalizeRecord(value) {
     ...(value.message === undefined ? {} : { message: String(value.message) }),
     ...(value.unread === undefined ? {} : { unread: Boolean(value.unread) }),
   }
+}
+
+function normalizeTitleSource(value) {
+  const source = String(value.titleSource || '')
+  if (TITLE_SOURCES.has(source)) return source
+  if (value.autoTitleEligible) return 'launcher'
+  return 'manual'
 }
 
 function assertKnownFields(value) {

@@ -31,21 +31,15 @@ impl Default for AgentStatusTrackerConfig {
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatusSnapshot {
     pub status: ActivityStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title_hint: Option<String>,
     pub needs_input_is_blocking: bool,
 }
 
 /// A coalesced renderer update. A complete PTY chunk may contain many control
-/// sequences, but consumers only need the final status/title pair.
+/// sequences, but consumers only need the final status and attention state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatusChange {
     pub status: ActivityStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title_hint: Option<String>,
-    pub status_changed: bool,
-    pub title_changed: bool,
     pub needs_input_is_blocking: bool,
 }
 
@@ -74,7 +68,6 @@ pub struct AgentStatusTracker {
     started_at_ms: u64,
     last_signal_at_ms: u64,
     status: ActivityStatus,
-    title_hint: Option<String>,
     parser_state: ParserState,
     osc_buffer: Vec<u8>,
     has_tui_signals: bool,
@@ -85,7 +78,7 @@ pub struct AgentStatusTracker {
     has_seen_title: bool,
     finished: bool,
     last_emitted_status: ActivityStatus,
-    last_emitted_title: Option<String>,
+    last_emitted_needs_input_is_blocking: bool,
 }
 
 impl AgentStatusTracker {
@@ -95,7 +88,6 @@ impl AgentStatusTracker {
             started_at_ms,
             last_signal_at_ms: started_at_ms,
             status: ActivityStatus::Idle,
-            title_hint: None,
             parser_state: ParserState::Text,
             osc_buffer: Vec::new(),
             has_tui_signals: false,
@@ -106,7 +98,7 @@ impl AgentStatusTracker {
             has_seen_title: false,
             finished: false,
             last_emitted_status: ActivityStatus::Idle,
-            last_emitted_title: None,
+            last_emitted_needs_input_is_blocking: false,
         }
     }
 
@@ -145,7 +137,6 @@ impl AgentStatusTracker {
     pub fn snapshot(&self, now_ms: u64) -> AgentStatusSnapshot {
         AgentStatusSnapshot {
             status: self.effective_status(now_ms),
-            title_hint: self.title_hint.clone(),
             needs_input_is_blocking: self.needs_input_is_blocking,
         }
     }
@@ -329,7 +320,6 @@ impl AgentStatusTracker {
         self.last_title_spinner = now_spinner;
         self.last_title_requires_action = now_requires_action;
         self.has_seen_title = true;
-        self.title_hint = Some(title.to_owned());
     }
 
     fn set_status(&mut self, next: ActivityStatus, now_ms: u64) {
@@ -367,18 +357,16 @@ impl AgentStatusTracker {
     fn emit_if_changed(&mut self, now_ms: u64) -> Option<AgentStatusChange> {
         let status = self.effective_status(now_ms);
         let status_changed = status != self.last_emitted_status;
-        let title_changed = self.title_hint != self.last_emitted_title;
-        if !status_changed && !title_changed {
+        let blocking_changed =
+            self.needs_input_is_blocking != self.last_emitted_needs_input_is_blocking;
+        if !status_changed && !blocking_changed {
             return None;
         }
 
         self.last_emitted_status = status;
-        self.last_emitted_title = self.title_hint.clone();
+        self.last_emitted_needs_input_is_blocking = self.needs_input_is_blocking;
         Some(AgentStatusChange {
             status,
-            title_hint: self.title_hint.clone(),
-            status_changed,
-            title_changed,
             needs_input_is_blocking: self.needs_input_is_blocking,
         })
     }
@@ -450,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn starts_idle_and_emits_only_real_status_or_title_changes() {
+    fn starts_idle_and_emits_only_status_or_attention_changes() {
         let mut status = tracker(100);
         assert_eq!(status.snapshot(100).status, ActivityStatus::Idle);
         assert_eq!(status.poll(100), None);
@@ -458,8 +446,6 @@ mod tests {
 
         let change = status.feed(b"\x07", 101).unwrap();
         assert_eq!(change.status, ActivityStatus::NeedsInput);
-        assert!(change.status_changed);
-        assert!(!change.title_changed);
         assert_eq!(status.feed(b"\x07", 102), None);
     }
 
@@ -492,29 +478,24 @@ mod tests {
         );
         let change = status.feed(b"\x1b]0;Codex\x07", 5_001).unwrap();
         assert_eq!(change.status, ActivityStatus::Idle);
-        assert_eq!(change.title_hint.as_deref(), Some("Codex"));
-        assert!(change.status_changed);
-        assert!(change.title_changed);
     }
 
     #[test]
     fn title_terminating_bel_is_swallowed_not_reinterpreted() {
         let mut status = tracker(0);
-        let change = status.feed(b"\x1b]2;Claude Code\x07", 0).unwrap();
-        assert_eq!(change.status, ActivityStatus::Idle);
-        assert_eq!(change.title_hint.as_deref(), Some("Claude Code"));
-        assert!(!change.needs_input_is_blocking);
+        assert_eq!(status.feed(b"\x1b]2;Claude Code\x07", 0), None);
+        assert_eq!(status.snapshot(0).status, ActivityStatus::Idle);
+        assert!(!status.snapshot(0).needs_input_is_blocking);
     }
 
     #[test]
     fn parses_osc_split_at_introducer_payload_and_st_terminator() {
         let mut status = tracker(0);
         assert_eq!(status.feed(b"\x1b", 0), None);
-        assert_eq!(status.feed(b"]2;spl", 0), None);
-        assert_eq!(status.feed(b"it title\x1b", 0), None);
+        assert_eq!(status.feed(b"]2;\xe2\xa0", 0), None);
+        assert_eq!(status.feed(b"\xb4 split title\x1b", 0), None);
         let change = status.feed(b"\\", 0).unwrap();
-        assert_eq!(change.title_hint.as_deref(), Some("split title"));
-        assert_eq!(change.status, ActivityStatus::Idle);
+        assert_eq!(change.status, ActivityStatus::Working);
     }
 
     #[test]
@@ -529,7 +510,6 @@ mod tests {
         );
         let change = status.feed(&bytes[spinner_start + 2..], 0).unwrap();
         assert_eq!(change.status, ActivityStatus::Working);
-        assert_eq!(change.title_hint.as_deref(), Some("⠴ Refactoring"));
     }
 
     #[test]
@@ -579,7 +559,7 @@ mod tests {
     #[test]
     fn spinner_gain_and_loss_map_to_work_and_transient_input() {
         let mut status = tracker(0);
-        status.feed(b"\x1b]0;Codex\x07", 0).unwrap();
+        assert_eq!(status.feed(b"\x1b]0;Codex\x07", 0), None);
         assert_eq!(
             status.feed("\x1b]0;⠂ Editing\x07", 1).unwrap().status,
             ActivityStatus::Working
@@ -614,7 +594,7 @@ mod tests {
             .feed(b"\x1b]0;[ ! ] Action Required | project\x07", 1)
             .unwrap();
         assert_eq!(change.status, ActivityStatus::NeedsInput);
-        assert!(change.needs_input_is_blocking);
+        assert!(status.snapshot(1).needs_input_is_blocking);
         assert_eq!(status.poll(50_000), None);
 
         let release = status.feed(b"\x1b]0;project\x07", 50_001).unwrap();
@@ -636,17 +616,11 @@ mod tests {
     }
 
     #[test]
-    fn title_only_changes_emit_without_a_fake_status_change() {
+    fn title_only_changes_do_not_emit_redundant_status_updates() {
         let mut status = tracker(0);
-        let first = status.feed(b"\x1b]0;first\x07", 0).unwrap();
-        assert!(!first.status_changed);
-        assert!(first.title_changed);
-
+        assert_eq!(status.feed(b"\x1b]0;first\x07", 0), None);
         assert_eq!(status.feed(b"\x1b]0;first\x07", 1), None);
-        let second = status.feed(b"\x1b]1;second\x07", 2).unwrap();
-        assert_eq!(second.status, ActivityStatus::Idle);
-        assert!(!second.status_changed);
-        assert!(second.title_changed);
+        assert_eq!(status.feed(b"\x1b]1;second\x07", 2), None);
     }
 
     #[test]

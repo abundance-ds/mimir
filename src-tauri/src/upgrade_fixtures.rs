@@ -581,7 +581,7 @@ fn check_activities_and_routine_runtime(version: &str, home: &Path, mimir: &Path
 fn generate_current_version_snapshot() {
     use crate::activities::{
         ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin, ActivityRecord,
-        ActivityRetention, SpawnActivityRequest,
+        ActivityRetention, ActivityTitleSource, SpawnActivityRequest,
     };
     use crate::business_graph::{GraphNodeCreate, GraphRelation};
     use crate::persistence::{write_bytes_atomic, write_json_atomic};
@@ -783,7 +783,8 @@ fn generate_current_version_snapshot() {
         id: "agent-fixture-0001".into(),
         kind: ActivityKind::Agent,
         title: "Codex review".into(),
-        auto_title_eligible: false,
+        title_source: ActivityTitleSource::Manual,
+        legacy_auto_title_eligible: None,
         workspace_path: Some("/Users/tester/projects/acme".into()),
         status: ActivityStatus::Ready,
         created_at: "2026-07-27T09:00:00Z".into(),

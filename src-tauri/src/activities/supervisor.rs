@@ -26,7 +26,7 @@ use crate::persistence::{
 use super::{
     model::{
         ActivityHost, ActivityKind, ActivityRecord, ActivityRetention, ActivitySessionRecord,
-        ActivityStatus, SessionExitReason, SessionExitRecord,
+        ActivityStatus, ActivityTitleSource, SessionExitReason, SessionExitRecord,
     },
     scrollback::{OutputChunk, RawScrollback, ScrollbackReplay},
     status::{AgentStatusChange, AgentStatusTracker, AgentStatusTrackerConfig},
@@ -203,8 +203,6 @@ pub enum ActivityEvent {
     Status {
         activity_id: String,
         status: ActivityStatus,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        title_hint: Option<String>,
         needs_input_is_blocking: bool,
     },
     Exit {
@@ -516,6 +514,7 @@ impl ActivitySupervisor {
     ) -> Result<ActivitySnapshot, SupervisorError> {
         let mut cli_session_id = request.cli_session_id.clone();
         let mut record = request.record;
+        record.normalize_legacy_title_source();
         if record.id.trim().is_empty() {
             return Err(SupervisorError::EmptyActivityId);
         }
@@ -542,6 +541,8 @@ impl ActivitySupervisor {
                     });
                 }
                 record.created_at = existing_record.created_at.clone();
+                record.title = existing_record.title.clone();
+                record.title_source = existing_record.title_source;
                 record.archived_at = None;
                 record.close_requested_at = None;
                 if cli_session_id.is_none() {
@@ -1029,11 +1030,11 @@ impl ActivitySupervisor {
             let dispatch = lock(&self.inner.dispatch);
             let mut record = lock(&activity.record);
             let scrollback = lock(&activity.scrollback);
-            if record.title == title && !record.auto_title_eligible {
+            if record.title == title && record.title_source == ActivityTitleSource::Manual {
                 return Ok(record.clone());
             }
             record.title = title;
-            record.auto_title_eligible = false;
+            record.title_source = ActivityTitleSource::Manual;
             record.updated_at = timestamp();
             let snapshot = record.clone();
             if record.retention.should_persist() {
@@ -1053,13 +1054,47 @@ impl ActivitySupervisor {
         Ok(record)
     }
 
-    /// Accept one model-authored title while an agent still has its launch
-    /// placeholder. Later calls are harmless, and an explicit rename wins
-    /// atomically even when it races the model tool call.
+    /// Accept a local prompt-derived title only while the launcher placeholder
+    /// is still present. The agent may improve it once later in the same
+    /// Activity. Manual titles always remain authoritative.
+    pub fn provisional_title(
+        &self,
+        activity_id: &str,
+        title: impl Into<String>,
+    ) -> Result<ActivityRecord, SupervisorError> {
+        self.automatic_title(
+            activity_id,
+            title,
+            ActivityTitleSource::Provisional,
+            &[ActivityTitleSource::Launcher],
+        )
+    }
+
+    /// Accept one agent-authored title over a launcher or provisional title.
+    /// Later calls are harmless, and a manual rename wins atomically even when
+    /// it races the agent tool call.
     pub fn auto_title(
         &self,
         activity_id: &str,
         title: impl Into<String>,
+    ) -> Result<ActivityRecord, SupervisorError> {
+        self.automatic_title(
+            activity_id,
+            title,
+            ActivityTitleSource::Agent,
+            &[
+                ActivityTitleSource::Launcher,
+                ActivityTitleSource::Provisional,
+            ],
+        )
+    }
+
+    fn automatic_title(
+        &self,
+        activity_id: &str,
+        title: impl Into<String>,
+        source: ActivityTitleSource,
+        allowed_sources: &[ActivityTitleSource],
     ) -> Result<ActivityRecord, SupervisorError> {
         let title = normalize_auto_title(&title.into());
         if title.is_empty() {
@@ -1069,12 +1104,14 @@ impl ActivitySupervisor {
         let (record, sinks) = {
             let dispatch = lock(&self.inner.dispatch);
             let mut record = lock(&activity.record);
-            if record.kind != ActivityKind::Agent || !record.auto_title_eligible {
+            record.normalize_legacy_title_source();
+            if record.kind != ActivityKind::Agent || !allowed_sources.contains(&record.title_source)
+            {
                 return Ok(record.clone());
             }
             let scrollback = lock(&activity.scrollback);
             record.title = title;
-            record.auto_title_eligible = false;
+            record.title_source = source;
             record.updated_at = timestamp();
             let snapshot = record.clone();
             if record.retention.should_persist() {
@@ -1499,6 +1536,9 @@ impl ActivitySupervisor {
                 continue;
             }
             let mut corrected = false;
+            if record.normalize_legacy_title_source() {
+                corrected = true;
+            }
             if capture_cli_session_id(&self.inner.config.persistence_dir, &mut record) {
                 corrected = true;
             }
@@ -1593,7 +1633,7 @@ impl SupervisorInner {
                 .as_mut()
                 .and_then(|tracker| tracker.feed(&bytes, output_elapsed_ms))
         };
-        let status_changed = status_change.is_some();
+        let status_updated = status_change.is_some();
 
         let mut events = Vec::with_capacity(2);
         let sinks;
@@ -1611,7 +1651,7 @@ impl SupervisorInner {
                 session.scrollback_bytes = retained_bytes;
             }
             let persist_output = record.retention.should_persist()
-                && (status_changed
+                && (status_updated
                     || claim_periodic_persistence(
                         &activity.last_output_persist_ms,
                         output_elapsed_ms,
@@ -1643,7 +1683,6 @@ impl SupervisorInner {
                 events.push(ActivityEvent::Status {
                     activity_id: record.id.clone(),
                     status: change.status,
-                    title_hint: change.title_hint,
                     needs_input_is_blocking: change.needs_input_is_blocking,
                 });
             }
@@ -1718,7 +1757,6 @@ impl SupervisorInner {
             event = ActivityEvent::Status {
                 activity_id: record.id.clone(),
                 status: change.status,
-                title_hint: change.title_hint,
                 needs_input_is_blocking: change.needs_input_is_blocking,
             };
             if record.retention.should_persist() {
@@ -2350,7 +2388,8 @@ mod tests {
             id: id.into(),
             kind: ActivityKind::Agent,
             title: id.into(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: None,
             status: ActivityStatus::Ready,
             created_at: now.clone(),
@@ -2884,6 +2923,7 @@ mod tests {
             Some(exact_session_id.as_str())
         );
         let first_run_id = first_session.run_id;
+        supervisor.rename("resume", "Pinned resume title").unwrap();
 
         let mut again = durable_record(
             "resume",
@@ -2891,10 +2931,14 @@ mod tests {
             vec!["-c".into(), "printf second-run".into()],
         );
         again.created_at = "2027-01-01T00:00:00Z".into();
+        again.title = "Codex".into();
+        again.title_source = ActivityTitleSource::Launcher;
         let resumed = supervisor
             .respawn(SpawnActivityRequest::new(again, 80, 24))
             .unwrap();
         assert_eq!(resumed.record.created_at, "2026-07-25T00:00:00Z");
+        assert_eq!(resumed.record.title, "Pinned resume title");
+        assert_eq!(resumed.record.title_source, ActivityTitleSource::Manual);
         assert!(resumed.record.archived_at.is_none());
         let resumed_session = resumed.record.session.unwrap();
         assert_ne!(resumed_session.run_id, first_run_id);
@@ -3130,7 +3174,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn automatic_title_is_one_shot_and_never_overwrites_an_explicit_rename() {
+    fn title_priority_is_launcher_then_provisional_then_agent_then_manual() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
 
@@ -3139,7 +3183,7 @@ mod tests {
             "/bin/sh",
             vec!["-c".into(), "true".into()],
         );
-        automatic.auto_title_eligible = true;
+        automatic.title_source = ActivityTitleSource::Launcher;
         supervisor
             .spawn(SpawnActivityRequest::new(automatic, 80, 24))
             .unwrap();
@@ -3147,6 +3191,18 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::channel();
         supervisor.subscribe(Arc::new(event_tx));
+        let provisional = supervisor
+            .provisional_title("automatic-title", "Restore Activity titles")
+            .unwrap();
+        assert_eq!(provisional.title, "Restore Activity titles");
+        assert_eq!(provisional.title_source, ActivityTitleSource::Provisional);
+        assert!(matches!(
+            event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ActivityEvent::Upsert { record }
+                if record.title == "Restore Activity titles"
+                    && record.title_source == ActivityTitleSource::Provisional
+        ));
+
         let titled = supervisor
             .auto_title(
                 "automatic-title",
@@ -3157,7 +3213,7 @@ mod tests {
             titled.title,
             "Restore reliable Activity titles across every supported"
         );
-        assert!(!titled.auto_title_eligible);
+        assert_eq!(titled.title_source, ActivityTitleSource::Agent);
         assert!(matches!(
             event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
             ActivityEvent::Upsert { record }
@@ -3176,7 +3232,7 @@ mod tests {
             "/bin/sh",
             vec!["-c".into(), "true".into()],
         );
-        explicit.auto_title_eligible = true;
+        explicit.title_source = ActivityTitleSource::Launcher;
         supervisor
             .spawn(SpawnActivityRequest::new(explicit, 80, 24))
             .unwrap();
@@ -3186,7 +3242,17 @@ mod tests {
             .auto_title("explicit-title", "Model title")
             .unwrap();
         assert_eq!(protected.title, "User title");
-        assert!(!protected.auto_title_eligible);
+        assert_eq!(protected.title_source, ActivityTitleSource::Manual);
+
+        let renamed_again = supervisor
+            .rename("explicit-title", "Later user title")
+            .unwrap();
+        assert_eq!(renamed_again.title, "Later user title");
+        assert_eq!(renamed_again.title_source, ActivityTitleSource::Manual);
+        let late_provisional = supervisor
+            .provisional_title("explicit-title", "Late fallback")
+            .unwrap();
+        assert_eq!(late_provisional.title, "Later user title");
     }
 
     #[cfg(unix)]

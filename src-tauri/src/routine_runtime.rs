@@ -1,8 +1,8 @@
 use crate::{
     activities::{
         ActivityHost, ActivityKind, ActivityLaunchSpec, ActivityOrigin, ActivityRecord,
-        ActivityRetention, ActivityStatus, ActivitySupervisor, ActivityWorkspaceScope,
-        SpawnActivityRequest,
+        ActivityRetention, ActivityStatus, ActivitySupervisor, ActivityTitleSource,
+        ActivityWorkspaceScope, SpawnActivityRequest,
     },
     launchers::{
         self, AgentDefinition, DetectedAgent, LauncherKind, LauncherPreset, ResolvedLaunch,
@@ -730,7 +730,8 @@ impl RoutineRuntime {
             id: activity_id,
             kind: ActivityKind::Routine,
             title: resolved.definition.title.clone(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: match resolved.workspace_scope {
                 ActivityWorkspaceScope::Workspace => resolved.definition.workspace.clone(),
                 ActivityWorkspaceScope::Global => None,
@@ -813,7 +814,8 @@ impl RoutineRuntime {
             id: activity_id,
             kind: ActivityKind::Routine,
             title: request.title.trim().to_string(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: match resolved.workspace_scope {
                 ActivityWorkspaceScope::Workspace => Some(request.workspace.clone()),
                 ActivityWorkspaceScope::Global => None,

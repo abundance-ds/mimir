@@ -1281,6 +1281,7 @@ mod tests {
     use super::*;
     use crate::activities::{
         ActivityHost, ActivityKind, ActivityOrigin, ActivityRetention, ActivityStatus,
+        ActivityTitleSource,
     };
     use tempfile::tempdir;
 
@@ -1289,7 +1290,8 @@ mod tests {
             id: id.into(),
             kind: ActivityKind::Agent,
             title: id.into(),
-            auto_title_eligible: false,
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
             workspace_path: None,
             status: ActivityStatus::Idle,
             created_at: "2026-08-14T00:00:00Z".into(),
