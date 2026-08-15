@@ -19,6 +19,7 @@ const api = vi.hoisted(() => ({
   checkpoint: vi.fn(),
   release: vi.fn(),
   listen: vi.fn(),
+  proposeTitle: vi.fn(),
   resize: vi.fn(),
   stop: vi.fn(),
   write: vi.fn(),
@@ -113,6 +114,7 @@ vi.mock('../../services/activities.js', () => ({
   attachTerminalActivity: api.attach,
   checkpointTerminalActivity: api.checkpoint,
   listenToActivityEvents: api.listen,
+  proposeActivityTitle: api.proposeTitle,
   releaseTerminalActivity: api.release,
   resizeActivity: api.resize,
   stopActivity: api.stop,
@@ -125,6 +127,7 @@ const agent = {
   id: 'agent:one',
   kind: 'agent',
   title: 'Codex',
+  titleSource: 'launcher',
   workspacePath: '/workspace',
   status: 'working',
   host: { type: 'pty', resumeStrategy: 'codex' },
@@ -152,6 +155,11 @@ beforeEach(() => {
     return api.unlisten
   })
   api.attach.mockResolvedValue(snapshot())
+  api.proposeTitle.mockResolvedValue({
+    ...agent,
+    title: 'Restore Activity titles',
+    titleSource: 'provisional',
+  })
   api.checkpoint.mockResolvedValue({ revision: 1, throughSequence: 2 })
   api.release.mockResolvedValue(true)
   api.resize.mockResolvedValue()
@@ -271,7 +279,10 @@ describe('TerminalActivity', () => {
     const wrapper = await initialize()
 
     expect(order).toEqual(['listen', 'attach'])
-    expect(writtenBytes(xterm.terminals[0])).toEqual([[0xf0, 0x9f], [0x99, 0x82]])
+    const terminal = xterm.terminals[0]
+    expect(writtenBytes(terminal)).toEqual([[0xf0, 0x9f], [0x99, 0x82]])
+    expect(terminal.open.mock.invocationCallOrder[0])
+      .toBeLessThan(terminal.write.mock.invocationCallOrder[0])
     expect(wrapper.emitted('ready')[0][0]).toMatchObject({ activityId: 'agent:one' })
     expect(xterm.terminals[0].loadAddon).toHaveBeenCalledTimes(5)
     expect(xterm.terminals[0].unicode.activeVersion).toBe('11')
@@ -460,10 +471,7 @@ describe('TerminalActivity', () => {
     await nextTick()
 
     expect(wrapper.find('[data-terminal-attention]').exists()).toBe(false)
-    expect(wrapper.emitted('status').at(-1)[0]).toMatchObject({
-      status: 'needs-input',
-      needsInputIsBlocking: true,
-    })
+    expect(wrapper.emitted('status')).toBeUndefined()
 
     api.callback({
       type: 'exit',
@@ -503,6 +511,95 @@ describe('TerminalActivity', () => {
     await flushPromises()
     expect(api.write).toHaveBeenCalledTimes(2)
     expect(Array.from(api.write.mock.calls[1][1])).toEqual([195, 169])
+  })
+
+  it('blocks input during restoration and reports the first later user interaction', async () => {
+    const wrapper = await initialize(render({ restoring: true }))
+    const terminal = xterm.terminals[0]
+
+    terminal.dataCallback('blocked')
+    await flushPromises()
+    expect(api.write).not.toHaveBeenCalled()
+    expect(wrapper.vm.focusEntry()).toBe(false)
+
+    await wrapper.setProps({ restoring: false })
+    terminal.dataCallback('ready')
+    terminal.dataCallback('\r')
+    await flushPromises()
+
+    expect(api.write).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('activity-input')).toEqual([[
+      { activityId: 'agent:one' },
+    ]])
+  })
+
+  it.each(['codex', 'claude', 'pi', 'gemini'])(
+    'proposes a first-prompt title through the shared terminal path for %s',
+    async (launcherId) => {
+      await initialize(render({
+        activity: {
+          ...agent,
+          title: launcherId,
+          source: { launcherId },
+        },
+      }))
+      const terminal = xterm.terminals[0]
+
+      terminal.dataCallback('Please restore Activity titles across providers')
+      terminal.dataCallback('\r')
+      await flushPromises()
+
+      expect(api.proposeTitle).toHaveBeenCalledWith(
+        'agent:one',
+        'Restore Activity titles across providers',
+      )
+    },
+  )
+
+  it('never proposes over a manual title', async () => {
+    await initialize(render({
+      activity: { ...agent, title: 'Pinned title', titleSource: 'manual' },
+    }))
+    const terminal = xterm.terminals[0]
+
+    terminal.dataCallback('Investigate the title regression')
+    terminal.dataCallback('\r')
+    await flushPromises()
+
+    expect(api.proposeTitle).not.toHaveBeenCalled()
+  })
+
+  it('keeps terminal color replies out of the proposed title', async () => {
+    await initialize()
+    const terminal = xterm.terminals[0]
+
+    terminal.dataCallback('\u001b]10;rgb:f8f8/f8f8/f2f2\u001b\\')
+    terminal.dataCallback('\u001b]11;rgb:2727/2828/2222\u001b\\')
+    terminal.dataCallback('tiny test')
+    terminal.dataCallback('\r')
+    await flushPromises()
+
+    expect(api.proposeTitle).toHaveBeenCalledWith('agent:one', 'Tiny test')
+    expect(api.write.mock.calls.map(([, bytes]) => new TextDecoder().decode(bytes))).toEqual([
+      '\u001b]10;rgb:f8f8/f8f8/f2f2\u001b\\',
+      '\u001b]11;rgb:2727/2828/2222\u001b\\',
+      'tiny test',
+      '\r',
+    ])
+  })
+
+  it('keeps title fallback failures silent and leaves terminal input intact', async () => {
+    api.proposeTitle.mockRejectedValueOnce(new Error('title persistence unavailable'))
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+
+    terminal.dataCallback('Investigate title persistence')
+    terminal.dataCallback('\r')
+    await flushPromises()
+
+    expect(api.write).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-terminal-error]').exists()).toBe(false)
+    expect(wrapper.emitted('surface-error')).toBeUndefined()
   })
 
   it('reports a local terminal API failure to the Activity owner', async () => {
@@ -685,6 +782,31 @@ describe('TerminalActivity', () => {
     expect(writtenBytes(terminal).at(-1)).toEqual([66])
     expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
     expect(wrapper.find('[data-terminal-stop]').exists()).toBe(true)
+  })
+
+  it('does not reset or attach twice when initial attachment already acquired the resumed run', async () => {
+    let resolveAttachment
+    api.attach.mockReturnValueOnce(new Promise((resolve) => {
+      resolveAttachment = resolve
+    }))
+    const first = { ...agent, session: { runId: 'run-1' } }
+    const wrapper = render({ activity: first })
+    await flushPromises()
+
+    await wrapper.setProps({
+      activity: { ...agent, status: 'idle', session: { runId: 'run-2' } },
+    })
+    resolveAttachment(snapshot({
+      record: { ...agent, status: 'idle', session: { runId: 'run-2' } },
+      runId: 'run-2',
+      events: [{ type: 'output', sequence: 1, bytes: [66] }],
+      lastSequence: 1,
+    }))
+    await initialize(wrapper)
+
+    expect(api.attach).toHaveBeenCalledTimes(1)
+    expect(xterm.terminals[0].reset).not.toHaveBeenCalled()
+    expect(writtenBytes(xterm.terminals[0]).at(-1)).toEqual([66])
   })
 
   it('keeps the event owner stable across rapid active changes', async () => {

@@ -107,6 +107,7 @@ import {
   attachTerminalActivity,
   checkpointTerminalActivity,
   listenToActivityEvents,
+  proposeActivityTitle,
   releaseTerminalActivity,
   resizeActivity,
   stopActivity,
@@ -119,22 +120,24 @@ import {
   readTerminalTheme,
   terminalBytes,
 } from './terminalActivity.js'
+import { createTerminalPromptTitleTracker } from './terminalPromptTitle.js'
 import { SYSTEM_MONO_FONT_STACK } from '../../shared/fonts.js'
 
 const props = defineProps({
   activity: { type: Object, required: true },
   active: { type: Boolean, default: false },
   fontSize: { type: Number, default: 12 },
+  restoring: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
   'ready',
-  'status',
   'exit',
   'interrupt',
   'stop',
   'restart',
   'restart-ready',
+  'activity-input',
   'surface-error',
 ])
 
@@ -181,11 +184,13 @@ let themeObserver = null
 let unlistenEvents = null
 let disposed = false
 let hydrated = false
+let initialAttachComplete = false
 let appliedSequence = 0
 let queuedSequence = 0
 let pendingEvents = []
 let inputQueue = Promise.resolve()
 let terminalEventQueue = Promise.resolve()
+let terminalAttachmentQueue = Promise.resolve()
 let resizeFrame = 0
 let lastSize = { cols: 0, rows: 0 }
 let entryFocusRequested = false
@@ -199,6 +204,8 @@ let checkpointInFlight = null
 let checkpointAgain = false
 let outputBytesSinceCheckpoint = 0
 let lastCheckpointAt = performance.now()
+const promptTitleTracker = createTerminalPromptTitleTracker()
+let titleProposalInFlight = null
 
 onMounted(initialize)
 
@@ -234,6 +241,7 @@ async function initialize() {
     terminal.loadAddon(serializeAddon)
     terminal.unicode.activeVersion = UNICODE_VERSION
     terminal.attachCustomKeyEventHandler(handleCustomKey)
+    terminal.open(surface.value)
 
     // Listen before reading the durable restore state. Events that arrive
     // during the native read stay queued and are de-duplicated by sequence.
@@ -243,13 +251,17 @@ async function initialize() {
       return
     }
     unlistenEvents = stopListening
-    await attachTerminalRun()
+    await serializeTerminalAttachment(() => attachTerminalRun())
+    initialAttachComplete = true
+    await reconcileAttachedTerminalRun(props.activity.session?.runId)
     if (disposed || !surface.value) return
-    terminal.open(surface.value)
     if (entryFocusRequested && props.active) focusTerminal()
     else entryFocusRequested = false
     installWebglRenderer()
-    dataDisposable = terminal.onData((value) => enqueueInput(terminalBytes(value)))
+    dataDisposable = terminal.onData((value) => enqueueInput(
+      terminalBytes(value),
+      { type: 'feed', value },
+    ))
     if (props.active) activateSurface()
     loading.value = false
     emit('ready', { activityId: activityId.value, snapshot: null })
@@ -260,6 +272,7 @@ async function initialize() {
       })
     }
   } catch (cause) {
+    initialAttachComplete = true
     loading.value = false
     exposeSurfaceError(cause, 'Could not attach to this Activity.')
   }
@@ -313,6 +326,23 @@ async function attachTerminalRun() {
   for (const event of queued) applyEvent(event)
 }
 
+function serializeTerminalAttachment(task) {
+  const pending = terminalAttachmentQueue.then(task, task)
+  terminalAttachmentQueue = pending.catch(() => {})
+  return pending
+}
+
+function reconcileAttachedTerminalRun(expectedRunId) {
+  if (!expectedRunId || disposed || !terminal || !initialAttachComplete) {
+    return Promise.resolve()
+  }
+  return serializeTerminalAttachment(async () => {
+    if (disposed || runId === expectedRunId) return
+    await resetForTerminalRun()
+    await attachTerminalRun()
+  })
+}
+
 function activateSurface() {
   if (disposed) return
   installResizeObserver()
@@ -347,12 +377,6 @@ function applyEvent(event) {
   if (event.type === 'status') {
     status.value = event.status
     if (!hasExited.value) live.value = event.status !== 'interrupted'
-    emit('status', {
-      activityId: activityId.value,
-      status: event.status,
-      titleHint: event.titleHint || null,
-      needsInputIsBlocking: Boolean(event.needsInputIsBlocking),
-    })
     return
   }
   if (event.type === 'exit') {
@@ -486,16 +510,47 @@ function terminalSearchText() {
   return lines.reverse().join('\n').replace(/\n+$/, '')
 }
 
-function enqueueInput(bytes) {
-  if (!bytes.byteLength || !live.value) return inputQueue
+function enqueueInput(bytes, promptInput = null) {
+  if (!bytes.byteLength || !live.value || props.restoring) return inputQueue
   inputQueue = inputQueue
-    .then(() => writeActivity(activityId.value, bytes))
-    .then(() => true)
+    .then(async () => {
+      await writeActivity(activityId.value, bytes)
+      if (submitsTerminalTurn(promptInput)) {
+        emit('activity-input', { activityId: activityId.value })
+      }
+      capturePromptInput(promptInput)
+      return true
+    })
     .catch((cause) => {
       exposeSurfaceError(cause, 'Could not send terminal input.')
       return false
     })
   return inputQueue
+}
+
+function submitsTerminalTurn(input) {
+  return input?.type === 'feed' && String(input.value || '').includes('\r')
+}
+
+function capturePromptInput(input) {
+  if (!input || mode.value !== 'agent') return
+  if (props.activity.titleSource !== 'launcher') {
+    promptTitleTracker.reset()
+    return
+  }
+
+  let title = ''
+  if (input.type === 'paste') promptTitleTracker.paste(input.value)
+  else title = promptTitleTracker.feed(input.value)
+  if (!title || titleProposalInFlight) return
+
+  const pending = proposeActivityTitle(activityId.value, title)
+    // A title is enhancement data. A failure must not affect the live session.
+    .catch(() => null)
+    .finally(() => {
+      if (titleProposalInFlight === pending) titleProposalInFlight = null
+    })
+  titleProposalInFlight = pending
 }
 
 // Shift+Enter inserts a line break instead of submitting. LF (Ctrl+J) is the
@@ -510,7 +565,9 @@ function handleCustomKey(event) {
     || event.altKey
     || event.isComposing
   ) return true
-  if (event.type === 'keydown') enqueueInput(terminalBytes('\n'))
+  if (event.type === 'keydown') {
+    enqueueInput(terminalBytes('\n'), { type: 'feed', value: '\n' })
+  }
   return false
 }
 
@@ -544,7 +601,7 @@ function installWebglRenderer() {
 }
 
 async function interrupt() {
-  const sent = await enqueueInput(Uint8Array.of(3))
+  const sent = await enqueueInput(Uint8Array.of(3), { type: 'feed', value: '\u0003' })
   if (sent) emit('interrupt', { activityId: activityId.value })
   terminal?.focus()
 }
@@ -572,14 +629,14 @@ function requestRestart() {
 async function pasteText(value = '') {
   const bytes = terminalBytes(value)
   if (!bytes.byteLength || !live.value) return false
-  const sent = await enqueueInput(bytes)
+  const sent = await enqueueInput(bytes, { type: 'paste', value })
   if (!sent) return false
   terminal?.focus()
   return true
 }
 
 function focusTerminal() {
-  if (!props.active) {
+  if (!props.active || props.restoring) {
     entryFocusRequested = false
     return false
   }
@@ -662,35 +719,18 @@ function installThemeObserver() {
   })
 }
 
-// A respawned session reuses this Activity identity. Replay sequences restart
-// from the new session's first byte, so the surface must drop the previous
-// run's screen and sequence watermark before hydrating again.
+// A respawned session reuses this Activity identity. Native respawn has already
+// replaced the old run by the time this prop changes, so the old checkpoint
+// lease is stale. Serialize attachments, invalidate that lease without saving,
+// and skip the reset when initial attachment already acquired the new run.
 watch(
   () => props.activity.session?.runId,
   async (nextRunId, previousRunId) => {
     if (!nextRunId || !previousRunId || nextRunId === previousRunId || disposed) return
-    hydrated = false
-    pendingEvents = []
-    await terminalEventQueue
-    await persistCheckpoint(true)
-    if (runId && leaseGeneration) {
-      await releaseTerminalActivity(activityId.value, ownerId, leaseGeneration).catch(() => {})
-    }
-    hasExited.value = false
-    live.value = true
-    stopping.value = false
-    error.value = ''
-    appliedSequence = 0
-    queuedSequence = 0
-    checkpointRevision = 0
-    checkpointThroughSequence = 0
-    leaseGeneration = 0
-    runId = ''
-    lastSize = { cols: 0, rows: 0 }
-    terminal?.reset()
+    if (!initialAttachComplete) return
     loading.value = true
     try {
-      await attachTerminalRun()
+      await reconcileAttachedTerminalRun(nextRunId)
     } catch (cause) {
       exposeSurfaceError(cause, 'Could not attach to the resumed Activity.')
     }
@@ -698,6 +738,42 @@ watch(
     if (props.active) activateSurface()
   },
 )
+
+async function resetForTerminalRun() {
+  hydrated = false
+  pendingEvents = []
+  if (checkpointTimer) clearTimeout(checkpointTimer)
+  checkpointTimer = 0
+  checkpointAgain = false
+  await terminalEventQueue
+  terminalEventQueue = Promise.resolve()
+
+  const previousRunId = runId
+  const previousLeaseGeneration = leaseGeneration
+  runId = ''
+  leaseGeneration = 0
+  if (previousRunId && previousLeaseGeneration) {
+    await releaseTerminalActivity(
+      activityId.value,
+      ownerId,
+      previousLeaseGeneration,
+    ).catch(() => {})
+  }
+
+  hasExited.value = false
+  live.value = true
+  stopping.value = false
+  error.value = ''
+  appliedSequence = 0
+  queuedSequence = 0
+  checkpointRevision = 0
+  checkpointThroughSequence = 0
+  outputBytesSinceCheckpoint = 0
+  promptTitleTracker.reset()
+  titleProposalInFlight = null
+  lastSize = { cols: 0, rows: 0 }
+  terminal?.reset()
+}
 
 watch(
   () => [props.activity.status, props.activity.session?.exit],
