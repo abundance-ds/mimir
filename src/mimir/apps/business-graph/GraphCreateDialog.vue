@@ -216,6 +216,7 @@ const kinds = Object.freeze([
   { id: 'person', label: 'Person', hint: 'Team member, client, or collaborator' },
   { id: 'company', label: 'Company', hint: 'Client, partner, or organization' },
   { id: 'note', label: 'Knowledge note', hint: 'Reusable context and understanding' },
+  { id: 'journal', label: 'Journal', hint: 'Chronological notes and daily logs' },
   { id: 'decision', label: 'Decision', hint: 'A durable choice and its rationale' },
   { id: 'record', label: 'Record' },
   { id: 'research-question', label: 'Research question' },

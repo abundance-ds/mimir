@@ -197,6 +197,7 @@ describe('BusinessGraphApp', () => {
       'Work',
       'Projects',
       'Knowledge',
+      'Journal',
       'All',
       'Changes',
     ])

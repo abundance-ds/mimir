@@ -51,7 +51,7 @@ mimir call graph_find '{"kinds":["issue"],"limit":100}' \
 Kinds:
 
 ```text
-issue person company project note decision record
+issue person company project note journal decision record
 study evidence dataset analysis model endpoint publication submission
 research-question method client-request
 ```

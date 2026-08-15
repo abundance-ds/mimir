@@ -27,6 +27,7 @@ export const BUSINESS_SECTIONS = Object.freeze([
       'method', 'client-request',
     ],
   },
+  { id: 'journal', label: 'Journal', kinds: ['journal'] },
   { id: 'all', label: 'All', kinds: [] },
   { id: 'now', label: 'Changes', kinds: [] },
 ])
@@ -55,6 +56,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     work: 'board',
     projects: 'portfolio',
     knowledge: 'list',
+    journal: 'list',
     all: 'list',
   })
   const searchQuery = ref('')

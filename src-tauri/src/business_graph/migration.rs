@@ -459,8 +459,8 @@ mod tests {
             GraphSourceRoot::new("project:golden", GraphScopeKind::Project, root.clone());
         let report = build_migration_report(std::slice::from_ref(&graph_root));
 
-        assert_eq!(report.source_count, 19);
-        assert_eq!(report.parsed_count, 19);
+        assert_eq!(report.source_count, 20);
+        assert_eq!(report.parsed_count, 20);
         for kind in ENTITY_KINDS {
             assert!(
                 report.kind_counts.get(*kind).copied().unwrap_or_default() > 0,

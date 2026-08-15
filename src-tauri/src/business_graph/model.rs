@@ -9,6 +9,7 @@ pub const ENTITY_KINDS: &[&str] = &[
     "company",
     "project",
     "note",
+    "journal",
     "decision",
     "record",
     "study",
@@ -589,6 +590,7 @@ mod tests {
         assert!(is_known_kind("issue"));
         assert!(is_known_kind("evidence"));
         assert!(is_known_kind("research-question"));
+        assert!(is_known_kind("journal"));
         assert!(!is_known_kind("anything-goes"));
     }
 

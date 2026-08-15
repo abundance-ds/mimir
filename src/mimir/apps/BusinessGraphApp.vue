@@ -663,6 +663,10 @@ const viewsBySection = {
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
   ],
+  journal: [
+    { id: 'list', label: 'List' },
+    { id: 'timeline', label: 'Timeline' },
+  ],
   all: [
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
