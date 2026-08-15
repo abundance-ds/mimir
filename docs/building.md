@@ -46,6 +46,24 @@ open src-tauri/target/debug/bundle/macos/Mimir.app
 
 Development builds are not release artifacts.
 
+### Connection sign-in clients
+
+Google and Slack sign-in use desktop OAuth with PKCE and a loopback callback.
+Set these values in the ignored `.env` file before development or packaging:
+
+```text
+MIMIR_GOOGLE_OAUTH_CLIENT_ID=
+MIMIR_GOOGLE_OAUTH_CLIENT_SECRET=
+MIMIR_SLACK_CLIENT_ID=
+```
+
+The Google client must be a Desktop app client with Gmail, Calendar, Drive,
+and OpenID APIs enabled. The Slack app must enable PKCE desktop redirects and
+the user scopes declared in `src-tauri/src/connections.rs`. Release packaging
+requires all three values. They identify the Mimir app; end users never enter
+them. Granola does not need a Mimir OAuth client because the user supplies a
+supported Granola API key in Settings.
+
 Vite binds to `127.0.0.1:1420`. If the port is busy:
 
 ```bash
@@ -189,12 +207,13 @@ incomplete release. There is no manual candidate or manual Publish step.
 After the workflow succeeds, run:
 
 ```bash
-bun run release:verify -- v0.2.0
+bun run release:verify
 ```
 
-This command verifies the published asset inventory, public updater version,
-signature field, archive URL, and archive availability. Do not report release
-success before this check passes.
+This command derives the tag from the synchronized repository version. It
+verifies the published asset inventory, public updater version, signature
+field, archive URL, and archive availability. Do not report release success
+before this check passes.
 
 Do not move a published tag. Do not replace published assets. If a published
 release has a defect, fix it and create a new patch version.

@@ -621,6 +621,31 @@ describe('files store', () => {
     expect(store.openFiles[0].dirty).toBe(false)
   })
 
+  it('saveAs() starts an untitled project file in the current project root', async () => {
+    saveFileDialog.mockResolvedValue('/work/new-name.md')
+    saveFile.mockResolvedValue(undefined)
+
+    const store = useFileStore()
+    store.setWorkspaceScope('/work')
+    store.newFile()
+
+    await store.saveAs()
+
+    expect(saveFileDialog).toHaveBeenCalledWith('/work/untitled.md')
+  })
+
+  it('saveAs() starts a named file in its current folder', async () => {
+    saveFileDialog.mockResolvedValue('/tmp/new-name.md')
+    saveFile.mockResolvedValue(undefined)
+
+    const store = useFileStore()
+    await store.openFile('/tmp/original.md', 'hello')
+
+    await store.saveAs()
+
+    expect(saveFileDialog).toHaveBeenCalledWith('/tmp/original.md')
+  })
+
   // openDialog()
   it('openDialog() opens file from dialog result', async () => {
     openFileDialog.mockResolvedValue({ path: '/tmp/from-dialog.md', content: 'dialog content' })

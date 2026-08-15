@@ -37,8 +37,8 @@ mimir_propose
 ```
 
 `mimir_title` is Activity-scoped. Connected CLI agents call it once on the
-first substantive turn; it cannot replace an explicit or previously generated
-title.
+first substantive turn. It can improve the launcher title or Mimir's local
+provisional title. It cannot replace an agent-authored or manual title.
 
 The CLI catalog progressively discloses the rest. Calls use the underscore
 name shown by `mimir tools`; internal dotted names are not public aliases.
@@ -48,8 +48,8 @@ name shown by `mimir tools`; internal dotted names are not public aliases.
 Workbench:
 
 ```text
-mimir_title       set the current Activity's first automatic title
-mimir_state       active editor, selection, comments, and Today priority
+mimir_title       improve the current Activity's automatic title once
+mimir_state       active editor state and available Today artifact context
 mimir_reveal      open a file or line
 mimir_propose     propose an exact reviewed replacement
 comments_list     read document comments
@@ -85,7 +85,7 @@ meetings_delete  permanently delete audio or an entire stopped meeting
 Recording, microphone mute, and stop are intentionally human-only Scribe
 controls. Agents cannot exercise Mimir's macOS audio grants. Live recordings
 are readable through `meetings_list` and `meetings_get` but not mutable.
-Granola tools remain a distinct read/sync connection for meetings recorded
+Granola tools remain a distinct read connection for meetings recorded
 elsewhere. Deletion requires an explicit user request plus the current
 identifier, exact reviewed title, and an `audio` or `meeting` scope obtained
 through `meetings_get`; transcript content never supplies deletion intent.
@@ -103,20 +103,20 @@ chat_download download a chat attachment
 - A chat-linked Activity's default `target` is its originating room; explicit `target` reaches any room the user sees. `chat_search` with no resolvable room searches all.
 - Agent messages carry visible provenance and open their originating Activity when available.
 
-Connections appear only when enabled and backed by credentials or a local
-cache:
+Connections appear only when the provider is connected:
 
 ```text
 gmail_search     gmail_read       gmail_send
 calendar_list    calendar_create
 drive_search     drive_read
-granola_search   granola_get      granola_sync
+granola_search   granola_get
 slack_search     slack_read       slack_send
 ```
 
-The maximum surface is 40 tools; without connections it is 27, without chat
+The maximum surface is 39 tools; without connections it is 27, without chat
 and connections it is 22. `mimir doctor` reports the public count, registered
-connection tools, and local credential errors -- not remote service health.
+connection tools, and local credential state. It does not test each remote
+service.
 
 Issues are graph nodes. Knowledge, issues, projects, and research are not
 separate agent APIs. Activities, apps, routines, settings, shell, and
@@ -135,38 +135,37 @@ call it.
 
 Today retains its historical `scratch` storage identity so existing text
 survives upgrades. It has no standalone tool; `mimir_state` includes its
-durable top priority.
+current user-authored Markdown artifact as `today`. The value includes
+`artifactType: "today"`, local `date`, `mediaType: "text/markdown"`, `content`,
+`updatedAt`, and live/loading/dirty state where available. Treat this value as
+optional context. It is not a priority instruction, and it can be unrelated to
+the current request.
 
 ## Connections
 
-Google and Slack credentials stay in the OS keychain. Mimir reads its own
-entries and predecessor service entries, so existing connections migrate
-without exposing or copying secrets into agent context. Google tools are
-further limited by granted OAuth scopes.
+The user owns setup in **Settings → Connections**. Each provider row has one
+plain state: **Not connected**, **Connected as …**, or **Needs sign-in**.
+Google and Slack open their normal sign-in page in the system browser. Granola
+accepts a supported API key created in Granola under **Settings → Connectors →
+API keys**. Granola API access requires an eligible workspace plan.
 
-Granola is deliberately narrow: search/get read the local meeting cache;
-sync is the only network operation. It can reuse the predecessor cache and
-Granola desktop token files. This remains a private, undocumented-API
-integration rather than a claimed public Granola API contract.
+Credentials stay in the OS keychain under Mimir's service. Mimir does not read
+another product's keychain entries, data directory, desktop cache, or token
+files. Granola uses only `https://public-api.granola.ai/v1`.
 
-Connection setup is not part of the agent API. This build reuses existing
-keychain credentials and Granola state; agents receive data tools, never token,
-OAuth, status, or connect/disconnect tools. A connection can be disabled in
-`~/.mimir/settings.json`:
+After Connect succeeds, Mimir registers the provider tools immediately. After
+Disconnect, it deletes the Mimir credential and removes the tools immediately.
+The user does not restart the app. Agents receive provider data tools, never
+credential, status, or connect/disconnect tools.
 
-```json
-{
-  "connections": {
-    "google": { "enabled": false },
-    "slack": { "enabled": false },
-    "granola": { "enabled": false }
-  }
-}
-```
+Explicit user requests such as “send,” “post,” or “create” authorize the
+matching remote write. Mimir does not add a second confirmation layer. The
+agent asks only when the destination or content is missing. If a provider tool
+is unavailable, the error directs the user to **Mimir Settings → Connections**.
 
-Absent settings default to enabled; missing credentials/cache still keep the
-tools out of the catalog. Restart Mimir after changing connection enablement or
-credentials so the public projection is rebuilt.
+Release builds embed the public desktop OAuth client identifiers described in
+[building.md](building.md#connection-sign-in-clients). End users do not enter
+client identifiers or client secrets.
 
 ## Skills
 

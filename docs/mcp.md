@@ -18,7 +18,7 @@ issue session IDs. It must not be exposed beyond loopback.
 Initialization contains only:
 
 ```text
-Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`.
+Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`. If a work connection is missing, ask the user to open Mimir Settings → Connections.
 ```
 
 Normal `tools/list` advertises `mimir_state`, `mimir_title`, `mimir_reveal`,
@@ -56,7 +56,8 @@ MCP responses contain readable `content` plus machine-readable
 `structuredContent`; the CLI prefers the latter.
 
 Today is folded into `mimir_state`. The built-in retains its `scratch` storage
-id for migration but does not register an app tool.
+id for migration but does not register an app tool. The returned Today value is
+a dated Markdown artifact for optional context, not a priority instruction.
 
 ## Dynamic providers
 

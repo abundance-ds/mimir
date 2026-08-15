@@ -34,6 +34,14 @@ The xterm core, serializer, and Unicode addon are exact-version dependencies.
 A checkpoint is a versioned Mimir format even though its payload is a VT stream.
 Change those versions together with checkpoint compatibility tests.
 
+### Resume attachment must be serialized
+
+Open xterm before checkpoint or event replay. A resumed Activity can publish a
+new `runId` while its surface performs the initial attach. Serialize both paths
+and compare the requested run with the run that is already attached before any
+reset. Native respawn has already invalidated the old checkpoint lease, so a
+run switch releases that lease without trying to save it.
+
 ### Font readiness and pixel snap
 
 Terminal initialization selects the native system monospace stack and waits for
@@ -313,6 +321,14 @@ configured.
 
 ## Persistence and settings
 
+### Connections do not import another product's state
+
+Connection discovery reads only credentials that Mimir created in its own
+keychain service. Do not add fallback keychain services, data directories,
+desktop-app token files, or hidden migration probes. Granola access must stay
+on its documented public REST API. Connect and Disconnect must update the
+canonical tool registry in the same running app.
+
 ### Tracker enabled and armed are not synonyms
 
 Disabled is the privacy boundary: no sampling, permission request, AI,
@@ -565,6 +581,19 @@ macOS titlebar, traffic-light, and native spellcheck APIs require
 `#[cfg(target_os = "macos")]`. Linux CI compiles the Rust app, so unguarded
 platform calls break verification. Never retain a raw native-window pointer
 across an async delay; a closed window makes it invalid.
+
+### Keep automatic Activity titles on the shared input path
+
+Do not parse provider output or add one title hook per CLI. All supported
+agents already send user input through `TerminalActivity`. The prompt tracker
+must observe that successful write without changing its bytes, must keep the
+raw prompt in memory only until submit, and must sanitize the bounded title
+before persistence. Native `titleSource` arbitration is authoritative; a
+renderer race must never replace a manual title. `xterm.onData` also carries
+terminal-generated replies. Strip complete and split OSC/DCS/APC control
+strings before they reach the prompt buffer, and retain incomplete CSI, SS3,
+and C1 sequences until their final byte. Color replies such as OSC 10 and 11
+are protocol data, not user text.
 
 ### Keep product identity synchronized
 

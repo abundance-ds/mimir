@@ -18,14 +18,7 @@ const libPath = path.join(root, 'src-tauri/src/lib.rs')
 // list cannot silently rot.
 
 // Commands present in the setup.js mock allowlist but NOT registered in Rust.
-const KNOWN_MOCK_ONLY = new Map([
-  // Still invoked by src/editor/composables/useDocumentBridge.js but never
-  // registered in lib.rs; the invoke fails silently at runtime. The real fix
-  // (registering the command or dropping the invoke) belongs to the editor
-  // bridge owner; the mock entry keeps editor tests from tripping the
-  // unknown-command guard until then.
-  ['document_context_send', 'ghost: invoked by useDocumentBridge.js, no Rust command'],
-])
+const KNOWN_MOCK_ONLY = new Map([])
 
 // Commands registered in Rust but missing from the setup.js mock allowlist.
 const KNOWN_RUST_ONLY = new Map([])

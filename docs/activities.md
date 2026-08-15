@@ -10,8 +10,7 @@ pane without duplicating themselves in Activities.
 The shared Rust/renderer record in `src-tauri/src/activities/model.rs` contains:
 
 - stable `id`, `kind`, title, workspace, timestamps, and status
-- an automatic-title eligibility bit consumed by the first generated or
-  explicit rename
+- title provenance: `launcher`, `provisional`, `agent`, or `manual`
 - `retention` (`ephemeral` or `durable`)
 - origin metadata for a launcher, app, routine, schedule, or parent Activity
 - a host description such as PTY, embedded app, process, window, or Rust helper
@@ -41,13 +40,20 @@ This distinction controls mutations:
 
 Do not infer authority from `kind`; inspect `host.type` and the record origin.
 
-New launcher-backed agent Activities begin with the launcher title and expose
-the scoped `mimir_title` tool to Codex, Claude, Pi, and Gemini. The connected
-agent calls it once on the first substantive user turn with a concise task
-title. Native compare-and-set semantics accept it only while the launcher title
-is still eligible; an explicit launch title or manual rename wins atomically.
-The accepted rename is persisted and projected through the ordinary Activity
-upsert path.
+New launcher-backed agent Activities begin with the launcher title. The shared
+terminal input path reconstructs the first submitted prompt for Codex, Claude,
+Pi, and Gemini without changing the bytes sent to the PTY. It discards paths,
+logs, code blocks, URLs, credentials, and token-like values, then proposes a
+bounded task title. This local fallback does not depend on a provider hook,
+provider transcript format, or MCP call.
+
+The scoped `mimir_title` tool lets the connected agent improve a launcher or
+provisional title once. Native title provenance supplies the compare-and-set
+order: `launcher` -> `provisional` -> `agent`. An explicit launch title or any
+manual rename sets `manual`; it overwrites every automatic source and stays
+authoritative for all later calls and resumed runs. Accepted changes use the
+ordinary persisted Activity upsert path. Legacy eligibility records migrate
+conservatively so an old locked title remains manual.
 
 ## Workspace projection
 
@@ -112,7 +118,9 @@ attached.
 The renderer installs `mimir://activity-event` before calling `activity_list`.
 Events project upsert/status/output/resize/exit, while the initial list closes
 the startup gap. A terminal surface also listens before it atomically acquires
-its checkpoint lease and durable restore state. `activity_flush` and shutdown
+its checkpoint lease and durable restore state. It opens xterm before replay,
+and serializes run attachments so an initial attach cannot race a resumed
+`runId` update. `activity_flush` and shutdown
 wait for the SQLite worker. See [persistence.md](persistence.md) and
 [ipc.md](ipc.md).
 
@@ -122,7 +130,9 @@ The Sidebar presents observable conversation state, not every supervisor
 status. It deliberately does not distinguish `done` from `idle`:
 
 - `starting` or `working`: animated 3×3 working grid;
-- `needs-input`: orange `attn` dot and relative time;
+- a blocking `needs-input` request on an inactive Activity: orange `attn` dot
+  and relative time; transient prompt-ready states and the selected Activity
+  show relative time only;
 - output received while another Activity is selected: pale blue `info` dot
   and relative time, cleared when selected;
 - any exposed process, surface/API, provider/authentication, or resume error:
@@ -150,13 +160,21 @@ contract are owned by [agent-setup.md](agent-setup.md). The supervisor's
 `activity_respawn` replaces only ended PTY records; the terminal surface watches
 `runId` to reset replay to the new session's first byte.
 
-At app startup, Mimir resumes unarchived interrupted agent rows from the opened
-project in the background. It excludes History, global Activities, other
-projects, process Apps, terminals, and routines. Two exact-session resumes run
-at once, with no total limit, and startup does not wait for them. Each row gets
-one attempt per launch. A missing continuation requirement or failed attempt
-leaves the row interrupted, records the cause as an error, and does not show a
-second Resume action. Deliberately stopped Activities never enter this flow.
+Mimir resumes unarchived interrupted agent rows whenever a project becomes
+active, including app startup. It scans that project only and excludes History,
+global Activities, other projects, process Apps, terminals, and routines. Two
+exact-session restores run at once across the app, with no total limit. Each row
+gets one attempt per app session.
+
+Session restoration is not conversation activity. It does not show the working
+indicator, create unread state, or change the row's last conversation time. The
+restore stays pending until the new run produces terminal output; selecting it
+meanwhile shows `Restoring session…` and blocks terminal input. Restoration
+output stays silent until the user's next submitted turn. A run that produces
+no terminal output within 45 seconds becomes an explicit error instead of
+loading forever. A missing continuation requirement or spawn failure leaves
+the row interrupted; every failure records its exact cause. Deliberately
+stopped Activities never enter this flow.
 
 ## Relevant code
 

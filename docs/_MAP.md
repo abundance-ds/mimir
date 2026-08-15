@@ -189,7 +189,6 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/bin/` | installed `mimir` |
 | `~/.mimir/pi/mimir-tools.ts` | installed Pi extension |
 | `~/.mimir/skills/` | canonical skills, revisions, manifests, Claude snapshots |
-| `~/.mimir/connections/granola.sqlite` | native Granola cache when no predecessor cache exists |
 | `~/.agents/skills/` | Mimir-managed catalog/personal projection plus unrelated user skills |
 | `~/.mimir/keys.env` | debug-only plaintext key fallback |
 

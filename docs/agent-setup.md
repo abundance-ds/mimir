@@ -63,7 +63,9 @@ error, not an overwrite.
 Pi performs the MCP handshake, dynamically registers the lean tool set, and
 adds the one-line Mimir instruction once. The shared instruction asks every
 supported CLI agent to call the scoped `mimir_title` tool on its first
-substantive turn. `/mimir-refresh` rediscovers the currently exposed set.
+substantive turn. This call can improve Mimir's provider-neutral local title
+fallback, but title creation does not depend on the call. `/mimir-refresh`
+rediscovers the currently exposed set.
 
 Continuations retain the Activity's recorded launch policy, including model,
 permission, and tool flags, while refreshing the launcher executable and

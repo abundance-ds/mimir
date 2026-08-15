@@ -1,10 +1,3 @@
-const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
-
-const windowLabel = (() => {
-  if (typeof window === 'undefined') return ''
-  return new URLSearchParams(window.location.search).get('window') || ''
-})()
-
 export function useDocumentBridge({ delay = 650 } = {}) {
   let timer = null
   let latestContent = ''
@@ -15,18 +8,6 @@ export function useDocumentBridge({ delay = 650 } = {}) {
       localStorage.setItem('mimir:doc', content)
       localStorage.setItem('mimir:doc:path', path || '')
     } catch {}
-  }
-
-  async function emitTauri(content, path) {
-    if (!isTauri) return
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('document_context_send', {
-        payload: { content, path: path || '', windowLabel },
-      })
-    } catch (error) {
-      console.warn('[editor] document_context_send failed:', error)
-    }
   }
 
   function clearScheduled() {
@@ -41,7 +22,6 @@ export function useDocumentBridge({ delay = 650 } = {}) {
     latestContent = content || ''
     latestPath = path || ''
     writeLocalStorage(latestContent, latestPath)
-    emitTauri(latestContent, latestPath)
   }
 
   function schedule(content, path) {

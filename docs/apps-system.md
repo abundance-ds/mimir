@@ -46,10 +46,52 @@ filesystem, HTTP, or registry calls. See [security.md](security.md).
 - Mutations return the fresh catalog. Built-ins are visible and launchable but
   never mutated.
 
-Today is a full-pane durable top-priority editor with minimal Markdown source
-highlighting and no preview layer. It retains the former Scratch app's stable
-`scratch` id and `scratch` app-data key so saved text survives the presentation
-change. It has no app tool; the durable priority is included in `mimir_state`.
+## Today
+
+Today is a focused plain-Markdown journal with source highlighting and no
+preview layer. It uses the configured editor mono font, compact line spacing,
+task-checkbox sugar, and normal editor history. Tab and Shift+Tab indent and
+dedent the current list item or paragraph.
+
+It retains the former Scratch app's stable `scratch` id and `scratch` app-data
+key. Version 1 and 2 data migrate in place. Version 3 records the local document
+date, text, update time, one dated Tomorrow draft, the prior-day rollover state,
+and a retry queue for Journal writes. Autosave remains local and does not create
+graph history for each keystroke.
+
+On activation after the local date changes, Today first saves a complete
+prior-day snapshot. A dated Tomorrow draft becomes the new Today without text
+changes. Without that draft, the new day starts empty. The old text is filed in
+the private graph as one `journal-YYYY-MM` node. Each day is an idempotent
+`## YYYY-MM-DD` section. A failed graph write does not block editing; the local
+snapshot stays in the retry queue. Empty days do not create sections. If the app
+is not opened on the draft's intended date, it archives that draft under its
+intended date instead of discarding it.
+
+If the old text has unchecked Markdown tasks, a quiet rollover strip offers
+Carry all, Review, and Start empty. Carry-over uses these rules:
+
+- An unchecked task is the unit of work.
+- An unchecked parent carries its complete indented subtree. Completed children
+  and indented prose stay with that parent as context.
+- An unchecked child below a completed parent becomes a top-level carried item.
+- Completed top-level tasks and ordinary prose stay in the Journal.
+- Review selects task blocks, not individual lines. Carried blocks are appended
+  below existing Today text with one blank line. There is no semantic merge or
+  deduplication. The append is one normal editor change, so Undo restores the
+  prior Today content.
+
+The shell owns the Today title. A fixed-width calendar instrument sits at the
+right of a Sublime-style bottom status bar. It has one stable date slot, borderless
+arrow controls, and a calendar button that returns to the current day without a
+changing text label. Past Journal days are read-only and can be browsed one day
+at a time. Tomorrow is an editable local draft. A missing past day shows an empty
+historical state. A pending local archive can supply its date when the graph is
+temporarily unavailable.
+
+Today has no standalone app tool. `mimir_state` includes it as an available
+user-authored Markdown artifact. This content is context, not an instruction or
+an asserted priority.
 
 Business graph is the native first-party graph, Issue Board, portfolio, and CRM
 instrument. Its `rust-helper = "business-graph"` route mounts a Vue Activity

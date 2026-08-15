@@ -78,6 +78,10 @@ requirements; they do not replace runtime verification.
   inside the same Activity row; resume never uses latest/last/implicit continue
   and never creates a second record. Resume preserves that Activity's recorded
   model, permission, and tool flags while refreshing Mimir's scoped connection.
+- Codex, Claude, Pi, and Gemini get a bounded first-prompt title through the
+  same terminal input path. A later agent title can improve it once. A manual
+  rename always overwrites every automatic title and remains authoritative
+  across late calls and resumed runs.
 - History rows without an exact id restore the transcript only. Run again is a
   distinct new-session action, ambiguous legacy identity fails closed, and
   failed or duplicate Resume attempts cannot unarchive or respawn twice.
@@ -109,6 +113,12 @@ requirements; they do not replace runtime verification.
   client tutorials.
 - Every connection uses the product-owned `mimir_workbench` identity and
   preserves unrelated client configuration.
+- Settings > Connections shows Google, Slack, and Granola as Not connected,
+  Connected as, or Needs sign-in. Connect and Disconnect change the public
+  tool catalog immediately, without an app restart.
+- Connection credentials use only Mimir's keychain service. Granola uses its
+  public REST API and a user-supplied supported API key; no provider desktop
+  cache or token file is read.
 - Catalog and personal skills trigger natively in every client; project skills
   trigger natively in Claude and Pi and remain one explicit lookup away in
   Codex and Gemini.
@@ -227,9 +237,11 @@ requirements; they do not replace runtime verification.
 - App-defined tools join the live registry and unregister with their instance.
 - Reloading an already-mounted embedded App replaces its exact tool provider
   and reloads its frame without accumulating listeners.
-- Today is a durable single-priority editor that restores former Scratch text,
-  highlights Markdown source without a preview layer, autosaves, and is
-  included in `mimir_state`.
+- Today is a durable daily Markdown journal that restores former Scratch text,
+  uses editor-style Tab indentation, rolls over nested unfinished task blocks,
+  archives one section per day into monthly private `journal` nodes, provides a
+  readable date navigator with read-only look-back and one Tomorrow draft, and
+  appears in `mimir_state` as artifact context.
 - Today and Business graph are functional built-in Tools.
 - Tracker is a functional built-in Rust-helper that is always discoverable in
   Settings but absent from Tools and Go to until explicitly enabled.

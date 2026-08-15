@@ -24,7 +24,7 @@ subsystems:
 | public Mimir/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
 | tab close/reorder/new behavior | `useTabManagement.js` |
 | CodeMirror/store/document synchronization | `useContentSync.js` |
-| debounced document context bridge (localStorage + Tauri IPC) | `useDocumentBridge.js` |
+| debounced document context fallback (`localStorage`) | `useDocumentBridge.js` |
 
 These controllers own their timers, watchers, and native listener cleanup.
 `App.vue` owns their ordering because hydration must finish before native
@@ -33,6 +33,12 @@ surfaces are installed.
 `src/stores/files.js` owns open files and save state.
 `src/editor/composables/useContentSync.js` keeps CodeMirror, the file store, and
 the attached document bridge synchronized.
+
+The Save chooser follows the active editing context. Save As for a named file
+starts in that file's directory. The first save of an untitled draft starts at
+the active project root in the embedded Workbench. Without an active project,
+the native dialog chooses the location. Canceling the chooser leaves the draft
+unchanged.
 
 In the embedded Workbench, named tabs opened inside a retained project record
 that project as their owner. The tab strip projects the active project plus

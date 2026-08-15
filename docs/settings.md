@@ -114,12 +114,15 @@ macOS Keychain entry directly; snapshots expose only
 owned native monitor. Local model progress comes from the managed installation
 state, not from optimistic renderer state. See [meetings.md](meetings.md).
 
-## File-first top-level namespaces
+## Connection settings
 
-The CLI reads two file-first top-level namespaces that the renderer store
-preserves: `connections` (per-service `enabled`/`account`) and `skills`
-(`catalogRoot`, must be absolute). Missing connection accounts fall back to
-`default`.
+Connections are outside the renderer settings snapshot. The native connection
+manager owns credentials in the OS keychain. The Settings section calls native
+connect and disconnect commands and projects only provider state and account
+labels. Tool registration changes in the same operation, without a restart.
+
+The remaining file-first top-level namespace is `skills` (`catalogRoot`, which
+must be absolute).
 
 ## Internal settings handler
 
@@ -154,6 +157,7 @@ prefixes do not match the filter.
 | Change Business graph settings | `stores/settings.js`, `GraphSettingsSection.vue`, graph app/Workbench mount watchers; settings and graph app tests |
 | Change Chat connection settings | `ChatSettingsSection.vue`, `services/chat.js`, native `chat/`; credential/reconnect and UI tests |
 | Change Scribe settings | `ScribeSettings.vue`, meetings service/store, native `meetings/platform.rs`; config corruption, Keychain, detector propagation, and UI tests |
+| Change Connections | `ConnectionsSettingsSection.vue`, native `connections.rs`, public tool projection; status, credential, and live registration tests |
 
 See [persistence.md](persistence.md), [workbench-design.md](workbench-design.md),
 and [gotchas.md](gotchas.md).

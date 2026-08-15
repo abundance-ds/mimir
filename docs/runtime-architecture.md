@@ -34,11 +34,12 @@ before building Tauri. Setup then performs this order:
 3. attach Activity and Routine event sinks;
 4. start the Routine runtime and install Tracker; disabled Tracker starts no
    collection, while enabled Tracker restores its lifecycle and menu-bar item;
-5. register renderer-backed core definitions, native Business graph tools,
-   and native connection tools (`crate::connections::register_native_tools`),
+5. register renderer-backed core definitions and native Business graph tools,
    then begin registry revision observation;
-6. install ChatRuntime with app handle and tool registry;
-7. queue startup file arguments.
+6. install the native ConnectionManager, which projects currently connected
+   providers into the same registry;
+7. install ChatRuntime with app handle and tool registry;
+8. queue startup file arguments.
 
 The MCP HTTP listener is intentionally absent from this list. Core definitions
 exist before the renderer, but `src/services/toolRuntime.js` starts the socket

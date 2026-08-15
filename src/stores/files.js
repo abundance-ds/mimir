@@ -521,7 +521,8 @@ export const useFileStore = defineStore('files', () => {
   // Save As
   async function saveAs(file = currentFile.value) {
     if (!file) return false
-    const defaultPath = file.path || 'untitled.md'
+    const defaultPath = file.path
+      || (workspaceScope.value ? `${workspaceScope.value}/untitled.md` : 'untitled.md')
     const path = await saveFileDialog(defaultPath)
     if (!path) return false
     if (!openFiles.value.includes(file)) return false

@@ -36,11 +36,14 @@ The ontology is intentionally business-specific:
 
 | Family | Kinds |
 |---|---|
-| Business | `issue`, `person`, `company`, `project`, `note`, `decision`, `record` |
+| Business | `issue`, `person`, `company`, `project`, `note`, `journal`, `decision`, `record` |
 | HEOR | `study`, `evidence`, `dataset`, `analysis`, `model`, `endpoint`, `publication`, `submission`, `research-question`, `method`, `client-request` |
 
 Legacy `org` sources normalize to `company`. Unknown frontmatter is preserved
 through parse and serialization, but new public writes accept only known kinds.
+`journal` is the chronological artifact kind. It has a separate Journal
+projection and is excluded from the Knowledge/Notes projection. Today stores
+one private node per month, with ISO-date headings in the Markdown body.
 
 Every node has a stable id, kind, title, summary, Markdown body, tags,
 relations, properties, timestamps, and provenance. Issue properties include:
@@ -71,6 +74,7 @@ stays in the Activity pane; files open in the persistent Editor.
 | Work | Board, List, Attention |
 | Projects | Portfolio, List, Timeline |
 | Knowledge | List, Timeline |
+| Journal | List, Timeline |
 | All | List, Timeline (kind filter) |
 | Changes | History |
 

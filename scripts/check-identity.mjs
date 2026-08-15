@@ -3,8 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const root = process.cwd()
-const priorSlug = ['m', 'i', 'm'].join('')
-const priorDisplay = `${priorSlug[0].toUpperCase()}${priorSlug.slice(1)}`
+// Keep the retired name explicit in this guard. Production code must never
+// hide it in string fragments to evade repository search.
+const priorSlug = 'mim'
+const priorDisplay = 'Mim'
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const escapedPrior = escapeRegExp(priorSlug)
 
@@ -17,6 +19,11 @@ const forbidden = [
   ['previous environment prefix', new RegExp(`${escapedPrior.toUpperCase()}_`)],
   ['previous bundle/keychain namespace', new RegExp(`(?:rs\\.shoulde|com)\\.${escapedPrior}(?:\\.|\\b)`, 'i')],
 ]
+const forbiddenObfuscation = [
+  ['fragmented previous identity in Rust concat', /concat!\(\s*["']m["']\s*,\s*["']i["']\s*,\s*["']m["']/i],
+  ['fragmented previous identity in a joined array', /\[\s*["']m["']\s*,\s*["']i["']\s*,\s*["']m["']\s*\]\.join/i],
+]
+const identityGuardFile = 'scripts/check-identity.mjs'
 
 const requiredFiles = [
   'bin/mimir.mjs',
@@ -70,7 +77,11 @@ for (const file of files) {
   }
   if (bytes.includes(0)) continue
   const text = bytes.toString('utf8')
+  if (file === identityGuardFile) continue
   for (const [label, pattern] of forbidden) {
+    if (pattern.test(text)) failures.push(`${file}: content contains ${label}`)
+  }
+  for (const [label, pattern] of forbiddenObfuscation) {
     if (pattern.test(text)) failures.push(`${file}: content contains ${label}`)
   }
 }
@@ -83,5 +94,5 @@ if (failures.length) {
 
 console.log(
   `Mimir identity check passed: ${files.length} repository files use the Mimir contract; `
-  + `${priorDisplay} identities are absent.`,
+  + `${priorDisplay} identities are absent outside this explicit guard.`,
 )

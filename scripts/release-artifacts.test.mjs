@@ -19,6 +19,31 @@ import {
   stageRelease,
   verifyReleaseStage,
 } from './lib/release-artifacts.mjs'
+import { resolveReleaseTag } from './check-published-release.mjs'
+
+test('release verification derives the synchronized repository version', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'mimir-release-version-test.'))
+  try {
+    mkdirSync(resolve(temporary, 'src-tauri'), { recursive: true })
+    writeFileSync(resolve(temporary, 'package.json'), '{"version":"1.2.3"}\n')
+    writeFileSync(resolve(temporary, 'src-tauri/tauri.conf.json'), '{"version":"1.2.3"}\n')
+    writeFileSync(resolve(temporary, 'src-tauri/Cargo.toml'), '[package]\nversion = "1.2.3"\n')
+
+    assert.equal(resolveReleaseTag(undefined, temporary), 'v1.2.3')
+    assert.equal(resolveReleaseTag('v0.2.0', temporary), 'v0.2.0')
+
+    writeFileSync(resolve(temporary, 'src-tauri/tauri.conf.json'), '{"version":"1.2.4"}\n')
+    assert.throws(
+      () => resolveReleaseTag(undefined, temporary),
+      /package, Cargo, and Tauri versions must match/,
+    )
+    assert.equal(resolveReleaseTag('v0.2.0', temporary), 'v0.2.0')
+    assert.throws(() => resolveReleaseTag('1.2.3', temporary), /usage:/)
+    assert.throws(() => resolveReleaseTag('', temporary), /usage:/)
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
 
 test('mac release layout selects one exact arm64 artifact and rejects other architectures', () => {
   assert.equal(argumentValue(['build', '--target', 'aarch64-apple-darwin'], '--target'), 'aarch64-apple-darwin')
