@@ -399,12 +399,12 @@
             class="flex items-center gap-1.5 lowercase tabular-nums tracking-normal"
           >
             <span
-              v-if="activity.status === 'needs-input'"
+              v-if="activityNeedsAttention(activity)"
               :data-activity-attention="activity.id"
               class="size-1.5 shrink-0 rounded-full bg-attn/65"
             />
             <span
-              v-else-if="activity.unread"
+              v-else-if="activityHasUnread(activity)"
               :data-activity-unread="activity.id"
               class="size-1.5 shrink-0 rounded-full bg-info/60"
             />
@@ -580,6 +580,7 @@ const props = defineProps({
   chatSectionCollapsed: { type: Boolean, default: false },
   activeActivityId: { type: String, default: '' },
   resumingActivityIds: { type: [Array, Set], default: () => new Set() },
+  blockingInputActivityIds: { type: [Array, Set], default: () => new Set() },
   activitySort: { type: String, default: 'manual' },
   meetingCapture: { type: Object, default: null },
 })
@@ -766,16 +767,26 @@ function activityHasError(activity) {
 }
 
 function activityIsResponding(activity) {
+  if (collectionHas(props.resumingActivityIds, activity.id)) return false
   return ['starting', 'working'].includes(activity.status)
-    || collectionHas(props.resumingActivityIds, activity.id)
 }
 
 function activityStateLabel(activity) {
   if (activityHasError(activity)) return 'error'
   if (activityIsResponding(activity)) return 'responding'
-  if (activity.status === 'needs-input') return 'needs input'
-  if (activity.unread) return 'new response'
+  if (activityNeedsAttention(activity)) return 'needs input'
+  if (activityHasUnread(activity)) return 'new response'
   return ''
+}
+
+function activityNeedsAttention(activity) {
+  return activity.status === 'needs-input'
+    && props.activeActivityId !== activity.id
+    && collectionHas(props.blockingInputActivityIds, activity.id)
+}
+
+function activityHasUnread(activity) {
+  return activity.unread && props.activeActivityId !== activity.id
 }
 
 function collectionHas(collection, id) {

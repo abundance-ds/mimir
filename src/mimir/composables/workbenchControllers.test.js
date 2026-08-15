@@ -675,6 +675,105 @@ describe('Workbench controllers', () => {
     controller.dispose()
   })
 
+  it('resumes each project on activation without exceeding two global workers or retrying', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    settings.settingsReady = true
+    settings.mimirWorkspaceFolder = '/alpha'
+    const preset = { id: 'codex', cwd: { mode: 'workspace' } }
+    for (const project of ['alpha', 'beta']) {
+      for (let index = 0; index < 2; index += 1) {
+        activities.upsert(activity(`agent:${project}:${index}`, {
+          kind: 'agent',
+          status: 'interrupted',
+          workspacePath: `/${project}`,
+          source: { presetId: 'codex', workspaceScope: 'workspace' },
+          host: { type: 'pty', resumeStrategy: 'codex' },
+          session: { cliSessionId: `${project}-${index}` },
+        }))
+      }
+    }
+
+    let activeResumes = 0
+    let maxActiveResumes = 0
+    const releases = new Map()
+    const resumePreset = vi.fn((_, candidate) => new Promise((resolve) => {
+      activeResumes += 1
+      maxActiveResumes = Math.max(maxActiveResumes, activeResumes)
+      releases.set(candidate.id, () => {
+        releases.delete(candidate.id)
+        activeResumes -= 1
+        resolve({ ...candidate, status: 'idle' })
+      })
+    }))
+    const workspaceFiles = {
+      workspacePath: '',
+      openWorkspace: vi.fn(async (path) => {
+        workspaceFiles.workspacePath = path
+      }),
+    }
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: {
+        initialize: vi.fn(async () => {}),
+        resumePreset,
+        markAutomaticResumeFailure: vi.fn(),
+        error: '',
+      },
+      launchers: {
+        load: vi.fn(async () => {}),
+        byId: id => (id === 'codex' ? preset : null),
+      },
+      appsCatalog: { load: vi.fn(async () => {}) },
+      workspaceFiles,
+      editorFiles: { currentFile: null },
+      toolRuntime: { start: vi.fn(async () => {}) },
+      diagnostic: ref(''),
+      coreActivities: [{ id: 'files', kind: 'files', title: 'Files' }],
+      openCoreActivity: id => workbench.openActivity(id),
+      isActivityVisible: candidate => (
+        !candidate.workspacePath || candidate.workspacePath === workspaceFiles.workspacePath
+      ),
+      getFocusOwner: () => 'none',
+    })
+
+    await controller.start()
+    expect(resumePreset.mock.calls.map(([, candidate]) => candidate.id)).toEqual([
+      'agent:alpha:0',
+      'agent:alpha:1',
+    ])
+
+    await controller.openWorkspace('/beta')
+    expect(resumePreset).toHaveBeenCalledTimes(2)
+
+    releases.get('agent:alpha:0')()
+    await Promise.resolve()
+    await nextTick()
+    expect(resumePreset.mock.calls.map(([, candidate]) => candidate.id))
+      .toContain('agent:beta:0')
+    expect(maxActiveResumes).toBe(2)
+
+    releases.get('agent:alpha:1')()
+    await Promise.resolve()
+    await nextTick()
+    expect(resumePreset.mock.calls.map(([, candidate]) => candidate.id))
+      .toContain('agent:beta:1')
+    expect(maxActiveResumes).toBe(2)
+
+    releases.get('agent:beta:0')()
+    releases.get('agent:beta:1')()
+    await Promise.resolve()
+    await nextTick()
+    await controller.openWorkspace('/alpha')
+    await controller.openWorkspace('/beta')
+    expect(resumePreset).toHaveBeenCalledTimes(4)
+    expect(maxActiveResumes).toBe(2)
+    controller.dispose()
+  })
+
   it('returns to each workspace Activity for the current app session', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()

@@ -26,7 +26,12 @@ export function useWorkspaceBootstrap({
   const viewportWidth = ref(window.innerWidth)
   const workspaceViewByPath = new Map()
   let desktopLayout = null
-  let automaticResumeGeneration = 0
+  let automaticResumeEnabled = false
+  let automaticResumeLauncherFailure = ''
+  let automaticResumeWorkers = 0
+  let automaticResumeQueue = []
+  const queuedAutomaticResumeIds = new Set()
+  const attemptedAutomaticResumeIds = new Set()
 
   const stopGraphFolderWatch = watch(
     () => settings.mimirTeamGraphFolder,
@@ -81,49 +86,67 @@ export function useWorkspaceBootstrap({
     initialized.value = true
     persistWorkbench()
     if (runtimeResult.status === 'fulfilled') {
-      void resumeInterruptedAgentsAtStartup({ launcherLoadFailure })
+      automaticResumeEnabled = true
+      automaticResumeLauncherFailure = launcherLoadFailure
+      queueInterruptedAgentsForActiveProject()
     }
   }
 
-  async function resumeInterruptedAgentsAtStartup({ launcherLoadFailure = '' } = {}) {
+  function queueInterruptedAgentsForActiveProject() {
+    if (!automaticResumeEnabled) return
     const projectPath = normalizedWorkspacePath(workspaceFiles.workspacePath)
     if (!projectPath) return
-    const generation = ++automaticResumeGeneration
-    const queue = []
+
+    automaticResumeQueue = automaticResumeQueue.filter((item) => {
+      if (item.projectPath === projectPath) return true
+      queuedAutomaticResumeIds.delete(item.activity.id)
+      return false
+    })
 
     for (const activity of activities.visibleActivities) {
       if (!isCurrentProjectInterruptedAgent(activity, projectPath)) continue
+      if (
+        attemptedAutomaticResumeIds.has(activity.id)
+        || queuedAutomaticResumeIds.has(activity.id)
+      ) continue
       const presetId = activity.source?.presetId || activity.source?.launcherId
-      const preset = !launcherLoadFailure && presetId ? launchers.byId(presetId) : null
-      const unavailable = launcherLoadFailure
+      const preset = !automaticResumeLauncherFailure && presetId
+        ? launchers.byId(presetId)
+        : null
+      const unavailable = automaticResumeLauncherFailure
         || automaticResumeUnavailableReason(activity, preset)
       if (unavailable) {
+        attemptedAutomaticResumeIds.add(activity.id)
         activityRuntime.markAutomaticResumeFailure(activity.id, unavailable)
         continue
       }
-      queue.push({ activity, preset })
+      queuedAutomaticResumeIds.add(activity.id)
+      automaticResumeQueue.push({ activity, preset, projectPath })
     }
+    drainAutomaticResumeQueue()
+  }
 
-    let nextIndex = 0
-    async function worker() {
-      while (generation === automaticResumeGeneration && nextIndex < queue.length) {
-        const item = queue[nextIndex]
-        nextIndex += 1
-        try {
-          await activityRuntime.resumePreset(item.preset, item.activity, {
-            automatic: true,
-            open: false,
-          })
-        } catch {
-          // The runtime keeps the interrupted row and records the exact cause.
-        }
-      }
+  function drainAutomaticResumeQueue() {
+    while (automaticResumeEnabled && automaticResumeWorkers < 2 && automaticResumeQueue.length) {
+      const item = automaticResumeQueue.shift()
+      queuedAutomaticResumeIds.delete(item.activity.id)
+      if (normalizedWorkspacePath(workspaceFiles.workspacePath) !== item.projectPath) continue
+
+      const current = activities.byId(item.activity.id)
+      if (!current || !isCurrentProjectInterruptedAgent(current, item.projectPath)) continue
+      if (attemptedAutomaticResumeIds.has(current.id)) continue
+      attemptedAutomaticResumeIds.add(current.id)
+      automaticResumeWorkers += 1
+      Promise.resolve(activityRuntime.resumePreset(item.preset, current, {
+        automatic: true,
+        open: false,
+      })).catch(() => {
+        // The runtime keeps the interrupted row and records the exact cause.
+      }).finally(() => {
+        automaticResumeWorkers -= 1
+        drainAutomaticResumeQueue()
+      })
     }
-
-    await Promise.all(Array.from(
-      { length: Math.min(2, queue.length) },
-      () => worker(),
-    ))
   }
 
   function isCurrentProjectInterruptedAgent(activity, projectPath) {
@@ -272,6 +295,7 @@ export function useWorkspaceBootstrap({
           workbench.setPaneState('activity', 'expanded')
         }
       }
+      queueInterruptedAgentsForActiveProject()
       return true
     } catch (cause) {
       diagnostic.value = `Workspace index failed: ${errorMessage(cause)}`
@@ -366,7 +390,9 @@ export function useWorkspaceBootstrap({
   }
 
   function dispose() {
-    automaticResumeGeneration += 1
+    automaticResumeEnabled = false
+    automaticResumeQueue = []
+    queuedAutomaticResumeIds.clear()
     stopGraphFolderWatch()
   }
 

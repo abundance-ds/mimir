@@ -75,4 +75,24 @@ describe('ActivityHost', () => {
 
     expect(wrapper.emitted('recover')).toHaveLength(1)
   })
+
+  it('shows an explicit state while an automatic session restore is not usable', async () => {
+    const wrapper = mount(ActivityHost, {
+      props: {
+        activities: [{ id: 'agent:one', title: 'Codex' }],
+        activeId: 'agent:one',
+        restoringActivityIds: new Set(['agent:one']),
+      },
+      slots: {
+        'activity-agent:one': () => h(StatefulActivity, { label: 'agent' }),
+      },
+    })
+
+    expect(wrapper.get('[data-activity-restoring="agent:one"]').text())
+      .toBe('Restoring session…')
+    expect(wrapper.get('[data-stateful-activity="agent"]').exists()).toBe(true)
+
+    await wrapper.setProps({ restoringActivityIds: new Set() })
+    expect(wrapper.find('[data-activity-restoring]').exists()).toBe(false)
+  })
 })

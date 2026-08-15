@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 let eventCallback = null
@@ -39,6 +39,10 @@ const backendRecord = {
 }
 
 describe('activity runtime store', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.resetAllMocks()
@@ -99,7 +103,7 @@ describe('activity runtime store', () => {
 
     expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
       id: 'agent:new-id',
-      autoTitleEligible: true,
+      titleSource: 'launcher',
       workspacePath: '/w',
       source: expect.objectContaining({ workspaceScope: 'workspace' }),
       retention: 'durable',
@@ -152,7 +156,7 @@ describe('activity runtime store', () => {
     expect(api.spawnActivity).toHaveBeenCalledWith(expect.objectContaining({
       id: 'agent:explicit-id',
       title: 'Review · #general',
-      autoTitleEligible: false,
+      titleSource: 'manual',
     }), {}, null)
   })
 
@@ -311,6 +315,8 @@ describe('activity runtime store', () => {
     await expect(runtime.resumePreset({ id: 'review' }, ended))
       .rejects.toThrow(/belongs to codex.*resolves to claude/i)
     expect(api.respawnActivity).not.toHaveBeenCalled()
+    expect(useActivitiesStore().byId(ended.id).error)
+      .toMatch(/Resume failed:.*belongs to codex.*resolves to claude/i)
   })
 
   it('coalesces duplicate Resume clicks for the same Activity', async () => {
@@ -357,8 +363,22 @@ describe('activity runtime store', () => {
   it('reconciles status and exit events from process truth', async () => {
     const runtime = useActivityRuntimeStore()
     await runtime.initialize()
-    eventCallback({ type: 'status', activityId: 'agent:one', status: 'needs-input' })
+    eventCallback({
+      type: 'status',
+      activityId: 'agent:one',
+      status: 'needs-input',
+      needsInputIsBlocking: true,
+    })
     expect(useActivitiesStore().byId('agent:one').status).toBe('needs-input')
+    expect(runtime.blockingInputActivityIds.has('agent:one')).toBe(true)
+
+    eventCallback({
+      type: 'status',
+      activityId: 'agent:one',
+      status: 'needs-input',
+      needsInputIsBlocking: false,
+    })
+    expect(runtime.blockingInputActivityIds.has('agent:one')).toBe(false)
 
     eventCallback({
       type: 'exit',
@@ -367,6 +387,7 @@ describe('activity runtime store', () => {
       exit: { reason: 'completed', code: 0 },
     })
     expect(useActivitiesStore().byId('agent:one').status).toBe('done')
+    expect(runtime.blockingInputActivityIds.has('agent:one')).toBe(false)
   })
 
   it('marks real output unread only while an agent row is inactive', async () => {
@@ -413,7 +434,74 @@ describe('activity runtime store', () => {
     })
   })
 
-  it('does not activate an automatically resumed background Activity', async () => {
+  it('keeps automatic restoration silent until the next user turn', async () => {
+    const runtime = useActivityRuntimeStore()
+    const store = useActivitiesStore()
+    await runtime.initialize()
+    const interrupted = store.upsert({
+      ...backendRecord,
+      status: 'interrupted',
+      unread: true,
+      session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
+    })
+
+    const resume = runtime.resumePreset({ id: 'review' }, interrupted, {
+      automatic: true,
+      open: false,
+    })
+    await vi.waitFor(() => {
+      expect(store.byId(interrupted.id).status).toBe('idle')
+    })
+
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(store.byId(interrupted.id)).toMatchObject({
+      status: 'idle',
+      unread: false,
+      updatedAt: interrupted.updatedAt,
+    })
+    expect(runtime.resumingActivityIds.has(interrupted.id)).toBe(true)
+
+    eventCallback({
+      type: 'status',
+      activityId: interrupted.id,
+      status: 'working',
+    })
+    expect(store.byId(interrupted.id).updatedAt).toBe(interrupted.updatedAt)
+
+    eventCallback({
+      type: 'output',
+      activityId: interrupted.id,
+      sequence: 1,
+      bytes: [65],
+    })
+    await resume
+    expect(runtime.resumingActivityIds.has(interrupted.id)).toBe(false)
+    expect(store.byId(interrupted.id)).toMatchObject({
+      unread: false,
+      updatedAt: interrupted.updatedAt,
+    })
+
+    eventCallback({
+      type: 'output',
+      activityId: interrupted.id,
+      sequence: 2,
+      bytes: [66],
+    })
+    expect(store.byId(interrupted.id).unread).toBe(false)
+
+    runtime.markActivityInteraction(interrupted.id)
+    eventCallback({
+      type: 'output',
+      activityId: interrupted.id,
+      sequence: 3,
+      bytes: [67],
+    })
+    expect(store.byId(interrupted.id).unread).toBe(true)
+    expect(store.byId(interrupted.id).updatedAt).not.toBe(interrupted.updatedAt)
+  })
+
+  it('turns a silent automatic restore into a visible error instead of loading forever', async () => {
+    vi.useFakeTimers()
     const runtime = useActivityRuntimeStore()
     const store = useActivitiesStore()
     await runtime.initialize()
@@ -423,13 +511,17 @@ describe('activity runtime store', () => {
       session: { cliSessionId: '11111111-1111-4111-8111-111111111111' },
     })
 
-    await runtime.resumePreset({ id: 'review' }, interrupted, {
+    const resume = runtime.resumePreset({ id: 'review' }, interrupted, {
       automatic: true,
       open: false,
     })
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(45_000)
+    await resume
 
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
-    expect(store.byId(interrupted.id).status).toBe('idle')
+    expect(runtime.resumingActivityIds.has(interrupted.id)).toBe(false)
+    expect(store.byId(interrupted.id).error)
+      .toBe('Automatic resume failed: The session started but did not produce terminal output.')
   })
 
   it('stops through the supervisor and waits for authoritative exit', async () => {

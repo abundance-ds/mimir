@@ -25,6 +25,7 @@
         :chat-section-collapsed="settings.sidebarChatsCollapsed"
         :active-activity-id="workbench.activeActivityId || ''"
         :resuming-activity-ids="activityRuntime.resumingActivityIds"
+        :blocking-input-activity-ids="activityRuntime.blockingInputActivityIds"
         :activity-sort="activityNavigator.mode"
         :meeting-capture="meetingCapture"
         @launch="onLaunch"
@@ -81,6 +82,7 @@
           <ActivityHost
             :activities="hostActivities"
             :active-id="workbench.activeActivityId || ''"
+            :restoring-activity-ids="activityRuntime.resumingActivityIds"
             @recover="openCoreActivity('files')"
           >
             <template
@@ -94,6 +96,7 @@
                 :activity="hostedActivity"
                 :active="hostedActivity.id === workbench.activeActivityId"
                 :font-size="settings.mimirTerminalFontSize"
+                :restoring="activityRuntime.resumingActivityIds.has(hostedActivity.id)"
                 :diagnostic="surfaceDiagnostic(hostedActivity)"
                 @open-file="openFileInEditor"
                 @choose-workspace="chooseWorkspace"
@@ -106,6 +109,7 @@
                 @start-work="startGraphWork"
                 @diagnostic="showDiagnostic"
                 @surface-error="recordActivitySurfaceError"
+                @activity-input="activityRuntime.markActivityInteraction(hostedActivity.id)"
               />
             </template>
           </ActivityHost>
@@ -189,6 +193,7 @@ import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
 import { callAppAction, loadAppData, openAppWindow } from '../services/appsCatalog.js'
+import { localDateKey, parseTodayStorage } from './apps/todayModel.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
 import ChatActivity from './activities/ChatActivity.vue'
@@ -276,16 +281,29 @@ const toolRuntime = createToolRuntime({
     }
     try {
       const raw = await loadAppData('scratch', 'scratch')
-      if (raw == null) return { text: '', updatedAt: null }
-      const saved = JSON.parse(raw)
-      return typeof saved === 'string'
-        ? { text: saved, updatedAt: null }
-        : {
-            text: String(saved?.text || ''),
-            updatedAt: saved?.updatedAt || null,
-          }
+      const saved = parseTodayStorage(raw, localDateKey())
+      return {
+        artifactType: 'today',
+        date: saved.date,
+        mediaType: 'text/markdown',
+        content: saved.text,
+        updatedAt: saved.updatedAt,
+        loading: false,
+        dirty: false,
+        live: false,
+      }
     } catch {
-      return { text: '', updatedAt: null, unavailable: true }
+      return {
+        artifactType: 'today',
+        date: localDateKey(),
+        mediaType: 'text/markdown',
+        content: '',
+        updatedAt: null,
+        loading: false,
+        dirty: false,
+        live: false,
+        unavailable: true,
+      }
     }
   },
   settings,
@@ -399,6 +417,8 @@ const sidebarActivities = computed(() => (
     {
       mode: activityNavigator.value.mode,
       manualOrder: activityNavigator.value.order,
+      blockingInputActivityIds: activityRuntime.blockingInputActivityIds,
+      restoringActivityIds: activityRuntime.resumingActivityIds,
     },
   )
 ))

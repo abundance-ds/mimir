@@ -18,6 +18,17 @@
           </div>
         </div>
       </slot>
+
+      <div
+        v-if="collectionHas(restoringActivityIds, activity.id)"
+        :data-activity-restoring="activity.id"
+        role="status"
+        class="absolute inset-0 z-20 grid place-items-center bg-surface px-8 text-center"
+      >
+        <p class="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">
+          Restoring session…
+        </p>
+      </div>
     </section>
 
     <div
@@ -51,6 +62,7 @@ import { computed, ref, watch } from 'vue'
 const props = defineProps({
   activities: { type: Array, default: () => [] },
   activeId: { type: String, default: '' },
+  restoringActivityIds: { type: [Array, Set], default: () => new Set() },
 })
 
 defineEmits(['recover'])
@@ -78,4 +90,10 @@ const mountedActivities = computed(() => {
   const mounted = new Set(mountedIds.value)
   return props.activities.filter((activity) => mounted.has(activity.id))
 })
+
+function collectionHas(collection, id) {
+  return typeof collection?.has === 'function'
+    ? collection.has(id)
+    : Array.isArray(collection) && collection.includes(id)
+}
 </script>

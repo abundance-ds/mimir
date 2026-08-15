@@ -16,6 +16,8 @@ import {
 import { useActivitiesStore } from './activities.js'
 import { useWorkbenchStore } from './workbench.js'
 
+const AUTOMATIC_RESTORE_READY_TIMEOUT_MS = 45_000
+
 export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   const activities = useActivitiesStore()
   const workbench = useWorkbenchStore()
@@ -23,13 +25,23 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   const error = ref('')
   const lastLaunchMetrics = ref(null)
   const resumingActivityIds = ref(new Set())
+  const blockingInputActivityIds = ref(new Set())
   let unlisten = null
   let nextArchiveMutation = 0
   const archiveMutations = new Map()
   const resumePromises = new Map()
+  const restorationState = new Map()
 
   function upsertBackendRecord(record) {
-    return activities.upsert(canonicalBackendRecord(record))
+    const canonical = canonicalBackendRecord(record)
+    const restoration = restorationState.get(canonical?.id)
+    return activities.upsert(restoration
+      ? {
+          ...canonical,
+          unread: false,
+          updatedAt: restoration.updatedAt,
+        }
+      : canonical)
   }
 
   async function initialize() {
@@ -65,7 +77,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       id,
       kind,
       title: options.title || resolved.title,
-      autoTitleEligible: kind === 'agent' && !options.title,
+      titleSource: kind === 'agent' && !options.title ? 'launcher' : 'manual',
       workspacePath: workspaceScope === 'workspace' ? workspacePath : '',
       status: 'ready',
       createdAt: timestamp,
@@ -122,16 +134,29 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   function resumePreset(preset, activity, options = {}) {
     const existing = resumePromises.get(activity.id)
     if (existing) return existing
+    beginSessionRestoration(activity, { automatic: Boolean(options.automatic) })
     setResumePending(activity.id, true)
     clearActivityError(activity.id)
+    let resumed = false
     const promise = resumePresetExact(preset, activity, options)
+      .then(async (record) => {
+        resumed = true
+        if (options.automatic) {
+          await restorationState.get(activity.id)?.ready
+        }
+        return record
+      })
       .catch((cause) => {
+        endSessionRestoration(activity.id)
         if (options.automatic) markAutomaticResumeFailure(activity.id, cause)
+        else markActivityError(activity.id, `Resume failed: ${message(cause)}`)
         throw cause
       })
       .finally(() => {
         resumePromises.delete(activity.id)
-        setResumePending(activity.id, false)
+        // Restoration remains pending until the new run produces terminal
+        // output. A successful process spawn alone is not usable UI.
+        if (!resumed) setResumePending(activity.id, false)
       })
     resumePromises.set(activity.id, promise)
     return promise
@@ -183,7 +208,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const record = {
       ...activity,
       status: 'ready',
-      updatedAt: new Date().toISOString(),
+      updatedAt: restorationState.get(activity.id)?.updatedAt || activity.updatedAt,
       archivedAt: undefined,
       session: undefined,
       error: undefined,
@@ -233,6 +258,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   function markActivityError(id, cause) {
     const activity = activities.byId(id)
     if (!activity) return null
+    if (restorationState.has(id)) endSessionRestoration(id)
     return activities.upsert({
       ...activity,
       error: message(cause),
@@ -264,6 +290,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       id,
       kind,
       title: title || command,
+      titleSource: 'manual',
       workspacePath: workspaceScope === 'workspace' ? (workspacePath || cwd) : '',
       status: 'ready',
       createdAt: timestamp,
@@ -307,6 +334,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       activities.upsert({
         ...activity,
         title,
+        titleSource: 'manual',
         updatedAt: new Date().toISOString(),
       })
       return
@@ -332,31 +360,60 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   }
 
   async function clear(id) {
+    endSessionRestoration(id)
     const activity = activities.byId(id)
     if (activity && activity.host?.type !== 'pty') {
       activities.remove(id)
+      setBlockingInput(id, false)
       return
     }
     await clearActivity(id)
     activities.remove(id)
+    setBlockingInput(id, false)
   }
 
   function onEvent(event) {
     if (!event || typeof event !== 'object') return
     if (event.type === 'upsert' && event.record) {
+      if (event.record.status === 'error') {
+        endSessionRestoration(event.record.id)
+        setResumePending(event.record.id, false)
+      }
       upsertBackendRecord(event.record)
+      if (event.record.status !== 'needs-input') setBlockingInput(event.record.id, false)
       return
     }
     if (event.type === 'status' && activities.byId(event.activityId)) {
-      activities.reconcileStatus(event.activityId, event.status)
+      const restoration = restorationState.get(event.activityId)
+      activities.reconcileStatus(
+        event.activityId,
+        event.status,
+        restoration?.updatedAt,
+      )
+      setBlockingInput(
+        event.activityId,
+        !restoration
+          && event.status === 'needs-input'
+          && event.needsInputIsBlocking === true,
+      )
       return
     }
     if (event.type === 'output') {
+      if (
+        outputHasBytes(event.bytes)
+        && restorationState.has(event.activityId)
+      ) {
+        markSessionRestorationReady(event.activityId)
+        return
+      }
       recordInactiveAgentOutput(event)
       return
     }
     if (event.type === 'exit' && event.record) {
+      endSessionRestoration(event.activityId || event.record.id)
+      setResumePending(event.activityId || event.record.id, false)
       upsertBackendRecord(event.record)
+      setBlockingInput(event.activityId || event.record.id, false)
     }
   }
 
@@ -379,7 +436,9 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     if (unlisten) unlisten()
     unlisten = null
     archiveMutations.clear()
+    for (const id of restorationState.keys()) endSessionRestoration(id)
     resumingActivityIds.value = new Set()
+    blockingInputActivityIds.value = new Set()
     ready.value = false
   }
 
@@ -388,9 +447,11 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     error,
     lastLaunchMetrics,
     resumingActivityIds,
+    blockingInputActivityIds,
     initialize,
     launchPreset,
     resumePreset,
+    markActivityInteraction,
     markActivityError,
     markAutomaticResumeFailure,
     launchCommand,
@@ -426,6 +487,60 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     resumingActivityIds.value = next
   }
 
+  function setBlockingInput(id, blocking) {
+    if (!id || blockingInputActivityIds.value.has(id) === blocking) return
+    const next = new Set(blockingInputActivityIds.value)
+    if (blocking) next.add(id)
+    else next.delete(id)
+    blockingInputActivityIds.value = next
+  }
+
+  function beginSessionRestoration(activity, { automatic = false } = {}) {
+    if (!activity?.id || restorationState.has(activity.id)) return
+    let resolveReady
+    const ready = new Promise((resolve) => {
+      resolveReady = resolve
+    })
+    const restoration = {
+      updatedAt: activity.updatedAt,
+      ready,
+      resolveReady,
+      readyResolved: false,
+      timeoutId: 0,
+    }
+    restoration.timeoutId = setTimeout(() => {
+      if (restorationState.get(activity.id) !== restoration) return
+      endSessionRestoration(activity.id)
+      const failure = 'The session started but did not produce terminal output.'
+      if (automatic) markAutomaticResumeFailure(activity.id, failure)
+      else markActivityError(activity.id, `Resume failed: ${failure}`)
+    }, AUTOMATIC_RESTORE_READY_TIMEOUT_MS)
+    restorationState.set(activity.id, restoration)
+    activities.upsert({
+      ...activity,
+      unread: false,
+    })
+  }
+
+  function endSessionRestoration(id) {
+    markSessionRestorationReady(id)
+    restorationState.delete(id)
+  }
+
+  function markSessionRestorationReady(id) {
+    const restoration = restorationState.get(id)
+    if (restoration && !restoration.readyResolved) {
+      restoration.readyResolved = true
+      clearTimeout(restoration.timeoutId)
+      restoration.resolveReady()
+    }
+    setResumePending(id, false)
+  }
+
+  function markActivityInteraction(id) {
+    endSessionRestoration(id)
+  }
+
   function clearActivityError(id) {
     const activity = activities.byId(id)
     if (!activity?.error) return
@@ -440,7 +555,6 @@ function canonicalBackendRecord(record) {
   // a restored Activity retains its previous archive timestamp forever.
   return {
     ...record,
-    autoTitleEligible: Boolean(record.autoTitleEligible),
     archivedAt: record.archivedAt ?? null,
     closeRequestedAt: record.closeRequestedAt ?? null,
     error: record.error ?? null,

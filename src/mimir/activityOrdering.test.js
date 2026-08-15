@@ -52,10 +52,31 @@ describe('Activity ordering', () => {
   it('offers deterministic recent, attention, and name views', () => {
     expect(orderActivities([alpha, beta, gamma], { mode: 'recent' }).map(({ id }) => id))
       .toEqual([gamma.id, alpha.id, beta.id])
-    expect(orderActivities([alpha, beta, gamma], { mode: 'attention' }).map(({ id }) => id))
+    expect(orderActivities([alpha, beta, gamma], {
+      mode: 'attention',
+      blockingInputActivityIds: new Set([beta.id]),
+    }).map(({ id }) => id))
       .toEqual([beta.id, alpha.id, gamma.id])
+    expect(orderActivities([alpha, beta, gamma], { mode: 'attention' }).map(({ id }) => id))
+      .toEqual([alpha.id, beta.id, gamma.id])
     expect(orderActivities([gamma, beta, alpha], { mode: 'name' }).map(({ id }) => id))
       .toEqual([alpha.id, beta.id, gamma.id])
+  })
+
+  it('does not promote a restoring row as active work', () => {
+    const recentIdle = {
+      ...beta,
+      status: 'idle',
+      updatedAt: '2026-07-25T12:00:00Z',
+    }
+
+    expect(orderActivities([alpha, recentIdle], { mode: 'attention' }).map(({ id }) => id))
+      .toEqual([alpha.id, recentIdle.id])
+    expect(orderActivities([alpha, recentIdle], {
+      mode: 'attention',
+      restoringActivityIds: new Set([alpha.id]),
+    }).map(({ id }) => id))
+      .toEqual([recentIdle.id, alpha.id])
   })
 
   it('reorders by stable id for pointer and keyboard moves', () => {

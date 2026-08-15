@@ -20,6 +20,8 @@ const ATTENTION_RANK = Object.freeze({
 export function orderActivities(items, {
   mode = 'manual',
   manualOrder = [],
+  blockingInputActivityIds = new Set(),
+  restoringActivityIds = new Set(),
 } = {}) {
   const rows = [...items]
   const canonical = recent(rows)
@@ -32,7 +34,8 @@ export function orderActivities(items, {
   }
   if (mode === 'attention') {
     return canonical.sort((left, right) => (
-      attentionRank(left.status) - attentionRank(right.status)
+      attentionRank(left, blockingInputActivityIds, restoringActivityIds)
+        - attentionRank(right, blockingInputActivityIds, restoringActivityIds)
       || timestamp(right.updatedAt) - timestamp(left.updatedAt)
       || left.id.localeCompare(right.id)
     ))
@@ -86,8 +89,19 @@ function recent(items) {
   ))
 }
 
-function attentionRank(status) {
-  return ATTENTION_RANK[status] ?? Number.MAX_SAFE_INTEGER
+function attentionRank(activity, blockingInputActivityIds, restoringActivityIds) {
+  if (collectionHas(restoringActivityIds, activity.id)) return ATTENTION_RANK.idle
+  if (
+    activity.status === 'needs-input'
+    && !collectionHas(blockingInputActivityIds, activity.id)
+  ) return ATTENTION_RANK.idle
+  return ATTENTION_RANK[activity.status] ?? Number.MAX_SAFE_INTEGER
+}
+
+function collectionHas(collection, id) {
+  return typeof collection?.has === 'function'
+    ? collection.has(id)
+    : Array.isArray(collection) && collection.includes(id)
 }
 
 function timestamp(value) {

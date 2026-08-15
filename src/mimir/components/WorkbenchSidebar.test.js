@@ -258,6 +258,8 @@ describe('WorkbenchSidebar', () => {
     const states = [
       { id: 'working', status: 'working' },
       { id: 'attention', status: 'needs-input' },
+      { id: 'prompt-ready', status: 'needs-input' },
+      { id: 'active-attention', status: 'needs-input', unread: true },
       { id: 'error', status: 'error' },
       { id: 'api-error', status: 'idle', error: 'API authentication failed' },
       { id: 'working-error', status: 'working', error: 'API rate limit exceeded' },
@@ -279,11 +281,13 @@ describe('WorkbenchSidebar', () => {
       props: {
         activities: states,
         resumingActivityIds: new Set(['resuming']),
+        blockingInputActivityIds: new Set(['attention', 'active-attention']),
+        activeActivityId: 'active-attention',
       },
     })
 
     expect(wrapper.get('[data-activity-working="working"]').exists()).toBe(true)
-    expect(wrapper.get('[data-activity-working="resuming"]').exists()).toBe(true)
+    expect(wrapper.find('[data-activity-working="resuming"]').exists()).toBe(false)
     expect(wrapper.get('[data-activity-attention="attention"]').classes()).toContain('bg-attn/65')
     expect(wrapper.get('[data-activity-error="error"]').classes()).toContain('bg-rem')
     expect(wrapper.get('[data-activity-error="api-error"]').exists()).toBe(true)
@@ -291,12 +295,25 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.find('[data-activity-working="working-error"]').exists()).toBe(false)
     expect(wrapper.get('[data-activity-unread="unread"]').classes()).toContain('bg-info/60')
 
-    for (const id of ['done', 'idle', 'interrupted']) {
+    for (const id of [
+      'done',
+      'idle',
+      'interrupted',
+      'resuming',
+      'prompt-ready',
+      'active-attention',
+    ]) {
       const row = wrapper.get(`[data-sidebar-row="activity:${id}"]`)
       expect(row.get('[data-sidebar-meta]').text()).toBe('now')
       expect(row.attributes('title')).not.toContain(`· ${id}`)
       expect(row.find('[data-activity-unread], [data-activity-attention], [data-activity-error]').exists()).toBe(false)
     }
+    expect(wrapper.get('[data-sidebar-row="activity:prompt-ready"]').attributes('title'))
+      .not.toContain('needs input')
+    expect(wrapper.get('[data-sidebar-row="activity:active-attention"]').attributes('title'))
+      .not.toContain('needs input')
+    expect(wrapper.get('[data-sidebar-row="activity:active-attention"]').attributes('title'))
+      .not.toContain('new response')
     wrapper.unmount()
   })
 
