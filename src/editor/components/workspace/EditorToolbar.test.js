@@ -11,7 +11,7 @@ function btnByTitle(wrapper, title) {
 }
 
 function commentBtn(wrapper) {
-  return wrapper.findAll('button').at(-1)
+  return wrapper.find('[data-toolbar-action="comment"]')
 }
 
 describe('EditorToolbar', () => {
@@ -108,4 +108,5 @@ describe('EditorToolbar', () => {
     expect(commentBtn(w).text()).toContain('3')
     expect(w.findAll('button.toolbar-btn')).toHaveLength(15)
   })
+
 })

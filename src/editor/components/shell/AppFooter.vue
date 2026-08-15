@@ -1,5 +1,5 @@
 <template>
-  <div class="app-footer h-[26px] shrink-0 flex items-center justify-between px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
+  <div class="app-footer h-[26px] shrink-0 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
     <!-- Left: stats -->
     <div class="footer-stats flex items-center justify-self-start relative min-w-0">
       <div class="relative flex items-center hover:bg-chrome-mid rounded" @click.stop="statsOpen = !statsOpen">
@@ -44,7 +44,24 @@
       </div>
     </div>
 
-    <div class="footer-zoom zoom-ctrl group flex items-center relative" @click.stop>
+    <div class="footer-comment-history-slot justify-self-center">
+      <button
+        v-if="resolvedCommentCount"
+        type="button"
+        class="footer-comment-history"
+        :class="resolvedCommentsVisible ? 'is-active' : ''"
+        :title="resolvedCommentsVisible ? 'Hide resolved comments' : 'Show resolved comments'"
+        :aria-label="`${resolvedCommentsVisible ? 'Hide' : 'Show'} ${resolvedCommentCount} resolved ${resolvedCommentCount === 1 ? 'comment' : 'comments'}`"
+        :aria-pressed="resolvedCommentsVisible"
+        @click.stop="$emit('toggle-resolved-comments')"
+      >
+        <IconCircleCheck :size="12" />
+        <span>Resolved</span>
+        <span>{{ resolvedCommentCount }}</span>
+      </button>
+    </div>
+
+    <div class="footer-zoom zoom-ctrl group flex items-center relative justify-self-end" @click.stop>
       <button class="zoom-step" @click="$emit('zoom-out')">−</button>
       <span class="min-w-9 text-center font-mono text-[9px] leading-none text-ink-3 hover:text-ink-2 hover:bg-chrome-mid rounded" @click="zoomOpen = !zoomOpen">{{ zoomLevel }}%</span>
       <button class="zoom-step" @click="$emit('zoom-in')">+</button>
@@ -70,14 +87,17 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { IconCircleCheck } from '@tabler/icons-vue'
 
 const props = defineProps({
   zoomLevel: { type: Number, default: 100 },
   selectionText: { type: String, default: '' },
   stats: { type: Object, default: () => ({ words: 0, characters: 0, lines: 0, readingMinutes: 1 }) },
   saveStatus: { type: Object, default: () => ({ label: '', tone: 'quiet' }) },
+  resolvedCommentCount: { type: Number, default: 0 },
+  resolvedCommentsVisible: { type: Boolean, default: false },
 })
-defineEmits(['zoom-in', 'zoom-out', 'set-zoom', 'save-status-click'])
+defineEmits(['zoom-in', 'zoom-out', 'set-zoom', 'save-status-click', 'toggle-resolved-comments'])
 
 const statsOpen = ref(false)
 const zoomOpen = ref(false)
@@ -168,6 +188,32 @@ button.footer-save-status {
   color: var(--color-ink);
 }
 
+.footer-comment-history {
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-ink-4);
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.footer-comment-history:hover,
+.footer-comment-history:focus-visible {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink-2);
+  outline: none;
+}
+
+.footer-comment-history.is-active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
 .zoom-step {
   display: inline-flex;
   align-items: center;
@@ -222,6 +268,10 @@ button.footer-save-status {
 
   .footer-stats {
     display: none;
+  }
+
+  .footer-comment-history-slot {
+    justify-self: center;
   }
 
 }

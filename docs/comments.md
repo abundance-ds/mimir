@@ -31,8 +31,11 @@ block discussion beneath its highlighted anchor. A thread supports:
 - delete the thread
 - remove every thread from the current document
 
-Resolved threads remain stored and visible in a quieter collapsed state.
-Minimized/expanded presentation is UI state only.
+Resolved threads remain stored but leave the document flow. Their anchor has no
+comment highlight. The status bar shows one quiet Resolved count when the document
+has resolved threads. The user can use it to reveal the threads in a collapsed
+history view and reopen one. Hiding or showing resolved threads and
+minimizing/expanding active threads are UI state only.
 
 Delete replaces the entire tag with its anchor text. Remove all strips every
 comment/reply wrapper while preserving every anchor. Resolve and reopen update

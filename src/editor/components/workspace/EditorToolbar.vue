@@ -29,6 +29,7 @@
       :class="props.hasSelection ? '' : 'toolbar-disabled'"
       :disabled="!props.hasSelection"
       :aria-disabled="!props.hasSelection"
+      data-toolbar-action="comment"
       :title="props.hasSelection ? 'Add Comment (⇧⌘M)' : 'Select text to add a comment'"
       @mousedown.prevent
       @click="onComment"

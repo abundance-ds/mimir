@@ -5,6 +5,7 @@ import { parseCommentTags, stripCommentTags } from '../../services/comments/pars
 // --- Effects & Annotations ---
 
 export const setActiveComment = StateEffect.define()
+export const setResolvedCommentsVisible = StateEffect.define()
 export const commentMutation = Annotation.define()
 
 // --- Incremental reparse guard ---
@@ -78,10 +79,10 @@ function mapCommentsThrough(changes, comments) {
 export const commentTagField = StateField.define({
   create(state) {
     const { comments } = parseCommentTags(state.doc.toString())
-    return { comments, activeId: null }
+    return { comments, activeId: null, resolvedVisible: false }
   },
   update(value, tr) {
-    let { comments, activeId } = value
+    let { comments, activeId, resolvedVisible } = value
 
     if (tr.docChanged) {
       if (changesMayAffectComments(tr.changes, tr.startState.doc, comments)) {
@@ -98,16 +99,19 @@ export const commentTagField = StateField.define({
       if (effect.is(setActiveComment)) {
         activeId = effect.value
       }
+      if (effect.is(setResolvedCommentsVisible)) {
+        resolvedVisible = Boolean(effect.value)
+      }
     }
 
-    return { comments, activeId }
+    return { comments, activeId, resolvedVisible }
   },
 })
 
 // --- Decorations ---
 
 const commentDecorations = EditorView.decorations.compute([commentTagField], (state) => {
-  const { comments, activeId } = state.field(commentTagField)
+  const { comments, activeId, resolvedVisible } = state.field(commentTagField)
   const decos = []
   const docLen = state.doc.length
 
@@ -123,7 +127,7 @@ const commentDecorations = EditorView.decorations.compute([commentTagField], (st
 
     const safeFrom = Math.min(c.contentFrom, docLen)
     const safeTo = Math.min(c.contentTo, docLen)
-    if (safeFrom < safeTo) {
+    if (safeFrom < safeTo && (c.status !== 'resolved' || resolvedVisible)) {
       const resolvedClass = c.status === 'resolved' ? ' cm-comment-range-resolved' : ''
       decos.push(
         Decoration.mark({
@@ -167,7 +171,7 @@ class CommentBlockWidget extends WidgetType {
     const wrap = document.createElement('div')
     const hasText = Boolean(c.text?.trim())
     const resolved = c.status === 'resolved'
-    const draft = ensureDraft(this.drafts, c.id, !hasText, resolved)
+    const draft = ensureDraft(this.drafts, c.id, !hasText, resolved, c.status)
     wrap.className = `cm-comment-block${c.id === this.activeId ? ' is-active' : ''}${hasText ? '' : ' is-empty'}${resolved ? ' is-resolved' : ''}${draft.collapsed ? ' is-collapsed' : ''}`
     wrap.dataset.commentId = c.id
     wrap.contentEditable = 'false'
@@ -481,9 +485,20 @@ function commentSummary(comment) {
   return replies ? `${body} · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : body
 }
 
-function ensureDraft(drafts, id, open = false, collapsed = false) {
-  if (!drafts.has(id)) drafts.set(id, { text: '', open, collapsed })
-  return drafts.get(id)
+function ensureDraft(drafts, id, open = false, collapsed = false, status = 'active') {
+  if (!drafts.has(id)) drafts.set(id, { text: '', open, collapsed, status })
+  const draft = drafts.get(id)
+  if (draft.status !== status) {
+    draft.status = status
+    if (status === 'resolved') {
+      draft.text = ''
+      draft.open = false
+      draft.collapsed = true
+    } else {
+      draft.collapsed = false
+    }
+  }
+  return draft
 }
 
 function makeButton(label, action, { primary = false, title = '' } = {}) {
@@ -599,7 +614,7 @@ function runWidgetAction({
 function createInlineCommentBlocks(onCommentClick, onCommentAction) {
   const drafts = new Map()
   return EditorView.decorations.compute([commentTagField], (state) => {
-    const { comments, activeId } = state.field(commentTagField)
+    const { comments, activeId, resolvedVisible } = state.field(commentTagField)
     const liveIds = new Set(comments.map(comment => comment.id))
     for (const id of drafts.keys()) {
       if (!liveIds.has(id)) drafts.delete(id)
@@ -609,6 +624,7 @@ function createInlineCommentBlocks(onCommentClick, onCommentAction) {
 
     for (const c of comments) {
       if (c.contentFrom > docLen) continue
+      if (c.status === 'resolved' && !resolvedVisible) continue
       const anchorPos = Math.min(c.contentTo, docLen)
       const line = state.doc.lineAt(anchorPos)
       decos.push(

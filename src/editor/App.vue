@@ -55,7 +55,7 @@
           v-if="editorToolbarVisible"
           :active-formats="activeFormats"
           :has-selection="Boolean(selectionText)"
-          :comment-count="commentManager.comments.length"
+          :comment-count="activeCommentCount"
           @format="onFormat"
           @comment="onComment"
         />
@@ -105,10 +105,13 @@
           :selectionText="selectionText"
           :stats="documentStats"
           :saveStatus="footerSave"
+          :resolved-comment-count="resolvedCommentCount"
+          :resolved-comments-visible="resolvedCommentsVisible"
           @zoom-in="zoomIn"
           @zoom-out="zoomOut"
           @set-zoom="setZoomLevel"
           @save-status-click="onSaveStatusClick"
+          @toggle-resolved-comments="toggleResolvedComments"
         />
       </div>
 
@@ -233,7 +236,7 @@ import { createWindowCloseGuard } from './windowCloseGuard.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
 import { taskCheckboxExtension } from './codemirror/taskCheckboxes.js'
-import { commentsExtension, setActiveComment as setActiveCommentEffect, getCommentsFromState, commentMutation } from './codemirror/comments.js'
+import { commentsExtension, setActiveComment as setActiveCommentEffect, setResolvedCommentsVisible, getCommentsFromState, commentMutation } from './codemirror/comments.js'
 import { escapeAttr } from '../services/comments/parser.js'
 import { buildCommentsPrompt } from '../services/comments/prompt.js'
 import { EditorView } from '@codemirror/view'
@@ -306,6 +309,9 @@ const {
 } = storeToRefs(fileManager)
 
 const commentManager = useCommentsStore()
+const activeCommentCount = computed(() => commentManager.comments.filter(comment => comment.status !== 'resolved').length)
+const resolvedCommentCount = computed(() => commentManager.comments.filter(comment => comment.status === 'resolved').length)
+const resolvedCommentsVisible = ref(false)
 const diffStore = useDiffStore()
 const diffViewRef = ref(null)
 const batchDiffViewRef = ref(null)
@@ -940,6 +946,14 @@ watch(() => commentManager.activeCommentId, (id) => {
   v.dispatch({ effects: setActiveCommentEffect.of(id) })
 })
 
+watch(() => currentFile.value?.id, () => {
+  setResolvedCommentsVisibility(false)
+})
+
+watch(resolvedCommentCount, (count) => {
+  if (count === 0) setResolvedCommentsVisibility(false)
+})
+
 watch(() => editorSettings.aiInlineRewrite, (enabled) => {
   if (!enabled && inlineAIState.value) closeInlineAI()
 })
@@ -952,6 +966,17 @@ function onFormat(action) {
 
 function onEditCommand(action) {
   editorSurfaceRef.value?.edit(action)
+}
+
+function setResolvedCommentsVisibility(visible) {
+  resolvedCommentsVisible.value = visible
+  const view = editorSurfaceRef.value?.getView?.()
+  if (!view) return
+  view.dispatch({ effects: setResolvedCommentsVisible.of(visible) })
+}
+
+function toggleResolvedComments() {
+  setResolvedCommentsVisibility(!resolvedCommentsVisible.value)
 }
 
 function showCommentGate() {
@@ -1049,7 +1074,9 @@ async function onInlineCommentAction({ type, id, text, replyId }) {
   }
 
   if (type === 'resolve') {
-    return commentMutations.resolve?.(id) || { ok: false, error: 'Comment mutation unavailable.' }
+    const result = commentMutations.resolve?.(id) || { ok: false, error: 'Comment mutation unavailable.' }
+    if (result.ok !== false) setResolvedCommentsVisibility(false)
+    return result
   }
 
   if (type === 'reopen') {

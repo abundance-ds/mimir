@@ -7,6 +7,7 @@ import {
   commentMutation,
   getCommentsFromState,
   changesMayAffectComments,
+  setResolvedCommentsVisible,
 } from './comments.js'
 import { parseCommentTags } from '../../services/comments/parser.js'
 
@@ -119,7 +120,7 @@ describe('commentsExtension inline widget', () => {
     view.destroy()
   })
 
-  it('preserves resolved status and offers reopen instead of deleting the thread', async () => {
+  it('removes resolved discussions from the document flow until history is shown', async () => {
     const actions = []
     const { parent, view } = mountCommentEditor({
       doc: '<comment id="c1" author="user" text="Done" status="resolved">World</comment>',
@@ -128,14 +129,55 @@ describe('commentsExtension inline widget', () => {
         return { ok: true }
       },
     })
+
+    expect(parent.getElementsByClassName('cm-comment-block')).toHaveLength(0)
+    expect(parent.getElementsByClassName('cm-comment-range-resolved')).toHaveLength(0)
+
+    view.dispatch({ effects: setResolvedCommentsVisible.of(true) })
     const block = parent.getElementsByClassName('cm-comment-block')[0]
     expect(block.classList.contains('is-resolved')).toBe(true)
     expect(block.classList.contains('is-collapsed')).toBe(true)
+    expect(parent.getElementsByClassName('cm-comment-range-resolved')).toHaveLength(1)
 
     buttonByAction(parent, 'reopen').click()
     await Promise.resolve()
     expect(actions).toEqual([{ type: 'reopen', id: 'c1', text: '' }])
     expect(view.state.doc.toString()).toContain('status="resolved"')
+    view.destroy()
+  })
+
+  it('hides an active discussion as soon as its stored status becomes resolved', () => {
+    const { parent, view } = mountCommentEditor({
+      doc: '<comment id="c1" author="user" text="Done" status="active">World</comment>',
+      onCommentAction: () => ({ ok: true }),
+    })
+    expect(parent.getElementsByClassName('cm-comment-block')).toHaveLength(1)
+
+    const doc = view.state.doc.toString()
+    const from = doc.indexOf('status="active"')
+    view.dispatch({
+      changes: { from, to: from + 'status="active"'.length, insert: 'status="resolved"' },
+      annotations: commentMutation.of(true),
+    })
+
+    expect(parent.getElementsByClassName('cm-comment-block')).toHaveLength(0)
+    expect(parent.getElementsByClassName('cm-comment-range-resolved')).toHaveLength(0)
+    expect(view.state.doc.toString()).toContain('status="resolved"')
+
+    view.dispatch({ effects: setResolvedCommentsVisible.of(true) })
+    expect(parent.getElementsByClassName('cm-comment-block')[0].classList.contains('is-collapsed')).toBe(true)
+
+    const resolvedDoc = view.state.doc.toString()
+    const resolvedFrom = resolvedDoc.indexOf('status="resolved"')
+    view.dispatch({
+      changes: {
+        from: resolvedFrom,
+        to: resolvedFrom + 'status="resolved"'.length,
+        insert: 'status="active"',
+      },
+      annotations: commentMutation.of(true),
+    })
+    expect(parent.getElementsByClassName('cm-comment-block')[0].classList.contains('is-collapsed')).toBe(false)
     view.destroy()
   })
 
