@@ -26,8 +26,8 @@
 :root[data-theme="parchment"] {
   --color-ink:         #1a1a18;
   --color-ink-2:       #4a4a44;
-  --color-ink-3:       #8a8a80;
-  --color-ink-4:       #b0b0a6;
+  --color-ink-3:       #606059;
+  --color-ink-4:       #686860;
   --color-chrome:      #ebe9e3;
   --color-chrome-mid:  #f3f1ec;
   --color-chrome-high: #f9f8f5;
@@ -61,8 +61,8 @@
 :root[data-theme="studio"] {
   --color-ink:         #1C1B1A;
   --color-ink-2:       #4A4845;
-  --color-ink-3:       #7A7875;
-  --color-ink-4:       #A3A09C;
+  --color-ink-3:       #575552;
+  --color-ink-4:       #5F5D59;
   --color-chrome:      #D9D9D7;
   --color-chrome-mid:  #E5E5E3;
   --color-chrome-high: #EDEDEB;
@@ -95,8 +95,8 @@
 :root[data-theme="glacier"] {
   --color-ink:         #1c1f24;
   --color-ink-2:       #44494f;
-  --color-ink-3:       #7d838a;
-  --color-ink-4:       #a5abb2;
+  --color-ink-3:       #596067;
+  --color-ink-4:       #60676e;
   --color-chrome:      #e4e8ec;
   --color-chrome-mid:  #edf0f4;
   --color-chrome-high: #f4f6f8;
@@ -129,8 +129,8 @@
 :root[data-theme="slate"] {
   --color-ink:         #e0e0dc;
   --color-ink-2:       #b0b0aa;
-  --color-ink-3:       #8a8a84;
-  --color-ink-4:       #4a4a44;
+  --color-ink-3:       #aaa9a0;
+  --color-ink-4:       #96958c;
   --color-chrome:      #1e1e1e;
   --color-chrome-mid:  #252525;
   --color-chrome-high: #292929;
@@ -164,8 +164,8 @@
 :root[data-theme="monokai"] {
   --color-ink:         #f8f8f2;
   --color-ink-2:       #d5d3cb;
-  --color-ink-3:       #928e7c;
-  --color-ink-4:       #555248;
+  --color-ink-3:       #aaa697;
+  --color-ink-4:       #969284;
   --color-chrome:      #1e1e1e;
   --color-chrome-mid:  #252525;
   --color-chrome-high: #262624;
@@ -200,8 +200,8 @@
 :root[data-theme="dracula"] {
   --color-ink:         #f0eef8;
   --color-ink-2:       #b8b4c8;
-  --color-ink-3:       #7e7a92;
-  --color-ink-4:       #4e4a60;
+  --color-ink-3:       #aaa5bd;
+  --color-ink-4:       #948fa7;
   --color-chrome:      #151622;
   --color-chrome-mid:  #1c1d2e;
   --color-chrome-high: #22233a;
@@ -236,7 +236,7 @@
   --color-ink:         #f0f4f8;
   --color-ink-2:       #b8c4d0;
   --color-ink-3:       #8494a6;
-  --color-ink-4:       #506070;
+  --color-ink-4:       #78899b;
   --color-chrome:      #0a0e14;
   --color-chrome-mid:  #111820;
   --color-chrome-high: #161e28;
@@ -270,8 +270,8 @@
 :root[data-theme="synthwave"] {
   --color-ink:         #e8e6f0;
   --color-ink-2:       #b5b3c0;
-  --color-ink-3:       #807e8e;
-  --color-ink-4:       #4e4c58;
+  --color-ink-3:       #a09eae;
+  --color-ink-4:       #8b8998;
   --color-chrome:      #141416;
   --color-chrome-mid:  #1a1a1e;
   --color-chrome-high: #222226;

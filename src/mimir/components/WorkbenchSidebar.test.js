@@ -35,7 +35,7 @@ const activities = [
     id: 'terminal:two',
     title: 'Dev server',
     kind: 'terminal',
-    status: 'needs-input',
+    status: 'idle',
     retention: 'ephemeral',
     updatedAt: '2026-07-25T09:00:00Z',
     source: { presetId: 'terminal' },
@@ -127,6 +127,8 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.text()).toContain('Tools')
     expect(wrapper.text()).not.toContain('New activity')
     expect(wrapper.get('[data-activity-working="agent:one"]').exists()).toBe(true)
+    expect(wrapper.find('[data-activity-working="terminal:two"]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-row="activity:terminal:two"] [data-sidebar-meta]').text()).toBeTruthy()
     expect(wrapper.get('[data-sidebar-row="activity:agent:one"] svg').attributes('viewBox')).toBe('0 0 256 260')
     expect(wrapper.find('[data-sidebar-row="tool:files"] [data-sidebar-meta]').exists()).toBe(false)
   })

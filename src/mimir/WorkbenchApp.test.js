@@ -9,6 +9,7 @@ const editorOpenSettings = vi.hoisted(() => vi.fn())
 const editorClose = vi.hoisted(() => vi.fn())
 const editorCycle = vi.hoisted(() => vi.fn())
 const editorNew = vi.hoisted(() => vi.fn())
+const editorReviewGit = vi.hoisted(() => vi.fn())
 const editorPrepareWorkspaceSwitch = vi.hoisted(() => vi.fn())
 const terminalPaste = vi.hoisted(() => vi.fn())
 const terminalFocus = vi.hoisted(() => vi.fn())
@@ -35,7 +36,14 @@ vi.mock('../editor/App.vue', async () => {
         workspacePath: String,
         workspacePaths: Array,
       },
-      emits: ['closeRequest', 'empty', 'navigateEditor', 'newRequest', 'quickOpenRequest'],
+      emits: [
+        'closeRequest',
+        'empty',
+        'navigateEditor',
+        'newRequest',
+        'quickOpenRequest',
+        'reviewGitWithAgent',
+      ],
       setup(_props, { expose }) {
         expose({
           mimirOpen: editorOpen,
@@ -43,6 +51,7 @@ vi.mock('../editor/App.vue', async () => {
           mimirCloseActiveTab: editorClose,
           mimirCycleTab: editorCycle,
           mimirNewFile: editorNew,
+          mimirReviewGit: editorReviewGit,
           mimirPrepareWorkspaceSwitch: editorPrepareWorkspaceSwitch,
         })
         return () => h('div', { 'data-editor-stub': '', tabindex: '0' }, 'Editor')
@@ -214,6 +223,7 @@ describe('WorkbenchApp', () => {
     editorClose.mockReset()
     editorCycle.mockReset()
     editorNew.mockReset()
+    editorReviewGit.mockReset()
     terminalPaste.mockReset()
     terminalPaste.mockResolvedValue(true)
     terminalFocus.mockReset()
@@ -549,7 +559,7 @@ describe('WorkbenchApp', () => {
     expect(document.body.querySelector(
       '[data-activity-create-id="app:review-runner"]',
     )).toBeTruthy()
-    expect(wrapper.text()).not.toContain('Changes')
+    expect(wrapper.find('[data-sidebar-row="tool:app:review-runner"]').exists()).toBe(false)
   })
 
   it('persists and projects manual Tool order', async () => {
@@ -1251,6 +1261,61 @@ describe('WorkbenchApp', () => {
       entry: expect.objectContaining({ openBehavior: 'text' }),
     })
     expect(useWorkbenchStore().activeActivityId).toBe('files')
+  })
+
+  it('opens a Git change from Files in the mounted Editor review surface', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const request = {
+      workspacePath: '/w',
+      file: 'README.md',
+      scope: 'unstaged',
+    }
+
+    wrapper.findComponent({ name: 'FilesActivity' }).vm.$emit('reviewGit', request)
+    await flushPromises()
+
+    expect(editorReviewGit).toHaveBeenCalledWith(request)
+    expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+  })
+
+  it('starts a focused agent Activity from a Git review', async () => {
+    const wrapper = await render({ workspace: '/w' })
+
+    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('reviewGitWithAgent', {
+      workspacePath: '/w',
+      path: 'src/main.js',
+      status: 'modified',
+      scope: 'unstaged',
+      presetId: 'review',
+    })
+    await flushPromises()
+
+    expect(activityApi.resolveLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'review' }),
+      '/w',
+    )
+    expect(activityApi.spawnActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Review · main.js',
+        retention: 'durable',
+        source: expect.objectContaining({
+          type: 'git-review',
+          gitPath: 'src/main.js',
+          gitScope: 'unstaged',
+        }),
+        launch: expect.objectContaining({ args: ['review'] }),
+      }),
+      {},
+      null,
+    )
+    expect(activityApi.writeActivity).toHaveBeenCalledWith(
+      expect.stringMatching(/^agent:/),
+      expect.stringContaining('Review the Git change for src/main.js.'),
+    )
+    expect(activityApi.writeActivity.mock.calls.at(-1)[1]).toContain('My question or instruction: ')
+    expect(activityApi.writeActivity.mock.calls.at(-1)[1]).not.toMatch(/[\r\n]/)
+    expect(useWorkbenchStore().activeActivityId).toMatch(/^agent:/)
   })
 
   it('contains workbench shortcuts inside Quick Open and resumes them after close', async () => {

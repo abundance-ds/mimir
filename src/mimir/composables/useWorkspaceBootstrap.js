@@ -34,7 +34,7 @@ export function useWorkspaceBootstrap({
   const attemptedAutomaticResumeIds = new Set()
 
   const stopGraphFolderWatch = watch(
-    () => settings.mimirTeamGraphFolder,
+    () => settings.mimirTeamFolder,
     () => {
       if (initialized.value && workspaceFiles.workspacePath) {
         void mountBusinessGraph()
@@ -368,7 +368,7 @@ export function useWorkspaceBootstrap({
   async function mountBusinessGraph(projectRoot = workspaceFiles.workspacePath) {
     if (!projectRoot) return ''
     try {
-      await openBusinessGraph(projectRoot, settings.mimirTeamGraphFolder)
+      await openBusinessGraph(projectRoot, settings.mimirTeamFolder)
       return ''
     } catch (cause) {
       const message = `Business graph could not open: ${errorMessage(cause)}`

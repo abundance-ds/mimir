@@ -164,12 +164,6 @@
   background: color-mix(in srgb, var(--color-ink) 8%, transparent);
   border-bottom-color: color-mix(in srgb, var(--color-ink) 24%, transparent);
 }
-.cm-comment-range-resolved {
-  background: transparent;
-  border-bottom-style: dotted;
-  opacity: .72;
-}
-
 .cm-comment-block {
   width: min(560px, calc(100% - 16px));
   margin: 2px 0 4px 0;
@@ -198,11 +192,6 @@
   border-color: color-mix(in srgb, var(--color-rem) 45%, var(--color-rule));
 }
 
-.cm-comment-block.is-resolved {
-  border-style: dashed;
-  opacity: .78;
-}
-
 .cm-comment-block-header {
   display: flex;
   align-items: center;
@@ -218,6 +207,11 @@
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.01em;
+}
+
+.cm-comment-block-status {
+  color: var(--color-accent);
+  font-weight: 650;
 }
 
 .cm-comment-block-summary {

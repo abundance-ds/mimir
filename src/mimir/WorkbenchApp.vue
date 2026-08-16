@@ -99,6 +99,7 @@
                 :restoring="activityRuntime.resumingActivityIds.has(hostedActivity.id)"
                 :diagnostic="surfaceDiagnostic(hostedActivity)"
                 @open-file="openFileInEditor"
+                @review-git="reviewGitInEditor"
                 @choose-workspace="chooseWorkspace"
                 @request-stop="stopActivity"
                 @restart="restartActivity"
@@ -147,6 +148,7 @@
         @quick-open-request="openQuickOpen"
         @empty="collapseEmptyEditor"
         @navigate-editor="onEditorNavigate"
+        @review-git-with-agent="startGitReviewWithAgent"
         @launch-app="dispatchAppPayload"
       />
     </template>
@@ -1103,6 +1105,58 @@ async function openFileInEditor(request) {
     diagnostic.value = ''
   } catch (cause) {
     diagnostic.value = `${basename(path)} could not be opened: ${errorMessage(cause)}`
+  }
+}
+
+async function reviewGitInEditor(request) {
+  if (!request?.file) return
+  try {
+    await editorRef.value?.mimirReviewGit?.(request)
+    focusNarrowPane('editor')
+    workbench.setPaneState('editor', 'expanded')
+    diagnostic.value = ''
+  } catch (cause) {
+    diagnostic.value = `${basename(request.file)} could not be reviewed: ${errorMessage(cause)}`
+  }
+}
+
+async function startGitReviewWithAgent(request) {
+  const requestedPresetId = String(request?.presetId || '')
+  const preset = launchers.availablePresets.find(candidate => (
+    candidate.kind === 'agent' && candidate.id === requestedPresetId
+  ))
+  if (!preset) {
+    diagnostic.value = requestedPresetId
+      ? `The selected agent preset '${requestedPresetId}' is not available. Choose another agent or update Settings.`
+      : 'Choose an available agent for this Git review.'
+    return
+  }
+  if (!workspaceFiles.workspacePath || request?.workspacePath !== workspaceFiles.workspacePath) {
+    diagnostic.value = 'Open the change workspace before starting its review agent.'
+    return
+  }
+  const prompt = [
+    `Review the Git change for ${request.path}.`,
+    `The selected view is ${request.scope || 'all changes'}.`,
+    'Inspect the repository before you answer.',
+    'My question or instruction: ',
+  ].join(' ')
+  try {
+    diagnostic.value = ''
+    const record = await activityRuntime.launchPreset(preset, workspaceFiles.workspacePath, {
+      title: `Review · ${basename(request.path)}`,
+      seedInput: prompt,
+      retention: 'durable',
+      open: true,
+      source: {
+        type: 'git-review',
+        gitPath: request.path,
+        gitScope: request.scope,
+      },
+    })
+    selectActivity(record.id)
+  } catch (cause) {
+    diagnostic.value = `Could not start Git review: ${errorMessage(cause)}`
   }
 }
 

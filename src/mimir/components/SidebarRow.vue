@@ -38,7 +38,7 @@
         <span
           v-if="$slots.meta || meta"
           data-sidebar-meta
-          class="shrink-0 font-mono text-[9px] text-ink-4"
+          class="shrink-0 font-mono text-[9px] text-ink-3"
           :class="{ 'uppercase tracking-[0.06em]': !$slots.meta }"
         >
           <slot name="meta">{{ meta }}</slot>
