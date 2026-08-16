@@ -12,16 +12,17 @@ import {
 } from './lib/release-artifacts.mjs'
 import {
   APPLE_RELEASE_KEYS,
-  CONNECTION_RELEASE_KEYS,
+  GOOGLE_RELEASE_KEYS,
   REPOSITORY_ROOT,
   loadReleaseEnv,
   requireReleaseKeys,
   requireUpdaterKeys,
+  stripPersonalSlackTokens,
 } from './release-env.mjs'
 import { configureMacDevCommand } from './prepare-macos-dev-app.mjs'
 
 const args = process.argv.slice(2)
-const env = loadReleaseEnv({ allowMissing: true })
+const env = stripPersonalSlackTokens(loadReleaseEnv({ allowMissing: true }))
 configureMacDevCommand({ args, env, repositoryRoot: REPOSITORY_ROOT })
 const isRelease = args[0] === 'build' || args[0] === 'bundle'
 const target = argumentValue(args, '--target')
@@ -38,7 +39,7 @@ let macRelease
 
 if (isMacBuild) {
   requireReleaseKeys(env, APPLE_RELEASE_KEYS, 'Apple')
-  requireReleaseKeys(env, CONNECTION_RELEASE_KEYS, 'Connection client')
+  requireReleaseKeys(env, GOOGLE_RELEASE_KEYS, 'Google client')
   requireUpdaterKeys(env)
 }
 

@@ -27,6 +27,10 @@ const identityGuardFile = 'scripts/check-identity.mjs'
 
 const requiredFiles = [
   'bin/mimir.mjs',
+  'bin/mimir-scopes.mjs',
+  'bin/mimir-packages.mjs',
+  'bin/mimir-skills.mjs',
+  'bin/mimir-agents.mjs',
   'bin/pi-mimir-extension.ts',
   'src/apps/sdk/mimir-sdk.js',
   'src/mimir/App.vue',

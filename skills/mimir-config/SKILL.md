@@ -1,18 +1,20 @@
 ---
 name: mimir-config
-description: Locate and safely edit Mimir settings, launchers, routines, apps, and skills.
+description: Edit Mimir settings, launchers, routines, apps, and skills.
 ---
 
 # Mimir configuration
 
-Edit only authored sources under `~/.mimir`: `settings.json`,
-`launchers.json`, `routines/*.toml`, `apps/`, and
-`skills/{catalog,personal,projects}/`. Preserve unrelated JSON keys.
+Authored sources are `~/.mimir/{settings.json,launchers.json,routines,apps}`
+and scoped `graph/`, `skills/`, and `agents/` folders. Project sources are at
+the repository root, Private sources are in `~/.mimir/private/`, and Team
+sources are under `editor.mimirTeamFolder`. Preserve unrelated JSON keys.
 
-Routine files require `id`, `title`, `preset`, and `prompt`. `schedule` is an
-optional cron string; omit it for manual-only. Optional keys are `enabled`,
-`timezone`, `overlap = "skip" | "parallel"`, `missed = "skip" | "run-once"`,
-`workspace`, and `interactive`.
+Routine files require `id` and `title`, plus either `agent` or both `preset`
+and `prompt`. `agent` is mutually exclusive with `preset` and `prompt`.
+Omit `schedule` for manual-only. Optional keys are `enabled`, `timezone`,
+`overlap = "skip" | "parallel"`,
+`missed = "skip" | "run-once"`, `workspace`, and `interactive`.
 
 An app is `apps/<id>/app.toml` or `apps/<id>.toml`:
 
@@ -23,17 +25,14 @@ mode = "embedded"
 entry = "index.html"
 ```
 
-Modes require one matching key: `embedded`/`window` → `entry`, `terminal` →
-`preset`, `process` → `command`, `rust-helper` → compiled-in `helper`, `action`
-→ internal `actionTool`. Optional `args`, `env`, `launchOnly`, and `tools`
-remain private to the app runtime. Embedded pages receive `window.mimir` APIs
-for app data, files, HTTP, private tools, and opening workspace files.
-Routine files refresh automatically; reload externally edited apps in
-Settings → Apps.
+Modes require one key: `embedded`/`window` → `entry`, `terminal` → `preset`,
+`process` → `command`, `rust-helper` → `helper`, `action` → `actionTool`.
+Optional keys are `args`, `env`, `launchOnly`, and `tools`. Routine files
+refresh automatically. Reload edited apps in Settings → Apps.
 
-Add skills with `mimir skill add <directory> --catalog|--personal|--project`;
-do not copy cross-project skills into repositories.
-To share the catalog, set absolute `settings.skills.catalogRoot`.
+Add skills with `mimir skill add <dir> --private|--project|--team` and agents
+with `mimir agent add <dir> --private|--project|--team`. Use only the scoped
+roots. A missing Team folder stays unmounted; commands do not recreate it.
 
 Do not edit `session.json`, `routines-state.json`, `activities/`, `app-data/`,
 graph event files, or credentials. Use graph tools for graph data. Credentials

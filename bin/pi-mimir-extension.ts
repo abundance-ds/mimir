@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 const endpoint = process.env.MIMIR_MCP_URL || "http://127.0.0.1:17532/mcp";
-const instruction = "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`.";
+const instruction = "Discover other tools with `mimir tools`.";
 let protocolVersion: string | undefined;
 
 async function request(

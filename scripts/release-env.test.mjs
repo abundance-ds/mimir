@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   APPLE_RELEASE_KEYS,
+  GOOGLE_RELEASE_KEYS,
   WINDOWS_RELEASE_KEYS,
   loadReleaseEnv,
   parseEnv,
   requireReleaseKeys,
   requireUpdaterKeys,
+  stripPersonalSlackTokens,
   windowsSigningConfig,
 } from './release-env.mjs'
 
@@ -36,6 +38,26 @@ test('loads legacy Apple aliases without replacing explicit environment values',
   assert.equal(env.APPLE_CERTIFICATE, 'certificate')
   assert.equal(env.APPLE_CERTIFICATE_PASSWORD, 'certificate-password')
   assert.equal(env.APPLE_PASSWORD, 'explicit')
+})
+
+test('requires only Google connection clients for release packaging', () => {
+  assert.deepEqual(GOOGLE_RELEASE_KEYS, [
+    'MIMIR_GOOGLE_OAUTH_CLIENT_ID',
+    'MIMIR_GOOGLE_OAUTH_CLIENT_SECRET',
+  ])
+})
+
+test('strips personal Slack tokens before Tauri runs', () => {
+  const env = {
+    SLACK_TOKEN: 'personal',
+    SLACK_ACCESS_TOKEN: 'access',
+    SLACK_USER_TOKEN: 'user',
+    SLACK_BOT_TOKEN: 'bot',
+    MIMIR_SLACK_TOKEN: 'mimir',
+    MIMIR_GOOGLE_OAUTH_CLIENT_ID: 'google',
+  }
+  stripPersonalSlackTokens(env)
+  assert.deepEqual(env, { MIMIR_GOOGLE_OAUTH_CLIENT_ID: 'google' })
 })
 
 test('retains a credential-safe Windows signing recipe while the platform is parked', () => {

@@ -2,11 +2,8 @@
 
 ## Fast path
 
-- Use `mimir tools graph` once for every graph tool signature. Use
-  `mimir tool <name>` only when that and the examples below are insufficient.
 - Use graph tools, never the backing Markdown files.
-- Find before get. Never guess an id. `graph_find` returns compact nodes;
-  `graph_get` returns one full node.
+- Find before get. Never guess an id.
 - `graph_find.query` searches ids, titles, tags, summaries, and bodies.
   `kinds` filters the returned node's kind, not entities mentioned in its text.
   All filters combine.
@@ -17,7 +14,7 @@
 
 ## Common reads
 
-Latest matching entry (two Mimir calls):
+Latest matching entry:
 
 ```bash
 mimir call graph_find '{"query":"FDE","limit":100}' \

@@ -1,23 +1,34 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { promisify } from 'node:util'
+import {
+  PACKAGE_PROMPT_LIMIT,
+  parsePackageFrontmatter,
+  readUtf8Bounded,
+  replaceDirectoryAtomic,
+  uniquePhysicalRoots,
+} from './mimir-packages.mjs'
+import { scopeRoots } from './mimir-scopes.mjs'
 
-const execFileAsync = promisify(execFile)
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export async function listSkills(options = {}) {
   const roots = await skillRoots(options)
-  const groups = await Promise.all([
-    readScope('catalog', roots.catalog),
-    readScope('personal', roots.personal),
-    readScope('project', roots.project),
-  ])
-  const skills = groups.flat().sort((left, right) => left.name.localeCompare(right.name))
-  assertUniqueSkills(skills)
-  return skills
+  const groups = await Promise.all(uniquePhysicalRoots([
+    { scope: 'project', root: roots.project },
+    { scope: 'private', root: roots.private },
+    { scope: 'team', root: roots.team },
+  ]).map(({ scope, root }) => readScopePaths(scope, [root], options)))
+  const visible = []
+  const seen = new Set()
+  for (const skill of groups.flat()) {
+    if (seen.has(skill.name)) continue
+    seen.add(skill.name)
+    visible.push(skill)
+  }
+  return visible.sort((left, right) => left.name.localeCompare(right.name))
 }
 
 export async function findSkill(query, options = {}) {
@@ -42,8 +53,8 @@ export async function findSkill(query, options = {}) {
 }
 
 export async function addSkill(source, scope, options = {}) {
-  if (!['catalog', 'personal', 'project'].includes(scope)) {
-    throw new Error('Choose one skill scope: --catalog, --personal, or --project.')
+  if (!['private', 'project', 'team'].includes(scope)) {
+    throw new Error('Choose one skill scope: --private, --project, or --team.')
   }
   const sourcePath = path.resolve(String(source || ''))
   const skill = await readSkill(sourcePath, scope)
@@ -53,56 +64,49 @@ export async function addSkill(source, scope, options = {}) {
   }
   const roots = await skillRoots(options)
   await assertNameAvailable(skill.name, scope, roots)
+  if (scope === 'team' && !await pathType(roots.scopes.team)) {
+    throw new Error(`The Team folder does not exist: ${roots.scopes.team}`)
+  }
 
   const destinationRoot = roots[scope]
-  await fs.mkdir(destinationRoot, { recursive: true })
   const destination = path.join(destinationRoot, skill.name)
-  const temporary = path.join(destinationRoot, `.${skill.name}.tmp-${randomUUID()}`)
-  const previous = path.join(destinationRoot, `.${skill.name}.previous-${randomUUID()}`)
-  await fs.cp(sourceRoot, temporary, { recursive: true, errorOnExist: true })
-
   const existing = await pathType(destination)
   if (existing) {
     await materializeSkillRevision(await readSkill(destination, scope), roots)
   }
-  let installed = false
-  try {
-    if (existing) await fs.rename(destination, previous)
-    await fs.rename(temporary, destination)
-    installed = true
-    await writeSkillMetadata(destination, {
-      name: skill.name,
-      scope,
-      revision: await packageRevision(destination),
-      updatedAt: new Date().toISOString(),
-      updatedBy: options.author || process.env.USER || process.env.USERNAME || 'unknown',
-    })
-    const [added] = await readScope(scope, destinationRoot)
-      .then(skills => skills.filter(entry => entry.name === skill.name))
-    await materializeSkillRevision(added, roots)
-    if (scope !== 'project') await refreshNativeSkills(options)
-    if (existing) await fs.rm(previous, { recursive: true, force: true })
-    return added
-  } catch (error) {
-    await fs.rm(temporary, { recursive: true, force: true }).catch(() => {})
-    if (installed && await pathType(destination)) {
-      await fs.rm(destination, { recursive: true, force: true }).catch(() => {})
-    }
-    if (existing && await pathType(previous)) {
-      await fs.rename(previous, destination).catch(() => {})
-    }
-    if (scope !== 'project') await refreshNativeSkills(options).catch(() => {})
-    throw error
-  }
+  return await replaceDirectoryAtomic(sourceRoot, destination, {
+    afterReplace: async () => {
+      await writeSkillMetadata(destination, {
+        name: skill.name,
+        scope,
+        revision: await packageRevision(destination),
+        updatedAt: new Date().toISOString(),
+        updatedBy: options.author || process.env.USER || process.env.USERNAME || 'unknown',
+      })
+      const [added] = await readScope(scope, destinationRoot, options)
+        .then(skills => skills.filter(entry => entry.name === skill.name))
+      await materializeSkillRevision(added, roots)
+      if (scope !== 'project') await refreshNativeSkills(options)
+      return added
+    },
+    afterRollback: async () => {
+      if (scope !== 'project') await refreshNativeSkills(options)
+    },
+  })
 }
 
 export async function refreshNativeSkills(options = {}) {
   const roots = await skillRoots(options)
-  const skills = (await Promise.all([
-    readScope('catalog', roots.catalog),
-    readScope('personal', roots.personal),
-  ])).flat()
-  assertUniqueSkills(skills)
+  const skills = []
+  const seen = new Set()
+  for (const skill of (await Promise.all([
+    readScopePaths('private', roots.privateSources, options),
+    readScopePaths('team', roots.teamSources, options),
+  ])).flat()) {
+    if (seen.has(skill.name)) continue
+    seen.add(skill.name)
+    skills.push(skill)
+  }
 
   const nativeRoot = path.resolve(
     options.nativeRoot
@@ -112,6 +116,7 @@ export async function refreshNativeSkills(options = {}) {
   const manifestPath = path.join(roots.base, 'native-projection.json')
   const previous = await readJsonFile(manifestPath, { entries: [] })
   const previousEntries = validateProjectionEntries(previous?.entries, nativeRoot)
+  const revisionsRoot = path.join(roots.base, 'revisions')
   const desired = []
   await fs.mkdir(nativeRoot, { recursive: true })
 
@@ -121,11 +126,14 @@ export async function refreshNativeSkills(options = {}) {
     const current = await declaredLinkTarget(linkPath)
     const existing = await pathType(linkPath)
     const owned = previousEntries.find(entry => entry.path === linkPath)
+    const manifestOwnsCurrent = owned
+      && current
+      && path.resolve(current) === path.resolve(owned.target)
+    const revisionOwnsCurrent = current
+      && isManagedRevisionTarget(current, revisionsRoot, skill.name)
     if (existing && (
       existing !== 'link'
-      || !owned
-      || !current
-      || path.resolve(current) !== path.resolve(owned.target)
+      || (!manifestOwnsCurrent && !revisionOwnsCurrent)
     )) {
       throw new Error(
         `Cannot expose '${skill.name}': ${linkPath} already exists and is not managed by Mimir.`,
@@ -189,13 +197,17 @@ export async function refreshNativeSkills(options = {}) {
     }
     throw error
   }
-  return { root: nativeRoot, count: desired.length }
+  return {
+    root: nativeRoot,
+    count: desired.length,
+    ...(options.diagnostics?.length ? { diagnostics: options.diagnostics } : {}),
+  }
 }
 
 export async function projectSkillPaths(options = {}) {
   const roots = await skillRoots(options)
   return await Promise.all(
-    (await readScope('project', roots.project))
+    (await readScopePaths('project', roots.projectSources, options))
       .map(async skill => (await materializeSkillRevision(skill, roots)).path),
   )
 }
@@ -204,9 +216,11 @@ export async function prepareSkills(client, options = {}) {
   if (!['codex', 'claude', 'pi', 'gemini'].includes(client)) {
     throw new Error(`Unsupported skill client '${client}'.`)
   }
-  const roots = await skillRoots(options)
-  const native = await refreshNativeSkills(options)
-  const skills = await listSkills(options)
+  const diagnostics = Array.isArray(options.diagnostics) ? options.diagnostics : []
+  const scanOptions = { ...options, diagnostics }
+  const roots = await skillRoots(scanOptions)
+  const native = await refreshNativeSkills(scanOptions)
+  const skills = await listSkills(scanOptions)
   const revisions = await Promise.all(
     skills.map(skill => materializeSkillRevision(skill, roots)),
   )
@@ -220,6 +234,7 @@ export async function prepareSkills(client, options = {}) {
     client,
     nativeRoot: native.root,
     nativeSkills: native.count,
+    ...(diagnostics.length ? { diagnostics } : {}),
     ...(claudeRoot ? { claudeRoot } : {}),
     projectSkillFiles: client === 'pi'
       ? projectSkills.map(skill => path.join(skill.path, 'SKILL.md'))
@@ -291,51 +306,47 @@ export function formatSkillMatches(skills, { limit = 5 } = {}) {
 }
 
 export async function skillRoots(options = {}) {
-  const home = path.resolve(
-    options.home
-      || process.env.MIMIR_HOME
-      || path.join(os.homedir(), '.mimir'),
-  )
+  const scopes = await scopeRoots(options)
+  const home = scopes.home
   const base = path.join(home, 'skills')
-  const projectRoot = await resolveProjectRoot(options.cwd || process.cwd())
+  const privateRoot = path.join(scopes.private, 'skills')
+  const projectRoot = scopes.projectRoot
   const projectKey = createHash('sha256').update(projectRoot).digest('hex').slice(0, 20)
-  const settingsCatalogRoot = await catalogRootFromSettings(home)
-  const catalog = path.resolve(
-    options.catalogRoot
-      || process.env.MIMIR_SKILLS_CATALOG_ROOT
-      || settingsCatalogRoot
-      || path.join(base, 'catalog'),
-  )
+  const project = path.join(projectRoot, 'skills')
+  const team = scopes.team ? path.join(scopes.team, 'skills') : ''
   return {
     base,
-    catalog,
-    personal: path.join(base, 'personal'),
-    project: path.join(base, 'projects', projectKey),
+    private: privateRoot,
+    project,
+    team,
+    privateSources: [privateRoot],
+    projectSources: [project],
+    teamSources: team ? [team] : [],
     projectKey,
     projectRoot,
+    scopes,
   }
 }
 
-async function catalogRootFromSettings(home) {
-  const settings = await readJsonFile(path.join(home, 'settings.json'), {})
-  const configured = settings?.skills?.catalogRoot
-  if (configured === undefined) return ''
-  if (
-    typeof configured !== 'string'
-    || !configured.trim()
-    || !path.isAbsolute(configured)
-  ) {
-    throw new Error('settings.skills.catalogRoot must be an absolute path.')
+async function readScopePaths(scope, roots, options = {}) {
+  const skills = []
+  const seen = new Set()
+  for (const root of roots) {
+    for (const skill of await readScope(scope, root, options)) {
+      if (seen.has(skill.name)) continue
+      seen.add(skill.name)
+      skills.push(skill)
+    }
   }
-  return configured
+  return skills
 }
 
-async function readScope(scope, root) {
+async function readScope(scope, root, options = {}) {
   let entries
   try {
     entries = await fs.readdir(root, { withFileTypes: true })
   } catch (error) {
-    if (error?.code === 'ENOENT') return []
+    if (error?.code === 'ENOENT' || scope === 'team') return []
     throw error
   }
   const skills = []
@@ -346,18 +357,27 @@ async function readScope(scope, root) {
     try {
       skills.push(await readSkill(skillPath, scope))
     } catch (error) {
-      error.message = `${skillPath}: ${error.message}`
-      throw error
+      recordDiagnostic(options, skillPath, error)
     }
   }
   return skills
 }
 
 async function readSkill(skillPath, scope) {
-  const content = await fs.readFile(path.join(skillPath, 'SKILL.md'), 'utf8')
-  const frontmatter = parseFrontmatter(content)
-  const name = String(frontmatter.name || '').trim()
-  const description = String(frontmatter.description || '').trim()
+  const source = path.join(skillPath, 'SKILL.md')
+  const content = await readUtf8Bounded(source, PACKAGE_PROMPT_LIMIT, { label: 'SKILL.md' })
+  const { frontmatter } = parsePackageFrontmatter(content, {
+    label: 'SKILL.md',
+    required: true,
+  })
+  if (typeof frontmatter.name !== 'string') {
+    throw new Error('SKILL.md frontmatter must include a string name')
+  }
+  if (typeof frontmatter.description !== 'string') {
+    throw new Error('SKILL.md frontmatter must include a string description')
+  }
+  const name = frontmatter.name.trim()
+  const description = frontmatter.description.trim()
   if (!name) throw new Error('SKILL.md frontmatter must include name')
   if (!SKILL_NAME.test(name) || name.length > 64) {
     throw new Error('skill name must be 1–64 lowercase letters, numbers, and single hyphens')
@@ -376,87 +396,15 @@ async function readSkill(skillPath, scope) {
   }
 }
 
-function parseFrontmatter(content) {
-  const normalized = String(content || '').replaceAll('\r\n', '\n')
-  if (!normalized.startsWith('---\n')) {
-    throw new Error('SKILL.md must start with YAML frontmatter')
-  }
-  const end = normalized.indexOf('\n---', 4)
-  if (end < 0) throw new Error('SKILL.md frontmatter is not closed')
-  const lines = normalized.slice(4, end).split('\n')
-  const values = {}
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(/^([A-Za-z0-9_-]+):(?:\s*(.*))?$/)
-    if (!match) continue
-    const [, key, raw = ''] = match
-    if (raw === '|' || raw === '>') {
-      const block = []
-      while (index + 1 < lines.length && /^\s+/.test(lines[index + 1])) {
-        block.push(lines[index + 1].trim())
-        index += 1
-      }
-      values[key] = raw === '>' ? block.join(' ') : block.join('\n')
-    } else {
-      values[key] = unquoteYaml(raw.trim())
-    }
-  }
-  return values
-}
-
-function unquoteYaml(value) {
-  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
-    try {
-      return JSON.parse(value)
-    } catch {
-      return value.slice(1, -1)
-    }
-  }
-  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1).replaceAll("''", "'")
-  }
-  return value
+function recordDiagnostic(options, skillPath, error) {
+  if (!Array.isArray(options.diagnostics)) return
+  const message = `${skillPath}: ${error instanceof Error ? error.message : String(error)}`
+  if (!options.diagnostics.includes(message)) options.diagnostics.push(message)
 }
 
 async function assertNameAvailable(name, targetScope, roots) {
-  const all = [
-    ...(await readScope('catalog', roots.catalog)),
-    ...(await readScope('personal', roots.personal)),
-  ]
-  if (targetScope === 'project') {
-    all.push(...await readScope('project', roots.project))
-  } else {
-    const projectRoots = path.join(roots.base, 'projects')
-    let projectKeys = []
-    try {
-      projectKeys = (await fs.readdir(projectRoots, { withFileTypes: true }))
-        .filter(entry => entry.isDirectory())
-        .map(entry => entry.name)
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error
-    }
-    for (const key of projectKeys) {
-      all.push(...await readScope('project', path.join(projectRoots, key)))
-    }
-  }
-  const destination = path.resolve(path.join(roots[targetScope], name))
-  const conflict = all.find(skill => (
-    skill.name === name && path.resolve(skill.path) !== destination
-  ))
-  if (conflict) {
-    throw new Error(`Skill '${name}' already exists in ${conflict.scope}. Skill names are unique across scopes.`)
-  }
-}
-
-function assertUniqueSkills(skills) {
-  const seen = new Map()
-  for (const skill of skills) {
-    const existing = seen.get(skill.name)
-    if (existing) {
-      throw new Error(
-        `Skill '${skill.name}' exists in both ${existing.scope} and ${skill.scope}. Rename one skill.`,
-      )
-    }
-    seen.set(skill.name, skill)
+  if (!roots[targetScope]) {
+    throw new Error(`The ${targetScope} scope is not mounted.`)
   }
 }
 
@@ -477,19 +425,6 @@ function scoreSkill(skill, query, terms) {
   return score
 }
 
-async function resolveProjectRoot(cwd) {
-  const resolved = path.resolve(cwd)
-  try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', resolved, 'rev-parse', '--show-toplevel'],
-      { timeout: 2_000, windowsHide: true },
-    )
-    return await fs.realpath(stdout.trim())
-  } catch {
-    return await fs.realpath(resolved).catch(() => resolved)
-  }
-}
 
 async function packageRevision(root) {
   const entries = []
@@ -501,11 +436,15 @@ async function packageRevision(root) {
     if (relative === '.mimir.json' || relative === '.mimir-revision.json') continue
     hash.update(type)
     hash.update(relative)
-    hash.update(type === 'link'
-      ? await fs.readlink(path.join(root, relative))
-      : await fs.readFile(path.join(root, relative)))
+    const absolute = path.join(root, relative)
+    if (type === 'link') hash.update(await fs.readlink(absolute))
+    else await updateHashFromFile(hash, absolute)
   }
   return hash.digest('hex')
+}
+
+async function updateHashFromFile(hash, file) {
+  for await (const chunk of createReadStream(file)) hash.update(chunk)
 }
 
 async function walk(root, current, realRoot, entries) {
@@ -662,6 +601,15 @@ function validateProjectionEntries(entries, nativeRoot) {
     }
     return { name, path: entryPath, target }
   })
+}
+
+function isManagedRevisionTarget(target, revisionsRoot, skillName) {
+  const relative = path.relative(path.resolve(revisionsRoot), path.resolve(target))
+  const parts = relative.split(path.sep)
+  return parts.length === 3
+    && parts[0]
+    && parts[1] === skillName
+    && /^[a-f0-9]{64}$/.test(parts[2])
 }
 
 async function pathType(value) {

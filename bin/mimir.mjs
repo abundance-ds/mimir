@@ -14,6 +14,7 @@ import {
   prepareSkills,
   refreshNativeSkills,
 } from './mimir-skills.mjs'
+import { addAgent, formatAgents, listAgents } from './mimir-agents.mjs'
 
 const FALLBACK_URL = 'http://127.0.0.1:17532/mcp'
 const REQUEST_TIMEOUT_MS = 10_000
@@ -89,6 +90,18 @@ export async function main() {
   }
   if (command === 'skills') {
     await skillsCommand(args)
+    return
+  }
+  if (command === 'agent') {
+    await agentCommand(args)
+    return
+  }
+  if (command === 'agents') {
+    await agentsCommand(args)
+    return
+  }
+  if (command === 'run') {
+    await runAgentCommand(args)
     return
   }
   if (command === 'doctor') {
@@ -181,11 +194,11 @@ async function skillCommand(args) {
   }
   if (args[0] === 'add') {
     const source = args[1]
-    if (!source) throw new Error('Usage: mimir skill add <directory> <--catalog|--personal|--project>')
-    assertKnownFlags(args.slice(2), ['--catalog', '--personal', '--project'])
-    const scopes = ['catalog', 'personal', 'project'].filter(scope => args.includes(`--${scope}`))
+    if (!source) throw new Error('Usage: mimir skill add <directory> <--private|--project|--team>')
+    assertKnownFlags(args.slice(2), ['--private', '--project', '--team'])
+    const scopes = ['private', 'project', 'team'].filter(scope => args.includes(`--${scope}`))
     if (scopes.length !== 1) {
-      throw new Error('Choose one skill scope: --catalog, --personal, or --project.')
+      throw new Error('Choose one skill scope: --private, --project, or --team.')
     }
     const added = await addSkill(source, scopes[0])
     console.log(`${added.name} [${added.scope}]\nPath: ${added.path}`)
@@ -211,7 +224,9 @@ export async function skillsCommand(args) {
   }
   if (args[0] === 'refresh') {
     assertKnownFlags(args.slice(1), [])
-    const result = await refreshNativeSkills()
+    const diagnostics = []
+    const result = await refreshNativeSkills({ diagnostics })
+    printSkillDiagnostics(result.diagnostics)
     console.log(`Skills ready: ${result.count}\nPath: ${result.root}`)
     return
   }
@@ -228,10 +243,123 @@ export async function skillsCommand(args) {
   if (positional(listArgs).length) {
     throw new Error('Usage: mimir skills [list] [--json]')
   }
-  const skills = await listSkills()
+  const diagnostics = []
+  const skills = await listSkills({ diagnostics })
+  printSkillDiagnostics(diagnostics)
   console.log(listArgs.includes('--json')
     ? JSON.stringify(skills, null, 2)
     : formatSkillMatches(skills, { limit: Number.POSITIVE_INFINITY }))
+}
+
+function printSkillDiagnostics(diagnostics = []) {
+  for (const diagnostic of diagnostics) console.error(`Invalid skill skipped: ${diagnostic}`)
+}
+
+export async function agentCommand(args) {
+  if (wantsHelp(args) || args[0] !== 'add') {
+    console.log(agentCommandHelp())
+    return
+  }
+  const source = args[1]
+  if (!source) throw new Error('Usage: mimir agent add <directory> <--private|--project|--team>')
+  assertKnownFlags(args.slice(2), ['--private', '--project', '--team'])
+  const scopes = ['private', 'project', 'team'].filter(scope => args.includes(`--${scope}`))
+  if (scopes.length !== 1) {
+    throw new Error('Choose one agent scope: --private, --project, or --team.')
+  }
+  const added = await addAgent(source, scopes[0])
+  console.log(`${added.name} [${added.scope}]\nPath: ${added.path}`)
+}
+
+export async function agentsCommand(args) {
+  if (wantsHelp(args)) {
+    console.log(agentsCommandHelp())
+    return
+  }
+  const listArgs = args[0] === 'list' ? args.slice(1) : args
+  assertKnownFlags(listArgs, ['--json'])
+  if (positional(listArgs).length) throw new Error('Usage: mimir agents [list] [--json]')
+  const agents = await listAgents()
+  console.log(listArgs.includes('--json') ? JSON.stringify(agents, null, 2) : formatAgents(agents))
+}
+
+export async function runAgentCommand(args, options = {}) {
+  if (wantsHelp(args) || !args.length) {
+    console.log(runCommandHelp())
+    return
+  }
+  const parsed = parseRunArguments(args)
+  if (parsed.interactive && parsed.follow) {
+    throw new Error('--follow supports headless agent runs only. Start the interactive run without --follow, then continue it in Mimir.')
+  }
+  const call = options.callTool || callTool
+  const result = await call('agents_run', {
+    name: parsed.name,
+    workspace: options.cwd || process.cwd(),
+    args: parsed.args,
+    ...(parsed.preset ? { preset: parsed.preset } : {}),
+    interactive: parsed.interactive,
+    follow: parsed.follow,
+  })
+  const activity = result?.activity || result
+  if (!activity?.id) throw new Error('Mimir started no Activity for this agent package.')
+  if (!parsed.follow) {
+    console.log(`${activity.title || parsed.name}\nActivity: ${activity.id}`)
+    return result
+  }
+  return await followActivity(activity.id, {
+    callTool: call,
+    output: options.output || process.stdout,
+    pollMs: options.pollMs,
+  })
+}
+
+export async function followActivity(activityId, options = {}) {
+  const call = options.callTool || callTool
+  const output = options.output || process.stdout
+  const pollMs = Number.isFinite(options.pollMs) ? options.pollMs : 120
+  let afterSequence
+  while (true) {
+    const snapshot = await call('activities_snapshot', {
+      activity_id: activityId,
+      ...(afterSequence === undefined ? {} : { after_sequence: afterSequence }),
+    })
+    for (const chunk of snapshot?.scrollback?.chunks || []) {
+      output.write(Buffer.from(chunk.bytes || []))
+    }
+    const last = snapshot?.scrollback?.lastSequence ?? snapshot?.scrollback?.last_sequence
+    if (Number.isFinite(last)) afterSequence = last
+    if (!snapshot?.live) {
+      const exit = snapshot?.record?.session?.exit
+      if (exit && exit.reason !== 'completed') process.exitCode = exit.code || 1
+      else if (Number.isInteger(exit?.code) && exit.code !== 0) process.exitCode = exit.code
+      return snapshot
+    }
+    await new Promise(resolve => setTimeout(resolve, pollMs))
+  }
+}
+
+function parseRunArguments(args) {
+  const name = String(args[0] || '').trim()
+  if (!name || name.startsWith('-')) throw new Error('Usage: mimir run <name> [args…] [--preset <id>] [--interactive] [--follow]')
+  const parsed = { name, args: [], preset: '', interactive: false, follow: false }
+  for (let index = 1; index < args.length; index += 1) {
+    const value = args[index]
+    if (value === '--') {
+      parsed.args.push(...args.slice(index + 1))
+      break
+    }
+    if (value === '--interactive') parsed.interactive = true
+    else if (value === '--follow') parsed.follow = true
+    else if (value === '--preset') {
+      parsed.preset = String(args[++index] || '').trim()
+      if (!parsed.preset) throw new Error('--preset requires a launcher preset id.')
+    } else if (value.startsWith('--preset=')) {
+      parsed.preset = value.slice('--preset='.length).trim()
+      if (!parsed.preset) throw new Error('--preset requires a launcher preset id.')
+    } else parsed.args.push(value)
+  }
+  return parsed
 }
 
 export async function findTools(query, tools) {
@@ -786,6 +914,8 @@ export function helpText(topic = '') {
   mimir tools <group>    list one focused drawer
   mimir tool <name>      show one capability and its inputs
   mimir skill <query>    find a workflow
+  mimir agents           list runnable agent packages
+  mimir run <name>       run an agent package
   mimir doctor           diagnose the connection
   mimir call <tool> ...  call a capability`
 }
@@ -828,12 +958,28 @@ function callCommandHelp() {
 
 function skillCommandHelp() {
   return `Usage: mimir skill <name-or-query> [--json]
-       mimir skill add <directory> <--catalog|--personal|--project>`
+       mimir skill add <directory> <--private|--project|--team>`
 }
 
 function skillsCommandHelp() {
   return `Usage: mimir skills [list] [--json]
-       mimir skills refresh`
+       mimir skills refresh
+       mimir skills prepare <client> [--json]`
+}
+
+function agentCommandHelp() {
+  return `Usage: mimir agent add <directory> <--private|--project|--team>`
+}
+
+function agentsCommandHelp() {
+  return `Usage: mimir agents [list] [--json]`
+}
+
+function runCommandHelp() {
+  return `Usage: mimir run <name> [agent args…] [--preset <id>] [--interactive] [--follow]
+
+Extra arguments keep their exact boundaries. Use -- before an agent argument
+that is also a Mimir run option.`
 }
 
 function doctorCommandHelp() {
