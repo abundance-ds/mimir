@@ -80,6 +80,7 @@ describe('AppFooter resolved comment history', () => {
 
     expect(history.text()).toContain('Resolved')
     expect(history.text()).toContain('2')
+    expect(history.find('svg').exists()).toBe(false)
     expect(history.attributes('aria-label')).toBe('Show 2 resolved comments')
     expect(history.attributes('aria-pressed')).toBe('false')
 
@@ -94,5 +95,14 @@ describe('AppFooter resolved comment history', () => {
     expect(history.classes()).toContain('is-active')
     expect(history.attributes('aria-label')).toBe('Hide 1 resolved comment')
     expect(history.attributes('aria-pressed')).toBe('true')
+  })
+
+  it('groups resolved history with the footer view controls', () => {
+    const wrapper = mountFooter({ resolvedCommentCount: 1 })
+    const controls = wrapper.find('.footer-view-controls')
+
+    expect(controls.find('.footer-comment-history').exists()).toBe(true)
+    expect(controls.find('.footer-view-divider').exists()).toBe(true)
+    expect(controls.find('.footer-zoom').exists()).toBe(true)
   })
 })

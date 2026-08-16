@@ -102,11 +102,16 @@ describe('EditorToolbar', () => {
     expect(w.emitted('comment')).toHaveLength(1)
   })
 
-  it('shows the current comment count without turning it into a separate toolbar control', () => {
+  it('shows a compact previous, count, and next comment navigator', async () => {
     const w = mountToolbar({ hasSelection: true, commentCount: 3 })
     expect(commentBtn(w).text()).toContain('Comment')
-    expect(commentBtn(w).text()).toContain('3')
-    expect(w.findAll('button.toolbar-btn')).toHaveLength(15)
+    expect(w.find('.comment-nav-count').text()).toBe('3')
+    expect(w.find('.comment-nav').attributes('aria-label')).toBe('3 visible comments')
+
+    await btnByTitle(w, 'Previous comment').trigger('click')
+    await btnByTitle(w, 'Next comment').trigger('click')
+    expect(w.emitted('navigate-comment')).toEqual([['previous'], ['next']])
+    expect(w.findAll('button.toolbar-btn')).toHaveLength(17)
   })
 
 })

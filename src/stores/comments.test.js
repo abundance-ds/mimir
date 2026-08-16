@@ -14,19 +14,21 @@ function makeComment(overrides = {}) {
     contentFrom: 50,
     contentTo: 60,
     anchorText: 'some text',
+    status: 'active',
     ...overrides,
   }
 }
 
-describe('comments store (thin reactive mirror)', () => {
+describe('comments store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('starts with empty comments and null activeCommentId', () => {
+  it('starts with empty comments and hidden resolved history', () => {
     const store = useCommentsStore()
     expect(store.comments).toEqual([])
     expect(store.activeCommentId).toBe(null)
+    expect(store.resolvedCommentsVisible).toBe(false)
   })
 
   it('updateCommentsFromState replaces comments', () => {
@@ -83,6 +85,45 @@ describe('comments store (thin reactive mirror)', () => {
     ])
     const result = store.commentsForFile('/test.md')
     expect(result.map(c => c.id)).toEqual(['c1', 'c2', 'c3'])
+  })
+
+  it('owns the visible ordered comment projection and resolved count', () => {
+    const store = useCommentsStore()
+    store.updateCommentsFromState([
+      makeComment({ id: 'a2', contentFrom: 50 }),
+      makeComment({ id: 'r1', contentFrom: 30, status: 'resolved' }),
+      makeComment({ id: 'a1', contentFrom: 10 }),
+    ])
+
+    expect(store.resolvedCommentCount).toBe(1)
+    expect(store.visibleComments.map(comment => comment.id)).toEqual(['a1', 'a2'])
+
+    store.setResolvedCommentsVisible(true)
+    expect(store.visibleComments.map(comment => comment.id)).toEqual(['a1', 'r1', 'a2'])
+  })
+
+  it('clears a hidden resolved selection and resets presentation state', () => {
+    const store = useCommentsStore()
+    store.updateCommentsFromState([makeComment({ id: 'r1', status: 'resolved' })])
+    store.setResolvedCommentsVisible(true)
+    store.setActiveComment('r1')
+
+    store.setResolvedCommentsVisible(false)
+    expect(store.activeCommentId).toBe(null)
+
+    store.setResolvedCommentsVisible(true)
+    store.setActiveComment('r1')
+    store.resetPresentation()
+    expect(store.activeCommentId).toBe(null)
+    expect(store.resolvedCommentsVisible).toBe(false)
+  })
+
+  it('hides resolved history when the last resolved comment leaves the document', () => {
+    const store = useCommentsStore()
+    store.updateCommentsFromState([makeComment({ id: 'r1', status: 'resolved' })])
+    store.setResolvedCommentsVisible(true)
+    store.updateCommentsFromState([makeComment({ id: 'a1' })])
+    expect(store.resolvedCommentsVisible).toBe(false)
   })
 
   it('findActiveByRange finds matching comment by contentFrom/contentTo', () => {

@@ -171,7 +171,7 @@ class CommentBlockWidget extends WidgetType {
     const wrap = document.createElement('div')
     const hasText = Boolean(c.text?.trim())
     const resolved = c.status === 'resolved'
-    const draft = ensureDraft(this.drafts, c.id, !hasText, resolved, c.status)
+    const draft = ensureDraft(this.drafts, c.id, !hasText, false, c.status)
     wrap.className = `cm-comment-block${c.id === this.activeId ? ' is-active' : ''}${hasText ? '' : ' is-empty'}${resolved ? ' is-resolved' : ''}${draft.collapsed ? ' is-collapsed' : ''}`
     wrap.dataset.commentId = c.id
     wrap.contentEditable = 'false'
@@ -189,7 +189,13 @@ class CommentBlockWidget extends WidgetType {
 
     const meta = document.createElement('span')
     meta.className = 'cm-comment-block-meta'
-    meta.textContent = resolved ? `${authorLabel(c.author)} · Resolved` : authorLabel(c.author)
+    meta.textContent = authorLabel(c.author)
+    if (resolved) {
+      const status = document.createElement('span')
+      status.className = 'cm-comment-block-status'
+      status.textContent = 'Resolved'
+      meta.append(' · ', status)
+    }
     header.append(meta)
 
     const summary = document.createElement('span')
@@ -493,10 +499,8 @@ function ensureDraft(drafts, id, open = false, collapsed = false, status = 'acti
     if (status === 'resolved') {
       draft.text = ''
       draft.open = false
-      draft.collapsed = true
-    } else {
-      draft.collapsed = false
     }
+    draft.collapsed = false
   }
   return draft
 }

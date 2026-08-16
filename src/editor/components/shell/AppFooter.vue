@@ -1,5 +1,5 @@
 <template>
-  <div class="app-footer h-[26px] shrink-0 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
+  <div class="app-footer h-[26px] shrink-0 grid grid-cols-[minmax(0,1fr)_auto] items-center px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
     <!-- Left: stats -->
     <div class="footer-stats flex items-center justify-self-start relative min-w-0">
       <div class="relative flex items-center hover:bg-chrome-mid rounded" @click.stop="statsOpen = !statsOpen">
@@ -44,7 +44,7 @@
       </div>
     </div>
 
-    <div class="footer-comment-history-slot justify-self-center">
+    <div class="footer-view-controls justify-self-end">
       <button
         v-if="resolvedCommentCount"
         type="button"
@@ -55,30 +55,29 @@
         :aria-pressed="resolvedCommentsVisible"
         @click.stop="$emit('toggle-resolved-comments')"
       >
-        <IconCircleCheck :size="12" />
         <span>Resolved</span>
-        <span>{{ resolvedCommentCount }}</span>
+        <span class="footer-comment-count">{{ resolvedCommentCount }}</span>
       </button>
-    </div>
-
-    <div class="footer-zoom zoom-ctrl group flex items-center relative justify-self-end" @click.stop>
-      <button class="zoom-step" @click="$emit('zoom-out')">−</button>
-      <span class="min-w-9 text-center font-mono text-[9px] leading-none text-ink-3 hover:text-ink-2 hover:bg-chrome-mid rounded" @click="zoomOpen = !zoomOpen">{{ zoomLevel }}%</span>
-      <button class="zoom-step" @click="$emit('zoom-in')">+</button>
-      <div
-        v-show="zoomOpen"
-        class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-surface border border-rule rounded-[6px] py-1 min-w-[80px] z-20"
-      >
-        <button
-          v-for="level in zoomPresets"
-          :key="level"
-          class="flex items-center w-full px-3 py-1 font-mono text-[10px] text-ink-2 gap-1.5 hover:bg-chrome-mid"
-          :class="level === zoomLevel ? 'text-accent font-semibold' : ''"
-          @click="$emit('set-zoom', level); zoomOpen = false"
+      <span v-if="resolvedCommentCount" class="footer-view-divider" aria-hidden="true"></span>
+      <div class="footer-zoom zoom-ctrl group flex items-center relative" @click.stop>
+        <button class="zoom-step" @click="$emit('zoom-out')">−</button>
+        <span class="min-w-9 text-center font-mono text-[9px] leading-none text-ink-3 hover:text-ink-2 hover:bg-chrome-mid rounded" @click="zoomOpen = !zoomOpen">{{ zoomLevel }}%</span>
+        <button class="zoom-step" @click="$emit('zoom-in')">+</button>
+        <div
+          v-show="zoomOpen"
+          class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-surface border border-rule rounded-[6px] py-1 min-w-[80px] z-20"
         >
-          <span class="w-1 h-1 rounded-full" :class="level === zoomLevel ? 'bg-accent' : 'bg-transparent'"></span>
-          {{ level }}%
-        </button>
+          <button
+            v-for="level in zoomPresets"
+            :key="level"
+            class="flex items-center w-full px-3 py-1 font-mono text-[10px] text-ink-2 gap-1.5 hover:bg-chrome-mid"
+            :class="level === zoomLevel ? 'text-accent font-semibold' : ''"
+            @click="$emit('set-zoom', level); zoomOpen = false"
+          >
+            <span class="w-1 h-1 rounded-full" :class="level === zoomLevel ? 'bg-accent' : 'bg-transparent'"></span>
+            {{ level }}%
+          </button>
+        </div>
       </div>
     </div>
 
@@ -87,7 +86,6 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { IconCircleCheck } from '@tabler/icons-vue'
 
 const props = defineProps({
   zoomLevel: { type: Number, default: 100 },
@@ -188,16 +186,21 @@ button.footer-save-status {
   color: var(--color-ink);
 }
 
+.footer-view-controls {
+  display: flex;
+  align-items: center;
+}
+
 .footer-comment-history {
   display: inline-flex;
   height: 20px;
   align-items: center;
-  gap: 5px;
-  padding: 0 6px;
+  gap: 6px;
+  padding: 0 9px;
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: var(--color-ink-4);
+  color: var(--color-ink-3);
   font: inherit;
   letter-spacing: inherit;
 }
@@ -206,12 +209,32 @@ button.footer-save-status {
 .footer-comment-history:focus-visible {
   background: var(--color-chrome-mid);
   color: var(--color-ink-2);
-  outline: none;
+}
+
+.footer-comment-history:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .footer-comment-history.is-active {
   background: var(--color-accent-soft);
   color: var(--color-accent);
+}
+
+.footer-comment-count {
+  color: var(--color-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.footer-comment-history.is-active .footer-comment-count {
+  color: inherit;
+}
+
+.footer-view-divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 7px;
+  background: var(--color-rule-light);
 }
 
 .zoom-step {
@@ -256,6 +279,10 @@ button.footer-save-status {
     display: none;
   }
 
+  .footer-view-divider {
+    display: none;
+  }
+
 }
 
 @media (max-width: 430px) {
@@ -270,7 +297,7 @@ button.footer-save-status {
     display: none;
   }
 
-  .footer-comment-history-slot {
+  .footer-view-controls {
     justify-self: center;
   }
 

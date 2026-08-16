@@ -7,6 +7,8 @@ export function useTabManagement({
   diffActive = computed(() => diffStore.active),
   displayTabs,
   reviewTabActive,
+  gitReviewStore = null,
+  gitReviewTabActive = ref(false),
   inlineAIState,
   activeFileIndex,
   flushEditorContent,
@@ -28,10 +30,18 @@ export function useTabManagement({
   function onSelectTab(idx) {
     const tab = displayTabs.value[idx]
     if (tab?.type === 'review') {
+      gitReviewTabActive.value = false
       reviewTabActive.value = true
       diffStore.clearBatchFocus()
       return
     }
+    if (tab?.type === 'git-review') {
+      reviewTabActive.value = false
+      gitReviewTabActive.value = true
+      return
+    }
+    const returningFromGit = gitReviewTabActive.value
+    gitReviewTabActive.value = false
     reviewTabActive.value = false
     const fileIndex = tabFileIndex(tab, idx)
     if (diffActive.value && diffStore.isBatch) {
@@ -39,6 +49,20 @@ export function useTabManagement({
       fileManager.setActiveTab(fileIndex)
       const file = fileManager.openFiles[fileIndex]
       if (file?.path) diffStore.focusBatchFile(file.path)
+      return
+    }
+    const file = fileManager.openFiles[fileIndex]
+    const returnsToSingleReview = returningFromGit
+      && diffActive.value
+      && !diffStore.isBatch
+      && file
+      && (
+        (diffStore.fileId != null && file.id === diffStore.fileId)
+        || (diffStore.fileId == null && diffStore.filePath && file.path === diffStore.filePath)
+      )
+    if (returnsToSingleReview) {
+      flushEditorContent({ bridge: 'flush' })
+      fileManager.setActiveTab(fileIndex)
       return
     }
     if (diffActive.value && !diffStore.isBatch) diffStore.deactivate()
@@ -52,6 +76,11 @@ export function useTabManagement({
     if (tab?.type === 'review') {
       diffStore.deactivate()
       reviewTabActive.value = false
+      return
+    }
+    if (tab?.type === 'git-review') {
+      gitReviewStore?.deactivate?.()
+      gitReviewTabActive.value = false
       return
     }
 
@@ -127,6 +156,7 @@ export function useTabManagement({
   }
 
   function onNewFile() {
+    gitReviewTabActive.value = false
     flushEditorContent({ bridge: 'flush' })
     fileManager.newFile()
   }

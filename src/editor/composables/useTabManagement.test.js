@@ -8,6 +8,8 @@ function setup({
   saveResult = true,
   visibleIds = null,
   activeIndex = 0,
+  gitActive = false,
+  diffActive = false,
 } = {}) {
   const openFiles = reactive(files)
   const activeFileIndex = ref(activeIndex)
@@ -23,8 +25,10 @@ function setup({
     newFile: vi.fn(),
   }
   const diffStore = reactive({
-    active: false,
+    active: diffActive,
     isBatch: false,
+    fileId: files[0]?.id ?? null,
+    filePath: files[0]?.path || '',
     deactivate: vi.fn(),
     clearBatchFocus: vi.fn(),
     focusBatchFile: vi.fn(),
@@ -32,18 +36,28 @@ function setup({
   const requestWindowClose = vi.fn(async () => true)
   const onEmpty = vi.fn()
   const saveCurrentFile = vi.fn(async () => saveResult)
-  const manager = useTabManagement({
-    fileManager,
-    diffStore,
-    displayTabs: computed(() => openFiles
+  const gitReviewStore = reactive({ active: gitActive, deactivate: vi.fn() })
+  const gitReviewTabActive = ref(false)
+  const reviewTabActive = ref(false)
+  const displayTabs = computed(() => {
+    const tabs = openFiles
       .map((file, fileIndex) => ({ file, fileIndex }))
       .filter(({ file }) => !visibleIds || visibleIds.includes(file.id))
       .map(({ file, fileIndex }) => ({
         id: file.id,
         fileIndex,
         type: 'file',
-      }))),
-    reviewTabActive: ref(false),
+      }))
+    if (gitReviewStore.active) tabs.push({ id: '__git__', type: 'git-review' })
+    return tabs
+  })
+  const manager = useTabManagement({
+    fileManager,
+    diffStore,
+    displayTabs,
+    reviewTabActive,
+    gitReviewStore,
+    gitReviewTabActive,
     inlineAIState: ref(null),
     activeFileIndex,
     flushEditorContent: vi.fn(),
@@ -59,6 +73,10 @@ function setup({
     saveCurrentFile,
     onEmpty,
     activeFileIndex,
+    diffStore,
+    gitReviewStore,
+    gitReviewTabActive,
+    displayTabs,
   }
 }
 
@@ -154,5 +172,24 @@ describe('useTabManagement close safety', () => {
     h.manager.onReorderTab(0, 1)
 
     expect(h.fileManager.moveTab).toHaveBeenCalledWith(0, 2)
+  })
+
+  it('keeps a single-file proposal intact while Git review opens and returns', () => {
+    const h = setup({ gitActive: true, diffActive: true })
+    h.manager.onSelectTab(1)
+    expect(h.gitReviewTabActive.value).toBe(true)
+    expect(h.diffStore.deactivate).not.toHaveBeenCalled()
+
+    h.manager.onSelectTab(0)
+    expect(h.gitReviewTabActive.value).toBe(false)
+    expect(h.diffStore.deactivate).not.toHaveBeenCalled()
+    expect(h.fileManager.setActiveTab).toHaveBeenCalledWith(0)
+  })
+
+  it('closes Git review without resolving proposal state', async () => {
+    const h = setup({ gitActive: true, diffActive: true })
+    await h.manager.onCloseTab(1)
+    expect(h.gitReviewStore.deactivate).toHaveBeenCalledTimes(1)
+    expect(h.diffStore.deactivate).not.toHaveBeenCalled()
   })
 })

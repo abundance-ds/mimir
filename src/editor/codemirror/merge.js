@@ -72,18 +72,28 @@ function sideBySideChunkWatcher(onAllResolved, onChunkCountChange) {
   })
 }
 
-export function createUnifiedDiffView({ parent, originalContent, modifiedContent, collapse = false, onAllResolved, onChunkCountChange }) {
+export function createUnifiedDiffView({
+  parent,
+  originalContent,
+  modifiedContent,
+  collapse = false,
+  editable = true,
+  mergeControls = true,
+  onAllResolved,
+  onChunkCountChange,
+}) {
   const state = EditorState.create({
     doc: modifiedContent,
     extensions: [
       ...sharedDiffExtensions,
+      ...(editable ? [] : [EditorView.editable.of(false)]),
       mergeViewCompartment.of([
         unifiedMergeView({
           original: Text.of(originalContent.split('\n')),
           gutter: true,
           highlightChanges: true,
           syntaxHighlightDeletions: false,
-          mergeControls: true,
+          mergeControls,
           diffConfig,
           ...(collapse ? { collapseUnchanged: { margin: 3, minSize: 4 } } : {}),
         }),
@@ -113,7 +123,16 @@ export function getUnifiedChunks(view) {
   return info ? info.chunks : []
 }
 
-export function createSplitDiffView({ parent, originalContent, modifiedContent, collapse = false, onAllResolved, onChunkCountChange }) {
+export function createSplitDiffView({
+  parent,
+  originalContent,
+  modifiedContent,
+  collapse = false,
+  editable = true,
+  mergeControls = true,
+  onAllResolved,
+  onChunkCountChange,
+}) {
   let mv
 
   mv = new MergeView({
@@ -128,13 +147,14 @@ export function createSplitDiffView({ parent, originalContent, modifiedContent, 
       doc: modifiedContent,
       extensions: [
         ...sharedDiffExtensions,
+        ...(editable ? [] : [EditorView.editable.of(false)]),
         sideBySideChunkWatcher(onAllResolved, onChunkCountChange),
       ],
     },
     parent,
     orientation: 'a-b',
-    revertControls: 'a-to-b',
-    renderRevertControl: () => {
+    revertControls: mergeControls ? 'a-to-b' : undefined,
+    renderRevertControl: mergeControls ? () => {
       const wrap = document.createElement('div')
       wrap.className = 'cm-merge-chunk-buttons'
 
@@ -177,7 +197,7 @@ export function createSplitDiffView({ parent, originalContent, modifiedContent, 
       wrap.appendChild(acceptBtn)
       wrap.appendChild(revertBtn)
       return wrap
-    },
+    } : undefined,
     highlightChanges: true,
     gutter: true,
     diffConfig,

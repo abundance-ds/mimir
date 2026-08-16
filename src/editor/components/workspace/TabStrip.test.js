@@ -167,6 +167,14 @@ describe('TabStrip', () => {
     expect(tabs[1].classes()).toContain('tab-active')
   })
 
+  it('presents Git review as a virtual review tab', () => {
+    const w = mountStrip({
+      tabs: [{ id: '__git__', name: 'Changes · app.js', type: 'git-review', dirty: false }],
+    })
+    expect(fileTabs(w)[0].classes()).toContain('tab-review')
+    expect(fileTabs(w)[0].attributes('aria-label')).toBe('Changes · app.js')
+  })
+
   it('uses a valid tablist with sibling keyboard-operable close buttons', async () => {
     const w = mountStrip({ activeTab: 1 })
     const tabs = fileTabs(w)

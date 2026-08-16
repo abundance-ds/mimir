@@ -24,27 +24,57 @@
       <button class="toolbar-btn" title="Inline Code" :class="isActive('code')" @mousedown.prevent @click="emit('format', 'code')"><IconCode :size="14" /></button>
     </div>
     <span class="toolbar-sep"></span>
-    <button
-      class="toolbar-btn shrink-0 gap-1 px-2 text-[11px]"
-      :class="props.hasSelection ? '' : 'toolbar-disabled'"
-      :disabled="!props.hasSelection"
-      :aria-disabled="!props.hasSelection"
-      data-toolbar-action="comment"
-      :title="props.hasSelection ? 'Add Comment (⇧⌘M)' : 'Select text to add a comment'"
-      @mousedown.prevent
-      @click="onComment"
-    >
-      <IconMessagePlus :size="13" />
-      <span v-show="!compact">Comment</span>
-      <span v-if="commentCount" class="font-mono text-[9px] text-accent">{{ commentCount }}</span>
-    </button>
+    <div class="flex shrink-0 gap-1 items-center">
+      <button
+        class="toolbar-btn shrink-0 gap-1 px-2 text-[11px]"
+        :class="props.hasSelection ? '' : 'toolbar-disabled'"
+        :disabled="!props.hasSelection"
+        :aria-disabled="!props.hasSelection"
+        data-toolbar-action="comment"
+        :title="props.hasSelection ? 'Add Comment (⇧⌘M)' : 'Select text to add a comment'"
+        @mousedown.prevent
+        @click="onComment"
+      >
+        <IconMessagePlus :size="13" />
+        <span v-show="!compact">Comment</span>
+      </button>
+      <div
+        v-if="commentCount"
+        class="comment-nav"
+        role="group"
+        :aria-label="`${commentCount} visible ${commentCount === 1 ? 'comment' : 'comments'}`"
+      >
+        <button
+          class="toolbar-btn comment-nav-step"
+          title="Previous comment"
+          aria-label="Previous comment"
+          @mousedown.prevent
+          @click="emit('navigate-comment', 'previous')"
+        >
+          <IconChevronLeft :size="13" />
+        </button>
+        <span class="comment-nav-count" :title="`${commentCount} visible ${commentCount === 1 ? 'comment' : 'comments'}`">
+          <IconMessage :size="12" />
+          <span>{{ commentCount }}</span>
+        </span>
+        <button
+          class="toolbar-btn comment-nav-step"
+          title="Next comment"
+          aria-label="Next comment"
+          @mousedown.prevent
+          @click="emit('navigate-comment', 'next')"
+        >
+          <IconChevronRight :size="13" />
+        </button>
+      </div>
+    </div>
     <div class="min-w-2 flex-1"></div>
   </div>
 </template>
 
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { IconList, IconListNumbers, IconListCheck, IconQuote, IconLineDashed, IconLink, IconPhoto, IconCode, IconMessagePlus } from '@tabler/icons-vue'
+import { IconList, IconListNumbers, IconListCheck, IconQuote, IconLineDashed, IconLink, IconPhoto, IconCode, IconMessagePlus, IconMessage, IconChevronLeft, IconChevronRight } from '@tabler/icons-vue'
 
 const props = defineProps({
   activeFormats: { type: Array, default: () => [] },
@@ -52,7 +82,7 @@ const props = defineProps({
   commentCount: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['format', 'comment'])
+const emit = defineEmits(['format', 'comment', 'navigate-comment'])
 const toolbarRef = ref(null)
 const compact = ref(false)
 let fullContentWidth = 0
@@ -137,6 +167,33 @@ watch(() => props.commentCount, () => nextTick(checkOverflow))
   opacity: 0.35;
   cursor: default;
 }
+
+.comment-nav {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  color: var(--color-ink-3);
+}
+
+.comment-nav-step {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 3px;
+}
+
+.comment-nav-count {
+  display: inline-flex;
+  min-width: 31px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--color-ink-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
 .toolbar-sep {
   width: 1px;
   align-self: stretch;

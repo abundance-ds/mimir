@@ -136,7 +136,9 @@ describe('commentsExtension inline widget', () => {
     view.dispatch({ effects: setResolvedCommentsVisible.of(true) })
     const block = parent.getElementsByClassName('cm-comment-block')[0]
     expect(block.classList.contains('is-resolved')).toBe(true)
-    expect(block.classList.contains('is-collapsed')).toBe(true)
+    expect(block.classList.contains('is-collapsed')).toBe(false)
+    expect(parent.getElementsByClassName('cm-comment-block-body')[0].textContent).toBe('Done')
+    expect(parent.getElementsByClassName('cm-comment-block-status')[0].textContent).toBe('Resolved')
     expect(parent.getElementsByClassName('cm-comment-range-resolved')).toHaveLength(1)
 
     buttonByAction(parent, 'reopen').click()
@@ -165,7 +167,7 @@ describe('commentsExtension inline widget', () => {
     expect(view.state.doc.toString()).toContain('status="resolved"')
 
     view.dispatch({ effects: setResolvedCommentsVisible.of(true) })
-    expect(parent.getElementsByClassName('cm-comment-block')[0].classList.contains('is-collapsed')).toBe(true)
+    expect(parent.getElementsByClassName('cm-comment-block')[0].classList.contains('is-collapsed')).toBe(false)
 
     const resolvedDoc = view.state.doc.toString()
     const resolvedFrom = resolvedDoc.indexOf('status="resolved"')

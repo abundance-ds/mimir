@@ -30,7 +30,7 @@
                 class="file-tab w-full h-full flex items-center gap-1 pl-2 pr-7 rounded-t-[5px] select-none whitespace-nowrap overflow-hidden font-mono text-[11.5px] relative"
                 :class="[
                     activeTab === i ? 'tab-active' : 'tab-inactive',
-                    tab.type === 'review' ? 'tab-review' : '',
+                    ['review', 'git-review'].includes(tab.type) ? 'tab-review' : '',
                     tab.preview ? 'italic' : '',
                 ]"
                 role="tab"

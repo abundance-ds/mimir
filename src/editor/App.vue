@@ -45,23 +45,32 @@
           @configure-models="openSettings('models')"
         />
         <DiffBar
-          v-else-if="visibleDiffActive && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
+          v-else-if="!gitReviewVisible && visibleDiffActive && (!diffStore.isBatch || reviewTabActive || diffStore.isBatchFileFocused)"
           @accept-all="acceptDiffAndFocus"
           @reject-all="rejectDiffAndFocus"
           @navigate-chunk="onDiffNavigateChunk"
           @navigate-file="onDiffNavigateFile"
         />
+        <GitReviewBar
+          v-else-if="gitReviewVisible"
+          :dirty="gitReviewDirty"
+          @open-file="onGitReviewOpenFile"
+          @ask-agent="onGitReviewAskAgent"
+          @close="closeGitReview"
+        />
         <EditorToolbar
-          v-if="editorToolbarVisible"
+          v-if="editorToolbarVisible && !gitReviewVisible"
           :active-formats="activeFormats"
           :has-selection="Boolean(selectionText)"
-          :comment-count="activeCommentCount"
+          :comment-count="commentManager.visibleComments.length"
           @format="onFormat"
           @comment="onComment"
+          @navigate-comment="commentPresentation.navigateComment"
         />
         <div class="editor-panes flex-1 flex min-h-0 overflow-hidden">
+          <GitDiffView v-if="gitReviewVisible" />
           <BatchDiffView
-            v-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
+            v-else-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
             ref="batchDiffViewRef"
             @all-resolved="onBatchAllResolved"
           />
@@ -71,16 +80,16 @@
             @accept="onDiffChunksResolved"
           />
           <FilePreviewPage
-            v-if="isResourcePreview && !visibleDiffActive"
+            v-if="isResourcePreview && !visibleDiffActive && !gitReviewVisible"
             :file="currentFile"
           />
           <NewTabPage
-            v-else-if="isNewTabPage && !visibleDiffActive"
+            v-else-if="isNewTabPage && !visibleDiffActive && !gitReviewVisible"
             @activated="restoreEditorFocus"
           />
           <EditorSurface
             ref="editorSurfaceRef"
-            v-show="!isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
+            v-show="!gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :zoomLevel="state.zoomLevel"
@@ -100,18 +109,18 @@
         </div>
 
         <AppFooter
-          v-if="!isResourcePreview"
+          v-if="!isResourcePreview && !gitReviewVisible"
           :zoomLevel="state.zoomLevel"
           :selectionText="selectionText"
           :stats="documentStats"
           :saveStatus="footerSave"
-          :resolved-comment-count="resolvedCommentCount"
-          :resolved-comments-visible="resolvedCommentsVisible"
+          :resolved-comment-count="commentManager.resolvedCommentCount"
+          :resolved-comments-visible="commentManager.resolvedCommentsVisible"
           @zoom-in="zoomIn"
           @zoom-out="zoomOut"
           @set-zoom="setZoomLevel"
           @save-status-click="onSaveStatusClick"
-          @toggle-resolved-comments="toggleResolvedComments"
+          @toggle-resolved-comments="commentPresentation.toggleResolvedComments"
         />
       </div>
 
@@ -232,11 +241,12 @@ import { isTauriRuntime, platformKind } from '../shared/platform.js'
 import { relativeTime } from '../shared/time.js'
 import { basename, parentPath } from '../shared/utils/path.js'
 import { readFile } from '../services/fileSystem.js'
+import { absoluteWorkspacePath } from '../services/gitChanges.js'
 import { createWindowCloseGuard } from './windowCloseGuard.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
 import { taskCheckboxExtension } from './codemirror/taskCheckboxes.js'
-import { commentsExtension, setActiveComment as setActiveCommentEffect, setResolvedCommentsVisible, getCommentsFromState, commentMutation } from './codemirror/comments.js'
+import { commentsExtension, getCommentsFromState, commentMutation } from './codemirror/comments.js'
 import { escapeAttr } from '../services/comments/parser.js'
 import { buildCommentsPrompt } from '../services/comments/prompt.js'
 import { EditorView } from '@codemirror/view'
@@ -249,6 +259,7 @@ import { useFileOpen } from './composables/useFileOpen.js'
 import { useContentSync } from './composables/useContentSync.js'
 import { useExternalFileSync } from './composables/useExternalFileSync.js'
 import { useCommentMutations } from './composables/useCommentMutations.js'
+import { useCommentPresentation } from './composables/useCommentPresentation.js'
 import { useDiffReview } from './composables/useDiffReview.js'
 import { useTabManagement } from './composables/useTabManagement.js'
 import { requestGhostSuggestions } from '../services/ai/ghost.js'
@@ -270,7 +281,10 @@ import DiffView from './components/workspace/DiffView.vue'
 import BatchDiffView from './components/workspace/BatchDiffView.vue'
 import NewTabPage from './components/workspace/NewTabPage.vue'
 import FilePreviewPage from './components/workspace/FilePreviewPage.vue'
+import GitDiffView from './components/workspace/GitDiffView.vue'
+import GitReviewBar from './components/workspace/GitReviewBar.vue'
 import { useDiffStore } from '../stores/diff.js'
+import { useGitReviewStore } from '../stores/gitReview.js'
 
 const props = defineProps({
   hideSidebar: { type: Boolean, default: false },
@@ -285,6 +299,7 @@ const emit = defineEmits([
   'navigateEditor',
   'newRequest',
   'quickOpenRequest',
+  'reviewGitWithAgent',
 ])
 const editorShellRef = ref(null)
 
@@ -309,10 +324,8 @@ const {
 } = storeToRefs(fileManager)
 
 const commentManager = useCommentsStore()
-const activeCommentCount = computed(() => commentManager.comments.filter(comment => comment.status !== 'resolved').length)
-const resolvedCommentCount = computed(() => commentManager.comments.filter(comment => comment.status === 'resolved').length)
-const resolvedCommentsVisible = ref(false)
 const diffStore = useDiffStore()
+const gitReview = useGitReviewStore()
 const diffViewRef = ref(null)
 const batchDiffViewRef = ref(null)
 
@@ -438,27 +451,52 @@ const editorTabs = computed(() => {
 })
 
 const reviewTabActive = ref(false)
+const gitReviewTabActive = ref(false)
+const gitReviewVisible = computed(() => gitReview.active && gitReviewTabActive.value)
+const gitReviewPath = computed(() => {
+  const relativePath = gitReview.review?.path || gitReview.requestedFile
+  return relativePath
+    ? absoluteWorkspacePath(gitReview.workspacePath, relativePath)
+    : ''
+})
+const gitReviewDirty = computed(() => {
+  const path = normalizeComparablePath(gitReviewPath.value)
+  if (!path) return false
+  return openFiles.value.some(file => normalizeComparablePath(file.path) === path && file.dirty)
+})
 
 const displayTabs = computed(() => {
   const fileTabs = editorTabs.value.map(t => ({ ...t, type: 'file' }))
-  if (!diffStore.isBatch || !visibleDiffActive.value) return fileTabs
-  const pending = diffStore.pendingFiles.length
-  const total = diffStore.files.length
-  return [
-    ...fileTabs,
-    {
+  const tabs = [...fileTabs]
+  if (diffStore.isBatch && visibleDiffActive.value) {
+    const pending = diffStore.pendingFiles.length
+    const total = diffStore.files.length
+    tabs.push({
       id: '__review__',
       name: `Review · ${pending > 0 ? pending : total}`,
       type: 'review',
       dirty: pending > 0,
       saveTone: 'clean',
-    },
-  ]
+    })
+  }
+  if (gitReview.active) {
+    tabs.push({
+      id: '__git_review__',
+      name: `Changes · ${basename(gitReview.review?.path || gitReview.requestedFile || 'Review')}`,
+      type: 'git-review',
+      dirty: false,
+      saveTone: 'clean',
+    })
+  }
+  return tabs
 })
 
 const displayActiveTab = computed(() => {
+  if (gitReviewVisible.value) {
+    return displayTabs.value.findIndex(tab => tab.type === 'git-review')
+  }
   if (reviewTabActive.value && diffStore.isBatch && visibleDiffActive.value) {
-    return displayTabs.value.length - 1
+    return displayTabs.value.findIndex(tab => tab.type === 'review')
   }
   return activeVisibleFileIndex.value
 })
@@ -485,6 +523,7 @@ provide('hasEditorSelection', computed(() => Boolean(selectionText.value)))
 provide('onAddComment', () => onComment())
 provide('currentFilePath', computed(() => currentFile.value?.path || ''))
 const commentMutations = useCommentMutations(editorSurfaceRef)
+const commentPresentation = useCommentPresentation(editorSurfaceRef, commentManager)
 provide('commentMutations', commentMutations)
 
 // --- Proposal bridge (cross-window) ---
@@ -497,8 +536,14 @@ const proposalLifecycle = useEditorProposalLifecycle({
   currentEditorContent: () => currentEditorContent(),
   flushEditorContent: (...args) => flushEditorContent(...args),
   editorSurfaceRef,
-  activateDiff: (...args) => activateDiffForCurrentFile(...args),
-  activateBatchDiff: (...args) => activateBatchDiff(...args),
+  activateDiff: (...args) => {
+    gitReviewTabActive.value = false
+    return activateDiffForCurrentFile(...args)
+  },
+  activateBatchDiff: (...args) => {
+    gitReviewTabActive.value = false
+    return activateBatchDiff(...args)
+  },
 })
 
 const editorExtensions = computed(() => [
@@ -628,6 +673,8 @@ const tabMgmt = useTabManagement({
   diffActive: visibleDiffActive,
   displayTabs,
   reviewTabActive,
+  gitReviewStore: gitReview,
+  gitReviewTabActive,
   inlineAIState,
   activeFileIndex,
   flushEditorContent,
@@ -688,6 +735,10 @@ function closeActiveEditorTab() {
 
 function prepareWorkspaceSwitch() {
   flushEditorContent({ bridge: 'flush' })
+  if (gitReview.workspacePath && gitReview.workspacePath !== props.workspacePath) {
+    gitReview.clearWorkspace()
+    gitReviewTabActive.value = false
+  }
 }
 
 function restoreEditorFocus() {
@@ -697,7 +748,7 @@ function restoreEditorFocus() {
 function selectEditorTab(index) {
   const tab = displayTabs.value[index]
   onSelectTab(index)
-  if (tab?.type !== 'review') restoreEditorFocus()
+  if (tab?.type === 'file') restoreEditorFocus()
 }
 
 function createBlankFile() {
@@ -706,6 +757,7 @@ function createBlankFile() {
 }
 
 function openNewTabPage() {
+  gitReviewTabActive.value = false
   flushEditorContent({ bridge: 'flush' })
   fileManager.newTab()
 }
@@ -730,6 +782,10 @@ async function dismissEditorSurface() {
   if (inlineAIState.value) {
     closeInlineAI()
     restoreEditorFocus()
+    return true
+  }
+  if (gitReviewVisible.value) {
+    closeGitReview()
     return true
   }
   if (visibleDiffActive.value) {
@@ -939,19 +995,8 @@ function nativeMenuActions() {
   }
 }
 
-// --- Comments: Active comment sync (Vue→CM6) ---
-watch(() => commentManager.activeCommentId, (id) => {
-  const v = editorSurfaceRef.value?.getView()
-  if (!v) return
-  v.dispatch({ effects: setActiveCommentEffect.of(id) })
-})
-
 watch(() => currentFile.value?.id, () => {
-  setResolvedCommentsVisibility(false)
-})
-
-watch(resolvedCommentCount, (count) => {
-  if (count === 0) setResolvedCommentsVisibility(false)
+  commentPresentation.reset()
 })
 
 watch(() => editorSettings.aiInlineRewrite, (enabled) => {
@@ -966,17 +1011,6 @@ function onFormat(action) {
 
 function onEditCommand(action) {
   editorSurfaceRef.value?.edit(action)
-}
-
-function setResolvedCommentsVisibility(visible) {
-  resolvedCommentsVisible.value = visible
-  const view = editorSurfaceRef.value?.getView?.()
-  if (!view) return
-  view.dispatch({ effects: setResolvedCommentsVisible.of(visible) })
-}
-
-function toggleResolvedComments() {
-  setResolvedCommentsVisibility(!resolvedCommentsVisible.value)
 }
 
 function showCommentGate() {
@@ -1075,7 +1109,7 @@ async function onInlineCommentAction({ type, id, text, replyId }) {
 
   if (type === 'resolve') {
     const result = commentMutations.resolve?.(id) || { ok: false, error: 'Comment mutation unavailable.' }
-    if (result.ok !== false) setResolvedCommentsVisibility(false)
+    if (result.ok !== false) commentPresentation.hideResolvedComments()
     return result
   }
 
@@ -1228,7 +1262,7 @@ const {
   mimirCommentAction,
   mimirComments,
   mimirCycleTab,
-  mimirOpen,
+  mimirOpen: mimirOpenCommand,
   mimirOpenSettings,
   mimirOwnsFocus,
   mimirReplaceSelection,
@@ -1241,8 +1275,55 @@ const {
   mimirTabs,
 } = editorCommands
 
+async function mimirOpen(...args) {
+  gitReviewTabActive.value = false
+  return mimirOpenCommand(...args)
+}
+
+async function mimirReviewGit(request = {}) {
+  flushEditorContent({ bridge: 'flush' })
+  inlineAIState.value = null
+  reviewTabActive.value = false
+  gitReviewTabActive.value = true
+  return gitReview.reviewFile(request.file, {
+    workspacePath: request.workspacePath || props.workspacePath,
+    scope: request.scope || gitReview.scope,
+  })
+}
+
+async function onGitReviewOpenFile() {
+  const path = gitReviewPath.value
+  if (!path || gitReview.review?.status === 'deleted') return
+  gitReviewTabActive.value = false
+  await mimirOpen(path, { preview: false })
+  emit('navigateEditor', { path })
+}
+
+function onGitReviewAskAgent(presetId) {
+  const review = gitReview.review
+  if (!review?.path || !presetId) return
+  emit('reviewGitWithAgent', {
+    workspacePath: gitReview.workspacePath,
+    path: review.path,
+    status: review.status,
+    scope: review.scope,
+    presetId,
+  })
+}
+
+function closeGitReview() {
+  gitReview.deactivate()
+  gitReviewTabActive.value = false
+  restoreEditorFocus()
+}
+
+watch(() => gitReview.active, (active) => {
+  if (!active) gitReviewTabActive.value = false
+})
+
 defineExpose({
   mimirOpen,
+  mimirReviewGit,
   mimirState,
   mimirActive,
   mimirTabs,
@@ -1293,6 +1374,11 @@ useKeyboardShortcuts({
 })
 
 function onEditorKeydown(event) {
+  if (event.key === 'Escape' && gitReviewVisible.value) {
+    event.preventDefault()
+    closeGitReview()
+    return
+  }
   if (event.key === 'Escape' && visibleDiffActive.value) {
     event.preventDefault()
     void rejectDiffAndFocus().catch((error) => {
@@ -1386,6 +1472,10 @@ onUnmounted(() => {
   editorSession.dispose()
   documentBridge.dispose()
 })
+
+function normalizeComparablePath(path) {
+  return String(path || '').replaceAll('\\', '/').replace(/\/+$/, '')
+}
 </script>
 
 <style scoped>
