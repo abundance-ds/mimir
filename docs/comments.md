@@ -33,9 +33,20 @@ block discussion beneath its highlighted anchor. A thread supports:
 
 Resolved threads remain stored but leave the document flow. Their anchor has no
 comment highlight. The status bar shows one quiet Resolved count when the document
-has resolved threads. The user can use it to reveal the threads in a collapsed
-history view and reopen one. Hiding or showing resolved threads and
+has resolved threads. The user can use it to reveal the complete threads inline
+at normal comment contrast and reopen one. Hiding or showing resolved threads and
 minimizing/expanding active threads are UI state only.
+
+The Editor toolbar shows previous and next comment controls with the visible
+comment count. Navigation wraps in document order. It includes resolved threads
+only while resolved history is visible. A revealed thread marks its Resolved
+status with the accent color so active and resolved discussions remain scannable.
+
+`src/stores/comments.js` owns transient document-level presentation: the active
+thread, resolved-history visibility, counts, and the ordered visible set.
+`useCommentPresentation.js` is the single bridge from that state to CodeMirror
+and owns previous/next navigation. CodeMirror remains the owner of parsed tag
+ranges, protected syntax, widget drafts, and rendering.
 
 Delete replaces the entire tag with its anchor text. Remove all strips every
 comment/reply wrapper while preserving every anchor. Resolve and reopen update

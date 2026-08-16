@@ -8,19 +8,21 @@ file work; the human monitors, contributes, and corrects. No chat surface.
 ## GraphStore contract
 
 Markdown is the durable source of truth. `GraphStore` is a rebuildable Rust
-read model: normalized indexes over `knowledge/*.md` and `issues/*.md`,
-revision-aware atomic writes, backlinks, diagnostics, and filesystem watchers
-that emit `mimir://graph-changed`.
+read model: normalized indexes over `graph/*.md`, revision-aware atomic writes,
+backlinks, diagnostics, and filesystem watchers that emit
+`mimir://graph-changed`.
 
 ## Physical scopes
 
 | Scope | Root | Intended use |
 |---|---|---|
-| Private | `~/.mimir/graph/private/` | local notes, drafts, sensitive records |
+| Private | `~/.mimir/private/` | local notes, drafts, sensitive records |
 | Project | current workspace | engagement issues, decisions, evidence, deliverables |
-| Team | Settings > Graph configured folder | shared companies, people, projects, methods, knowledge |
+| Team | Settings > Team folder | shared companies, people, projects, methods, knowledge |
 
-Each root contains flat `knowledge/*.md` and `issues/*.md` directories.
+Each root contains a flat `graph/*.md` directory. Node kind stays in the file
+frontmatter. The Issue Board and Knowledge views are filtered projections over
+the same files.
 Scope ids filter queries, context packs, and projections; private nodes never
 leak into team-only views. This is a storage boundary, not a permission
 system. External collaborators share the project root without the team root.
@@ -102,9 +104,19 @@ a distributed audit log.
 
 - **Board**: two-line rows (priority control, title, metadata in mono). Drag reorder, keyboard movement, grouping, filter strip, settings-backed view state.
 - **Portfolio**: tabular ledger (open/waiting/done/completion, health as marker + word). Project Focus: standing summary with blocked-on, decisions, deliverables.
-- **Scan / Peek / Focus**: keyboard focus lands in projection on open. Peek: editable side surface beside the projection — title, status, priority, project, owner, due date, waiting-for, and the working note, all autosaving. Focus: full object workspace adding reminder, snooze, tags, deliverables, connections, connected work, and provenance.
+- **Scan / Peek / Focus**: keyboard focus lands in projection on open. Peek: editable side surface beside the projection — title, status, priority, project, owner, due date, waiting-for, and the working note, all autosaving. Focus: full object workspace adding reminder, snooze, tags, deliverables, connections, and connected work. Peek and Focus keep history, mode, save, Markdown, overflow, and close actions in one header; neither uses a separate action footer.
 - **Inspector**: edit-first and revision-aware; autosaves the draft and commits it before navigation; a rejected save keeps the surface open with its error and releases the next explicit exit. Bounded relation vocabulary via two-step connection composer. Delete to OS Trash with in-session undo.
-- **Context trail**: preserves navigation path from projection through inspected nodes.
+- **Primary metadata**: Peek and Focus use the same labeled grid for status,
+  priority, project, owner, due date, waiting-for, Created, and Last updated.
+  Values and labels use one system UI typeface and one spacing scale. A legacy
+  source without a timestamp says `Unknown`.
+- **Connections**: relationships are supporting details, not primary object metadata. Peek puts its compact bidirectional relationship summary inside the expandable Details area and shows the connection count while it is closed. Details stays at the bottom edge; when no Activity or deliverable follows a short note, the editable note surface absorbs the spare height. Focus uses its editable Connections and Connected work sections; it does not repeat a compact relationship strip below the hero.
+- **Object history**: Back and Forward controls in the Peek and Focus headers
+  preserve a bounded 24-object visit history. Tooltips name the destination.
+  Going back keeps the forward stack; opening a different object replaces it.
+  Closing the inspector clears the history and restores the first projection.
+- **Technical identity**: raw object ids and source revisions stay out of the
+  product surface. The Markdown action opens the source when needed.
 
 ## Search
 
@@ -112,7 +124,9 @@ A persistent graph search field filters the active projection across indexed
 titles, ids, tags, summaries, and body text. Input is debounced, ranked results
 replace the projection in place, and the visible result count updates without
 opening a separate search surface. Cmd/Ctrl+F focuses the field; Escape or the
-clear control restores the projection immediately.
+clear control restores the projection immediately. Search state stays in that
+field. Projection filters stay in their toolbar controls with adjacent one-click
+reset actions; they do not add status rows above the results.
 
 ## Dispatch bar
 
@@ -163,12 +177,16 @@ mimir call graph_events '{"scopeIds":["project:alpha"],"since":"2026-07-20T00:00
 Issues are `kind: "issue"` graph nodes. Internal compatibility and semantic
 handlers are not public tool families.
 
-## Migration and compatibility
+## Unified storage and older frontmatter
 
-Opening a graph dual-reads existing `<root>/knowledge/*.md` and
-`<root>/issues/*.md` without first rewriting them. Internal compatibility
-translation preserves legacy shapes. Unknown metadata and stable ids survive
-read/write round trips.
+GraphRuntime reads and watches `<root>/graph/*.md` in each mounted scope. New
+nodes of every kind write to the same directory. Older knowledge and issue
+frontmatter shapes normalize on read. Unknown metadata, stable ids, typed
+properties, and relations survive canonical graph serialization.
+
+A kindless record defaults to `note`. Strong legacy workflow fields such as
+`status`, `priority`, or `dueDate` infer `issue`. An explicit unknown kind stays
+unchanged and receives an `unknown-kind` diagnostic for deliberate repair.
 
 `graph.migration_report` is a read-only inventory. It reports source and scope
 counts, kinds and aliases, id collisions, diagnostics, and every legacy
@@ -176,9 +194,8 @@ project/assignee reference as exact-id, unique-title, ambiguous, or unresolved.
 It sets `readyForCutover` only when the mounted data is unambiguous enough.
 
 `graph.resolve_reference` performs an explicit, kind-checked project or
-assignee repair. No fuzzy identity choice is written automatically. Existing
-paths remain in place; any future physical reorganization is a separate
-migration.
+assignee repair. No fuzzy identity choice is written automatically. Reference
+repairs do not move source files.
 
 Mutation recovery is source-based:
 
@@ -207,8 +224,8 @@ Renderer ownership is split between `src/services/businessGraph.js`,
 `src/stores/businessGraph.js`, the built-in app, and its components under
 `src/mimir/apps/business-graph/` — including `WorkBoard.vue`, `NowView.vue`,
 `DispatchBar.vue`, `PortfolioView.vue`, `ProjectStanding.vue`,
-`EntityList.vue`, `TimelineView.vue`, `GraphInspector.vue`, and
-`GraphFilterBanner.vue`. `WorkbenchApp.vue` mounts roots and owns the
+`EntityList.vue`, `TimelineView.vue`, and `GraphInspector.vue`.
+`WorkbenchApp.vue` mounts roots and owns the
 work-Activity handoff (foreground delegate or background dispatch);
 `AppActivity.vue` only routes the built-in surface.
 

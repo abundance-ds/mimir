@@ -19,7 +19,7 @@ crash.
 | `~/.mimir/routines-state.json` | `routine_runtime.rs` | planner cursor only; definitions remain TOML authority |
 | `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
 | `~/.mimir/app-data/<app-id>/<key>.json` | app SDK through `apps.rs` | namespaced by validated app id/key; value bytes are opaque to Rust |
-| private/project/team `knowledge/*.md`, `issues/*.md` | user, GraphRuntime UI/tools | Markdown is canonical; every node retains physical scope/path/revision; the in-memory GraphStore is disposable |
+| Private/Project/Team `graph/*.md` | user, GraphRuntime UI/tools | Markdown is canonical; every node retains physical scope/path/revision; older frontmatter shapes normalize on read; the in-memory GraphStore is disposable |
 | `~/.mimir/tracker/tracker.sqlite` | `tracker/store.rs`, `tracker/runtime.rs` | WAL database for configuration, exact activity intervals, rules/jobs, usage, nudges, and idempotent imports; disabled state retains data |
 | `~/.mimir/keys.env` | `ai_keys.rs`, debug only | owner-only atomic plaintext fallback when keychain storage fails |
 

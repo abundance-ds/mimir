@@ -1,6 +1,6 @@
 # Files
 
-Files spans four state owners. Keep them separate when changing behavior:
+Files spans five state owners. Keep them separate when changing behavior:
 
 | Projection | Canonical owner | Renderer owner/consumer |
 |---|---|---|
@@ -8,6 +8,7 @@ Files spans four state owners. Keep them separate when changing behavior:
 | immediate directory children and mutation safety | `src-tauri/src/workspace_files.rs` | `src/services/workspaceFileOperations.js`, `workspaceFiles.treeChildren` |
 | open tabs and user-opened recents | — | `src/stores/files.js` |
 | Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mimir/activities/FilesActivity.vue`, `src/mimir/files/`, `src/mimir/components/FileTreeRow.vue` |
+| Git change scopes, review snapshots, and index actions | `src-tauri/src/git.rs` | `src/services/gitReview.js`, `src/stores/gitReview.js`, `GitChangesList.vue` |
 
 The metadata index and directory tree are intentionally different projections.
 The index contains reviewable regular files, respects ignore/noise rules, and
@@ -15,6 +16,10 @@ is sorted recent-first. The tree lists one directory at a time, includes
 directories, applies native workspace/symlink guards, and classifies each entry
 for opening. Do not derive the tree from the index: ignored or unindexed
 directory structure would disappear and expansion would require a full scan.
+
+Project `graph/`, `skills/`, and `agents/` folders are ordinary repository
+content. Files shows them through the normal tree and Git projections; their
+special meaning belongs to the graph and agent runtimes.
 
 ## View composition
 
@@ -50,6 +55,12 @@ directory structure would disappear and expansion would require a full scan.
   queue with parent paths, including deleted or not-yet-loaded entries. The
   named `Git changes` filter composes with path/content search and clears from
   the surface.
+- Changes is a separate review queue. It keeps staged and unstaged state
+  distinct and filters the queue by All, Unstaged, or Staged. Selecting a row
+  opens an immutable Git snapshot in the Editor. This does not open, edit, or
+  replace the file buffer. A folder that is not a Git repository gets a quiet
+  setup state instead of a native library error. The original Project Git
+  filter remains available.
 
 `FilesActivity.vue` composes ephemeral surface state while focused controllers
 under `src/mimir/files/` own selection/navigation, context-menu lifetime,
@@ -219,6 +230,7 @@ repoint or release.
 | tree load/expand/refresh | `workspace_files.rs`, `workspaceFileOperations.js`, `workspaceFiles.js`, `FilesActivity.vue` | native workspace-file, service, store, Files Activity tests |
 | row ledger, metadata formatting, focus, selection, context actions | `FilesActivity.vue`, `mimir/files/fileLedger.js`, `mimir/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity, ledger, and file-controller tests |
 | favorites | `mimir/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
+| Git queue, snapshot review, stage/unstage | `git.rs`, `gitReview.js` service/store, `GitChangesList.vue`, Editor Git review surface, Workbench agent handoff | native Git tests; Git service/store/components; Files Activity, Editor tab, and Workbench bridge tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |
 | external edit refresh | `file_index_commands.rs`, `useExternalFileSync.js`, `stores/files.js`, `EditorSurface.vue` | native index, external-sync, file-store, and EditorSurface tests; desktop CLI-edit smoke |
 | external move/rename reconciliation | `file_index.rs` (identity pairing), `file_index_commands.rs`, `stores/workspaceFiles.js`, `stores/files.js`, favorites in `stores/settings.js` | native index move tests; workspaceFiles store tests |

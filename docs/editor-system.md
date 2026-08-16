@@ -114,7 +114,7 @@ CodeMirror states and each add the same extension.
 
 The active document remains plain Markdown on disk.
 
-## Review flow
+## Proposal review
 
 Substantial MCP file edits become proposals:
 
@@ -139,6 +139,35 @@ complete until `proposal_respond` succeeds; failure leaves the diff open.
 A single-file review records the exact Editor file id. A project switch or tab
 switch hides the review but keeps it active. The review can apply only after
 its exact target tab becomes active again.
+
+## Git review
+
+The Files Changes view opens a separate, read-only Editor tab. `git.rs` creates
+the Git snapshot. `src/stores/gitReview.js` owns the queue, selected scope,
+loaded snapshot, and index action state. `GitDiffView.vue` uses the existing
+CodeMirror merge renderer with edit and merge controls disabled.
+
+Git review and proposal review have separate stores and lifecycles. Opening or
+closing a Git review does not accept, reject, or clear a proposal. If a Git
+review hides an active single-file proposal, returning to its exact file shows
+the proposal again.
+
+The Git review bar can open the file, prepare a question for a selected agent,
+stage the file, or unstage the file. Ask agent opens the available launcher
+menu. Mimir starts that exact agent and inserts an editable review prompt
+without submitting it. The user can add a specific question before pressing
+Enter.
+
+Stage includes the reviewed file in the next commit. It does not create a
+commit and it never changes the working file. The bar shows `Ready to commit`
+after a complete stage. If the working file changes later, it shows `New edits
+not staged` and offers `Review new edits`. Unstage removes the file from the
+next commit and also leaves the working file unchanged.
+
+Stage and unstage require the loaded snapshot to still match Git. Stage is
+disabled when the open Editor buffer has unsaved text. If a file has staged and
+unstaged changes, the user must review the exact Unstaged or Staged scope before
+the related index action.
 
 ## Agent bridge
 
@@ -175,10 +204,12 @@ stored in the Markdown itself. See [comments.md](comments.md).
 - `src/editor/components/workspace/PdfPreview.vue`
 - `src/editor/components/workspace/DiffView.vue`
 - `src/editor/components/workspace/BatchDiffView.vue`
+- `src/editor/components/workspace/GitDiffView.vue`
+- `src/editor/components/workspace/GitReviewBar.vue`
 - `src/editor/components/workspace/InlineAI.vue`
 - `src/editor/codemirror/`
 - `src/editor/composables/`
-- `src/stores/files.js`, `src/stores/diff.js`, `src/stores/comments.js`
+- `src/stores/files.js`, `src/stores/diff.js`, `src/stores/gitReview.js`, `src/stores/comments.js`
 - `src/services/fileSystem.js`, `src/services/workspaceFileOperations.js`
 
 Primary cross-cutting tests are session restore/persist, window close/app Quit,

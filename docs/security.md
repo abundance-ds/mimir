@@ -12,6 +12,7 @@ The user trusts:
 - local App definitions and their JavaScript;
 - callers able to connect to Mimir's loopback MCP port;
 - Routine definitions and launcher presets under `~/.mimir`;
+- agent packages and skills in the Project, Private, and Team roots;
 - the currently opened workspace.
 
 There is no per-agent identity, permission prompt, package signature, App
@@ -37,9 +38,9 @@ naming the exact boundary it enforces.
 | Scribe follow-up | exact-argv durable Activity, terminal revision, bounded schema-validated output | the selected CLI agent has normal user-account filesystem/process authority |
 | Tracker collector | disabled native guard; lazy Accessibility; browser host-only retention; no screen capture or public tools | enabled title/domain history is sensitive local data readable by the user's account |
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
-| Launcher/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment |
+| Launcher/Agent package/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment; Project and Team packages are trusted teammate code |
 | API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
-| Work connections | provider tokens and Granola API key stay in Mimir's OS-keychain service; OAuth uses PKCE and a loopback callback | connected providers receive agent-requested reads and explicit user-requested writes by design |
+| Work connections | provider tokens and Granola API key stay in Mimir's OS-keychain service; Google OAuth uses PKCE and a loopback callback | connected providers receive agent-requested reads and explicit user-requested writes by design |
 | Chat transport | public WSS, mandatory SASL, loopback Ergo listeners behind Caddy | one small-team server; no per-room authorization UI or enterprise tenancy |
 | Chat administration | bearer token checked by a loopback Node service; server stores only its digest; dedicated narrow Ergo OPER | possession of the raw token grants full teammate/channel lifecycle administration |
 | Linked chat agent | Activity-to-room link rejects target changes | an unlinked trusted-local MCP caller may pass a room explicitly |

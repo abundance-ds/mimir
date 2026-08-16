@@ -1,8 +1,8 @@
 # Routines
 
-Routines are file-defined prompts that launch CLI agent presets — on a cron
-schedule, or manually with one click. A scheduled or manual run becomes an
-ordinary durable Activity with status and scrollback.
+Routines are file-defined runs that launch an agent package or a CLI preset —
+on a cron schedule, or manually with one click. A scheduled or manual run
+becomes an ordinary durable Activity with status and scrollback.
 
 ## Definition
 
@@ -14,8 +14,7 @@ title = "Morning review"
 enabled = true
 schedule = "0 9 * * 1-5"
 timezone = "Europe/Berlin"
-preset = "codex"
-prompt = "Review recent workspace changes and leave precise comments."
+agent = "morning-review"
 overlap = "skip"
 missed = "run-once"
 workspace = "/absolute/path/to/workspace"
@@ -30,8 +29,9 @@ Fields:
 | `enabled` | defaults to `true`; only governs scheduled fires |
 | `schedule` | optional five-, six-, or seven-field cron expression; omit it entirely for a manual-only routine |
 | `timezone` | IANA timezone or `local`; `local` resolves the `TZ` environment variable and falls back to UTC when `TZ` is unset |
-| `preset` | ID from `~/.mimir/launchers.json` |
-| `prompt` | final CLI prompt argument |
+| `agent` | scoped agent package name; use instead of `preset` and `prompt` |
+| `preset` | ID from `~/.mimir/launchers.json`; required with `prompt` when `agent` is absent |
+| `prompt` | final CLI prompt argument; required with `preset` when `agent` is absent |
 | `overlap` | `skip` or `parallel` |
 | `missed` | `skip` or `run-once` |
 | `workspace` | folder the run starts in; required when the preset's working directory is "workspace", ignored for home/custom presets |
@@ -43,6 +43,9 @@ The runtime normalizes it into the seconds-aware scheduler format.
 A routine without a `schedule` is manual-only: the planner never arms it and
 `enabled` has no effect on it, but Run now launches it exactly like a scheduled
 fire. An empty `schedule = ""` is rejected — omit the key instead.
+
+`agent` and `preset`/`prompt` are mutually exclusive. The routine workspace is
+the Project scope for package and skill resolution.
 
 `interactive` picks the argv adapter. Headless runs force one-shot mode
 (`codex exec …`, `claude --print …`, `pi --print …`; Gemini has no headless
@@ -70,15 +73,17 @@ runtime-unavailable because its current preset cannot resolve.
 At fire time the runtime:
 
 1. applies missed-fire and overlap policy;
-2. resolves the current launcher preset and agent connection flags;
-3. appends the routine prompt as one argv item through the session's argv
-   adapter (headless or interactive);
+2. resolves the current agent package or launcher preset and agent connection
+   flags;
+3. builds the package mission and skills, or appends the routine prompt, as one
+   argv item through the session's argv adapter (headless or interactive);
 4. spawns a durable `routine` Activity through `ActivitySupervisor`;
 5. records the scheduled time and routine origin on the Activity.
 
 Run now uses the same launch path with the current time as its scheduled time.
-"Run again" on an ended run resolves the current TOML definition, so updated
-prompt, flags, workspace, overlap, and launcher policy take effect.
+"Run again" on an ended run resolves the current TOML definition and current
+agent package, so updated mission, prompt, flags, workspace, overlap, and
+launcher policy take effect.
 
 Planner cursor is committed atomically before scheduled fires are spawned. This
 prevents a crash during spawn from repeatedly treating the same instant as
@@ -98,8 +103,11 @@ planner.
 - Trigger defaults to manual-only; scheduled mode exposes a builder that compiles
   to five-field cron. Cron/builder mapping: `src/mimir/activities/routineSchedule.js`.
   Definitions whose cron the builder cannot express open in raw cron mode.
-- Agent is picked from launcher presets configured under Settings. Missing
-  binaries and vanished presets stay selectable but flagged.
+- A routine can select an active scoped agent package by name. The form shows
+  its winning scope and requires a workspace for a Project package. Otherwise,
+  its launcher is picked from presets configured under Settings. Missing
+  binaries, vanished presets, and unresolved packages stay visible with
+  diagnostics.
 - When the preset runs in "the workspace", the form requires a Workspace field.
 
 For launcher presets see [agent-setup.md](agent-setup.md).
@@ -114,7 +122,7 @@ Private registry handlers:
 |---|---|---|
 | `routines.list` | `routines_list` | catalog, status, source path/revision |
 | `routines.run` | `routines_run` | launch now as a durable Activity |
-| `routines.create` | `routines_create` | create canonical TOML; `schedule` optional (omit for manual), `interactive` optional (defaults to headless) |
+| `routines.create` | `routines_create` | create canonical TOML; use `agent` or a `preset`/`prompt` pair; `schedule` optional (omit for manual) |
 | `routines.update` | `routines_update` | atomic, revision-guarded replace |
 | `routines.duplicate` | `routines_duplicate` | new id, always initially paused |
 | `routines.trash` | `routines_trash` | revision-guarded system Trash |

@@ -6,10 +6,10 @@ SQLite store plus a native Vue Activity surface. Its stable built-in app id and
 Rust-helper name are both `tracker`.
 
 Tracker is hard-coded into Mimir, not installed from an App manifest. It is
-visible in `Settings > Apps` so the user can discover and configure it, but is
-disabled by default and stays out of Tools and Go to until enabled. Disabling
-retains history and settings while stopping sampling, AI work, nudges,
-notifications, launch-at-login, and the Tracker menu-bar item.
+configured in `Settings > Tracker`, is disabled by default, and stays out of
+Tools and Go to until enabled. Disabling retains history and settings while
+stopping sampling, AI work, nudges, notifications, launch-at-login, and the
+Tracker menu-bar item.
 
 ## Product contract
 
@@ -62,8 +62,8 @@ The renderer is a projection over that authority:
 - `src/stores/tracker.js` owns one reconciled Pinia status projection;
 - `src/mimir/apps/TrackerApp.vue` and `src/mimir/apps/tracker/` own the
   dashboard;
-- `src/shared/ui/settings/TrackerSettingsPanel.vue` owns opt-in, privacy,
-  runtime, and migration controls.
+- `src/shared/ui/settings/TrackerSettingsPanel.vue` owns enable, collection,
+  dependent options, and migration controls.
 
 The dashboard is a flat time instrument rather than a generic card grid. Day
 uses one exact-width timeline ruler; Week, Month, and All use ledgers, stacked
@@ -197,10 +197,10 @@ Historical reports refresh when opened, navigated, or explicitly requested;
 live sampling revisions refresh only Day and Classifications.
 
 Tracker derives its reporting and nudge timezone from the operating system at
-native startup. Settings presents that resolved timezone as information, not an
-editable IANA identifier, keeping renderer day bounds and native report buckets
-on the same clock. The Argus import IPC retains an explicit timezone solely for
-interpreting legacy timestamps.
+native startup. The settings UI does not expose it as an ordinary setting.
+Renderer day bounds and native report buckets still use the same clock. The
+Argus import IPC receives the resolved timezone internally to interpret legacy
+timestamps.
 
 Disabling never deletes history. To deliberately remove all Tracker data, quit
 Mimir first and remove `~/.mimir/tracker/`; this is intentionally not combined
@@ -218,7 +218,7 @@ Safe cutover order:
 1. Quit the legacy `/Applications/Argus.app` and prevent its launchd job from
    restarting.
 2. Keep Tracker disabled.
-3. Inspect the preview and confirm the import timezone.
+3. Inspect the preview.
 4. Import once.
 5. Review a Day and Classifications sample, then enable Tracker.
 

@@ -79,9 +79,8 @@ requirements; they do not replace runtime verification.
   and never creates a second record. Resume preserves that Activity's recorded
   model, permission, and tool flags while refreshing Mimir's scoped connection.
 - Codex, Claude, Pi, and Gemini get a bounded first-prompt title through the
-  same terminal input path. A later agent title can improve it once. A manual
-  rename always overwrites every automatic title and remains authoritative
-  across late calls and resumed runs.
+  same terminal input path. A manual rename always overwrites the provisional
+  title and remains authoritative across resumed runs.
 - History rows without an exact id restore the transcript only. Run again is a
   distinct new-session action, ambiguous legacy identity fails closed, and
   failed or duplicate Resume attempts cannot unarchive or respawn twice.
@@ -95,8 +94,8 @@ requirements; they do not replace runtime verification.
   `tools/list`, and `tools/call`.
 - One canonical registry backs the UI and runtimes; MCP and `mimir` use its
   explicit public projection.
-- Default agent discovery contains only `mimir_state`, `mimir_title`,
-  `mimir_reveal`, and `mimir_propose`; the remaining public tools require CLI
+- Default agent discovery contains only `mimir_state`, `mimir_reveal`, and
+  `mimir_propose`; the remaining public tools require CLI
   discovery.
 - Tool calls validate complete object schemas, report all input failures
   together, and return structured stable errors.
@@ -119,7 +118,7 @@ requirements; they do not replace runtime verification.
 - Connection credentials use only Mimir's keychain service. Granola uses its
   public REST API and a user-supplied supported API key; no provider desktop
   cache or token file is read.
-- Catalog and personal skills trigger natively in every client; project skills
+- Private and Team skills trigger natively in every client; Project skills
   trigger natively in Claude and Pi and remain one explicit lookup away in
   Codex and Gemini.
 
@@ -218,15 +217,17 @@ requirements; they do not replace runtime verification.
   Apps destination.
 - Tools support persistent manual ordering by pointer or Shift+Alt+Up/Down.
 - The bottom Settings control remains visible in both Sidebar states; Settings
-  > Apps is the catalog and management surface.
-- Settings > Apps is a searchable, keyboard-operable local instrument manager
-  for built-ins and valid definitions from `~/.mimir/apps`.
+  > Apps is the local-definition management surface.
+- Settings > Apps is a compact, keyboard-operable row list for valid definitions
+  from `~/.mimir/apps`. Built-ins and empty detail pages do not appear there.
 - It launches and reloads Apps, opens or reveals local definitions, creates a
   runnable starter app, duplicates local packages, updates display titles
   without changing stable ids, and moves exact definitions to Trash.
 - App mutations update Sidebar launch rows immediately through the human UI.
 - Invalid TOML, duplicate IDs, missing entries, and invalid modes produce
   visible diagnostics without hiding valid apps.
+- Tracker configuration has a direct Settings section and uses the shared
+  Settings controls with progressive disclosure for dependent options.
 - Embedded, terminal, process, window, Rust-helper, and action launch plans
   resolve explicitly.
 - Stable Apps reopen one singleton Tool Activity and do not duplicate
@@ -285,8 +286,8 @@ requirements; they do not replace runtime verification.
 
 ## Business graph
 
-- Knowledge and Issue Markdown remain canonical and dual-read through one
-  Rust-owned GraphStore without mandatory source rewrites.
+- Every graph node kind is canonical Markdown under `graph/` and loads through
+  one Rust-owned GraphStore.
 - Private, current-project, and optional team roots compose into projections
   without losing scope, source path, source revision, or legacy metadata.
 - A query limited to project or team scopes never returns private nodes,
@@ -312,12 +313,15 @@ requirements; they do not replace runtime verification.
 - The app follows Scan → Peek → Focus: projections remain scannable, Peek
   edits an object's operational properties and working note in place beside the
   projection, and Focus uses one spacious scroll adding the remaining
-  properties, connections, and provenance.
-- The inspector preserves a context trail, commits drafts before every
-  replacing navigation or scope refresh, opens sources and deliverables in the
-  Editor, shows related Activities, and reports revision conflicts rather than
-  overwriting them. A rejected save keeps its error on the surface and never
-  traps the object.
+  planning properties, connections, and connected work. Peek and Focus use one
+  labeled metadata grid for status, priority, project, owner, due date,
+  waiting-for, Created, and Last updated.
+- The inspector provides destination-aware Back and Forward controls with a
+  bounded object history. It commits drafts before every replacing navigation
+  or scope refresh, opens sources and deliverables in the Editor, shows related
+  Activities, and reports revision conflicts rather than overwriting them. A
+  rejected save keeps its error on the surface and never traps the object. Raw
+  object ids and source revisions do not appear in the inspector.
 - A legacy `project`/`assignee` label that is not a graph node stays a label:
   it never becomes a relation, and it never blocks saving the rest of the node.
 - `graph.context` bounds bodies and node count, preserves provenance and

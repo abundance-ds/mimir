@@ -18,11 +18,11 @@ issue session IDs. It must not be exposed beyond loopback.
 Initialization contains only:
 
 ```text
-Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`. If a work connection is missing, ask the user to open Mimir Settings → Connections.
+Discover other tools with `mimir tools`.
 ```
 
-Normal `tools/list` advertises `mimir_state`, `mimir_title`, `mimir_reveal`,
-and `mimir_propose`. The installed CLI uses `includeAll: true` to obtain every
+Normal `tools/list` advertises `mimir_state`, `mimir_reveal`, and
+`mimir_propose`. The installed CLI uses `includeAll: true` to obtain every
 currently backed public tool. That wider result is still a public projection,
 not the internal registry.
 
@@ -36,7 +36,7 @@ handler exists.
 
 The projection includes `files_trash`, 5 bounded post-recording Scribe tools,
 the 5 chat tools (`chat_rooms`, `chat_read`, `chat_search`, `chat_send`,
-`chat_download`), and up to 13 connection tools.
+`chat_download`), and up to 14 connection tools.
 [agent-interface.md](agent-interface.md) owns the full canonical tool listing,
 the counts, and the policy for which capabilities are agent-facing at all.
 

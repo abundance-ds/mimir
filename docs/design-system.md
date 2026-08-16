@@ -3,6 +3,26 @@
 This document defines the current visual and interaction rules for Mimir.
 [workbench-design.md](workbench-design.md) defines the shell-specific layout.
 
+## Design stance
+
+Mimir is the visual form of ASD-STE100: direct, controlled, and unambiguous.
+Each element has one job. Position, spacing, type, and restrained signals make
+the interface clear before decoration does. Familiar words state what happened
+and what the user can do next.
+
+The intended response is: “Wow, that is working surprisingly great.” This
+response must come from speed, predictability, and useful details that appear at
+the correct time. It must not come from cuteness, novelty, ornamental motion, or
+extra interface language.
+
+- Remove an element before adding another explanation.
+- Group controls by the thing they affect, and separate groups with structure.
+- Keep inactive information quiet; make selected, changed, or actionable state
+  clear without making it loud.
+- Prefer one precise word, value, or hairline over an illustrative icon when the
+  icon adds no meaning.
+- Make advanced behavior feel obvious after one use and dependable thereafter.
+
 ## Principles
 
 - Every property change has an on-surface control; chords accelerate, never gate.
@@ -19,17 +39,21 @@ This document defines the current visual and interaction rules for Mimir.
 See [business-graph.md](business-graph.md) for the dispatch-desk model and
 graph ontology.
 
-- Titles: system UI ~12px. Metadata: system mono 10-11px, tabular numerals. Micro labels: uppercase letterspaced mono >= 9px.
+- Titles: system UI ~12px. Inspector metadata labels and values use the same
+  system UI face; dates use tabular numerals without changing typeface. Reserve
+  monospace for paths, code, and other technical values. Micro labels outside
+  the inspector can use uppercase letterspaced mono at 9px or larger.
 - Rows on projection canvas separated by 1px hairlines — no wells, no raised plates.
 - Radius 0-2px; no shadows except functional overlays; no gradients.
 - Inspector (Peek/Focus) property controls are ghost fields: borderless and
   transparent at rest, `chrome-mid` wash on hover, accent ring on focus,
-  radius 0-2px. A self-evident control (status, priority, dates, project,
-  owner) carries no visible text label — the current value is the label;
-  accessible names come from `aria-label`. No character counters, no
-  editorial section mastheads, no duplicate state banners. The working note
-  is unframed document text, not a boxed textarea. Boxed fields remain
-  correct inside dialogs (create, summarise).
+  radius 0-2px. Primary metadata uses one label/value grammar in both modes:
+  sentence-case labels, aligned values, one font family, and one spacing scale.
+  Do not rely on a current value to explain an editable control. Keep accessible
+  names in addition to visible labels. No character counters, duplicate state
+  banners, raw object ids, or source revisions. The working note is unframed
+  document text, not a boxed textarea. Boxed fields remain correct inside
+  dialogs (create, summarise).
 - **Banned**: colored left borders, left-edge classification devices, ALL-CAPS kicker mastheads, lit lamps, blinking flags, meter bars, reverse video, ASCII ornament, sparkles, suggestion chips, hover transforms, AI chat surfaces. Agents appear as authors/processes (initials, active count, events in Changes) — never personas.
 
 ## Tokens
@@ -67,6 +91,9 @@ The `data-theme` values are `parchment`, `studio`, `glacier`, `slate`,
 `src/shared/ui/settings/AppearanceSection.vue`.
 
 Every theme must preserve token roles and contrast relationships.
+Against every theme surface, `ink-3` has a minimum 5:1 contrast ratio and
+`ink-4` has a minimum 4.5:1 ratio. Small metadata must remain readable at the
+default interface zoom; quiet means subordinate, not faint.
 
 ## Type
 

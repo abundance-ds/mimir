@@ -1,13 +1,13 @@
 # Apps
 
-Apps are local instruments. Mimir ships Today, Business graph, and Tracker as
-built-ins; additional definitions live under `~/.mimir/apps/`.
+Apps are local instruments. Mimir ships Today, Business graph, Scribe, and
+Tracker as built-ins; additional definitions live under `~/.mimir/apps/`.
 
 There is no generic Apps Activity or launcher row. The Sidebar places stable
 Apps under Tools; the Activities `+` and Cmd/Ctrl+P expose terminal/process
-Apps beside configured CLI launchers. Settings > Apps is the catalog: inspect,
-reload, diagnose, search, launch, open or reveal definitions, duplicate them,
-rename their display title, or move them to the operating-system Trash.
+Apps beside configured CLI launchers. Settings > Apps is a compact manager for
+local definitions only. Built-in products use their own Settings sections when
+they have settings.
 
 Sidebar order is local presentation state, not catalog order. Pointer drag or
 Shift+Alt+Up/Down updates `sidebarToolOrder` for Tools. Fresh-run sources use
@@ -22,10 +22,8 @@ Activities history.
 This is deliberately a personal/small-team local instrument manager. There is
 no marketplace, install workflow, trust gate, permission approval, generic App
 enable switch, package origin, or team policy layer. Put code in
-`~/.mimir/apps`, reload, and run it. Tracker is the deliberate exception at the
-subsystem level: its built-in definition is always discoverable in Settings,
-but its sensitive background collector is explicitly enabled or disabled by
-Tracker's native configuration.
+`~/.mimir/apps`, reload, and run it. Tracker has a dedicated Settings section
+because it owns background collection and related options.
 
 App manifests and frames are trusted local extension code. Manifest/path
 validation protects catalog/protocol integrity; it does not sandbox SDK
@@ -33,18 +31,24 @@ filesystem, HTTP, or registry calls. See [security.md](security.md).
 
 ## Settings workflow
 
-`Settings > Apps` is the management surface.
+`Settings > Apps` is a one-column manager for definitions under
+`~/.mimir/apps`. Each app is one row with its name, **Open**, **Edit**, and one
+overflow menu. There is no app picker, selection state, or detail pane.
 
-- **New** creates a working embedded app (starter note with SDK autosave and a
-  live `read` tool).
-- Duplicate copies a directory app under a new stable id. Symlinks and packages
-  above 512 entries/32 MB are rejected.
-- Rename changes only the display title. The id is stable: it owns app data,
-  Activity identity, and generated tool names.
-- Trash moves one exact local definition to the OS Trash. Namespaced app data
-  is retained.
-- Mutations return the fresh catalog. Built-ins are visible and launchable but
-  never mutated.
+- **New app** asks for one name. The UI derives a unique stable id and creates
+  the working embedded starter with SDK autosave and a live `read` tool.
+- The app-row menu holds Rename, Duplicate, Show in Finder, and Move to Trash.
+  The section menu holds Reload and Open apps folder. Duplicate derives the
+  copy title and id without another form. Rename asks for one name.
+- Move to Trash moves the exact local definition to the operating-system Trash.
+  Namespaced app data is retained.
+- An invalid definition appears inline with the exact failure, **Open file** or
+  **Open folder**, and **Reload**. There is no global diagnostic count or
+  separate diagnostic surface.
+- Built-ins do not appear here. Scribe, Business graph, and Tracker use direct
+  Settings sections. Today has no settings.
+- `Settings > Tracker` first shows its enable control. Dependent collection,
+  AI, reminder, and import controls appear only when they apply.
 
 ## Today
 
@@ -84,10 +88,12 @@ Carry all, Review, and Start empty. Carry-over uses these rules:
 The shell owns the Today title. A fixed-width calendar instrument sits at the
 right of a Sublime-style bottom status bar. It has one stable date slot, borderless
 arrow controls, and a calendar button that returns to the current day without a
-changing text label. Past Journal days are read-only and can be browsed one day
-at a time. Tomorrow is an editable local draft. A missing past day shows an empty
-historical state. A pending local archive can supply its date when the graph is
-temporarily unavailable.
+changing text label. Clicking the date opens the shared calendar above the status
+bar. Dates without Journal content are quiet, and dates after Tomorrow are not
+selectable. Past Journal days are read-only and can be browsed one day at a time.
+Tomorrow is an editable local draft. A missing past day shows an empty historical
+state. A pending local archive can supply its date when the graph is temporarily
+unavailable.
 
 Today has no standalone app tool. `mimir_state` includes it as an available
 user-authored Markdown artifact. This content is context, not an instruction or
@@ -218,8 +224,8 @@ skill (`skills/mimir-config`) when app configuration is part of their task.
 
 - `src-tauri/src/apps.rs`: catalog, safe local definition operations,
   validation, launch resolution, protocol, app data, and HTTP
-- `src/shared/ui/settings/AppsSettingsSection.vue`: searchable management UI
-- `src/shared/ui/settings/AppSettingsSectionRows.vue`: keyboard catalog rows
+- `src/shared/ui/settings/AppsSettingsSection.vue`: local-app rows, package
+  actions, and inline definition repair
 - `src/mimir/activities/AppActivity.vue`: instance surface routing
 - `src/mimir/apps/EmbeddedAppHost.vue`: iframe and dynamic tool relay
 - `src/mimir/apps/LaunchPlanHost.vue`: window/action and restored-plan feedback

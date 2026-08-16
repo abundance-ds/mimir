@@ -10,7 +10,8 @@ pane without duplicating themselves in Activities.
 The shared Rust/renderer record in `src-tauri/src/activities/model.rs` contains:
 
 - stable `id`, `kind`, title, workspace, timestamps, and status
-- title provenance: `launcher`, `provisional`, `agent`, or `manual`
+- title provenance: `launcher`, `provisional`, or `manual`; old `agent` values
+  remain readable
 - `retention` (`ephemeral` or `durable`)
 - origin metadata for a launcher, app, routine, schedule, or parent Activity
 - a host description such as PTY, embedded app, process, window, or Rust helper
@@ -19,6 +20,20 @@ The shared Rust/renderer record in `src-tauri/src/activities/model.rs` contains:
 
 Statuses are `ready`, `starting`, `working`, `needs-input`, `idle`, `done`,
 `error`, `stopped`, and `interrupted`.
+
+### Plain terminal status
+
+A plain terminal uses `idle` for its complete live shell session. Process
+existence alone does not mean that the terminal is doing work, and PTY output
+does not supply reliable command boundaries. The shell changes to `done`,
+`stopped`, `error`, or `interrupted` only when the session ends. Agent status is
+tracked from supported CLI signals. Routine and process App Activities use
+`working` while their process is live.
+
+Command-aware terminal status is a possible future extension. It needs an
+explicit shell integration contract that marks a foreground command start and
+the next prompt. Output volume or silence must not control that state because a
+quiet command can still be active.
 
 ## Authority split
 
@@ -47,13 +62,13 @@ logs, code blocks, URLs, credentials, and token-like values, then proposes a
 bounded task title. This local fallback does not depend on a provider hook,
 provider transcript format, or MCP call.
 
-The scoped `mimir_title` tool lets the connected agent improve a launcher or
-provisional title once. Native title provenance supplies the compare-and-set
-order: `launcher` -> `provisional` -> `agent`. An explicit launch title or any
-manual rename sets `manual`; it overwrites every automatic source and stays
-authoritative for all later calls and resumed runs. Accepted changes use the
-ordinary persisted Activity upsert path. Legacy eligibility records migrate
-conservatively so an old locked title remains manual.
+Native title provenance supplies the compare-and-set order: `launcher` ->
+`provisional`. An explicit launch title or manual rename sets `manual` and
+stays authoritative across resumed runs. Accepted changes use the ordinary
+persisted Activity upsert path. The old `agent` source remains readable only
+for stored records created before the agent title tool was removed. Legacy
+eligibility records migrate conservatively so an old locked title remains
+manual.
 
 ## Workspace projection
 
@@ -170,10 +185,12 @@ Session restoration is not conversation activity. It does not show the working
 indicator, create unread state, or change the row's last conversation time. The
 restore stays pending until the new run produces terminal output; selecting it
 meanwhile shows `Restoring session…` and blocks terminal input. Restoration
-output stays silent until the user's next submitted turn. A run that produces
-no terminal output within 45 seconds becomes an explicit error instead of
-loading forever. A missing continuation requirement or spawn failure leaves
-the row interrupted; every failure records its exact cause. Deliberately
+output stays silent until the user's next submitted turn. Native persistence
+holds `updatedAt` across app interruption, respawn, startup output, and status
+signals, then releases it only after that submitted turn reaches the PTY. A run
+that produces no terminal output within 45 seconds becomes an explicit error
+instead of loading forever. A missing continuation requirement or spawn failure
+leaves the row interrupted; every failure records its exact cause. Deliberately
 stopped Activities never enter this flow.
 
 ## Relevant code

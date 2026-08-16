@@ -61,11 +61,9 @@ collision with an unrelated entry using the same product-owned name is an
 error, not an overwrite.
 
 Pi performs the MCP handshake, dynamically registers the lean tool set, and
-adds the one-line Mimir instruction once. The shared instruction asks every
-supported CLI agent to call the scoped `mimir_title` tool on its first
-substantive turn. This call can improve Mimir's provider-neutral local title
-fallback, but title creation does not depend on the call. `/mimir-refresh`
-rediscovers the currently exposed set.
+adds the one-line tool-discovery instruction once. `/mimir-refresh`
+rediscovers the currently exposed set. Activity titles come from Mimir's
+provider-neutral local first-prompt path.
 
 Continuations retain the Activity's recorded launch policy, including model,
 permission, and tool flags, while refreshing the launcher executable and
@@ -75,10 +73,10 @@ launches also receive scoped provenance.
 
 ## Skills
 
-Before launch, Mimir resolves catalog, personal, and current-project skills
-into retained read-only revisions:
+Before launch, Mimir resolves Project, Private, and Team skills into retained
+read-only revisions. Project wins over Private; Private wins over Team.
 
-- Codex and Gemini discover catalog/personal links in `~/.agents/skills`;
+- Codex and Gemini discover Private/Team links in `~/.agents/skills`;
 - Claude receives a generated `.claude/skills` snapshot through `--add-dir`;
 - Pi receives shared links plus repeated `--skill <SKILL.md>` project paths.
 
@@ -88,6 +86,17 @@ or replace the client's home directory.
 
 See [Agent interface](agent-interface.md) for scope and compatibility
 decisions.
+
+## Agent packages
+
+`mimir run <name>` resolves `agents/<name>/AGENT.md` in Project, Private, then
+Team order. The package selects a preset, prompt, skills, and exact extra argv.
+The run becomes a durable Activity through the same native launch path as a
+routine. Use `--interactive` for a live session in Mimir. Use `--follow` to
+stream a headless run until it exits. The two flags are mutually exclusive.
+
+Routines can select an agent package instead of storing a separate preset and
+prompt. See [Routines](routines.md) for the TOML contract.
 
 ## Resolution boundary
 

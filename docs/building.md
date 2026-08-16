@@ -48,20 +48,24 @@ Development builds are not release artifacts.
 
 ### Connection sign-in clients
 
-Google and Slack sign-in use desktop OAuth with PKCE and a loopback callback.
-Set these values in the ignored `.env` file before development or packaging:
+Google sign-in uses desktop OAuth with PKCE and a loopback callback. Set these
+values in the ignored `.env` file before development or packaging:
 
 ```text
 MIMIR_GOOGLE_OAUTH_CLIENT_ID=
 MIMIR_GOOGLE_OAUTH_CLIENT_SECRET=
-MIMIR_SLACK_CLIENT_ID=
 ```
 
 The Google client must be a Desktop app client with Gmail, Calendar, Drive,
-and OpenID APIs enabled. The Slack app must enable PKCE desktop redirects and
-the user scopes declared in `src-tauri/src/connections.rs`. Release packaging
-requires all three values. They identify the Mimir app; end users never enter
-them. Granola does not need a Mimir OAuth client because the user supplies a
+Sheets, Slides, and OpenID services enabled. Its consent configuration must
+allow the scopes declared in `src-tauri/src/connections.rs`. Release packaging
+requires both values. They identify the Mimir app; end users never enter them.
+
+Slack uses a per-user `xoxp-` personal token entered in Settings after
+installation. Mimir verifies it and stores it in the OS keychain. A Slack token
+must never be in `.env`, GitHub Actions secrets, or a build environment. The
+Tauri wrapper removes common Slack token variables before it starts a build.
+Granola does not need a Mimir OAuth client because the user supplies a
 supported Granola API key in Settings.
 
 Vite binds to `127.0.0.1:1420`. If the port is busy:
@@ -112,6 +116,13 @@ cargo clean --manifest-path src-tauri/Cargo.toml
 ```
 
 ## Packaging
+
+Before packaging, confirm these connection inputs:
+
+- The reference Mac's ignored `.env` contains the Google OAuth client ID and
+  secret. GitHub Actions needs the same two values for CI packaging.
+- Slack personal tokens belong only in each user's OS keychain. They are not
+  release inputs and must never enter the build.
 
 ### Local signed package
 

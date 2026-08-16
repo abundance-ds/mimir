@@ -18,3 +18,12 @@ task scope.
   railed/expanded, reduced-motion states) is a manual runtime release check —
   automated behavior, accessibility, build, and performance verification is
   complete. Do not infer this evidence from happy-dom geometry.
+
+- Terminal command-aware `working` status is a future specification candidate.
+  The current truthful live-shell state is `idle`; any later implementation
+  needs the explicit shell command-boundary contract in
+  [activities.md](activities.md#plain-terminal-status).
+
+- Editor comment navigation is available only while the formatting toolbar is
+  enabled. Add reusable keyboard or menu commands before treating comment
+  navigation as independent of toolbar visibility.

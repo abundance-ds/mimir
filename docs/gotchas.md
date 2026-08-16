@@ -145,6 +145,11 @@ each Activity a saved position when it first appears
 (`WorkbenchApp.vue`), and unsaved rows fall back to `createdAt`
 (`activityOrdering.js`).
 
+Session restoration is the deliberate exception. App interruption, respawn,
+startup output, and startup status signals retain the previous stamp until the
+first submitted user turn reaches the resumed PTY. Keep this hold native so a
+restart cannot persist a false conversation time.
+
 ### Routine `timezone = "local"` resolves TZ, then UTC
 
 `parse_timezone` in `src-tauri/src/routines.rs` maps `local` (or empty) to the
@@ -291,6 +296,24 @@ The Editor diff is presentation; the native proposal coordinator is lifecycle
 authority. Proposal-backed accept/reject paths must report their outcome before
 dismissing the review. If reporting fails, leave the diff open with a visible
 retryable error.
+
+### Git index actions must match the reviewed snapshot and scope
+
+Git review is not proposal review. Keep `gitReview.js` state and its virtual
+tab separate from `diff.js` and the proposal coordinator. Stage and unstage
+must verify the native snapshot before they write the index. Stage must not run
+while the matching Editor buffer has unsaved text.
+
+An All diff is not enough when the same file has staged and unstaged changes.
+It can hide how the index differs from both HEAD and the working file. Require
+the Unstaged scope for Stage and the Staged scope for Unstage. These actions
+change only the index. Do not add Restore or hunk mutation without a separate
+working-file safety contract.
+
+Ask agent must resolve the exact selected launcher. Put the prepared review
+text on the PTY input path as `seedInput`, with no carriage return or newline.
+Passing it as a launcher argument submits work before the user can add a
+specific question.
 
 ### Visible Editor tab indexes are projection indexes
 

@@ -8,7 +8,8 @@ small trusted team.
 ## What it provides
 
 - [Activities](docs/activities.md) — CLI agents and terminals with scrollback,
-  resume, and recorded sessions.
+  resume, and recorded sessions; [agent packages](docs/agent-interface.md#agent-packages)
+  add reusable Project, Private, and Team missions.
 - [Files](docs/files.md) — project navigation;
   [Editor](docs/editor-system.md) — Markdown editing with agent changes as
   reviewable diffs.

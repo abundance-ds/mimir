@@ -77,16 +77,20 @@ at the saved zoom (see [runtime-architecture.md](runtime-architecture.md)).
 It is a third scaling layer above `editorFontSize` and session-persisted
 content zoom.
 
-Business graph settings follow the same mutation invariant:
+Shared scope settings follow the same mutation invariant:
 
-- `mimirTeamGraphFolder` is the optional physical `team:main` source configured
-  in Settings > Graph. An empty value mounts only private and project scopes.
+- `mimirTeamFolder` is the optional Team root configured in Settings > Scopes.
+  It can contain `graph/`, `skills/`, and `agents/`. An empty value mounts only
+  Private and Project scopes. A configured folder that is temporarily missing
+  stays visible as unmounted and does not block local scopes.
 - `businessGraphViewState` stores the active section, per-section projection,
   Board grouping/sort/priority filter, and visible status columns. It is local
   presentation state, never graph source data.
 
-Changing the team root remounts GraphRuntime against the current workspace;
-changing view state must use `settings.set` with a newly constructed object.
+Changing the Team root remounts GraphRuntime against the current workspace.
+The scope inventory in Settings reports which component folders exist in each
+root. Changing view state must use `settings.set` with a newly constructed
+object.
 
 `sidebarChatsCollapsed` and `chatNotifications` are local presentation/preference
 state; they do not affect chat-server behavior. The Show Chats switch updates
@@ -121,8 +125,7 @@ manager owns credentials in the OS keychain. The Settings section calls native
 connect and disconnect commands and projects only provider state and account
 labels. Tool registration changes in the same operation, without a restart.
 
-The remaining file-first top-level namespace is `skills` (`catalogRoot`, which
-must be absolute).
+Team graph, skill, and agent content all use `editor.mimirTeamFolder`.
 
 ## Internal settings handler
 

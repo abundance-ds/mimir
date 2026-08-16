@@ -40,13 +40,13 @@ resizing, rails, widths, and Activity navigation history.
 | Activity/PTY/agent lifecycle | [activities](activities.md), [agent setup](agent-setup.md), [persistence](persistence.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores/surfaces | native supervisor/model/status/scrollback; Activity stores/components |
 | Team chat and chat-linked agents | [Chats](chat.md), [security](security.md), [MCP](mcp.md) | native `chat/`; chat service/store; Chat Activity/sidebar/header/settings; `deploy/chat/` | native chat/db; chat service/store/components; production protocol smoke |
 | MCP/tool/provider | [MCP](mcp.md), [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
-| Files/tree/search/preview/mutation | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, Files store/service/activity/row, Editor typed-preview path | native file modules; workspace/file stores; Files Activity; Editor preview tests |
+| Files/tree/search/preview/mutation/Git changes | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, `git.rs`, Files and Git review stores/services/activity/rows, Editor typed-preview and Git review paths | native file/Git modules; workspace/file/Git stores; Files Activity; Editor preview/review tests |
 | Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
 | Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
-| Tracker/Argus migration | [Tracker](tracker.md), [persistence](persistence.md), [security](security.md) | native `tracker/`; Tracker service/store; `TrackerApp.vue`, tracker components, Apps Settings panel; Workbench optional-app projection | native engine/store/report/import/runtime; tracker service/store/app/settings/timeline/classification tests |
-| Routines/scheduler | [Routines](routines.md), [persistence](persistence.md) | `routines.rs`, `routine_runtime.rs`, Routine store/service/activity | native schema/runtime; Routine store/service/activity |
+| Tracker/Argus migration | [Tracker](tracker.md), [persistence](persistence.md), [security](security.md) | native `tracker/`; Tracker service/store; `TrackerApp.vue`, tracker components, Tracker Settings panel; Workbench optional-app projection | native engine/store/report/import/runtime; tracker service/store/app/settings/timeline/classification tests |
+| Agent packages/Routines/scheduler | [Agent interface](agent-interface.md), [Routines](routines.md), [persistence](persistence.md) | `agent_packages.rs`, `routines.rs`, `routine_runtime.rs`, `bin/mimir-agents.mjs`, Routine store/service/activity | native package/schema/runtime; CLI and Routine store/service/activity |
 | Scribe meetings/capture/transcription/follow-up | [Scribe meetings](meetings.md), [security](security.md), [persistence](persistence.md) | native `meetings/`, `crates/mimir-meeting-{audio,detect}`; Scribe service/store/app/settings; meeting hooks in `routine_runtime.rs` | Gherkin evidence; native runtime/audio/detection/STT/job/tool tests; Scribe service/store/app; packaged macOS hardware |
-| Editor/tabs/diffs/proposals | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal Rust logic |
+| Editor/tabs/diffs/proposals/Git review | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, Git review store, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal and Git Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
 | Installed app updates | [updates](updates.md), [building](building.md) | `stores/appUpdate.js`, `services/appUpdates.js`, update toast/settings, native restart guard, Tauri updater config | update store/UI/native-lifecycle tests; release artifact and feed tests |
@@ -73,7 +73,9 @@ resizing, rails, widths, and Activity navigation history.
 - Files: `src/stores/workspaceFiles.js` (index/tree state),
   `src/services/fileIndex.js`, `src/services/workspaceFileOperations.js`,
   `src/mimir/files/` (selection/favorites/mutations/drop composables),
-  `src/mimir/components/FileTreeRow.vue`, `src/services/fileSystem.js`,
+  `src/mimir/components/FileTreeRow.vue`, `src/mimir/components/GitChangesList.vue`,
+  `src/services/fileSystem.js`, `src/services/gitReview.js`,
+  `src/stores/gitReview.js`,
   `src/stores/files.js` (typed tabs, dirty state, recents). Docs:
   [files.md](files.md).
 - Apps: `src/stores/appsCatalog.js`, `src/services/appsCatalog.js`,
@@ -99,7 +101,7 @@ resizing, rails, widths, and Activity navigation history.
 - Editor: `src/editor/App.vue` (orchestration, editor bridge),
   `src/editor/composables/` (session/native/proposal lifecycle, command API,
   content sync, document bridge, keyboard),
-  `src/editor/components/workspace/` (tabs, surface, inline AI, diffs),
+  `src/editor/components/workspace/` (tabs, surface, inline AI, proposal and Git diffs),
   `src/editor/codemirror/` (core factory, formatting, live preview, ghost,
   comments), `src/stores/files.js` + `diff.js` + `comments.js` +
   `editorUI.js`, `src/services/ai/` (+ `src/services/ai/tools/`),
@@ -118,13 +120,17 @@ resizing, rails, widths, and Activity navigation history.
 - Activity runtime: `src-tauri/src/activities/` (model, supervisor,
   scrollback, store, status), `src-tauri/src/activity_commands.rs`,
   `src-tauri/src/launchers.rs` (presets, detection, argv, MCP injection),
-  `src-tauri/src/mimir_cli.rs` (installs `mimir`, skills, Pi extension).
+  `src-tauri/src/agent_packages.rs` (scoped runnable packages),
+  `src-tauri/src/mimir_cli.rs` (installs `mimir`, scope/skill/agent helpers,
+  and the Pi extension).
   Docs: [activities.md](activities.md), [agent-setup.md](agent-setup.md).
 - MCP/tools: `src-tauri/src/tool_registry.rs`, `src-tauri/src/tool_bridge.rs`,
   `src-tauri/src/tool_runtime.rs`, `src-tauri/src/tool_server.rs`,
   `src-tauri/src/connections.rs` (Google/Slack/Granola),
-  `src-tauri/src/shell_exec.rs`; CLI `bin/mimir.mjs`, `bin/mimir-skills.mjs`,
-  `bin/pi-mimir-extension.ts`; end-to-end contract test
+  `src-tauri/src/shell_exec.rs`; CLI `bin/mimir.mjs`, `bin/mimir-scopes.mjs`,
+  `bin/mimir-packages.mjs`, `bin/mimir-skills.mjs`, `bin/mimir-agents.mjs`,
+  `bin/pi-mimir-extension.ts`;
+  end-to-end contract test
   `src-tauri/tests/mimir_cli_contract.rs`. Docs: [mcp.md](mcp.md),
   [agent-interface.md](agent-interface.md).
 - Chat: `src-tauri/src/chat/` (WebSocket session, SQLite/FTS cache,
@@ -161,7 +167,7 @@ ordering: [ipc.md](ipc.md).
 
 | Path | Contents |
 |---|---|
-| `bin/` | `mimir` CLI, skills storage, Pi extension |
+| `bin/` | `mimir` CLI, shared scope/skill/agent helpers, Pi extension |
 | `deploy/chat/` | team chat server stack; ops runbook `deploy/chat/README.md` |
 | `harness/` | standalone HTML/JS harnesses for Business graph views |
 | `skills/` | repo-local agent skills (`skills/mimir-config`, `skills/mimir-graph`, `skills/mimir-meetings`) |
@@ -176,7 +182,7 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/activities/` | Activity SQLite event/checkpoint store and legacy v1 migration files |
 | `~/.mimir/apps/` | local app TOML and app directories |
 | `~/.mimir/app-data/` | app-owned JSON values |
-| `~/.mimir/graph/private/` | private local Business graph Markdown |
+| `~/.mimir/private/` | Private `graph/`, `skills/`, and `agents/` sources |
 | `~/.mimir/tracker/tracker.sqlite` | Tracker configuration, timeline, classifications, usage, nudges, and imports |
 | `~/.mimir/routines/` | routine TOML |
 | `~/.mimir/routines-state.json` | next-fire planner state |
@@ -188,8 +194,8 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/models.json` | inline/ghost AI provider and model registry |
 | `~/.mimir/bin/` | installed `mimir` |
 | `~/.mimir/pi/mimir-tools.ts` | installed Pi extension |
-| `~/.mimir/skills/` | canonical skills, revisions, manifests, Claude snapshots |
-| `~/.agents/skills/` | Mimir-managed catalog/personal projection plus unrelated user skills |
+| `~/.mimir/skills/` | retained skill revisions, projection manifests, and Claude snapshots |
+| `~/.agents/skills/` | Mimir-managed Private/Team projection plus unrelated user skills |
 | `~/.mimir/keys.env` | debug-only plaintext key fallback |
 
 ## Documentation
@@ -197,6 +203,7 @@ ordering: [ipc.md](ipc.md).
 | Document | Purpose |
 |---|---|
 | [agent-interface.md](agent-interface.md) | public agent tools, discovery CLI, skills contract |
+| [scopes-agents-plan.md](scopes-agents-plan.md) | implemented decision for unified scopes and agent packages |
 | [synthesis.md](synthesis.md) | product laws |
 | [acceptance.md](acceptance.md) | release behavior contract |
 | [building.md](building.md) | prerequisites, dev loop, packaging |
