@@ -89,56 +89,52 @@ pub fn build_migration_report(roots: &[GraphSourceRoot]) -> GraphMigrationReport
             knowledge_count: 0,
             issue_count: 0,
         };
-        for (directory, format) in [
-            (root.root.join("knowledge"), GraphSourceFormat::Knowledge),
-            (root.root.join("issues"), GraphSourceFormat::Issue),
-        ] {
-            let paths = markdown_paths(&directory, &mut diagnostics);
-            for path in paths {
-                source_count += 1;
-                scope.source_count += 1;
-                match format {
-                    GraphSourceFormat::Knowledge => {
+        let directory = root.root.join("graph");
+        for path in markdown_paths(&directory, &mut diagnostics) {
+            source_count += 1;
+            scope.source_count += 1;
+            let raw = match fs::read_to_string(&path) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    diagnostics.push(GraphDiagnostic::error(
+                        "source-file-unreadable",
+                        format!("Could not read graph source '{}': {error}", path.display()),
+                        Some(path.to_string_lossy().into_owned()),
+                    ));
+                    continue;
+                }
+            };
+            if let Some(alias) = raw_kind_alias(&raw) {
+                if matches!(alias.as_str(), "org" | "organization") {
+                    *alias_counts.entry(alias).or_insert(0) += 1;
+                }
+            }
+            match parse_graph_markdown(
+                &path,
+                &root.scope_id,
+                root.scope_kind,
+                GraphSourceFormat::Graph,
+                &raw,
+            ) {
+                Ok(mut parsed) => {
+                    scope.parsed_count += 1;
+                    if parsed.node.kind == "issue" {
+                        issue_count += 1;
+                        scope.issue_count += 1;
+                    } else {
                         knowledge_count += 1;
                         scope.knowledge_count += 1;
                     }
-                    GraphSourceFormat::Issue => {
-                        issue_count += 1;
-                        scope.issue_count += 1;
-                    }
+                    *kind_counts.entry(parsed.node.kind.clone()).or_insert(0) += 1;
+                    collect_legacy_references(&parsed.node, &mut pending_references);
+                    diagnostics.append(&mut parsed.diagnostics);
+                    nodes.push(parsed.node);
                 }
-                let raw = match fs::read_to_string(&path) {
-                    Ok(raw) => raw,
-                    Err(error) => {
-                        diagnostics.push(GraphDiagnostic::error(
-                            "source-file-unreadable",
-                            format!("Could not read graph source '{}': {error}", path.display()),
-                            Some(path.to_string_lossy().into_owned()),
-                        ));
-                        continue;
-                    }
-                };
-                if format == GraphSourceFormat::Knowledge {
-                    if let Some(alias) = raw_kind_alias(&raw) {
-                        if matches!(alias.as_str(), "org" | "organization") {
-                            *alias_counts.entry(alias).or_insert(0) += 1;
-                        }
-                    }
-                }
-                match parse_graph_markdown(&path, &root.scope_id, root.scope_kind, format, &raw) {
-                    Ok(mut parsed) => {
-                        scope.parsed_count += 1;
-                        *kind_counts.entry(parsed.node.kind.clone()).or_insert(0) += 1;
-                        collect_legacy_references(&parsed.node, &mut pending_references);
-                        diagnostics.append(&mut parsed.diagnostics);
-                        nodes.push(parsed.node);
-                    }
-                    Err(error) => diagnostics.push(GraphDiagnostic::error(
-                        "source-file-invalid",
-                        format!("Could not load graph source '{}': {error}", path.display()),
-                        Some(path.to_string_lossy().into_owned()),
-                    )),
-                }
+                Err(error) => diagnostics.push(GraphDiagnostic::error(
+                    "source-file-invalid",
+                    format!("Could not load graph source '{}': {error}", path.display()),
+                    Some(path.to_string_lossy().into_owned()),
+                )),
             }
         }
         scopes.push(scope);
@@ -349,27 +345,26 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn inventories_legacy_sources_without_writing_and_resolves_safe_identity_matches() {
+    fn inventories_unified_sources_without_writing_and_resolves_old_identity_fields() {
         let root = TempDir::new().unwrap();
-        fs::create_dir_all(root.path().join("knowledge")).unwrap();
-        fs::create_dir_all(root.path().join("issues")).unwrap();
+        fs::create_dir_all(root.path().join("graph")).unwrap();
         fs::write(
-            root.path().join("knowledge/project-alpha.md"),
+            root.path().join("graph/project-alpha.md"),
             "---\ntitle: Project Alpha\ntype: project\n---\n",
         )
         .unwrap();
         fs::write(
-            root.path().join("knowledge/alex.md"),
+            root.path().join("graph/alex.md"),
             "---\ntitle: Alex Smith\ntype: person\n---\n",
         )
         .unwrap();
         fs::write(
-            root.path().join("knowledge/client.md"),
+            root.path().join("graph/client.md"),
             "---\ntitle: Client\ntype: org\n---\n",
         )
         .unwrap();
-        let issue_path = root.path().join("issues/issue-1.md");
-        let original = "---\ntitle: Evidence review\nproject: Project Alpha\nassignee: alex\nlinks: [\"blocked_by missing-issue\"]\n---\nBody";
+        let issue_path = root.path().join("graph/issue-1.md");
+        let original = "---\ntitle: Evidence review\nstatus: review\npriority: high\nproject: Project Alpha\nassignee: alex\nlinks: [\"blocked_by missing-issue\"]\n---\nBody";
         fs::write(&issue_path, original).unwrap();
 
         let report = build_migration_report(&[GraphSourceRoot::new(
@@ -415,9 +410,9 @@ mod tests {
         let first = TempDir::new().unwrap();
         let second = TempDir::new().unwrap();
         for root in [&first, &second] {
-            fs::create_dir_all(root.path().join("knowledge")).unwrap();
+            fs::create_dir_all(root.path().join("graph")).unwrap();
             fs::write(
-                root.path().join("knowledge/shared.md"),
+                root.path().join("graph/shared.md"),
                 "---\ntitle: Shared\ntype: note\n---\n",
             )
             .unwrap();
@@ -432,11 +427,11 @@ mod tests {
     }
 
     #[test]
-    fn clean_legacy_sources_can_cut_over_without_reorganization() {
+    fn clean_unified_sources_are_ready_for_reference_repairs() {
         let root = TempDir::new().unwrap();
-        fs::create_dir_all(root.path().join("knowledge")).unwrap();
+        fs::create_dir_all(root.path().join("graph")).unwrap();
         fs::write(
-            root.path().join("knowledge/decision.md"),
+            root.path().join("graph/decision.md"),
             "---\ntitle: Decision\ntype: decision\n---\n",
         )
         .unwrap();
@@ -473,39 +468,46 @@ mod tests {
             report.diagnostics
         );
 
-        for (directory, format) in [
-            (root.join("knowledge"), GraphSourceFormat::Knowledge),
-            (root.join("issues"), GraphSourceFormat::Issue),
-        ] {
-            for path in markdown_paths(&directory, &mut Vec::new()) {
-                let raw = fs::read_to_string(&path).unwrap();
-                let first = parse_graph_markdown(
-                    &path,
-                    &graph_root.scope_id,
-                    graph_root.scope_kind,
-                    format,
-                    &raw,
-                )
-                .unwrap()
-                .node;
-                let serialized = serialize_graph_markdown(&first).unwrap();
-                let second = parse_graph_markdown(
-                    &path,
-                    &graph_root.scope_id,
-                    graph_root.scope_kind,
-                    format,
-                    &serialized,
-                )
-                .unwrap()
-                .node;
-                assert_eq!(second.id, first.id);
-                assert_eq!(second.kind, first.kind);
-                assert_eq!(second.title, first.title);
-                assert_eq!(second.body, first.body);
-                assert_eq!(second.tags, first.tags);
-                assert_eq!(second.relations, first.relations);
-                assert_eq!(second.properties, first.properties);
-            }
+        let directory = root.join("graph");
+        for path in markdown_paths(&directory, &mut Vec::new()) {
+            let raw = fs::read_to_string(&path).unwrap();
+            let first = parse_graph_markdown(
+                &path,
+                &graph_root.scope_id,
+                graph_root.scope_kind,
+                GraphSourceFormat::Graph,
+                &raw,
+            )
+            .unwrap()
+            .node;
+            let serialized = serialize_graph_markdown(&first).unwrap();
+            let second = parse_graph_markdown(
+                &path,
+                &graph_root.scope_id,
+                graph_root.scope_kind,
+                GraphSourceFormat::Graph,
+                &serialized,
+            )
+            .unwrap()
+            .node;
+            assert_eq!(second.id, first.id);
+            assert_eq!(second.kind, first.kind);
+            assert_eq!(second.title, first.title);
+            assert_eq!(second.body, first.body);
+            assert_eq!(second.tags, first.tags);
+            assert_eq!(
+                second
+                    .relations
+                    .iter()
+                    .map(|relation| (&relation.relation, &relation.target))
+                    .collect::<Vec<_>>(),
+                first
+                    .relations
+                    .iter()
+                    .map(|relation| (&relation.relation, &relation.target))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(second.properties, first.properties);
         }
     }
 }

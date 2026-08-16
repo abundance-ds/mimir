@@ -77,6 +77,7 @@ impl GraphSourceRoot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GraphSourceFormat {
+    Graph,
     Knowledge,
     Issue,
 }

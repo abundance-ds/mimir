@@ -78,12 +78,13 @@ impl GraphRuntime {
             ),
         ];
         if let Some(team_root) = team_root {
-            let team_root = canonical_directory(team_root, "team graph root")?;
-            roots.push(GraphSourceRoot::new(
-                "team:main",
-                GraphScopeKind::Team,
-                team_root,
-            ));
+            if let Some(team_root) = optional_directory(team_root, "team graph root")? {
+                roots.push(GraphSourceRoot::new(
+                    "team:main",
+                    GraphScopeKind::Team,
+                    team_root,
+                ));
+            }
         }
         deduplicate_roots(&mut roots);
 
@@ -1076,14 +1077,14 @@ fn graph_markdown_path(root: &Path, path: &Path) -> bool {
             .components()
             .next()
             .and_then(|component| component.as_os_str().to_str()),
-        Some("knowledge" | "issues")
+        Some("graph")
     )
 }
 
 fn private_root() -> Result<PathBuf, String> {
-    dirs::home_dir()
-        .map(|home| home.join(".mimir").join("graph").join("private"))
-        .ok_or_else(|| "Could not resolve the private graph root.".into())
+    let home =
+        dirs::home_dir().ok_or_else(|| "Could not resolve the private graph root.".to_string())?;
+    Ok(home.join(".mimir").join("private"))
 }
 
 fn canonical_directory(path: PathBuf, label: &str) -> Result<PathBuf, String> {
@@ -1096,6 +1097,24 @@ fn canonical_directory(path: PathBuf, label: &str) -> Result<PathBuf, String> {
         ));
     }
     Ok(canonical)
+}
+
+fn optional_directory(path: PathBuf, label: &str) -> Result<Option<PathBuf>, String> {
+    if !path.is_absolute() {
+        return Err(format!(
+            "{label} must be an absolute path: {}",
+            path.display()
+        ));
+    }
+    match fs::metadata(&path) {
+        Ok(metadata) if metadata.is_dir() => canonical_directory(path, label).map(Some),
+        Ok(_) => Err(format!("{label} is not a directory: {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Could not inspect {label} '{}': {error}",
+            path.display()
+        )),
+    }
 }
 
 fn project_scope_id(path: &Path) -> String {
@@ -1125,9 +1144,11 @@ fn deduplicate_roots(roots: &mut Vec<GraphSourceRoot>) {
 }
 
 fn open_result(roots: &[GraphSourceRoot], store: &GraphStore) -> GraphOpenResult {
+    let mut seen_scope_ids = HashSet::new();
     GraphOpenResult {
         scopes: roots
             .iter()
+            .filter(|root| seen_scope_ids.insert(root.scope_id.clone()))
             .map(|root| GraphScopeDescriptor {
                 id: root.scope_id.clone(),
                 kind: root.scope_kind,
@@ -1157,22 +1178,22 @@ mod tests {
     use crate::business_graph::GraphRelation;
     use tempfile::TempDir;
 
-    fn knowledge_root(files: &[(&str, &str)]) -> TempDir {
+    fn graph_root(files: &[(&str, &str)]) -> TempDir {
         let root = TempDir::new().unwrap();
-        fs::create_dir_all(root.path().join("knowledge")).unwrap();
+        fs::create_dir_all(root.path().join("graph")).unwrap();
         for (name, raw) in files {
-            fs::write(root.path().join("knowledge").join(name), raw).unwrap();
+            fs::write(root.path().join("graph").join(name), raw).unwrap();
         }
         root
     }
 
-    fn parsed_clean_knowledge(path: &Path) -> GraphNode {
+    fn parsed_clean_graph(path: &Path) -> GraphNode {
         let raw = fs::read_to_string(path).unwrap();
         let parsed = parse_graph_markdown(
             path,
             "project:test",
             GraphScopeKind::Project,
-            GraphSourceFormat::Knowledge,
+            GraphSourceFormat::Graph,
             &raw,
         )
         .unwrap();
@@ -1189,9 +1210,13 @@ mod tests {
         let root = Path::new("/workspace");
         assert!(graph_markdown_path(
             root,
+            Path::new("/workspace/graph/note.md")
+        ));
+        assert!(!graph_markdown_path(
+            root,
             Path::new("/workspace/knowledge/note.md")
         ));
-        assert!(graph_markdown_path(
+        assert!(!graph_markdown_path(
             root,
             Path::new("/workspace/issues/issue.md")
         ));
@@ -1201,7 +1226,7 @@ mod tests {
         ));
         assert!(!graph_markdown_path(
             root,
-            Path::new("/workspace/knowledge/image.png")
+            Path::new("/workspace/graph/image.png")
         ));
     }
 
@@ -1214,18 +1239,38 @@ mod tests {
     }
 
     #[test]
+    fn missing_optional_team_directory_does_not_block_local_graphs() {
+        let root = TempDir::new().unwrap();
+        let missing = root.path().join("offline-team");
+        assert_eq!(
+            optional_directory(missing, "team graph root").unwrap(),
+            None
+        );
+
+        let mounted = optional_directory(root.path().to_path_buf(), "team graph root")
+            .unwrap()
+            .unwrap();
+        assert_eq!(mounted, fs::canonicalize(root.path()).unwrap());
+        assert!(
+            optional_directory(PathBuf::from("relative"), "team graph root")
+                .unwrap_err()
+                .contains("absolute path")
+        );
+    }
+
+    #[test]
     fn runtime_composes_project_and_team_queries_without_private_leakage() {
         let project = TempDir::new().unwrap();
         let team = TempDir::new().unwrap();
-        fs::create_dir_all(project.path().join("issues")).unwrap();
-        fs::create_dir_all(team.path().join("knowledge")).unwrap();
+        fs::create_dir_all(project.path().join("graph")).unwrap();
+        fs::create_dir_all(team.path().join("graph")).unwrap();
         fs::write(
-            project.path().join("issues/issue-1.md"),
+            project.path().join("graph/issue-1.md"),
             "---\ntitle: Project issue\nstatus: plan\n---\n",
         )
         .unwrap();
         fs::write(
-            team.path().join("knowledge/company.md"),
+            team.path().join("graph/company.md"),
             "---\ntitle: Team company\ntype: company\n---\n",
         )
         .unwrap();
@@ -1263,20 +1308,20 @@ mod tests {
         let project = TempDir::new().unwrap();
         let team = TempDir::new().unwrap();
         for root in [&private, &project, &team] {
-            fs::create_dir_all(root.path().join("knowledge")).unwrap();
+            fs::create_dir_all(root.path().join("graph")).unwrap();
         }
         fs::write(
-            private.path().join("knowledge/private-plan.md"),
+            private.path().join("graph/private-plan.md"),
             "---\ntitle: Private acquisition plan\ntype: note\n---\n",
         )
         .unwrap();
         fs::write(
-            project.path().join("knowledge/project-plan.md"),
+            project.path().join("graph/project-plan.md"),
             "---\ntitle: Project evidence plan\ntype: note\n---\n",
         )
         .unwrap();
         fs::write(
-            team.path().join("knowledge/team-method.md"),
+            team.path().join("graph/team-method.md"),
             "---\ntitle: Team evidence method\ntype: note\n---\n",
         )
         .unwrap();
@@ -1305,9 +1350,9 @@ mod tests {
     fn cross_scope_edges_are_written_only_with_their_source_node() {
         let private = TempDir::new().unwrap();
         let team = TempDir::new().unwrap();
-        fs::create_dir_all(team.path().join("knowledge")).unwrap();
+        fs::create_dir_all(team.path().join("graph")).unwrap();
         fs::write(
-            team.path().join("knowledge/shared-method.md"),
+            team.path().join("graph/shared-method.md"),
             "---\ntitle: Shared method\ntype: note\n---\n",
         )
         .unwrap();
@@ -1332,15 +1377,15 @@ mod tests {
         assert_eq!(created.provenance.scope_id, "private:local");
         assert!(private
             .path()
-            .join("knowledge/my-method-annotation.md")
+            .join("graph/my-method-annotation.md")
             .is_file());
-        let shared = fs::read_to_string(team.path().join("knowledge/shared-method.md")).unwrap();
+        let shared = fs::read_to_string(team.path().join("graph/shared-method.md")).unwrap();
         assert!(!shared.contains("my-method-annotation"));
     }
 
     #[test]
     fn racing_writers_on_one_node_serialize_to_a_single_winner() {
-        let project = knowledge_root(&[(
+        let project = graph_root(&[(
             "shared-note.md",
             "---\ntitle: Shared note\ntype: note\n---\nBody.",
         )]);
@@ -1385,8 +1430,8 @@ mod tests {
             "the losing writer must see a clean conflict: {results:?}"
         );
 
-        let path = project.path().join("knowledge/shared-note.md");
-        let on_disk = parsed_clean_knowledge(&path);
+        let path = project.path().join("graph/shared-note.md");
+        let on_disk = parsed_clean_graph(&path);
         assert_eq!(on_disk.title, winners[0].title);
         assert_eq!(
             runtime.get("shared-note").unwrap().unwrap().title,
@@ -1396,7 +1441,7 @@ mod tests {
 
     #[test]
     fn racing_writers_on_distinct_nodes_both_commit_valid_sources() {
-        let project = knowledge_root(&[
+        let project = graph_root(&[
             ("alpha.md", "---\ntitle: Alpha\ntype: note\n---\n"),
             ("beta.md", "---\ntitle: Beta\ntype: note\n---\n"),
         ]);
@@ -1427,11 +1472,8 @@ mod tests {
         }
 
         for id in ["alpha", "beta"] {
-            let path = project.path().join(format!("knowledge/{id}.md"));
-            assert_eq!(
-                parsed_clean_knowledge(&path).title,
-                format!("{id} rewritten")
-            );
+            let path = project.path().join(format!("graph/{id}.md"));
+            assert_eq!(parsed_clean_graph(&path).title, format!("{id} rewritten"));
             assert_eq!(
                 runtime.get(id).unwrap().unwrap().title,
                 format!("{id} rewritten")
@@ -1441,8 +1483,7 @@ mod tests {
 
     #[test]
     fn refresh_racing_a_writer_never_harms_the_source_and_reconverges() {
-        let project =
-            knowledge_root(&[("race-note.md", "---\ntitle: Race note\ntype: note\n---\n")]);
+        let project = graph_root(&[("race-note.md", "---\ntitle: Race note\ntype: note\n---\n")]);
         let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
             "project:test",
             GraphScopeKind::Project,
@@ -1471,11 +1512,8 @@ mod tests {
 
         // Whatever the interleaving, the Markdown source holds the writer's
         // committed content and stays parseable.
-        let path = project.path().join("knowledge/race-note.md");
-        assert_eq!(
-            parsed_clean_knowledge(&path).title,
-            "Rewritten during refresh"
-        );
+        let path = project.path().join("graph/race-note.md");
+        assert_eq!(parsed_clean_graph(&path).title, "Rewritten during refresh");
 
         // NOTE: captures current behavior. refresh() loads the graph from disk
         // without holding the store lock, so a write that commits between that
@@ -1493,8 +1531,7 @@ mod tests {
     #[test]
     fn authored_source_revisions_do_not_hide_a_later_external_edit() {
         let project = TempDir::new().unwrap();
-        fs::create_dir_all(project.path().join("knowledge")).unwrap();
-        fs::create_dir_all(project.path().join("issues")).unwrap();
+        fs::create_dir_all(project.path().join("graph")).unwrap();
         let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
             "project:test",
             GraphScopeKind::Project,
@@ -1565,7 +1602,7 @@ mod tests {
             node_kind: "issue".into(),
             title: "Review evidence".into(),
             scope_id: "project:test".into(),
-            source_path: "/project/issues/issue-1.md".into(),
+            source_path: "/project/graph/issue-1.md".into(),
             summary: "Updated Review evidence".into(),
             actor: GraphActor::human(),
             changes: Vec::new(),
@@ -1605,8 +1642,8 @@ mod tests {
     #[test]
     fn recently_deleted_sources_can_be_restored_from_an_opaque_undo_token() {
         let project = TempDir::new().unwrap();
-        fs::create_dir_all(project.path().join("knowledge")).unwrap();
-        let path = project.path().join("knowledge/decision.md");
+        fs::create_dir_all(project.path().join("graph")).unwrap();
+        let path = project.path().join("graph/decision.md");
         let raw = "---\ntitle: Reversible decision\ntype: decision\n---\nKeep the rationale.";
         fs::write(&path, raw).unwrap();
         let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(

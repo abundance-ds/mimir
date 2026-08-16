@@ -48,6 +48,23 @@ const ISSUE_FIELDS: &[&str] = &[
     "relations",
 ];
 
+// These fields carry workflow meaning that a general note does not have. Keep
+// this narrower than ISSUE_FIELDS: title, tags, timestamps, and relations are
+// valid on every graph node and must not turn a kindless note into an issue.
+const ISSUE_DISCRIMINATOR_FIELDS: &[&str] = &[
+    "status",
+    "priority",
+    "dueDate",
+    "due_date",
+    "waiting_for",
+    "waitingFor",
+    "snooze_until",
+    "snoozeUntil",
+    "remind_at",
+    "remindAt",
+    "deliverables",
+];
+
 #[derive(Debug, Error)]
 pub enum GraphMarkdownError {
     #[error("graph source has no Markdown filename: {0}")]
@@ -96,6 +113,23 @@ pub fn parse_graph_markdown(
     };
 
     let mut parsed = match source_format {
+        GraphSourceFormat::Graph => {
+            let explicit_kind = string_field(&meta, "kind")
+                .or_else(|| string_field(&meta, "type"))
+                .map(|kind| canonical_kind(&kind));
+            let looks_like_issue = explicit_kind.as_deref() == Some("issue")
+                || (explicit_kind.is_none()
+                    && ISSUE_DISCRIMINATOR_FIELDS
+                        .iter()
+                        .any(|field| meta.contains_key(*field)));
+            let mut parsed = if looks_like_issue {
+                parse_issue(id, meta, body, provenance)
+            } else {
+                parse_knowledge(id, meta, body, provenance)
+            };
+            parsed.node.provenance.source_format = GraphSourceFormat::Graph;
+            parsed
+        }
         GraphSourceFormat::Knowledge => parse_knowledge(id, meta, body, provenance),
         GraphSourceFormat::Issue => parse_issue(id, meta, body, provenance),
     };
@@ -106,6 +140,7 @@ pub fn parse_graph_markdown(
 pub fn serialize_graph_markdown(node: &GraphNode) -> Result<String, GraphMarkdownError> {
     let mut meta = Map::new();
     match node.provenance.source_format {
+        GraphSourceFormat::Graph => serialize_graph(node, &mut meta),
         GraphSourceFormat::Knowledge => serialize_knowledge(node, &mut meta),
         GraphSourceFormat::Issue => serialize_issue(node, &mut meta),
     }
@@ -115,6 +150,32 @@ pub fn serialize_graph_markdown(node: &GraphNode) -> Result<String, GraphMarkdow
         yaml = without_marker.to_string();
     }
     Ok(format!("---\n{}---\n{}", yaml, node.body))
+}
+
+fn serialize_graph(node: &GraphNode, meta: &mut Map<String, Value>) {
+    meta.insert("kind".into(), Value::String(node.kind.clone()));
+    meta.insert("title".into(), Value::String(node.title.clone()));
+    if !node.summary.is_empty() {
+        meta.insert("summary".into(), Value::String(node.summary.clone()));
+    }
+    if !node.tags.is_empty() {
+        meta.insert(
+            "tags".into(),
+            Value::Array(node.tags.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    insert_relations(node, meta);
+    for (key, value) in &node.properties {
+        if !COMMON_FIELDS.contains(&key.as_str()) {
+            meta.insert(key.clone(), value.clone());
+        }
+    }
+    if !node.created_at.is_empty() {
+        meta.insert("created".into(), Value::String(node.created_at.clone()));
+    }
+    if !node.updated_at.is_empty() {
+        meta.insert("updated".into(), Value::String(node.updated_at.clone()));
+    }
 }
 
 pub fn source_revision(raw: &str) -> String {
@@ -200,7 +261,8 @@ fn insert_relations(node: &GraphNode, meta: &mut Map<String, Value>) {
         .relations
         .iter()
         .filter(|relation| {
-            !(node.kind == "issue"
+            !(node.provenance.source_format == GraphSourceFormat::Issue
+                && node.kind == "issue"
                 && relation.legacy
                 && relation.relation == "part_of"
                 && node.properties.get("legacyProject").and_then(Value::as_str)
@@ -276,6 +338,7 @@ fn parse_issue(
     provenance: GraphProvenance,
 ) -> ParsedGraphNode {
     let title = string_field(&meta, "title").unwrap_or_default();
+    let summary = string_field(&meta, "summary").unwrap_or_default();
     let status = string_field(&meta, "status").unwrap_or_else(|| "backlog".into());
     let priority = string_field(&meta, "priority").unwrap_or_else(|| "normal".into());
     let labels = normalize_labels(meta.get("labels"), meta.get("tags"));
@@ -333,6 +396,7 @@ fn parse_issue(
     }
 
     remove_fields(&mut meta, ISSUE_FIELDS);
+    remove_fields(&mut meta, COMMON_FIELDS);
     properties.extend(meta);
 
     ParsedGraphNode {
@@ -340,7 +404,7 @@ fn parse_issue(
             id,
             kind: "issue".into(),
             title,
-            summary: String::new(),
+            summary,
             body,
             tags,
             relations,
@@ -573,6 +637,7 @@ mod tests {
 
     fn parse(source_format: GraphSourceFormat, raw: &str) -> ParsedGraphNode {
         let path = match source_format {
+            GraphSourceFormat::Graph => PathBuf::from("/work/graph/eversana.md"),
             GraphSourceFormat::Knowledge => PathBuf::from("/work/knowledge/eversana.md"),
             GraphSourceFormat::Issue => PathBuf::from("/work/issues/issue-1784943918-d4c5.md"),
         };
@@ -667,6 +732,78 @@ Build the map.
             }]
         );
         assert!(parsed.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn unified_graph_infers_a_migrated_issue_without_rewriting_it() {
+        let parsed = parse(
+            GraphSourceFormat::Graph,
+            r#"---
+title: "Evidence review"
+status: review
+priority: high
+project: project-atlas
+assignee: person-alex
+---
+Check the extraction grid.
+"#,
+        );
+
+        assert_eq!(parsed.node.kind, "issue");
+        assert_eq!(parsed.node.status(), Some("review"));
+        assert_eq!(parsed.node.priority(), Some("high"));
+        assert_eq!(
+            parsed.node.provenance.source_format,
+            GraphSourceFormat::Graph
+        );
+        let serialized = serialize_graph_markdown(&parsed.node).unwrap();
+        assert!(serialized.contains("kind: issue"));
+        assert!(serialized.contains("status: review"));
+        assert!(serialized.contains("legacyProject: project-atlas"));
+        let reparsed = parse(GraphSourceFormat::Graph, &serialized);
+        assert_eq!(reparsed.node.status(), Some("review"));
+        assert_eq!(reparsed.node.priority(), Some("high"));
+        assert_eq!(
+            reparsed.node.properties["legacyAssignee"],
+            Value::String("person-alex".into())
+        );
+        assert!(reparsed
+            .node
+            .relations
+            .iter()
+            .any(|relation| relation.relation == "part_of" && relation.target == "project-atlas"));
+    }
+
+    #[test]
+    fn unified_graph_defaults_kindless_general_metadata_to_note() {
+        let parsed = parse(
+            GraphSourceFormat::Graph,
+            r#"---
+title: "Working context"
+tags: [research, draft]
+created: 2026-08-16T10:00:00Z
+updated: 2026-08-16T11:00:00Z
+---
+Capture the useful context without forcing an ontology choice.
+"#,
+        );
+
+        assert_eq!(parsed.node.kind, "note");
+        assert!(parsed.diagnostics.is_empty());
+        let serialized = serialize_graph_markdown(&parsed.node).unwrap();
+        assert!(serialized.contains("kind: note"));
+    }
+
+    #[test]
+    fn unified_graph_preserves_an_explicit_unknown_kind_for_repair() {
+        let parsed = parse(
+            GraphSourceFormat::Graph,
+            "---\ntitle: Experimental\nkind: hypothesis-map\n---\nBody.\n",
+        );
+
+        assert_eq!(parsed.node.kind, "hypothesis-map");
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert_eq!(parsed.diagnostics[0].code, "unknown-kind");
     }
 
     #[test]
@@ -1005,6 +1142,7 @@ mod proptest_roundtrip {
 
     fn provenance_for(id: &str, source_format: GraphSourceFormat) -> GraphProvenance {
         let directory = match source_format {
+            GraphSourceFormat::Graph => "graph",
             GraphSourceFormat::Knowledge => "knowledge",
             GraphSourceFormat::Issue => "issues",
         };

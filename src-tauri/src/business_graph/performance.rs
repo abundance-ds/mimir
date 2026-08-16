@@ -70,11 +70,11 @@ fn graph_performance_budget_covers_index_query_search_and_traversal() {
 fn markdown_startup_board_mutation_and_refresh_stay_within_budget() {
     const SOURCE_COUNT: usize = 600;
     let root = TempDir::new().unwrap();
-    let issues = root.path().join("issues");
-    fs::create_dir_all(&issues).unwrap();
+    let graph = root.path().join("graph");
+    fs::create_dir_all(&graph).unwrap();
     for index in 0..SOURCE_COUNT {
         fs::write(
-            issues.join(format!("issue-benchmark-{index}.md")),
+            graph.join(format!("issue-benchmark-{index}.md")),
             format!(
                 "---\ntitle: Benchmark issue {index}\nstatus: plan\npriority: normal\nproject: project-benchmark\n---\nReviewable body {index}."
             ),
@@ -189,13 +189,9 @@ fn synthetic_node(index: usize, total: usize) -> GraphNode {
             } else {
                 GraphScopeKind::Project
             },
-            source_path: format!("/benchmark/knowledge/node-{index}.md"),
+            source_path: format!("/benchmark/graph/node-{index}.md"),
             source_revision: format!("revision-{index}"),
-            source_format: if kind == "issue" {
-                GraphSourceFormat::Issue
-            } else {
-                GraphSourceFormat::Knowledge
-            },
+            source_format: GraphSourceFormat::Graph,
         },
     }
 }

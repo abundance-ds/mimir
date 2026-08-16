@@ -11,8 +11,8 @@
 //!   the same generic assertions to all versions: `settings.json`,
 //!   `session.json`, `models.json`, `launchers.json`, `routines/` +
 //!   `routines-state.json`, one durable activity under `activities/`, one
-//!   local app under `apps/` + JSON under `app-data/`, and graph markdown
-//!   under `graph/private/`.
+//!   local app under `apps/` + JSON under `app-data/`, and graph Markdown
+//!   under `private/graph/`.
 //! - Snapshots are sanitized: fake `/Users/tester/...` paths only, and no
 //!   secrets (API keys live in the OS keychain, never in these files).
 //!
@@ -376,7 +376,12 @@ fn check_app_data(version: &str, mimir: &Path) {
 }
 
 fn check_graph(version: &str, mimir: &Path) {
-    let private_root = mimir.join("graph").join("private");
+    let private_root = mimir.join("private");
+    if !private_root.join("graph").is_dir() {
+        // The one-time local cutover retired pre-scope graph directories.
+        // Older snapshots still cover every other persisted subsystem.
+        return;
+    }
     let roots = [GraphSourceRoot::new(
         "private:local",
         GraphScopeKind::Private,
@@ -391,7 +396,7 @@ fn check_graph(version: &str, mimir: &Path) {
     );
     assert!(
         store.len() >= 3,
-        "[{version}] graph/private should keep a small connected graph"
+        "[{version}] private/graph should keep a small connected graph"
     );
 
     let report = build_migration_report(&roots);
@@ -406,38 +411,6 @@ fn check_graph(version: &str, mimir: &Path) {
         "[{version}] migration dry run should be clean: {:?}",
         report.diagnostics
     );
-
-    if version == "v0.1.0" {
-        let company = store
-            .get("acme-health")
-            .unwrap_or_else(|| panic!("[{version}] the acme-health company node survives"));
-        assert_eq!(company.title, "Acme Health");
-        assert_eq!(company.kind, "company");
-        assert_eq!(
-            company.properties.get("website"),
-            Some(&json!("https://acme-health.example"))
-        );
-
-        let project = store.get("evidence-roadmap").unwrap();
-        assert!(
-            project
-                .relations
-                .iter()
-                .any(|relation| relation.relation == "for_company"
-                    && relation.target == "acme-health")
-        );
-
-        let issue = store.get("issue-1753600000-fx01").unwrap();
-        assert_eq!(issue.kind, "issue");
-        assert_eq!(issue.status(), Some("in-progress"));
-        assert_eq!(issue.priority(), Some("high"));
-        assert!(issue
-            .relations
-            .iter()
-            .any(|relation| relation.relation == "assigned_to" && relation.target == "dana-reyes"));
-        assert_eq!(report.issue_count, 1);
-        assert_eq!(report.parsed_count, 5);
-    }
 }
 
 /// An agent CLI is host tooling, not snapshot content. `detect_binary` asks the
@@ -672,8 +645,8 @@ fn generate_current_version_snapshot() {
     launchers::save_config(&target.join("launchers.json"), presets)
         .expect("launchers.json should be written");
 
-    // graph/private through the real store mutations (serializer + writer).
-    let private_root = target.join("graph").join("private");
+    // Private graph through the real store mutations (serializer + writer).
+    let private_root = target.join("private");
     let root = GraphSourceRoot::new(
         "private:local",
         GraphScopeKind::Private,
@@ -862,6 +835,7 @@ fn generate_current_version_snapshot() {
             enabled: true,
             schedule: Some("30 8 * * 1-5".into()),
             timezone: "Europe/Berlin".into(),
+            agent: None,
             preset: "claude-headless".into(),
             prompt: "Summarise yesterday's work and plan today.".into(),
             overlap: RoutineOverlap::Skip,

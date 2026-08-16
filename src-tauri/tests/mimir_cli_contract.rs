@@ -318,7 +318,7 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
     let focused = run_mimir(&url, &["tool", "graph_get"]).await.unwrap();
     assert_success(&focused, "mimir tool graph_get");
     let focused_stdout = stdout_of(&focused);
-    assert!(focused_stdout.contains("graph_get — Read one complete graph node."));
+    assert!(focused_stdout.contains("graph_get — Read a complete graph node."));
     assert!(focused_stdout.contains("Required:\n  id: string"));
     assert!(focused_stdout.contains("mimir call graph_get"));
     assert!(!focused_stdout.contains("graph_status"));
@@ -429,7 +429,7 @@ async fn raw_jsonrpc_handshake_matches_the_mcp_contract() {
     assert_eq!(init["result"]["capabilities"]["tools"], json!({}));
     assert_eq!(
         init["result"]["instructions"],
-        "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`. If a work connection is missing, ask the user to open Mimir Settings → Connections."
+        "Discover other tools with `mimir tools`."
     );
 
     // notifications (no id) are accepted with 202 and an empty body.

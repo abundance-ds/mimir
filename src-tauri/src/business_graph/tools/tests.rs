@@ -12,25 +12,24 @@ use tempfile::TempDir;
 
 fn fixture() -> (TempDir, GraphRuntime) {
     let root = TempDir::new().unwrap();
-    fs::create_dir_all(root.path().join("knowledge")).unwrap();
-    fs::create_dir_all(root.path().join("issues")).unwrap();
+    fs::create_dir_all(root.path().join("graph")).unwrap();
     fs::write(
-        root.path().join("knowledge/client.md"),
+        root.path().join("graph/client.md"),
         "---\ntitle: Client\ntype: company\n---\n",
     )
     .unwrap();
     fs::write(
-        root.path().join("knowledge/project-alpha.md"),
+        root.path().join("graph/project-alpha.md"),
         "---\ntitle: Project Alpha\ntype: project\nlinks: [\"for_company client\"]\n---\n",
     )
     .unwrap();
     fs::write(
-        root.path().join("knowledge/alex.md"),
+        root.path().join("graph/alex.md"),
         "---\ntitle: Alex Researcher\ntype: person\n---\n",
     )
     .unwrap();
     fs::write(
-        root.path().join("issues/issue-1.md"),
+        root.path().join("graph/issue-1.md"),
         "---\ntitle: Extract evidence\nstatus: plan\npriority: high\nproject: project-alpha\n---\nBody",
     )
     .unwrap();
@@ -75,10 +74,10 @@ fn graph_find_schema_matches_its_bounded_search_limit() {
 #[test]
 fn graph_find_scans_the_whole_graph_past_the_store_page_size() {
     let root = TempDir::new().unwrap();
-    fs::create_dir_all(root.path().join("knowledge")).unwrap();
+    fs::create_dir_all(root.path().join("graph")).unwrap();
     for index in 0..505 {
         fs::write(
-            root.path().join(format!("knowledge/note-{index:03}.md")),
+            root.path().join(format!("graph/note-{index:03}.md")),
             format!(
                 "---\ntitle: Note {index}\ntype: note\nupdated: 2026-01-01T00:00:00.{index:03}Z\n---\n"
             ),
@@ -86,7 +85,7 @@ fn graph_find_scans_the_whole_graph_past_the_store_page_size() {
         .unwrap();
     }
     fs::write(
-        root.path().join("knowledge/ancient-needle.md"),
+        root.path().join("graph/ancient-needle.md"),
         "---\ntitle: Ancient needle\ntype: note\nupdated: 2020-06-01T00:00:00.000Z\n---\n",
     )
     .unwrap();
@@ -153,11 +152,7 @@ fn compatibility_writes_create_real_relations_and_revisions() {
     )
     .unwrap();
     let id = created.value["id"].as_str().unwrap();
-    assert!(root
-        .path()
-        .join("issues")
-        .join(format!("{id}.md"))
-        .is_file());
+    assert!(root.path().join("graph").join(format!("{id}.md")).is_file());
     assert!(created.value["sourceRevision"].as_str().unwrap().len() > 20);
     let full = runtime.get(id).unwrap().unwrap();
     assert!(full
@@ -281,7 +276,7 @@ fn semantic_project_actions_are_idempotent_and_kind_safe() {
 #[test]
 fn migration_report_tool_is_read_only_and_exposes_legacy_references() {
     let (root, runtime) = fixture();
-    let issue_path = root.path().join("issues/issue-1.md");
+    let issue_path = root.path().join("graph/issue-1.md");
     let before = fs::read_to_string(&issue_path).unwrap();
 
     let report = execute_native_tool(&runtime, "graph.migration_report", json!({})).unwrap();
@@ -316,10 +311,9 @@ fn context_tool_returns_bounded_agent_ready_provenance() {
 #[test]
 fn private_graph_reads_add_one_short_scope_warning() {
     let root = TempDir::new().unwrap();
-    fs::create_dir_all(root.path().join("knowledge")).unwrap();
-    fs::create_dir_all(root.path().join("issues")).unwrap();
+    fs::create_dir_all(root.path().join("graph")).unwrap();
     fs::write(
-        root.path().join("knowledge/private-note.md"),
+        root.path().join("graph/private-note.md"),
         "---\ntitle: Private note\ntype: note\n---\nPrivate body",
     )
     .unwrap();

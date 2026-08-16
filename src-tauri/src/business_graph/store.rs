@@ -64,15 +64,8 @@ impl GraphStore {
         for root in roots {
             load_directory(
                 root,
-                &root.root.join("knowledge"),
-                GraphSourceFormat::Knowledge,
-                &mut parsed_nodes,
-                &mut diagnostics,
-            );
-            load_directory(
-                root,
-                &root.root.join("issues"),
-                GraphSourceFormat::Issue,
+                &root.root.join("graph"),
+                GraphSourceFormat::Graph,
                 &mut parsed_nodes,
                 &mut diagnostics,
             );
@@ -81,12 +74,7 @@ impl GraphStore {
         Self::from_nodes(parsed_nodes, diagnostics)
     }
 
-    pub fn from_nodes(mut nodes: Vec<GraphNode>, mut diagnostics: Vec<GraphDiagnostic>) -> Self {
-        nodes.sort_by(|left, right| {
-            left.provenance
-                .source_path
-                .cmp(&right.provenance.source_path)
-        });
+    pub fn from_nodes(nodes: Vec<GraphNode>, mut diagnostics: Vec<GraphDiagnostic>) -> Self {
         let mut by_id: BTreeMap<String, GraphNode> = BTreeMap::new();
         for node in nodes {
             if let Some(existing) = by_id.get(&node.id) {
@@ -150,15 +138,8 @@ impl GraphStore {
         let kind = canonical_kind(&create.kind);
         let explicit_id = create.id.take();
         let id = allocate_id(self, explicit_id.as_deref(), &kind, &create.title)?;
-        let source_format = if kind == "issue" {
-            GraphSourceFormat::Issue
-        } else {
-            GraphSourceFormat::Knowledge
-        };
-        let directory = match source_format {
-            GraphSourceFormat::Knowledge => root.root.join("knowledge"),
-            GraphSourceFormat::Issue => root.root.join("issues"),
-        };
+        let source_format = GraphSourceFormat::Graph;
+        let directory = root.root.join("graph");
         let source_path = directory.join(format!("{id}.md"));
         let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let mut properties = create.properties;
@@ -318,12 +299,23 @@ impl GraphStore {
 
         if let Some(kind) = patch.kind {
             let kind = canonical_kind(&kind);
-            if (node.kind == "issue") != (kind == "issue") {
+            let becomes_issue = node.kind != "issue" && kind == "issue";
+            if node.provenance.source_format != GraphSourceFormat::Graph
+                && (node.kind == "issue") != (kind == "issue")
+            {
                 return Err(GraphMutationError::Invalid(
-                    "changing between issue and knowledge source formats requires migration".into(),
+                    "changing issue state on a non-unified graph source is not supported".into(),
                 ));
             }
             node.kind = kind;
+            if becomes_issue {
+                node.properties
+                    .entry("status")
+                    .or_insert_with(|| Value::String("backlog".into()));
+                node.properties
+                    .entry("priority")
+                    .or_insert_with(|| Value::String("normal".into()));
+            }
         }
         if let Some(title) = patch.title {
             node.title = title.trim().to_string();
@@ -911,20 +903,19 @@ mod tests {
 
     fn fixture() -> (TempDir, GraphStore) {
         let root = TempDir::new().unwrap();
-        fs::create_dir_all(root.path().join("knowledge")).unwrap();
-        fs::create_dir_all(root.path().join("issues")).unwrap();
+        fs::create_dir_all(root.path().join("graph")).unwrap();
         fs::write(
-            root.path().join("knowledge/eversana.md"),
+            root.path().join("graph/eversana.md"),
             "---\ntitle: EVERSANA\ntype: org\ntags: [heor, client]\n---\nServices company.",
         )
         .unwrap();
         fs::write(
-            root.path().join("knowledge/project-eversana.md"),
+            root.path().join("graph/project-eversana.md"),
             "---\ntitle: EVERSANA engagement\ntype: project\nlinks:\n  - \"for_company eversana\"\nupdated: \"2026-07-02\"\n---\nAI advisory.",
         )
         .unwrap();
         fs::write(
-            root.path().join("issues/issue-1784943918-d4c5.md"),
+            root.path().join("graph/issue-1784943918-d4c5.md"),
             "---\ntitle: HEOR evidence map\nstatus: in-progress\npriority: urgent\nproject: project-eversana\nlabels:\n  - name: heor\n    color: blue\nupdated: \"2026-07-03\"\n---\nBuild an evidence map.",
         )
         .unwrap();
@@ -938,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_and_indexes_legacy_sources_as_one_graph() {
+    fn loads_older_frontmatter_shapes_from_the_unified_graph() {
         let (_root, store) = fixture();
         assert_eq!(store.len(), 3);
         assert_eq!(store.get("eversana").unwrap().kind, "company");
@@ -989,29 +980,29 @@ mod tests {
 
     #[test]
     fn diagnoses_duplicate_ids_and_dangling_relations() {
-        let root = TempDir::new().unwrap();
-        fs::create_dir_all(root.path().join("knowledge")).unwrap();
-        fs::create_dir_all(root.path().join("issues")).unwrap();
+        let project = TempDir::new().unwrap();
+        let team = TempDir::new().unwrap();
+        fs::create_dir_all(project.path().join("graph")).unwrap();
+        fs::create_dir_all(team.path().join("graph")).unwrap();
         fs::write(
-            root.path().join("knowledge/shared.md"),
+            project.path().join("graph/shared.md"),
             "---\ntitle: Shared\ntype: note\n---\n",
         )
         .unwrap();
         fs::write(
-            root.path().join("knowledge/linked.md"),
+            project.path().join("graph/linked.md"),
             "---\ntitle: Linked\ntype: note\nlinks: [\"references missing\"]\n---\n",
         )
         .unwrap();
         fs::write(
-            root.path().join("issues/shared.md"),
+            team.path().join("graph/shared.md"),
             "---\ntitle: Duplicate\n---\n",
         )
         .unwrap();
-        let store = GraphStore::load(&[GraphSourceRoot::new(
-            "project:test",
-            GraphScopeKind::Project,
-            root.path(),
-        )]);
+        let store = GraphStore::load(&[
+            GraphSourceRoot::new("project:test", GraphScopeKind::Project, project.path()),
+            GraphSourceRoot::new("team:test", GraphScopeKind::Team, team.path()),
+        ]);
         assert_eq!(store.len(), 2);
         assert!(store
             .diagnostics()
@@ -1028,15 +1019,15 @@ mod tests {
         let root = TempDir::new().unwrap();
         let private = root.path().join("private");
         let team = root.path().join("team");
-        fs::create_dir_all(private.join("knowledge")).unwrap();
-        fs::create_dir_all(team.join("knowledge")).unwrap();
+        fs::create_dir_all(private.join("graph")).unwrap();
+        fs::create_dir_all(team.join("graph")).unwrap();
         fs::write(
-            private.join("knowledge/private-note.md"),
+            private.join("graph/private-note.md"),
             "---\ntitle: Private note\ntype: note\nlinks: [\"references team-note\"]\n---\n",
         )
         .unwrap();
         fs::write(
-            team.join("knowledge/team-note.md"),
+            team.join("graph/team-note.md"),
             "---\ntitle: Team note\ntype: note\n---\n",
         )
         .unwrap();
@@ -1193,7 +1184,7 @@ mod tests {
         assert_eq!(project.provenance.scope_id, "project:test");
         assert!(root
             .path()
-            .join("knowledge/value-evidence-strategy.md")
+            .join("graph/value-evidence-strategy.md")
             .is_file());
 
         let issue = store
@@ -1211,9 +1202,43 @@ mod tests {
         assert_eq!(issue.priority(), Some("normal"));
         assert!(root
             .path()
-            .join("issues")
+            .join("graph")
             .join(format!("{}.md", issue.id))
             .is_file());
+    }
+
+    #[test]
+    fn unified_graph_nodes_can_change_kind_without_moving_files() {
+        let (root, mut store) = fixture();
+        let source = GraphSourceRoot::new("project:test", GraphScopeKind::Project, root.path());
+        let note = store
+            .create_node(
+                &source,
+                GraphNodeCreate {
+                    kind: "note".into(),
+                    title: "Evidence follow-up".into(),
+                    ..GraphNodeCreate::default()
+                },
+            )
+            .unwrap();
+        let source_path = note.provenance.source_path.clone();
+
+        let issue = store
+            .update_node(GraphNodePatch {
+                id: note.id.clone(),
+                expected_revision: Some(note.provenance.source_revision),
+                kind: Some("issue".into()),
+                ..GraphNodePatch::default()
+            })
+            .unwrap();
+
+        assert_eq!(issue.kind, "issue");
+        assert_eq!(issue.status(), Some("backlog"));
+        assert_eq!(issue.priority(), Some("normal"));
+        assert_eq!(issue.provenance.source_path, source_path);
+        let reloaded = GraphStore::load(&[source]);
+        assert_eq!(reloaded.get(&note.id).unwrap().kind, "issue");
+        assert_eq!(reloaded.get(&note.id).unwrap().status(), Some("backlog"));
     }
 
     #[test]
@@ -1235,13 +1260,13 @@ mod tests {
         assert_eq!(store.get("eversana").unwrap().title, "EVERSANA");
     }
 
-    fn parsed_clean_knowledge(path: &Path) -> GraphNode {
+    fn parsed_clean_graph(path: &Path) -> GraphNode {
         let raw = fs::read_to_string(path).unwrap();
         let parsed = parse_graph_markdown(
             path,
             "project:test",
             GraphScopeKind::Project,
-            GraphSourceFormat::Knowledge,
+            GraphSourceFormat::Graph,
             &raw,
         )
         .unwrap();
@@ -1288,7 +1313,7 @@ mod tests {
 
         assert!(matches!(error, GraphMutationError::Conflict { .. }));
         let source_path = PathBuf::from(&winner.provenance.source_path);
-        let on_disk = parsed_clean_knowledge(&source_path);
+        let on_disk = parsed_clean_graph(&source_path);
         assert_eq!(on_disk.title, "Winner");
         assert!(!fs::read_to_string(&source_path).unwrap().contains("Loser"));
         assert_eq!(second.get("eversana").unwrap().title, "EVERSANA");
@@ -1332,7 +1357,7 @@ mod tests {
         );
         for id in ["eversana", "project-eversana"] {
             let path = PathBuf::from(&reloaded.get(id).unwrap().provenance.source_path);
-            parsed_clean_knowledge(&path);
+            parsed_clean_graph(&path);
         }
     }
 
@@ -1373,8 +1398,8 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error, GraphMutationError::Exists("race-note".into()));
-        let path = root.path().join("knowledge/race-note.md");
-        assert_eq!(parsed_clean_knowledge(&path).title, "First to file");
+        let path = root.path().join("graph/race-note.md");
+        assert_eq!(parsed_clean_graph(&path).title, "First to file");
         assert!(second.get("race-note").is_none());
     }
 
@@ -1443,7 +1468,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(updated.title, "Untokened writer");
-        let on_disk = parsed_clean_knowledge(Path::new(&updated.provenance.source_path));
+        let on_disk = parsed_clean_graph(Path::new(&updated.provenance.source_path));
         assert_eq!(on_disk.title, "Untokened writer");
 
         // The defaulted baseline tracks the store's own committed writes, so
@@ -1458,7 +1483,7 @@ mod tests {
             .unwrap();
         assert_eq!(again.body, "Second pass.");
         assert_eq!(
-            parsed_clean_knowledge(Path::new(&again.provenance.source_path)).body,
+            parsed_clean_graph(Path::new(&again.provenance.source_path)).body,
             "Second pass."
         );
     }
@@ -1508,8 +1533,8 @@ mod tests {
     #[test]
     fn load_flags_corrupt_sources_without_panicking_deleting_or_rewriting_them() {
         let root = TempDir::new().unwrap();
-        let knowledge = root.path().join("knowledge");
-        fs::create_dir_all(&knowledge).unwrap();
+        let graph = root.path().join("graph");
+        fs::create_dir_all(&graph).unwrap();
         let sources: [(&str, &[u8]); 6] = [
             (
                 "healthy.md",
@@ -1525,7 +1550,7 @@ mod tests {
             ("binary.md", b"\xff\xfe\x00not utf-8"),
         ];
         for (name, bytes) in &sources {
-            fs::write(knowledge.join(name), bytes).unwrap();
+            fs::write(graph.join(name), bytes).unwrap();
         }
 
         let store = GraphStore::load(&[GraphSourceRoot::new(
@@ -1576,7 +1601,7 @@ mod tests {
         // Loading must never delete, rewrite, or quarantine a source file.
         for (name, bytes) in &sources {
             assert_eq!(
-                fs::read(knowledge.join(name)).unwrap().as_slice(),
+                fs::read(graph.join(name)).unwrap().as_slice(),
                 *bytes,
                 "{name} must stay byte-identical after load"
             );

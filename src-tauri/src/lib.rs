@@ -62,6 +62,7 @@ fn complete_windowless_meeting_quit(
 
 pub mod activities;
 mod activity_commands;
+pub mod agent_packages;
 mod ai;
 mod ai_keys;
 mod ai_models;
@@ -1073,8 +1074,10 @@ pub fn run() {
             connections::connections_status,
             connections::connections_connect_google,
             connections::connections_connect_slack,
+            connections::connections_connect_slack_token,
             connections::connections_connect_granola,
             connections::connections_disconnect,
+            connections::connections_set_google_default,
             read_text_file,
             read_binary_file,
             write_text_file,
@@ -1098,6 +1101,10 @@ pub fn run() {
             business_graph::runtime::graph_delete,
             business_graph::runtime::graph_restore,
             git::git_status,
+            git::git_changes,
+            git::git_file_diff,
+            git::git_stage_file,
+            git::git_unstage_file,
             push_proposals,
             get_proposals_for_path,
             proposal_create,
@@ -1154,7 +1161,6 @@ pub fn run() {
             activity_commands::activity_stop,
             activity_commands::activity_close,
             activity_commands::activity_rename,
-            activity_commands::activity_auto_title,
             activity_commands::activity_provisional_title,
             activity_commands::activity_set_archived,
             activity_commands::activity_clear,
@@ -1167,6 +1173,9 @@ pub fn run() {
             routine_runtime::routine_catalog,
             routine_runtime::routine_reload,
             routine_runtime::routine_run_now,
+            routine_runtime::agent_run,
+            routine_runtime::agent_list,
+            routine_runtime::scope_inventory,
             routine_runtime::routine_create,
             routine_runtime::routine_update,
             routine_runtime::routine_duplicate,

@@ -9,11 +9,20 @@ use sha2::{Digest, Sha256};
 
 const MIMIR_CLI_SOURCE: &str = include_str!("../../bin/mimir.mjs");
 const MIMIR_SKILLS_SOURCE: &str = include_str!("../../bin/mimir-skills.mjs");
+const MIMIR_AGENTS_SOURCE: &str = include_str!("../../bin/mimir-agents.mjs");
+const MIMIR_SCOPES_SOURCE: &str = include_str!("../../bin/mimir-scopes.mjs");
+const MIMIR_PACKAGES_SOURCE: &str = include_str!("../../bin/mimir-packages.mjs");
 const PI_EXTENSION_SOURCE: &str = include_str!("../../bin/pi-mimir-extension.ts");
 const MIMIR_CONFIG_SKILL: &str = include_str!("../../skills/mimir-config/SKILL.md");
 const MIMIR_GRAPH_SKILL: &str = include_str!("../../skills/mimir-graph/SKILL.md");
 const MIMIR_GRAPH_REFERENCE: &str = include_str!("../../skills/mimir-graph/references/graph.md");
 const MIMIR_MEETINGS_SKILL: &str = include_str!("../../skills/mimir-meetings/SKILL.md");
+const MIMIR_CLI_MODULES: &[(&str, &str)] = &[
+    ("mimir-skills.mjs", MIMIR_SKILLS_SOURCE),
+    ("mimir-agents.mjs", MIMIR_AGENTS_SOURCE),
+    ("mimir-scopes.mjs", MIMIR_SCOPES_SOURCE),
+    ("mimir-packages.mjs", MIMIR_PACKAGES_SOURCE),
+];
 const LEGACY_MIMIR_CONFIG_SKILL_V1: &str = r#"---
 name: mimir-config
 description: Locate and safely edit Mimir settings, launchers, routines, apps, and skills.
@@ -26,16 +35,18 @@ Authored sources live in `~/.mimir`: `settings.json`, `launchers.json`, `routine
 Do not edit runtime state (`session.json`, `routines-state.json`, `activities/`, `app-data/`, graph event files) or credentials. Use Mimir’s graph tools for graph data; credentials live in the OS keychain and are changed in Settings.
 "#;
 
+#[cfg(test)]
+fn word_count(value: &str) -> usize {
+    value.split_whitespace().count()
+}
+
 pub fn install() -> Result<PathBuf, String> {
     let directory = install_dir()?;
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create Mimir CLI directory: {error}"))?;
     install_builtin_skills()?;
     install_pi_extension()?;
-    write_if_changed(
-        &directory.join("mimir-skills.mjs"),
-        MIMIR_SKILLS_SOURCE.as_bytes(),
-    )?;
+    install_cli_modules_at(&directory)?;
 
     #[cfg(windows)]
     {
@@ -61,6 +72,13 @@ pub fn install() -> Result<PathBuf, String> {
     }
 }
 
+fn install_cli_modules_at(directory: &Path) -> Result<(), String> {
+    for (name, source) in MIMIR_CLI_MODULES {
+        write_if_changed(&directory.join(name), source.as_bytes())?;
+    }
+    Ok(())
+}
+
 fn install_builtin_skills() -> Result<(), String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "Could not resolve the home directory for skills.".to_string())?;
@@ -69,8 +87,8 @@ fn install_builtin_skills() -> Result<(), String> {
 
 fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
     let skills_root = home.join(".mimir").join("skills");
-    let catalog = configured_catalog_root(home).unwrap_or_else(|| skills_root.join("catalog"));
-    let config_destination = catalog.join("mimir-config").join("SKILL.md");
+    let private_skills = home.join(".mimir").join("private").join("skills");
+    let config_destination = private_skills.join("mimir-config").join("SKILL.md");
     let config_marker = skills_root
         .join(".builtin-sources")
         .join("mimir-config.json");
@@ -81,7 +99,7 @@ fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
         &[LEGACY_MIMIR_CONFIG_SKILL_V1.as_bytes()],
     )?;
 
-    let graph = catalog.join("mimir-graph");
+    let graph = private_skills.join("mimir-graph");
     install_managed_builtin_skill(
         &graph.join("SKILL.md"),
         &skills_root
@@ -100,21 +118,13 @@ fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
     )?;
 
     install_managed_builtin_skill(
-        &catalog.join("mimir-meetings").join("SKILL.md"),
+        &private_skills.join("mimir-meetings").join("SKILL.md"),
         &skills_root
             .join(".builtin-sources")
             .join("mimir-meetings.json"),
         MIMIR_MEETINGS_SKILL.as_bytes(),
         &[],
     )
-}
-
-fn configured_catalog_root(home: &Path) -> Option<PathBuf> {
-    let settings = fs::read_to_string(home.join(".mimir").join("settings.json")).ok()?;
-    let settings = serde_json::from_str::<serde_json::Value>(&settings).ok()?;
-    let configured = settings.get("skills")?.get("catalogRoot")?.as_str()?.trim();
-    let path = PathBuf::from(configured);
-    (!configured.is_empty() && path.is_absolute()).then_some(path)
 }
 
 fn install_managed_builtin_skill(
@@ -226,6 +236,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn packaged_skills_stay_lean() {
+        for (name, source, limit) in [
+            ("mimir-config", MIMIR_CONFIG_SKILL, 220),
+            ("mimir-graph", MIMIR_GRAPH_SKILL, 25),
+            ("mimir-meetings", MIMIR_MEETINGS_SKILL, 70),
+            ("mimir-graph reference", MIMIR_GRAPH_REFERENCE, 450),
+        ] {
+            let words = word_count(source);
+            assert!(words <= limit, "{name} has {words} words; limit is {limit}");
+        }
+    }
+
+    #[test]
     fn prepends_once_without_destroying_existing_path_entries() {
         let directory = Path::new("/tmp/mimir-bin");
         let existing = env::join_paths([
@@ -280,21 +303,21 @@ mod tests {
     }
 
     #[test]
-    fn builtin_skills_use_the_default_catalog_path() {
+    fn builtin_skills_use_the_private_scope() {
         let home = tempfile::tempdir().unwrap();
         install_builtin_skills_at(home.path()).unwrap();
         let config = home
             .path()
-            .join(".mimir/skills/catalog/mimir-config/SKILL.md");
+            .join(".mimir/private/skills/mimir-config/SKILL.md");
         let graph = home
             .path()
-            .join(".mimir/skills/catalog/mimir-graph/SKILL.md");
+            .join(".mimir/private/skills/mimir-graph/SKILL.md");
         let reference = home
             .path()
-            .join(".mimir/skills/catalog/mimir-graph/references/graph.md");
+            .join(".mimir/private/skills/mimir-graph/references/graph.md");
         let meetings = home
             .path()
-            .join(".mimir/skills/catalog/mimir-meetings/SKILL.md");
+            .join(".mimir/private/skills/mimir-meetings/SKILL.md");
         assert_eq!(fs::read_to_string(config).unwrap(), MIMIR_CONFIG_SKILL);
         assert_eq!(fs::read_to_string(graph).unwrap(), MIMIR_GRAPH_SKILL);
         assert_eq!(
@@ -302,44 +325,6 @@ mod tests {
             MIMIR_GRAPH_REFERENCE
         );
         assert_eq!(fs::read_to_string(meetings).unwrap(), MIMIR_MEETINGS_SKILL);
-    }
-
-    #[test]
-    fn builtin_skills_use_the_configured_catalog_root() {
-        let home = tempfile::tempdir().unwrap();
-        let catalog = home.path().join("shared-team-catalog");
-        fs::create_dir_all(home.path().join(".mimir")).unwrap();
-        fs::write(
-            home.path().join(".mimir/settings.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "skills": { "catalogRoot": catalog }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        install_builtin_skills_at(home.path()).unwrap();
-
-        assert_eq!(
-            fs::read_to_string(catalog.join("mimir-config/SKILL.md")).unwrap(),
-            MIMIR_CONFIG_SKILL
-        );
-        assert_eq!(
-            fs::read_to_string(catalog.join("mimir-graph/SKILL.md")).unwrap(),
-            MIMIR_GRAPH_SKILL
-        );
-        assert_eq!(
-            fs::read_to_string(catalog.join("mimir-graph/references/graph.md")).unwrap(),
-            MIMIR_GRAPH_REFERENCE
-        );
-        assert_eq!(
-            fs::read_to_string(catalog.join("mimir-meetings/SKILL.md")).unwrap(),
-            MIMIR_MEETINGS_SKILL
-        );
-        assert!(!home
-            .path()
-            .join(".mimir/skills/catalog/mimir-graph")
-            .exists());
     }
 
     #[cfg(unix)]
@@ -372,10 +357,15 @@ mod tests {
         assert!(MIMIR_CLI_SOURCE.contains("command === 'call'"));
         assert!(MIMIR_CLI_SOURCE.contains("command === 'doctor'"));
         assert!(MIMIR_CLI_SOURCE.contains("command === 'skill'"));
+        assert!(MIMIR_CLI_SOURCE.contains("command === 'agent'"));
+        assert!(MIMIR_CLI_SOURCE.contains("command === 'run'"));
         assert!(MIMIR_CLI_SOURCE.contains("command === 'mcp-proxy'"));
         assert!(MIMIR_CLI_SOURCE.contains("includeAll"));
         assert!(MIMIR_SKILLS_SOURCE.contains("export async function findSkill"));
         assert!(MIMIR_SKILLS_SOURCE.contains("export async function prepareSkills"));
+        assert!(MIMIR_AGENTS_SOURCE.contains("export async function listAgents"));
+        assert!(MIMIR_SCOPES_SOURCE.contains("export async function scopeRoots"));
+        assert!(MIMIR_PACKAGES_SOURCE.contains("export function parsePackageFrontmatter"));
         assert!(MIMIR_CONFIG_SKILL.contains("name: mimir-config"));
         assert!(MIMIR_GRAPH_SKILL.contains("name: mimir-graph"));
         assert!(MIMIR_MEETINGS_SKILL.contains("name: mimir-meetings"));
@@ -395,6 +385,42 @@ mod tests {
     }
 
     #[test]
+    fn installs_every_embedded_cli_module_and_closes_local_imports() {
+        let directory = tempfile::tempdir().unwrap();
+        install_cli_modules_at(directory.path()).unwrap();
+
+        let installed = MIMIR_CLI_MODULES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<std::collections::HashSet<_>>();
+        for (name, source) in std::iter::once(("mimir.mjs", MIMIR_CLI_SOURCE))
+            .chain(MIMIR_CLI_MODULES.iter().copied())
+        {
+            for import in relative_mjs_imports(source) {
+                let dependency = import.trim_start_matches("./");
+                assert!(
+                    installed.contains(dependency),
+                    "{name} imports {dependency}, but the CLI installer does not embed it"
+                );
+            }
+        }
+        for (name, source) in MIMIR_CLI_MODULES {
+            assert_eq!(
+                fs::read_to_string(directory.path().join(name)).unwrap(),
+                *source
+            );
+        }
+    }
+
+    fn relative_mjs_imports(source: &str) -> Vec<&str> {
+        source
+            .lines()
+            .flat_map(|line| line.split(['\'', '"']))
+            .filter(|part| part.starts_with("./") && part.ends_with(".mjs"))
+            .collect()
+    }
+
+    #[test]
     fn embedded_pi_extension_registers_the_default_discovered_tools() {
         assert!(PI_EXTENSION_SOURCE.contains("\"tools/list\""));
         assert!(PI_EXTENSION_SOURCE.contains("pi.registerTool"));
@@ -402,6 +428,7 @@ mod tests {
         assert!(PI_EXTENSION_SOURCE.contains("\"tools/call\""));
         assert!(PI_EXTENSION_SOURCE.contains("\"initialize\""));
         assert!(PI_EXTENSION_SOURCE.contains("before_agent_start"));
+        assert!(PI_EXTENSION_SOURCE.contains("Discover other tools with `mimir tools`."));
         assert_eq!(
             pi_extension_path_at(Path::new("/Users/mimir")),
             Path::new("/Users/mimir/.mimir/pi/mimir-tools.ts")
