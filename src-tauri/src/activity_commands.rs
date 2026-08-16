@@ -239,17 +239,6 @@ pub fn activity_rename(
 }
 
 #[tauri::command]
-pub fn activity_auto_title(
-    supervisor: tauri::State<'_, ActivitySupervisor>,
-    activity_id: String,
-    title: String,
-) -> Result<ActivityRecord, String> {
-    supervisor
-        .auto_title(&activity_id, title)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 pub fn activity_provisional_title(
     supervisor: tauri::State<'_, ActivitySupervisor>,
     activity_id: String,
@@ -375,15 +364,6 @@ mod tests {
         assert_eq!(provisional.title, "Provisional command title");
         assert_eq!(provisional.title_source, ActivityTitleSource::Provisional);
 
-        let automatic = activity_auto_title(
-            app.state(),
-            "command-lifecycle".into(),
-            "Automatic command title".into(),
-        )
-        .unwrap();
-        assert_eq!(automatic.title, "Automatic command title");
-        assert_eq!(automatic.title_source, ActivityTitleSource::Agent);
-
         let renamed = activity_rename(
             app.state(),
             "command-lifecycle".into(),
@@ -393,7 +373,7 @@ mod tests {
         assert_eq!(renamed.title, "Command title");
         assert_eq!(renamed.title_source, ActivityTitleSource::Manual);
 
-        let ignored = activity_auto_title(
+        let ignored = activity_provisional_title(
             app.state(),
             "command-lifecycle".into(),
             "Must not replace manual title".into(),

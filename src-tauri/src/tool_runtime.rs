@@ -40,29 +40,20 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 42] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
-        description: "Active editor state and available Today artifact context.",
+        description: "Read editor and Today context.",
         group: "workbench",
         effect: "read",
         direct: true,
         connection: None,
     },
     AgentToolSpec {
-        canonical_name: "activities.auto-title",
-        public_name: "mimir_title",
-        description: "Set a concise title for the current Activity on its first substantive turn.",
-        group: "workbench",
-        effect: "write",
-        direct: true,
-        connection: None,
-    },
-    AgentToolSpec {
         canonical_name: "editor.reveal",
         public_name: "mimir_reveal",
-        description: "Open a file or line in Mimir.",
+        description: "Open a file or line.",
         group: "workbench",
         effect: "write",
         direct: true,
@@ -71,7 +62,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "editor.propose",
         public_name: "mimir_propose",
-        description: "Propose an exact reviewed replacement.",
+        description: "Propose an exact replacement for review.",
         group: "workbench",
         effect: "write",
         direct: true,
@@ -119,9 +110,27 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "files.trash",
         public_name: "files_trash",
-        description: "Move exact workspace files or folders to the recoverable OS Trash.",
+        description: "Move exact workspace paths to recoverable OS Trash.",
         group: "workbench",
         effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "agents.run",
+        public_name: "agents_run",
+        description: "Run a scoped agent package.",
+        group: "workbench",
+        effect: "write",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "activities.snapshot",
+        public_name: "activities_snapshot",
+        description: "Read Activity state and PTY output.",
+        group: "workbench",
+        effect: "read",
         direct: false,
         connection: None,
     },
@@ -137,7 +146,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "graph.get",
         public_name: "graph_get",
-        description: "Read one complete graph node.",
+        description: "Read a complete graph node.",
         group: "graph",
         effect: "read",
         direct: false,
@@ -155,7 +164,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "graph.update",
         public_name: "graph_update",
-        description: "Update a graph node with revision protection.",
+        description: "Update a graph node with revision checks.",
         group: "graph",
         effect: "write",
         direct: false,
@@ -191,7 +200,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "graph.events",
         public_name: "graph_events",
-        description: "Read recent authored changes in the mounted graph.",
+        description: "Read recent graph changes.",
         group: "graph",
         effect: "read",
         direct: false,
@@ -200,7 +209,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "meetings.list",
         public_name: "meetings_list",
-        description: "List meetings recorded natively in Mimir Scribe.",
+        description: "List Scribe meetings.",
         group: "meetings",
         effect: "read",
         direct: false,
@@ -209,7 +218,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "meetings.get",
         public_name: "meetings_get",
-        description: "Read one Mimir Scribe meeting and a bounded transcript slice.",
+        description: "Read a meeting and bounded transcript slice.",
         group: "meetings",
         effect: "read",
         direct: false,
@@ -218,8 +227,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "meetings.search",
         public_name: "meetings_search",
-        description:
-            "Search reviewed titles, full summaries, tags, and terminal transcript text across the complete Mimir Scribe library.",
+        description: "Search reviewed meeting titles, summaries, tags, and transcripts.",
         group: "meetings",
         effect: "read",
         direct: false,
@@ -228,7 +236,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "meetings.update",
         public_name: "meetings_update",
-        description: "Update the reviewed title, summary, or tags of a Mimir Scribe meeting.",
+        description: "Update a meeting's reviewed title, summary, or tags.",
         group: "meetings",
         effect: "write",
         direct: false,
@@ -237,7 +245,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "meetings.delete",
         public_name: "meetings_delete",
-        description: "Permanently delete source audio or an entire stopped Mimir Scribe meeting.",
+        description: "Permanently delete stopped-meeting audio or record.",
         group: "meetings",
         effect: "destructive",
         direct: false,
@@ -271,9 +279,27 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
         connection: Some("gmail"),
     },
     AgentToolSpec {
+        canonical_name: "calendar.calendars",
+        public_name: "calendar_calendars",
+        description: "List available Google calendars.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("calendar"),
+    },
+    AgentToolSpec {
         canonical_name: "calendar.list",
         public_name: "calendar_list",
         description: "List Google Calendar events.",
+        group: "connections",
+        effect: "external",
+        direct: false,
+        connection: Some("calendar"),
+    },
+    AgentToolSpec {
+        canonical_name: "calendar.freebusy",
+        public_name: "calendar_freebusy",
+        description: "Read availability across Google calendars.",
         group: "connections",
         effect: "external",
         direct: false,
@@ -300,7 +326,7 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 39] = [
     AgentToolSpec {
         canonical_name: "drive.read",
         public_name: "drive_read",
-        description: "Read Drive metadata and text content when available.",
+        description: "Read metadata or normalized Docs, Sheets, Slides, and text.",
         group: "connections",
         effect: "external",
         direct: false,
@@ -1196,26 +1222,22 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             &[],
         ),
         definition(
-            "activities.auto-title",
-            "mimir_title",
-            "Call once at the start of the first substantive user turn with a concise 3-8 word Activity title. Explicit or previously generated titles are preserved.",
-            object_schema(
-                json!({
-                    "title": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 60,
-                        "description": "A concise 3-8 word description of the user's task, without provider names or trailing punctuation."
-                    }
-                }),
-                &["title"],
-            ),
-        ),
-        definition(
             "activities.list",
             "activities_list",
             "List durable terminal, agent, app, files, and routine activities.",
             object_schema(json!({}), &[]),
+        ),
+        definition(
+            "activities.snapshot",
+            "activities_snapshot",
+            "Read one Activity record and raw PTY output after an optional sequence.",
+            object_schema(
+                json!({
+                    "activity_id": { "type": "string", "minLength": 1 },
+                    "after_sequence": { "type": "integer", "minimum": 0 }
+                }),
+                &["activity_id"],
+            ),
         ),
         definition(
             "activities.spawn",
@@ -1360,6 +1382,22 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             object_schema(json!({}), &[]),
         ),
         definition(
+            "agents.run",
+            "agents_run",
+            "Resolve and run a Project, Private, or Team agent package as a durable Activity.",
+            object_schema(
+                json!({
+                    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+                    "workspace": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                    "args": { "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 10000 } },
+                    "preset": { "type": "string", "minLength": 1, "maxLength": 100 },
+                    "interactive": { "type": "boolean" },
+                    "follow": { "type": "boolean", "description": "Reject an interactive package before launch because CLI follow mode cannot send input." }
+                }),
+                &["name", "workspace"],
+            ),
+        ),
+        definition(
             "routines.run",
             "routines_run",
             "Run a file-defined routine now as a durable activity.",
@@ -1453,6 +1491,7 @@ fn routine_definition_schema() -> Value {
             "enabled": { "type": "boolean" },
             "schedule": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
             "timezone": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "agent": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
             "preset": { "type": "string", "minLength": 1, "maxLength": 100 },
             "prompt": { "type": "string", "minLength": 1, "maxLength": 100000 },
             "overlap": { "enum": ["skip", "parallel"] },
@@ -1460,7 +1499,7 @@ fn routine_definition_schema() -> Value {
             "workspace": { "type": ["string", "null"], "minLength": 1, "maxLength": 1000 },
             "interactive": { "type": "boolean" }
         },
-        "required": ["id", "title", "preset", "prompt"]
+        "required": ["id", "title"]
     })
 }
 
@@ -1516,7 +1555,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 39);
+        assert_eq!(AGENT_TOOLS.len(), 42);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
@@ -1529,18 +1568,16 @@ mod tests {
             .filter(|spec| spec.direct)
             .map(|spec| spec.public_name)
             .collect();
-        assert_eq!(
-            direct,
-            [
-                "mimir_state",
-                "mimir_title",
-                "mimir_reveal",
-                "mimir_propose"
-            ]
-        );
+        assert_eq!(direct, ["mimir_state", "mimir_reveal", "mimir_propose"]);
 
         for spec in AGENT_TOOLS {
             assert!(!spec.public_name.contains('.'));
+            assert!(
+                spec.description.split_whitespace().count() <= 10,
+                "verbose public description for {}: {}",
+                spec.public_name,
+                spec.description
+            );
             assert!(matches!(
                 spec.group,
                 "workbench" | "graph" | "meetings" | "chat" | "connections"

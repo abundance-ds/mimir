@@ -144,6 +144,7 @@ fn inferred_annotations(canonical_name: &str) -> ToolAnnotations {
         "resolve_reference",
         "search",
         "selection",
+        "snapshot",
         "state",
         "status",
         "tabs",

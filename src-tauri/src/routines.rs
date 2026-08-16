@@ -39,7 +39,11 @@ pub struct RoutineDefinition {
     pub schedule: Option<String>,
     #[serde(default = "default_timezone")]
     pub timezone: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub preset: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prompt: String,
     #[serde(default)]
     pub overlap: RoutineOverlap,
@@ -219,11 +223,31 @@ pub fn validate_definition(definition: &RoutineDefinition) -> Result<(), (String
     if definition.title.trim().is_empty() {
         return Err(("title".into(), "Title must not be empty.".into()));
     }
-    if definition.preset.trim().is_empty() {
-        return Err(("preset".into(), "Preset must not be empty.".into()));
-    }
-    if definition.prompt.trim().is_empty() {
-        return Err(("prompt".into(), "Prompt must not be empty.".into()));
+    let agent = definition
+        .agent
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if agent.is_some() {
+        if !definition.preset.trim().is_empty() || !definition.prompt.trim().is_empty() {
+            return Err((
+                "agent".into(),
+                "Agent is mutually exclusive with preset and prompt.".into(),
+            ));
+        }
+    } else {
+        if definition.preset.trim().is_empty() {
+            return Err((
+                "preset".into(),
+                "Preset must not be empty when agent is absent.".into(),
+            ));
+        }
+        if definition.prompt.trim().is_empty() {
+            return Err((
+                "prompt".into(),
+                "Prompt must not be empty when agent is absent.".into(),
+            ));
+        }
     }
     if definition.prompt.contains('\0') {
         return Err(("prompt".into(), "Prompt must not contain NUL bytes.".into()));
@@ -468,6 +492,7 @@ mod tests {
             enabled: true,
             schedule: Some(schedule.into()),
             timezone: "Europe/Berlin".into(),
+            agent: None,
             preset: "claude-headless".into(),
             prompt: "Review recent changes and leave comments.".into(),
             overlap: RoutineOverlap::Skip,
@@ -700,6 +725,22 @@ prompt = "Review."
             toml::from_str::<RoutineDefinition>(&serialized).unwrap(),
             interactive
         );
+    }
+
+    #[test]
+    fn agent_package_replaces_preset_and_prompt_in_toml() {
+        let mut definition = routine("* * * * *");
+        definition.agent = Some("evidence-sweep".into());
+        definition.preset.clear();
+        definition.prompt.clear();
+        assert!(validate_definition(&definition).is_ok());
+        let serialized = toml::to_string_pretty(&definition).unwrap();
+        assert!(serialized.contains("agent = \"evidence-sweep\""));
+        assert!(!serialized.contains("preset ="));
+        assert!(!serialized.contains("prompt ="));
+
+        definition.preset = "codex".into();
+        assert_eq!(validate_definition(&definition).unwrap_err().0, "agent");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use reqwest::{header::RETRY_AFTER, Client, Method, StatusCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -13,21 +13,20 @@ use crate::tool_registry::{
 
 const MIMIR_KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
 const DEFAULT_ACCOUNT: &str = "default";
-const GOOGLE_SCOPES: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly";
+const GOOGLE_ACCOUNTS_KEY: &str = "google:accounts";
+const GOOGLE_SCOPES: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/drive.readonly";
 const SLACK_USER_SCOPES: &str = "search:read,channels:read,channels:history,groups:read,groups:history,im:read,im:history,mpim:read,mpim:history,chat:write";
 const GRANOLA_API_ROOT: &str = "https://public-api.granola.ai/v1";
 
 #[derive(Clone)]
 struct ConnectionRuntime {
     http: Client,
-    google_account: String,
     slack_account: String,
 }
 
 #[derive(Clone)]
 struct Secret {
     value: String,
-    service: &'static str,
 }
 
 pub struct ConnectionManager {
@@ -37,11 +36,23 @@ pub struct ConnectionManager {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConnectionAccountStatus {
+    id: String,
+    label: String,
+    detail: Option<String>,
+    state: &'static str,
+    is_default: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionStatus {
     provider: &'static str,
     name: &'static str,
     state: &'static str,
     account: Option<String>,
+    accounts: Vec<ConnectionAccountStatus>,
+    oauth_available: bool,
     detail: String,
 }
 
@@ -54,7 +65,6 @@ impl ConnectionManager {
                     .timeout(Duration::from_secs(30))
                     .build()
                     .map_err(|error| error.to_string())?,
-                google_account: DEFAULT_ACCOUNT.to_string(),
                 slack_account: DEFAULT_ACCOUNT.to_string(),
             },
         })
@@ -72,10 +82,13 @@ impl ConnectionManager {
             .unregister_owner(&ToolOwner::Provider(provider.to_string()));
         match provider {
             "google" => {
-                if let Some(bundle) = google_bundle(DEFAULT_ACCOUNT)? {
-                    if !google_needs_sign_in(&bundle) {
-                        register_google_tools(&self.registry, &self.runtime, &bundle)?;
-                    }
+                let store = google_store()?;
+                if store
+                    .accounts
+                    .iter()
+                    .any(|account| !google_needs_sign_in(&account.bundle))
+                {
+                    register_google_tools(&self.registry, &self.runtime, &store)?;
                 }
             }
             "slack" => {
@@ -123,7 +136,7 @@ pub async fn connections_connect_google(
         .append_pair("response_type", "code")
         .append_pair("scope", GOOGLE_SCOPES)
         .append_pair("access_type", "offline")
-        .append_pair("prompt", "consent")
+        .append_pair("prompt", "consent select_account")
         .append_pair("code_challenge", &oauth.challenge)
         .append_pair("code_challenge_method", "S256")
         .append_pair("state", &oauth.state);
@@ -180,7 +193,8 @@ pub async fn connections_connect_google(
         .json()
         .await
         .map_err(|error| format!("Google returned invalid account data: {error}"))?;
-    let bundle = GoogleBundle {
+    let email = required_json_string(&identity, "email")?;
+    let mut bundle = GoogleBundle {
         access_token,
         refresh_token: value
             .get("refresh_token")
@@ -203,13 +217,29 @@ pub async fn connections_connect_google(
             "email": identity.get("email").and_then(Value::as_str),
             "name": identity.get("name").and_then(Value::as_str),
         })),
-        service: MIMIR_KEYCHAIN_SERVICE,
     };
-    write_secret(
-        MIMIR_KEYCHAIN_SERVICE,
-        "google:default",
-        &serde_json::to_string(&bundle.as_stored()).map_err(|error| error.to_string())?,
-    )?;
+    let mut store = google_store()?;
+    let id = email.to_lowercase();
+    if bundle.refresh_token.is_none() {
+        bundle.refresh_token = store
+            .accounts
+            .iter()
+            .find(|account| account.id.eq_ignore_ascii_case(&id))
+            .and_then(|account| account.bundle.refresh_token.clone());
+    }
+    upsert_google_account(
+        &mut store,
+        GoogleAccount {
+            id,
+            email,
+            name: identity
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            bundle,
+        },
+    );
+    write_google_store(&store)?;
     manager.refresh_provider("google")?;
     Ok(google_status())
 }
@@ -290,6 +320,57 @@ pub async fn connections_connect_slack(
 }
 
 #[tauri::command]
+pub async fn connections_connect_slack_token(
+    token: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    let token = slack_personal_token(&token)?;
+    let response = manager
+        .runtime
+        .http
+        .post("https://slack.com/api/auth.test")
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Slack returned invalid token data: {error}"))?;
+    if !status.is_success() || value.get("ok") != Some(&Value::Bool(true)) {
+        let reason = value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid_auth");
+        return Err(format!("Slack rejected this personal token: {reason}"));
+    }
+    let team = value
+        .get("team")
+        .and_then(Value::as_str)
+        .unwrap_or("Slack workspace");
+    let user = value.get("user").and_then(Value::as_str);
+    let account = user
+        .map(|user| format!("{team} · {user}"))
+        .unwrap_or_else(|| team.to_string());
+    let stored = json!({
+        "access_token": token,
+        "refresh_token": null,
+        "account": account,
+        "team_id": value.get("team_id").and_then(Value::as_str),
+        "user_id": value.get("user_id").and_then(Value::as_str),
+        "expires_at": null,
+    });
+    write_secret(
+        MIMIR_KEYCHAIN_SERVICE,
+        "slack:default",
+        &serde_json::to_string(&stored).map_err(|error| error.to_string())?,
+    )?;
+    manager.refresh_provider("slack")?;
+    Ok(slack_status())
+}
+
+#[tauri::command]
 pub async fn connections_connect_granola(
     api_key: String,
     manager: tauri::State<'_, ConnectionManager>,
@@ -335,36 +416,89 @@ pub async fn connections_connect_granola(
 #[tauri::command]
 pub fn connections_disconnect(
     provider: String,
+    account: Option<String>,
     manager: tauri::State<'_, ConnectionManager>,
 ) -> Result<Vec<ConnectionStatus>, String> {
-    let account = match provider.as_str() {
-        "google" => "google:default",
-        "slack" => "slack:default",
-        "granola" => "granola:default",
+    match provider.as_str() {
+        "google" => {
+            if let Some(account) = account.filter(|value| !value.trim().is_empty()) {
+                let mut store = google_store()?;
+                let id = resolve_google_account(&store, Some(&account))?.id.clone();
+                store.accounts.retain(|entry| entry.id != id);
+                normalize_google_store(&mut store);
+                write_google_store(&store)?;
+            } else {
+                delete_secret(GOOGLE_ACCOUNTS_KEY)?;
+                delete_secret("google:default")?;
+            }
+        }
+        "slack" => delete_secret("slack:default")?,
+        "granola" => delete_secret("granola:default")?,
         _ => return Err(format!("Unknown connection provider: {provider}")),
-    };
-    delete_secret(account)?;
+    }
     manager.refresh_provider(&provider)?;
     Ok(manager.statuses())
 }
 
+#[tauri::command]
+pub fn connections_set_google_default(
+    account: String,
+    manager: tauri::State<'_, ConnectionManager>,
+) -> Result<ConnectionStatus, String> {
+    let mut store = google_store()?;
+    let id = resolve_google_account(&store, Some(&account))?.id.clone();
+    store.default_account = Some(id);
+    write_google_store(&store)?;
+    manager.refresh_provider("google")?;
+    Ok(google_status())
+}
+
 fn google_status() -> ConnectionStatus {
-    match google_bundle(DEFAULT_ACCOUNT) {
-        Ok(Some(bundle)) if google_needs_sign_in(&bundle) => ConnectionStatus {
-            provider: "google",
-            name: "Google",
-            state: "needs_sign_in",
-            account: google_account_label(&bundle),
-            detail: "Sign in again to restore Gmail, Calendar, and Drive.".into(),
-        },
-        Ok(Some(bundle)) => ConnectionStatus {
-            provider: "google",
-            name: "Google",
-            state: "connected",
-            account: google_account_label(&bundle),
-            detail: "Gmail, Calendar, and Drive are available to agents.".into(),
-        },
-        Ok(None) => disconnected_status("google", "Google", "Gmail, Calendar, and Drive"),
+    match google_store() {
+        Ok(store) if store.accounts.is_empty() => {
+            disconnected_status("google", "Google", "Gmail, Calendar, and Drive")
+        }
+        Ok(store) => {
+            let default = resolve_google_account(&store, None).ok();
+            let connected = store
+                .accounts
+                .iter()
+                .any(|account| !google_needs_sign_in(&account.bundle));
+            let count = store.accounts.len();
+            ConnectionStatus {
+                provider: "google",
+                name: "Google",
+                state: if connected {
+                    "connected"
+                } else {
+                    "needs_sign_in"
+                },
+                account: default.map(|account| account.email.clone()),
+                accounts: store
+                    .accounts
+                    .iter()
+                    .map(|account| ConnectionAccountStatus {
+                        id: account.id.clone(),
+                        label: account.email.clone(),
+                        detail: account.name.clone(),
+                        state: if google_needs_sign_in(&account.bundle) {
+                            "needs_sign_in"
+                        } else {
+                            "connected"
+                        },
+                        is_default: store.default_account.as_deref() == Some(&account.id),
+                    })
+                    .collect(),
+                oauth_available: configured_google_client_id().is_some(),
+                detail: if !connected {
+                    "Sign in again to restore Gmail, Calendar, and Drive.".into()
+                } else if count == 1 {
+                    "Gmail, Calendar, and Drive are available to agents.".into()
+                } else {
+                    format!("{count} Google accounts are available to agents.")
+                },
+            }
+        }
         Err(error) => needs_sign_in_status("google", "Google", error),
     }
 }
@@ -376,6 +510,8 @@ fn slack_status() -> ConnectionStatus {
             name: "Slack",
             state: "needs_sign_in",
             account: bundle.account,
+            accounts: Vec::new(),
+            oauth_available: configured_slack_client_id().is_some(),
             detail: "Sign in again to restore Slack access.".into(),
         },
         Ok(Some(bundle)) => ConnectionStatus {
@@ -383,6 +519,8 @@ fn slack_status() -> ConnectionStatus {
             name: "Slack",
             state: "connected",
             account: bundle.account,
+            accounts: Vec::new(),
+            oauth_available: configured_slack_client_id().is_some(),
             detail: "Search, read, and send tools are available to agents.".into(),
         },
         Ok(None) => disconnected_status("slack", "Slack", "Search, read, and send messages"),
@@ -397,6 +535,8 @@ fn granola_status() -> ConnectionStatus {
             name: "Granola",
             state: "connected",
             account: bundle.account,
+            accounts: Vec::new(),
+            oauth_available: false,
             detail: "Meeting notes and transcripts are available to agents.".into(),
         },
         Ok(None) => disconnected_status("granola", "Granola", "Meeting notes and transcripts"),
@@ -414,6 +554,12 @@ fn disconnected_status(
         name,
         state: "not_connected",
         account: None,
+        accounts: Vec::new(),
+        oauth_available: match provider {
+            "google" => configured_google_client_id().is_some(),
+            "slack" => configured_slack_client_id().is_some(),
+            _ => false,
+        },
         detail: format!("Connect to use {capability}."),
     }
 }
@@ -428,6 +574,12 @@ fn needs_sign_in_status(
         name,
         state: "needs_sign_in",
         account: None,
+        accounts: Vec::new(),
+        oauth_available: match provider {
+            "google" => configured_google_client_id().is_some(),
+            "slack" => configured_slack_client_id().is_some(),
+            _ => false,
+        },
         detail: truncate(&error, 160),
     }
 }
@@ -439,20 +591,20 @@ fn google_needs_sign_in(bundle: &GoogleBundle) -> bool {
         && bundle.refresh_token.is_none()
 }
 
-fn google_account_label(bundle: &GoogleBundle) -> Option<String> {
-    bundle
-        .auth
-        .as_ref()
-        .and_then(|auth| auth.get("email"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
 fn slack_needs_sign_in(bundle: &SlackBundle) -> bool {
     bundle
         .expires_at
         .is_some_and(|expires| expires <= unix_seconds() + 60)
         && bundle.refresh_token.is_none()
+}
+
+fn slack_personal_token(value: &str) -> Result<&str, String> {
+    let token = value.trim();
+    if token.starts_with("xoxp-") {
+        Ok(token)
+    } else {
+        Err("Enter a Slack personal token that starts with xoxp-.".into())
+    }
 }
 
 pub(crate) fn local_diagnostics() -> Value {
@@ -479,9 +631,27 @@ pub(crate) fn local_diagnostics() -> Value {
 fn register_google_tools(
     registry: &ToolRegistry,
     runtime: &ConnectionRuntime,
-    bundle: &GoogleBundle,
+    store: &GoogleStore,
 ) -> Result<(), String> {
-    if bundle.has_any(&[
+    let accounts = store
+        .accounts
+        .iter()
+        .filter(|account| !google_needs_sign_in(&account.bundle))
+        .collect::<Vec<_>>();
+    let has_any = |scopes: &[&str]| {
+        accounts
+            .iter()
+            .any(|account| account.bundle.has_any(scopes))
+    };
+    let schema = |properties: Value, required: &[&str]| {
+        google_object_schema(
+            properties,
+            required,
+            &accounts,
+            store.default_account.as_deref(),
+        )
+    };
+    if has_any(&[
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://mail.google.com/",
@@ -492,7 +662,7 @@ fn register_google_tools(
             "gmail.search",
             "gmail_search",
             "Search Gmail messages.",
-            object_schema(
+            schema(
                 json!({
                     "query": { "type": "string", "description": "Gmail search syntax." },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
@@ -507,7 +677,7 @@ fn register_google_tools(
             "gmail.read",
             "gmail_read",
             "Read a Gmail message or thread.",
-            object_schema(
+            schema(
                 json!({
                     "message_id": { "type": "string" },
                     "thread_id": { "type": "string" }
@@ -516,7 +686,7 @@ fn register_google_tools(
             ),
         )?;
     }
-    if bundle.has_any(&[
+    if has_any(&[
         "https://www.googleapis.com/auth/gmail.send",
         "https://mail.google.com/",
     ]) {
@@ -526,7 +696,7 @@ fn register_google_tools(
             "gmail.send",
             "gmail_send",
             "Send or reply to Gmail.",
-            object_schema(
+            schema(
                 json!({
                     "to": { "type": "string", "minLength": 1 },
                     "subject": { "type": "string" },
@@ -540,7 +710,7 @@ fn register_google_tools(
             ),
         )?;
     }
-    if bundle.has_any(&[
+    if has_any(&[
         "https://www.googleapis.com/auth/calendar.events.readonly",
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar.readonly",
@@ -552,7 +722,7 @@ fn register_google_tools(
             "calendar.list",
             "calendar_list",
             "List Google Calendar events.",
-            object_schema(
+            schema(
                 json!({
                     "from": { "type": "string", "description": "Inclusive RFC 3339 start." },
                     "to": { "type": "string", "description": "Exclusive RFC 3339 end." },
@@ -564,7 +734,7 @@ fn register_google_tools(
             ),
         )?;
     }
-    if bundle.has_any(&[
+    if has_any(&[
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar",
     ]) {
@@ -574,7 +744,7 @@ fn register_google_tools(
             "calendar.create",
             "calendar_create",
             "Create a Google Calendar event.",
-            object_schema(
+            schema(
                 json!({
                     "summary": { "type": "string", "minLength": 1 },
                     "start": { "type": "string", "description": "RFC 3339 date-time." },
@@ -587,7 +757,58 @@ fn register_google_tools(
             ),
         )?;
     }
-    if bundle.has_any(&[
+    if has_any(&[
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        "https://www.googleapis.com/auth/calendar.calendarlist",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar",
+    ]) {
+        register(
+            registry,
+            runtime,
+            "calendar.calendars",
+            "calendar_calendars",
+            "List the Google calendars available to the user.",
+            schema(
+                json!({
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 250, "default": 100 },
+                    "page_token": { "type": "string" },
+                    "include_hidden": { "type": "boolean", "default": false }
+                }),
+                &[],
+            ),
+        )?;
+    }
+    if has_any(&[
+        "https://www.googleapis.com/auth/calendar.events.freebusy",
+        "https://www.googleapis.com/auth/calendar.freebusy",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar",
+    ]) {
+        register(
+            registry,
+            runtime,
+            "calendar.freebusy",
+            "calendar_freebusy",
+            "Read availability across Google calendars.",
+            schema(
+                json!({
+                    "from": { "type": "string", "description": "Inclusive RFC 3339 start." },
+                    "to": { "type": "string", "description": "Exclusive RFC 3339 end." },
+                    "calendar_ids": {
+                        "type": "array",
+                        "items": { "type": "string", "minLength": 1 },
+                        "minItems": 1,
+                        "maxItems": 50,
+                        "default": ["primary"]
+                    },
+                    "time_zone": { "type": "string", "description": "Optional IANA time zone." }
+                }),
+                &["from", "to"],
+            ),
+        )?;
+    }
+    if has_any(&[
         "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/drive",
     ]) {
@@ -597,7 +818,7 @@ fn register_google_tools(
             "drive.search",
             "drive_search",
             "Search Google Drive files.",
-            object_schema(
+            schema(
                 json!({
                     "query": { "type": "string" },
                     "type": {
@@ -616,8 +837,8 @@ fn register_google_tools(
             runtime,
             "drive.read",
             "drive_read",
-            "Read Drive metadata and text content when available.",
-            object_schema(
+            "Read Drive metadata and normalized Docs, Sheets, Slides, or text content.",
+            schema(
                 json!({
                     "file_id": { "type": "string", "minLength": 1 },
                     "max_chars": { "type": "integer", "minimum": 1000, "maximum": 100000, "default": 30000 }
@@ -764,12 +985,14 @@ fn register(
 
 impl ConnectionRuntime {
     async fn execute(&self, tool: &str, input: Value) -> Result<Value, String> {
-        match tool {
+        let result = match tool {
             "gmail.search" => self.gmail_search(&input).await,
             "gmail.read" => self.gmail_read(&input).await,
             "gmail.send" => self.gmail_send(&input).await,
             "calendar.list" => self.calendar_list(&input).await,
             "calendar.create" => self.calendar_create(&input).await,
+            "calendar.calendars" => self.calendar_calendars(&input).await,
+            "calendar.freebusy" => self.calendar_freebusy(&input).await,
             "drive.search" => self.drive_search(&input).await,
             "drive.read" => self.drive_read(&input).await,
             "slack.search" => self.slack_search(&input).await,
@@ -778,17 +1001,25 @@ impl ConnectionRuntime {
             "granola.search" => self.granola_search(&input).await,
             "granola.get" => self.granola_get(&input).await,
             _ => Err(format!("Unknown connection tool: {tool}")),
+        }?;
+        if matches!(
+            tool.split_once('.').map(|(provider, _)| provider),
+            Some("gmail" | "calendar" | "drive")
+        ) {
+            return add_google_account_to_result(&input, result);
         }
+        Ok(result)
     }
 
     async fn google_request(
         &self,
+        input: &Value,
         method: Method,
         url: &str,
         query: &[(&str, String)],
         body: Option<Value>,
     ) -> Result<reqwest::Response, String> {
-        let token = self.google_access_token().await?;
+        let token = self.google_access_token(input).await?;
         let mut request = self.http.request(method, url).bearer_auth(token);
         if !query.is_empty() {
             request = request.query(query);
@@ -810,21 +1041,30 @@ impl ConnectionRuntime {
 
     async fn google_json(
         &self,
+        input: &Value,
         method: Method,
         url: &str,
         query: &[(&str, String)],
         body: Option<Value>,
     ) -> Result<Value, String> {
-        self.google_request(method, url, query, body)
+        self.google_request(input, method, url, query, body)
             .await?
             .json()
             .await
             .map_err(|error| format!("Google returned invalid JSON: {error}"))
     }
 
-    async fn google_access_token(&self) -> Result<String, String> {
-        let mut bundle = google_bundle(&self.google_account)?
-            .ok_or_else(|| "Google is not connected.".to_string())?;
+    async fn google_access_token(&self, input: &Value) -> Result<String, String> {
+        let store = google_store()?;
+        let account = resolve_google_account(&store, string(input, "account").as_deref())?;
+        let account_id = account.id.clone();
+        let email = account.email.clone();
+        let mut bundle = account.bundle.clone();
+        if google_needs_sign_in(&bundle) {
+            return Err(format!(
+                "Google account {email} needs sign-in. Reconnect it in Settings → Connections."
+            ));
+        }
         if bundle.expires_at.unwrap_or(i64::MAX) > unix_seconds() + 60
             || bundle.refresh_token.is_none()
         {
@@ -878,12 +1118,9 @@ impl ConnectionRuntime {
         if let Some(scope) = value.get("scope").and_then(Value::as_str) {
             bundle.scope = scope.to_string();
         }
-        write_secret(
-            bundle.service,
-            &format!("google:{}", self.google_account),
-            &serde_json::to_string(&bundle.as_stored()).map_err(|error| error.to_string())?,
-        )?;
-        Ok(bundle.access_token)
+        let access_token = bundle.access_token.clone();
+        save_google_bundle(&account_id, bundle)?;
+        Ok(access_token)
     }
 
     async fn gmail_search(&self, input: &Value) -> Result<Value, String> {
@@ -897,6 +1134,7 @@ impl ConnectionRuntime {
         }
         let list = self
             .google_json(
+                input,
                 Method::GET,
                 "https://gmail.googleapis.com/gmail/v1/users/me/messages",
                 &query,
@@ -915,6 +1153,7 @@ impl ConnectionRuntime {
             };
             let detail = self
                 .google_json(
+                    input,
                     Method::GET,
                     &format!(
                         "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
@@ -942,6 +1181,7 @@ impl ConnectionRuntime {
         if let Some(id) = string(input, "message_id") {
             let message = self
                 .google_json(
+                    input,
                     Method::GET,
                     &format!(
                         "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
@@ -957,6 +1197,7 @@ impl ConnectionRuntime {
             .ok_or_else(|| "message_id or thread_id is required.".to_string())?;
         let thread = self
             .google_json(
+                input,
                 Method::GET,
                 &format!(
                     "https://gmail.googleapis.com/gmail/v1/users/me/threads/{}",
@@ -988,6 +1229,7 @@ impl ConnectionRuntime {
         if let Some(reply_id) = string(input, "reply_to_message_id") {
             let original = self
                 .google_json(
+                    input,
                     Method::GET,
                     &format!(
                         "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
@@ -1033,6 +1275,7 @@ impl ConnectionRuntime {
         lines.push(body);
         let raw = URL_SAFE_NO_PAD.encode(lines.join("\r\n"));
         self.google_json(
+            input,
             Method::POST,
             "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
             &[],
@@ -1054,6 +1297,7 @@ impl ConnectionRuntime {
             query.push(("pageToken", value));
         }
         self.google_json(
+            input,
             Method::GET,
             &format!(
                 "https://www.googleapis.com/calendar/v3/calendars/{}/events",
@@ -1079,6 +1323,7 @@ impl ConnectionRuntime {
             })
             .unwrap_or_default();
         self.google_json(
+            input,
             Method::POST,
             &format!(
                 "https://www.googleapis.com/calendar/v3/calendars/{}/events",
@@ -1092,6 +1337,77 @@ impl ConnectionRuntime {
                 "end": { "dateTime": required_string(input, "end")? },
                 "attendees": attendees
             })),
+        )
+        .await
+    }
+
+    async fn calendar_calendars(&self, input: &Value) -> Result<Value, String> {
+        let mut query = vec![
+            (
+                "maxResults",
+                int(input, "limit", 100, 1, 250).to_string(),
+            ),
+            (
+                "showHidden",
+                input
+                    .get("include_hidden")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    .to_string(),
+            ),
+            (
+                "fields",
+                "nextPageToken,nextSyncToken,items(id,summary,description,location,timeZone,colorId,backgroundColor,foregroundColor,selected,primary,accessRole,hidden,deleted)"
+                    .into(),
+            ),
+        ];
+        if let Some(value) = string(input, "page_token") {
+            query.push(("pageToken", value));
+        }
+        self.google_json(
+            input,
+            Method::GET,
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+            &query,
+            None,
+        )
+        .await
+    }
+
+    async fn calendar_freebusy(&self, input: &Value) -> Result<Value, String> {
+        let calendar_ids = input
+            .get("calendar_ids")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .take(50)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|values| !values.is_empty())
+            .unwrap_or_else(|| vec!["primary".into()]);
+        let mut body = json!({
+            "timeMin": required_string(input, "from")?,
+            "timeMax": required_string(input, "to")?,
+            "calendarExpansionMax": 50,
+            "items": calendar_ids
+                .into_iter()
+                .map(|id| json!({ "id": id }))
+                .collect::<Vec<_>>()
+        });
+        if let Some(time_zone) = string(input, "time_zone") {
+            body["timeZone"] = Value::String(time_zone);
+        }
+        self.google_json(
+            input,
+            Method::POST,
+            "https://www.googleapis.com/calendar/v3/freeBusy",
+            &[],
+            Some(body),
         )
         .await
     }
@@ -1119,6 +1435,7 @@ impl ConnectionRuntime {
             query.push(("pageToken", value));
         }
         self.google_json(
+            input,
             Method::GET,
             "https://www.googleapis.com/drive/v3/files",
             &query,
@@ -1131,6 +1448,7 @@ impl ConnectionRuntime {
         let id = required_string(input, "file_id")?;
         let metadata = self
             .google_json(
+                input,
                 Method::GET,
                 &format!(
                     "https://www.googleapis.com/drive/v3/files/{}",
@@ -1151,6 +1469,7 @@ impl ConnectionRuntime {
         let content = if mime == "application/vnd.google-apps.document" {
             Some(
                 self.google_request(
+                    input,
                     Method::GET,
                     &format!(
                         "https://www.googleapis.com/drive/v3/files/{}/export",
@@ -1164,11 +1483,47 @@ impl ConnectionRuntime {
                 .await
                 .map_err(|error| error.to_string())?,
             )
+        } else if mime == "application/vnd.google-apps.spreadsheet" {
+            let spreadsheet = self
+                .google_json(
+                    input,
+                    Method::GET,
+                    &format!(
+                        "https://sheets.googleapis.com/v4/spreadsheets/{}",
+                        url_encode(&id)
+                    ),
+                    &[
+                        ("includeGridData", "true".into()),
+                        (
+                            "fields",
+                            "spreadsheetId,properties(title,locale,timeZone),sheets(properties(sheetId,title,index,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(effectiveValue,formattedValue))))"
+                                .into(),
+                        ),
+                    ],
+                    None,
+                )
+                .await?;
+            Some(spreadsheet_text(&spreadsheet))
+        } else if mime == "application/vnd.google-apps.presentation" {
+            let presentation = self
+                .google_json(
+                    input,
+                    Method::GET,
+                    &format!(
+                        "https://slides.googleapis.com/v1/presentations/{}",
+                        url_encode(&id)
+                    ),
+                    &[("fields", "presentationId,title,slides".into())],
+                    None,
+                )
+                .await?;
+            Some(presentation_text(&presentation))
         } else if mime.starts_with("text/")
             || matches!(mime, "application/json" | "application/xml")
         {
             Some(
                 self.google_request(
+                    input,
                     Method::GET,
                     &format!(
                         "https://www.googleapis.com/drive/v3/files/{}",
@@ -1416,14 +1771,14 @@ impl ConnectionRuntime {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct GoogleBundle {
     access_token: String,
     refresh_token: Option<String>,
     expires_at: Option<i64>,
+    #[serde(default)]
     scope: String,
     auth: Option<Value>,
-    service: &'static str,
 }
 
 impl GoogleBundle {
@@ -1434,39 +1789,168 @@ impl GoogleBundle {
                 .split_whitespace()
                 .any(|granted| scopes.contains(&granted))
     }
+}
 
-    fn as_stored(&self) -> Value {
-        json!({
-            "access_token": self.access_token,
-            "refresh_token": self.refresh_token,
-            "expires_at": self.expires_at,
-            "scope": self.scope,
-            "auth": self.auth
-        })
+#[derive(Clone, Serialize, Deserialize)]
+struct GoogleAccount {
+    id: String,
+    email: String,
+    name: Option<String>,
+    bundle: GoogleBundle,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct GoogleStore {
+    default_account: Option<String>,
+    #[serde(default)]
+    accounts: Vec<GoogleAccount>,
+}
+
+fn google_store() -> Result<GoogleStore, String> {
+    if let Some(secret) = read_secret(GOOGLE_ACCOUNTS_KEY)? {
+        let mut store: GoogleStore = serde_json::from_str(&secret.value)
+            .map_err(|_| "Invalid Google account store.".to_string())?;
+        normalize_google_store(&mut store);
+        return Ok(store);
+    }
+    let Some(secret) = read_secret("google:default")? else {
+        return Ok(GoogleStore::default());
+    };
+    let bundle: GoogleBundle = serde_json::from_str(&secret.value)
+        .map_err(|_| "Invalid Google token bundle.".to_string())?;
+    if bundle.access_token.trim().is_empty() {
+        return Err("Invalid Google token bundle.".into());
+    }
+    let email = bundle
+        .auth
+        .as_ref()
+        .and_then(|auth| auth.get("email"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| DEFAULT_ACCOUNT.into());
+    let id = email.to_lowercase();
+    Ok(GoogleStore {
+        default_account: Some(id.clone()),
+        accounts: vec![GoogleAccount {
+            id,
+            email,
+            name: bundle
+                .auth
+                .as_ref()
+                .and_then(|auth| auth.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            bundle,
+        }],
+    })
+}
+
+fn normalize_google_store(store: &mut GoogleStore) {
+    let mut seen = std::collections::HashSet::new();
+    store.accounts.retain_mut(|account| {
+        account.id = account.id.trim().to_lowercase();
+        account.email = account.email.trim().to_string();
+        !account.id.is_empty()
+            && !account.email.is_empty()
+            && !account.bundle.access_token.trim().is_empty()
+            && seen.insert(account.id.clone())
+    });
+    if !store.accounts.iter().any(|account| {
+        store
+            .default_account
+            .as_deref()
+            .is_some_and(|default| account.id.eq_ignore_ascii_case(default))
+    }) {
+        store.default_account = store.accounts.first().map(|account| account.id.clone());
+    }
+    if let Some(default) = store.default_account.as_deref() {
+        store
+            .accounts
+            .sort_by_key(|account| !account.id.eq_ignore_ascii_case(default));
     }
 }
 
-fn google_bundle(account: &str) -> Result<Option<GoogleBundle>, String> {
-    let Some(secret) = read_secret(&format!("google:{account}"))? else {
-        return Ok(None);
+fn upsert_google_account(store: &mut GoogleStore, account: GoogleAccount) {
+    if let Some(existing) = store
+        .accounts
+        .iter_mut()
+        .find(|existing| existing.id.eq_ignore_ascii_case(&account.id))
+    {
+        *existing = account;
+    } else {
+        store.accounts.push(account);
+    }
+    normalize_google_store(store);
+}
+
+fn resolve_google_account<'a>(
+    store: &'a GoogleStore,
+    selector: Option<&str>,
+) -> Result<&'a GoogleAccount, String> {
+    let requested = selector.map(str::trim).filter(|value| !value.is_empty());
+    let account = if let Some(requested) = requested {
+        store.accounts.iter().find(|account| {
+            account.id.eq_ignore_ascii_case(requested)
+                || account.email.eq_ignore_ascii_case(requested)
+        })
+    } else {
+        store
+            .default_account
+            .as_deref()
+            .and_then(|default| {
+                store
+                    .accounts
+                    .iter()
+                    .find(|account| account.id.eq_ignore_ascii_case(default))
+            })
+            .or_else(|| store.accounts.first())
     };
-    let value: Value = serde_json::from_str(&secret.value)
-        .map_err(|_| "Invalid Google token bundle.".to_string())?;
-    Ok(Some(GoogleBundle {
-        access_token: required_json_string(&value, "access_token")?,
-        refresh_token: value
-            .get("refresh_token")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        expires_at: value.get("expires_at").and_then(Value::as_i64),
-        scope: value
-            .get("scope")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        auth: value.get("auth").cloned(),
-        service: secret.service,
-    }))
+    account.ok_or_else(|| {
+        if let Some(requested) = requested {
+            format!("Google account {requested} is not connected.")
+        } else {
+            "Google is not connected.".into()
+        }
+    })
+}
+
+fn add_google_account_to_result(input: &Value, mut result: Value) -> Result<Value, String> {
+    let store = google_store()?;
+    let account = resolve_google_account(&store, string(input, "account").as_deref())?;
+    if let Some(object) = result.as_object_mut() {
+        object.insert("account".into(), Value::String(account.email.clone()));
+        Ok(result)
+    } else {
+        Ok(json!({ "account": account.email, "result": result }))
+    }
+}
+
+fn write_google_store(store: &GoogleStore) -> Result<(), String> {
+    let mut store = store.clone();
+    normalize_google_store(&mut store);
+    if store.accounts.is_empty() {
+        delete_secret(GOOGLE_ACCOUNTS_KEY)?;
+        delete_secret("google:default")?;
+        return Ok(());
+    }
+    write_secret(
+        MIMIR_KEYCHAIN_SERVICE,
+        GOOGLE_ACCOUNTS_KEY,
+        &serde_json::to_string(&store).map_err(|error| error.to_string())?,
+    )?;
+    let _ = delete_secret("google:default");
+    Ok(())
+}
+
+fn save_google_bundle(account_id: &str, bundle: GoogleBundle) -> Result<(), String> {
+    let mut store = google_store()?;
+    let account = store
+        .accounts
+        .iter_mut()
+        .find(|account| account.id.eq_ignore_ascii_case(account_id))
+        .ok_or_else(|| format!("Google account {account_id} is not connected."))?;
+    account.bundle = bundle;
+    write_google_store(&store)
 }
 
 fn configured_google_client_id() -> Option<String> {
@@ -1576,10 +2060,7 @@ fn read_secret(account: &str) -> Result<Option<Secret>, String> {
     let entry =
         keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
     match entry.get_password() {
-        Ok(value) if !value.trim().is_empty() => Ok(Some(Secret {
-            value,
-            service: MIMIR_KEYCHAIN_SERVICE,
-        })),
+        Ok(value) if !value.trim().is_empty() => Ok(Some(Secret { value })),
         Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
@@ -1608,6 +2089,35 @@ fn object_schema(properties: Value, required: &[&str]) -> Value {
         "required": required,
         "additionalProperties": false
     })
+}
+
+fn google_object_schema(
+    mut properties: Value,
+    required: &[&str],
+    accounts: &[&GoogleAccount],
+    default_account: Option<&str>,
+) -> Value {
+    let emails = accounts
+        .iter()
+        .map(|account| account.email.clone())
+        .collect::<Vec<_>>();
+    let mut account = json!({
+        "type": "string",
+        "description": "Connected Google account email. Uses the marked default when omitted.",
+        "enum": emails,
+    });
+    if let Some(default) = default_account.and_then(|default| {
+        accounts
+            .iter()
+            .find(|account| account.id.eq_ignore_ascii_case(default))
+            .map(|account| account.email.clone())
+    }) {
+        account["default"] = Value::String(default);
+    }
+    if let Some(properties) = properties.as_object_mut() {
+        properties.insert("account".into(), account);
+    }
+    object_schema(properties, required)
 }
 
 fn connection_annotations(canonical: &str) -> ToolAnnotations {
@@ -1741,6 +2251,237 @@ fn drive_mime(kind: Option<&str>) -> Option<&'static str> {
         Some("image") => Some("mimeType contains 'image/'"),
         _ => None,
     }
+}
+
+fn spreadsheet_text(spreadsheet: &Value) -> String {
+    let mut output = String::new();
+    if let Some(title) = spreadsheet
+        .pointer("/properties/title")
+        .and_then(Value::as_str)
+    {
+        output.push_str("# Spreadsheet: ");
+        output.push_str(title.trim());
+        output.push_str("\n\n");
+    }
+    for (sheet_index, sheet) in spreadsheet
+        .get("sheets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let title = sheet
+            .pointer("/properties/title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Sheet {}", sheet_index + 1));
+        output.push_str("## Sheet: ");
+        output.push_str(&title);
+        output.push('\n');
+
+        let mut rows =
+            std::collections::BTreeMap::<usize, std::collections::BTreeMap<usize, String>>::new();
+        for grid in sheet
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let start_row = grid.get("startRow").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let start_column =
+                grid.get("startColumn").and_then(Value::as_u64).unwrap_or(0) as usize;
+            for (row_offset, row) in grid
+                .get("rowData")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                for (column_offset, cell) in row
+                    .get("values")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                {
+                    let value = sheet_cell_text(cell);
+                    if !value.is_empty() {
+                        rows.entry(start_row + row_offset)
+                            .or_default()
+                            .insert(start_column + column_offset, value);
+                    }
+                }
+            }
+        }
+        if rows.is_empty() {
+            output.push_str("(no populated cells)\n\n");
+            continue;
+        }
+        for (row_index, cells) in rows {
+            let last_column = cells.keys().next_back().copied().unwrap_or(0);
+            let values = (0..=last_column)
+                .map(|column| cells.get(&column).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            output.push_str(&(row_index + 1).to_string());
+            output.push('\t');
+            output.push_str(&values.join("\t"));
+            output.push('\n');
+        }
+        output.push('\n');
+    }
+    output.trim_end().to_string()
+}
+
+fn sheet_cell_text(cell: &Value) -> String {
+    let value = cell
+        .get("formattedValue")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            let effective = cell.get("effectiveValue")?;
+            effective
+                .get("stringValue")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| effective.get("numberValue").map(|value| value.to_string()))
+                .or_else(|| {
+                    effective
+                        .get("boolValue")
+                        .and_then(Value::as_bool)
+                        .map(|value| value.to_string())
+                })
+                .or_else(|| {
+                    effective
+                        .pointer("/errorValue/message")
+                        .and_then(Value::as_str)
+                        .map(|value| format!("#ERROR: {value}"))
+                })
+        })
+        .unwrap_or_default();
+    value.replace(['\r', '\n', '\t'], " ").trim().to_string()
+}
+
+fn presentation_text(presentation: &Value) -> String {
+    let mut output = String::new();
+    if let Some(title) = presentation.get("title").and_then(Value::as_str) {
+        output.push_str("# Presentation: ");
+        output.push_str(title.trim());
+        output.push_str("\n\n");
+    }
+    for (index, slide) in presentation
+        .get("slides")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        output.push_str(&format!("## Slide {}\n", index + 1));
+        let mut blocks = Vec::new();
+        for element in slide
+            .get("pageElements")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            slide_element_text(element, &mut blocks);
+        }
+        let notes = slide
+            .pointer("/slideProperties/notesPage/pageElements")
+            .and_then(Value::as_array)
+            .map(|elements| {
+                let mut notes = Vec::new();
+                for element in elements {
+                    slide_element_text(element, &mut notes);
+                }
+                notes
+            })
+            .unwrap_or_default();
+        if blocks.is_empty() {
+            output.push_str("(no text)\n");
+        } else {
+            output.push_str(&blocks.join("\n"));
+            output.push('\n');
+        }
+        if !notes.is_empty() {
+            output.push_str("\nSpeaker notes:\n");
+            output.push_str(&notes.join("\n"));
+            output.push('\n');
+        }
+        output.push('\n');
+    }
+    output.trim_end().to_string()
+}
+
+fn slide_element_text(element: &Value, output: &mut Vec<String>) {
+    if let Some(shape) = element.get("shape") {
+        if let Some(text) = shape.get("text") {
+            push_text_content(text, output);
+        }
+    }
+    if let Some(word_art) = element
+        .pointer("/wordArt/renderedText")
+        .and_then(Value::as_str)
+        .map(clean_text_block)
+        .filter(|value| !value.is_empty())
+    {
+        output.push(word_art);
+    }
+    if let Some(rows) = element
+        .pointer("/table/tableRows")
+        .and_then(Value::as_array)
+    {
+        for row in rows {
+            let cells = row
+                .get("tableCells")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|cell| text_content(cell.get("text").unwrap_or(&Value::Null)))
+                .collect::<Vec<_>>();
+            if cells.iter().any(|cell| !cell.is_empty()) {
+                output.push(cells.join("\t"));
+            }
+        }
+    }
+    for child in element
+        .pointer("/elementGroup/children")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        slide_element_text(child, output);
+    }
+}
+
+fn push_text_content(text: &Value, output: &mut Vec<String>) {
+    let content = text_content(text);
+    if !content.is_empty() {
+        output.push(content);
+    }
+}
+
+fn text_content(text: &Value) -> String {
+    let content = text
+        .get("textElements")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|element| element.pointer("/textRun/content").and_then(Value::as_str))
+        .collect::<String>();
+    clean_text_block(&content)
+}
+
+fn clean_text_block(value: &str) -> String {
+    value
+        .replace('\r', "")
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn escape_drive_query(value: &str) -> String {
@@ -1922,7 +2663,22 @@ mod tests {
             expires_at,
             scope: GOOGLE_SCOPES.into(),
             auth: Some(json!({ "email": "work@example.com", "client_id": "client" })),
-            service: MIMIR_KEYCHAIN_SERVICE,
+        }
+    }
+
+    fn google_store_for_test(emails: &[&str]) -> GoogleStore {
+        let accounts = emails
+            .iter()
+            .map(|email| GoogleAccount {
+                id: email.to_lowercase(),
+                email: (*email).into(),
+                name: None,
+                bundle: google_bundle_for_test(None, Some("refresh")),
+            })
+            .collect::<Vec<_>>();
+        GoogleStore {
+            default_account: accounts.first().map(|account| account.id.clone()),
+            accounts,
         }
     }
 
@@ -1947,11 +2703,148 @@ mod tests {
     }
 
     #[test]
+    fn slack_personal_token_accepts_only_user_tokens() {
+        assert_eq!(
+            slack_personal_token(" xoxp-example ").unwrap(),
+            "xoxp-example"
+        );
+        assert!(slack_personal_token("xoxb-example").is_err());
+        assert!(slack_personal_token("").is_err());
+    }
+
+    #[test]
+    fn google_scopes_cover_calendar_discovery_and_availability() {
+        assert!(GOOGLE_SCOPES
+            .contains("https://www.googleapis.com/auth/calendar.calendarlist.readonly"));
+        assert!(GOOGLE_SCOPES.contains("https://www.googleapis.com/auth/calendar.events.freebusy"));
+    }
+
+    #[test]
+    fn google_registration_includes_calendar_discovery_and_freebusy() {
+        let registry = ToolRegistry::default();
+        let runtime = ConnectionRuntime {
+            http: Client::new(),
+            slack_account: DEFAULT_ACCOUNT.into(),
+        };
+        let store = google_store_for_test(&["work@example.com", "me@example.net"]);
+        register_google_tools(&registry, &runtime, &store).unwrap();
+        let names = registry
+            .snapshot()
+            .tools
+            .into_iter()
+            .map(|tool| tool.canonical_name)
+            .collect::<std::collections::HashSet<_>>();
+        assert!(names.contains("calendar.calendars"));
+        assert!(names.contains("calendar.freebusy"));
+        assert!(names.contains("drive.read"));
+        let gmail = registry.descriptor("gmail.search").unwrap();
+        assert_eq!(
+            gmail.input_schema["properties"]["account"]["enum"],
+            json!(["work@example.com", "me@example.net"])
+        );
+        assert_eq!(
+            gmail.input_schema["properties"]["account"]["default"],
+            "work@example.com"
+        );
+    }
+
+    #[test]
+    fn google_accounts_keep_one_default_and_resolve_explicit_email() {
+        let mut store = google_store_for_test(&["work@example.com"]);
+        upsert_google_account(
+            &mut store,
+            GoogleAccount {
+                id: "ME@EXAMPLE.NET".into(),
+                email: "me@example.net".into(),
+                name: Some("Personal".into()),
+                bundle: google_bundle_for_test(None, Some("refresh")),
+            },
+        );
+        assert_eq!(
+            resolve_google_account(&store, None).unwrap().email,
+            "work@example.com"
+        );
+        assert_eq!(
+            resolve_google_account(&store, Some("ME@example.net"))
+                .unwrap()
+                .email,
+            "me@example.net"
+        );
+        store.default_account = Some("me@example.net".into());
+        normalize_google_store(&mut store);
+        assert_eq!(
+            resolve_google_account(&store, None).unwrap().email,
+            "me@example.net"
+        );
+    }
+
+    #[test]
+    fn spreadsheet_content_keeps_tabs_rows_and_sheet_names() {
+        let spreadsheet = json!({
+            "properties": { "title": "Pipeline" },
+            "sheets": [{
+                "properties": { "title": "Q3" },
+                "data": [{
+                    "startRow": 1,
+                    "startColumn": 0,
+                    "rowData": [
+                        { "values": [
+                            { "formattedValue": "Client" },
+                            { "formattedValue": "Value" }
+                        ] },
+                        { "values": [
+                            { "formattedValue": "Acme\nLabs" },
+                            { "effectiveValue": { "numberValue": 42 } }
+                        ] }
+                    ]
+                }]
+            }]
+        });
+        assert_eq!(
+            spreadsheet_text(&spreadsheet),
+            "# Spreadsheet: Pipeline\n\n## Sheet: Q3\n2\tClient\tValue\n3\tAcme Labs\t42"
+        );
+    }
+
+    #[test]
+    fn presentation_content_includes_shapes_tables_groups_and_notes() {
+        let presentation = json!({
+            "title": "Pitch",
+            "slides": [{
+                "pageElements": [
+                    { "shape": { "text": { "textElements": [
+                        { "textRun": { "content": "Opening\n" } }
+                    ] } } },
+                    { "table": { "tableRows": [{ "tableCells": [
+                        { "text": { "textElements": [
+                            { "textRun": { "content": "A" } }
+                        ] } },
+                        { "text": { "textElements": [
+                            { "textRun": { "content": "B" } }
+                        ] } }
+                    ] }] } },
+                    { "elementGroup": { "children": [
+                        { "wordArt": { "renderedText": "Grouped" } }
+                    ] } }
+                ],
+                "slideProperties": { "notesPage": { "pageElements": [
+                    { "shape": { "text": { "textElements": [
+                        { "textRun": { "content": "Ask about timing." } }
+                    ] } } }
+                ] } }
+            }]
+        });
+        assert_eq!(
+            presentation_text(&presentation),
+            "# Presentation: Pitch\n\n## Slide 1\nOpening\nA\tB\nGrouped\n\nSpeaker notes:\nAsk about timing."
+        );
+    }
+
+    #[test]
     fn provider_tools_have_provider_ownership() {
         let registry = ToolRegistry::default();
         let runtime = ConnectionRuntime {
             http: Client::new(),
-            google_account: DEFAULT_ACCOUNT.into(),
             slack_account: DEFAULT_ACCOUNT.into(),
         };
         register_slack_tools(&registry, &runtime).unwrap();

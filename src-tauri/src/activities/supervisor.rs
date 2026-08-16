@@ -10,7 +10,7 @@ use std::{
     io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         mpsc, Arc, Condvar, Mutex, MutexGuard,
     },
     thread,
@@ -322,6 +322,9 @@ struct ManagedActivity {
     stop_intent: AtomicU8,
     process_id: AtomicU32,
     last_output_persist_ms: AtomicU64,
+    /// A resumed session keeps the previous conversation stamp through CLI
+    /// startup. The first submitted user turn releases this hold.
+    preserve_updated_at_until_turn: AtomicBool,
     next_event_sequence: AtomicU64,
     terminal_order: Mutex<()>,
     terminal_size: Mutex<(u16, u16)>,
@@ -543,6 +546,7 @@ impl ActivitySupervisor {
                 record.created_at = existing_record.created_at.clone();
                 record.title = existing_record.title.clone();
                 record.title_source = existing_record.title_source;
+                record.updated_at = existing_record.updated_at.clone();
                 record.archived_at = None;
                 record.close_requested_at = None;
                 if cli_session_id.is_none() {
@@ -619,12 +623,10 @@ impl ActivitySupervisor {
         let killer = child.clone_killer();
         let process_id = child.process_id();
         let now = timestamp();
-        record.status = if record.kind == ActivityKind::Agent {
-            ActivityStatus::Idle
-        } else {
-            ActivityStatus::Working
-        };
-        record.updated_at = now.clone();
+        record.status = initial_live_status(record.kind);
+        if !replace_ended {
+            record.updated_at = now.clone();
+        }
         record.error = None;
         record.session = Some(ActivitySessionRecord {
             run_id,
@@ -661,6 +663,7 @@ impl ActivitySupervisor {
             stop_intent: AtomicU8::new(NO_STOP_INTENT),
             process_id: AtomicU32::new(process_id.unwrap_or(0)),
             last_output_persist_ms: AtomicU64::new(0),
+            preserve_updated_at_until_turn: AtomicBool::new(replace_ended),
             next_event_sequence: AtomicU64::new(1),
             terminal_order: Mutex::new(()),
             terminal_size: Mutex::new((request.cols.max(1), request.rows.max(1))),
@@ -978,16 +981,22 @@ impl ActivitySupervisor {
         bytes: impl Into<Vec<u8>>,
     ) -> Result<(), SupervisorError> {
         let activity = self.activity(activity_id)?;
+        let bytes = bytes.into();
+        let submits_turn = bytes.contains(&b'\r');
         let command_tx = lock(&activity.command_tx)
             .clone()
             .ok_or_else(|| SupervisorError::NotRunning(activity_id.to_string()))?;
         let (ack_tx, ack_rx) = mpsc::channel();
         command_tx
-            .send(SessionCommand::Write(bytes.into(), ack_tx))
+            .send(SessionCommand::Write(bytes, ack_tx))
             .map_err(|_| SupervisorError::CommandChannelClosed {
                 activity_id: activity_id.to_string(),
             })?;
-        receive_command_ack(activity_id, ack_rx)
+        receive_command_ack(activity_id, ack_rx)?;
+        if submits_turn {
+            self.inner.record_activity_interaction(&activity);
+        }
+        Ok(())
     }
 
     pub fn resize(&self, activity_id: &str, cols: u16, rows: u16) -> Result<(), SupervisorError> {
@@ -1055,48 +1064,21 @@ impl ActivitySupervisor {
     }
 
     /// Accept a local prompt-derived title only while the launcher placeholder
-    /// is still present. The agent may improve it once later in the same
-    /// Activity. Manual titles always remain authoritative.
+    /// is still present. Manual titles always remain authoritative.
     pub fn provisional_title(
         &self,
         activity_id: &str,
         title: impl Into<String>,
     ) -> Result<ActivityRecord, SupervisorError> {
-        self.automatic_title(
-            activity_id,
-            title,
-            ActivityTitleSource::Provisional,
-            &[ActivityTitleSource::Launcher],
-        )
+        self.apply_provisional_title(activity_id, title)
     }
 
-    /// Accept one agent-authored title over a launcher or provisional title.
-    /// Later calls are harmless, and a manual rename wins atomically even when
-    /// it races the agent tool call.
-    pub fn auto_title(
+    fn apply_provisional_title(
         &self,
         activity_id: &str,
         title: impl Into<String>,
     ) -> Result<ActivityRecord, SupervisorError> {
-        self.automatic_title(
-            activity_id,
-            title,
-            ActivityTitleSource::Agent,
-            &[
-                ActivityTitleSource::Launcher,
-                ActivityTitleSource::Provisional,
-            ],
-        )
-    }
-
-    fn automatic_title(
-        &self,
-        activity_id: &str,
-        title: impl Into<String>,
-        source: ActivityTitleSource,
-        allowed_sources: &[ActivityTitleSource],
-    ) -> Result<ActivityRecord, SupervisorError> {
-        let title = normalize_auto_title(&title.into());
+        let title = normalize_provisional_title(&title.into());
         if title.is_empty() {
             return Err(SupervisorError::EmptyTitle);
         }
@@ -1105,13 +1087,14 @@ impl ActivitySupervisor {
             let dispatch = lock(&self.inner.dispatch);
             let mut record = lock(&activity.record);
             record.normalize_legacy_title_source();
-            if record.kind != ActivityKind::Agent || !allowed_sources.contains(&record.title_source)
+            if record.kind != ActivityKind::Agent
+                || record.title_source != ActivityTitleSource::Launcher
             {
                 return Ok(record.clone());
             }
             let scrollback = lock(&activity.scrollback);
             record.title = title;
-            record.title_source = source;
+            record.title_source = ActivityTitleSource::Provisional;
             record.updated_at = timestamp();
             let snapshot = record.clone();
             if record.retention.should_persist() {
@@ -1555,7 +1538,6 @@ impl ActivitySupervisor {
                     message: Some("Mimir exited before this activity completed".into()),
                 };
                 record.status = ActivityStatus::Interrupted;
-                record.updated_at = now.clone();
                 record.error = None;
                 if let Some(session) = record.session.as_mut() {
                     session.ended_at = Some(now);
@@ -1585,6 +1567,7 @@ impl ActivitySupervisor {
                 stop_intent: AtomicU8::new(NO_STOP_INTENT),
                 process_id: AtomicU32::new(0),
                 last_output_persist_ms: AtomicU64::new(0),
+                preserve_updated_at_until_turn: AtomicBool::new(false),
                 next_event_sequence: AtomicU64::new(loaded.next_sequence.max(1)),
                 terminal_order: Mutex::new(()),
                 terminal_size: Mutex::new((loaded.cols, loaded.rows)),
@@ -1656,7 +1639,7 @@ impl SupervisorInner {
                         &activity.last_output_persist_ms,
                         output_elapsed_ms,
                     ));
-            if persist_output {
+            if persist_output && !holds_activity_time(activity) {
                 record.updated_at = timestamp();
             }
             apply_status_change(&mut record, status_change.as_ref());
@@ -1686,11 +1669,9 @@ impl SupervisorInner {
                     needs_input_is_blocking: change.needs_input_is_blocking,
                 });
             }
-            if persist_output {
-                if record.retention.should_persist() {
-                    self.store
-                        .save_record(record.clone(), scrollback.byte_cap());
-                }
+            if persist_output && record.retention.should_persist() {
+                self.store
+                    .save_record(record.clone(), scrollback.byte_cap());
             }
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
         }
@@ -1753,7 +1734,9 @@ impl SupervisorInner {
             }
             let scrollback = lock(&activity.scrollback);
             record.status = change.status;
-            record.updated_at = timestamp();
+            if !holds_activity_time(activity) {
+                record.updated_at = timestamp();
+            }
             event = ActivityEvent::Status {
                 activity_id: record.id.clone(),
                 status: change.status,
@@ -1766,6 +1749,36 @@ impl SupervisorInner {
             sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
         }
         publish_to_sinks(&sinks, &event);
+    }
+
+    fn record_activity_interaction(&self, activity: &Arc<ManagedActivity>) {
+        if !activity
+            .preserve_updated_at_until_turn
+            .swap(false, Ordering::AcqRel)
+        {
+            return;
+        }
+
+        let record_snapshot;
+        let sinks;
+        {
+            let dispatch = lock(&self.dispatch);
+            let mut record = lock(&activity.record);
+            let scrollback = lock(&activity.scrollback);
+            record.updated_at = timestamp();
+            record_snapshot = record.clone();
+            if record.retention.should_persist() {
+                self.store
+                    .save_record(record.clone(), scrollback.byte_cap());
+            }
+            sinks = dispatch.sinks.values().cloned().collect::<Vec<_>>();
+        }
+        publish_to_sinks(
+            &sinks,
+            &ActivityEvent::Upsert {
+                record: record_snapshot,
+            },
+        );
     }
 
     fn complete(
@@ -1806,7 +1819,9 @@ impl SupervisorInner {
             let scrollback = lock(&activity.scrollback);
             let now = timestamp();
             record.status = exit.activity_status();
-            record.updated_at = now.clone();
+            if exit.reason != SessionExitReason::Interrupted {
+                record.updated_at = now.clone();
+            }
             record.error = if exit.reason == SessionExitReason::Failed {
                 exit.message.clone()
             } else {
@@ -2003,7 +2018,24 @@ fn apply_status_change(record: &mut ActivityRecord, change: Option<&AgentStatusC
     }
 }
 
-fn normalize_auto_title(value: &str) -> String {
+/// A live interactive surface is not necessarily doing work. Agent status has
+/// its own tracker, while a plain terminal remains idle until its shell exits.
+/// Task-style process Activities remain working for the life of the process.
+fn initial_live_status(kind: ActivityKind) -> ActivityStatus {
+    match kind {
+        ActivityKind::Terminal | ActivityKind::Agent | ActivityKind::Files => ActivityStatus::Idle,
+        ActivityKind::App | ActivityKind::Routine => ActivityStatus::Working,
+    }
+}
+
+fn holds_activity_time(activity: &ManagedActivity) -> bool {
+    activity
+        .preserve_updated_at_until_turn
+        .load(Ordering::Acquire)
+        || activity.stop_intent.load(Ordering::Acquire) == QUIT_INTERRUPT_INTENT
+}
+
+fn normalize_provisional_title(value: &str) -> String {
     let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
     let compact = compact.trim_matches(|character| {
         matches!(
@@ -2468,6 +2500,30 @@ mod tests {
     }
 
     #[test]
+    fn initial_live_status_separates_interactive_surfaces_from_process_work() {
+        assert_eq!(
+            initial_live_status(ActivityKind::Terminal),
+            ActivityStatus::Idle
+        );
+        assert_eq!(
+            initial_live_status(ActivityKind::Agent),
+            ActivityStatus::Idle
+        );
+        assert_eq!(
+            initial_live_status(ActivityKind::Files),
+            ActivityStatus::Idle
+        );
+        assert_eq!(
+            initial_live_status(ActivityKind::App),
+            ActivityStatus::Working
+        );
+        assert_eq!(
+            initial_live_status(ActivityKind::Routine),
+            ActivityStatus::Working
+        );
+    }
+
+    #[test]
     fn noisy_output_persistence_is_bounded_without_losing_the_first_snapshot() {
         let last = AtomicU64::new(0);
 
@@ -2692,6 +2748,16 @@ mod tests {
             .spawn(SpawnActivityRequest::new(record, 80, 24))
             .unwrap();
 
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let before_shutdown = loop {
+            let snapshot = supervisor.snapshot("quit", None).unwrap();
+            if replay_bytes(&snapshot).contains(&b'b') {
+                break snapshot.record.updated_at;
+            }
+            assert!(Instant::now() < deadline, "activity output never arrived");
+            thread::sleep(Duration::from_millis(10));
+        };
+
         let report = supervisor.shutdown(Duration::from_secs(3)).unwrap();
         assert_eq!(
             report,
@@ -2702,6 +2768,7 @@ mod tests {
         );
         let snapshot = supervisor.snapshot("quit", None).unwrap();
         assert_eq!(snapshot.record.status, ActivityStatus::Interrupted);
+        assert_eq!(snapshot.record.updated_at, before_shutdown);
         assert_eq!(
             snapshot.record.session.unwrap().exit.unwrap().reason,
             SessionExitReason::Interrupted
@@ -2709,10 +2776,9 @@ mod tests {
 
         drop(supervisor);
         let restarted = create_supervisor(&temp);
-        assert_eq!(
-            restarted.snapshot("quit", None).unwrap().record.status,
-            ActivityStatus::Interrupted
-        );
+        let restored = restarted.snapshot("quit", None).unwrap();
+        assert_eq!(restored.record.status, ActivityStatus::Interrupted);
+        assert_eq!(restored.record.updated_at, before_shutdown);
     }
 
     #[cfg(unix)]
@@ -2862,6 +2928,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn plain_terminal_starts_idle_and_remains_live_until_stopped() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let mut terminal = durable_record(
+            "terminal-idle",
+            "/bin/sh",
+            vec!["-c".into(), "while :; do sleep 1; done".into()],
+        );
+        terminal.kind = ActivityKind::Terminal;
+        terminal.retention = ActivityRetention::Ephemeral;
+
+        let spawned = supervisor
+            .spawn(SpawnActivityRequest::new(terminal, 80, 24))
+            .unwrap();
+
+        assert_eq!(spawned.record.status, ActivityStatus::Idle);
+        assert!(spawned.live);
+        assert!(spawned
+            .record
+            .session
+            .as_ref()
+            .is_some_and(|session| session.exit.is_none()));
+
+        supervisor.stop("terminal-idle").unwrap();
+        let stopped = wait_for_end(&supervisor, "terminal-idle");
+        assert_eq!(stopped.record.status, ActivityStatus::Stopped);
+        assert!(!stopped.live);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn agent_status_settles_during_silence_and_quit_is_interrupted() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
@@ -2957,6 +3054,54 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn respawn_preserves_activity_time_until_submitted_input() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let first = durable_record("resume-time", "/bin/sh", vec!["-c".into(), "true".into()]);
+        supervisor
+            .spawn(SpawnActivityRequest::new(first, 80, 24))
+            .unwrap();
+        let previous_time = wait_for_end(&supervisor, "resume-time").record.updated_at;
+
+        let resumed = durable_record(
+            "resume-time",
+            "/bin/sh",
+            vec![
+                "-c".into(),
+                "printf restored; IFS= read -r line; while :; do sleep 1; done".into(),
+            ],
+        );
+        let snapshot = supervisor
+            .respawn(SpawnActivityRequest::new(resumed, 80, 24))
+            .unwrap();
+        assert_eq!(snapshot.record.updated_at, previous_time);
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = supervisor.snapshot("resume-time", None).unwrap();
+            if replay_bytes(&snapshot).starts_with(b"restored") {
+                assert_eq!(snapshot.record.updated_at, previous_time);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "restoration output never arrived"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        thread::sleep(Duration::from_millis(2));
+        supervisor.write("resume-time", b"next turn\r").unwrap();
+        let after_input = supervisor.snapshot("resume-time", None).unwrap();
+        assert_ne!(after_input.record.updated_at, previous_time);
+        assert!(after_input.live);
+
+        supervisor.stop("resume-time").unwrap();
+        wait_for_end(&supervisor, "resume-time");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn respawn_rejects_missing_and_live_activities() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
@@ -3020,6 +3165,7 @@ mod tests {
         drop(hydrated);
         rewrite_stored_record(&temp, "persisted", |record| {
             record.status = ActivityStatus::Working;
+            record.updated_at = "2026-07-25T09:30:00Z".into();
             record.session.as_mut().unwrap().exit = None;
             record.session.as_mut().unwrap().ended_at = None;
         });
@@ -3027,6 +3173,7 @@ mod tests {
         let restarted = create_supervisor(&temp);
         let snapshot = restarted.snapshot("persisted", None).unwrap();
         assert_eq!(snapshot.record.status, ActivityStatus::Interrupted);
+        assert_eq!(snapshot.record.updated_at, "2026-07-25T09:30:00Z");
         assert_eq!(
             snapshot.record.session.unwrap().exit.unwrap().reason,
             SessionExitReason::Interrupted
@@ -3174,7 +3321,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn title_priority_is_launcher_then_provisional_then_agent_then_manual() {
+    fn title_priority_is_launcher_then_provisional_then_manual() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
 
@@ -3203,28 +3350,10 @@ mod tests {
                     && record.title_source == ActivityTitleSource::Provisional
         ));
 
-        let titled = supervisor
-            .auto_title(
-                "automatic-title",
-                "  **Restore reliable Activity titles across every supported provider today.**  ",
-            )
-            .unwrap();
-        assert_eq!(
-            titled.title,
-            "Restore reliable Activity titles across every supported"
-        );
-        assert_eq!(titled.title_source, ActivityTitleSource::Agent);
-        assert!(matches!(
-            event_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
-            ActivityEvent::Upsert { record }
-                if record.title
-                    == "Restore reliable Activity titles across every supported"
-        ));
-
         let ignored = supervisor
-            .auto_title("automatic-title", "Replace the generated title")
+            .provisional_title("automatic-title", "Replace the generated title")
             .unwrap();
-        assert_eq!(ignored.title, titled.title);
+        assert_eq!(ignored.title, provisional.title);
         assert!(event_rx.recv_timeout(Duration::from_millis(20)).is_err());
 
         let mut explicit = durable_record(
@@ -3239,7 +3368,7 @@ mod tests {
         wait_for_end(&supervisor, "explicit-title");
         supervisor.rename("explicit-title", "User title").unwrap();
         let protected = supervisor
-            .auto_title("explicit-title", "Model title")
+            .provisional_title("explicit-title", "Provisional title")
             .unwrap();
         assert_eq!(protected.title, "User title");
         assert_eq!(protected.title_source, ActivityTitleSource::Manual);

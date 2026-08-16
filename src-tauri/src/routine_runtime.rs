@@ -4,6 +4,7 @@ use crate::{
         ActivityRetention, ActivityStatus, ActivitySupervisor, ActivityTitleSource,
         ActivityWorkspaceScope, SpawnActivityRequest,
     },
+    agent_packages::{self, AgentRunPlan, AgentRunRequest},
     launchers::{
         self, AgentDefinition, DetectedAgent, LauncherKind, LauncherPreset, ResolvedLaunch,
         WorkingDirectory,
@@ -105,6 +106,12 @@ pub struct RoutineRuntimeCatalog {
 pub struct RoutineRunResult {
     pub activity: ActivityRecord,
     pub scheduled_for: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPackageRunResult {
+    pub activity: ActivityRecord,
 }
 
 /// Exact, durable Activity launch requested by a finalized meeting job.
@@ -455,6 +462,37 @@ impl RoutineRuntime {
         }
     }
 
+    pub fn run_agent_package(
+        &self,
+        request: AgentRunRequest,
+    ) -> Result<AgentPackageRunResult, String> {
+        let plan = agent_packages::resolve(&self.inner.config.home_path, &request)?;
+        let loaded = launchers::load_config(&self.inner.config.launcher_config_path)?;
+        let presets = loaded
+            .presets
+            .into_iter()
+            .map(|preset| (preset.id.clone(), preset))
+            .collect::<BTreeMap<_, _>>();
+        let definition = RoutineDefinition {
+            id: format!("agent-{}", plan.name),
+            title: plan.title.clone(),
+            enabled: true,
+            schedule: None,
+            timezone: "UTC".into(),
+            agent: Some(plan.name.clone()),
+            preset: String::new(),
+            prompt: String::new(),
+            overlap: RoutineOverlap::Parallel,
+            missed: Default::default(),
+            workspace: Some(plan.workspace.to_string_lossy().into_owned()),
+            interactive: plan.interactive,
+        };
+        let resolved = resolve_agent_plan(definition, plan, &presets, &self.inner.config)
+            .map_err(definition_error)?;
+        self.spawn_agent_package(&resolved)
+            .map(|activity| AgentPackageRunResult { activity })
+    }
+
     /// Launch a one-shot meeting follow-up through the same exact-argv,
     /// executable-resolution, PTY, and durable persistence path as Routines.
     pub fn launch_meeting_hook(
@@ -703,6 +741,20 @@ impl RoutineRuntime {
         resolved: &ResolvedRoutine,
         scheduled_for: &str,
     ) -> Result<ActivityRecord, String> {
+        let refreshed;
+        let resolved = if resolved.definition.agent.is_some() {
+            let loaded = launchers::load_config(&self.inner.config.launcher_config_path)?;
+            let presets = loaded
+                .presets
+                .into_iter()
+                .map(|preset| (preset.id.clone(), preset))
+                .collect::<BTreeMap<_, _>>();
+            refreshed = resolve_routine(&resolved.definition, &presets, &self.inner.config)
+                .map_err(definition_error)?;
+            &refreshed
+        } else {
+            resolved
+        };
         let activity_id = format!("routine:{}:{}", resolved.definition.id, Uuid::new_v4());
         let now = Utc::now().to_rfc3339();
         let agent_id = resolved.launch.agent_id.as_deref();
@@ -774,6 +826,75 @@ impl RoutineRuntime {
                     resolved.definition.title
                 )
             })
+    }
+
+    fn spawn_agent_package(&self, resolved: &ResolvedRoutine) -> Result<ActivityRecord, String> {
+        let activity_id = format!(
+            "agent:{}:{}",
+            resolved.definition.agent.as_deref().unwrap_or("package"),
+            Uuid::new_v4()
+        );
+        let now = Utc::now().to_rfc3339();
+        let agent_id = resolved.launch.agent_id.as_deref();
+        let mcp_url = activity_mcp_url(
+            &self.inner.config.mcp_url,
+            &activity_id,
+            agent_id.unwrap_or(&resolved.launch.preset_id),
+        );
+        let mut env = resolved.launch.env.clone();
+        env.insert("MIMIR_ACTIVITY_ID".into(), activity_id.clone());
+        env.insert(
+            "MIMIR_AGENT_ID".into(),
+            agent_id.unwrap_or(&resolved.launch.preset_id).into(),
+        );
+        env.insert("MIMIR_MCP_URL".into(), mcp_url.clone());
+        env.insert(
+            "MIMIR_AGENT_PACKAGE".into(),
+            resolved.definition.agent.clone().unwrap_or_default(),
+        );
+        let args = resolved
+            .args
+            .iter()
+            .map(|argument| argument.replace(&self.inner.config.mcp_url, &mcp_url))
+            .collect();
+        let record = ActivityRecord {
+            id: activity_id,
+            kind: ActivityKind::Agent,
+            title: resolved.definition.title.clone(),
+            title_source: ActivityTitleSource::Manual,
+            legacy_auto_title_eligible: None,
+            workspace_path: resolved.definition.workspace.clone(),
+            status: ActivityStatus::Ready,
+            created_at: now.clone(),
+            updated_at: now,
+            last_viewed_at: None,
+            archived_at: None,
+            close_requested_at: None,
+            retention: ActivityRetention::Durable,
+            source: ActivityOrigin {
+                launcher_id: resolved.launch.agent_id.clone(),
+                preset_id: Some(resolved.launch.preset_id.clone()),
+                workspace_scope: Some(resolved.workspace_scope),
+                ..ActivityOrigin::default()
+            },
+            host: ActivityHost::pty(resolved.launch.agent_id.clone()),
+            launch: Some(ActivityLaunchSpec {
+                command: resolved.launch.command.clone(),
+                args,
+                cwd: Some(resolved.launch.cwd.clone()),
+                env,
+            }),
+            session: None,
+            error: None,
+        };
+        self.inner
+            .supervisor
+            .spawn(
+                SpawnActivityRequest::new(record, ROUTINE_COLS, ROUTINE_ROWS)
+                    .with_cli_session_id(resolved.launch.cli_session_id.clone()),
+            )
+            .map(|snapshot| snapshot.record)
+            .map_err(|error| format!("Could not launch agent package: {error}"))
     }
 
     fn spawn_meeting_hook(
@@ -1204,6 +1325,76 @@ fn resolve_routine(
     presets: &BTreeMap<String, LauncherPreset>,
     config: &RoutineRuntimeConfig,
 ) -> Result<ResolvedRoutine, (String, String)> {
+    if let Some(agent) = definition
+        .agent
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let workspace = definition
+            .workspace
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| config.home_path.clone());
+        let plan = agent_packages::resolve(
+            &config.home_path,
+            &AgentRunRequest {
+                name: agent.to_string(),
+                workspace: workspace.to_string_lossy().into_owned(),
+                args: Vec::new(),
+                preset: None,
+                interactive: definition.interactive,
+                follow: false,
+            },
+        )
+        .map_err(|message| ("agent".into(), message))?;
+        return resolve_agent_plan(definition.clone(), plan, presets, config);
+    }
+    resolve_effective_routine(definition, &[], presets, config)
+}
+
+fn resolve_agent_plan(
+    mut definition: RoutineDefinition,
+    plan: AgentRunPlan,
+    presets: &BTreeMap<String, LauncherPreset>,
+    config: &RoutineRuntimeConfig,
+) -> Result<ResolvedRoutine, (String, String)> {
+    definition.preset = plan.preset.unwrap_or_else(|| default_agent_preset(presets));
+    definition.prompt = plan.prompt;
+    definition.interactive = plan.interactive;
+    definition.workspace = Some(plan.workspace.to_string_lossy().into_owned());
+    resolve_effective_routine(&definition, &plan.args, presets, config)
+}
+
+fn default_agent_preset(presets: &BTreeMap<String, LauncherPreset>) -> String {
+    if presets
+        .get("codex")
+        .is_some_and(|preset| preset.enabled && preset.kind == LauncherKind::Agent)
+    {
+        return "codex".into();
+    }
+    for agent in launchers::agent_catalog() {
+        if let Some(preset) = presets.values().find(|preset| {
+            preset.enabled
+                && preset.kind == LauncherKind::Agent
+                && preset.agent_id.as_deref() == Some(agent.id.as_str())
+        }) {
+            return preset.id.clone();
+        }
+    }
+    presets
+        .values()
+        .find(|preset| preset.enabled && preset.kind == LauncherKind::Agent)
+        .map(|preset| preset.id.clone())
+        .unwrap_or_else(|| "codex".into())
+}
+
+fn resolve_effective_routine(
+    definition: &RoutineDefinition,
+    extra_args: &[String],
+    presets: &BTreeMap<String, LauncherPreset>,
+    config: &RoutineRuntimeConfig,
+) -> Result<ResolvedRoutine, (String, String)> {
     let preset = presets.get(&definition.preset).ok_or_else(|| {
         (
             "preset".into(),
@@ -1277,6 +1468,7 @@ fn resolve_routine(
     })?;
     launch.command = resolve_executable(&launch.command, Path::new(&launch.cwd))
         .map_err(|message| ("binary".into(), message))?;
+    launch.args.extend(extra_args.iter().cloned());
     let args = if definition.interactive {
         interactive_argv(agent_id, &launch.args, &definition.prompt)
     } else {
@@ -1347,6 +1539,7 @@ fn resolve_meeting_hook(
         enabled: true,
         schedule: None,
         timezone: "UTC".into(),
+        agent: None,
         preset: preset_id.into(),
         prompt: request.prompt.clone(),
         overlap: RoutineOverlap::Parallel,
@@ -1733,6 +1926,41 @@ pub async fn routine_run_now(
 }
 
 #[tauri::command]
+pub async fn agent_run(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    request: AgentRunRequest,
+) -> Result<AgentPackageRunResult, String> {
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || runtime.run_agent_package(request))
+        .await
+        .map_err(|error| format!("Agent package launch task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn agent_list(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    workspace: String,
+) -> Result<Vec<agent_packages::AgentPackageDescriptor>, String> {
+    let home = runtime.inner().inner.config.home_path.clone();
+    tauri::async_runtime::spawn_blocking(move || agent_packages::list(&home, Path::new(&workspace)))
+        .await
+        .map_err(|error| format!("Agent package list task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn scope_inventory(
+    runtime: tauri::State<'_, RoutineRuntime>,
+    workspace: String,
+) -> Result<Vec<agent_packages::ScopeInventoryEntry>, String> {
+    let home = runtime.inner().inner.config.home_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        agent_packages::inventory(&home, Path::new(&workspace))
+    })
+    .await
+    .map_err(|error| format!("Scope inventory task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn routine_create(
     runtime: tauri::State<'_, RoutineRuntime>,
     definition: RoutineDefinition,
@@ -1862,6 +2090,7 @@ mod tests {
                 enabled: true,
                 schedule: Some("* * * * *".into()),
                 timezone: "UTC".into(),
+                agent: None,
                 preset: "review-agent".into(),
                 prompt: "Review the work tree and report sharp findings.".into(),
                 overlap: RoutineOverlap::Skip,
@@ -1998,6 +2227,63 @@ mod tests {
         assert!(interactive_argv("unknown", &[], prompt)
             .unwrap_err()
             .contains("no interactive routine adapter"));
+    }
+
+    #[test]
+    fn agent_packages_fall_back_in_launcher_catalog_order() {
+        let mut presets = launchers::default_config().presets;
+        presets.retain(|preset| preset.kind == LauncherKind::Agent);
+        presets
+            .iter_mut()
+            .find(|preset| preset.id == "codex")
+            .unwrap()
+            .enabled = false;
+        presets
+            .iter_mut()
+            .find(|preset| preset.id == "claude")
+            .unwrap()
+            .enabled = false;
+        let presets = presets
+            .into_iter()
+            .map(|preset| (preset.id.clone(), preset))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(default_agent_preset(&presets), "pi");
+    }
+
+    #[test]
+    fn agent_routine_resolves_the_current_package_at_launch_time() {
+        let fixture = Harness::new();
+        let package = fixture
+            .root
+            .path()
+            .join(".mimir/private/agents/evidence-sweep");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("AGENT.md"),
+            "---\npreset: review-agent\nargs: [--package-flag]\n---\nFirst mission.\n",
+        )
+        .unwrap();
+        let mut routine = fixture.routine();
+        routine.agent = Some("evidence-sweep".into());
+        routine.preset.clear();
+        routine.prompt.clear();
+        fixture.write_routine(&routine);
+        fixture.write_presets(vec![fixture.preset()]);
+        let runtime = fixture.runtime();
+
+        fs::write(
+            package.join("AGENT.md"),
+            "---\npreset: review-agent\nargs: [--package-flag]\n---\nUpdated mission.\n",
+        )
+        .unwrap();
+        let result = runtime.run_now("daily-review").unwrap();
+        let launch = result.activity.launch.unwrap();
+
+        assert_eq!(launch.args.first().map(String::as_str), Some("exec"));
+        assert_eq!(launch.args[launch.args.len() - 2], "--package-flag");
+        assert!(launch.args.last().unwrap().contains("Updated mission."));
+        assert!(!launch.args.last().unwrap().contains("First mission."));
     }
 
     #[cfg(unix)]
@@ -2162,6 +2448,65 @@ mod tests {
         assert!(output.contains("arg=exec"));
         assert!(output.contains("arg=gpt 5"));
         assert!(output.contains("mcp=http://127.0.0.1:29999/mcp"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_package_run_reaches_pty_output_and_clean_exit() {
+        let harness = Harness::new();
+        let package = harness.workspace.join("agents/evidence-sweep");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("AGENT.md"),
+            "---\npreset: review-agent\nargs: [--package-flag]\n---\nReview this evidence package.\n",
+        )
+        .unwrap();
+        harness.write_presets(vec![harness.preset()]);
+        let runtime = harness.runtime();
+
+        let result = runtime
+            .run_agent_package(AgentRunRequest {
+                name: "evidence-sweep".into(),
+                workspace: harness.workspace.to_string_lossy().into_owned(),
+                args: vec!["--caller value".into()],
+                preset: None,
+                interactive: false,
+                follow: true,
+            })
+            .unwrap();
+
+        assert_eq!(result.activity.kind, ActivityKind::Agent);
+        assert_eq!(result.activity.retention, ActivityRetention::Durable);
+        assert_eq!(
+            result
+                .activity
+                .launch
+                .as_ref()
+                .unwrap()
+                .env
+                .get("MIMIR_AGENT_PACKAGE")
+                .map(String::as_str),
+            Some("evidence-sweep")
+        );
+        let ended = wait_for_end(
+            &harness.supervisor,
+            &result.activity.id,
+            Duration::from_secs(3),
+        );
+        assert_eq!(
+            ended.record.session.unwrap().exit.unwrap().reason,
+            SessionExitReason::Completed
+        );
+        let output = ended
+            .scrollback
+            .chunks
+            .iter()
+            .flat_map(|chunk| chunk.bytes.iter().copied())
+            .collect::<Vec<_>>();
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.contains("arg=--package-flag"));
+        assert!(output.contains("arg=--caller value"));
+        assert!(output.contains("arg=Review this evidence package."));
     }
 
     #[cfg(unix)]

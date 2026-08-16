@@ -291,6 +291,7 @@ pub enum ActivityTitleSource {
     Legacy,
     Launcher,
     Provisional,
+    /// Read compatibility for titles created by the removed agent-title tool.
     Agent,
     Manual,
 }
@@ -395,6 +396,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ActivityRetention::Durable).unwrap(),
             "durable"
+        );
+        assert_eq!(
+            serde_json::from_value::<ActivityTitleSource>(serde_json::json!("agent")).unwrap(),
+            ActivityTitleSource::Agent
         );
     }
 

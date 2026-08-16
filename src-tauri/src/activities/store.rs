@@ -866,10 +866,11 @@ fn import_legacy(transaction: &Transaction<'_>, activity: LegacyActivity) -> Res
         .first()
         .map(|chunk| chunk.sequence)
         .unwrap_or(1);
-    let truncated_through = activity
-        .truncated
-        .then(|| first_sequence.saturating_sub(1))
-        .unwrap_or(0);
+    let truncated_through = if activity.truncated {
+        first_sequence.saturating_sub(1)
+    } else {
+        0
+    };
     transaction
         .execute(
             "INSERT INTO activity_records (

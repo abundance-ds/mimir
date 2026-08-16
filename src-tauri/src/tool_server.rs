@@ -211,8 +211,7 @@ fn tool_error_name(code: ToolErrorCode) -> &'static str {
 const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS: [&str; 3] =
     [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26"];
-const MIMIR_INSTRUCTIONS: &str =
-    "Mimir: On the first substantive user turn, call `mimir_title` once with a concise 3-8 word task title. Discover other capabilities with `mimir tools` (all), `mimir tools <workbench|graph|meetings|chat|connections>`, `mimir tool <name>`, `mimir skill <query>`, and `mimir doctor`. If a work connection is missing, ask the user to open Mimir Settings → Connections.";
+const MIMIR_INSTRUCTIONS: &str = "Discover other tools with `mimir tools`.";
 
 fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
     requested
@@ -709,6 +708,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn initialization_instructions_stay_lean() {
+        assert!(
+            MIMIR_INSTRUCTIONS.split_whitespace().count() <= 20,
+            "MCP initialization instructions exceed 20 words"
+        );
+    }
+
+    #[test]
     fn mcp_list_is_direct_by_default_and_public_on_request() {
         let registry = ToolRegistry::new();
         register_core_tool(
@@ -741,7 +748,7 @@ mod tests {
         assert_eq!(list["tools"][0]["name"], "mimir_state");
         assert_eq!(
             list["tools"][0]["description"],
-            "Active editor state and available Today artifact context."
+            "Read editor and Today context."
         );
         assert_eq!(list["tools"][0]["_meta"]["mimir/group"], "workbench");
         assert_eq!(list["tools"][0]["_meta"]["mimir/effect"], "read");
