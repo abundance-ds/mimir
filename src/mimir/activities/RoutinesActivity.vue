@@ -154,7 +154,7 @@
                 <span class="mt-0.5 flex min-w-0 items-center gap-2 text-[9px] text-ink-3">
                   <span class="truncate">{{ scheduleLabel(routine) }}</span>
                   <span aria-hidden="true">·</span>
-                  <span class="truncate">{{ routine.preset }}</span>
+                  <span class="truncate">{{ routine.agent || routine.preset }}</span>
                   <template v-if="foreignTimezone(routine)">
                     <span aria-hidden="true">·</span>
                     <span class="shrink-0 font-mono">{{ routine.timezone }}</span>
@@ -212,8 +212,8 @@
             class="routine-detail-grid grid gap-3 border-t border-rule-light bg-surface/55 px-5 py-3"
           >
             <div class="min-w-0">
-              <p class="font-mono text-[8px] uppercase tracking-[0.12em] text-ink-3">Prompt</p>
-              <p class="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-ink-2">{{ routine.prompt }}</p>
+              <p class="font-mono text-[8px] uppercase tracking-[0.12em] text-ink-3">{{ routine.agent ? 'Agent package' : 'Prompt' }}</p>
+              <p class="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-ink-2">{{ routine.agent || routine.prompt }}</p>
             </div>
             <dl class="grid content-start grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[9px]">
               <dt class="text-ink-3">Schedule</dt>
@@ -449,7 +449,27 @@
               />
             </RoutineField>
 
-            <RoutineField label="Agent" required tag="div">
+            <RoutineField label="Agent package" :hint="agentPackageHint">
+              <input
+                v-model="draft.agent"
+                data-routine-agent-input
+                class="routine-input font-mono"
+                autocomplete="off"
+                list="routine-agent-packages"
+                placeholder="evidence-sweep"
+              />
+              <datalist id="routine-agent-packages">
+                <option
+                  v-for="agentPackage in activeAgentPackages"
+                  :key="`${agentPackage.scope}:${agentPackage.name}`"
+                  :value="agentPackage.name"
+                >
+                  {{ agentPackage.scope }} · {{ agentPackage.title }}
+                </option>
+              </datalist>
+            </RoutineField>
+
+            <RoutineField v-if="!draft.agent.trim()" label="Agent" required tag="div">
               <p v-if="launchers.loading || !launchers.ready" class="text-[10px] text-ink-3">
                 Detecting installed agents…
               </p>
@@ -492,11 +512,11 @@
             </RoutineField>
 
             <RoutineField
-              v-if="workspaceVisible"
+              v-if="workspaceVisible || draft.agent.trim()"
               label="Workspace"
               :required="workspaceRequired"
               :hint="workspaceRequired
-                ? `${selectedAgent?.title || 'This launcher'} runs in this folder`
+                ? `${selectedPackage?.title || selectedAgent?.title || 'This launcher'} runs in this folder`
                 : 'Used when the launcher runs in a workspace'"
             >
               <input
@@ -510,7 +530,7 @@
               />
             </RoutineField>
 
-            <RoutineField label="Prompt" required>
+            <RoutineField v-if="!draft.agent.trim()" label="Prompt" required>
               <textarea
                 v-model="draft.prompt"
                 data-routine-prompt-input
@@ -851,6 +871,7 @@
 
 <script setup>
 import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import {
   IconAlertTriangle,
   IconCalendarClock,
@@ -944,6 +965,7 @@ const titleInputRef = ref(null)
 const dialogBusy = ref(false)
 const formError = ref('')
 const draft = ref(emptyDraft())
+const agentPackages = ref([])
 const trashDialogRef = ref(null)
 const trashConfirmRef = ref(null)
 const trashTarget = ref(null)
@@ -1014,7 +1036,18 @@ const agentChoices = computed(() => {
 const selectedAgent = computed(() => (
   agentChoices.value.find((choice) => choice.id === draft.value.preset) || null
 ))
-const workspaceRequired = computed(() => Boolean(selectedAgent.value?.needsWorkspace))
+const activeAgentPackages = computed(() => (
+  agentPackages.value.filter(agentPackage => agentPackage.active !== false)
+))
+const selectedPackage = computed(() => (
+  activeAgentPackages.value.find(agentPackage => agentPackage.name === draft.value.agent.trim()) || null
+))
+const agentPackageHint = computed(() => selectedPackage.value
+  ? `${capitalize(selectedPackage.value.scope)} · ${selectedPackage.value.title}`
+  : 'Optional Project, Private, or Team mission name')
+const workspaceRequired = computed(() => draft.value.agent.trim()
+  ? selectedPackage.value?.scope === 'project'
+  : Boolean(selectedAgent.value?.needsWorkspace))
 const workspaceVisible = computed(() => (
   workspaceRequired.value || Boolean(draft.value.workspace)
 ))
@@ -1027,7 +1060,10 @@ const scheduleSummary = computed(() => {
   return { text: `Runs ${description}${suffix} · ${zone}`, error: false }
 })
 
-onMounted(() => initialize())
+onMounted(() => {
+  initialize()
+  void refreshAgentPackages()
+})
 watch(() => props.active, (active, wasActive) => {
   if (!active || wasActive !== false) return
   if (routines.loaded) void activationReload()
@@ -1046,6 +1082,7 @@ watch(workspaceRequired, (required) => {
   }
   prefillWorkspace()
 })
+watch(() => props.activity.workspacePath, () => { void refreshAgentPackages() })
 
 function prefillWorkspace() {
   if (!dialogMode.value || !workspaceRequired.value || draft.value.workspace) return
@@ -1053,6 +1090,20 @@ function prefillWorkspace() {
   if (!path) return
   draft.value.workspace = path
   workspaceWasPrefilled.value = true
+}
+
+async function refreshAgentPackages() {
+  const workspace = props.activity.workspacePath || ''
+  if (!workspace) {
+    agentPackages.value = []
+    return
+  }
+  try {
+    const packages = await invoke('agent_list', { workspace })
+    agentPackages.value = Array.isArray(packages) ? packages : []
+  } catch {
+    agentPackages.value = []
+  }
 }
 
 async function initialize() {
@@ -1507,6 +1558,11 @@ function policyLabel(value) {
     .join(' ')
 }
 
+function capitalize(value) {
+  const text = String(value || '')
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : ''
+}
+
 function runTitle(routine) {
   if (!routine.available) return routine.diagnostic || `Preset '${routine.preset}' is unavailable`
   return `Run ${routine.title} now`
@@ -1531,6 +1587,7 @@ function emptyDraft() {
     interactive: true,
     scheduleState: defaultScheduleState(),
     timezone: systemTimezone(),
+    agent: '',
     preset: '',
     prompt: '',
     overlap: 'skip',
@@ -1547,6 +1604,7 @@ function definitionDraft(routine) {
     interactive: Boolean(routine.interactive),
     scheduleState: parseSchedule(routine.schedule || ''),
     timezone: routine.timezone,
+    agent: routine.agent || '',
     preset: routine.preset,
     prompt: routine.prompt,
     overlap: routine.overlap,
@@ -1565,8 +1623,9 @@ function buildDefinition(id) {
     enabled: value.enabled,
     schedule: value.scheduled ? compileSchedule(value.scheduleState).cron : null,
     timezone: value.timezone,
-    preset: value.preset,
-    prompt: value.prompt,
+    agent: value.agent.trim() || null,
+    preset: value.agent.trim() ? '' : value.preset,
+    prompt: value.agent.trim() ? '' : value.prompt,
     overlap: value.overlap,
     missed: value.missed,
     workspace: value.workspace,
@@ -1577,13 +1636,13 @@ function buildDefinition(id) {
 function validateDraft(value, mode) {
   if (!value.title?.trim()) return 'Title is required.'
   if (mode === 'duplicate') return ''
-  if (!value.preset?.trim()) return 'Choose an agent to run this routine.'
-  if (!value.prompt?.trim()) return 'Prompt is required.'
+  if (!value.agent?.trim() && !value.preset?.trim()) return 'Choose an agent to run this routine.'
+  if (!value.agent?.trim() && !value.prompt?.trim()) return 'Prompt is required.'
   if (!value.interactive && selectedAgent.value?.agentId === 'gemini') {
     return 'Gemini has no headless adapter — set Session to Interactive.'
   }
   if (workspaceRequired.value && !value.workspace?.trim()) {
-    return `Pick a workspace folder — ${selectedAgent.value?.title || 'this launcher'} runs inside one.`
+    return `Pick a workspace folder — ${selectedPackage.value?.title || selectedAgent.value?.title || 'this launcher'} runs inside one.`
   }
   if (value.scheduled) {
     const { error } = compileSchedule(value.scheduleState)

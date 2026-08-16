@@ -538,7 +538,15 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
   }
 
   function markActivityInteraction(id) {
+    const restoration = restorationState.get(id)
     endSessionRestoration(id)
+    const activity = restoration ? activities.byId(id) : null
+    if (activity) {
+      activities.upsert({
+        ...activity,
+        updatedAt: new Date().toISOString(),
+      })
+    }
   }
 
   function clearActivityError(id) {

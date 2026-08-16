@@ -529,7 +529,7 @@ function enqueueInput(bytes, promptInput = null) {
 }
 
 function submitsTerminalTurn(input) {
-  return input?.type === 'feed' && String(input.value || '').includes('\r')
+  return Boolean(input) && String(input.value || '').includes('\r')
 }
 
 function capturePromptInput(input) {

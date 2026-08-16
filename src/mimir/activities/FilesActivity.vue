@@ -12,18 +12,25 @@
           :key="option.id"
           type="button"
           :data-files-mode="option.id"
+          :aria-label="option.label"
           :aria-current="viewMode === option.id ? 'page' : undefined"
           class="relative flex h-full items-center gap-1.5 px-2 text-[11px] font-medium text-ink-3 outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
           :class="{ 'text-ink': viewMode === option.id }"
           @click="setViewMode(option.id)"
         >
           <component :is="option.icon" :size="13" :stroke-width="1.75" />
-          <span>{{ option.label }}</span>
+          <span class="files-view-label">{{ option.label }}</span>
           <span
             v-if="option.id === 'favorites' && favorites.length"
             class="font-mono text-[9px] tabular-nums text-ink-4"
           >
             {{ favorites.length }}
+          </span>
+          <span
+            v-if="option.id === 'changes' && gitReview.changes.length"
+            class="font-mono text-[9px] tabular-nums text-ink-4"
+          >
+            {{ gitReview.changes.length }}
           </span>
           <span
             v-if="viewMode === option.id"
@@ -71,10 +78,11 @@
     </header>
 
     <div
-      v-if="files.workspacePath"
+      v-if="files.workspacePath && !(viewMode === 'changes' && gitReview.repositoryState === 'not-repository')"
       class="mx-2 my-2 flex h-8 shrink-0 items-center"
     >
       <div
+        v-if="viewMode !== 'changes'"
         class="flex h-full shrink-0 border border-r-0 border-rule-light bg-chrome-high p-0.5"
         role="group"
         aria-label="Search scope"
@@ -131,7 +139,7 @@
     </div>
 
     <div
-      v-if="gitOnly"
+      v-if="gitOnly && viewMode !== 'changes'"
       data-files-active-filter
       role="status"
       class="flex h-7 shrink-0 items-center gap-2 border-y border-rule-light bg-chrome-high px-3 font-mono text-[9px] text-ink-3"
@@ -149,7 +157,7 @@
     </div>
 
     <div
-      v-if="files.workspacePath && !contentMode"
+      v-if="files.workspacePath && !contentMode && viewMode !== 'changes'"
       data-files-ledger-header
       aria-hidden="true"
       class="files-ledger-grid grid h-7 min-w-[248px] shrink-0 items-center border-b border-rule-light bg-chrome-high px-0 font-mono text-[9px] text-ink-4"
@@ -161,8 +169,16 @@
       <IconStar :size="11" :stroke-width="1.7" class="mx-auto" />
     </div>
 
+    <GitChangesList
+      v-if="files.workspacePath && viewMode === 'changes'"
+      ref="gitListRef"
+      :query="query"
+      @review="$emit('reviewGit', $event)"
+      @open-file="$emit('openFile', $event)"
+    />
+
     <div
-      v-if="files.workspacePath"
+      v-else-if="files.workspacePath"
       ref="listRef"
       data-files-list
       :role="contentMode ? 'listbox' : 'tree'"
@@ -365,7 +381,7 @@
       </span>
       <span v-if="importing" data-files-importing class="text-accent">Adding dropped items…</span>
       <button
-        v-else-if="gitChanges.length || gitOnly"
+        v-else-if="viewMode !== 'changes' && (gitChanges.length || gitOnly)"
         type="button"
         data-files-git-filter
         :aria-pressed="gitOnly"
@@ -560,13 +576,16 @@ import {
   IconFolderOpen,
   IconFolderPlus,
   IconHistory,
+  IconGitCompare,
   IconRefresh,
   IconSearch,
   IconStar,
   IconX,
 } from '@tabler/icons-vue'
 import FileTreeRow from '../components/FileTreeRow.vue'
+import GitChangesList from '../components/GitChangesList.vue'
 import { pathIsInsideWorkspace, useFileStore } from '../../stores/files.js'
+import { useGitReviewStore } from '../../stores/gitReview.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import { loadGitChanges } from '../../services/gitChanges.js'
@@ -618,15 +637,17 @@ const props = defineProps({
   active: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['openFile', 'chooseWorkspace'])
+const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace'])
 const files = useWorkspaceFilesStore()
 const editorFiles = useFileStore()
+const gitReview = useGitReviewStore()
 const settings = useSettingsStore()
 const viewMode = ref('project')
 const searchScope = ref('paths')
 const query = ref('')
 const queryInput = ref(null)
 const listRef = ref(null)
+const gitListRef = ref(null)
 const contextMenuRef = ref(null)
 const deleteDialogRef = ref(null)
 const deleteConfirmRef = ref(null)
@@ -636,6 +657,7 @@ const contentFocusedIndex = ref(-1)
 const clockNow = ref(Date.now())
 let queryTimer = null
 let clockTimer = null
+let gitRefreshTimer = null
 
 const SEARCH_DEBOUNCE_MS = 130
 // Windowed rendering: only trees larger than this render behind spacers.
@@ -648,6 +670,7 @@ const viewportHeight = ref(0)
 
 const views = Object.freeze([
   { id: 'project', label: 'Project', icon: IconFolderOpen },
+  { id: 'changes', label: 'Changes', icon: IconGitCompare },
   { id: 'recent', label: 'Recent', icon: IconClock },
   { id: 'favorites', label: 'Favorites', icon: IconStar },
 ])
@@ -655,7 +678,7 @@ const searchScopes = Object.freeze([
   { id: 'paths', label: 'Paths' },
   { id: 'contents', label: 'Contents' },
 ])
-const contentMode = computed(() => searchScope.value === 'contents')
+const contentMode = computed(() => viewMode.value !== 'changes' && searchScope.value === 'contents')
 
 const workspaceName = computed(() => basename(files.workspacePath) || 'workspace')
 const {
@@ -703,7 +726,7 @@ const gitDirectoryCounts = computed(() => {
 const activePath = computed(() => normalizePath(editorFiles.currentFile?.path))
 
 const visibleRows = computed(() => {
-  if (contentMode.value) return []
+  if (contentMode.value || viewMode.value === 'changes') return []
   if (gitOnly.value && viewMode.value === 'project' && !query.value.trim()) {
     return gitChangeRows()
   }
@@ -1019,6 +1042,7 @@ const isLoading = computed(() => files.loading || (
 ))
 const surfaceError = computed(() => files.error || files.treeErrors[''] || '')
 const searchPlaceholder = computed(() => {
+  if (viewMode.value === 'changes') return 'Filter changed files'
   if (contentMode.value) return ({
     project: 'Search project contents',
     recent: 'Search recent file contents',
@@ -1045,6 +1069,10 @@ const emptyBody = computed(() => {
   return 'Create a file to start working here.'
 })
 const footerCount = computed(() => {
+  if (viewMode.value === 'changes') {
+    const total = gitReview.visibleChanges.length
+    return `${total} ${total === 1 ? 'change' : 'changes'}`
+  }
   if (contentMode.value) return `${contentMatches.value.length} ${contentMatches.value.length === 1 ? 'match' : 'matches'}`
   return selectedPaths.value.size
     ? `${selectedPaths.value.size} selected`
@@ -1072,12 +1100,29 @@ watch(() => files.workspacePath, () => {
   // A pending name belongs to the project that is leaving: its parent folder
   // means nothing in the arriving one.
   cancelNameAction()
-  if (files.workspacePath) void refreshGit()
+  if (files.workspacePath) {
+    void refreshGit()
+    void gitReview.openWorkspace(files.workspacePath, { force: true })
+  } else {
+    gitReview.clearWorkspace()
+  }
+})
+
+watch(() => files.files, () => {
+  if (!files.workspacePath) return
+  clearTimeout(gitRefreshTimer)
+  gitRefreshTimer = setTimeout(() => {
+    void refreshGit()
+    void gitReview.refreshChanges()
+  }, 180)
 })
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown, true)
-  if (files.workspacePath) void refreshGit()
+  if (files.workspacePath) {
+    void refreshGit()
+    void gitReview.openWorkspace(files.workspacePath, { force: true })
+  }
   clockTimer = setInterval(() => {
     clockNow.value = Date.now()
   }, 60_000)
@@ -1085,6 +1130,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   clearTimeout(queryTimer)
+  clearTimeout(gitRefreshTimer)
   clearInterval(clockTimer)
   listResizeObserver?.disconnect()
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
@@ -1217,7 +1263,8 @@ function setViewMode(mode) {
   void files.searchContent('')
   contentFocusedIndex.value = -1
   clearSelection()
-  nextTick(() => listRef.value?.focus())
+  if (mode === 'changes') void gitReview.openWorkspace(files.workspacePath)
+  nextTick(() => (mode === 'changes' ? gitListRef.value?.enter?.(1) : listRef.value?.focus()))
 }
 
 function setSearchScope(scope) {
@@ -1234,6 +1281,7 @@ function setSearchScope(scope) {
 
 function onQueryInput() {
   clearTimeout(queryTimer)
+  if (viewMode.value === 'changes') return
   queryTimer = setTimeout(async () => {
     try {
       if (contentMode.value) {
@@ -1275,6 +1323,10 @@ function focusSearchResults(delta) {
 }
 
 function enterSearchResults(delta) {
+  if (viewMode.value === 'changes') {
+    gitListRef.value?.enter?.(delta)
+    return
+  }
   if (contentMode.value) {
     contentFocusedIndex.value = -1
     focusSearchResults(delta)
@@ -1304,7 +1356,8 @@ function onCommandKeydown(event) {
   } else if (key === 'r') {
     event.preventDefault()
     event.stopPropagation()
-    void refresh()
+    if (viewMode.value === 'changes') void gitReview.refreshChanges()
+    else void refresh()
   } else if (key === 'arrowleft' && viewMode.value === 'project') {
     event.preventDefault()
     collapseAll()
@@ -1613,6 +1666,10 @@ function relativeFromAbsolute(path) {
 }
 
 @container files (max-width: 399px) {
+  .files-view-label {
+    display: none;
+  }
+
   .files-ledger-grid {
     grid-template-columns: minmax(180px, 1fr) 40px 28px;
   }

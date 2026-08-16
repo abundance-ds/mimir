@@ -6,6 +6,7 @@ import { useFileStore } from '../../stores/files.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import * as operations from '../../services/workspaceFileOperations.js'
 import { loadGitChanges } from '../../services/gitChanges.js'
+import { loadGitReviewChanges } from '../../services/gitReview.js'
 import FilesActivity from './FilesActivity.vue'
 
 vi.mock('../../services/fileIndex.js', () => ({
@@ -24,6 +25,14 @@ vi.mock('../../services/fileIndex.js', () => ({
 
 vi.mock('../../services/gitChanges.js', () => ({
   loadGitChanges: vi.fn(async () => []),
+}))
+
+vi.mock('../../services/gitReview.js', async importOriginal => ({
+  ...(await importOriginal()),
+  loadGitReviewChanges: vi.fn(async () => []),
+  loadGitFileDiff: vi.fn(),
+  stageGitFile: vi.fn(),
+  unstageGitFile: vi.fn(),
 }))
 
 // Records the drag-drop handlers the Files panel registers on the webview, so
@@ -71,6 +80,7 @@ describe('FilesActivity', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     vi.clearAllMocks()
+    loadGitReviewChanges.mockResolvedValue([])
     const store = useWorkspaceFilesStore()
     store.workspacePath = '/w'
     store.files = indexed
@@ -115,13 +125,14 @@ describe('FilesActivity', () => {
     })
   }
 
-  it('starts with a dense Project tree and exposes Project, Recent, and Favorites', () => {
+  it('starts with a dense Project tree and exposes its stable views', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-file-row]')
 
     expect(wrapper.get('[data-files-mode="project"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-files-mode="recent"]').exists()).toBe(true)
     expect(wrapper.get('[data-files-mode="favorites"]').exists()).toBe(true)
+    expect(wrapper.get('[data-files-mode="changes"]').exists()).toBe(true)
     expect(rows.map((row) => row.attributes('data-file-row'))).toEqual([
       '/w/docs',
       '/w/new.md',
@@ -621,6 +632,43 @@ describe('FilesActivity', () => {
 
     await wrapper.get('[data-files-clear-git-filter]').trigger('click')
     expect(wrapper.get('[data-file-row="/w/chart.png"]').exists()).toBe(true)
+  })
+
+  it('opens the isolated Changes ledger without changing Project behavior', async () => {
+    loadGitReviewChanges.mockResolvedValueOnce([
+      { path: 'new.md', oldPath: '', status: 'new', staged: false, unstaged: true, conflicted: false },
+      { path: 'src/lib.rs', oldPath: '', status: 'modified', staged: true, unstaged: false, conflicted: false },
+    ])
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-files-mode="changes"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-git-changes-list]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-git-change]').map(row => row.attributes('data-git-change')))
+      .toEqual(['new.md', 'src/lib.rs'])
+    expect(wrapper.emitted('reviewGit').at(-1)).toEqual([{
+      workspacePath: '/w', file: 'new.md', scope: 'all',
+    }])
+
+    await wrapper.get('[data-files-mode="project"]').trigger('click')
+    expect(wrapper.get('[data-file-row="/w/new.md"]').exists()).toBe(true)
+    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Filter project files')
+  })
+
+  it('removes Git controls and native diagnostics from a non-Git folder', async () => {
+    loadGitReviewChanges.mockRejectedValue(new Error(
+      "Could not find a Git repository from /w: could not find repository at '/w'; class=Repository (6); code=NotFound (-3)",
+    ))
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-files-mode="changes"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-git-not-repository]').text()).toContain('No Git repository')
+    expect(wrapper.find('[data-files-search]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('class=Repository')
+    expect(wrapper.text()).not.toContain('Changes could not be loaded')
   })
 
   function seedLargeTree(count = 400) {

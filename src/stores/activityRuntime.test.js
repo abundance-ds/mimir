@@ -490,6 +490,7 @@ describe('activity runtime store', () => {
     expect(store.byId(interrupted.id).unread).toBe(false)
 
     runtime.markActivityInteraction(interrupted.id)
+    expect(store.byId(interrupted.id).updatedAt).not.toBe(interrupted.updatedAt)
     eventCallback({
       type: 'output',
       activityId: interrupted.id,
@@ -497,7 +498,6 @@ describe('activity runtime store', () => {
       bytes: [67],
     })
     expect(store.byId(interrupted.id).unread).toBe(true)
-    expect(store.byId(interrupted.id).updatedAt).not.toBe(interrupted.updatedAt)
   })
 
   it('turns a silent automatic restore into a visible error instead of loading forever', async () => {

@@ -96,6 +96,7 @@ function normalizeRoutine(value) {
     enabled: routine.enabled !== false,
     schedule: optionalString(routine.schedule),
     timezone: String(routine.timezone || 'local'),
+    agent: optionalString(routine.agent),
     preset: String(routine.preset || ''),
     prompt: String(routine.prompt || ''),
     overlap: String(routine.overlap || 'skip'),
@@ -121,6 +122,7 @@ function normalizeRoutine(value) {
 function serializeDefinition(value) {
   const definition = isPlainObject(value) ? value : {}
   const workspace = definition.workspace == null ? '' : String(definition.workspace).trim()
+  const agent = String(definition.agent || '').trim()
   return {
     id: requiredId(definition.id),
     title: String(definition.title || '').trim(),
@@ -128,6 +130,7 @@ function serializeDefinition(value) {
     // No schedule means manual-only: the routine runs exclusively on demand.
     schedule: String(definition.schedule || '').trim() || null,
     timezone: String(definition.timezone || '').trim() || 'local',
+    ...(agent ? { agent } : {}),
     preset: String(definition.preset || '').trim(),
     prompt: String(definition.prompt || ''),
     overlap: String(definition.overlap || 'skip'),

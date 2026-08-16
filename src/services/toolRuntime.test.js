@@ -155,6 +155,33 @@ describe('canonical renderer tool runtime', () => {
     )).toEqual({ id: 'review' })
   })
 
+  it('passes agent follow intent to native validation before launch', async () => {
+    invoke.mockResolvedValue({ activity: { id: 'agent:review:1' } })
+
+    await executeToolRequest({
+      tool: 'agents.run',
+      input: {
+        name: 'review',
+        workspace: '/work',
+        args: ['--exact value'],
+        preset: 'codex',
+        interactive: false,
+        follow: true,
+      },
+    })
+
+    expect(invoke).toHaveBeenCalledWith('agent_run', {
+      request: {
+        name: 'review',
+        workspace: '/work',
+        args: ['--exact value'],
+        preset: 'codex',
+        interactive: false,
+        follow: true,
+      },
+    })
+  })
+
   it('exposes local app definition operations through the canonical MCP runtime', async () => {
     const reloadApps = vi.fn(async () => ({ apps: ['notes'] }))
     const createApp = vi.fn(async input => ({ created: input.id }))
@@ -338,27 +365,17 @@ describe('canonical renderer tool runtime', () => {
   })
 
   it('exposes the complete durable Activity lifecycle', async () => {
-    const autoTitleActivity = vi.fn(async (id, title) => ({ id, title }))
     const stopActivity = vi.fn(async id => ({ id, status: 'stopping' }))
     const renameActivity = vi.fn(async (id, title) => ({ id, title }))
     const archiveActivity = vi.fn(async (id, archived) => ({ id, archived }))
     const clearActivity = vi.fn(async id => ({ id, status: 'cleared' }))
     const options = {
-      autoTitleActivity,
       stopActivity,
       renameActivity,
       archiveActivity,
       clearActivity,
     }
 
-    await expect(executeToolRequest({
-      tool: 'activities.auto-title',
-      input: { title: 'Restore Activity titles' },
-      context: { metadata: { activityId: 'agent:one' } },
-    }, options)).resolves.toEqual({
-      id: 'agent:one',
-      title: 'Restore Activity titles',
-    })
     await expect(executeToolRequest({
       tool: 'activities.stop',
       input: { activity_id: 'agent:one' },
@@ -375,18 +392,6 @@ describe('canonical renderer tool runtime', () => {
       tool: 'activities.clear',
       input: { activity_id: 'agent:one' },
     }, options)).resolves.toEqual({ id: 'agent:one', status: 'cleared' })
-  })
-
-  it('rejects automatic title calls outside a scoped Activity', async () => {
-    await expect(executeToolRequest({
-      tool: 'activities.auto-title',
-      input: { title: 'Unscoped title' },
-      context: { metadata: {} },
-    })).rejects.toMatchObject({
-      code: 'invalid_input',
-      message: expect.stringContaining('scoped Activity'),
-    })
-    expect(invoke).not.toHaveBeenCalledWith('activity_auto_title', expect.anything())
   })
 
   it('executes catalogued workspace tools under their canonical names', async () => {

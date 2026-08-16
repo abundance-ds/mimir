@@ -533,6 +533,17 @@ describe('TerminalActivity', () => {
     ]])
   })
 
+  it('reports a pasted carriage return as a submitted user interaction', async () => {
+    const wrapper = await initialize()
+
+    await wrapper.vm.pasteText('continue\r')
+    await flushPromises()
+
+    expect(wrapper.emitted('activity-input')).toEqual([[
+      { activityId: 'agent:one' },
+    ]])
+  })
+
   it.each(['codex', 'claude', 'pi', 'gemini'])(
     'proposes a first-prompt title through the shared terminal path for %s',
     async (launcherId) => {

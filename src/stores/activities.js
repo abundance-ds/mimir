@@ -23,6 +23,7 @@ export const ACTIVITY_STATUSES = Object.freeze([
 ])
 
 const RETENTIONS = new Set(['ephemeral', 'durable'])
+// `agent` remains readable for Activities created before the title tool was removed.
 const TITLE_SOURCES = new Set(['legacy', 'launcher', 'provisional', 'agent', 'manual'])
 const LIVE_STATUSES = new Set(['ready', 'starting', 'working', 'needs-input', 'idle'])
 const KNOWN_FIELDS = new Set([

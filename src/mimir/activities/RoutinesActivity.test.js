@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
 import {
   createRoutineDefinition,
   duplicateRoutineDefinition,
@@ -151,6 +152,21 @@ describe('RoutinesActivity', () => {
         { id: 'pi', title: 'Pi', kind: 'agent', agentId: 'pi', enabled: true, cwd: { mode: 'workspace' } },
         { id: 'terminal', title: 'Terminal', kind: 'terminal', enabled: true, cwd: { mode: 'workspace' } },
       ],
+    })
+    vi.mocked(invoke).mockReset().mockImplementation((command) => {
+      if (command === 'agent_list') {
+        return Promise.resolve([
+          {
+            name: 'evidence-sweep',
+            title: 'Evidence sweep',
+            description: 'Review the current evidence base.',
+            scope: 'project',
+            path: '/work/agents/evidence-sweep',
+            active: true,
+          },
+        ])
+      }
+      return Promise.resolve()
     })
   })
 
@@ -340,6 +356,33 @@ describe('RoutinesActivity', () => {
     expect(wrapper.emitted('openFile').at(-1)).toEqual([
       '/home/me/.mimir/routines/friday-synthesis.toml',
     ])
+  })
+
+  it('offers scoped agent packages and saves one without a duplicate prompt', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-routines-new]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('datalist option').attributes('value')).toBe('evidence-sweep')
+
+    await wrapper.get('[data-routine-title-input]').setValue('Evidence sweep')
+    await wrapper.get('[data-routine-agent-input]').setValue('evidence-sweep')
+    await flushPromises()
+
+    expect(wrapper.find('[data-routine-prompt-input]').exists()).toBe(false)
+    expect(wrapper.find('[data-routine-preset-option]').exists()).toBe(false)
+    expect(wrapper.get('[data-routine-workspace-input]').element.value).toBe('/work')
+    await wrapper.get('[data-routine-form]').trigger('submit')
+    await flushPromises()
+
+    expect(createRoutineDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'evidence-sweep',
+      agent: 'evidence-sweep',
+      preset: '',
+      prompt: '',
+      workspace: '/work',
+    }))
   })
 
   it('builds cron from the schedule picker without exposing cron syntax', async () => {

@@ -91,7 +91,7 @@ export function createToolRuntime(options = {}) {
 }
 
 export async function executeToolRequest(request, options = {}) {
-  const { tool, input = {}, context = {} } = request
+  const { tool, input = {} } = request
   if (options.signal?.aborted) throw cancelledError()
 
   if (tool === 'editor.propose') {
@@ -105,22 +105,15 @@ export async function executeToolRequest(request, options = {}) {
   }
 
   switch (tool) {
-    case 'activities.auto-title': {
-      const activityId = String(context.metadata?.activityId || '').trim()
-      if (!activityId) {
-        throw invalidInputError('mimir_title is only available inside a scoped Activity.')
-      }
-      return options.autoTitleActivity
-        ? options.autoTitleActivity(activityId, input.title)
-        : invoke('activity_auto_title', {
-            activityId,
-            title: input.title,
-          })
-    }
     case 'activities.list':
       return options.listActivities
         ? options.listActivities()
         : invoke('activity_list')
+    case 'activities.snapshot':
+      return invoke('activity_snapshot', {
+        activityId: input.activity_id,
+        afterSequence: input.after_sequence ?? null,
+      })
     case 'activities.spawn':
       return options.spawnActivity
         ? options.spawnActivity(input)
@@ -190,6 +183,17 @@ export async function executeToolRequest(request, options = {}) {
       return options.listRoutines
         ? options.listRoutines()
         : invoke('routine_catalog')
+    case 'agents.run':
+      return invoke('agent_run', {
+        request: {
+          name: input.name,
+          workspace: input.workspace,
+          args: Array.isArray(input.args) ? input.args.map(String) : [],
+          preset: input.preset || null,
+          interactive: input.interactive === true,
+          follow: input.follow === true,
+        },
+      })
     case 'routines.run':
       return options.runRoutine
         ? options.runRoutine(input.routine_id)
@@ -280,12 +284,14 @@ function requireMatchingRoutineId(routineId, definitionId) {
 }
 
 function normalizeRoutineDefinition(value = {}) {
+  const agent = String(value.agent || '').trim()
   return {
     id: String(value.id || '').trim(),
     title: String(value.title || '').trim(),
     enabled: value.enabled !== false,
     schedule: String(value.schedule || '').trim() || null,
     timezone: String(value.timezone || '').trim() || 'local',
+    ...(agent ? { agent } : {}),
     preset: String(value.preset || '').trim(),
     prompt: String(value.prompt || ''),
     overlap: String(value.overlap || 'skip'),
