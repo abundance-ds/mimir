@@ -5,6 +5,7 @@ import {
 } from '../../services/businessGraph.js'
 import {
   journalDay,
+  journalDates,
   journalNodeId,
   journalTitle,
   upsertJournalDay,
@@ -72,6 +73,14 @@ export async function archiveTodayEntry({ date, text, timeZone = localTimeZone()
 export async function loadTodayEntry(date) {
   const node = await getGraphNode(journalNodeId(date))
   return node ? journalDay(node.body, date) : null
+}
+
+export async function loadTodayMonthDates(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return []
+  const node = await getGraphNode(journalNodeId(monthKey))
+  return node
+    ? journalDates(node.body).filter(date => date.startsWith(`${monthKey}-`))
+    : []
 }
 
 function localTimeZone() {

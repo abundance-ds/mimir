@@ -4,7 +4,11 @@ import {
   getGraphNode,
   updateGraphNode,
 } from '../../services/businessGraph.js'
-import { archiveTodayEntry, loadTodayEntry } from './todayJournal.js'
+import {
+  archiveTodayEntry,
+  loadTodayEntry,
+  loadTodayMonthDates,
+} from './todayJournal.js'
 
 vi.mock('../../services/businessGraph.js', () => ({
   createGraphNode: vi.fn(),
@@ -101,5 +105,25 @@ describe('todayJournal', () => {
     })
 
     await expect(loadTodayEntry('2026-08-14')).resolves.toBe('Yesterday.')
+  })
+
+  it('loads the available dates for one calendar month', async () => {
+    vi.mocked(getGraphNode).mockResolvedValue({
+      body: [
+        '## 2026-08-13',
+        '',
+        'Earlier.',
+        '',
+        '## 2026-08-15',
+        '',
+        'Today.',
+      ].join('\n'),
+    })
+
+    await expect(loadTodayMonthDates('2026-08')).resolves.toEqual([
+      '2026-08-13',
+      '2026-08-15',
+    ])
+    expect(getGraphNode).toHaveBeenCalledWith('journal-2026-08')
   })
 })

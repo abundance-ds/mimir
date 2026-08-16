@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { syntaxTree } from '@codemirror/language'
 import { loadAppData, saveAppData } from '../../services/appsCatalog.js'
-import { archiveTodayEntry, loadTodayEntry } from './todayJournal.js'
+import {
+  archiveTodayEntry,
+  loadTodayEntry,
+  loadTodayMonthDates,
+} from './todayJournal.js'
 import TodayApp from './TodayApp.vue'
 
 vi.mock('../../services/appsCatalog.js', () => ({
@@ -13,6 +17,7 @@ vi.mock('../../services/appsCatalog.js', () => ({
 vi.mock('./todayJournal.js', () => ({
   archiveTodayEntry: vi.fn(),
   loadTodayEntry: vi.fn(),
+  loadTodayMonthDates: vi.fn(),
 }))
 
 const app = {
@@ -37,6 +42,7 @@ describe('TodayApp', () => {
     vi.mocked(saveAppData).mockReset().mockResolvedValue()
     vi.mocked(archiveTodayEntry).mockReset().mockResolvedValue({ id: 'journal-2026-08' })
     vi.mocked(loadTodayEntry).mockReset().mockResolvedValue(null)
+    vi.mocked(loadTodayMonthDates).mockReset().mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -77,7 +83,32 @@ describe('TodayApp', () => {
     expect(wrapper.get('[data-today-date-nav]').text()).toContain('Sat 15 Aug')
     expect(wrapper.find('[data-today-datebar]').exists()).toBe(false)
     expect(wrapper.get('[data-today-date-nav]').classes()).not.toContain('border-l')
-    expect(wrapper.get('[data-today-date-nav] time').classes()).toContain('w-[104px]')
+    expect(wrapper.get('[data-today-date-picker]').classes()).toContain('w-[104px]')
+    expect(wrapper.get('[data-today-date-picker]').attributes('aria-haspopup')).toBe('dialog')
+  })
+
+  it('opens the shared calendar from the stable date and marks empty Journal days', async () => {
+    vi.mocked(loadTodayMonthDates).mockResolvedValue(['2026-08-13', '2026-08-14'])
+    vi.mocked(loadTodayEntry).mockResolvedValue('- [x] Friday was archived')
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-today-date-picker]').trigger('click')
+    await flushPromises()
+
+    expect(loadTodayMonthDates).toHaveBeenCalledWith('2026-08')
+    const popover = document.querySelector('[data-date-picker-popover]')
+    expect(popover.querySelector('[data-date-value="2026-08-14"]').dataset.dayState).toBe('entry')
+    expect(popover.querySelector('[data-date-value="2026-08-12"]').dataset.dayState).toBe('empty')
+    expect(popover.querySelector('[data-date-value="2026-08-17"]').disabled).toBe(true)
+    expect(popover.querySelector('footer')).toBeNull()
+
+    popover.querySelector('[data-date-value="2026-08-14"]').click()
+    await flushPromises()
+
+    expect(loadTodayEntry).toHaveBeenCalledWith('2026-08-14')
+    expect(wrapper.get('[data-today-date-nav] time').attributes('datetime')).toBe('2026-08-14')
+    expect(view(wrapper).state.doc.toString()).toBe('- [x] Friday was archived')
   })
 
   it('exposes live Today content as optional artifact context', async () => {
@@ -277,6 +308,31 @@ describe('TodayApp', () => {
 
     await wrapper.get('[aria-label="Return to current day"]').trigger('click')
     expect(view(wrapper).state.doc.toString()).toBe('Ship the focused review flow')
+  })
+
+  it('does not let a slow historical read replace a later date', async () => {
+    let resolveFriday
+    vi.mocked(loadTodayEntry).mockImplementation(date => {
+      if (date === '2026-08-14') {
+        return new Promise(resolve => { resolveFriday = resolve })
+      }
+      return Promise.resolve('Thursday entry')
+    })
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[aria-label="View previous day"]').trigger('click')
+    await wrapper.get('[aria-label="View previous day"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-today-date-nav] time').attributes('datetime')).toBe('2026-08-13')
+    expect(view(wrapper).state.doc.toString()).toBe('Thursday entry')
+
+    resolveFriday('Late Friday entry')
+    await flushPromises()
+
+    expect(wrapper.get('[data-today-date-nav] time').attributes('datetime')).toBe('2026-08-13')
+    expect(view(wrapper).state.doc.toString()).toBe('Thursday entry')
   })
 
   it('keeps Select All inside the Today editor', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   appendMarkdownBelow,
   journalDay,
+  journalDates,
   journalNodeId,
   parseTodayStorage,
   shiftDateKey,
@@ -102,5 +103,21 @@ describe('todayModel', () => {
     expect(journalDay(appended, '2026-08-14')).toBe('- [x] First')
     expect(journalDay(appended, '2026-08-15')).toBe('A short note.')
     expect(upsertJournalDay(appended, '2026-08-15', 'A short note.')).toBe(appended)
+  })
+
+  it('lists valid Journal dates once in chronological order', () => {
+    expect(journalDates([
+      '## 2026-08-15',
+      '',
+      'Later.',
+      '',
+      '## 2026-08-14',
+      '',
+      'Earlier.',
+      '',
+      '## 2026-02-31',
+      '',
+      'Invalid.',
+    ].join('\n'))).toEqual(['2026-08-14', '2026-08-15'])
   })
 })

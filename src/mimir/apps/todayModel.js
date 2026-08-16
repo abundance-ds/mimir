@@ -144,6 +144,15 @@ export function journalDay(body, dateKey) {
     .trimEnd()
 }
 
+export function journalDates(body) {
+  const dates = []
+  const pattern = new RegExp(JOURNAL_HEADING_PATTERN.source, 'gm')
+  for (const match of normalizeNewlines(body).matchAll(pattern)) {
+    if (validDateKey(match[1])) dates.push(match[1])
+  }
+  return [...new Set(dates)].sort()
+}
+
 export function upsertJournalDay(body, dateKey, markdown) {
   const normalized = normalizeNewlines(body).trimEnd()
   const content = normalizeNewlines(markdown).trimEnd()

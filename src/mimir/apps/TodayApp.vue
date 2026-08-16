@@ -152,12 +152,29 @@
         >
           <IconChevronLeft :size="14" :stroke-width="1.7" />
         </button>
-        <time
-          :datetime="viewDate"
-          class="w-[104px] truncate px-1 text-center font-mono text-[10px] font-medium tabular-nums text-ink-2"
+        <DatePicker
+          :model-value="viewDate"
+          data-today-date-picker
+          aria-label="Choose Journal date"
+          variant="custom"
+          :max="tomorrowDate"
+          :show-footer="false"
+          placement="top-end"
+          :day-state="calendarDayState"
+          :describe-day="calendarDayDescription"
+          class="h-full w-[104px] hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          @change="showDate"
+          @month-change="loadCalendarMonth"
         >
-          {{ navigationDateLabel }}
-        </time>
+          <template #trigger>
+            <time
+              :datetime="viewDate"
+              class="block min-w-0 truncate px-1 text-center font-mono text-[10px] font-medium tabular-nums text-ink-2"
+            >
+              {{ navigationDateLabel }}
+            </time>
+          </template>
+        </DatePicker>
         <button
           type="button"
           aria-label="View next day"
@@ -204,6 +221,7 @@ import { Strikethrough } from '@lezer/markdown'
 import { taskCheckboxExtension } from '../../editor/codemirror/taskCheckboxes.js'
 import { markdownListKeymap } from '../../editor/codemirror/markdownLists.js'
 import { loadAppData, saveAppData } from '../../services/appsCatalog.js'
+import DatePicker from '../../shared/ui/DatePicker.vue'
 import {
   appendMarkdownBelow,
   carrySource,
@@ -213,7 +231,11 @@ import {
   shiftDateKey,
   uncheckedTaskBlocks,
 } from './todayModel.js'
-import { archiveTodayEntry, loadTodayEntry } from './todayJournal.js'
+import {
+  archiveTodayEntry,
+  loadTodayEntry,
+  loadTodayMonthDates,
+} from './todayJournal.js'
 
 const props = defineProps({
   app: { type: Object, required: true },
@@ -246,10 +268,13 @@ const notice = ref('')
 const carryReview = ref(false)
 const carrySelection = ref(new Set())
 const archiving = ref(false)
+const calendarDatesByMonth = ref(new Map())
+const calendarMonthsLoading = new Set()
 let saveTimer = null
 let savedTimer = null
 let noticeTimer = null
 let activeSave = null
+let historyRequest = 0
 let editRevision = 0
 let disposed = false
 let editorView = null
@@ -558,6 +583,7 @@ async function ensureCurrentDay() {
   }
   documentDate.value = todayKey.value
   viewDate.value = todayKey.value
+  cancelHistoryLoad()
   const promotedTomorrow = scheduled?.date === todayKey.value ? scheduled : null
   text.value = promotedTomorrow?.text || ''
   updatedAt.value = promotedTomorrow?.updatedAt || null
@@ -592,6 +618,7 @@ async function navigateDate(offset) {
 }
 
 async function showHistoryDate(date) {
+  const request = ++historyRequest
   viewDate.value = date
   historyLoading.value = true
   updateEditorContext()
@@ -605,19 +632,39 @@ async function showHistoryDate(date) {
       entry = pending.text
     }
     if (entry == null) entry = pendingEntry(date)?.text || ''
+    if (request !== historyRequest || viewDate.value !== date) return
+    markCalendarDate(date, Boolean(String(entry).trim()))
     syncEditorText(entry)
     error.value = ''
     errorAction.value = ''
   } catch (cause) {
+    if (request !== historyRequest || viewDate.value !== date) return
     syncEditorText('')
     reportError(`Journal entry could not be loaded: ${errorMessage(cause)}`, 'history')
   } finally {
-    historyLoading.value = false
-    updateEditorContext()
+    if (request === historyRequest && viewDate.value === date) {
+      historyLoading.value = false
+      updateEditorContext()
+    }
   }
 }
 
+async function showDate(date) {
+  await ensureCurrentDay()
+  if (!date || date > tomorrowDate.value) return
+  if (date === documentDate.value) {
+    showToday()
+    return
+  }
+  if (date === tomorrowDate.value) {
+    showTomorrow()
+    return
+  }
+  await showHistoryDate(date)
+}
+
 function showToday() {
+  cancelHistoryLoad()
   viewDate.value = documentDate.value
   syncEditorText(text.value)
   updateEditorContext()
@@ -625,11 +672,17 @@ function showToday() {
 }
 
 function showTomorrow() {
+  cancelHistoryLoad()
   viewDate.value = tomorrowDate.value
   const draft = tomorrow.value?.date === tomorrowDate.value ? tomorrow.value.text : ''
   syncEditorText(draft)
   updateEditorContext()
   nextTick(() => editorView?.focus())
+}
+
+function cancelHistoryLoad() {
+  historyRequest += 1
+  historyLoading.value = false
 }
 
 function carryAll() {
@@ -699,6 +752,7 @@ async function archivePendingEntries() {
   try {
     for (const entry of entries) {
       await archiveTodayEntry(entry)
+      markCalendarDate(entry.date, true)
       archivedDate = entry.date
       archiveQueue.value = archiveQueue.value.filter(item => item.date !== entry.date)
       if (previous.value?.date === entry.date) {
@@ -720,6 +774,51 @@ async function archivePendingEntries() {
       void flushSave()
     }
   }
+}
+
+async function loadCalendarMonth(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return
+  if (calendarDatesByMonth.value.has(monthKey) || calendarMonthsLoading.has(monthKey)) return
+  calendarMonthsLoading.add(monthKey)
+  try {
+    const dates = await loadTodayMonthDates(monthKey)
+    const next = new Map(calendarDatesByMonth.value)
+    next.set(monthKey, new Set(dates))
+    calendarDatesByMonth.value = next
+  } catch {
+    // Date selection remains available when the optional entry markers cannot load.
+  } finally {
+    calendarMonthsLoading.delete(monthKey)
+  }
+}
+
+function calendarDayState(date) {
+  if (date === documentDate.value) return text.value.trim() ? 'entry' : 'empty'
+  if (date === tomorrowDate.value) {
+    return tomorrow.value?.date === date && tomorrow.value.text.trim() ? 'entry' : 'empty'
+  }
+  if (pendingEntry(date)?.text?.trim()) return 'entry'
+  const dates = calendarDatesByMonth.value.get(date.slice(0, 7))
+  if (!dates) return ''
+  return dates.has(date) ? 'entry' : 'empty'
+}
+
+function calendarDayDescription(_date, state) {
+  if (state === 'entry') return 'has content'
+  if (state === 'empty') return 'no entry'
+  return ''
+}
+
+function markCalendarDate(date, present) {
+  const monthKey = String(date || '').slice(0, 7)
+  const dates = calendarDatesByMonth.value.get(monthKey)
+  if (!dates) return
+  const nextDates = new Set(dates)
+  if (present) nextDates.add(date)
+  else nextDates.delete(date)
+  const next = new Map(calendarDatesByMonth.value)
+  next.set(monthKey, nextDates)
+  calendarDatesByMonth.value = next
 }
 
 function pendingArchiveEntries() {
