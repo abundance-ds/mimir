@@ -11,13 +11,47 @@
   >
     <template v-if="mode === 'peek'">
       <header class="peek-header">
-        <span class="peek-identity">
-          <span>{{ human(node.kind) }} · {{ scopeLabel }}</span>
-          <small>{{ node.id }}</small>
-        </span>
+        <div class="object-history-controls" aria-label="Object history">
+          <button
+            type="button"
+            data-inspector-history-back
+            data-graph-control="peek-history-back"
+            class="object-icon-button"
+            :disabled="!historyBack"
+            :title="historyBack ? `Back to ${historyBack.title}` : 'No previous object'"
+            :aria-label="historyBack ? `Back to ${historyBack.title}` : 'No previous object'"
+            @click="$emit('navigateHistory', -1)"
+          >
+            <IconChevronLeft :size="15" />
+          </button>
+          <button
+            type="button"
+            data-inspector-history-forward
+            data-graph-control="peek-history-forward"
+            class="object-icon-button"
+            :disabled="!historyForward"
+            :title="historyForward ? `Forward to ${historyForward.title}` : 'No next object'"
+            :aria-label="historyForward ? `Forward to ${historyForward.title}` : 'No next object'"
+            @click="$emit('navigateHistory', 1)"
+          >
+            <IconChevronRight :size="15" />
+          </button>
+        </div>
+        <span class="object-header-spacer" />
         <span class="peek-save-state" :class="saveStateClass" aria-live="polite">
           {{ saveStateLabel }}
         </span>
+        <button
+          type="button"
+          data-inspector-focus
+          data-graph-control="peek-focus"
+          class="object-secondary-action peek-focus-action"
+          title="Open Focus"
+          @click="$emit('focus')"
+        >
+          <IconMaximize :size="13" />
+          Focus
+        </button>
         <button
           type="button"
           data-inspector-source
@@ -29,6 +63,51 @@
         >
           <IconFileCode :size="15" />
         </button>
+        <div class="object-more-wrap" data-object-more-root>
+          <button
+            type="button"
+            data-graph-control="peek-more"
+            class="object-icon-button"
+            title="More actions"
+            aria-label="More actions"
+            :aria-expanded="moreOpen"
+            @click="moreOpen = !moreOpen"
+          >
+            <IconDots :size="16" />
+          </button>
+          <div v-if="moreOpen" class="object-more-menu">
+            <button
+              v-if="node.kind === 'issue'"
+              type="button"
+              data-inspector-next-action
+              data-graph-control="peek-next-action"
+              @click="moreAction(() => quickCreate('issue'))"
+            >
+              <IconArrowForwardUp :size="14" />
+              Create next action
+            </button>
+            <button
+              v-if="node.kind === 'project'"
+              type="button"
+              data-inspector-record-decision
+              data-graph-control="peek-record-decision"
+              @click="moreAction(() => quickCreate('decision'))"
+            >
+              <IconScale :size="14" />
+              Record decision
+            </button>
+            <button
+              type="button"
+              data-inspector-delete
+              data-graph-control="peek-delete"
+              class="danger"
+              @click="moreAction(remove)"
+            >
+              <IconTrash :size="14" />
+              Move to Trash
+            </button>
+          </div>
+        </div>
         <button
           type="button"
           data-inspector-close
@@ -51,7 +130,10 @@
         <span>{{ error }}</span>
       </div>
 
-      <div class="peek-scroll">
+      <div
+        class="peek-scroll"
+        :class="{ 'peek-scroll-fill-note': !activities.length && !deliverableItems.length }"
+      >
         <section v-if="lookupFacts.length" class="peek-lookup-facts" aria-label="Contact facts">
           <button
             v-for="fact in lookupFacts"
@@ -91,39 +173,36 @@
             @input="changedAndGrow"
           />
 
-          <div v-if="node.kind === 'issue'" class="peek-quick-properties">
-            <GraphSelect
-              :model-value="draft.status"
-              data-inspector-status
-              data-graph-control="peek-status"
-              variant="quiet"
-              aria-label="Issue status"
-              :options="statuses"
-              @update:model-value="quickUpdate('status', $event)"
-            />
-            <GraphSelect
-              :model-value="draft.priority"
-              data-inspector-priority
-              data-graph-control="peek-priority"
-              variant="quiet"
-              aria-label="Issue priority"
-              :options="priorities"
-              @update:model-value="quickUpdate('priority', $event)"
-            />
-          </div>
-        </section>
-
-        <section class="peek-section relationship-section">
-          <GraphRelationshipLine
-            :node="node"
-            :neighbors="neighbors"
-            @open="openRelated"
-          />
-        </section>
-
-        <section v-if="node.kind === 'issue'" class="peek-section">
-          <div class="peek-property-grid">
-            <div class="peek-field">
+          <div
+            v-if="node.kind === 'issue'"
+            class="object-metadata-grid object-metadata-grid-peek"
+            aria-label="Issue details"
+          >
+            <div class="object-metadata-field">
+              <span>Status</span>
+              <GraphSelect
+                :model-value="draft.status"
+                data-inspector-status
+                data-graph-control="peek-status"
+                variant="quiet"
+                aria-label="Issue status"
+                :options="statuses"
+                @update:model-value="quickUpdate('status', $event)"
+              />
+            </div>
+            <div class="object-metadata-field">
+              <span>Priority</span>
+              <GraphSelect
+                :model-value="draft.priority"
+                data-inspector-priority
+                data-graph-control="peek-priority"
+                variant="quiet"
+                aria-label="Issue priority"
+                :options="priorities"
+                @update:model-value="quickUpdate('priority', $event)"
+              />
+            </div>
+            <div class="object-metadata-field">
               <span>Project</span>
               <GraphSelect
                 :model-value="draft.projectId"
@@ -139,7 +218,7 @@
                 @update:model-value="updateDraft('projectId', $event)"
               />
             </div>
-            <div class="peek-field">
+            <div class="object-metadata-field">
               <span>Owner</span>
               <GraphSelect
                 :model-value="draft.assigneeId"
@@ -155,7 +234,7 @@
                 @update:model-value="updateDraft('assigneeId', $event)"
               />
             </div>
-            <div class="peek-field">
+            <div class="object-metadata-field">
               <span>Due date</span>
               <GraphDatePicker
                 :model-value="draft.dueDate"
@@ -168,7 +247,7 @@
                 @update:model-value="updateDraft('dueDate', $event)"
               />
             </div>
-            <label class="peek-field">
+            <label class="object-metadata-field">
               <span>Waiting for</span>
               <input
                 v-model="draft.waitingFor"
@@ -178,8 +257,36 @@
                 @input="changed"
               />
             </label>
+            <div class="object-metadata-field object-metadata-date">
+              <span>Created</span>
+              <strong data-inspector-created>{{ readableDateTime(node.createdAt) || 'Unknown' }}</strong>
+            </div>
+            <div class="object-metadata-field object-metadata-date">
+              <span>Last updated</span>
+              <strong data-inspector-updated>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</strong>
+            </div>
           </div>
-          <p v-if="attentionLabel !== 'Clear'" class="peek-attention">{{ attentionLabel }}</p>
+          <p
+            v-if="node.kind === 'issue' && attentionLabel !== 'Clear'"
+            class="peek-attention"
+          >
+            {{ attentionLabel }}
+          </p>
+
+          <div
+            v-if="node.kind !== 'issue'"
+            class="object-metadata-grid object-metadata-grid-peek"
+            aria-label="Object details"
+          >
+            <div class="object-metadata-field object-metadata-date">
+              <span>Created</span>
+              <strong data-inspector-created>{{ readableDateTime(node.createdAt) || 'Unknown' }}</strong>
+            </div>
+            <div class="object-metadata-field object-metadata-date">
+              <span>Last updated</span>
+              <strong data-inspector-updated>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</strong>
+            </div>
+          </div>
         </section>
 
         <section class="peek-section peek-note-section">
@@ -243,87 +350,27 @@
           </button>
         </section>
 
-        <details class="peek-provenance">
-          <summary data-graph-control="peek-source-details">Source details</summary>
-          <dl>
-            <dt>scope</dt>
-            <dd>{{ node.provenance?.scopeId }}</dd>
-            <dt>updated</dt>
-            <dd>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</dd>
-            <dt>revision</dt>
-            <dd>{{ shortRevision }}</dd>
-            <dt>path</dt>
-            <dd>{{ node.provenance?.sourcePath }}</dd>
-          </dl>
+        <details class="peek-details">
+          <summary data-graph-control="peek-details">
+            <span>Details</span>
+            <small v-if="neighbors.length">
+              {{ neighbors.length }} {{ neighbors.length === 1 ? 'connection' : 'connections' }}
+            </small>
+          </summary>
+          <div class="peek-details-content">
+            <section class="peek-details-group">
+              <span class="object-section-label">Connections</span>
+              <GraphRelationshipLine
+                :node="node"
+                :neighbors="neighbors"
+                :limit="6"
+                @open="openRelated"
+              />
+            </section>
+          </div>
         </details>
       </div>
 
-      <footer class="peek-footer">
-        <button
-          type="button"
-          data-inspector-focus
-          data-graph-control="peek-focus"
-          class="object-secondary-action"
-          @click="$emit('focus')"
-        >
-          <IconMaximize :size="13" />
-          Focus
-          <kbd>F</kbd>
-        </button>
-        <div class="peek-more-wrap" data-peek-more-root>
-          <button
-            type="button"
-            data-graph-control="peek-more"
-            class="object-icon-button"
-            title="More actions"
-            aria-label="More actions"
-            :aria-expanded="moreOpen"
-            @click="moreOpen = !moreOpen"
-          >
-            <IconDots :size="16" />
-          </button>
-          <div v-if="moreOpen" class="peek-more-menu">
-            <button
-              v-if="node.kind === 'issue'"
-              type="button"
-              data-inspector-next-action
-              data-graph-control="peek-next-action"
-              @click="moreAction(() => quickCreate('issue'))"
-            >
-              <IconArrowForwardUp :size="14" />
-              Create next action
-            </button>
-            <button
-              v-if="node.kind === 'project'"
-              type="button"
-              data-inspector-record-decision
-              data-graph-control="peek-record-decision"
-              @click="moreAction(() => quickCreate('decision'))"
-            >
-              <IconScale :size="14" />
-              Record decision
-            </button>
-            <button
-              type="button"
-              data-graph-control="peek-open-source"
-              @click="moreAction(() => openSource(node.provenance?.sourcePath))"
-            >
-              <IconFileCode :size="14" />
-              Open Markdown source
-            </button>
-            <button
-              type="button"
-              data-inspector-delete
-              data-graph-control="peek-delete"
-              class="danger"
-              @click="moreAction(remove)"
-            >
-              <IconTrash :size="14" />
-              Move to Trash
-            </button>
-          </div>
-        </div>
-      </footer>
     </template>
 
     <template v-else>
@@ -332,18 +379,53 @@
           type="button"
           data-graph-control="focus-back"
           class="object-secondary-action"
+          title="Exit Focus"
           @click="requestExit('back')"
         >
-          <IconArrowLeft :size="14" />
-          Back to projection
+          <IconArrowsMinimize :size="14" />
+          Exit Focus
         </button>
-        <span class="focus-header-identity">
-          {{ human(node.kind) }}
-          <small>{{ scopeLabel }}</small>
-        </span>
+        <div class="object-history-controls" aria-label="Object history">
+          <button
+            type="button"
+            data-inspector-history-back
+            data-graph-control="focus-history-back"
+            class="object-icon-button"
+            :disabled="!historyBack"
+            :title="historyBack ? `Back to ${historyBack.title}` : 'No previous object'"
+            :aria-label="historyBack ? `Back to ${historyBack.title}` : 'No previous object'"
+            @click="$emit('navigateHistory', -1)"
+          >
+            <IconChevronLeft :size="15" />
+          </button>
+          <button
+            type="button"
+            data-inspector-history-forward
+            data-graph-control="focus-history-forward"
+            class="object-icon-button"
+            :disabled="!historyForward"
+            :title="historyForward ? `Forward to ${historyForward.title}` : 'No next object'"
+            :aria-label="historyForward ? `Forward to ${historyForward.title}` : 'No next object'"
+            @click="$emit('navigateHistory', 1)"
+          >
+            <IconChevronRight :size="15" />
+          </button>
+        </div>
+        <span class="object-header-spacer" />
         <span class="focus-save-state" :class="saveStateClass" aria-live="polite">
           {{ saveStateLabel }}
         </span>
+        <button
+          type="button"
+          data-inspector-save
+          data-graph-control="focus-save"
+          class="object-primary-action focus-save-button"
+          :disabled="!dirty || saving || !draft.title.trim()"
+          @click="save"
+        >
+          {{ saving ? 'Saving…' : 'Save changes' }}
+          <kbd>⌘S</kbd>
+        </button>
         <button
           type="button"
           data-graph-control="focus-source"
@@ -354,6 +436,51 @@
         >
           <IconFileCode :size="15" />
         </button>
+        <div class="object-more-wrap" data-object-more-root>
+          <button
+            type="button"
+            data-graph-control="focus-more"
+            class="object-icon-button"
+            title="More actions"
+            aria-label="More actions"
+            :aria-expanded="moreOpen"
+            @click="moreOpen = !moreOpen"
+          >
+            <IconDots :size="16" />
+          </button>
+          <div v-if="moreOpen" class="object-more-menu">
+            <button
+              v-if="node.kind === 'issue'"
+              type="button"
+              data-inspector-next-action
+              data-graph-control="focus-next-action"
+              @click="moreAction(() => quickCreate('issue'))"
+            >
+              <IconArrowForwardUp :size="14" />
+              Create next action
+            </button>
+            <button
+              v-else-if="node.kind === 'project'"
+              type="button"
+              data-inspector-record-decision
+              data-graph-control="focus-record-decision"
+              @click="moreAction(() => quickCreate('decision'))"
+            >
+              <IconScale :size="14" />
+              Record decision
+            </button>
+            <button
+              type="button"
+              data-inspector-delete
+              data-graph-control="focus-delete"
+              class="danger"
+              @click="moreAction(remove)"
+            >
+              <IconTrash :size="14" />
+              Move to Trash
+            </button>
+          </div>
+        </div>
         <button
           type="button"
           data-graph-control="focus-close"
@@ -380,7 +507,6 @@
       <main class="focus-scroll">
         <article class="focus-document">
           <header class="focus-hero">
-            <span class="focus-object-id">{{ node.id }}</span>
             <textarea
               ref="titleInput"
               v-model="draft.title"
@@ -392,51 +518,98 @@
               @input="changedAndGrow"
             />
 
-            <div v-if="node.kind === 'issue'" class="focus-primary-properties">
-              <GraphSelect
-                :model-value="draft.status"
-                data-inspector-status
-                data-graph-control="focus-status"
-                variant="quiet"
-                aria-label="Issue status"
-                :options="statuses"
-                @update:model-value="updateDraft('status', $event)"
-              />
-              <GraphSelect
-                :model-value="draft.priority"
-                data-inspector-priority
-                data-graph-control="focus-priority"
-                variant="quiet"
-                aria-label="Issue priority"
-                :options="priorities"
-                @update:model-value="updateDraft('priority', $event)"
-              />
-              <GraphSelect
-                :model-value="draft.projectId"
-                data-inspector-project
-                data-graph-control="focus-project"
-                variant="quiet"
-                aria-label="Issue project"
-                placeholder="No project"
-                :options="projectOptions"
-                :menu-min-width="280"
-                searchable
-                search-placeholder="Find a project"
-                @update:model-value="updateDraft('projectId', $event)"
-              />
-              <GraphSelect
-                :model-value="draft.assigneeId"
-                data-inspector-assignee
-                data-graph-control="focus-assignee"
-                variant="quiet"
-                aria-label="Issue assignee"
-                placeholder="Unassigned"
-                :options="personOptions"
-                :menu-min-width="280"
-                searchable
-                search-placeholder="Find a person"
-                @update:model-value="updateDraft('assigneeId', $event)"
-              />
+            <div
+              v-if="node.kind === 'issue'"
+              class="object-metadata-grid object-metadata-grid-focus"
+              aria-label="Issue details"
+            >
+              <div class="object-metadata-field">
+                <span>Status</span>
+                <GraphSelect
+                  :model-value="draft.status"
+                  data-inspector-status
+                  data-graph-control="focus-status"
+                  variant="quiet"
+                  aria-label="Issue status"
+                  :options="statuses"
+                  @update:model-value="updateDraft('status', $event)"
+                />
+              </div>
+              <div class="object-metadata-field">
+                <span>Priority</span>
+                <GraphSelect
+                  :model-value="draft.priority"
+                  data-inspector-priority
+                  data-graph-control="focus-priority"
+                  variant="quiet"
+                  aria-label="Issue priority"
+                  :options="priorities"
+                  @update:model-value="updateDraft('priority', $event)"
+                />
+              </div>
+              <div class="object-metadata-field">
+                <span>Project</span>
+                <GraphSelect
+                  :model-value="draft.projectId"
+                  data-inspector-project
+                  data-graph-control="focus-project"
+                  variant="quiet"
+                  aria-label="Issue project"
+                  placeholder="No project"
+                  :options="projectOptions"
+                  :menu-min-width="280"
+                  searchable
+                  search-placeholder="Find a project"
+                  @update:model-value="updateDraft('projectId', $event)"
+                />
+              </div>
+              <div class="object-metadata-field">
+                <span>Owner</span>
+                <GraphSelect
+                  :model-value="draft.assigneeId"
+                  data-inspector-assignee
+                  data-graph-control="focus-assignee"
+                  variant="quiet"
+                  aria-label="Issue assignee"
+                  placeholder="Unassigned"
+                  :options="personOptions"
+                  :menu-min-width="280"
+                  searchable
+                  search-placeholder="Find a person"
+                  @update:model-value="updateDraft('assigneeId', $event)"
+                />
+              </div>
+              <div class="object-metadata-field">
+                <span>Due date</span>
+                <GraphDatePicker
+                  :model-value="draft.dueDate"
+                  data-inspector-due
+                  data-graph-control="focus-due"
+                  variant="quiet"
+                  aria-label="Issue due date"
+                  placeholder="No due date"
+                  :class="{ attention: isOverdue(draft.dueDate) }"
+                  @update:model-value="updateDraft('dueDate', $event)"
+                />
+              </div>
+              <label class="object-metadata-field">
+                <span>Waiting for</span>
+                <input
+                  v-model="draft.waitingFor"
+                  data-inspector-waiting
+                  data-graph-control="focus-waiting"
+                  placeholder="Nobody"
+                  @input="changed"
+                />
+              </label>
+              <div class="object-metadata-field object-metadata-date">
+                <span>Created</span>
+                <strong data-inspector-created>{{ readableDateTime(node.createdAt) || 'Unknown' }}</strong>
+              </div>
+              <div class="object-metadata-field object-metadata-date">
+                <span>Last updated</span>
+                <strong data-inspector-updated>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</strong>
+              </div>
             </div>
 
             <textarea
@@ -450,6 +623,21 @@
               placeholder="A concise retrieval hint for people and agents"
               @input="changedAndGrow"
             />
+
+            <div
+              v-if="node.kind !== 'issue'"
+              class="object-metadata-grid object-metadata-grid-focus object-metadata-grid-dates"
+              aria-label="Object details"
+            >
+              <div class="object-metadata-field object-metadata-date">
+                <span>Created</span>
+                <strong data-inspector-created>{{ readableDateTime(node.createdAt) || 'Unknown' }}</strong>
+              </div>
+              <div class="object-metadata-field object-metadata-date">
+                <span>Last updated</span>
+                <strong data-inspector-updated>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</strong>
+              </div>
+            </div>
           </header>
 
           <ProjectStanding
@@ -460,12 +648,19 @@
             @open-file="openSource"
           />
 
-          <section class="focus-relationship">
-            <GraphRelationshipLine
-              :node="node"
-              :neighbors="neighbors"
-              :limit="8"
-              @open="openRelated"
+          <section class="focus-note">
+            <span class="object-section-label">Working note</span>
+            <GraphMarkdownEditor
+              v-model="draft.body"
+              data-inspector-body
+              data-graph-control="focus-working-note"
+              :disabled="saving"
+              :min-height="380"
+              :framed="false"
+              control-id="focus-working-note"
+              aria-label="Working note in Markdown"
+              @change="changed"
+              @save="save"
             />
           </section>
 
@@ -517,13 +712,13 @@
                 <IconLink :size="14" />
                 <span>
                   <strong>{{ human(connection.edge.relation) }}</strong>
-                  <small>{{ connection.target?.title || connection.edge.target }}</small>
+                  <small>{{ connectionTitle(connection) }}</small>
                 </span>
                 <span>{{ human(connection.target?.kind || 'unresolved') }}</span>
                 <button
                   type="button"
                   :data-graph-control="`focus-connection-remove-${connection.index}`"
-                  :aria-label="`Remove ${human(connection.edge.relation)} connection to ${connection.target?.title || connection.edge.target}`"
+                  :aria-label="`Remove ${human(connection.edge.relation)} connection to ${connectionTitle(connection)}`"
                   @click="removeConnection(connection.index)"
                 >
                   <IconX :size="14" />
@@ -531,24 +726,8 @@
               </div>
             </div>
             <p v-else class="connection-empty">
-              No outgoing connections yet. Incoming links appear in the context strip.
+              No outgoing connections yet. Incoming links appear under Connected work.
             </p>
-          </section>
-
-          <section class="focus-note">
-            <span class="object-section-label">Working note</span>
-            <GraphMarkdownEditor
-              v-model="draft.body"
-              data-inspector-body
-              data-graph-control="focus-working-note"
-              :disabled="saving"
-              :min-height="380"
-              :framed="false"
-              control-id="focus-working-note"
-              aria-label="Working note in Markdown"
-              @change="changed"
-              @save="save"
-            />
           </section>
 
           <section class="focus-details-section">
@@ -557,19 +736,7 @@
             </span>
 
             <div v-if="node.kind === 'issue'" class="focus-property-grid">
-              <div class="focus-field">
-                <span>Due date</span>
-                <GraphDatePicker
-                  :model-value="draft.dueDate"
-                  data-inspector-due
-                  data-graph-control="focus-due"
-                  variant="quiet"
-                  aria-label="Issue due date"
-                  placeholder="No due date"
-                  @update:model-value="updateDraft('dueDate', $event)"
-                />
-              </div>
-              <div class="focus-field">
+              <div class="object-metadata-field">
                 <span>Reminder</span>
                 <GraphDateTimeField
                   :model-value="draft.remindAt"
@@ -581,17 +748,7 @@
                   @update:model-value="updateDraft('remindAt', $event)"
                 />
               </div>
-              <label class="focus-field">
-                <span>Waiting for</span>
-                <input
-                  v-model="draft.waitingFor"
-                  data-inspector-waiting
-                  data-graph-control="focus-waiting"
-                  placeholder="External dependency or response"
-                  @input="changed"
-                />
-              </label>
-              <div class="focus-field">
+              <div class="object-metadata-field">
                 <span>Snooze until</span>
                 <GraphDatePicker
                   :model-value="draft.snoozeUntil"
@@ -606,7 +763,7 @@
             </div>
 
             <div class="focus-property-grid focus-classification-grid">
-              <label class="focus-field">
+              <label class="object-metadata-field">
                 <span>Tags</span>
                 <input
                   v-model="editableTags"
@@ -654,7 +811,7 @@
                     {{ neighbor.direction === 'incoming' ? '←' : '→' }}
                   </span>
                   <span>
-                    <strong>{{ neighbor.node.title || neighbor.node.id }}</strong>
+                    <strong>{{ displayTitle(neighbor.node) }}</strong>
                     <small>{{ human(neighbor.relation) }} · {{ human(neighbor.node.kind) }}</small>
                   </span>
                   <IconChevronRight :size="14" />
@@ -703,74 +860,9 @@
             </div>
           </section>
 
-          <section class="focus-source-section">
-            <span class="object-section-label">Source</span>
-            <p>{{ node.provenance?.sourcePath }}</p>
-            <dl>
-              <div>
-                <dt>Scope</dt>
-                <dd>{{ node.provenance?.scopeId }}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</dd>
-              </div>
-              <div>
-                <dt>Revision</dt>
-                <dd>{{ shortRevision }}</dd>
-              </div>
-            </dl>
-          </section>
         </article>
       </main>
 
-      <footer class="focus-footer">
-        <button
-          type="button"
-          data-inspector-delete
-          data-graph-control="focus-delete"
-          class="focus-danger-action"
-          title="Move to Trash"
-          aria-label="Move to Trash"
-          @click="remove"
-        >
-          <IconTrash :size="15" />
-        </button>
-        <button
-          v-if="node.kind === 'issue'"
-          type="button"
-          data-inspector-next-action
-          data-graph-control="focus-next-action"
-          class="object-secondary-action"
-          @click="quickCreate('issue')"
-        >
-          <IconArrowForwardUp :size="14" />
-          Next action
-        </button>
-        <button
-          v-else-if="node.kind === 'project'"
-          type="button"
-          data-inspector-record-decision
-          data-graph-control="focus-record-decision"
-          class="object-secondary-action"
-          @click="quickCreate('decision')"
-        >
-          <IconScale :size="14" />
-          Record decision
-        </button>
-        <span class="focus-footer-state" :class="saveStateClass">{{ saveStateLabel }}</span>
-        <button
-          type="button"
-          data-inspector-save
-          data-graph-control="focus-save"
-          class="object-primary-action focus-save-button"
-          :disabled="!dirty || saving || !draft.title.trim()"
-          @click="save"
-        >
-          {{ saving ? 'Saving…' : 'Save changes' }}
-          <kbd>⌘S</kbd>
-        </button>
-      </footer>
     </template>
   </aside>
 </template>
@@ -788,8 +880,9 @@ import {
 import {
   IconAlertTriangle,
   IconArrowForwardUp,
-  IconArrowLeft,
   IconArrowUpRight,
+  IconArrowsMinimize,
+  IconChevronLeft,
   IconChevronRight,
   IconDots,
   IconFileCode,
@@ -821,6 +914,8 @@ const props = defineProps({
   error: { type: String, default: '' },
   saving: { type: Boolean, default: false },
   activities: { type: Array, default: () => [] },
+  historyBack: { type: Object, default: null },
+  historyForward: { type: Object, default: null },
 })
 
 const emit = defineEmits([
@@ -833,6 +928,7 @@ const emit = defineEmits([
   'openActivity',
   'quickCreate',
   'delete',
+  'navigateHistory',
 ])
 const titleInput = ref(null)
 const inspectorRoot = ref(null)
@@ -943,12 +1039,6 @@ const RELATION_DEFINITIONS = Object.freeze([
     to: ['any'],
   },
 ])
-const scopeLabel = computed(() => (
-  props.scopes.find(scope => scope.id === props.node?.provenance?.scopeId)?.kind || 'source'
-))
-const shortRevision = computed(() => (
-  String(props.node?.provenance?.sourceRevision || '').slice(0, 12) || 'unknown'
-))
 const projects = computed(() => props.nodes.filter(node => node.kind === 'project'))
 const people = computed(() => props.nodes.filter(node => node.kind === 'person'))
 const projectOptions = computed(() => [
@@ -956,8 +1046,8 @@ const projectOptions = computed(() => [
   ...labelOption(draft.projectId, projects.value),
   ...projects.value.map(project => ({
     value: project.id,
-    label: project.title || project.id,
-    hint: `${project.provenance?.scopeKind || project.scopeId || 'project'} · ${project.id}`,
+    label: displayTitle(project),
+    hint: `${human(scopeFor(project))} scope`,
   })),
 ])
 const personOptions = computed(() => [
@@ -965,8 +1055,8 @@ const personOptions = computed(() => [
   ...labelOption(draft.assigneeId, people.value),
   ...people.value.map(person => ({
     value: person.id,
-    label: person.title || person.id,
-    hint: `${person.provenance?.scopeKind || person.scopeId || 'person'} · ${person.id}`,
+    label: displayTitle(person),
+    hint: `${human(scopeFor(person))} scope`,
   })),
 ])
 
@@ -1003,7 +1093,7 @@ const connectionTargetOptions = computed(() => {
     ))
     .map(candidate => ({
       value: candidate.id,
-      label: candidate.title || candidate.id,
+      label: displayTitle(candidate),
       hint: `${human(candidate.kind)} · ${scopeFor(candidate)}`,
     }))
 })
@@ -1254,7 +1344,7 @@ const lookupFacts = computed(() => {
   const companyId = (props.node.relations || [])
     .find(edge => edge.relation === 'works_at')?.target || ''
   const company = companyId
-    ? props.nodes.find(node => node.id === companyId)?.title || companyId
+    ? props.nodes.find(node => node.id === companyId)?.title || 'Unavailable company'
     : ''
   return [
     ['Email', properties.email],
@@ -1367,7 +1457,15 @@ function defaultRelationFor(kind) {
 function scopeFor(node) {
   const scopeId = node.provenance?.scopeId || node.scopeId
   const scope = props.scopes.find(candidate => candidate.id === scopeId)
-  return scope?.kind || scopeId || 'visible'
+  return scope?.kind || node.provenance?.scopeKind || 'visible'
+}
+
+function displayTitle(node) {
+  return node?.title || `Untitled ${human(node?.kind || 'object')}`
+}
+
+function connectionTitle(connection) {
+  return connection.target ? displayTitle(connection.target) : 'Unavailable object'
 }
 
 function labelColor(name) {
@@ -1429,7 +1527,7 @@ function onKeydown(event) {
 function onDocumentPointerDown(event) {
   if (
     moreOpen.value
-    && !inspectorRoot.value?.querySelector('[data-peek-more-root]')?.contains(event.target)
+    && !inspectorRoot.value?.querySelector('[data-object-more-root]')?.contains(event.target)
   ) {
     moreOpen.value = false
   }
@@ -1546,6 +1644,8 @@ onUnmounted(() => {
 
 .peek-header,
 .focus-header {
+  position: relative;
+  z-index: 2;
   display: flex;
   min-height: 40px;
   flex: 0 0 auto;
@@ -1556,28 +1656,16 @@ onUnmounted(() => {
   padding: 5px 7px 5px 12px;
 }
 
-.peek-identity {
+.object-history-controls {
   display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+}
+
+.object-header-spacer {
   min-width: 0;
   flex: 1 1 auto;
-  flex-direction: column;
-}
-
-.peek-identity > span {
-  color: var(--color-ink-2);
-  font-size: 10px;
-  font-weight: 620;
-  text-transform: capitalize;
-}
-
-.peek-identity small {
-  overflow: hidden;
-  margin-top: 2px;
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .object-icon-button {
@@ -1595,10 +1683,19 @@ onUnmounted(() => {
   color: var(--color-ink);
 }
 
+.object-icon-button:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.object-icon-button:disabled:hover {
+  background: transparent;
+  color: var(--color-ink-4);
+}
+
 .object-icon-button:focus-visible,
 .object-primary-action:focus-visible,
-.object-secondary-action:focus-visible,
-.focus-danger-action:focus-visible {
+.object-secondary-action:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
   outline-offset: 1px;
 }
@@ -1627,6 +1724,11 @@ onUnmounted(() => {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
+}
+
+.peek-scroll {
+  display: flex;
+  flex-direction: column;
 }
 
 .peek-lookup-facts {
@@ -1731,37 +1833,49 @@ onUnmounted(() => {
   font-size: 9px;
 }
 
-.peek-property-grid {
+.object-metadata-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px 12px;
+  gap: 9px 14px;
+  margin-top: 13px;
   margin-inline: -5px;
+  font-variant-numeric: tabular-nums;
 }
 
-.peek-field {
+.object-metadata-grid-peek {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.object-metadata-grid-focus {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.object-metadata-grid-dates {
+  grid-template-columns: repeat(2, minmax(0, 240px));
+}
+
+.object-metadata-field {
   display: block;
   min-width: 0;
 }
 
-.peek-field > span {
+.object-metadata-field > span,
+.focus-deliverables-field > span {
   display: block;
-  margin: 0 0 1px 5px;
-  color: var(--color-ink-4);
+  margin: 0 0 2px 5px;
+  color: var(--color-ink-3);
   font-size: 9px;
-  font-weight: 660;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-weight: 620;
+  line-height: 1.3;
 }
 
-.peek-field :deep(.graph-select-quiet),
-.peek-field :deep(.graph-date-quiet) {
+.object-metadata-field :deep(.graph-select-quiet),
+.object-metadata-field :deep(.graph-date-quiet) {
   width: 100%;
 }
 
-/* Ghost text input: borderless until hover/focus. */
-.peek-field input {
+.object-metadata-field input {
   width: 100%;
-  height: 26px;
+  height: 27px;
   border: 1px solid transparent;
   border-radius: 2px;
   background: transparent;
@@ -1770,37 +1884,39 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
-.peek-field input::placeholder {
+.object-metadata-field input::placeholder {
   color: var(--color-ink-4);
 }
 
-.peek-field input:hover {
+.object-metadata-field input:hover {
   background: var(--color-chrome-mid);
 }
 
-.peek-field input:focus-visible {
+.object-metadata-field input:focus-visible {
   border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
   background: var(--color-surface);
   outline: 2px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
   outline-offset: 1px;
 }
 
+.object-metadata-date strong {
+  display: flex;
+  min-height: 27px;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 5px;
+  color: var(--color-ink-2);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .peek-attention {
   margin-top: 8px;
   color: var(--color-rem);
   font-size: 10px;
-}
-
-/* Status and priority read as clickable values, not labeled form fields. */
-.peek-quick-properties {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin: 9px -5px 0;
-}
-
-.peek-quick-properties :deep(.graph-select-quiet) {
-  max-width: 62%;
 }
 
 .peek-section {
@@ -1812,9 +1928,21 @@ onUnmounted(() => {
   padding-top: 6px;
 }
 
-.relationship-section {
-  background: var(--color-chrome-high);
-  padding-block: 9px;
+.peek-scroll-fill-note .peek-note-section {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.peek-scroll-fill-note .peek-note-section :deep(.graph-markdown-editor) {
+  display: flex;
+  flex: 1 1 auto;
+}
+
+.peek-scroll-fill-note .peek-note-section :deep(.cm-editor),
+.peek-scroll-fill-note .peek-note-section :deep(.cm-scroller),
+.peek-scroll-fill-note .peek-note-section :deep(.cm-content) {
+  min-height: 100%;
 }
 
 .object-section-heading {
@@ -1858,7 +1986,7 @@ onUnmounted(() => {
   font-size: 9px;
 }
 
-.peek-field :deep(.graph-date-trigger.attention) {
+.object-metadata-field :deep(.graph-date-trigger.attention) {
   color: var(--color-rem);
 }
 
@@ -1951,16 +2079,22 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
-.peek-provenance {
+.peek-details {
+  flex: 0 0 auto;
+  margin-top: auto;
   border-top: 1px solid var(--color-rule-light);
-  padding: 9px 18px 13px;
+  padding: 1px 18px 2px;
 }
 
-.peek-provenance summary {
+.peek-details[open] {
+  padding-bottom: 11px;
+}
+
+.peek-details summary {
   display: flex;
-  min-height: 28px;
+  min-height: 24px;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   cursor: pointer;
   list-style: none;
   color: var(--color-ink-4);
@@ -1968,11 +2102,19 @@ onUnmounted(() => {
   font-weight: 620;
 }
 
-.peek-provenance summary::-webkit-details-marker {
+.peek-details summary small {
+  margin-left: auto;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.peek-details summary::-webkit-details-marker {
   display: none;
 }
 
-.peek-provenance summary::after {
+.peek-details summary::after {
   display: grid;
   width: 22px;
   height: 22px;
@@ -1984,54 +2126,30 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-.peek-provenance[open] summary::after {
+.peek-details[open] summary::after {
   content: "−";
 }
 
-.peek-provenance summary:hover::after {
+.peek-details summary:hover::after {
   background: var(--color-chrome-mid);
   color: var(--color-ink);
 }
 
-.peek-provenance summary:focus-visible {
+.peek-details summary:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
   outline-offset: 2px;
 }
 
-.peek-provenance dl {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  gap: 6px 10px;
-  padding-top: 6px;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1.4;
+.peek-details-content {
+  padding-top: 7px;
 }
 
-.peek-provenance dt {
-  color: var(--color-ink-4);
-}
-
-.peek-provenance dd {
-  overflow-wrap: anywhere;
-  color: var(--color-ink-3);
-}
-
-.peek-footer,
-.focus-footer {
-  display: flex;
-  min-height: 43px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  border-top: 1px solid var(--color-rule);
-  background: var(--color-surface);
-  padding: 6px 9px;
+.peek-details-group .object-section-label {
+  margin-bottom: 6px;
 }
 
 .object-primary-action,
-.object-secondary-action,
-.focus-danger-action {
+.object-secondary-action {
   display: inline-flex;
   min-height: 29px;
   align-items: center;
@@ -2063,6 +2181,11 @@ onUnmounted(() => {
   color: var(--color-ink);
 }
 
+.peek-focus-action {
+  min-height: 26px;
+  padding-inline: 7px;
+}
+
 .object-primary-action kbd,
 .object-secondary-action kbd,
 .focus-save-button kbd {
@@ -2072,16 +2195,15 @@ onUnmounted(() => {
   opacity: 0.65;
 }
 
-.peek-more-wrap {
+.object-more-wrap {
   position: relative;
-  margin-left: auto;
 }
 
-.peek-more-menu {
+.object-more-menu {
   position: absolute;
   z-index: 90;
+  top: 34px;
   right: 0;
-  bottom: 34px;
   width: 196px;
   border: 1px solid var(--color-rule);
   border-radius: 3px;
@@ -2090,7 +2212,7 @@ onUnmounted(() => {
   box-shadow: 0 10px 30px color-mix(in srgb, var(--color-ink) 15%, transparent);
 }
 
-.peek-more-menu button {
+.object-more-menu button {
   display: flex;
   width: 100%;
   min-height: 31px;
@@ -2103,11 +2225,11 @@ onUnmounted(() => {
   text-align: left;
 }
 
-.peek-more-menu button:hover {
+.object-more-menu button:hover {
   background: var(--color-chrome-mid);
 }
 
-.peek-more-menu button.danger {
+.object-more-menu button.danger {
   color: var(--color-rem);
 }
 
@@ -2116,26 +2238,7 @@ onUnmounted(() => {
   padding-inline: 10px;
 }
 
-.focus-header-identity {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-  color: var(--color-ink-2);
-  font-size: 10px;
-  font-weight: 620;
-  text-transform: capitalize;
-}
-
-.focus-header-identity small {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 400;
-}
-
 .focus-save-state {
-  margin-left: auto;
   color: var(--color-ink-4);
   font-size: 9px;
   font-weight: 600;
@@ -2156,18 +2259,12 @@ onUnmounted(() => {
 .focus-document {
   width: min(1080px, 100%);
   margin: 0 auto;
-  padding: 24px clamp(20px, 4cqw, 48px) 80px;
+  padding: 24px clamp(20px, 4cqw, 48px) 40px;
 }
 
 .focus-hero {
   border-bottom: 1px solid var(--color-rule-light);
   padding-bottom: 16px;
-}
-
-.focus-object-id {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
 }
 
 .focus-title-input {
@@ -2192,30 +2289,6 @@ onUnmounted(() => {
 
 .focus-title-input::selection {
   background: var(--selection);
-}
-
-/* The primary property row reads as values on the document, not a form. */
-.focus-primary-properties {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 10px;
-  margin: 8px -5px 0;
-}
-
-.focus-primary-properties :deep(.graph-select-quiet) {
-  max-width: 240px;
-}
-
-.focus-field > span,
-.focus-deliverables-field > span {
-  display: block;
-  margin: 0 0 1px 5px;
-  color: var(--color-ink-4);
-  font-size: 9px;
-  font-weight: 670;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
 }
 
 /* Ghost summary: plain secondary text, no box. */
@@ -2243,19 +2316,11 @@ onUnmounted(() => {
   outline-offset: 2px;
 }
 
-.focus-relationship,
 .focus-connections-section,
 .focus-note,
 .focus-details-section,
-.focus-connected-section,
-.focus-source-section {
+.focus-connected-section {
   margin-top: 22px;
-}
-
-.focus-relationship {
-  border-block: 1px solid var(--color-rule-light);
-  background: var(--color-surface);
-  padding: 9px 2px;
 }
 
 .focus-connections-section {
@@ -2389,17 +2454,11 @@ onUnmounted(() => {
   margin-inline: -5px;
 }
 
-.focus-field :deep(.graph-select-quiet),
-.focus-field :deep(.graph-date-quiet) {
-  width: 100%;
-}
-
 .focus-classification-grid {
   margin-top: 8px;
 }
 
 /* Ghost text inputs: borderless until hover/focus. */
-.focus-field input,
 .focus-deliverables-field textarea {
   width: 100%;
   border: 1px solid transparent;
@@ -2409,22 +2468,14 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-.focus-field input {
-  height: 27px;
-  padding: 0 5px;
-}
-
-.focus-field input::placeholder,
 .focus-deliverables-field textarea::placeholder {
   color: var(--color-ink-4);
 }
 
-.focus-field input:hover,
 .focus-deliverables-field textarea:hover {
   background: var(--color-chrome-mid);
 }
 
-.focus-field input:focus-visible,
 .focus-deliverables-field textarea:focus-visible {
   border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
   background: var(--color-surface);
@@ -2432,7 +2483,7 @@ onUnmounted(() => {
   outline-offset: 1px;
 }
 
-.focus-field small {
+.object-metadata-field small {
   display: block;
   margin: 3px 0 0 5px;
   color: var(--color-ink-4);
@@ -2474,71 +2525,6 @@ onUnmounted(() => {
   font-weight: 650;
 }
 
-.focus-source-section {
-  border-top: 1px solid var(--color-rule-light);
-  padding-top: 14px;
-}
-
-.focus-source-section p {
-  overflow-wrap: anywhere;
-  margin-top: 2px;
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.focus-source-section dl {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 20px;
-  margin-top: 8px;
-}
-
-.focus-source-section dl > div {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.focus-source-section dt {
-  color: var(--color-ink-4);
-  font-size: 9px;
-  font-weight: 650;
-  text-transform: uppercase;
-}
-
-.focus-source-section dd {
-  overflow: hidden;
-  color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.focus-footer {
-  min-height: 46px;
-  padding-inline: 10px;
-}
-
-.focus-danger-action {
-  width: 29px;
-  padding: 0;
-  color: var(--color-ink-4);
-}
-
-.focus-danger-action:hover {
-  background: color-mix(in srgb, var(--color-rem) 8%, transparent);
-  color: var(--color-rem);
-}
-
-.focus-footer-state {
-  margin-left: auto;
-  color: var(--color-ink-4);
-  font-size: 9px;
-}
-
 .focus-save-button {
   min-width: 116px;
 }
@@ -2560,6 +2546,10 @@ onUnmounted(() => {
   .connection-composer {
     grid-template-columns: 1fr 1.4fr auto;
   }
+
+  .object-metadata-grid-focus {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @container business-graph (max-width: 560px) {
@@ -2569,13 +2559,12 @@ onUnmounted(() => {
     font-size: 0;
   }
 
-  .focus-header-identity small,
   .focus-save-state {
     display: none;
   }
 
   .focus-document {
-    padding: 22px 16px 80px;
+    padding: 22px 16px 40px;
   }
 
   .focus-property-grid,
@@ -2587,18 +2576,5 @@ onUnmounted(() => {
     justify-self: start;
   }
 
-  .focus-footer .object-secondary-action {
-    width: 34px;
-    padding: 0;
-    font-size: 0;
-  }
-
-  .focus-footer-state {
-    display: none;
-  }
-
-  .focus-save-button {
-    margin-left: auto;
-  }
 }
 </style>

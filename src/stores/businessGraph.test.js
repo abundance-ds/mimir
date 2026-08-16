@@ -162,7 +162,7 @@ describe('business graph store', () => {
     expect(store.eventOffset).toBe(50)
   })
 
-  it('keeps an inspectable context trail while preserving projection origin', async () => {
+  it('navigates object history in both directions and restores projection origin', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
     store.section = 'projects'
@@ -172,11 +172,21 @@ describe('business graph store', () => {
     store.section = 'work'
     await store.openNode('issue-1')
 
-    expect(store.contextTrail.map(item => item.id)).toEqual(['project-alpha', 'issue-1'])
-    await store.stepTo(0)
+    expect(store.inspectionHistory.map(item => item.id)).toEqual(['project-alpha', 'issue-1'])
+    expect(store.historyBack.id).toBe('project-alpha')
+    expect(store.historyForward).toBeNull()
+
+    await store.navigateHistory(-1)
     expect(store.selectedNode.id).toBe('project-alpha')
     expect(store.section).toBe('projects')
     expect(store.view).toBe('portfolio')
+    expect(store.historyBack).toBeNull()
+    expect(store.historyForward.id).toBe('issue-1')
+
+    await store.navigateHistory(1)
+    expect(store.selectedNode.id).toBe('issue-1')
+    expect(store.section).toBe('work')
+    expect(store.historyForward).toBeNull()
   })
 
   it('invalidates an in-flight result when a newer search draft is prepared', async () => {

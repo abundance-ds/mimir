@@ -385,8 +385,8 @@ let graphSelectCounter = 0
   font-size: 10px;
 }
 
-/* Ghost property control: the current value is the label. Borderless and
-   transparent at rest, a chrome-mid wash on hover, accent ring on focus. */
+/* Ghost property control: borderless and transparent at rest, with a
+   chrome-mid wash on hover and an accent ring on focus. */
 .graph-select-quiet {
   min-height: 26px;
   padding: 0 5px;

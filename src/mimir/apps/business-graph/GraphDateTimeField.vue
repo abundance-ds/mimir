@@ -148,7 +148,6 @@ function update(value) {
   outline: 0;
   background: transparent;
   color: var(--color-ink-2);
-  font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }

@@ -33,6 +33,8 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'create-submit',
   ],
   peek: [
+    'peek-history-back',
+    'peek-history-forward',
     'peek-source',
     'peek-close',
     'peek-title',
@@ -48,13 +50,15 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'peek-more',
     'peek-next-action',
     'peek-record-decision',
-    'peek-open-source',
-    'peek-source-details',
+    'peek-details',
     'peek-delete',
   ],
   focus: [
     'focus-back',
+    'focus-history-back',
+    'focus-history-forward',
     'focus-source',
+    'focus-more',
     'focus-close',
     'focus-title',
     'focus-status',
@@ -91,7 +95,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   filters: [
     'board-priority-filter-clear',
     'board-columns-filter-clear',
-    'search-filter-clear',
     'all-kind',
     'all-kind-filter-clear',
   ],
@@ -122,7 +125,6 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
   'list-open-',
   'portfolio-open-',
   'timeline-open-',
-  'context-',
   'relationship-',
   'peek-activity-',
   'peek-deliverable-',
@@ -134,7 +136,7 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
 
 export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'BusinessGraphApp.vue',
-  'ContextTrail.vue',
+  '../../../shared/ui/DatePicker.vue',
   'DispatchBar.vue',
   'EntityList.vue',
   'GraphCheckbox.vue',
@@ -150,7 +152,6 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'NowView.vue',
   'PortfolioView.vue',
   'ProjectStanding.vue',
-  'GraphFilterBanner.vue',
   'TimelineView.vue',
   'WorkBoard.vue',
 ])

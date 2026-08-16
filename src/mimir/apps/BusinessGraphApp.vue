@@ -170,12 +170,6 @@
       </div>
     </header>
 
-    <ContextTrail
-      v-if="graph.contextTrail.length > 1"
-      :items="graph.contextTrail"
-      @step="stepTo"
-    />
-
     <div v-if="graph.error" data-graph-error role="alert" class="graph-alert">
       <IconAlertTriangle :size="15" class="shrink-0" />
       <span>{{ graph.error }}</span>
@@ -211,6 +205,8 @@
         :error="saveError"
         :saving="saving"
         :activities="relatedActivities"
+        :history-back="graph.historyBack"
+        :history-forward="graph.historyForward"
         @back="returnToPeek"
         @close="finalizeObjectClose"
         @save="saveNode"
@@ -219,6 +215,7 @@
         @open-file="openFile"
         @open-activity="$emit('openActivity', $event)"
         @quick-create="openRelatedCreate"
+        @navigate-history="navigateObjectHistory"
       />
 
       <template v-else>
@@ -265,13 +262,26 @@
                 data-board-priority-filter
                 data-graph-control="board-priority"
                 class="w-[118px]"
+                :class="{ 'graph-filter-active': priorityFilter }"
                 variant="toolbar"
                 aria-label="Filter issues by priority"
                 :options="priorityFilterOptions"
               />
+              <button
+                type="button"
+                data-graph-control="board-priority-filter-clear"
+                class="graph-filter-reset"
+                :class="{ 'graph-filter-reset-active': priorityFilter }"
+                :disabled="!priorityFilter"
+                :title="priorityFilter ? `Clear priority filter: ${human(priorityFilter)}` : undefined"
+                :aria-label="priorityFilter ? `Clear priority filter: ${human(priorityFilter)}` : 'No priority filter to clear'"
+                @click="priorityFilter = ''"
+              >
+                <IconX :size="12" />
+              </button>
               <div
                 v-if="graph.view === 'board' && boardGroup === 'status'"
-                class="relative"
+                class="relative flex items-center gap-[5px]"
                 data-board-columns-root
               >
                 <button
@@ -280,6 +290,7 @@
                   data-board-columns-trigger
                   data-graph-control="board-columns"
                   class="graph-icon-button graph-toolbar-icon"
+                  :class="{ 'graph-filter-active': hiddenBoardStatuses.length }"
                   title="Visible columns"
                   aria-label="Choose visible board columns"
                   :aria-expanded="columnsMenu"
@@ -288,6 +299,18 @@
                   @keydown.up.prevent="openColumnsMenu('last')"
                 >
                   <IconColumns3 :size="14" />
+                </button>
+                <button
+                  type="button"
+                  data-graph-control="board-columns-filter-clear"
+                  class="graph-filter-reset"
+                  :class="{ 'graph-filter-reset-active': hiddenBoardStatuses.length }"
+                  :disabled="!hiddenBoardStatuses.length"
+                  :title="hiddenBoardStatuses.length ? 'Show all board columns' : undefined"
+                  :aria-label="hiddenBoardStatuses.length ? `Show all board columns. Hidden: ${hiddenBoardStatuses.join(', ')}` : 'All board columns are visible'"
+                  @click="showAllBoardStatuses"
+                >
+                  <IconX :size="12" />
                 </button>
                 <Teleport to="body">
                   <div
@@ -327,40 +350,25 @@
                 data-all-kind-filter
                 data-graph-control="all-kind"
                 class="w-[138px]"
+                :class="{ 'graph-filter-active': allKindFilter }"
                 variant="toolbar"
                 aria-label="Filter by kind"
                 :options="allKindOptions"
               />
+              <button
+                type="button"
+                data-graph-control="all-kind-filter-clear"
+                class="graph-filter-reset"
+                :class="{ 'graph-filter-reset-active': allKindFilter }"
+                :disabled="!allKindFilter"
+                :title="allKindFilter ? `Clear kind filter: ${human(allKindFilter)}` : undefined"
+                :aria-label="allKindFilter ? `Clear kind filter: ${human(allKindFilter)}` : 'No kind filter to clear'"
+                @click="allKindFilter = ''"
+              >
+                <IconX :size="12" />
+              </button>
             </div>
           </div>
-
-          <GraphFilterBanner
-            v-if="graph.searchQuery"
-            :label="`search “${graph.searchQuery}”`"
-            data-graph-control="search-filter-clear"
-            @clear="graph.clearSearch()"
-          />
-          <GraphFilterBanner
-            v-if="graph.section === 'all' && allKindFilter"
-            :label="`kind = ${allKindFilter}`"
-            :hidden-count="allKindFilterHidden"
-            data-graph-control="all-kind-filter-clear"
-            @clear="allKindFilter = ''"
-          />
-          <GraphFilterBanner
-            v-if="graph.section === 'work' && priorityFilter"
-            :label="`priority = ${priorityFilter}`"
-            :hidden-count="priorityFilterHidden"
-            data-graph-control="board-priority-filter-clear"
-            @clear="priorityFilter = ''"
-          />
-          <GraphFilterBanner
-            v-if="graph.section === 'work' && graph.view === 'board' && boardGroup === 'status' && hiddenBoardStatuses.length"
-            :label="`columns hidden: ${hiddenBoardStatuses.join(', ')}`"
-            :hidden-count="hiddenColumnIssues"
-            data-graph-control="board-columns-filter-clear"
-            @clear="showAllBoardStatuses"
-          />
           <div v-if="composing" data-graph-loading class="graph-state">
             <span class="graph-loading-mark" aria-hidden="true" />
             <h2>Composing your graph</h2>
@@ -449,6 +457,8 @@
           :error="saveError"
           :saving="saving"
           :activities="relatedActivities"
+          :history-back="graph.historyBack"
+          :history-forward="graph.historyForward"
           @focus="enterFocus"
           @close="finalizeObjectClose"
           @save="saveNode"
@@ -457,6 +467,7 @@
           @open-file="openFile"
           @open-activity="$emit('openActivity', $event)"
           @quick-create="openRelatedCreate"
+          @navigate-history="navigateObjectHistory"
         />
       </template>
     </div>
@@ -539,11 +550,9 @@ import {
   BUSINESS_SECTIONS,
   useBusinessGraphStore,
 } from '../../stores/businessGraph.js'
-import ContextTrail from './business-graph/ContextTrail.vue'
 import DispatchBar from './business-graph/DispatchBar.vue'
 import EntityList from './business-graph/EntityList.vue'
 import GraphConfirmDialog from './business-graph/GraphConfirmDialog.vue'
-import GraphFilterBanner from './business-graph/GraphFilterBanner.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSelect from './business-graph/GraphSelect.vue'
@@ -713,11 +722,6 @@ const projectionNodes = computed(() => {
   }
   return items
 })
-const allKindFilterHidden = computed(() => {
-  if (!allKindFilter.value) return 0
-  return graph.visibleNodes.filter(item => !matchesAllKind(item, allKindFilter.value)).length
-})
-
 function matchesAllKind(item, filter) {
   if (filter === 'knowledge') {
     const definition = sections.find(section => section.id === 'knowledge')
@@ -726,17 +730,9 @@ function matchesAllKind(item, filter) {
   return item.kind === filter
 }
 const boardIssues = computed(() => [...projectionNodes.value].sort(issueSort(boardSort.value)))
-const priorityFilterHidden = computed(() => {
-  if (!priorityFilter.value) return 0
-  return graph.visibleNodes.filter(item => item.priority !== priorityFilter.value).length
-})
 const hiddenBoardStatuses = computed(() => {
   const visible = new Set(visibleBoardStatuses.value)
   return boardStatuses.filter(status => !visible.has(status.id)).map(status => status.label)
-})
-const hiddenColumnIssues = computed(() => {
-  const visible = new Set(visibleBoardStatuses.value)
-  return projectionNodes.value.filter(item => !visible.has(item.status || 'backlog')).length
 })
 const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
 const nowSeenAt = ref(settings.businessGraphNowSeenAt || '')
@@ -966,7 +962,7 @@ function runPowerCommand(line) {
       return
     }
     void graph.search(arg)
-    pushEcho('ok', `/find ${arg} — filter announced above the projection · /clear resets`)
+    pushEcho('ok', `/find ${arg} — search active · /clear resets`)
     return
   }
   if (name === 'clear') {
@@ -1086,7 +1082,7 @@ function startGraph(workspace, teamRoot) {
 }
 
 watch(
-  [() => props.active, () => props.workspacePath, () => settings.mimirTeamGraphFolder],
+  [() => props.active, () => props.workspacePath, () => settings.mimirTeamFolder],
   ([active, workspace, teamFolder]) => {
     const projectRoot = String(workspace || '').trim()
     const teamRoot = String(teamFolder || '').trim()
@@ -1654,15 +1650,17 @@ watch(() => graph.loading, async (loading) => {
 
 defineExpose({ focusEntry })
 
-function stepTo(index) {
-  const step = () => void performStepTo(index)
-  if (objectInspector.value?.commitThen) objectInspector.value.commitThen(step)
-  else step()
+function navigateObjectHistory(direction) {
+  const navigate = () => void performHistoryNavigation(direction)
+  if (objectInspector.value?.commitThen) objectInspector.value.commitThen(navigate)
+  else navigate()
 }
 
-async function performStepTo(index) {
+async function performHistoryNavigation(direction) {
   try {
-    await graph.stepTo(index)
+    await graph.navigateHistory(direction)
+    await nextTick()
+    objectInspector.value?.focusEntry?.()
   } catch (cause) {
     emit('diagnostic', errorMessage(cause))
   }
@@ -1749,6 +1747,17 @@ function onKeydown(event) {
     else if (createOpen.value) createOpen.value = false
     else if (focusMode.value) objectInspector.value?.requestBack?.()
     else if (graph.selectedNode) closeObject()
+    return
+  }
+  const historyBackShortcut = graph.selectedNode
+    && (((event.metaKey || event.ctrlKey) && event.key === '[')
+      || (event.altKey && event.key === 'ArrowLeft'))
+  const historyForwardShortcut = graph.selectedNode
+    && (((event.metaKey || event.ctrlKey) && event.key === ']')
+      || (event.altKey && event.key === 'ArrowRight'))
+  if (historyBackShortcut || historyForwardShortcut) {
+    event.preventDefault()
+    navigateObjectHistory(historyBackShortcut ? -1 : 1)
     return
   }
   if (editing || event.metaKey || event.ctrlKey || event.altKey) return
@@ -2514,6 +2523,38 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   margin-left: auto;
+}
+
+.graph-filter-active {
+  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-rule));
+  color: var(--color-ink);
+}
+
+.graph-filter-reset {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  place-items: center;
+  visibility: hidden;
+  border-radius: 3px;
+  color: var(--color-ink-3);
+  pointer-events: none;
+}
+
+.graph-filter-reset-active {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.graph-filter-reset-active:hover {
+  background: var(--graph-hover);
+  color: var(--color-ink);
+}
+
+.graph-filter-reset-active:focus-visible {
+  outline: 2px solid var(--graph-focus);
+  outline-offset: 1px;
 }
 
 .graph-columns-menu {

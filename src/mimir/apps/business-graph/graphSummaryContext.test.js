@@ -15,7 +15,7 @@ function event(index, overrides = {}) {
     nodeKind: 'issue',
     title: `Issue ${index}`,
     scopeId: 'project:alpha',
-    sourcePath: `/alpha/issues/issue-${index}.md`,
+    sourcePath: `/alpha/graph/issue-${index}.md`,
     summary: `Updated Issue ${index}`,
     actor: { kind: 'human', id: 'local-human', label: 'You' },
     changes: [{ field: 'status', before: 'plan', after: 'in-progress' }],

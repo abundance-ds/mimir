@@ -18,7 +18,7 @@
           class="relationship-entity"
           @click="$emit('open', neighbor.node.id)"
         >
-          {{ neighbor.node.title || neighbor.node.id }}
+          {{ displayTitle(neighbor.node) }}
         </button>
       </span>
       <span v-if="hiddenCount" class="relationship-more">
@@ -65,7 +65,7 @@ const RELATION_PHRASES = Object.freeze({
 
 const orderedNeighbors = computed(() => [...props.neighbors].sort((left, right) => (
   relationOrder(left.relation) - relationOrder(right.relation)
-  || String(left.node?.title || left.node?.id).localeCompare(String(right.node?.title || right.node?.id))
+  || displayTitle(left.node).localeCompare(displayTitle(right.node))
 )))
 const visibleNeighbors = computed(() => orderedNeighbors.value.slice(0, props.limit))
 const hiddenCount = computed(() => Math.max(0, orderedNeighbors.value.length - visibleNeighbors.value.length))
@@ -100,6 +100,10 @@ function relationOrder(relation) {
 
 function human(value) {
   return String(value || '').replaceAll('_', ' ').replaceAll('-', ' ')
+}
+
+function displayTitle(node) {
+  return node?.title || `Untitled ${human(node?.kind || 'object')}`
 }
 </script>
 

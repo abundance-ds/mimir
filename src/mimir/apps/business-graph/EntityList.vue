@@ -388,7 +388,7 @@ defineExpose({ focusEdge, focusNode })
 .entity-summary {
   min-width: 0;
   overflow: hidden;
-  color: var(--color-ink-4);
+  color: var(--color-ink-3);
   text-overflow: ellipsis;
 }
 

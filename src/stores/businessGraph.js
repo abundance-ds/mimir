@@ -64,7 +64,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const searching = ref(false)
   const selectedNode = ref(null)
   const selectedNeighbors = ref([])
-  const contextTrail = ref([])
+  const inspectionHistory = ref([])
+  const inspectionHistoryIndex = ref(-1)
   const lastDeletion = ref(null)
   const projectRoot = ref('')
   const teamRoot = ref('')
@@ -109,6 +110,12 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
     return actors
   })
+  const historyBack = computed(() => (
+    inspectionHistory.value[inspectionHistoryIndex.value - 1] || null
+  ))
+  const historyForward = computed(() => (
+    inspectionHistory.value[inspectionHistoryIndex.value + 1] || null
+  ))
 
   // The first projection only needs the node query, so the change listener is
   // installed before it (no file change can slip through the mount window) and
@@ -280,37 +287,42 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     const neighbors = await graphNeighbors(id, { scopeIds: activeScopeIds.value })
     selectedNode.value = node
     selectedNeighbors.value = Array.isArray(neighbors) ? neighbors : []
-    const previous = contextTrail.value.at(-1)
-    if (previous?.id !== node.id) {
-      contextTrail.value.push({
+    const current = inspectionHistory.value[inspectionHistoryIndex.value]
+    if (current?.id !== node.id) {
+      const next = inspectionHistory.value.slice(0, inspectionHistoryIndex.value + 1)
+      next.push({
         id: node.id,
         kind: node.kind,
-        title: node.title,
+        title: historyTitle(node),
         origin,
       })
-      contextTrail.value = contextTrail.value.slice(-8)
+      inspectionHistory.value = next.slice(-24)
+      inspectionHistoryIndex.value = inspectionHistory.value.length - 1
     }
     return node
   }
 
-  async function stepTo(index) {
-    const item = contextTrail.value[index]
+  async function navigateHistory(direction) {
+    const index = inspectionHistoryIndex.value + Math.sign(Number(direction) || 0)
+    const item = inspectionHistory.value[index]
     if (!item) return
-    contextTrail.value = contextTrail.value.slice(0, index + 1)
     restoreProjection(item.origin)
     const [node, neighbors] = await Promise.all([
       getGraphNode(item.id),
       graphNeighbors(item.id, { scopeIds: activeScopeIds.value }),
     ])
+    if (!node) throw new Error(`Graph node not found: ${item.id}`)
     selectedNode.value = node
     selectedNeighbors.value = Array.isArray(neighbors) ? neighbors : []
+    inspectionHistoryIndex.value = index
   }
 
   function closeInspector({ restore = true } = {}) {
-    const origin = contextTrail.value[0]?.origin
+    const origin = inspectionHistory.value[0]?.origin
     selectedNode.value = null
     selectedNeighbors.value = []
-    contextTrail.value = []
+    inspectionHistory.value = []
+    inspectionHistoryIndex.value = -1
     if (restore && origin) restoreProjection(origin)
   }
 
@@ -340,6 +352,14 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       })
       selectedNode.value = updated
       replaceSummary(updated)
+      const historyItem = inspectionHistory.value[inspectionHistoryIndex.value]
+      if (historyItem?.id === updated.id) {
+        inspectionHistory.value[inspectionHistoryIndex.value] = {
+          ...historyItem,
+          kind: updated.kind,
+          title: historyTitle(updated),
+        }
+      }
       return updated
     } catch (cause) {
       if (before) selectedNode.value = before
@@ -454,7 +474,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     activeScopeIds.value = []
     selectedNode.value = null
     selectedNeighbors.value = []
-    contextTrail.value = []
+    inspectionHistory.value = []
+    inspectionHistoryIndex.value = -1
     lastDeletion.value = null
     searchQuery.value = ''
     searchResults.value = []
@@ -534,6 +555,10 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     else nodes.value.unshift(summary)
   }
 
+  function historyTitle(node) {
+    return String(node?.title || '').trim() || `Untitled ${node?.kind || 'object'}`
+  }
+
   return {
     status,
     nodes,
@@ -556,7 +581,10 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     searching,
     selectedNode,
     selectedNeighbors,
-    contextTrail,
+    inspectionHistory,
+    inspectionHistoryIndex,
+    historyBack,
+    historyForward,
     lastDeletion,
     projectRoot,
     teamRoot,
@@ -578,7 +606,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     prepareSearch,
     clearSearch,
     openNode,
-    stepTo,
+    navigateHistory,
     closeInspector,
     create,
     update,

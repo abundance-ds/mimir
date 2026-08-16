@@ -21,6 +21,8 @@ const issue = {
   title: 'Synthesize evidence',
   body: '# Evidence synthesis\n\nReview the extraction.',
   tags: ['heor'],
+  createdAt: '2026-07-20T08:15:00Z',
+  updatedAt: '2026-08-15T14:45:00Z',
   relations: [
     { relation: 'part_of', target: project.id },
     { relation: 'assigned_to', target: person.id },
@@ -35,7 +37,7 @@ const issue = {
   provenance: {
     scopeId: 'project:atlas',
     sourceRevision: 'revision-1',
-    sourcePath: '/atlas/issues/evidence.md',
+    sourcePath: '/atlas/graph/evidence.md',
   },
 }
 const blocker = {
@@ -59,6 +61,70 @@ const baseProps = {
 }
 
 describe('GraphInspector', () => {
+  it('keeps creation and update timestamps visible in Peek and Focus', async () => {
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, mode: 'peek' },
+    })
+
+    expect(wrapper.get('[data-inspector-created]').text()).toContain('2026')
+    expect(wrapper.get('[data-inspector-updated]').text()).toContain('2026')
+    expect(wrapper.get('.peek-details').text().toLowerCase()).not.toContain('updated')
+
+    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
+    expect(wrapper.get('[data-inspector-created]').text()).toContain('2026')
+    expect(wrapper.get('[data-inspector-updated]').text()).toContain('2026')
+    expect(wrapper.find('.focus-source-section').exists()).toBe(false)
+
+    await wrapper.setProps({
+      node: { ...issue, createdAt: '', updatedAt: '' },
+    })
+    expect(wrapper.get('[data-inspector-created]').text()).toBe('Unknown')
+    expect(wrapper.get('[data-inspector-updated]').text()).toBe('Unknown')
+  })
+
+  it('uses the same labeled primary metadata grammar in Peek and Focus', async () => {
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, mode: 'peek' },
+    })
+    const expected = [
+      'Status',
+      'Priority',
+      'Project',
+      'Owner',
+      'Due date',
+      'Waiting for',
+      'Created',
+      'Last updated',
+    ]
+
+    expect(wrapper.findAll('.peek-hero .object-metadata-field > span').map(item => item.text()))
+      .toEqual(expected)
+
+    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
+    expect(wrapper.findAll('.focus-hero .object-metadata-field > span').map(item => item.text()))
+      .toEqual(expected)
+  })
+
+  it('lets a short Peek note fill the space above bottom-anchored Details', () => {
+    const wrapper = mount(GraphInspector, {
+      props: {
+        ...baseProps,
+        mode: 'peek',
+        node: {
+          ...issue,
+          body: 'Short note.',
+          properties: { ...issue.properties, deliverables: [] },
+        },
+      },
+    })
+
+    expect(wrapper.get('.peek-scroll').classes()).toContain('peek-scroll-fill-note')
+    expect(wrapper.get('.peek-scroll').element.lastElementChild)
+      .toBe(wrapper.get('.peek-details').element)
+  })
+
   it('edits the operational properties of an object directly in Peek', async () => {
     const wrapper = mount(GraphInspector, {
       attachTo: document.body,
@@ -78,12 +144,18 @@ describe('GraphInspector', () => {
     ]) {
       expect(wrapper.find(selector).exists(), `missing ${selector}`).toBe(true)
     }
-    const contextStrip = wrapper.get('[data-graph-relationship-line]')
+    const details = wrapper.get('.peek-details')
+    const contextStrip = details.get('[data-graph-relationship-line]')
+    expect(details.attributes('open')).toBeUndefined()
+    expect(details.get('summary').text()).toContain('Details')
+    expect(details.get('summary').text()).toContain('2 connections')
     expect(contextStrip.text()).toContain('part of')
     expect(contextStrip.text()).toContain('blocked by')
     expect(wrapper.get('[data-related-node="project-atlas"]').text()).toBe('Project Atlas')
     expect(wrapper.get('[data-related-node="issue-infra"]').text()).toBe('Infra migration')
     expect(wrapper.get('[data-inspector-focus]').text()).toContain('Focus')
+    expect(wrapper.find('.peek-footer').exists()).toBe(false)
+    expect(wrapper.get('.peek-header').find('[data-inspector-focus]').exists()).toBe(true)
 
     await wrapper.get('[data-inspector-title]').setValue('Synthesize pivotal evidence')
     await wrapper.get('[data-inspector-waiting]').setValue('Client confirmation')
@@ -164,6 +236,50 @@ describe('GraphInspector', () => {
     await flushPromises()
     expect(wrapper.find('[data-inspector-delete]').exists()).toBe(false)
     wrapper.unmount()
+  })
+
+  it('uses one action header in Focus without repeating the relationship strip', async () => {
+    const wrapper = mount(GraphInspector, {
+      attachTo: document.body,
+      props: { ...baseProps, mode: 'focus' },
+    })
+    await flushPromises()
+
+    const header = wrapper.get('.focus-header')
+    expect(header.find('[data-inspector-save]').exists()).toBe(true)
+    expect(header.find('[data-graph-control="focus-source"]').exists()).toBe(true)
+    expect(header.find('[data-graph-control="focus-more"]').exists()).toBe(true)
+    expect(header.find('[data-graph-control="focus-close"]').exists()).toBe(true)
+    expect(header.get('[data-graph-control="focus-back"]').text()).toContain('Exit Focus')
+    expect(wrapper.find('.focus-footer').exists()).toBe(false)
+    expect(wrapper.find('[data-graph-relationship-line]').exists()).toBe(false)
+
+    await header.get('[data-graph-control="focus-more"]').trigger('click')
+    expect(wrapper.get('[data-inspector-next-action]').text()).toContain('Create next action')
+    expect(wrapper.get('[data-inspector-delete]').text()).toContain('Move to Trash')
+    wrapper.unmount()
+  })
+
+  it('provides destination-aware object history without showing raw ids', async () => {
+    const wrapper = mount(GraphInspector, {
+      props: {
+        ...baseProps,
+        mode: 'peek',
+        historyBack: { id: project.id, title: project.title },
+        historyForward: null,
+      },
+    })
+
+    const back = wrapper.get('[data-inspector-history-back]')
+    const forward = wrapper.get('[data-inspector-history-forward]')
+    expect(back.attributes('title')).toBe('Back to Project Atlas')
+    expect(back.attributes('disabled')).toBeUndefined()
+    expect(forward.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain(issue.id)
+    expect(wrapper.text()).not.toContain(issue.provenance.sourceRevision)
+
+    await back.trigger('click')
+    expect(wrapper.emitted('navigateHistory')).toEqual([[-1]])
   })
 
   it('puts every issue property and syntax-aware Markdown editing in Focus', async () => {
@@ -340,7 +456,7 @@ describe('GraphInspector', () => {
       provenance: {
         scopeId: 'private:local',
         sourceRevision: 'note-revision-1',
-        sourcePath: '/private/knowledge/note-private-context.md',
+        sourcePath: '/private/graph/note-private-context.md',
       },
     }
     const wrapper = mount(GraphInspector, {

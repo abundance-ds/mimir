@@ -84,6 +84,8 @@ function full(id) {
   return {
     ...summary,
     body: id === 'issue-1' ? 'Review extraction criteria.' : 'Project context.',
+    createdAt: '2026-07-20T08:15:00Z',
+    updatedAt: '2026-08-15T14:45:00Z',
     relations: id === 'issue-1'
       ? [{ relation: 'part_of', target: 'project-alpha', legacy: false }]
       : [],
@@ -186,7 +188,7 @@ describe('BusinessGraphApp', () => {
     })
   }
 
-  it('is one native scoped instrument with a real board and context trail', async () => {
+  it('is one native scoped instrument with a real board and object history', async () => {
     const wrapper = render()
     await flushPromises()
 
@@ -211,10 +213,21 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-inspector-body] .cm-content').text()).toBe('Review extraction criteria.')
     expect(wrapper.find('[data-graph-context-trail]').exists()).toBe(false)
 
-    await wrapper.get('[data-graph-relationship-line] [data-related-node="project-alpha"]').trigger('click')
+    await wrapper.get('[data-graph-control="focus-related-project-alpha"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-graph-context-trail]').text()).toContain('Extract evidence')
-    expect(wrapper.findAll('[data-context-node]')).toHaveLength(2)
+    expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
+    expect(wrapper.find('[data-graph-context-trail]').exists()).toBe(false)
+    expect(wrapper.get('[data-inspector-history-back]').attributes('title'))
+      .toBe('Back to Extract evidence')
+
+    await wrapper.get('[data-inspector-history-back]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-inspector-title]').element.value).toBe('Extract evidence')
+    expect(wrapper.get('[data-inspector-history-forward]').attributes('title'))
+      .toBe('Forward to Project Alpha')
+
+    await wrapper.get('[data-inspector-history-forward]').trigger('click')
+    await flushPromises()
     expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
     wrapper.unmount()
   })
@@ -225,7 +238,7 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(openBusinessGraph).toHaveBeenCalledWith('/alpha', '')
 
-    settings.mimirTeamGraphFolder = '/team'
+    settings.mimirTeamFolder = '/team'
     await flushPromises()
 
     expect(openBusinessGraph).toHaveBeenCalledTimes(2)
@@ -552,13 +565,78 @@ describe('BusinessGraphApp', () => {
       scopeIds: ['private:local', 'project:alpha', 'team:main'],
       limit: 100,
     })
-    expect(wrapper.get('[data-graph-filter-banner]').text()).toContain('evidence')
+    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
     expect(wrapper.get('.graph-search-count').text()).toBe('1')
 
     await wrapper.get('[data-graph-control="clear-search"]').trigger('click')
     expect(input.element.value).toBe('')
-    expect(wrapper.find('[data-graph-control="search-filter-clear"]').exists()).toBe(false)
+    expect(wrapper.find('[data-graph-control="clear-search"]').exists()).toBe(false)
     expect(document.activeElement).toBe(input.element)
+    wrapper.unmount()
+  })
+
+  it('keeps search and kind filters in their controls without adding projection headers', async () => {
+    vi.mocked(searchGraph).mockResolvedValue([
+      { node: summaries[0] },
+      { node: summaries[1] },
+    ])
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+
+    const input = wrapper.get('[data-graph-search]')
+    await input.setValue('evidence')
+    await new Promise(resolve => setTimeout(resolve, 120))
+    await flushPromises()
+
+    const kindReset = wrapper.get('[data-graph-control="all-kind-filter-clear"]')
+    expect(kindReset.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-all-kind-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="project"]').click()
+    await flushPromises()
+
+    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Projects')
+    expect(kindReset.attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node'))).toEqual([
+      'project-alpha',
+    ])
+    expect(wrapper.text()).not.toContain('Showing:')
+    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
+
+    await kindReset.trigger('click')
+    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
+    expect(kindReset.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('[data-graph-node]')).toHaveLength(2)
+
+    await wrapper.get('[data-graph-control="clear-search"]').trigger('click')
+    expect(input.element.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('resets work filters beside the controls that own them', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    const priorityReset = wrapper.get('[data-graph-control="board-priority-filter-clear"]')
+    expect(priorityReset.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-board-priority-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="high"]').click()
+    await flushPromises()
+    expect(priorityReset.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-board-priority-filter]').text()).toContain('High')
+    await priorityReset.trigger('click')
+    expect(wrapper.get('[data-board-priority-filter]').text()).toContain('All priorities')
+
+    const columnsReset = wrapper.get('[data-graph-control="board-columns-filter-clear"]')
+    expect(columnsReset.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-board-columns-trigger]').trigger('click')
+    document.querySelector('[data-graph-control="board-column-backlog"]').click()
+    await flushPromises()
+    expect(columnsReset.attributes('disabled')).toBeUndefined()
+    expect(columnsReset.attributes('aria-label')).toContain('Backlog')
+    await columnsReset.trigger('click')
+    expect(columnsReset.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
     wrapper.unmount()
   })
 
@@ -643,7 +721,7 @@ describe('BusinessGraphApp', () => {
     resolveFirstSearch([{ node: summaries[1] }])
     await flushPromises()
     expect(input.element.value).toBe('ba')
-    expect(wrapper.get('[data-graph-filter-banner]').text()).toContain('ba')
+    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
     expect(wrapper.find('.graph-search-count').exists()).toBe(false)
 
     await new Promise(resolve => setTimeout(resolve, 120))
@@ -653,7 +731,7 @@ describe('BusinessGraphApp', () => {
       scopeIds: ['private:local', 'project:alpha', 'team:main'],
       limit: 100,
     })
-    expect(wrapper.get('[data-graph-filter-banner]').text()).toContain('ba')
+    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -669,12 +747,13 @@ describe('BusinessGraphApp', () => {
 
     const search = wrapper.get('[data-graph-search]')
     expect(search.element.value).toBe('evidence')
-    expect(wrapper.get('[data-graph-filter-banner]').text()).toContain('evidence')
+    expect(wrapper.get('.graph-search-count').text()).toBe('1')
+    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
 
-    await wrapper.get('[data-graph-control="search-filter-clear"]').trigger('click')
+    await wrapper.get('[data-graph-control="clear-search"]').trigger('click')
     await flushPromises()
     expect(search.element.value).toBe('')
-    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
+    expect(wrapper.find('[data-graph-control="clear-search"]').exists()).toBe(false)
 
     await dispatch.setValue('/find evidence')
     await dispatch.trigger('keydown', { key: 'Enter' })
@@ -685,7 +764,7 @@ describe('BusinessGraphApp', () => {
     await dispatch.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(search.element.value).toBe('')
-    expect(wrapper.find('[data-graph-filter-banner]').exists()).toBe(false)
+    expect(wrapper.find('[data-graph-control="clear-search"]').exists()).toBe(false)
 
     const callsBeforePendingClear = searchGraph.mock.calls.length
     await search.setValue('bank')
@@ -926,6 +1005,7 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-project-card="project-alpha"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-inspector-focus]').trigger('click')
+    await wrapper.get('[data-graph-control="focus-more"]').trigger('click')
     await wrapper.get('[data-inspector-record-decision]').trigger('click')
     await flushPromises()
 
