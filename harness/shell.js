@@ -92,6 +92,7 @@ const fullNode = id => {
   const summary = summaries.find(item => item.id === id)
   return {
     ...summary,
+    createdAt: new Date(Date.now() - (30 * 86_400_000)).toISOString(),
     body: id === 'person-alex' ? 'Primary contact for extraction QC.' : 'Working note.',
     properties: id === 'person-alex'
       ? { role: 'HEOR lead', email: 'alex@acme.example', phone: '+49 30 555 010' }
@@ -124,12 +125,25 @@ window.__TAURI_INTERNALS__ = {
       }
       case 'graph_get':
         return fullNode(args?.id)
-      case 'graph_neighbors':
-        return []
+      case 'graph_neighbors': {
+        if (args?.id !== 'issue-map') return []
+        return [
+          {
+            relation: 'part_of',
+            direction: 'outgoing',
+            node: summaries.find(node => node.id === 'project-atlas'),
+          },
+          {
+            relation: 'blocked_by',
+            direction: 'incoming',
+            node: summaries.find(node => node.id === 'issue-comparator'),
+          },
+        ]
+      }
       case 'graph_context':
         return { graphRevision: 44, markdown: '# Business graph context\n\nBounded snapshot.' }
       case 'settings_load':
-        return { settings: {}, editor: { editorTheme: theme } }
+        return { settings: { editor: { editorTheme: theme } } }
       case 'settings_save':
       case 'settings_save_editor':
       case 'settings_changed':

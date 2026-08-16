@@ -3,7 +3,6 @@ import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
 import WorkBoard from '../src/mimir/apps/business-graph/WorkBoard.vue'
-import GraphFilterBanner from '../src/mimir/apps/business-graph/GraphFilterBanner.vue'
 import EntityList from '../src/mimir/apps/business-graph/EntityList.vue'
 
 const params = new URLSearchParams(location.search)
@@ -73,22 +72,9 @@ const actors = Object.fromEntries(issues.map((issue, index) => [
 
 const groupBy = ref(params.get('group') || 'status')
 const app = createApp({
-  components: { WorkBoard, GraphFilterBanner },
+  components: { WorkBoard },
   setup() {
     return () => [
-      params.get('filter') === '1'
-        ? h(GraphFilterBanner, {
-            label: 'priority = high',
-            hiddenCount: 11,
-            'data-graph-control': 'x',
-          })
-        : null,
-      params.get('filter') === '1'
-        ? h(GraphFilterBanner, {
-            label: 'columns hidden: Review, Done',
-            hiddenCount: 4,
-          })
-        : null,
       params.get('list') === '1'
         ? h(EntityList, {
             nodes: [...issues.slice(0, 10), ...projects.map(p => ({ ...p, summary: 'Global value evidence strategy', updatedAt: new Date().toISOString() }))],
