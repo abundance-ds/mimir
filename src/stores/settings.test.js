@@ -42,7 +42,7 @@ describe('settings store', () => {
     expect(store.aiGhostModel).toBe('auto')
     expect(store.aiInlineRewrite).toBe(true)
     expect(store.mimirWorkspaceFolder).toBe('')
-    expect(store.mimirTeamGraphFolder).toBe('')
+    expect(store.mimirTeamFolder).toBe('')
     expect(store.sidebarToolOrder).toEqual([])
     expect(store.sidebarNewActivityOrder).toEqual([])
     expect(store.sidebarChatsCollapsed).toBe(false)
@@ -89,6 +89,18 @@ describe('settings store', () => {
     const store = useSettingsStore()
     await store.load()
     expect(store.workbenchZoom).toBe(50)
+  })
+
+  it('ignores the retired Team graph folder key', async () => {
+    storage.set('mimir:editor:settings:v1', JSON.stringify({
+      mimirTeamGraphFolder: '/shared/team',
+    }))
+    const store = useSettingsStore()
+
+    await store.load()
+
+    expect(store.mimirTeamFolder).toBe('')
+    expect(store.mimirTeamGraphFolder).toBeUndefined()
   })
 
   it('isDarkTheme returns true for dark themes', () => {
@@ -283,16 +295,19 @@ describe('settings store', () => {
     store.set('editorTheme', 'monokai')
     store.set('editorFontSize', 18)
     store.set('editorWordWrap', false)
+    store.set('mimirTeamFolder', '/shared/team')
     await store.save()
 
     store.set('editorTheme', 'parchment')
     store.set('editorFontSize', 12)
     store.set('editorWordWrap', true)
+    store.set('mimirTeamFolder', '')
 
     await store.load()
     expect(store.editorTheme).toBe('monokai')
     expect(store.editorFontSize).toBe(18)
     expect(store.editorWordWrap).toBe(false)
+    expect(store.mimirTeamFolder).toBe('/shared/team')
   })
 
   it('set() before settingsReady does not schedule save', async () => {

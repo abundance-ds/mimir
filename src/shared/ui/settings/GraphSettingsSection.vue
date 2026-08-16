@@ -1,5 +1,5 @@
 <template>
-  <section class="font-sans text-ink" aria-label="Business graph settings">
+  <section class="font-sans text-ink" aria-label="Scope settings">
     <div>
       <h2 class="section-title mb-0">Information scopes</h2>
       <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
@@ -12,16 +12,18 @@
         <div class="scope-mark scope-private"><IconLock :size="13" /></div>
         <div class="min-w-0 flex-1">
           <div class="scope-title">Private</div>
-          <p class="scope-copy">Local notes, annotations, and drafts. Never loaded from a shared folder.</p>
+          <p class="scope-copy">Local graph, skills, and agents for this machine.</p>
+          <p class="scope-components">{{ componentLabel('private') }}</p>
         </div>
-        <code class="scope-path">~/.mimir/graph/private</code>
+        <code class="scope-path">~/.mimir/private</code>
       </div>
 
       <div class="scope-row">
         <div class="scope-mark scope-project"><IconFolder :size="13" /></div>
         <div class="min-w-0 flex-1">
           <div class="scope-title">Project</div>
-          <p class="scope-copy">Knowledge and issues travel with the workspace currently open in Mimir.</p>
+          <p class="scope-copy">Graph, skills, and agents that travel with the open repository.</p>
+          <p class="scope-components">{{ componentLabel('project') }}</p>
         </div>
         <span class="scope-badge">automatic</span>
       </div>
@@ -30,15 +32,16 @@
         <div class="scope-mark scope-team"><IconUsersGroup :size="13" /></div>
         <div class="min-w-0 flex-1">
           <div class="scope-title">Team</div>
-          <p class="scope-copy">Optional shared business graph for companies, people, methods, and engagements.</p>
+          <p class="scope-copy">Optional Git folder for shared graph, skills, and agents.</p>
+          <p class="scope-components">{{ componentLabel('team') }}</p>
           <div class="mt-3 flex min-w-0 items-center gap-1.5">
             <input
               v-model="teamRoot"
               data-graph-team-root
               class="scope-input"
               type="text"
-              aria-label="Shared team graph folder"
-              placeholder="/path/to/shared-team-graph"
+              aria-label="Team folder"
+              placeholder="/path/to/team"
               spellcheck="false"
               @change="save"
               @keydown.enter.prevent="save"
@@ -57,15 +60,15 @@
               type="button"
               data-graph-team-clear
               class="scope-icon-button"
-              title="Stop mounting the team graph"
-              aria-label="Stop mounting the team graph"
+              title="Stop mounting the Team folder"
+              aria-label="Stop mounting the Team folder"
               @click="clear"
             >
               <IconX :size="13" />
             </button>
           </div>
           <p class="mt-1.5 text-[9px] leading-relaxed text-ink-4">
-            The folder should contain <code>knowledge/</code> and may be a normal Git repository or shared drive.
+            The folder can contain <code>graph/</code>, <code>skills/</code>, and <code>agents/</code>.
           </p>
         </div>
       </div>
@@ -77,7 +80,8 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   IconFolder,
@@ -89,22 +93,29 @@ import {
 import { useSettingsStore } from '../../../stores/settings.js'
 
 const settings = useSettingsStore()
-const teamRoot = ref(settings.mimirTeamGraphFolder || '')
+const teamRoot = ref(settings.mimirTeamFolder || '')
+const inventory = ref([])
 const notice = ref('')
 const error = ref('')
 
-watch(() => settings.mimirTeamGraphFolder, (value) => {
+watch(() => settings.mimirTeamFolder, (value) => {
   if (String(value || '') !== teamRoot.value) teamRoot.value = String(value || '')
 })
 
-function save() {
+async function save() {
   const path = teamRoot.value.trim()
   teamRoot.value = path
-  settings.set('mimirTeamGraphFolder', path)
+  settings.set('mimirTeamFolder', path)
   error.value = ''
   notice.value = path
-    ? 'Team graph saved. Open workspaces now compose it automatically.'
-    : 'Team graph disabled. Private and project scopes remain available.'
+    ? 'Team folder saved. Graph, skills, and agents now compose automatically.'
+    : 'Team folder disabled. Private and Project remain available.'
+  if (!await settings.flush()) {
+    notice.value = ''
+    error.value = 'Could not save the Team folder.'
+    return
+  }
+  await refreshInventory()
 }
 
 async function choose() {
@@ -113,12 +124,12 @@ async function choose() {
     const selection = await open({
       directory: true,
       multiple: false,
-      title: 'Choose shared team graph',
+      title: 'Choose Team folder',
     })
     const path = Array.isArray(selection) ? selection[0] : selection
     if (!path) return
     teamRoot.value = typeof path === 'string' ? path : path.path
-    save()
+    await save()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   }
@@ -126,8 +137,25 @@ async function choose() {
 
 function clear() {
   teamRoot.value = ''
-  save()
+  void save()
 }
+
+function componentLabel(scope) {
+  const entry = inventory.value.find(item => item.scope === scope)
+  if (!entry?.mounted) return scope === 'team' ? 'not mounted' : 'empty'
+  return entry.components?.length ? entry.components.join(' · ') : 'empty'
+}
+
+async function refreshInventory() {
+  try {
+    const value = await invoke('scope_inventory', {
+      workspace: settings.mimirWorkspaceFolder || '.',
+    })
+    inventory.value = Array.isArray(value) ? value : []
+  } catch { /* inventory is informative; the saved path remains authoritative */ }
+}
+
+onMounted(refreshInventory)
 </script>
 
 <style scoped>
@@ -178,6 +206,13 @@ function clear() {
   font-size: 9.5px;
   line-height: 1.45;
   color: var(--color-ink-3);
+}
+
+.scope-components {
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--color-ink-4);
 }
 
 .scope-path {

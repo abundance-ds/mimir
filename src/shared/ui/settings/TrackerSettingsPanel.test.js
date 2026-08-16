@@ -47,15 +47,31 @@ vi.mock('../../../stores/tracker.js', () => ({
 describe('TrackerSettingsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tracker.enabled = true
   })
 
-  it('uses Mimir switches and presents the system timezone without developer input', () => {
+  it('uses the standard settings controls and reveals dependent options', () => {
     const wrapper = mount(TrackerSettingsPanel)
 
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
-    expect(wrapper.findAll('[role="switch"]').length).toBeGreaterThan(1)
-    expect(wrapper.get('[data-tracker-timezone]').text()).toContain('Europe/Berlin')
-    expect(wrapper.get('[data-tracker-timezone]').find('input').exists()).toBe(false)
+    const switches = wrapper.findAll('[role="switch"]')
+    expect(switches.length).toBeGreaterThan(1)
+    expect(wrapper.findAll('.toggle-switch')).toHaveLength(switches.length)
+    expect(wrapper.findAll('.toggle-knob')).toHaveLength(switches.length)
+    expect(wrapper.text()).toContain('Daily AI budget')
+    expect(wrapper.text()).toContain('Reminder delay')
+    expect(wrapper.text()).not.toContain('Mimir keeps collecting')
+    expect(wrapper.text()).not.toContain('System timezone')
+    wrapper.unmount()
+  })
+
+  it('keeps the disabled state to one setting and the optional import action', () => {
+    tracker.enabled = false
+    const wrapper = mount(TrackerSettingsPanel)
+
+    expect(wrapper.findAll('[role="switch"]')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('Collect activity')
+    expect(wrapper.text()).toContain('Import Argus history…')
     wrapper.unmount()
   })
 

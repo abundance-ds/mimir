@@ -32,6 +32,9 @@ describe('SettingsDialog Apps ownership', () => {
           EditorSection: true,
           AISection: true,
           ConnectionsSettingsSection: true,
+          TrackerSettingsPanel: {
+            template: '<div data-tracker-settings-stub>Tracker controls</div>',
+          },
           LaunchersSection: true,
           AppsSettingsSection: AppsSettingsStub,
           ShortcutsSection: true,
@@ -59,6 +62,15 @@ describe('SettingsDialog Apps ownership', () => {
 
     expect(wrapper.get('[data-apps-settings]').exists()).toBe(true)
     expect(document.activeElement).toBe(wrapper.get('[data-apps-search-stub]').element)
+    wrapper.unmount()
+  })
+
+  it('owns Tracker as a direct Settings section', async () => {
+    const wrapper = render('tracker')
+    await flushPromises()
+
+    expect(wrapper.get('[data-settings-section="tracker"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-tracker-settings-stub]').exists()).toBe(true)
     wrapper.unmount()
   })
 

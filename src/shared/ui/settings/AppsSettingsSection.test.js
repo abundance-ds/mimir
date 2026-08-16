@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 import {
   createLocalApp,
+  duplicateLocalApp,
   loadAppsCatalog,
   reloadAppsCatalog,
   resolveAppLaunch,
+  trashLocalApp,
+  updateLocalAppTitle,
 } from '../../../services/appsCatalog.js'
 import AppsSettingsSection from './AppsSettingsSection.vue'
 
@@ -22,19 +25,17 @@ vi.mock('../../../services/appsCatalog.js', async (importOriginal) => ({
   updateLocalAppTitle: vi.fn(),
 }))
 
-const builtIn = {
+const today = {
   id: 'scratch',
   title: 'Today',
-  description: 'Write today in a focused Markdown journal.',
   mode: 'embedded',
   builtin: true,
   manifestPath: 'builtin:scratch',
   tools: [],
 }
-const trackerBuiltIn = {
+const tracker = {
   id: 'tracker',
   title: 'Tracker',
-  description: 'Native desktop activity timeline',
   mode: 'rust-helper',
   helper: 'tracker',
   builtin: true,
@@ -51,16 +52,12 @@ const local = {
   tools: [{ name: 'total', mcpAlias: 'ledger_total' }],
 }
 
-function catalog(apps = [builtIn, local]) {
-  return {
-    directory: '/home/me/.mimir/apps',
-    apps,
-    diagnostics: [{
-      path: '/home/me/.mimir/apps/bad/app.toml',
-      field: 'entry',
-      message: 'Entry does not exist.',
-    }],
-  }
+function catalog(apps = [today, tracker, local], diagnostics = [{
+  path: '/home/me/.mimir/apps/bad/app.toml',
+  field: 'entry',
+  message: 'Entry does not exist.',
+}]) {
+  return { directory: '/home/me/.mimir/apps', apps, diagnostics }
 }
 
 describe('AppsSettingsSection', () => {
@@ -68,11 +65,14 @@ describe('AppsSettingsSection', () => {
     vi.mocked(loadAppsCatalog).mockReset().mockResolvedValue(catalog())
     vi.mocked(reloadAppsCatalog).mockReset().mockResolvedValue(catalog())
     vi.mocked(createLocalApp).mockReset().mockResolvedValue(catalog())
+    vi.mocked(duplicateLocalApp).mockReset().mockResolvedValue(catalog())
     vi.mocked(resolveAppLaunch).mockReset().mockResolvedValue({
       mode: 'embedded',
       appId: 'ledger',
       url: 'file:///apps/ledger/index.html',
     })
+    vi.mocked(trashLocalApp).mockReset().mockResolvedValue(catalog())
+    vi.mocked(updateLocalAppTitle).mockReset().mockResolvedValue(catalog())
   })
 
   function render() {
@@ -82,29 +82,48 @@ describe('AppsSettingsSection', () => {
     })
   }
 
-  it('is a searchable keyboard catalog with built-in/local boundaries and diagnostics', async () => {
+  it('shows only local apps and gives broken definitions direct recovery actions', async () => {
     const wrapper = render()
     await flushPromises()
 
-    expect(wrapper.get('[data-app-settings-group="built-in"]').text()).toContain('Today')
-    expect(wrapper.get('[data-app-settings-group="local"]').text()).toContain('Ledger')
-    expect(wrapper.get('[data-app-diagnostics]').text()).toContain('Entry does not exist')
-
-    await wrapper.get('[data-app-search]').setValue('ledger_total')
+    expect(wrapper.get('[data-app-settings-row="ledger"]').text()).toContain('Ledger')
     expect(wrapper.find('[data-app-settings-row="scratch"]').exists()).toBe(false)
-    expect(wrapper.get('[data-app-settings-row="ledger"]').exists()).toBe(true)
+    expect(wrapper.find('[data-app-settings-row="tracker"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Today')
+    expect(wrapper.get('[data-app-diagnostic-row]').text()).toContain('Entry does not exist.')
 
-    await wrapper.get('[data-app-settings-row="ledger"]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-    expect(wrapper.emitted('launchApp')).toHaveLength(1)
-    expect(wrapper.emitted('launchApp')[0][0]).toMatchObject({
-      app: { id: 'ledger' },
-      activity: { id: 'app:ledger' },
-    })
+    await wrapper.get('[data-app-diagnostic-open]').trigger('click')
+    expect(wrapper.emitted('openDefinition')).toEqual([
+      ['/home/me/.mimir/apps/bad/app.toml'],
+    ])
     wrapper.unmount()
   })
 
-  it('lets the first Escape cancel an inline operation without closing Settings', async () => {
+  it('shows an honest empty state when the catalog has no local apps', async () => {
+    vi.mocked(loadAppsCatalog).mockResolvedValue(catalog([today, tracker], []))
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No local apps.')
+    expect(wrapper.find('[data-app-settings-row]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('gives a failed catalog load one recovery action', async () => {
+    vi.mocked(loadAppsCatalog).mockRejectedValueOnce(new Error('Apps directory is unavailable.'))
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Apps directory is unavailable.')
+
+    vi.mocked(loadAppsCatalog).mockResolvedValueOnce(catalog())
+    await wrapper.get('[data-app-load-retry]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-app-settings-row="ledger"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('cancels the inline form on Escape without closing Settings', async () => {
     const wrapper = render()
     await flushPromises()
     const bubbled = vi.fn()
@@ -115,85 +134,97 @@ describe('AppsSettingsSection', () => {
     expect(wrapper.find('[data-app-operation]').exists()).toBe(false)
     expect(bubbled).not.toHaveBeenCalled()
 
-    await wrapper.get('[data-app-search]').trigger('keydown', { key: 'Escape' })
+    await wrapper.get('[data-app-new]').trigger('keydown', { key: 'Escape' })
     expect(bubbled).toHaveBeenCalledTimes(1)
     document.removeEventListener('keydown', bubbled)
     wrapper.unmount()
   })
 
-  it('does not hijack Enter from the inspector Open button', async () => {
+  it('opens a local app only from its explicit Open action', async () => {
     const wrapper = render()
     await flushPromises()
-    await wrapper.get('[data-app-settings-row="ledger"]').trigger('click')
-    const open = wrapper.get('[data-app-launch]')
 
-    await open.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
     expect(wrapper.emitted('launchApp')).toBeUndefined()
-
-    await open.trigger('click')
+    await wrapper.get('[data-app-launch]').trigger('click')
     await flushPromises()
+
+    expect(resolveAppLaunch).toHaveBeenCalledWith('ledger', '')
     expect(wrapper.emitted('launchApp')).toHaveLength(1)
     wrapper.unmount()
   })
 
-  it('exposes rich local actions while keeping built-ins immutable', async () => {
+  it('keeps edit visible and secondary package actions in one menu', async () => {
     const wrapper = render()
     await flushPromises()
+    const row = wrapper.get('[data-app-settings-row="ledger"]')
 
-    expect(wrapper.get('[data-app-inspector]').text()).toContain('Built-ins are host code')
-    await wrapper.get('[data-app-settings-row="ledger"]').trigger('click')
+    expect(row.text()).not.toContain('Project numbers')
+    expect(row.text()).not.toContain('ledger_total')
+    await row.get('[data-app-open-definition]').trigger('click')
+    expect(wrapper.emitted('openDefinition')).toEqual([[local.manifestPath]])
 
-    expect(wrapper.get('[data-app-open-definition]').exists()).toBe(true)
-    expect(wrapper.get('[data-app-duplicate]').exists()).toBe(true)
-    expect(wrapper.get('[data-app-rename]').exists()).toBe(true)
-    expect(wrapper.get('[data-app-trash]').exists()).toBe(true)
-
-    await wrapper.get('[data-app-open-definition]').trigger('click')
-    expect(wrapper.emitted('openDefinition')).toEqual([
-      ['/home/me/.mimir/apps/ledger/app.toml'],
-    ])
+    await row.get('[data-app-more]').trigger('click')
+    expect(row.get('[data-app-rename]').exists()).toBe(true)
+    expect(row.get('[data-app-duplicate]').exists()).toBe(true)
+    expect(row.get('[data-app-trash]').exists()).toBe(true)
     wrapper.unmount()
   })
 
-  it('keeps Tracker discoverable but requires subsystem opt-in before opening', async () => {
-    vi.mocked(loadAppsCatalog).mockResolvedValue(catalog([builtIn, trackerBuiltIn, local]))
-    const wrapper = render()
-    await flushPromises()
-
-    expect(wrapper.get('[data-app-settings-row="tracker"]').exists()).toBe(true)
-    await wrapper.get('[data-app-settings-row="tracker"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-tracker-settings]').text()).toContain('Collector off')
-    expect(wrapper.get('[data-app-launch]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-app-launch]').text()).toContain('Enable to open')
-
-    wrapper.unmount()
-  })
-
-  it('creates a usable scaffold and applies the returned catalog live', async () => {
+  it('creates a starter app in one compact form', async () => {
     const created = {
       ...local,
-      id: 'local-instrument',
-      title: 'Local Instrument',
-      manifestPath: '/home/me/.mimir/apps/local-instrument/app.toml',
+      id: 'focus-notes',
+      title: 'Focus Notes',
+      manifestPath: '/home/me/.mimir/apps/focus-notes/app.toml',
     }
-    vi.mocked(createLocalApp).mockResolvedValue(catalog([builtIn, local, created]))
+    vi.mocked(createLocalApp).mockResolvedValue(catalog([today, tracker, local, created]))
     const wrapper = render()
     await flushPromises()
 
     await wrapper.get('[data-app-new]').trigger('click')
-    await wrapper.get('[data-app-operation-confirm]').trigger('submit')
+    await wrapper.get('[data-app-title-input]').setValue('Focus Notes')
+    await wrapper.get('[data-app-operation]').trigger('submit')
     await flushPromises()
 
     expect(createLocalApp).toHaveBeenCalledWith({
-      id: 'local-instrument',
-      title: 'Local Instrument',
+      id: 'focus-notes',
+      title: 'Focus Notes',
       description: '',
     })
-    expect(wrapper.get('[data-app-settings-row="local-instrument"]').exists()).toBe(true)
-    expect(wrapper.get('[data-apps-notice]').text()).toContain('is ready')
+    expect(wrapper.get('[data-app-settings-row="focus-notes"]').exists()).toBe(true)
+    expect(wrapper.find('[data-app-operation]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('duplicates, renames, and trashes from the row menu', async () => {
+    const copy = { ...local, id: 'ledger-copy', title: 'Ledger Copy' }
+    vi.mocked(duplicateLocalApp).mockResolvedValue(catalog([today, tracker, local, copy]))
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-app-settings-row="ledger"]').get('[data-app-more]').trigger('click')
+    await wrapper.get('[data-app-duplicate]').trigger('click')
+    await flushPromises()
+    expect(duplicateLocalApp).toHaveBeenCalledWith('ledger', {
+      id: 'ledger-copy',
+      title: 'Ledger Copy',
+    })
+
+    const renamed = { ...local, title: 'Accounts' }
+    vi.mocked(updateLocalAppTitle).mockResolvedValue(catalog([today, tracker, renamed, copy]))
+    await wrapper.get('[data-app-settings-row="ledger"]').get('[data-app-more]').trigger('click')
+    await wrapper.get('[data-app-rename]').trigger('click')
+    await wrapper.get('[data-app-title-input]').setValue('Accounts')
+    await wrapper.get('[data-app-operation]').trigger('submit')
+    await flushPromises()
+    expect(updateLocalAppTitle).toHaveBeenCalledWith('ledger', 'Accounts')
+
+    vi.mocked(trashLocalApp).mockResolvedValue(catalog([today, tracker, copy]))
+    await wrapper.get('[data-app-settings-row="ledger"]').get('[data-app-more]').trigger('click')
+    await wrapper.get('[data-app-trash]').trigger('click')
+    await flushPromises()
+    expect(trashLocalApp).toHaveBeenCalledWith('ledger')
+    expect(wrapper.find('[data-app-settings-row="ledger"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

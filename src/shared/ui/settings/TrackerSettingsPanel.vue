@@ -1,270 +1,238 @@
 <template>
-  <section data-tracker-settings class="tracker-settings border-b border-rule-light bg-surface">
-    <div class="tracker-settings-runtime grid gap-0">
-      <div class="px-3 py-3">
-        <div class="flex items-start gap-3">
-          <span
-            class="mt-1 size-2 shrink-0 border border-rule"
-            :class="tracker.enabled ? 'bg-add' : 'bg-ink-4'"
-            aria-hidden="true"
-          />
-          <div class="min-w-0 flex-1">
-            <p class="text-[10px] font-semibold text-ink">
-              {{ tracker.enabled ? 'Collector enabled' : 'Collector off' }}
-            </p>
-            <p class="mt-0.5 text-[9px] leading-relaxed text-ink-3">
-              {{ tracker.enabled
-                ? 'Mimir keeps collecting after its window closes. Quit Mimir to stop the native runtime.'
-                : 'No sampling, privacy prompts, AI calls, notifications, or menu-bar item run while off.' }}
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            data-tracker-enabled
-            :aria-checked="tracker.enabled"
-            :disabled="tracker.loading"
-            class="relative h-5 w-9 shrink-0 border border-rule bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
-            :class="{ 'border-accent bg-accent-soft': tracker.enabled }"
-            @click="toggleEnabled"
-          >
-            <span
-              class="absolute top-[2px] size-3.5 border border-rule bg-surface"
-              :class="tracker.enabled ? 'left-[17px] border-accent' : 'left-[2px]'"
-            />
-            <span class="sr-only">{{ tracker.enabled ? 'Disable Tracker' : 'Enable Tracker' }}</span>
-          </button>
-        </div>
+  <section data-tracker-settings class="font-sans text-ink">
+    <div class="border-t border-rule-light">
+      <SettingToggle
+        data-attr="data-tracker-enabled"
+        label="Enabled"
+        :model-value="tracker.enabled"
+        :disabled="tracker.loading"
+        @update:model-value="toggleEnabled"
+      />
 
-        <div
-          v-if="tracker.enabled && needsAccess"
-          data-tracker-access-required
-          class="mt-3 flex items-start gap-2 border border-rem/25 bg-rem/5 px-2.5 py-2"
-        >
-          <IconLockAccess :size="13" class="mt-px shrink-0 text-rem" />
-          <div class="min-w-0 flex-1">
-            <p class="text-[9px] font-semibold text-ink">Window access is required</p>
-            <p class="mt-0.5 text-[9px] leading-relaxed text-ink-3">
-              Enabling asks macOS for window-title access. If Mimir was already approved, macOS does not ask again.
-            </p>
-          </div>
-          <button
-            type="button"
-            data-tracker-request-access
-            class="h-6 shrink-0 border border-rem/35 px-2 text-[9px] font-semibold text-rem hover:bg-rem/10"
-            @click="requestAccess"
-          >
-            Open settings
-          </button>
-        </div>
+      <template v-if="tracker.enabled">
+        <SettingToggle
+          data-attr="data-tracker-armed"
+          label="Collect activity"
+          :model-value="tracker.armed"
+          @update:model-value="toggleArmed"
+        />
+        <SettingToggle
+          label="Start at login"
+          :model-value="config.launchAtLogin"
+          @update:model-value="save({ launchAtLogin: $event })"
+        />
+        <SettingToggle
+          label="Save window titles"
+          :model-value="config.collectWindowTitles"
+          :action-label="needsAccess ? 'Open Settings' : ''"
+          @update:model-value="save({ collectWindowTitles: $event })"
+          @action="requestAccess"
+        />
 
-        <p v-if="error || tracker.error" class="mt-2 text-[9px] text-rem" role="alert">
-          {{ error || tracker.error }}
-        </p>
-        <p v-else-if="tracker.status.diagnostic" class="mt-2 text-[9px] text-rem" role="status">
-          {{ tracker.status.diagnostic }}
-        </p>
-        <p v-else-if="tracker.status.autostartDiagnostic" class="mt-2 text-[9px] text-rem" role="status">
-          {{ tracker.status.autostartDiagnostic }}
-        </p>
-      </div>
+        <SettingToggle
+          label="Save browser domains"
+          :model-value="config.collectBrowserDomains"
+          @update:model-value="save({ collectBrowserDomains: $event })"
+        />
+        <SettingToggle
+          label="AI classification"
+          :model-value="config.classificationEnabled"
+          @update:model-value="save({ classificationEnabled: $event })"
+        />
 
-      <div class="tracker-settings-runtime-side border-t border-rule-light px-3 py-3">
-        <p class="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">Runtime</p>
-        <p class="mt-1 font-mono text-[10px] text-ink">{{ modeLabel }}</p>
-        <p v-if="tracker.enabled && config.launchAtLogin" class="mt-1 text-[9px] text-ink-4">
-          Login launch {{ tracker.status.launchAtLoginActive ? 'active' : 'pending' }}
-        </p>
-        <p v-if="tracker.enabled && tracker.status.permissions.accessibilityRequired" class="mt-1 text-[9px] text-ink-4">
-          Window access {{ tracker.status.permissions.accessibility ? 'granted' : 'waiting for approval' }}
-        </p>
-        <p v-if="tracker.enabled && tracker.status.permissions.notifications" class="mt-1 text-[9px] text-ink-4">
-          Notifications {{ tracker.status.permissions.notifications }}
-        </p>
-        <button
-          v-if="tracker.enabled"
-          type="button"
-          data-tracker-armed
-          class="mt-2 h-6 w-full border border-rule px-2 text-[9px] font-semibold text-ink-2 hover:border-accent/50 hover:bg-accent-soft"
-          @click="toggleArmed"
-        >
-          {{ tracker.armed ? 'Pause collection' : 'Resume collection' }}
-        </button>
-      </div>
-    </div>
-
-    <details v-if="tracker.enabled" class="border-t border-rule-light">
-      <summary class="cursor-pointer px-3 py-2 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-3 hover:bg-chrome-mid">
-        Privacy, classification, and nudges
-      </summary>
-      <div class="tracker-settings-grid grid border-t border-rule-light">
-        <div class="divide-y divide-rule-light">
+        <template v-if="config.classificationEnabled">
           <SettingToggle
-            label="Launch Mimir at login"
-            detail="Keeps the all-day timeline continuous; closing the window still leaves Tracker running."
-            :model-value="config.launchAtLogin"
-            @update:model-value="save({ launchAtLogin: $event })"
-          />
-          <SettingToggle
-            label="Window titles"
-            detail="Persist the title of the active window."
-            :model-value="config.collectWindowTitles"
-            @update:model-value="save({ collectWindowTitles: $event })"
-          />
-          <SettingToggle
-            label="Browser domains"
-            detail="Optional per-browser Automation access. Full URLs are never stored."
-            :model-value="config.collectBrowserDomains"
-            @update:model-value="save({ collectBrowserDomains: $event })"
-          />
-          <SettingToggle
-            label="AI classification"
-            detail="Batch unknown apps through Mimir’s configured model and keychain."
-            :model-value="config.classificationEnabled"
-            @update:model-value="save({ classificationEnabled: $event })"
-          />
-          <SettingToggle
-            label="Send titles to AI"
-            detail="Off by default. App and domain metadata still classify."
+            nested
+            label="Use window titles for AI"
             :model-value="config.includeWindowTitlesInAi"
             @update:model-value="save({ includeWindowTitlesInAi: $event })"
           />
-        </div>
-        <div class="tracker-settings-grid-side divide-y divide-rule-light border-t border-rule-light">
-          <SettingToggle
-            label="Drift nudges"
-            detail="Notification after the grace period, with lunch and deep-work protection."
-            :model-value="config.nudgesEnabled"
-            @update:model-value="save({ nudgesEnabled: $event })"
+          <NumberSetting
+            data-attr="data-tracker-cost-cap"
+            nested
+            label="Daily AI budget"
+            suffix="USD"
+            :model-value="config.dailyCostCapUsd"
+            :minimum="0"
+            :maximum="100"
+            :step="0.05"
+            @commit="saveNumeric('dailyCostCapUsd', $event, 0, 100)"
           />
-          <div class="grid grid-cols-[1fr_auto] items-center gap-3 px-3 py-2" data-tracker-timezone>
-            <span>
-              <span class="block text-[9px] font-semibold text-ink-2">System timezone</span>
-              <span class="mt-0.5 block text-[9px] text-ink-4">Automatically follows this Mac for reports and nudge windows.</span>
-            </span>
-            <output class="max-w-[150px] truncate font-mono text-[9px] text-ink-2" :title="config.timezone">
-              {{ config.timezone }}
-            </output>
-          </div>
-          <label class="grid grid-cols-[1fr_78px] items-center gap-3 px-3 py-2">
-            <span>
-              <span class="block text-[9px] font-semibold text-ink-2">Nudge grace</span>
-              <span class="mt-0.5 block text-[9px] text-ink-4">Minutes of protected leisure first.</span>
-            </span>
-            <input
-              :value="config.nudgeGraceMinutes"
-              data-tracker-grace
-              type="number"
-              min="0"
-              max="240"
-              class="h-7 border border-rule bg-surface px-1.5 font-mono text-[9px] text-ink outline-none focus:border-accent"
-              @change="saveNumeric('nudgeGraceMinutes', $event, 0, 240)"
-            >
-          </label>
-          <label class="grid grid-cols-[1fr_78px] items-center gap-3 px-3 py-2">
-            <span>
-              <span class="block text-[9px] font-semibold text-ink-2">Daily AI cap</span>
-              <span class="mt-0.5 block text-[9px] text-ink-4">USD; 0 disables paid calls.</span>
-            </span>
-            <input
-              :value="config.dailyCostCapUsd"
-              data-tracker-cost-cap
-              type="number"
-              min="0"
-              max="100"
-              step="0.05"
-              class="h-7 border border-rule bg-surface px-1.5 font-mono text-[9px] text-ink outline-none focus:border-accent"
-              @change="saveNumeric('dailyCostCapUsd', $event, 0, 100)"
-            >
-          </label>
-        </div>
-      </div>
-    </details>
+        </template>
 
-    <details class="border-t border-rule-light">
-      <summary class="cursor-pointer px-3 py-2 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-3 hover:bg-chrome-mid">
-        Move history from Argus
-      </summary>
-      <div class="border-t border-rule-light px-3 py-3">
-        <p class="text-[9px] leading-relaxed text-ink-3">
-          Reads <code class="font-mono">~/.argus/activities.json</code> and classifications into SQLite.
-          Source files stay untouched. Disable Tracker before importing to prevent overlapping timelines.
-        </p>
-        <div class="mt-2 flex flex-wrap items-center gap-2">
+        <SettingToggle
+          label="Drift reminders"
+          :model-value="config.nudgesEnabled"
+          @update:model-value="save({ nudgesEnabled: $event })"
+        />
+        <NumberSetting
+          v-if="config.nudgesEnabled"
+          data-attr="data-tracker-grace"
+          nested
+          label="Reminder delay"
+          suffix="min"
+          :model-value="config.nudgeGraceMinutes"
+          :minimum="0"
+          :maximum="240"
+          @commit="saveNumeric('nudgeGraceMinutes', $event, 0, 240)"
+        />
+      </template>
+    </div>
+
+    <p v-if="visibleError" class="mt-3 text-[11px] text-rem" role="alert">
+      {{ visibleError }}
+    </p>
+
+    <div class="mt-5 border-t border-rule-light pt-3">
+      <button
+        v-if="!importOpen"
+        type="button"
+        data-tracker-import-open
+        class="h-8 text-[11px] font-medium text-ink-3 hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        @click="importOpen = true"
+      >
+        Import Argus history…
+      </button>
+
+      <div v-else data-tracker-import-panel class="max-w-lg">
+        <div class="flex items-center gap-3">
+          <h3 class="min-w-0 flex-1 text-[12px] font-semibold text-ink">Import Argus history</h3>
           <button
+            type="button"
+            class="h-7 px-2 text-[11px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+            @click="closeImport"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <template v-if="tracker.enabled">
+          <div class="mt-3 flex items-center gap-3 border-y border-rule-light py-3">
+            <span class="min-w-0 flex-1 text-[11px] text-ink-2">Turn Tracker off before import.</span>
+            <button
+              type="button"
+              class="h-8 border border-rule px-3 text-[11px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+              @click="toggleEnabled(false)"
+            >
+              Turn off
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <button
+            v-if="!preview"
             type="button"
             data-tracker-import-preview
             :disabled="importBusy"
-            class="h-7 border border-rule px-2.5 text-[9px] font-semibold text-ink-2 hover:bg-chrome-mid disabled:opacity-40"
+            class="mt-3 h-8 border border-rule px-3 text-[11px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
             @click="previewImport"
           >
-            Inspect Argus data
+            {{ importBusy ? 'Reading…' : 'Inspect data' }}
           </button>
-          <button
-            v-if="preview && !preview.alreadyImported"
-            type="button"
-            data-tracker-import
-            :disabled="importBusy || tracker.enabled"
-            class="h-7 border border-accent/40 bg-accent px-2.5 text-[9px] font-semibold text-accent-ink hover:bg-accent-2 disabled:opacity-40"
-            @click="runImport"
-          >
-            Import {{ preview.totalBlocks.toLocaleString() }} blocks
-          </button>
-          <span v-if="importBusy" class="font-mono text-[9px] text-ink-4">Reading…</span>
-        </div>
-        <div v-if="preview" data-tracker-import-summary class="mt-2 border border-rule-light bg-chrome-high px-2.5 py-2">
-          <p class="font-mono text-[9px] text-ink-2">
-            {{ preview.totalBlocks.toLocaleString() }} blocks ·
-            {{ preview.totalClassifications.toLocaleString() }} rules ·
-            {{ preview.alreadyImported ? 'already imported' : 'ready' }}
-          </p>
-          <p v-for="item in preview.diagnostics" :key="item" class="mt-1 text-[9px] text-ink-3">{{ item }}</p>
-        </div>
-        <p v-if="importReport" class="mt-2 text-[9px] text-add" role="status">
-          Imported {{ importReport.importedBlocks.toLocaleString() }} blocks and
-          {{ importReport.importedClassifications.toLocaleString() }} classifications.
+
+          <template v-else>
+            <p data-tracker-import-summary class="mt-3 text-[11px] text-ink-2">
+              {{ preview.totalBlocks.toLocaleString() }} activities and
+              {{ preview.totalClassifications.toLocaleString() }} rules.
+            </p>
+            <p v-for="item in preview.diagnostics" :key="item" class="mt-1 text-[11px] text-rem">{{ item }}</p>
+            <p v-if="preview.alreadyImported" class="mt-2 text-[11px] text-ink-3">Already imported.</p>
+            <button
+              v-else
+              type="button"
+              data-tracker-import
+              :disabled="importBusy"
+              class="mt-3 h-8 border border-accent/40 bg-accent px-3 text-[11px] font-semibold text-accent-ink hover:bg-accent-2 disabled:opacity-40"
+              @click="runImport"
+            >
+              {{ importBusy ? 'Importing…' : 'Import' }}
+            </button>
+          </template>
+        </template>
+
+        <p v-if="importReport" class="mt-3 text-[11px] text-ink-2" role="status">
+          Imported {{ importReport.importedBlocks.toLocaleString() }} activities and
+          {{ importReport.importedClassifications.toLocaleString() }} rules.
         </p>
+        <p v-if="error" class="mt-3 text-[11px] text-rem" role="alert">{{ error }}</p>
       </div>
-    </details>
+    </div>
   </section>
 </template>
 
 <script setup>
 import { computed, defineComponent, h, onMounted, ref } from 'vue'
-import { IconLockAccess } from '@tabler/icons-vue'
 import { useTrackerStore } from '../../../stores/tracker.js'
 
 const SettingToggle = defineComponent({
+  inheritAttrs: false,
   props: {
     label: { type: String, required: true },
-    detail: { type: String, default: '' },
     modelValue: { type: Boolean, default: false },
+    disabled: { type: Boolean, default: false },
+    nested: { type: Boolean, default: false },
+    dataAttr: { type: String, default: '' },
+    actionLabel: { type: String, default: '' },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'action'],
   setup(props, { emit }) {
-    return () => h('button', {
-      type: 'button',
-      role: 'switch',
-      'aria-checked': props.modelValue,
-      class: 'flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
-      onClick: () => emit('update:modelValue', !props.modelValue),
+    return () => h('div', {
+      class: ['setting-row', props.nested ? 'tracker-dependent' : ''],
     }, [
-      h('span', { class: 'min-w-0 flex-1' }, [
-        h('span', { class: 'block text-[9px] font-semibold text-ink-2' }, props.label),
-        h('span', { class: 'mt-0.5 block text-[9px] leading-relaxed text-ink-4' }, props.detail),
+      h('span', { class: 'setting-label' }, props.label),
+      props.actionLabel ? h('button', {
+        type: 'button',
+        'data-tracker-access-required': '',
+        'data-tracker-request-access': '',
+        class: 'mr-2 h-7 px-2 text-[10px] text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
+        onClick: () => emit('action'),
+      }, props.actionLabel) : null,
+      h('button', {
+        type: 'button',
+        role: 'switch',
+        'aria-label': props.label,
+        'aria-checked': props.modelValue,
+        disabled: props.disabled,
+        ...(props.dataAttr ? { [props.dataAttr]: '' } : {}),
+        class: ['toggle-switch', props.modelValue ? 'toggle-on' : '', 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40'],
+        onClick: () => emit('update:modelValue', !props.modelValue),
+      }, [h('span', { class: 'toggle-knob', 'aria-hidden': 'true' })]),
+    ])
+  },
+})
+
+const NumberSetting = defineComponent({
+  inheritAttrs: false,
+  props: {
+    label: { type: String, required: true },
+    suffix: { type: String, default: '' },
+    modelValue: { type: Number, required: true },
+    minimum: { type: Number, required: true },
+    maximum: { type: Number, required: true },
+    step: { type: Number, default: 1 },
+    dataAttr: { type: String, default: '' },
+    nested: { type: Boolean, default: false },
+  },
+  emits: ['commit'],
+  setup(props, { emit }) {
+    return () => h('label', {
+      class: ['setting-row', props.nested ? 'tracker-dependent' : ''],
+    }, [
+      h('span', { class: 'setting-label' }, props.label),
+      h('span', { class: 'flex items-center gap-2' }, [
+        h('input', {
+          type: 'number',
+          value: props.modelValue,
+          min: props.minimum,
+          max: props.maximum,
+          step: props.step,
+          ...(props.dataAttr ? { [props.dataAttr]: '' } : {}),
+          class: 'h-7 w-20 border border-rule bg-surface px-2 text-right font-mono text-[10px] text-ink outline-none focus:border-accent',
+          onChange: event => emit('commit', event),
+        }),
+        props.suffix ? h('span', { class: 'w-7 text-[10px] text-ink-3' }, props.suffix) : null,
       ]),
-      h('span', {
-        class: [
-          'relative mt-0.5 h-5 w-9 shrink-0 border bg-chrome-mid',
-          props.modelValue ? 'border-accent bg-accent-soft' : 'border-rule',
-        ],
-        'aria-hidden': 'true',
-      }, [h('span', {
-        class: [
-          'absolute top-[2px] size-3.5 border bg-surface',
-          props.modelValue ? 'left-[17px] border-accent' : 'left-[2px] border-rule',
-        ],
-      })]),
     ])
   },
 })
@@ -274,29 +242,24 @@ const error = ref('')
 const preview = ref(null)
 const importReport = ref(null)
 const importBusy = ref(false)
+const importOpen = ref(false)
 const config = computed(() => tracker.status.config)
 const needsAccess = computed(() => (
   tracker.status.permissions.accessibilityRequired
   && !tracker.status.permissions.accessibility
 ))
-const modeLabel = computed(() => ({
-  disabled: 'Off',
-  'needs-access': 'Needs access',
-  paused: 'Paused',
-  armed: 'Armed',
-  break: 'Break running',
-  unsupported: 'Unsupported platform',
-  error: 'Needs attention',
-})[tracker.mode] || tracker.mode)
+const visibleError = computed(() => (
+  error.value || tracker.error || tracker.status.diagnostic || tracker.status.autostartDiagnostic || ''
+))
 
 onMounted(() => tracker.initialize().catch(cause => { error.value = message(cause) }))
 
-async function toggleEnabled() {
-  await act(() => tracker.setEnabled(!tracker.enabled))
+async function toggleEnabled(value = !tracker.enabled) {
+  await act(() => tracker.setEnabled(value))
 }
 
-async function toggleArmed() {
-  await act(() => tracker.setArmed(!tracker.armed))
+async function toggleArmed(value = !tracker.armed) {
+  await act(() => tracker.setArmed(value))
 }
 
 async function requestAccess() {
@@ -315,6 +278,13 @@ async function saveNumeric(key, event, minimum, maximum) {
     return
   }
   await save({ [key]: Math.min(maximum, Math.max(minimum, value)) })
+}
+
+function closeImport() {
+  importOpen.value = false
+  preview.value = null
+  importReport.value = null
+  error.value = ''
 }
 
 async function previewImport() {
@@ -357,27 +327,7 @@ function message(cause) {
 </script>
 
 <style scoped>
-.tracker-settings { container-type: inline-size; }
-
-@container (min-width: 560px) {
-  .tracker-settings-runtime { grid-template-columns: minmax(0, 1fr) 190px; }
-  .tracker-settings-runtime-side {
-    border-top-width: 0;
-    border-left-width: 1px;
-  }
-}
-
-@container (min-width: 620px) {
-  .tracker-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tracker-settings-grid-side {
-    border-top-width: 0;
-    border-left-width: 1px;
-  }
-}
-
-button:focus-visible,
-summary:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
+.tracker-dependent {
+  padding-left: 14px;
 }
 </style>

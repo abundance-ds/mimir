@@ -49,15 +49,13 @@
                 <IconX :size="14" />
               </button>
             </div>
-            <div
-              class="settings-body scrollbar-thin"
-              :class="{ 'settings-body-apps': activeSection === 'apps' }"
-            >
+            <div class="settings-body scrollbar-thin">
               <AppearanceSection v-if="activeSection === 'appearance'" />
               <EditorSection v-else-if="activeSection === 'editor'" />
               <AISection v-else-if="activeSection === 'ai'" />
               <ConnectionsSettingsSection v-else-if="activeSection === 'connections'" />
               <ScribeSettingsSection v-else-if="activeSection === 'scribe'" />
+              <TrackerSettingsPanel v-else-if="activeSection === 'tracker'" />
               <GraphSettingsSection v-else-if="activeSection === 'graph'" />
               <ChatSettingsSection v-else-if="activeSection === 'chat'" />
               <LaunchersSection v-else-if="activeSection === 'launchers'" />
@@ -86,6 +84,7 @@ import EditorSection from './settings/EditorSection.vue'
 import AISection from './settings/AISection.vue'
 import ConnectionsSettingsSection from './settings/ConnectionsSettingsSection.vue'
 import ScribeSettingsSection from './settings/ScribeSettingsSection.vue'
+import TrackerSettingsPanel from './settings/TrackerSettingsPanel.vue'
 import GraphSettingsSection from './settings/GraphSettingsSection.vue'
 import ChatSettingsSection from './settings/ChatSettingsSection.vue'
 import LaunchersSection from './settings/LaunchersSection.vue'
@@ -105,6 +104,7 @@ import {
   IconTopologyStar3,
   IconMessages,
   IconMicrophone,
+  IconActivityHeartbeat,
   IconRefresh,
   IconPlugConnected,
 } from '@tabler/icons-vue'
@@ -122,6 +122,7 @@ const navGroups = [
     { id: 'ai',         label: 'Models',     icon: IconSparkles },
     { id: 'connections', label: 'Connections', icon: IconPlugConnected },
     { id: 'scribe',     label: 'Scribe',     icon: IconMicrophone },
+    { id: 'tracker',    label: 'Tracker',    icon: IconActivityHeartbeat },
     { id: 'graph',      label: 'Graph',      icon: IconTopologyStar3 },
     { id: 'chat',       label: 'Chat',       icon: IconMessages },
     { id: 'launchers',  label: 'CLI tools',  icon: IconTerminal2 },
@@ -165,6 +166,7 @@ function mapSection(section) {
   if (['models', 'ai'].includes(section)) return 'ai'
   if (['connections', 'integrations'].includes(section)) return 'connections'
   if (['scribe', 'meetings', 'recording'].includes(section)) return 'scribe'
+  if (['tracker', 'tracking', 'activity-tracking'].includes(section)) return 'tracker'
   if (['graph', 'knowledge', 'scopes'].includes(section)) return 'graph'
   if (['chat', 'chats'].includes(section)) return 'chat'
   if (['launchers', 'agents'].includes(section)) return 'launchers'
@@ -384,8 +386,4 @@ onUnmounted(() => {
   padding: 24px 28px;
 }
 
-.settings-body-apps {
-  overflow: hidden;
-  padding: 0;
-}
 </style>
