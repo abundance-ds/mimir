@@ -117,21 +117,16 @@
   flex-direction: column;
 }
 
-/* Custom chunk buttons (accept / reject) — shared base */
+/* Custom chunk buttons (accept / reject) — shared base.
+   Always visible at quiet ink: an opacity-0 reveal made the controls
+   undiscoverable, and .cm-changedLine is not a sibling of the gutter, so a
+   pure-CSS chunk-hover reveal cannot work. */
 .cm-merge-chunk-buttons {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1px;
   padding: 1px 0;
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-/* Show buttons on chunk row hover */
-.cm-merge-revert:hover .cm-merge-chunk-buttons,
-.cm-changedLine:hover ~ .cm-merge-revert .cm-merge-chunk-buttons {
-  opacity: 1;
 }
 
 .cm-merge-accept-btn,
