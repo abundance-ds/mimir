@@ -200,11 +200,13 @@ export function useEditorCommandApi({
       original: proposal.original,
       modified: proposal.modified,
     }
-    fileManager.setFileReviews(file, [review])
     const diff = computeDiffFromReview(review, file.content || '')
     if (!diff) {
+      // Do not stash: the caller receives this error before proposal_create
+      // runs, so no native proposal exists to back a stashed review.
       throw new Error('The proposal target is no longer present in the active document.')
     }
+    fileManager.setFileReviews(file, [review])
     activateDiff(diff.original, diff.modified, {
       review: {
         ids: [review.proposalId],

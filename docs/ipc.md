@@ -92,8 +92,14 @@ See `src-tauri/src/file_open.rs`, `src/editor/composables/useFileOpen.js`, and
 ## Proposal coordination
 
 `proposal_create` stores the proposal centrally after the initiating renderer
-has opened its diff. Editors periodically register their path/dirty/active
-snapshot through `proposal_register_editor`. On apply, Rust selects an owner:
+has opened its diff. Undecided proposals persist to `~/.mimir/proposals.json`
+on every store mutation and reload at startup, so an application restart keeps
+a review the user has not answered; the Editor re-offers them through
+`get_proposals_for_path` when their file becomes active. The renderer
+reconciles the `mimir://proposals-changed` payload by proposal id — a review
+leaves the Editor only when its id leaves the global pending set. Editors
+periodically register their path/dirty/active snapshot through
+`proposal_register_editor`. On apply, Rust selects an owner:
 
 - a matching dirty/open Editor receives `mimir://proposal-apply`;
 - otherwise Rust applies against disk after its conflict checks;

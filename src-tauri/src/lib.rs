@@ -1,10 +1,6 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs, path::PathBuf};
 use tauri::{Emitter, Manager};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,6 +304,63 @@ impl Default for ProposalState {
     }
 }
 
+impl ProposalState {
+    /// Restores undecided proposals from disk so an application restart does
+    /// not lose a review the user has not answered yet.
+    fn load() -> Self {
+        let proposals = proposals_path()
+            .map(|path| load_proposals_at(&path))
+            .unwrap_or_default();
+        Self(std::sync::Mutex::new(ProposalStore {
+            proposals,
+            editor_documents: HashMap::new(),
+        }))
+    }
+}
+
+fn proposals_path() -> Result<PathBuf, String> {
+    Ok(ai_models::app_config_dir()?.join("proposals.json"))
+}
+
+fn proposal_is_undecided(proposal: &serde_json::Value) -> bool {
+    matches!(proposal_status(proposal), "pending" | "applying")
+}
+
+/// Persists every undecided proposal. `applying` is written as-is and
+/// normalized back to `pending` on load, so an apply interrupted by a crash
+/// is offered for review again; `apply_proposal_to_file` detects an already
+/// applied change on the retry.
+fn persist_proposals_at(path: &std::path::Path, proposals: &[SharedProposal]) {
+    let undecided: Vec<&SharedProposal> = proposals
+        .iter()
+        .filter(|p| proposal_is_undecided(p))
+        .collect();
+    if let Err(error) = persistence::write_json_atomic(path, &undecided) {
+        log::warn!("Could not persist proposals: {error}");
+    }
+}
+
+fn load_proposals_at(path: &std::path::Path) -> Vec<SharedProposal> {
+    let Ok(Some(values)) = persistence::load_json_optional::<Vec<serde_json::Value>>(path) else {
+        return Vec::new();
+    };
+    values
+        .into_iter()
+        .filter(|p| proposal_id(p).is_some() && proposal_is_undecided(p))
+        .map(|mut p| {
+            if proposal_status(&p) == "applying" {
+                if let Some(obj) = p.as_object_mut() {
+                    obj.insert(
+                        "status".to_string(),
+                        serde_json::Value::String("pending".to_string()),
+                    );
+                }
+            }
+            SharedProposal::new(p)
+        })
+        .collect()
+}
+
 fn proposal_id(proposal: &serde_json::Value) -> Option<&str> {
     proposal.get("id").and_then(|v| v.as_str())
 }
@@ -403,7 +456,13 @@ fn pending_proposals(store: &ProposalStore) -> Vec<SharedProposal> {
         .collect()
 }
 
-fn broadcast_proposal_state(app: &tauri::AppHandle, proposals: &[SharedProposal]) {
+/// Publishes a store snapshot: persists undecided proposals, then emits the
+/// state events. Every store mutation routes its snapshot through here, so
+/// disk and renderer always see the same lifecycle transition.
+fn publish_proposal_state(app: &tauri::AppHandle, proposals: &[SharedProposal]) {
+    if let Ok(path) = proposals_path() {
+        persist_proposals_at(&path, proposals);
+    }
     let pending: Vec<SharedProposal> = proposals
         .iter()
         .filter(|p| proposal_status(p) == "pending")
@@ -594,34 +653,6 @@ fn apply_proposal_to_file(
 }
 
 #[tauri::command]
-fn push_proposals(
-    app: tauri::AppHandle,
-    state: tauri::State<ProposalState>,
-    proposals: Vec<serde_json::Value>,
-) -> Result<(), String> {
-    let proposals_snapshot = {
-        let mut store = state.0.lock().map_err(|e| e.to_string())?;
-        let incoming_ids: HashSet<String> = proposals
-            .iter()
-            .filter_map(|p| proposal_id(p).map(|id| id.to_string()))
-            .collect();
-        store.proposals.retain(|p| {
-            let status = proposal_status(p);
-            status != "pending"
-                || proposal_id(p)
-                    .map(|id| incoming_ids.contains(id))
-                    .unwrap_or(false)
-        });
-        for proposal in proposals {
-            upsert_proposal(&mut store, proposal)?;
-        }
-        store.proposals.clone()
-    };
-    broadcast_proposal_state(&app, &proposals_snapshot);
-    Ok(())
-}
-
-#[tauri::command]
 fn get_proposals_for_path(state: tauri::State<ProposalState>, path: String) -> Vec<SharedProposal> {
     let store = state.0.lock().unwrap_or_else(|e| e.into_inner());
     pending_proposals(&store)
@@ -644,7 +675,7 @@ fn proposal_create(
         upsert_proposal(&mut store, proposal.clone())?;
         store.proposals.clone()
     };
-    broadcast_proposal_state(&app, &proposals_snapshot);
+    publish_proposal_state(&app, &proposals_snapshot);
     Ok(proposal)
 }
 
@@ -688,14 +719,14 @@ fn proposal_apply(
                 if let Some(p) = &updated {
                     broadcast_proposal_result(&app, p, "conflict", &detail);
                 }
-                broadcast_proposal_state(&app, &snapshot);
+                publish_proposal_state(&app, &snapshot);
                 return Ok(serde_json::json!({ "status": "conflict", "detail": detail }));
             }
         };
         set_proposal_status(&mut store, &id, "applying", None);
         (proposal, owner, store.proposals.clone())
     };
-    broadcast_proposal_state(&app, &applying_snapshot);
+    publish_proposal_state(&app, &applying_snapshot);
 
     if let Some((label, should_delegate)) = owner {
         if should_delegate {
@@ -721,7 +752,7 @@ fn proposal_apply(
                 }
                 store.proposals.clone()
             };
-            broadcast_proposal_state(&app, &proposals_snapshot);
+            publish_proposal_state(&app, &proposals_snapshot);
             return Ok(serde_json::json!({ "status": "failed" }));
         }
     }
@@ -741,7 +772,7 @@ fn proposal_apply(
         );
         let snapshot = store.proposals.clone();
         drop(store);
-        broadcast_proposal_state(&app, &snapshot);
+        publish_proposal_state(&app, &snapshot);
         updated
     };
     if let Some((path, content)) = file_update {
@@ -772,7 +803,7 @@ fn proposal_reject(
     if let Some(proposal) = &updated {
         broadcast_proposal_result(&app, proposal, "rejected", "User rejected the change");
     }
-    broadcast_proposal_state(&app, &proposals_snapshot);
+    publish_proposal_state(&app, &proposals_snapshot);
     Ok(())
 }
 
@@ -815,7 +846,7 @@ fn proposal_respond(
         }
         store.proposals.clone()
     };
-    broadcast_proposal_state(&app, &proposals_snapshot);
+    publish_proposal_state(&app, &proposals_snapshot);
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.emit("mimir://proposal-result", &result);
     }
@@ -935,7 +966,7 @@ pub fn run() {
             let paths = file_open::resolve_file_args(&args, std::path::Path::new(&cwd));
             file_open::do_open_files_in_editor(app, paths);
         }))
-        .manage(ProposalState::default())
+        .manage(ProposalState::load())
         .manage(activity_supervisor)
         .manage(routine_runtime)
         .manage(tracker_runtime)
@@ -1105,7 +1136,6 @@ pub fn run() {
             git::git_file_diff,
             git::git_stage_file,
             git::git_unstage_file,
-            push_proposals,
             get_proposals_for_path,
             proposal_create,
             proposal_list,
@@ -1388,6 +1418,58 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod proposal_persistence_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn proposal(id: &str, status: &str) -> SharedProposal {
+        SharedProposal::new(serde_json::json!({
+            "id": id,
+            "status": status,
+            "path": "/w/a.md",
+            "targetText": "old",
+            "replacement": "new",
+        }))
+    }
+
+    #[test]
+    fn undecided_proposals_round_trip_and_applying_recovers_as_pending() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("proposals.json");
+
+        persist_proposals_at(
+            &path,
+            &[
+                proposal("p-pending", "pending"),
+                proposal("p-applying", "applying"),
+                proposal("p-accepted", "accepted"),
+                proposal("p-rejected", "rejected"),
+            ],
+        );
+
+        let loaded = load_proposals_at(&path);
+        let ids: Vec<&str> = loaded.iter().filter_map(|p| proposal_id(p)).collect();
+        assert_eq!(ids, ["p-pending", "p-applying"]);
+        assert!(loaded.iter().all(|p| proposal_status(p) == "pending"));
+    }
+
+    #[test]
+    fn missing_and_malformed_files_load_as_empty() {
+        let dir = tempdir().expect("tempdir");
+        let missing = dir.path().join("absent.json");
+        assert!(load_proposals_at(&missing).is_empty());
+
+        let corrupt = dir.path().join("corrupt.json");
+        fs::write(&corrupt, b"{not json").expect("write corrupt");
+        assert!(load_proposals_at(&corrupt).is_empty());
+
+        let wrong_shape = dir.path().join("wrong.json");
+        fs::write(&wrong_shape, b"[{\"noId\":true}]").expect("write wrong shape");
+        assert!(load_proposals_at(&wrong_shape).is_empty());
+    }
 }
 
 #[cfg(test)]

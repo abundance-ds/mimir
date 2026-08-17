@@ -21,6 +21,9 @@ __pycache__/
 *.log
 tmp/
 
+# Workspace-local Mimir data
+graph/
+
 # Spike experiments
 spike/
 review-workflow/

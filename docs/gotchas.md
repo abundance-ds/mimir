@@ -297,6 +297,22 @@ authority. Proposal-backed accept/reject paths must report their outcome before
 dismissing the review. If reporting fails, leave the diff open with a visible
 retryable error.
 
+### Snapshot diff content before awaiting `proposal_respond`
+
+The proposals-changed broadcast follows `proposal_respond` and can reach the
+renderer before the invoke resolves. The listener deactivates the diff store,
+which resets its content to `''`. Accept/reject must capture the content to
+apply before the await; a post-await store read once replaced the whole
+document with an empty string.
+
+### Diff comment concealment must admit merge user events
+
+`commentConcealment()` protects hidden tag ranges with its own change filter,
+not the editor's. Merge chunk actions and history replay dispatch without the
+`commentMutation` annotation; the filter passes their `accept`, `revert`,
+`undo`, and `redo` user events. Reusing the editor's `commentChangeFilter` in
+a diff pane silently suppresses chunk resolution inside commented text.
+
 ### Git index actions must match the reviewed snapshot and scope
 
 Git review is not proposal review. Keep `gitReview.js` state and its virtual

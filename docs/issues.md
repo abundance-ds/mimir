@@ -36,3 +36,13 @@ task scope.
 - Editor comment navigation is available only while the formatting toolbar is
   enabled. Add reusable keyboard or menu commands before treating comment
   navigation as independent of toolbar visibility.
+
+- Unified-diff deletion widgets render original text without comment
+  concealment. When a proposal deletes commented text, the struck-through
+  block shows the raw pseudo-XML tags. Editor panes and both split panes
+  conceal correctly; only the library-rendered deletion widget is affected.
+
+- Proposal restart recovery covers `edit` proposals. A pending `create`
+  proposal survives in `~/.mimir/proposals.json` but has no open tab to
+  re-offer it after a restart, so it stays invisible until a caller applies
+  or rejects it.

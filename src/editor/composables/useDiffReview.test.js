@@ -134,6 +134,114 @@ describe('useDiffReview proposal responses', () => {
     expect(currentFile.value.reviews).toBeNull()
   })
 
+  it('applies the snapshotted content when the store deactivates during accept', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activate({
+      original: 'old text',
+      modified: 'new text',
+      path: '/doc.md',
+      review: { id: 'p1', sessionId: 's1', path: '/doc.md' },
+    })
+    // The proposals-changed broadcast follows proposal_respond and can clear
+    // the diff store before the invoke promise resolves. The applied content
+    // must come from the pre-await snapshot, never from the reset store.
+    invoke.mockImplementation(async (command) => {
+      if (command === 'proposal_respond') diffStore.deactivate()
+      return undefined
+    })
+
+    const result = await review.onDiffAcceptAll()
+
+    expect(result).toEqual({ ok: true })
+    expect(currentFile.value.content).toBe('new text')
+  })
+
+  it('restores the snapshotted original when the store deactivates during reject', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    currentFile.value.content = 'edited text'
+    diffStore.activate({
+      original: 'old text',
+      modified: 'new text',
+      path: '/doc.md',
+      review: { id: 'p1', sessionId: 's1', path: '/doc.md' },
+    })
+    invoke.mockImplementation(async (command) => {
+      if (command === 'proposal_respond') diffStore.deactivate()
+      return undefined
+    })
+
+    const result = await review.onDiffRejectAll()
+
+    expect(result).toEqual({ ok: true })
+    expect(currentFile.value.content).toBe('old text')
+  })
+
+  it('resolves proposal chunk decisions and applies the resolved content', async () => {
+    const { diffStore, currentFile, review } = makeReviewHarness()
+    diffStore.activate({
+      original: 'old text',
+      modified: 'new text',
+      path: '/doc.md',
+      review: { id: 'p1', sessionId: 's1', path: '/doc.md' },
+    })
+    invoke.mockImplementation(async (command) => {
+      if (command === 'proposal_respond') diffStore.deactivate()
+      return undefined
+    })
+
+    const result = await review.onDiffChunksResolved('partially resolved text')
+
+    expect(result).toEqual({ ok: true })
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', {
+      result: expect.objectContaining({ id: 'p1', status: 'applied' }),
+    })
+    expect(currentFile.value.content).toBe('partially resolved text')
+  })
+
+  it('reports every batch proposal even when the store deactivates mid-loop', async () => {
+    const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
+    currentFile.value.path = '/work/active.md'
+    currentFile.value.content = 'active old'
+    fileManager.openFiles = [currentFile.value]
+    diffStore.activateBatch({
+      fileList: [
+        {
+          path: '/work/active.md',
+          original: 'active old',
+          modified: 'active new',
+          proposalId: 'p-active',
+        },
+        {
+          path: '/work/other.md',
+          original: 'other old',
+          modified: 'other new',
+          proposalId: 'p-other',
+        },
+      ],
+      sessionId: 's-batch',
+    })
+    diffStore.acceptAllFiles()
+    // The first proposal_respond triggers the proposals-changed broadcast,
+    // which can deactivate the store and empty its file list mid-loop. The
+    // second proposal must still receive its lifecycle report.
+    invoke.mockImplementation(async (command) => {
+      if (command === 'read_text_file') return { content: 'other old' }
+      if (command === 'proposal_respond') diffStore.deactivate()
+      return undefined
+    })
+
+    const result = await review.onBatchAllResolved()
+
+    expect(result).toEqual({ ok: true })
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', {
+      result: expect.objectContaining({ id: 'p-active', status: 'applied' }),
+    })
+    expect(invoke).toHaveBeenCalledWith('proposal_respond', {
+      result: expect.objectContaining({ id: 'p-other', status: 'applied' }),
+    })
+    expect(currentFile.value.content).toBe('active new')
+  })
+
   it('keeps a single-file review open and exposes a retryable lifecycle error', async () => {
     const { diffStore, currentFile, fileManager, review } = makeReviewHarness()
     diffStore.activate({

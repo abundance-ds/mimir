@@ -235,4 +235,70 @@ describe('Editor lifecycle controllers', () => {
 
     lifecycle.dispose()
   })
+
+  it('reconciles reviews by proposal id instead of clearing on any path miss', () => {
+    const file = {
+      path: '/w/a.md',
+      content: 'hello world',
+      dirty: true,
+    }
+    const fileManager = {
+      openFiles: [file],
+      activeFileIndex: 0,
+      currentFile: file,
+      setFileReviews: vi.fn((target, reviews) => {
+        target.reviews = reviews
+      }),
+      clearFileReviews: vi.fn((target) => {
+        delete target.reviews
+      }),
+      openFile: vi.fn(),
+    }
+    const diffStore = {
+      active: false,
+      reviewMeta: null,
+      activate: vi.fn(() => {
+        diffStore.active = true
+      }),
+      deactivate: vi.fn(() => {
+        diffStore.active = false
+      }),
+    }
+    const lifecycle = useEditorProposalLifecycle({
+      fileManager,
+      diffStore,
+      openFiles: ref([file]),
+      activeFileIndex: ref(0),
+      currentEditorContent: () => file.content,
+      flushEditorContent: vi.fn(),
+      editorSurfaceRef: ref(null),
+      activateDiff: vi.fn(),
+      activateBatchDiff: vi.fn(),
+    })
+    const p1 = { id: 'proposal:1', path: '/w/a.md', targetText: 'world', replacement: 'Mimir' }
+    lifecycle.onProposalsChanged({ payload: [p1] })
+    expect(file.reviews).toHaveLength(1)
+
+    // An unrelated proposal's event keeps this file's pending review intact.
+    fileManager.clearFileReviews.mockClear()
+    lifecycle.onProposalsChanged({ payload: [p1, { id: 'proposal:x', path: '/w/other.md' }] })
+    expect(fileManager.clearFileReviews).not.toHaveBeenCalled()
+    expect(file.reviews).toHaveLength(1)
+
+    // A new pending proposal for this file joins the review set.
+    const p2 = { id: 'proposal:2', path: '/w/a.md', targetText: 'hello', replacement: 'goodbye' }
+    lifecycle.onProposalsChanged({ payload: [p1, p2] })
+    expect(file.reviews.map(review => review.proposalId)).toEqual(['proposal:1', 'proposal:2'])
+
+    // Only ids that left the global pending set are dropped.
+    lifecycle.onProposalsChanged({ payload: [p2] })
+    expect(file.reviews.map(review => review.proposalId)).toEqual(['proposal:2'])
+
+    // The last terminal id clears the review and closes the diff.
+    lifecycle.onProposalsChanged({ payload: [] })
+    expect(fileManager.clearFileReviews).toHaveBeenCalledWith(file)
+    expect(diffStore.deactivate).toHaveBeenCalled()
+
+    lifecycle.dispose()
+  })
 })

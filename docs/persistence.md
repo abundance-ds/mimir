@@ -11,6 +11,7 @@ crash.
 |---|---|---|
 | `~/.mimir/settings.json` | `local_settings.rs`, `stores/settings.js` | one top-level object; renderer settings live under `editor`; partial editor save preserves other top-level namespaces |
 | `~/.mimir/session.json` | `session.rs`, `sessionPersist.js` | contains recovery content only for dirty named files and nonempty drafts |
+| `~/.mimir/proposals.json` | proposal coordinator in `lib.rs` | undecided proposals only; every store mutation rewrites it; an interrupted `applying` recovers as `pending` and the retry detects an already applied change |
 | `~/.mimir/models.json` | `ai_models.rs` | embedded product defaults replace known model/provider metadata on version migration; unknown user models survive |
 | `~/.mimir/launchers.json` | `launchers.rs` | versioned whole-file config; malformed/unsupported input recovers to defaults with diagnostics |
 | `~/.mimir/activities/activities.sqlite3` | Activity store worker | WAL database; compact records, binary ordered terminal events, versioned xterm checkpoints, and normalized search text |

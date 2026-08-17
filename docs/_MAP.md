@@ -190,6 +190,7 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/models/stt/` | verified Scribe local model artifacts and state |
 | `~/.mimir/settings.json` | editor/workbench/settings data |
 | `~/.mimir/session.json` | open editor tabs, drafts, recents, and zoom |
+| `~/.mimir/proposals.json` | undecided Editor proposals awaiting review |
 | `~/.mimir/models.json` | inline/ghost AI provider and model registry |
 | `~/.mimir/bin/` | installed `mimir` |
 | `~/.mimir/pi/mimir-tools.ts` | installed Pi extension |
@@ -202,7 +203,6 @@ ordering: [ipc.md](ipc.md).
 | Document | Purpose |
 |---|---|
 | [agent-interface.md](agent-interface.md) | public agent tools, discovery CLI, skills contract |
-| [scopes-agents-plan.md](scopes-agents-plan.md) | implemented decision for unified scopes and agent packages |
 | [synthesis.md](synthesis.md) | product laws |
 | [acceptance.md](acceptance.md) | release behavior contract |
 | [building.md](building.md) | prerequisites, dev loop, packaging |

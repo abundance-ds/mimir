@@ -58,6 +58,14 @@
           @ask-agent="onGitReviewAskAgent"
           @close="closeGitReview"
         />
+        <PendingProposalBar
+          v-else-if="pendingReviewBarVisible"
+          :count="currentFile?.reviews?.length || 0"
+          :busy="pendingReviewBusy"
+          :error="pendingReviewError"
+          @recheck="onRecheckPendingReviews"
+          @discard="onDiscardPendingReviews"
+        />
         <EditorToolbar
           v-if="editorToolbarVisible && !gitReviewVisible"
           :active-formats="activeFormats"
@@ -246,6 +254,7 @@ import { livePreviewExtension } from './codemirror/livePreview.js'
 import { taskCheckboxExtension } from './codemirror/taskCheckboxes.js'
 import { commentsExtension, getCommentsFromState, commentMutation } from './codemirror/comments.js'
 import { escapeAttr } from '../services/comments/parser.js'
+import { snapCommentAnchor } from '../services/comments/anchor.js'
 import { buildCommentsPrompt } from '../services/comments/prompt.js'
 import { EditorView } from '@codemirror/view'
 import { useCommentsStore } from '../stores/comments.js'
@@ -281,6 +290,7 @@ import NewTabPage from './components/workspace/NewTabPage.vue'
 import FilePreviewPage from './components/workspace/FilePreviewPage.vue'
 import GitDiffView from './components/workspace/GitDiffView.vue'
 import GitReviewBar from './components/workspace/GitReviewBar.vue'
+import PendingProposalBar from './components/workspace/PendingProposalBar.vue'
 import { useDiffStore } from '../stores/diff.js'
 import { useGitReviewStore } from '../stores/gitReview.js'
 
@@ -542,6 +552,57 @@ const proposalLifecycle = useEditorProposalLifecycle({
     return activateBatchDiff(...args)
   },
 })
+
+// A proposal whose target text cannot be matched to the current buffer stays
+// pending in the native coordinator. This bar keeps it visible and offers the
+// only two honest actions: recompute against the current text, or discard it
+// through the shared lifecycle.
+const pendingReviewBusy = ref(false)
+const pendingReviewError = ref('')
+const pendingReviewBarVisible = computed(() => (
+  Boolean(currentFile.value?.reviews?.length) && !visibleDiffActive.value
+))
+
+function onRecheckPendingReviews() {
+  pendingReviewError.value = ''
+  const shown = proposalLifecycle.activateDiffFromReviews(currentFile.value)
+  if (!shown) {
+    pendingReviewError.value = 'The target text still does not match.'
+  }
+}
+
+async function onDiscardPendingReviews() {
+  const file = currentFile.value
+  const reviews = file?.reviews || []
+  if (!reviews.length || pendingReviewBusy.value) return
+  pendingReviewBusy.value = true
+  pendingReviewError.value = ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    // allSettled: one failed report must not strand the other proposals
+    // un-rejected. Failed reviews stay stashed so Discard can retry them.
+    const results = await Promise.allSettled(reviews.map(review => invoke('proposal_respond', {
+      result: {
+        id: review.proposalId,
+        sessionId: review.sessionId,
+        status: 'rejected',
+        detail: 'User discarded the pending proposal',
+      },
+    })))
+    const failed = reviews.filter((review, index) => results[index].status === 'rejected')
+    if (failed.length === 0) {
+      fileManager.clearFileReviews(file)
+    } else {
+      fileManager.setFileReviews(file, failed)
+      const reason = results.find(result => result.status === 'rejected')?.reason
+      pendingReviewError.value = `Could not discard ${failed.length} of ${reviews.length}: ${reason?.message || reason}`
+    }
+  } catch (cause) {
+    pendingReviewError.value = `Could not discard: ${cause?.message || cause}`
+  } finally {
+    pendingReviewBusy.value = false
+  }
+}
 
 const editorExtensions = computed(() => [
   commentsExtension({
@@ -1022,7 +1083,13 @@ async function onComment() {
   const sel = view.state.selection.main
   if (sel.from === sel.to) return
 
-  const existing = commentManager.findActiveByRange(sel.from, sel.to)
+  // Snap the anchor away from heading/list/quote markers: a tag inserted
+  // before a block marker removes the line's block role and its formatting.
+  const snapped = snapCommentAnchor(view.state.doc.toString(), sel.from, sel.to)
+  if (!snapped) return
+  const { from, to } = snapped
+
+  const existing = commentManager.findActiveByRange(from, to)
   if (existing) {
     commentManager.setActiveComment(existing.id)
     return
@@ -1030,7 +1097,7 @@ async function onComment() {
 
   const currentComments = getCommentsFromState(view.state)
   for (const c of currentComments) {
-    if (Math.max(sel.from, c.contentFrom) < Math.min(sel.to, c.contentTo)) return
+    if (Math.max(from, c.contentFrom) < Math.min(to, c.contentTo)) return
   }
 
   if (!editorSettings.commentGateSkip && currentComments.length === 0) {
@@ -1045,8 +1112,8 @@ async function onComment() {
 
   view.dispatch({
     changes: [
-      { from: sel.from, insert: openTag },
-      { from: sel.to, insert: '</comment>' },
+      { from, insert: openTag },
+      { from: to, insert: '</comment>' },
     ],
     annotations: commentMutation.of(true),
   })
@@ -1424,6 +1491,10 @@ onMounted(async () => {
   if (editorDisposed) return
   await nativeLifecycle.start()
   if (editorDisposed) return
+
+  // Re-offer a pending proposal that survived an application restart for the
+  // restored active document. Later tab activations go through the watcher.
+  void proposalLifecycle.checkProposalsForFile(currentFile.value)
 
   // Dev: expose diff activation for console testing
   if (import.meta.env.DEV) {

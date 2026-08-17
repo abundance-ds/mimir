@@ -118,12 +118,28 @@ export function useEditorProposalLifecycle({
     const matches = proposals.filter(
       proposal => proposal.path === file.path || proposal.absolutePath === file.path,
     )
-    if (matches.length > 0 && !file.reviews) {
+    if (!file.reviews) {
+      if (matches.length === 0) return
       fileManager.setFileReviews(file, matches.map(proposalToReview))
       activateDiffFromReviews(file)
-    } else if (matches.length === 0 && file.reviews) {
+      return
+    }
+
+    // Reconcile by proposal id, not by "any match for this path": a review is
+    // stale only when its id left the global pending set, and a new pending
+    // proposal for this file joins the existing reviews instead of being lost.
+    const pendingIds = new Set(proposals.map(proposal => proposal.id))
+    const kept = file.reviews.filter(review => pendingIds.has(review.proposalId))
+    const keptIds = new Set(kept.map(review => review.proposalId))
+    const added = matches.filter(proposal => !keptIds.has(proposal.id)).map(proposalToReview)
+    if (added.length === 0 && kept.length === file.reviews.length) return
+    const next = [...kept, ...added]
+    if (next.length === 0) {
       fileManager.clearFileReviews(file)
       diffStore.deactivate()
+    } else {
+      fileManager.setFileReviews(file, next)
+      activateDiffFromReviews(file)
     }
   }
 
@@ -135,7 +151,10 @@ export function useEditorProposalLifecycle({
       ? computeDiffFromReview(file.reviews[0], content)
       : computeCompoundDiff(file.reviews, content)
     if (!diff) {
-      fileManager.clearFileReviews(file)
+      // A failed compute is transient (content still hydrating, buffer
+      // edited): keep the reviews so a later activation can re-offer them.
+      // Only the native coordinator or an explicit user action ends a
+      // proposal.
       return false
     }
     const first = file.reviews[0]
@@ -159,7 +178,9 @@ export function useEditorProposalLifecycle({
       const proposals = await invoke('get_proposals_for_path', { path: file.path })
       if (!proposals.length || disposed) return
       fileManager.setFileReviews(file, proposals.map(proposalToReview))
-      activateDiffFromReviews(file)
+      // Only activate the diff if this file is still current; a tab switch
+      // during the await must not leave a stale diff active.
+      if (fileManager.currentFile === file) activateDiffFromReviews(file)
     } catch {}
   }
 

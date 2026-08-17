@@ -84,6 +84,10 @@ export function useDiffReview({
   }
 
   async function onBatchAllResolved() {
+    // Captured references, mutated directly: a proposals-changed broadcast
+    // arriving between awaits can deactivate the store and empty its file
+    // list, and a path re-lookup would then silently skip the remaining
+    // proposal_respond calls, leaving those proposals pending forever.
     const allFiles = [...diffStore.files]
     const sessionId = diffStore.reviewMeta?.sessionId || ''
     const { invoke } = await import('@tauri-apps/api/core')
@@ -118,44 +122,46 @@ export function useDiffReview({
             openFile.saveError = null
           }
         }
-        diffStore.markFileApplied(file.path)
+        file.applied = true
+        file.error = null
       } catch (error) {
-        diffStore.markFileFailed(file.path, error?.message || error)
+        file.status = 'pending'
+        file.error = String(error?.message || error || 'Could not apply this file.')
       }
     }
     if (activeEditorChanged) scheduleContentSync()
 
     for (const file of allFiles) {
-      const liveFile = diffStore.files.find(candidate => candidate.path === file.path)
-      if (!liveFile || liveFile.status === 'pending' || liveFile.lifecycleResolved) continue
-      if (liveFile.status === 'accepted' && !liveFile.applied) continue
-      if (!liveFile.proposalId) {
-        diffStore.markFileLifecycleResolved(file.path)
+      if (file.status === 'pending' || file.lifecycleResolved) continue
+      if (file.status === 'accepted' && !file.applied) continue
+      if (!file.proposalId) {
+        file.lifecycleResolved = true
+        file.error = null
         continue
       }
-      const status = liveFile.status === 'accepted' ? 'applied' : 'rejected'
+      const status = file.status === 'accepted' ? 'applied' : 'rejected'
       try {
         await invoke('proposal_respond', {
           result: {
-            id: liveFile.proposalId,
+            id: file.proposalId,
             sessionId,
             status,
             detail: `User ${status} the change`,
           },
         })
-        diffStore.markFileLifecycleResolved(file.path)
+        file.lifecycleResolved = true
+        file.error = null
       } catch (error) {
-        diffStore.markFileFailed(
-          file.path,
-          `The file decision was saved, but its proposal status could not be updated: ${error?.message || error}`,
-        )
+        file.status = 'pending'
+        file.error = `The file decision was saved, but its proposal status could not be updated: ${error?.message || error}`
       }
     }
 
-    if (diffStore.pendingFiles.length > 0) {
+    const pendingLeft = allFiles.filter(file => file.status === 'pending')
+    if (pendingLeft.length > 0) {
       return {
         ok: false,
-        failures: diffStore.pendingFiles.map(file => ({ path: file.path, error: file.error })),
+        failures: pendingLeft.map(file => ({ path: file.path, error: file.error })),
       }
     }
 
@@ -186,10 +192,14 @@ export function useDiffReview({
         applyDiffResult(diffStore.modifiedContent, target)
         inlineAIState.value = null
       } else {
+        // Snapshot before the await: the proposals-changed broadcast that
+        // follows proposal_respond can deactivate the diff store mid-flight,
+        // and a post-await read would then apply reset ('') content.
+        const modified = diffStore.modifiedContent
         const lifecycle = await respondToDiffReview('applied')
         if (!lifecycle.ok) return lifecycle
         fileManager.clearFileReviews(target)
-        return applyDiffResult(diffStore.modifiedContent, target)
+        return applyDiffResult(modified, target)
       }
     }
   }
@@ -224,10 +234,12 @@ export function useDiffReview({
       } else if (diffStore.reviewMeta?.type === 'inline-ai') {
         diffStore.deactivate()
       } else {
+        // Same pre-await snapshot rule as accept: see onDiffAcceptAll.
+        const original = diffStore.originalContent
         const lifecycle = await respondToDiffReview('rejected')
         if (!lifecycle.ok) return lifecycle
         fileManager.clearFileReviews(target)
-        return applyDiffResult(diffStore.originalContent, target)
+        return applyDiffResult(original, target)
       }
     }
   }

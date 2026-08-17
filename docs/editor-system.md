@@ -146,6 +146,21 @@ A single-file review records the exact Editor file id. A project switch or tab
 switch hides the review but keeps it active. The review can apply only after
 its exact target tab becomes active again.
 
+Undecided proposals survive an application restart: the coordinator persists
+them to `~/.mimir/proposals.json` and the Editor re-offers a pending review
+when its file becomes active (see [ipc.md](ipc.md) and
+[persistence.md](persistence.md)). Only a user decision or an apply-time
+conflict ends a proposal. When a pending proposal's target text does not match
+the current buffer, the Editor keeps the review and shows the
+`PendingProposalBar` with Re-check and Discard instead of dropping it.
+
+Both diff layouts expose decisions: the diff bar holds Accept All/Reject All,
+and unified and split layouts each render per-chunk accept/reject controls.
+Diff panes hide pseudo-XML comment tags through `commentConcealment()`
+(`src/editor/codemirror/comments.js`): active anchors keep their quiet
+highlight, resolved threads read as plain text, and chunk accept/revert and
+undo/redo pass its tag-protection filter.
+
 ## Git review
 
 The Files Changes view opens a separate, read-only Editor tab. `git.rs` creates

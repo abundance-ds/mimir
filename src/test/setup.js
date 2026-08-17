@@ -35,7 +35,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'git_status', 'git_changes', 'git_file_diff', 'git_stage_file', 'git_unstage_file',
   // IPC / window coordination (top-level)
   'proposal_create', 'proposal_list', 'proposal_register_editor', 'proposal_apply', 'proposal_reject',
-  'proposal_respond', 'push_proposals', 'notify_file_updated', 'get_proposals_for_path',
+  'proposal_respond', 'notify_file_updated', 'get_proposals_for_path',
   'settings_changed',
   'app_quit_confirmed', 'app_prepare_relaunch',
   // spell
