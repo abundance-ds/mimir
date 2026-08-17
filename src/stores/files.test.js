@@ -652,9 +652,23 @@ describe('files store', () => {
 
     const store = useFileStore()
     await store.openDialog()
+    expect(openFileDialog).toHaveBeenCalledWith(undefined)
     expect(store.openFiles).toHaveLength(1)
     expect(store.openFiles[0].path).toBe('/tmp/from-dialog.md')
     expect(store.openFiles[0].content).toBe('dialog content')
+  })
+
+  it('openDialog() starts in the current project root', async () => {
+    openFileDialog.mockResolvedValue(null)
+
+    const store = useFileStore()
+    store.setWorkspaceScope('/work/current-project', [
+      '/work/current-project',
+      '/work/previous-project',
+    ])
+    await store.openDialog()
+
+    expect(openFileDialog).toHaveBeenCalledWith('/work/current-project')
   })
 
   it('openDialog() does nothing when dialog is cancelled', async () => {

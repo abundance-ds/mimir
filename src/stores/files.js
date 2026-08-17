@@ -534,7 +534,7 @@ export const useFileStore = defineStore('files', () => {
 
   // Open file dialog and open the selected file
   async function openDialog() {
-    const result = await openFileDialog()
+    const result = await openFileDialog(workspaceScope.value || undefined)
     if (!result) return
     await openFile(result.path, result.content)
   }

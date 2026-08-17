@@ -16,10 +16,11 @@ vi.mock('../../../services/fileSystem.js', () => ({
   saveFile: vi.fn(),
 }))
 
-function render() {
+function render({ workspacePath = '' } = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const files = useFileStore()
+  if (workspacePath) files.setWorkspaceScope(workspacePath)
   files.newTab()
   const wrapper = mount(NewTabPage, {
     attachTo: document.body,
@@ -81,6 +82,17 @@ describe('NewTabPage', () => {
 
     expect(files.currentFile.newTab).toBe(true)
     expect(wrapper.emitted('activated')).toBeFalsy()
+    wrapper.unmount()
+  })
+
+  it('opens the file chooser at the current project root', async () => {
+    fsMocks.openFileDialog.mockResolvedValue(null)
+    const { wrapper } = render({ workspacePath: '/work/current-project' })
+
+    await buttonWithText(wrapper, 'Open File').trigger('click')
+    await flushPromises()
+
+    expect(fsMocks.openFileDialog).toHaveBeenCalledWith('/work/current-project')
     wrapper.unmount()
   })
 

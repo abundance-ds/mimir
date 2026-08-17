@@ -1,6 +1,42 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { readBinaryFile } from './fileSystem.js'
+import { open } from '@tauri-apps/plugin-dialog'
+import { openFileDialog, readBinaryFile } from './fileSystem.js'
+
+describe('openFileDialog', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it('starts the native chooser at the requested project path', async () => {
+    open.mockResolvedValueOnce(null)
+
+    await expect(openFileDialog('/work/current-project')).resolves.toBeNull()
+
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({
+      multiple: false,
+      defaultPath: '/work/current-project',
+    }))
+  })
+
+  it('lets the native chooser select its folder when no project is active', async () => {
+    open.mockResolvedValueOnce(null)
+
+    await expect(openFileDialog()).resolves.toBeNull()
+
+    expect(open).toHaveBeenCalledWith(expect.not.objectContaining({
+      defaultPath: expect.anything(),
+    }))
+  })
+})
 
 describe('readBinaryFile', () => {
   beforeEach(() => {

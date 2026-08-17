@@ -18,10 +18,11 @@ const CODE_TEXT_EXTENSIONS = [
 
 // --- File dialogs ---
 
-export async function openFileDialog() {
+export async function openFileDialog(defaultPath) {
   if (!isTauri()) return null
   const selected = await open({
     multiple: false,
+    ...(defaultPath ? { defaultPath } : {}),
     filters: [
       { name: 'Code and Text', extensions: CODE_TEXT_EXTENSIONS },
       { name: 'All Files', extensions: ['*'] },

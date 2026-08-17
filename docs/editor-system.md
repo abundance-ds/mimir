@@ -37,8 +37,10 @@ the attached document bridge synchronized.
 The Save chooser follows the active editing context. Save As for a named file
 starts in that file's directory. The first save of an untitled draft starts at
 the active project root in the embedded Workbench. Without an active project,
-the native dialog chooses the location. Canceling the chooser leaves the draft
-unchanged.
+the native dialog chooses the location. The Open chooser also starts at the
+active project root in the embedded Workbench; without an active project, the
+native dialog chooses its starting folder. Canceling a chooser leaves the
+current document unchanged.
 
 In the embedded Workbench, named tabs opened inside a retained project record
 that project as their owner. The tab strip projects the active project plus
