@@ -1093,7 +1093,7 @@ describe('WorkbenchApp', () => {
     expect(surface.contains(document.activeElement)).toBe(true)
   })
 
-  it('launches external Apps as one real PTY Activity from the plus menu, Settings, and MCP', async () => {
+  it('launches external Apps as one real PTY Activity from the plus menu and MCP', async () => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps',
       diagnostics: [],
@@ -1141,19 +1141,16 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get(`[data-terminal-stub="${sidebarRun.id}"]`).exists()).toBe(true)
     expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
 
-    useWorkbenchStore().setPaneState('activity', 'rail')
-    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('launchApp', {
-      app: { id: 'review-runner', title: 'Review runner' },
-      launch: { mode: 'process', command: '/bin/tool', args: ['--exact'], cwd: '/w' },
-      activity: {
-        id: 'app:review-runner:settings-placeholder',
-        kind: 'app',
-        title: 'Review runner',
-        workspacePath: '/w',
-      },
+    appsApi.resolveAppLaunch.mockResolvedValueOnce({
+      mode: 'process',
+      appId: 'review-runner',
+      command: '/bin/tool',
+      args: ['--exact'],
+      cwd: '/w',
     })
+    const processTool = await toolRuntimeConfig.current.launchApp('review-runner', 'process')
     await flushPromises()
-    expect(store.byId('app:review-runner:settings-placeholder')).toBeNull()
+    expect(store.byId(processTool.activityId)).not.toBeNull()
     expect(activityApi.spawnActivity).toHaveBeenLastCalledWith(expect.objectContaining({
       launch: expect.objectContaining({ command: '/bin/tool', args: ['--exact'] }),
     }))

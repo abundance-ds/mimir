@@ -216,23 +216,20 @@ requirements; they do not replace runtime verification.
   presets appear in the Activities `+` menu and Cmd/Ctrl+P. There is no generic
   Apps destination.
 - Tools support persistent manual ordering by pointer or Shift+Alt+Up/Down.
-- The bottom Settings control remains visible in both Sidebar states; Settings
-  > Apps is the local-definition management surface.
-- Settings > Apps is a compact, keyboard-operable row list for valid definitions
-  from `~/.mimir/apps`. Built-ins and empty detail pages do not appear there.
-- It launches and reloads Apps, opens or reveals local definitions, creates a
-  runnable starter app, duplicates local packages, updates display titles
-  without changing stable ids, and moves exact definitions to Trash.
-- App mutations update Sidebar launch rows immediately through the human UI.
+- Settings has no Apps section. Scribe, Graph, and Tracker own direct sections;
+  Today has no settings.
+- Valid local definitions load from `~/.mimir/apps`. There is no current human
+  management surface; the deferred manager is recorded in `docs/issues.md`.
+- App catalog mutations update Sidebar launch rows immediately.
 - Invalid TOML, duplicate IDs, missing entries, and invalid modes produce
-  visible diagnostics without hiding valid apps.
+  catalog diagnostics without hiding valid apps.
 - Tracker configuration has a direct Settings section and uses the shared
   Settings controls with progressive disclosure for dependent options.
 - Embedded, terminal, process, window, Rust-helper, and action launch plans
   resolve explicitly.
 - Stable Apps reopen one singleton Tool Activity and do not duplicate
   themselves in Activities. Terminal and process Apps create one real PTY
-  Activity from Sidebar or Settings.
+  Activity from the Activities `+` menu.
 - Embedded apps can use the host SDK for app data, files, HTTP, tools, and
   opening a file in the Editor.
 - App-defined tools join the live registry and unregister with their instance.

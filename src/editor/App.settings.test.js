@@ -37,16 +37,9 @@ const SettingsDialogStub = defineComponent({
     open: Boolean,
     initialSection: String,
   },
-  emits: ['close', 'launchApp', 'openDefinition'],
+  emits: ['close'],
   template: `
-    <div v-if="open" data-settings-stub>
-      <button
-        data-open-app-definition
-        @click="$emit('openDefinition', '/home/me/.mimir/apps/ledger/app.toml')"
-      >
-        Open definition
-      </button>
-    </div>
+    <div v-if="open" data-settings-stub />
   `,
 })
 
@@ -62,7 +55,7 @@ const EditorSurfaceStub = defineComponent({
   },
 })
 
-describe('Editor Apps Settings bridge', () => {
+describe('Editor Settings bridge', () => {
   beforeEach(() => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -70,43 +63,6 @@ describe('Editor Apps Settings bridge', () => {
     loadSession.mockReset().mockResolvedValue(null)
     saveSession.mockReset().mockResolvedValue()
     nativeMenu.install.mockClear()
-  })
-
-  it('closes Settings and opens a local app definition in the right-hand Editor', async () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const wrapper = mount(App, {
-      global: {
-        plugins: [pinia],
-        stubs: {
-          AppHeader: true,
-          AppFooter: true,
-          SettingsDialog: SettingsDialogStub,
-          EditorSurface: EditorSurfaceStub,
-          InlineAI: true,
-          DiffBar: true,
-          DiffView: true,
-          BatchDiffView: true,
-          NewTabPage: true,
-          Teleport: true,
-          Transition: false,
-        },
-      },
-    })
-    await flushPromises()
-
-    wrapper.vm.mimirOpenSettings('apps')
-    await flushPromises()
-    await wrapper.get('[data-open-app-definition]').trigger('click')
-    await flushPromises()
-
-    expect(readFile).toHaveBeenCalledWith('/home/me/.mimir/apps/ledger/app.toml')
-    expect(useFileStore().currentFile?.path).toBe('/home/me/.mimir/apps/ledger/app.toml')
-    expect(wrapper.find('[data-settings-stub]').exists()).toBe(false)
-    expect(wrapper.emitted('navigateEditor')).toEqual([[
-      { path: '/home/me/.mimir/apps/ledger/app.toml' },
-    ]])
-    wrapper.unmount()
   })
 
   it('consumes native Close Tab by dismissing teleported Settings first', async () => {
@@ -133,7 +89,7 @@ describe('Editor Apps Settings bridge', () => {
     })
     await flushPromises()
 
-    wrapper.vm.mimirOpenSettings('apps')
+    wrapper.vm.mimirOpenSettings('appearance')
     await flushPromises()
     expect(wrapper.find('[data-settings-stub]').exists()).toBe(true)
 

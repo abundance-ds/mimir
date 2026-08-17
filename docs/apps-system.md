@@ -5,9 +5,8 @@ Tracker as built-ins; additional definitions live under `~/.mimir/apps/`.
 
 There is no generic Apps Activity or launcher row. The Sidebar places stable
 Apps under Tools; the Activities `+` and Cmd/Ctrl+P expose terminal/process
-Apps beside configured CLI launchers. Settings > Apps is a compact manager for
-local definitions only. Built-in products use their own Settings sections when
-they have settings.
+Apps beside configured CLI launchers. There is no Apps section in Settings.
+Built-in products use their own Settings sections when they have settings.
 
 Sidebar order is local presentation state, not catalog order. Pointer drag or
 Shift+Alt+Up/Down updates `sidebarToolOrder` for Tools. Fresh-run sources use
@@ -29,26 +28,15 @@ App manifests and frames are trusted local extension code. Manifest/path
 validation protects catalog/protocol integrity; it does not sandbox SDK
 filesystem, HTTP, or registry calls. See [security.md](security.md).
 
-## Settings workflow
+## Local definition workflow
 
-`Settings > Apps` is a one-column manager for definitions under
-`~/.mimir/apps`. Each app is one row with its name, **Open**, **Edit**, and one
-overflow menu. There is no app picker, selection state, or detail pane.
+Local definitions are authored directly under `~/.mimir/apps`. Valid apps
+appear in Tools or the Activities `+` menu according to their launch mode.
+Mimir has no human UI for creating, editing, reloading, or repairing these
+definitions. A future local-app manager is recorded in [issues.md](issues.md).
 
-- **New app** asks for one name. The UI derives a unique stable id and creates
-  the working embedded starter with SDK autosave and a live `read` tool.
-- The app-row menu holds Rename, Duplicate, Show in Finder, and Move to Trash.
-  The section menu holds Reload and Open apps folder. Duplicate derives the
-  copy title and id without another form. Rename asks for one name.
-- Move to Trash moves the exact local definition to the operating-system Trash.
-  Namespaced app data is retained.
-- An invalid definition appears inline with the exact failure, **Open file** or
-  **Open folder**, and **Reload**. There is no global diagnostic count or
-  separate diagnostic surface.
-- Built-ins do not appear here. Scribe, Business graph, and Tracker use direct
-  Settings sections. Today has no settings.
-- `Settings > Tracker` first shows its enable control. Dependent collection,
-  AI, reminder, and import controls appear only when they apply.
+Built-ins do not need a shared manager. Scribe, Business graph, and Tracker use
+direct Settings sections. Today has no settings.
 
 ## Today
 
@@ -224,8 +212,6 @@ skill (`skills/mimir-config`) when app configuration is part of their task.
 
 - `src-tauri/src/apps.rs`: catalog, safe local definition operations,
   validation, launch resolution, protocol, app data, and HTTP
-- `src/shared/ui/settings/AppsSettingsSection.vue`: local-app rows, package
-  actions, and inline definition repair
 - `src/mimir/activities/AppActivity.vue`: instance surface routing
 - `src/mimir/apps/EmbeddedAppHost.vue`: iframe and dynamic tool relay
 - `src/mimir/apps/LaunchPlanHost.vue`: window/action and restored-plan feedback
@@ -249,6 +235,6 @@ identity, and generated tool names. Display-title mutation must never rename
 it. Runtime tool ownership additionally includes `instanceId`; replacing an
 instance retires the prior provider before registering the new one.
 
-Tests are split accordingly: native `apps.rs`, catalog service/store, Settings
-catalog, `AppActivity`, embedded host, and launch-plan host. A manifest-mode
-change normally affects all six seams.
+Tests are split accordingly: native `apps.rs`, catalog service/store,
+`AppActivity`, embedded host, and launch-plan host. A manifest-mode change
+normally affects all five seams.

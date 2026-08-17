@@ -149,7 +149,6 @@
         @empty="collapseEmptyEditor"
         @navigate-editor="onEditorNavigate"
         @review-git-with-agent="startGitReviewWithAgent"
-        @launch-app="dispatchAppPayload"
       />
     </template>
   </WorkbenchShell>
@@ -1250,7 +1249,7 @@ async function launchAppFromTool(appId, requestedMode) {
   const app = appsCatalog.apps.find(candidate => candidate.id === appId)
   if (!app) throw new Error(`App '${appId}' is not installed.`)
   if (app.id === 'tracker' && !tracker.enabled) {
-    throw new Error("Tracker is disabled. Enable it in Settings → Apps first.")
+    throw new Error("Tracker is disabled. Enable it in Settings → Tracker first.")
   }
   const payload = await appsCatalog.prepareActivity(app, workspaceFiles.workspacePath || '')
   if (requestedMode && payload.launch.mode !== requestedMode) {

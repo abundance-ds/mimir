@@ -130,8 +130,6 @@
       :open="state.settingsOpen"
       :initial-section="settingsInitialSection"
       @close="closeSettings"
-      @launch-app="onSettingsAppLaunch"
-      @open-definition="onSettingsOpenDefinition"
     />
 
 
@@ -295,7 +293,6 @@ const props = defineProps({
 const emit = defineEmits([
   'closeRequest',
   'empty',
-  'launchApp',
   'navigateEditor',
   'newRequest',
   'quickOpenRequest',
@@ -919,16 +916,6 @@ function openSettings(section = 'appearance') {
 function closeSettings() {
   state.settingsOpen = false
   settingsInitialSection.value = 'appearance'
-}
-
-function onSettingsAppLaunch(payload) {
-  closeSettings()
-  emit('launchApp', payload)
-}
-
-async function onSettingsOpenDefinition(path) {
-  closeSettings()
-  if (path) await mimirOpen(path)
 }
 
 async function onSaveStatusClick(status) {

@@ -41,7 +41,7 @@ resizing, rails, widths, and Activity navigation history.
 | Team chat and chat-linked agents | [Chats](chat.md), [security](security.md), [MCP](mcp.md) | native `chat/`; chat service/store; Chat Activity/sidebar/header/settings; `deploy/chat/` | native chat/db; chat service/store/components; production protocol smoke |
 | MCP/tool/provider | [MCP](mcp.md), [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
 | Files/tree/search/preview/mutation/Git changes | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, `git.rs`, Files and Git review stores/services/activity/rows, Editor typed-preview and Git review paths | native file/Git modules; workspace/file/Git stores; Files Activity; Editor preview/review tests |
-| Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service/settings, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/settings/app host tests |
+| Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/app host tests |
 | Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
 | Tracker/Argus migration | [Tracker](tracker.md), [persistence](persistence.md), [security](security.md) | native `tracker/`; Tracker service/store; `TrackerApp.vue`, tracker components, Tracker Settings panel; Workbench optional-app projection | native engine/store/report/import/runtime; tracker service/store/app/settings/timeline/classification tests |
 | Agent packages/Routines/scheduler | [Agent interface](agent-interface.md), [Routines](routines.md), [persistence](persistence.md) | `agent_packages.rs`, `routines.rs`, `routine_runtime.rs`, `bin/mimir-agents.mjs`, Routine store/service/activity | native package/schema/runtime; CLI and Routine store/service/activity |
@@ -80,7 +80,6 @@ resizing, rails, widths, and Activity navigation history.
   [files.md](files.md).
 - Apps: `src/stores/appsCatalog.js`, `src/services/appsCatalog.js`,
   `src/mimir/apps/` (Today, Business graph, Tracker, embedded/launch-plan hosts),
-  `src/shared/ui/settings/AppsSettingsSection.vue`,
   `src/apps/sdk/mimir-sdk.js`. Docs: [apps-system.md](apps-system.md).
 - Tracker UI: `src/mimir/apps/TrackerApp.vue`,
   `src/mimir/apps/tracker/` (timeline, overview, log, classifications),

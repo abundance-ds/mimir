@@ -5,6 +5,15 @@ task scope.
 
 ## Open
 
+- Local Apps have no management surface. The empty `Settings > Apps` section
+  was removed because it exposed no installed local definitions and duplicated
+  built-in product navigation. The native app commands, catalog store/service,
+  launch pipeline, and SDK remain. Revive the manager only for real definitions
+  under `~/.mimir/apps`: add one direct Settings destination, show local apps
+  and diagnostics only, reconnect definition editing and app launch to the
+  Editor and Workbench, and restore focused UI tests. Do not put Today, Scribe,
+  Business graph, or Tracker in that manager.
+
 - Scribe is not ready. The signed installed `rs.shoulde.mimir` application has
   passed first-run TCC registration, known-playback microphone/system signal,
   dual-channel local live transcription, Stop, and fast historical-library

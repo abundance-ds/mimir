@@ -59,12 +59,6 @@
               <GraphSettingsSection v-else-if="activeSection === 'graph'" />
               <ChatSettingsSection v-else-if="activeSection === 'chat'" />
               <LaunchersSection v-else-if="activeSection === 'launchers'" />
-              <AppsSettingsSection
-                v-else-if="activeSection === 'apps'"
-                ref="appsSection"
-                @launch-app="$emit('launchApp', $event)"
-                @open-definition="$emit('openDefinition', $event)"
-              />
               <ShortcutsSection v-else-if="activeSection === 'shortcuts'" />
               <UpdatesSection v-else-if="activeSection === 'updates'" />
               <AboutSection v-else-if="activeSection === 'about'" />
@@ -88,7 +82,6 @@ import TrackerSettingsPanel from './settings/TrackerSettingsPanel.vue'
 import GraphSettingsSection from './settings/GraphSettingsSection.vue'
 import ChatSettingsSection from './settings/ChatSettingsSection.vue'
 import LaunchersSection from './settings/LaunchersSection.vue'
-import AppsSettingsSection from './settings/AppsSettingsSection.vue'
 import ShortcutsSection from './settings/ShortcutsSection.vue'
 import UpdatesSection from './settings/UpdatesSection.vue'
 import AboutSection from './settings/AboutSection.vue'
@@ -100,7 +93,6 @@ import {
   IconKeyboard,
   IconInfoCircle,
   IconTerminal2,
-  IconApps,
   IconTopologyStar3,
   IconMessages,
   IconMicrophone,
@@ -113,7 +105,7 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   initialSection: { type: String, default: 'appearance' },
 })
-const emit = defineEmits(['close', 'launchApp', 'openDefinition'])
+const emit = defineEmits(['close'])
 
 const navGroups = [
   [
@@ -126,7 +118,6 @@ const navGroups = [
     { id: 'graph',      label: 'Graph',      icon: IconTopologyStar3 },
     { id: 'chat',       label: 'Chat',       icon: IconMessages },
     { id: 'launchers',  label: 'CLI tools',  icon: IconTerminal2 },
-    { id: 'apps',       label: 'Apps',       icon: IconApps },
   ],
   [
     { id: 'shortcuts',  label: 'Shortcuts',  icon: IconKeyboard },
@@ -141,7 +132,6 @@ const activeSection = ref(mapSection(props.initialSection))
 const activeLabel = computed(() => navItems.find(i => i.id === activeSection.value)?.label ?? '')
 const dialog = ref(null)
 const settingsNav = ref(null)
-const appsSection = ref(null)
 let previousFocus = null
 
 watch(() => props.open, async (val) => {
@@ -170,7 +160,6 @@ function mapSection(section) {
   if (['graph', 'knowledge', 'scopes'].includes(section)) return 'graph'
   if (['chat', 'chats'].includes(section)) return 'chat'
   if (['launchers', 'agents'].includes(section)) return 'launchers'
-  if (['apps', 'applications'].includes(section)) return 'apps'
   if (['shortcuts'].includes(section)) return 'shortcuts'
   if (['updates', 'update'].includes(section)) return 'updates'
   if (['about', 'info'].includes(section)) return 'about'
@@ -223,10 +212,6 @@ function onNavKeydown(event) {
 async function focusInitial() {
   await nextTick()
   if (!props.open) return
-  if (activeSection.value === 'apps' && appsSection.value?.focusInitial) {
-    appsSection.value.focusInitial()
-    return
-  }
   const selected = settingsNav.value
     ?.querySelector(`[data-settings-section="${activeSection.value}"]`)
   ;(selected || dialog.value)?.focus()

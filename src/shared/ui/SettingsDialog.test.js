@@ -1,25 +1,8 @@
-import { defineComponent, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import SettingsDialog from './SettingsDialog.vue'
 
-const AppsSettingsStub = defineComponent({
-  emits: ['launchApp', 'openDefinition'],
-  setup(_, { expose }) {
-    const input = ref(null)
-    expose({ focusInitial: () => input.value?.focus() })
-    return { input }
-  },
-  template: `
-    <div>
-      <input ref="input" data-apps-search-stub>
-      <button data-apps-settings @click="$emit('launchApp', { activity: { id: 'app:ledger' } })">Apps</button>
-      <button data-app-definition @click="$emit('openDefinition', '/apps/ledger/app.toml')">Definition</button>
-    </div>
-  `,
-})
-
-describe('SettingsDialog Apps ownership', () => {
+describe('SettingsDialog', () => {
   function render(initialSection = 'appearance', attachTo = null) {
     return mount(SettingsDialog, {
       props: { open: true, initialSection },
@@ -36,7 +19,6 @@ describe('SettingsDialog Apps ownership', () => {
             template: '<div data-tracker-settings-stub>Tracker controls</div>',
           },
           LaunchersSection: true,
-          AppsSettingsSection: AppsSettingsStub,
           ShortcutsSection: true,
           AboutSection: true,
         },
@@ -44,24 +26,13 @@ describe('SettingsDialog Apps ownership', () => {
     })
   }
 
-  it('owns Apps as a first-class Settings section rather than a shell row', async () => {
-    const wrapper = render()
-
-    await wrapper.get('[data-settings-section="apps"]').trigger('click')
-
-    expect(wrapper.get('[data-apps-settings]').exists()).toBe(true)
-    await wrapper.get('[data-apps-settings]').trigger('click')
-    expect(wrapper.emitted('launchApp')).toEqual([[{ activity: { id: 'app:ledger' } }]])
-    await wrapper.get('[data-app-definition]').trigger('click')
-    expect(wrapper.emitted('openDefinition')).toEqual([['/apps/ledger/app.toml']])
-  })
-
-  it('accepts an Apps deep link and puts keyboard focus in its catalog', async () => {
+  it('does not expose the deferred local-app manager', async () => {
     const wrapper = render('apps', document.body)
     await flushPromises()
 
-    expect(wrapper.get('[data-apps-settings]').exists()).toBe(true)
-    expect(document.activeElement).toBe(wrapper.get('[data-apps-search-stub]').element)
+    expect(wrapper.find('[data-settings-section="apps"]').exists()).toBe(false)
+    expect(wrapper.get('[data-settings-section="appearance"]').attributes('aria-current')).toBe('page')
+    expect(document.activeElement).toBe(wrapper.get('[data-settings-section="appearance"]').element)
     wrapper.unmount()
   })
 
