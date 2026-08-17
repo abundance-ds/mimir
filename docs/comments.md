@@ -14,6 +14,14 @@ The text between the opening tag and the first reply is the exact anchor.
 `status` is `active` or `resolved`. Replies are self-closing `<reply>` elements
 inside the comment.
 
+Anchors snap away from Markdown block markers
+(`src/services/comments/anchor.js`): an open tag inserted before a line's
+heading, list, task, or quote marker removes the marker from the line start
+and collapses the block's formatting. Both the Editor's Add Comment action and
+the agent `comment_add` tool snap the anchor start past indent and markers and
+pull an anchor end that stops at a line start back to the previous content
+line. A selection that covers only markers creates no comment.
+
 `src/services/comments/parser.js` parses attributes, replies, raw ranges,
 clean text, and clean-to-raw offset mappings. Attribute values are escaped and
 unescaped centrally.

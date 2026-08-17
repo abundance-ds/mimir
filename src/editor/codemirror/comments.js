@@ -687,6 +687,33 @@ const commentChangeFilter = EditorState.changeFilter.of((tr) => {
   return protectedRanges
 })
 
+// Protection filter for merge/diff surfaces. Merge-view chunk actions and
+// history replay dispatch without the commentMutation annotation, so the
+// editor's commentChangeFilter would silently suppress them and corrupt the
+// review result. Their tagged user events pass instead; ordinary hand edits
+// keep full tag protection.
+const concealmentChangeFilter = EditorState.changeFilter.of((tr) => {
+  if (tr.annotation(commentMutation)) return true
+  if (
+    tr.isUserEvent('accept')
+    || tr.isUserEvent('revert')
+    || tr.isUserEvent('undo')
+    || tr.isUserEvent('redo')
+  ) {
+    return true
+  }
+
+  const { comments } = tr.startState.field(commentTagField)
+  if (comments.length === 0) return true
+
+  const protectedRanges = []
+  for (const c of comments) {
+    protectedRanges.push(c.tagFrom, c.contentFrom)
+    protectedRanges.push(c.contentTo, c.tagTo)
+  }
+  return protectedRanges
+})
+
 // --- Layer 4: keymap — redirect backspace/delete at tag boundaries ---
 //
 // Without this, backspace/delete at a tag boundary would be silently blocked
@@ -912,4 +939,20 @@ export function commentsExtension({ onCommentClick, onCommentAction, onScroll, o
     ext.push(createScrollPlugin(onScroll, onGeometryChange))
   }
   return ext
+}
+
+// Concealment-only projection for diff/merge surfaces: hides comment tags,
+// keeps the quiet anchor highlight for active threads, and shows resolved
+// anchors as plain text — no discussion widgets. Tag protection uses the
+// merge-aware change filter above so chunk accept/revert and undo/redo are
+// never suppressed.
+export function commentConcealment() {
+  return [
+    commentTagField,
+    commentDecorations,
+    commentAtomicRanges,
+    concealmentChangeFilter,
+    commentKeyHandlers,
+    createClipboardHandler(),
+  ]
 }

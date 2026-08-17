@@ -66,6 +66,25 @@ describe('comment_add tool', () => {
     })
   })
 
+  it('snaps a list anchor past its marker so the list survives', async () => {
+    mockInvoke.mockImplementation(async (command) => {
+      if (command === 'read_text_file') return { content: '- alpha\n- beta' }
+      return undefined
+    })
+    const { comment_add } = createCommentAddTool(context)
+    const result = await comment_add.execute({
+      target: '/project/list.md',
+      anchor_text: '- alpha',
+      text: 'Check this item',
+    })
+
+    expect(result.status).toBe('created')
+    expect(result.anchor).toBe('alpha')
+    const written = mockInvoke.mock.calls.find(c => c[0] === 'write_text_file')[1].content
+    expect(written).toMatch(/^- <comment /)
+    expect(written).toContain('>alpha</comment>\n- beta')
+  })
+
   it('returns error when anchor_text not found', async () => {
     const { comment_add } = createCommentAddTool(context)
     const result = await comment_add.execute({

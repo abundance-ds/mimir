@@ -2,6 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { withGate } from './gate'
 import { parseCommentTags, cleanToRawPos, buildCommentTag } from '../../comments/parser'
+import { snapCommentAnchor } from '../../comments/anchor'
 import { resolveSafePath } from './textMatch'
 
 export function createCommentAddTool(context = {}) {
@@ -43,14 +44,22 @@ export function createCommentAddTool(context = {}) {
             return { error: 'anchor_text matches more than one passage. Provide a longer, unique anchor.' }
           }
 
-          const rawFrom = cleanToRawPos(offsetMap, idx)
-          const rawTo = cleanToRawPos(offsetMap, idx + anchor_text.length)
+          // Snap away from heading/list/quote markers so the wrapped line
+          // keeps its Markdown block role.
+          const snapped = snapCommentAnchor(
+            rawContent,
+            cleanToRawPos(offsetMap, idx),
+            cleanToRawPos(offsetMap, idx + anchor_text.length),
+          )
+          if (!snapped) return { error: 'anchor_text covers only Markdown structure. Anchor to passage text instead.' }
+          const { from: rawFrom, to: rawTo } = snapped
 
           const overlaps = comments.some(c => rawFrom < c.tagTo && rawTo > c.tagFrom)
           if (overlaps) return { error: 'Anchor text overlaps with an existing comment. Choose a non-overlapping passage.' }
 
           const id = Math.random().toString(36).slice(2, 6)
-          const tag = buildCommentTag({ id, author: 'ai', text, created: new Date().toISOString(), anchorText: anchor_text })
+          const anchorText = rawContent.slice(rawFrom, rawTo)
+          const tag = buildCommentTag({ id, author: 'ai', text, created: new Date().toISOString(), anchorText })
           const modified = rawContent.slice(0, rawFrom) + tag + rawContent.slice(rawTo)
 
           if (target === '@editor' && context.setDocument) {
@@ -61,7 +70,7 @@ export function createCommentAddTool(context = {}) {
             await emit('mimir://file-updated', { path: resolvedPath, content: modified })
           }
 
-          return { comment_id: id, status: 'created', anchor: anchor_text.slice(0, 80) }
+          return { comment_id: id, status: 'created', anchor: anchorText.slice(0, 80) }
         } catch (err) {
           return { error: err?.message || err }
         }

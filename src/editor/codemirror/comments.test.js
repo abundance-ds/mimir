@@ -4,6 +4,7 @@ import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
   commentsExtension,
+  commentConcealment,
   commentMutation,
   getCommentsFromState,
   changesMayAffectComments,
@@ -255,6 +256,76 @@ function bareChanges(doc, changes) {
   const state = EditorState.create({ doc })
   return { changes: state.update({ changes }).changes, startDoc: state.doc }
 }
+
+describe('commentConcealment for diff surfaces', () => {
+  function mountConcealed(doc) {
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({
+      state: EditorState.create({ doc, extensions: [commentConcealment()] }),
+      parent,
+    })
+    return { parent, view }
+  }
+
+  it('hides tags, keeps anchor text, and highlights only active threads', () => {
+    const doc = 'Intro '
+      + '<comment id="a1" author="user" text="Check" status="active" created="t">active anchor</comment>'
+      + ' middle '
+      + '<comment id="b2" author="user" text="Done" status="resolved" created="t">resolved anchor</comment>'
+      + ' end'
+    const { parent, view } = mountConcealed(doc)
+
+    const visible = view.contentDOM.textContent
+    expect(visible).not.toContain('<comment')
+    expect(visible).not.toContain('</comment>')
+    expect(visible).toContain('active anchor')
+    expect(visible).toContain('resolved anchor')
+
+    const highlighted = [...parent.querySelectorAll('.cm-comment-range')]
+      .map(mark => mark.textContent)
+      .join('')
+    expect(highlighted).toContain('active anchor')
+    expect(highlighted).not.toContain('resolved anchor')
+    expect(parent.querySelector('.cm-comment-block')).toBeNull()
+    view.destroy()
+  })
+
+  it('suppresses plain edits into hidden tags but admits merge chunk actions', () => {
+    const doc = 'a <comment id="a1" author="user" text="" status="active" created="t">x</comment> b'
+    const { view } = mountConcealed(doc)
+    const [comment] = getCommentsFromState(view.state)
+
+    view.dispatch({ changes: { from: comment.tagFrom, to: comment.tagFrom + 3 } })
+    expect(view.state.doc.toString()).toBe(doc)
+
+    view.dispatch({
+      changes: { from: comment.tagFrom, to: comment.tagTo },
+      userEvent: 'revert',
+    })
+    expect(view.state.doc.toString()).toBe('a  b')
+    view.destroy()
+  })
+
+  it('admits undo and redo user events through the protection filter', () => {
+    const doc = 'a <comment id="a1" author="user" text="" status="active" created="t">x</comment> b'
+    const { view } = mountConcealed(doc)
+    const [comment] = getCommentsFromState(view.state)
+
+    view.dispatch({
+      changes: { from: comment.tagFrom, to: comment.tagTo, insert: 'restored' },
+      userEvent: 'undo',
+    })
+    expect(view.state.doc.toString()).toBe('a restored b')
+
+    view.dispatch({
+      changes: { from: 2, to: 10, insert: 'again' },
+      userEvent: 'redo',
+    })
+    expect(view.state.doc.toString()).toBe('a again b')
+    view.destroy()
+  })
+})
 
 describe('commentTagField incremental updates', () => {
   it('maps positions without reparsing when typing outside all comments', () => {

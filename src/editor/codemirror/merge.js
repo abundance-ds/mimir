@@ -6,6 +6,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxHighlighting } from '@codemirror/language'
 import { Strikethrough } from '@lezer/markdown'
 import { editorTheme, editorHighlightStyle, wrapCompartment } from './core.js'
+import { commentConcealment } from './comments.js'
 
 const mergeViewCompartment = new Compartment()
 const diffConfig = { scanLimit: 5000 }
@@ -18,6 +19,9 @@ const sharedDiffExtensions = [
   wrapCompartment.of(EditorView.lineWrapping),
   history(),
   keymap.of(historyKeymap),
+  // Hide pseudo-XML comment tags in every diff pane; resolved threads read
+  // as plain text, exactly as they do in the editor's document flow.
+  commentConcealment(),
 ]
 
 function chunkWatcherPlugin(onAllResolved, onChunkCountChange) {
@@ -174,6 +178,8 @@ export function createSplitDiffView({
           insert += mv.b.state.lineBreak
         mv.a.dispatch({
           changes: { from: chunk.fromA, to: Math.min(mv.a.state.doc.length, chunk.toA), insert },
+          // Tagged so the comment concealment change filter admits it.
+          userEvent: 'accept',
         })
         requestAnimationFrame(() => {
           if (mv && mv.chunks.length === 0) {
