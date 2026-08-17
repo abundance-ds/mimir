@@ -5,6 +5,7 @@ import { StreamLanguage } from '@codemirror/language'
 import {
   computeStats,
   createEditor,
+  editorHighlightStyle,
   editorInputAttributesExtension,
   languageExtensionForPath,
   lineIndicatorExtensions,
@@ -122,6 +123,18 @@ describe('editorInputAttributesExtension', () => {
 })
 
 describe('createEditor', () => {
+  it('uses a compact tonal and weight hierarchy for Markdown headings', () => {
+    expect(editorHighlightStyle.specs.slice(0, 3).map(({ fontWeight, fontSize, color }) => ({
+      fontWeight,
+      fontSize,
+      color,
+    }))).toEqual([
+      { fontWeight: '700', fontSize: '1.3em', color: 'var(--editor-heading-1)' },
+      { fontWeight: '650', fontSize: '1.15em', color: 'var(--color-ink)' },
+      { fontWeight: '560', fontSize: '1.05em', color: 'var(--color-ink-3)' },
+    ])
+  })
+
   it('creates a view holding the doc with wrap on and chrome hidden by default', () => {
     const view = makeEditor({ doc: '# Title\n\nBody', path: '/notes/readme.md' })
     expect(view.state.doc.toString()).toBe('# Title\n\nBody')

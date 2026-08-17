@@ -193,8 +193,7 @@ class ImageWidget extends WidgetType {
 }
 
 function buildDecorations(view, isEnabled, getFilePath) {
-  if (!isEnabled()) return Decoration.none
-
+  const enabled = isEnabled()
   const { state } = view
 
   const cursorLines = new Set()
@@ -220,7 +219,19 @@ function buildDecorations(view, isEnabled, getFilePath) {
       const nFrom = node.from
       const nTo = node.to
 
+      if (name.startsWith('ATXHeading')) {
+        syntaxTree(state).iterate({
+          from: nFrom, to: nTo,
+          enter(child) {
+            if (child.type.name === 'HeaderMark') {
+              decos.push(Decoration.mark({ class: 'cm-lp-heading-mark' }).range(child.from, child.to))
+            }
+          },
+        })
+        if (!enabled) return false
+      }
 
+      if (!enabled) return
 
       if (name === 'FencedCode' || name === 'CodeBlock') return false
 
@@ -339,17 +350,6 @@ function buildDecorations(view, isEnabled, getFilePath) {
           decos.push(Decoration.replace({ widget: new ImageWidget(imgUrl, absPath) }).range(nFrom, nTo))
         }
         return false
-      }
-
-      if (name.startsWith('ATXHeading') && !onCursorLine) {
-        syntaxTree(state).iterate({
-          from: nFrom, to: nTo,
-          enter(child) {
-            if (child.type.name === 'HeaderMark') {
-              decos.push(Decoration.mark({ class: 'cm-lp-heading-mark' }).range(child.from, child.to))
-            }
-          },
-        })
       }
 
       if (name === 'Blockquote' && !onCursorLine) {
@@ -504,8 +504,13 @@ const livePreviewTheme = EditorView.baseTheme({
     textUnderlineOffset: '2px',
   },
   '.cm-lp-heading-mark': {
-    opacity: '0.25',
-    fontSize: '0.7em',
+    color: 'var(--syntax-keyword)',
+    fontSize: '1em',
+    fontWeight: '700',
+  },
+  '.cm-lp-heading-mark > span': {
+    color: 'var(--syntax-keyword)',
+    fontWeight: '700',
   },
   '.cm-lp-blockquote-line': {
     borderLeft: '3px solid var(--color-accent)',

@@ -3,14 +3,15 @@
 :root {
   --ink: var(--color-ink);
   --ink-strong: var(--color-ink);
+  --editor-heading-1: var(--syntax-keyword);
   --editor-paper: var(--color-surface);
   --accent: var(--color-accent);
   --muted: var(--color-ink-3);
   --active-line: var(--color-line-soft);
   --selection: var(--color-accent-soft);
   --inline-code-bg: var(--color-chrome-mid);
-  --code: var(--color-ink-2);
-  --quote: var(--color-ink-3);
+  --code: color-mix(in srgb, var(--color-ink-2) 82%, var(--syntax-string));
+  --quote: color-mix(in srgb, var(--color-ink-3) 88%, var(--syntax-keyword));
   --line-strong: var(--color-rule);
   --panel: var(--color-chrome-mid);
   --shadow-low: 0 2px 8px rgba(0, 0, 0, 0.08);

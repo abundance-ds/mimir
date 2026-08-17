@@ -3,8 +3,9 @@ import { EditorState, StateEffect } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { Strikethrough } from '@lezer/markdown'
-import { syntaxTree, ensureSyntaxTree } from '@codemirror/language'
+import { syntaxHighlighting, syntaxTree, ensureSyntaxTree } from '@codemirror/language'
 import { livePreviewExtension, _buildDecorations, _parseMarkdownTable, _resolveImagePath } from './livePreview.js'
+import { editorHighlightStyle } from './core.js'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -50,6 +51,14 @@ describe('livePreview', () => {
       const view = makeView('**bold**')
       const decos = _buildDecorations(view, () => false, null)
       expect(decos.size).toBe(0)
+      view.destroy()
+    })
+
+    it('keeps heading marker colour when Live Preview is disabled', () => {
+      const view = makeView('## Heading')
+      const decos = _buildDecorations(view, () => false, null)
+      const iter = decos.iter()
+      expect(iter.value?.spec?.class).toBe('cm-lp-heading-mark')
       view.destroy()
     })
 
@@ -107,7 +116,7 @@ describe('livePreview', () => {
       expect(link.length).toBe(1)
     })
 
-    it('dims heading marks when cursor is away', () => {
+    it('styles heading marks when cursor is away', () => {
       const doc = '# Heading\n\nother'
       const cursorPos = doc.indexOf('other')
       const decos = getDecos(doc, cursorPos)
@@ -115,10 +124,10 @@ describe('livePreview', () => {
       expect(headingMark.length).toBe(1)
     })
 
-    it('does not dim heading marks when cursor is on heading line', () => {
+    it('keeps heading marker colour when cursor is on heading line', () => {
       const doc = '# Heading'
       const decos = getDecos(doc, 3)
-      expect(decos.length).toBe(0)
+      expect(decos.filter(d => d.class === 'cm-lp-heading-mark')).toHaveLength(1)
     })
 
     it('replaces horizontal rule with widget', () => {
@@ -211,6 +220,35 @@ describe('livePreview', () => {
       attachLanguage(view)
       expect(view.dom.querySelector('.cm-lp-table')).not.toBeNull()
       view.destroy()
+    })
+  })
+
+  describe('rendered heading marks', () => {
+    it('keeps the accent on the nested marker span', () => {
+      const parent = document.createElement('div')
+      document.body.appendChild(parent)
+      document.documentElement.style.setProperty('--syntax-keyword', 'rgb(18, 52, 86)')
+      document.documentElement.style.setProperty('--color-ink', 'rgb(220, 220, 220)')
+
+      const state = EditorState.create({
+        doc: '## Heading',
+        selection: { anchor: 4 },
+        extensions: [
+          markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+          syntaxHighlighting(editorHighlightStyle),
+          livePreviewExtension(() => false, () => '/test/file.md'),
+        ],
+      })
+      const view = new EditorView({ state, parent })
+      const marker = view.dom.querySelector('.cm-lp-heading-mark > span')
+      const heading = view.dom.querySelector('.cm-lp-heading-mark + span')
+
+      expect(getComputedStyle(marker).color).toBe('rgb(18, 52, 86)')
+      expect(getComputedStyle(heading).color).toBe('rgb(220, 220, 220)')
+      view.destroy()
+      parent.remove()
+      document.documentElement.style.removeProperty('--syntax-keyword')
+      document.documentElement.style.removeProperty('--color-ink')
     })
   })
 
