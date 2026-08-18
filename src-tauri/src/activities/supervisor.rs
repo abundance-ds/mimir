@@ -45,9 +45,15 @@ const USER_STOP_INTENT: u8 = 1;
 const QUIT_INTERRUPT_INTENT: u8 = 2;
 const OUTPUT_RECORD_PERSIST_INTERVAL_MS: u64 = 2_000;
 /// Coalescing window for PTY output events: bytes read within one frame are
-/// published as a single `ActivityEvent::Output`. The first bytes after a
-/// quiet period flush immediately, so interactive echo never waits a frame.
+/// published as a single `ActivityEvent::Output`.
 const OUTPUT_FLUSH_FRAME: Duration = Duration::from_millis(16);
+/// Gather window for the first bytes after a quiet period. A full-screen TUI
+/// repaint (erase + redraw, one stdout write) reaches the reader as several
+/// PTY reads microseconds apart; publishing the first read alone lets the
+/// renderer paint the erased intermediate state, which shows as flicker in
+/// the repainted region. Holding the first flush this long keeps the whole
+/// repaint in one Output event. Echo latency grows by at most this much.
+const OUTPUT_FLUSH_GATHER: Duration = Duration::from_millis(2);
 /// Pending-output cap that forces an immediate flush mid-frame and blocks the
 /// PTY reader until drained, preserving real backpressure toward the child.
 const OUTPUT_FLUSH_BUFFER_BYTES: usize = 256 * 1024;
@@ -1920,9 +1926,9 @@ fn reader_loop(
 }
 
 /// Drains coalesced PTY output at most once per `OUTPUT_FLUSH_FRAME`. The
-/// first bytes after a quiet period flush immediately (the frame deadline has
-/// already passed), so keystroke echo stays instant; sustained floods collapse
-/// into one Output event per frame. A full buffer or a close flushes at once.
+/// first bytes after a quiet period wait `OUTPUT_FLUSH_GATHER` so a burst
+/// (a TUI repaint) publishes whole; sustained floods collapse into one
+/// Output event per frame. A full buffer or a close flushes at once.
 fn output_flush_loop(
     inner: Arc<SupervisorInner>,
     activity: Arc<ManagedActivity>,
@@ -1930,27 +1936,7 @@ fn output_flush_loop(
 ) {
     let mut next_flush_at = Instant::now();
     loop {
-        let (bytes, closed) = {
-            let state = lock(&coalescer.state);
-            let mut state = coalescer
-                .wakeup
-                .wait_while(state, |state| state.pending.is_empty() && !state.closed)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            while !state.closed && state.pending.len() < OUTPUT_FLUSH_BUFFER_BYTES {
-                let Some(remaining) = next_flush_at.checked_duration_since(Instant::now()) else {
-                    break;
-                };
-                let (next_state, timeout) = coalescer
-                    .wakeup
-                    .wait_timeout(state, remaining)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                state = next_state;
-                if timeout.timed_out() {
-                    break;
-                }
-            }
-            (std::mem::take(&mut state.pending), state.closed)
-        };
+        let (bytes, closed) = drain_output(&coalescer, next_flush_at, OUTPUT_FLUSH_GATHER);
         // Wake a reader blocked on the buffer cap now that it is drained.
         coalescer.wakeup.notify_all();
         if bytes.is_empty() {
@@ -1963,6 +1949,43 @@ fn output_flush_loop(
             return;
         }
     }
+}
+
+/// Blocks until pending output is ready to publish, then drains it. Mid-flood
+/// wakes hold to `next_flush_at`; after a quiet period (deadline already
+/// passed) the drain waits `gather` from now instead of returning the first
+/// read alone. A close or a buffer over `OUTPUT_FLUSH_BUFFER_BYTES` drains
+/// immediately. Returns the drained bytes and whether the coalescer closed.
+fn drain_output(
+    coalescer: &OutputCoalescer,
+    next_flush_at: Instant,
+    gather: Duration,
+) -> (Vec<u8>, bool) {
+    let state = lock(&coalescer.state);
+    let mut state = coalescer
+        .wakeup
+        .wait_while(state, |state| state.pending.is_empty() && !state.closed)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let now = Instant::now();
+    let deadline = if next_flush_at > now {
+        next_flush_at
+    } else {
+        now + gather
+    };
+    while !state.closed && state.pending.len() < OUTPUT_FLUSH_BUFFER_BYTES {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        let (next_state, timeout) = coalescer
+            .wakeup
+            .wait_timeout(state, remaining)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state = next_state;
+        if timeout.timed_out() {
+            break;
+        }
+    }
+    (std::mem::take(&mut state.pending), state.closed)
 }
 
 fn agent_status_poll_loop(inner: Arc<SupervisorInner>, activity: Arc<ManagedActivity>) {
@@ -2608,6 +2631,44 @@ mod tests {
         let state = lock(&coalescer.state);
         assert_eq!(state.pending, b"tail");
         assert!(state.closed);
+    }
+
+    #[test]
+    fn quiet_period_burst_gathers_into_one_drain() {
+        let coalescer = OutputCoalescer::new();
+        coalescer.push(b"\x1b[1A\x1b[2K");
+        let pusher_coalescer = coalescer.clone();
+        let pusher = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            pusher_coalescer.push(b"redrawn frame");
+        });
+        // The frame deadline passed long ago (quiet period). The gather
+        // window must hold the drain until the rest of the repaint burst
+        // arrives, so erase and redraw publish as one event.
+        let (bytes, closed) = drain_output(
+            &coalescer,
+            Instant::now() - Duration::from_secs(1),
+            Duration::from_millis(200),
+        );
+        pusher.join().unwrap();
+        assert_eq!(bytes, b"\x1b[1A\x1b[2Kredrawn frame".to_vec());
+        assert!(!closed);
+    }
+
+    #[test]
+    fn close_ends_the_gather_window_immediately() {
+        let coalescer = OutputCoalescer::new();
+        coalescer.push(b"tail");
+        coalescer.close();
+        let started = Instant::now();
+        let (bytes, closed) = drain_output(
+            &coalescer,
+            Instant::now() - Duration::from_secs(1),
+            Duration::from_secs(30),
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(bytes, b"tail".to_vec());
+        assert!(closed);
     }
 
     #[cfg(unix)]
