@@ -15,6 +15,8 @@
       dragSource ? 'opacity-45' : '',
     ]"
     @contextmenu.prevent="$emit('context', row, $event)"
+    @click="select"
+    @dblclick.prevent="activate"
   >
     <span
       v-for="guide in row.depth"
@@ -34,6 +36,8 @@
       v-if="editing"
       class="flex h-full min-w-0 flex-1 items-center"
       :style="{ paddingLeft: `${7 + row.depth * 17}px` }"
+      @click.stop
+      @dblclick.stop
       @submit.prevent="$emit('commit-edit')"
     >
       <span class="grid size-5 shrink-0 place-items-center text-ink-3">
@@ -61,8 +65,6 @@
       :style="{ paddingLeft: `${4 + row.depth * 17}px` }"
       :title="entry.relativePath || entry.name"
       :aria-label="entryAriaLabel"
-      @click="select"
-      @dblclick.prevent="activate"
     >
       <span class="grid size-5 shrink-0 place-items-center text-ink-4">
         <IconLoader2
