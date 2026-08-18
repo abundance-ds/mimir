@@ -63,6 +63,7 @@ describe('settings store', () => {
     })
     expect(store.recentWorkspaceFolders).toEqual([])
     expect(store.workbenchFileFavorites).toEqual({})
+    expect(store.workbenchFileSort).toEqual({})
     expect(store.workbenchLayout).toEqual({
       sidebar: { state: 'expanded', width: 240 },
       activity: { state: 'expanded', width: 560 },
@@ -153,6 +154,30 @@ describe('settings store', () => {
     const store = useSettingsStore()
     store.set('recentAppIds', ['one', 'two'])
     expect(store.recentAppIds).toEqual(['one', 'two'])
+  })
+
+  it('persists detached file sort state by workspace and view', async () => {
+    vi.useFakeTimers()
+    const store = useSettingsStore()
+    await store.load()
+    const state = {
+      '/w': {
+        project: { key: 'modified', direction: 'desc' },
+        recent: { key: 'view', direction: 'asc' },
+        favorites: { key: 'name', direction: 'asc' },
+      },
+    }
+
+    store.set('workbenchFileSort', state)
+    state['/w'].project.key = 'name'
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(store.workbenchFileSort['/w'].project.key).toBe('modified')
+    const persisted = JSON.parse(storage.get('mimir:editor:settings:v1'))
+    expect(persisted.workbenchFileSort['/w'].project).toEqual({
+      key: 'modified',
+      direction: 'desc',
+    })
   })
 
   it('clones persisted business graph view state instead of retaining caller references', () => {

@@ -7,6 +7,7 @@ import { useSettingsStore } from '../../stores/settings.js'
 import * as operations from '../../services/workspaceFileOperations.js'
 import { loadGitChanges } from '../../services/gitChanges.js'
 import { loadGitReviewChanges } from '../../services/gitReview.js'
+import { formatModifiedTime } from '../files/fileLedger.js'
 import FilesActivity from './FilesActivity.vue'
 
 vi.mock('../../services/fileIndex.js', () => ({
@@ -135,8 +136,8 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-files-mode="changes"]').exists()).toBe(true)
     expect(rows.map((row) => row.attributes('data-file-row'))).toEqual([
       '/w/docs',
-      '/w/new.md',
       '/w/chart.png',
+      '/w/new.md',
     ])
     expect(wrapper.get('[data-files-new-file]').attributes('title')).toContain('New file')
     expect(wrapper.get('[data-files-new-folder]').attributes('title')).toContain('New folder')
@@ -144,16 +145,98 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Filter project files')
   })
 
-  it('shows the adaptive file ledger with modification time, size, and fixed favorite controls', () => {
+  it('shows the adaptive file ledger with kind, exact modification time, size, and fixed favorite controls', () => {
     const wrapper = render()
 
+    expect(wrapper.get('[data-files-ledger-header]').text()).toContain('Kind')
     expect(wrapper.get('[data-files-ledger-header]').text()).toContain('Modified')
     expect(wrapper.get('[data-files-ledger-header]').text()).toContain('Size')
+    expect(wrapper.get('[data-file-row="/w/new.md"] [data-file-kind]').text()).toBe('Markdown')
     expect(wrapper.get('[data-file-row="/w/new.md"] [data-file-size]').text()).toBe('1.5 KB')
-    expect(wrapper.get('[data-file-row="/w/new.md"] [data-file-modified]').text()).toBe('now')
+    expect(wrapper.get('[data-file-row="/w/new.md"] [data-file-modified]').text())
+      .toBe(formatModifiedTime(indexed[0].mtime))
     expect(wrapper.get('[data-file-row="/w/docs"] [data-file-size]').text()).toBe('—')
     expect(wrapper.get('[data-file-row="/w/new.md"] [data-file-favorite]').classes())
       .not.toContain('opacity-0')
+  })
+
+  it('sorts from column headers, reverses on the second click, and preserves selection', async () => {
+    const store = useWorkspaceFilesStore()
+    const settings = useSettingsStore()
+    store.treeChildren = { '': [
+      { ...browseEntries[0] },
+      { ...browseEntries[1], mtime: 100, size: 1536 },
+      { ...browseEntries[2], mtime: 200, size: 2048 },
+    ] }
+    const wrapper = render()
+    document.body.appendChild(wrapper.element)
+
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+    const modifiedHeader = wrapper.get('[data-file-sort-header="modified"]')
+    await modifiedHeader.trigger('click')
+    expect(wrapper.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual([
+      '/w/docs',
+      '/w/chart.png',
+      '/w/new.md',
+    ])
+    expect(modifiedHeader.attributes('data-file-sort-active')).toBe('')
+    expect(modifiedHeader.attributes('aria-label')).toContain('Newest first')
+    expect(modifiedHeader.find('[data-file-sort-arrow]').exists()).toBe(true)
+    expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
+    expect(settings.workbenchFileSort['/w'].project).toEqual({ key: 'modified', direction: 'desc' })
+
+    await modifiedHeader.trigger('click')
+    expect(wrapper.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual([
+      '/w/docs',
+      '/w/new.md',
+      '/w/chart.png',
+    ])
+    expect(modifiedHeader.attributes('aria-label')).toContain('Oldest first')
+    expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
+    expect(settings.workbenchFileSort['/w'].project).toEqual({ key: 'modified', direction: 'asc' })
+
+    wrapper.unmount()
+  })
+
+  it('keeps a keyboard-accessible sort menu for hidden columns and view order', async () => {
+    const wrapper = render()
+    document.body.appendChild(wrapper.element)
+    const sortButton = wrapper.get('[data-files-sort-button]')
+    sortButton.element.focus()
+    await sortButton.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(wrapper.get('[data-file-sort-option="name"]').element)
+
+    await wrapper.get('[data-file-sort-option="kind"]').trigger('click')
+    expect(wrapper.get('[data-file-sort-header="kind"]').attributes('data-file-sort-active')).toBe('')
+    expect(document.activeElement).toBe(sortButton.element)
+
+    await sortButton.trigger('click')
+    await wrapper.get('[data-files-sort-menu]').trigger('keydown', { key: 'Escape' })
+    expect(document.activeElement).toBe(sortButton.element)
+    wrapper.unmount()
+  })
+
+  it('restores independent workspace sort state for each Files view', async () => {
+    const settings = useSettingsStore()
+    settings.set('workbenchFileSort', {
+      '/w': {
+        project: { key: 'size', direction: 'desc' },
+        recent: { key: 'name', direction: 'desc' },
+        favorites: { key: 'kind', direction: 'asc' },
+      },
+    })
+    const wrapper = render()
+
+    expect(wrapper.get('[data-file-sort-header="size"]').attributes('data-file-sort-active')).toBe('')
+    expect(wrapper.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual([
+      '/w/docs',
+      '/w/chart.png',
+      '/w/new.md',
+    ])
+
+    await wrapper.get('[data-files-mode="recent"]').trigger('click')
+    expect(wrapper.get('[data-file-sort-header="name"]').attributes('data-file-sort-active')).toBe('')
+    expect(wrapper.get('[data-file-sort-header="name"]').attributes('aria-label')).toContain('Z–A')
   })
 
   it('lazily expands folders and uses preview-on-click, permanent-on-double-click', async () => {
@@ -334,8 +417,8 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-files-delete-dialog]').text()).toContain('2 items')
     await wrapper.get('[data-files-confirm-delete]').trigger('click')
     expect(operations.trashWorkspaceEntries).toHaveBeenCalledWith([
-      '/w/new.md',
       '/w/chart.png',
+      '/w/new.md',
     ])
   })
 
@@ -463,7 +546,7 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-file-row="/w/docs"]').attributes('aria-selected')).toBe('true')
 
     await input.trigger('keydown', { key: 'ArrowUp' })
-    expect(wrapper.get('[data-file-row="/w/chart.png"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
   })
 
   it('searches file contents through the visible scope control', async () => {
@@ -803,18 +886,18 @@ describe('FilesActivity', () => {
 
       // Focus and select the last row, then import into a folder whose new
       // child the reload does not surface.
-      await wrapper.get('[data-file-row="/w/chart.png"] button').trigger('click')
+      await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
       operations.listWorkspaceDirectory.mockResolvedValue([])
       hover('[data-file-row="/w/docs"]')
       await handler({ payload: { type: 'drop', position: { x: 0, y: 0 }, paths: ['/D/brief.md'] } })
       await flushPromises()
 
-      expect(wrapper.get('[data-file-row="/w/chart.png"]').attributes('aria-selected')).toBe('true')
+      expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
 
       // Focus is still on the last row: stepping up lands on its neighbour,
       // not on the row a reset-to-zero focus would wrap around to.
       await wrapper.get('[data-files-list]').trigger('keydown', { key: 'ArrowUp' })
-      expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
+      expect(wrapper.get('[data-file-row="/w/chart.png"]').attributes('aria-selected')).toBe('true')
     })
 
     it('surfaces a failed import without leaving the panel highlighted', async () => {

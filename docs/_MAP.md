@@ -73,7 +73,8 @@ resizing, rails, widths, and Activity navigation history.
 - Files: `src/stores/workspaceFiles.js` (index/tree state),
   `src/services/fileIndex.js`, `src/services/workspaceFileOperations.js`,
   `src/mimir/files/` (selection/favorites/mutations/drop composables),
-  `src/mimir/components/FileTreeRow.vue`, `src/mimir/components/GitChangesList.vue`,
+  `src/mimir/components/FileTreeRow.vue`, `src/mimir/components/FileSortHeader.vue`,
+  `src/mimir/components/FileSortMenu.vue`, `src/mimir/components/GitChangesList.vue`,
   `src/services/fileSystem.js`, `src/services/gitReview.js`,
   `src/stores/gitReview.js`,
   `src/stores/files.js` (typed tabs, dirty state, recents). Docs:

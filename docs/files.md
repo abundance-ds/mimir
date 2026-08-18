@@ -7,7 +7,7 @@ Files spans five state owners. Keep them separate when changing behavior:
 | regular-file metadata, fuzzy path results, bounded content hits | `src-tauri/src/file_index.rs`, `file_index_commands.rs` | `src/services/fileIndex.js`, `src/stores/workspaceFiles.js` |
 | immediate directory children and mutation safety | `src-tauri/src/workspace_files.rs` | `src/services/workspaceFileOperations.js`, `workspaceFiles.treeChildren` |
 | open tabs and user-opened recents | — | `src/stores/files.js` |
-| Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mimir/activities/FilesActivity.vue`, `src/mimir/files/`, `src/mimir/components/FileTreeRow.vue` |
+| Project/Recent/Favorites composition, selection, inline actions, Git decoration | — | `src/mimir/activities/FilesActivity.vue`, `src/mimir/files/`, `src/mimir/components/FileTreeRow.vue`, `FileSortHeader.vue`, `FileSortMenu.vue` |
 | Git change scopes, review snapshots, and index actions | `src-tauri/src/git.rs` | `src/services/gitReview.js`, `src/stores/gitReview.js`, `GitChangesList.vue` |
 
 The metadata index and directory tree are intentionally different projections.
@@ -39,12 +39,23 @@ special meaning belongs to the graph and agent runtimes.
   UI prove a fallback is missing.
 - Favorite directories can expose their loaded descendants. Renaming a
   directory rewrites favorites for the directory and every descendant.
-- Files is an adaptive ledger. At ordinary Activity widths each row aligns
-  Name, Git, Modified, Size, and Favorite. Size leaves first as the pane
-  narrows, then Modified; the selected file's metadata moves to the footer at
-  the minimum pane width. Directory time and size show `—` because a folder
-  timestamp is not a reliable summary of its descendants. Favorite controls
-  remain visible instead of appearing only on hover.
+- Files is an adaptive ledger. At the default Activity width each row aligns
+  Name, Kind, Git, Modified, Size, and Favorite. Kind leaves first as the pane
+  narrows, then Size, then Modified; the selected file's metadata moves to the
+  footer at the minimum pane width. Modified uses the exact local
+  `YYYY-MM-DD HH:mm` value, not a changing relative age. Directory time and
+  size show `—` because a folder timestamp is not a reliable summary of its
+  descendants. Favorite controls remain visible instead of appearing only on
+  hover.
+- Every visible ledger header is a sort control: Name, Kind, Git, Modified,
+  Size, and Favorite. The first click selects the column with its useful
+  default order; the next click reverses it. The active header shows one
+  direction arrow. A secondary header menu exposes columns that responsive
+  layout hides and restores Recent's `Recently opened` order. Project sorts
+  each directory's immediate children and keeps folders before files, so
+  sorting does not flatten or destabilize the tree. Selection and keyboard
+  position follow the same file after rows move. Sort state persists per
+  workspace and view under `settings.workbenchFileSort`.
 - Paths filters names and relative paths. Contents runs the bounded native
   content search and shows file, line, column, and excerpt. The scope control
   remains visible, and Recent/Favorites content results stay inside their
@@ -68,8 +79,10 @@ favorites identity, path normalization, and filesystem mutations. Mutation
 state and cleanup must stay in `useFileMutations.js`; tree rows remain
 presentation-only.
 `workspaceFiles.js` owns reusable index/search tokens and directory caches.
-`FileTreeRow.vue` is presentation plus ARIA only; moving operational state into
-the row creates per-row authorities and breaks keyboard/multi-select behavior.
+`FileTreeRow.vue`, `FileSortHeader.vue`, and `FileSortMenu.vue` own presentation
+and ARIA only; moving file or sort authority into them creates per-row or
+per-control authorities and breaks the Activity's shared ordering and keyboard
+behavior.
 
 ## Open and tab semantics
 
@@ -228,7 +241,7 @@ repoint or release.
 |---|---|---|
 | scan, ordering, ignore, path/content query | `file_index.rs`, `file_index_commands.rs`, `fileIndex.js`, `workspaceFiles.js`, Quick Open | native index tests; store and Quick Open tests |
 | tree load/expand/refresh | `workspace_files.rs`, `workspaceFileOperations.js`, `workspaceFiles.js`, `FilesActivity.vue` | native workspace-file, service, store, Files Activity tests |
-| row ledger, metadata formatting, focus, selection, context actions | `FilesActivity.vue`, `mimir/files/fileLedger.js`, `mimir/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue` | Files Activity, ledger, and file-controller tests |
+| row ledger, metadata formatting, sorting, focus, selection, context actions | `FilesActivity.vue`, `mimir/files/fileLedger.js`, `mimir/files/useFileSelection.js`, `useFileContextMenu.js`, `FileTreeRow.vue`, `FileSortHeader.vue`, `FileSortMenu.vue` | Files Activity, ledger, and file-controller tests |
 | favorites | `mimir/files/useFileFavorites.js`, `stores/settings.js`, settings persistence | file-controller, Files Activity, and settings tests |
 | Git queue, snapshot review, stage/unstage | `git.rs`, `gitReview.js` service/store, `GitChangesList.vue`, Editor Git review surface, Workbench agent handoff | native Git tests; Git service/store/components; Files Activity, Editor tab, and Workbench bridge tests |
 | open classification/preview tabs | `workspace_files.rs`, `workspaceFileOperations.js`, `editor/App.vue`, `stores/files.js`, `FilePreviewPage.vue`, `PdfPreview.vue`, `fileSystem.js` | workspace-file/service, Editor, file-store, preview tests |

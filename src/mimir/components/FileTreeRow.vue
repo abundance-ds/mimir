@@ -115,6 +115,14 @@
     </button>
 
     <span
+      data-file-kind
+      class="files-ledger-kind min-w-0 truncate px-1 font-mono text-[9px] text-ink-3"
+      :title="kindDisplay"
+    >
+      {{ kindDisplay }}
+    </span>
+
+    <span
       data-file-git
       class="px-1 text-right font-mono text-[9px] font-semibold tabular-nums"
       :class="gitClass"
@@ -182,6 +190,7 @@ import {
 import {
   formatFileSize,
   formatModifiedTime,
+  fileKind,
   gitLabel,
   gitMark,
   modifiedDateTime,
@@ -198,7 +207,6 @@ const props = defineProps({
   editing: { type: Boolean, default: false },
   editKind: { type: String, default: 'file' },
   editDraft: { type: String, default: '' },
-  now: { type: Number, default: () => Date.now() },
 })
 
 const emit = defineEmits([
@@ -233,8 +241,9 @@ const iconClass = computed(() => {
   if (entry.value.openBehavior === 'pdf' || extension.value === 'pdf') return 'text-rem'
   return props.active ? 'text-accent' : 'text-ink-3'
 })
+const kindDisplay = computed(() => fileKind(entry.value))
 const modifiedDisplay = computed(() => (
-  entry.value.isDirectory ? '—' : formatModifiedTime(entry.value.mtime, props.now)
+  entry.value.isDirectory ? '—' : formatModifiedTime(entry.value.mtime)
 ))
 const modifiedTitle = computed(() => {
   const dateTime = modifiedDateTime(entry.value.mtime)
@@ -267,6 +276,7 @@ const gitClass = computed(() => ({
 const entryAriaLabel = computed(() => {
   const parts = [entry.value.name]
   if (props.row.missing) parts.push('Missing')
+  parts.push(kindDisplay.value)
   if (gitTitle.value) parts.push(gitTitle.value)
   if (!entry.value.isDirectory) {
     parts.push(`Modified ${modifiedDisplay.value}`)
@@ -312,12 +322,22 @@ function activate() {
 
 <style scoped>
 .files-ledger-grid {
-  grid-template-columns: minmax(180px, 1fr) 40px 78px 60px 28px;
+  grid-template-columns: minmax(180px, 1fr) 86px 40px 112px 60px 28px;
 }
 
-@container files (max-width: 519px) {
+@container files (max-width: 539px) {
   .files-ledger-grid {
-    grid-template-columns: minmax(180px, 1fr) 40px 78px 28px;
+    grid-template-columns: minmax(180px, 1fr) 40px 112px 60px 28px;
+  }
+
+  .files-ledger-kind {
+    display: none;
+  }
+}
+
+@container files (max-width: 479px) {
+  .files-ledger-grid {
+    grid-template-columns: minmax(180px, 1fr) 40px 112px 28px;
   }
 
   .files-ledger-size {

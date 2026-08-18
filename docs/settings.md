@@ -92,6 +92,11 @@ The scope inventory in Settings reports which component folders exist in each
 root. Changing view state must use `settings.set` with a newly constructed
 object.
 
+Files presentation state is also workspace-scoped. `workbenchFileFavorites`
+stores favorite paths, and `workbenchFileSort` stores the Project, Recent, and
+Favorites sort key and direction under each normalized workspace path. Both
+use `settings.set` with a new top-level object.
+
 `sidebarChatsCollapsed` and `chatNotifications` are local presentation/preference
 state; they do not affect chat-server behavior. The Show Chats switch updates
 native `chat.json` `enabled`, controlling the connection and native tool

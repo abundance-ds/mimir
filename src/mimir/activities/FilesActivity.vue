@@ -1,5 +1,6 @@
 <template>
   <section
+    ref="activityRef"
     data-files-activity
     class="files-activity relative flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
     aria-label="Files"
@@ -159,14 +160,83 @@
     <div
       v-if="files.workspacePath && !contentMode && viewMode !== 'changes'"
       data-files-ledger-header
-      aria-hidden="true"
+      role="group"
+      aria-label="Sort files"
       class="files-ledger-grid grid h-7 min-w-[248px] shrink-0 items-center border-b border-rule-light bg-chrome-high px-0 font-mono text-[9px] text-ink-4"
     >
-      <span class="pl-3">Name</span>
-      <span class="px-1 text-right">Git</span>
-      <span class="files-ledger-modified px-1 text-right">Modified</span>
-      <span class="files-ledger-size px-1 text-right">Size</span>
-      <IconStar :size="11" :stroke-width="1.7" class="mx-auto" />
+      <div class="flex h-full min-w-0 items-center">
+        <FileSortHeader
+          sort-key="name"
+          label="Name"
+          inset
+          class="min-w-0 flex-1"
+          :active="sortKey === 'name'"
+          :direction="sortDirection"
+          :direction-label="sortHeaderDirectionLabel('name')"
+          @sort="sortByHeader('name')"
+        />
+        <FileSortMenu
+          :options="sortOptions"
+          :sort-key="sortKey"
+          :sort-direction="sortDirection"
+          :direction-options="sortDirectionOptions"
+          :label="sortLabel"
+          :direction-label="sortDirectionLabel"
+          :summary="sortMenuSummary"
+          @open="closeContextMenu"
+          @select-sort="selectSort"
+          @select-direction="selectSortDirection"
+        />
+      </div>
+      <FileSortHeader
+        sort-key="kind"
+        label="Kind"
+        class="files-ledger-kind"
+        :active="sortKey === 'kind'"
+        :direction="sortDirection"
+        :direction-label="sortHeaderDirectionLabel('kind')"
+        @sort="sortByHeader('kind')"
+      />
+      <FileSortHeader
+        sort-key="git"
+        label="Git"
+        align="right"
+        :active="sortKey === 'git'"
+        :direction="sortDirection"
+        :direction-label="sortHeaderDirectionLabel('git')"
+        @sort="sortByHeader('git')"
+      />
+      <FileSortHeader
+        sort-key="modified"
+        label="Modified"
+        align="right"
+        class="files-ledger-modified"
+        :active="sortKey === 'modified'"
+        :direction="sortDirection"
+        :direction-label="sortHeaderDirectionLabel('modified')"
+        @sort="sortByHeader('modified')"
+      />
+      <FileSortHeader
+        sort-key="size"
+        label="Size"
+        align="right"
+        class="files-ledger-size"
+        :active="sortKey === 'size'"
+        :direction="sortDirection"
+        :direction-label="sortHeaderDirectionLabel('size')"
+        @sort="sortByHeader('size')"
+      />
+      <FileSortHeader
+        sort-key="favorite"
+        label="Favorites"
+        align="center"
+        :active="sortKey === 'favorite'"
+        :direction="sortDirection"
+        :direction-label="sortHeaderDirectionLabel('favorite')"
+        @sort="sortByHeader('favorite')"
+      >
+        <IconStar :size="9" :stroke-width="1.7" />
+      </FileSortHeader>
     </div>
 
     <GitChangesList
@@ -291,13 +361,12 @@
             :selected="selectedPaths.has(item.row.entry.path)"
             :active="isActive(item.row.entry)"
             :ancestry="isActiveAncestry(item.row.entry)"
-            :favorite="isFavorite(item.row.entry)"
+            :favorite="item.row.favorite"
             :drop-target="dropHighlightPath === item.row.entry.path"
             :drag-source="treeDragging && draggedPaths.has(item.row.entry.path)"
             :editing="isEditing(item.row)"
             :edit-kind="nameAction?.kind"
             :edit-draft="nameDraft"
-            :now="clockNow"
             @select="onRowSelect(item.row, item.index, $event)"
             @activate="onRowActivate(item.row)"
             @toggle="onRowToggle(item.row, item.index)"
@@ -582,6 +651,8 @@ import {
   IconStar,
   IconX,
 } from '@tabler/icons-vue'
+import FileSortHeader from '../components/FileSortHeader.vue'
+import FileSortMenu from '../components/FileSortMenu.vue'
 import FileTreeRow from '../components/FileTreeRow.vue'
 import GitChangesList from '../components/GitChangesList.vue'
 import { pathIsInsideWorkspace, useFileStore } from '../../stores/files.js'
@@ -603,7 +674,13 @@ import { useFileFavorites } from '../files/useFileFavorites.js'
 import { useFileMutations } from '../files/useFileMutations.js'
 import { useFileSelection } from '../files/useFileSelection.js'
 import { useFileTreeDrag } from '../files/useFileTreeDrag.js'
-import { formatFileSize, formatModifiedTime, gitLabel } from '../files/fileLedger.js'
+import {
+  compareFileRows,
+  fileKind,
+  formatFileSize,
+  formatModifiedTime,
+  gitLabel,
+} from '../files/fileLedger.js'
 import { importWorkspaceEntries } from '../../services/workspaceFileOperations.js'
 import { basename } from '../../shared/utils/path.js'
 
@@ -638,6 +715,19 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace'])
+const FILE_SORT_OPTIONS = Object.freeze([
+  { id: 'name', label: 'Name' },
+  { id: 'kind', label: 'Kind' },
+  { id: 'git', label: 'Git' },
+  { id: 'modified', label: 'Modified' },
+  { id: 'size', label: 'Size' },
+  { id: 'favorite', label: 'Favorites' },
+])
+const DEFAULT_FILE_SORT_STATES = Object.freeze({
+  project: Object.freeze({ key: 'name', direction: 'asc' }),
+  recent: Object.freeze({ key: 'view', direction: 'asc' }),
+  favorites: Object.freeze({ key: 'name', direction: 'asc' }),
+})
 const files = useWorkspaceFilesStore()
 const editorFiles = useFileStore()
 const gitReview = useGitReviewStore()
@@ -645,6 +735,7 @@ const settings = useSettingsStore()
 const viewMode = ref('project')
 const searchScope = ref('paths')
 const query = ref('')
+const activityRef = ref(null)
 const queryInput = ref(null)
 const listRef = ref(null)
 const gitListRef = ref(null)
@@ -654,9 +745,8 @@ const deleteConfirmRef = ref(null)
 const gitChanges = ref([])
 const gitOnly = ref(false)
 const contentFocusedIndex = ref(-1)
-const clockNow = ref(Date.now())
+const sortStateByView = ref(defaultFileSortStates())
 let queryTimer = null
-let clockTimer = null
 let gitRefreshTimer = null
 
 const SEARCH_DEBOUNCE_MS = 130
@@ -667,6 +757,7 @@ const ROW_HEIGHT = 28 // FileTreeRow h-7
 const SECONDARY_ROW_HEIGHT = 36 // FileTreeRow h-9
 const scrollTop = ref(0)
 const viewportHeight = ref(0)
+const activityWidth = ref(560)
 
 const views = Object.freeze([
   { id: 'project', label: 'Project', icon: IconFolderOpen },
@@ -679,6 +770,29 @@ const searchScopes = Object.freeze([
   { id: 'contents', label: 'Contents' },
 ])
 const contentMode = computed(() => viewMode.value !== 'changes' && searchScope.value === 'contents')
+const sortState = computed(() => sortStateByView.value[viewMode.value] || sortStateByView.value.project)
+const sortKey = computed(() => sortState.value.key)
+const sortDirection = computed(() => sortState.value.direction)
+const sortOptions = computed(() => (
+  viewMode.value === 'recent'
+    ? [{ id: 'view', label: 'Recently opened' }, ...FILE_SORT_OPTIONS]
+    : FILE_SORT_OPTIONS
+))
+const sortLabel = computed(() => (
+  sortOptions.value.find(option => option.id === sortKey.value)?.label || 'Name'
+))
+const sortDirectionOptions = computed(() => directionOptions(sortKey.value))
+const sortDirectionLabel = computed(() => (
+  sortKey.value === 'view'
+    ? 'Default order'
+    : sortDirectionOptions.value.find(option => option.id === sortDirection.value)?.label || ''
+))
+const sortKeyHidden = computed(() => (
+  (sortKey.value === 'kind' && activityWidth.value <= 539)
+  || (sortKey.value === 'size' && activityWidth.value <= 479)
+  || (sortKey.value === 'modified' && activityWidth.value <= 399)
+))
+const sortMenuSummary = computed(() => (sortKeyHidden.value ? sortLabel.value : ''))
 
 const workspaceName = computed(() => basename(files.workspacePath) || 'workspace')
 const {
@@ -690,6 +804,16 @@ const {
   settings,
   workspacePath: computed(() => files.workspacePath),
 })
+watch(
+  [() => files.workspacePath, () => settings.workbenchFileSort],
+  ([workspacePath]) => {
+    const workspaceKey = normalizePath(workspacePath)
+    sortStateByView.value = normalizeFileSortStates(
+      settings.workbenchFileSort?.[workspaceKey],
+    )
+  },
+  { immediate: true },
+)
 const indexedByPath = computed(() => new Map(
   files.files.map((entry) => [normalizePath(entry.path), normalizeEntry(entry)]),
 ))
@@ -1025,12 +1149,25 @@ function onListScroll() {
 const listResizeObserver = typeof ResizeObserver === 'function'
   ? new ResizeObserver(() => onListScroll())
   : null
+const activityResizeObserver = typeof ResizeObserver === 'function'
+  ? new ResizeObserver(() => {
+      if (activityRef.value?.clientWidth > 0) activityWidth.value = activityRef.value.clientWidth
+    })
+  : null
 
 watch(listRef, (element, previous) => {
   if (previous) listResizeObserver?.unobserve(previous)
   if (element) {
     listResizeObserver?.observe(element)
     onListScroll()
+  }
+}, { flush: 'post' })
+
+watch(activityRef, (element, previous) => {
+  if (previous) activityResizeObserver?.unobserve(previous)
+  if (element) {
+    activityResizeObserver?.observe(element)
+    if (element.clientWidth > 0) activityWidth.value = element.clientWidth
   }
 }, { flush: 'post' })
 
@@ -1082,9 +1219,9 @@ const selectedFileSummary = computed(() => {
   if (contentMode.value || selectedPaths.value.size !== 1) return ''
   const row = visibleRows.value.find(item => selectedPaths.value.has(item.entry.path))
   if (!row || row.entry.isDirectory) return ''
-  const parts = [row.entry.name]
+  const parts = [row.entry.name, fileKind(row.entry)]
   if (row.gitStatus) parts.push(gitLabel(row.gitStatus))
-  parts.push(formatModifiedTime(row.entry.mtime, clockNow.value))
+  parts.push(formatModifiedTime(row.entry.mtime))
   parts.push(formatFileSize(row.entry.size))
   return parts.join(' · ')
 })
@@ -1123,16 +1260,12 @@ onMounted(() => {
     void refreshGit()
     void gitReview.openWorkspace(files.workspacePath, { force: true })
   }
-  clockTimer = setInterval(() => {
-    clockNow.value = Date.now()
-  }, 60_000)
-  clockTimer?.unref?.()
 })
 onUnmounted(() => {
   clearTimeout(queryTimer)
   clearTimeout(gitRefreshTimer)
-  clearInterval(clockTimer)
   listResizeObserver?.disconnect()
+  activityResizeObserver?.disconnect()
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
 })
 
@@ -1156,6 +1289,7 @@ function makeRow(entry, depth, options = {}) {
     loading: normalized.isDirectory && files.treeLoadingPaths.has(normalizeRelative(normalized.relativePath)),
     gitStatus: gitStatusFor(normalized),
     gitCount: gitCountFor(normalized),
+    favorite: isFavorite(normalized),
     secondary: Boolean(options.secondary),
     favoriteRoot: Boolean(options.favoriteRoot),
     missing,
@@ -1163,54 +1297,66 @@ function makeRow(entry, depth, options = {}) {
   }
 }
 
+function sortedRows(rows) {
+  if (sortKey.value === 'view') return rows
+  return [...rows].sort((left, right) => compareFileRows(left, right, {
+    by: sortKey.value,
+    direction: sortDirection.value,
+  }))
+}
+
 function flattenDirectory(parent, depth, rows, seen = new Set()) {
   const key = normalizeRelative(parent)
   if (seen.has(key)) return
   seen.add(key)
-  for (const entry of files.treeChildren[key] || []) {
-    const row = makeRow(entry, depth)
+  const children = (files.treeChildren[key] || []).map(entry => makeRow(entry, depth))
+  for (const row of sortedRows(children)) {
     rows.push(row)
-    if (entry.isDirectory && row.expanded) {
-      flattenDirectory(entry.relativePath, depth + 1, rows, seen)
+    if (row.entry.isDirectory && row.expanded) {
+      flattenDirectory(row.entry.relativePath, depth + 1, rows, seen)
     }
   }
 }
 
 function searchRows() {
-  return files.visibleFiles.map((entry) => makeRow(entry, 0, { secondary: true }))
+  return sortedRows(files.visibleFiles.map((entry) => makeRow(entry, 0, { secondary: true })))
 }
 
 function recentRows() {
   const needle = query.value.trim().toLowerCase()
-  return editorFiles.recentFiles
+  const rows = editorFiles.recentFiles
     .filter(path => pathIsInsideWorkspace(path, files.workspacePath))
     .map((path) => indexedByPath.value.get(normalizePath(path)) || fallbackFileEntry(path))
     .filter((entry) => matchesEntry(entry, needle))
     .map((entry) => makeRow(entry, 0, { secondary: true, missing: !indexedByPath.value.has(normalizePath(entry.path)) }))
+  return sortedRows(rows)
 }
 
 function favoriteRows() {
   const needle = query.value.trim().toLowerCase()
-  const rows = []
+  const roots = []
   for (const record of favorites.value) {
     const entry = resolveFavorite(record)
     if (needle && !matchesEntry(entry, needle)) continue
-    const row = makeRow(entry, 0, {
+    roots.push(makeRow(entry, 0, {
       favoriteRoot: true,
       secondary: true,
       missing: Boolean(entry.missing),
       key: `favorite:${record.relativePath}`,
-    })
+    }))
+  }
+  const rows = []
+  for (const row of sortedRows(roots)) {
     rows.push(row)
-    if (!needle && entry.isDirectory && row.expanded && !entry.missing) {
-      flattenDirectory(entry.relativePath, 1, rows)
+    if (!needle && row.entry.isDirectory && row.expanded && !row.entry.missing) {
+      flattenDirectory(row.entry.relativePath, 1, rows)
     }
   }
   return rows
 }
 
 function gitChangeRows() {
-  return gitChanges.value.map((change) => {
+  const rows = gitChanges.value.map((change) => {
     const relativePath = normalizeRelative(change.path)
     const absolute = absolutePath(relativePath)
     const entry = loadedByRelativePath.value.get(relativePath)
@@ -1222,6 +1368,7 @@ function gitChangeRows() {
       missing: change.status === 'deleted',
     })
   })
+  return sortedRows(rows)
 }
 
 function resolveFavorite(record) {
@@ -1265,6 +1412,52 @@ function setViewMode(mode) {
   clearSelection()
   if (mode === 'changes') void gitReview.openWorkspace(files.workspacePath)
   nextTick(() => (mode === 'changes' ? gitListRef.value?.enter?.(1) : listRef.value?.focus()))
+}
+
+function selectSort(key) {
+  if (!sortOptions.value.some(option => option.id === key)) return
+  updateSortState(key, key === sortKey.value ? sortDirection.value : defaultSortDirection(key))
+}
+
+function selectSortDirection(direction) {
+  if (!['asc', 'desc'].includes(direction) || sortKey.value === 'view') return
+  updateSortState(sortKey.value, direction)
+}
+
+function sortByHeader(key) {
+  const direction = key === sortKey.value
+    ? (sortDirection.value === 'asc' ? 'desc' : 'asc')
+    : defaultSortDirection(key)
+  updateSortState(key, direction)
+}
+
+function sortHeaderDirectionLabel(key) {
+  const direction = key === sortKey.value ? sortDirection.value : defaultSortDirection(key)
+  return directionOptions(key).find(option => option.id === direction)?.label || ''
+}
+
+function updateSortState(key, direction) {
+  const focusedPath = visibleRows.value[focusedIndex.value]?.entry.path
+  sortStateByView.value = {
+    ...sortStateByView.value,
+    [viewMode.value]: { key, direction },
+  }
+  const workspaceKey = normalizePath(files.workspacePath)
+  if (workspaceKey) {
+    settings.set('workbenchFileSort', {
+      ...(settings.workbenchFileSort || {}),
+      [workspaceKey]: sortStateByView.value,
+    })
+  }
+  const nextIndex = focusedPath
+    ? visibleRows.value.findIndex(row => row.entry.path === focusedPath)
+    : -1
+  focusedIndex.value = nextIndex >= 0 ? nextIndex : 0
+  nextTick(() => {
+    const row = [...(listRef.value?.querySelectorAll('[data-file-row]') || [])]
+      .find(element => element.getAttribute('data-file-row') === focusedPath)
+    row?.scrollIntoView?.({ block: 'nearest' })
+  })
 }
 
 function setSearchScope(scope) {
@@ -1640,6 +1833,61 @@ function relativeFromAbsolute(path) {
   return candidate.startsWith(`${root}/`) ? candidate.slice(root.length + 1) : basename(path)
 }
 
+function defaultSortDirection(key) {
+  return ['git', 'modified', 'size', 'favorite'].includes(key) ? 'desc' : 'asc'
+}
+
+function defaultFileSortStates() {
+  return Object.fromEntries(
+    Object.entries(DEFAULT_FILE_SORT_STATES).map(([view, state]) => [view, { ...state }]),
+  )
+}
+
+function normalizeFileSortStates(value) {
+  const normalized = defaultFileSortStates()
+  for (const view of Object.keys(normalized)) {
+    const candidate = value?.[view]
+    const keys = view === 'recent'
+      ? new Set(['view', ...FILE_SORT_OPTIONS.map(option => option.id)])
+      : new Set(FILE_SORT_OPTIONS.map(option => option.id))
+    if (keys.has(candidate?.key) && ['asc', 'desc'].includes(candidate?.direction)) {
+      normalized[view] = { key: candidate.key, direction: candidate.direction }
+    }
+  }
+  return normalized
+}
+
+function directionOptions(key) {
+  if (key === 'git') {
+    return [
+      { id: 'desc', label: 'Changed first' },
+      { id: 'asc', label: 'Unchanged first' },
+    ]
+  }
+  if (key === 'modified') {
+    return [
+      { id: 'desc', label: 'Newest first' },
+      { id: 'asc', label: 'Oldest first' },
+    ]
+  }
+  if (key === 'size') {
+    return [
+      { id: 'desc', label: 'Largest first' },
+      { id: 'asc', label: 'Smallest first' },
+    ]
+  }
+  if (key === 'favorite') {
+    return [
+      { id: 'desc', label: 'Favorites first' },
+      { id: 'asc', label: 'Other files first' },
+    ]
+  }
+  return [
+    { id: 'asc', label: 'A–Z' },
+    { id: 'desc', label: 'Z–A' },
+  ]
+}
+
 </script>
 
 <style scoped>
@@ -1648,16 +1896,26 @@ function relativeFromAbsolute(path) {
 }
 
 .files-ledger-grid {
-  grid-template-columns: minmax(180px, 1fr) 40px 78px 60px 28px;
+  grid-template-columns: minmax(180px, 1fr) 86px 40px 112px 60px 28px;
 }
 
 .files-selected-detail {
   display: none;
 }
 
-@container files (max-width: 519px) {
+@container files (max-width: 539px) {
   .files-ledger-grid {
-    grid-template-columns: minmax(180px, 1fr) 40px 78px 28px;
+    grid-template-columns: minmax(180px, 1fr) 40px 112px 60px 28px;
+  }
+
+  .files-ledger-kind {
+    display: none;
+  }
+}
+
+@container files (max-width: 479px) {
+  .files-ledger-grid {
+    grid-template-columns: minmax(180px, 1fr) 40px 112px 28px;
   }
 
   .files-ledger-size {

@@ -35,6 +35,7 @@ const DEFAULTS = {
   sidebarChatsCollapsed: false,
   chatNotifications: true,
   workbenchFileFavorites: {},
+  workbenchFileSort: {},
   commentGateSkip: false,
   mimirWorkspaceFolder: '',
   mimirTeamFolder: '',
