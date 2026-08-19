@@ -166,6 +166,12 @@ export const editorHighlightStyle = HighlightStyle.define([
   { tag: [t.string], color: 'var(--syntax-string)' },
   { tag: [t.number], color: 'var(--syntax-number)' },
   { tag: [t.comment], color: 'var(--muted)' },
+  { tag: [t.tagName], color: 'var(--syntax-tag)' },
+  { tag: [t.attributeName], color: 'var(--syntax-property)' },
+  { tag: [t.angleBracket, t.definitionOperator], color: 'var(--color-ink-4)' },
+  { tag: [t.documentMeta], color: 'var(--color-ink-3)' },
+  { tag: [t.character], color: 'var(--syntax-keyword)' },
+  { tag: [t.invalid], color: 'var(--color-rem)' },
 ])
 
 export const wrapCompartment = new Compartment()

@@ -50,6 +50,7 @@
   --syntax-property: #6e56cf;
   --syntax-string:  #2e7d32;
   --syntax-number:  #e65100;
+  --syntax-tag:     #1a6fb5;
   --selection:      rgba(192, 93, 60, 0.12);
 }
 
@@ -85,6 +86,7 @@
   --syntax-property: #6e56cf;
   --syntax-string:  #2e7d32;
   --syntax-number:  #b94d00;
+  --syntax-tag:     #1a6fb5;
   --selection:      rgba(232, 100, 32, 0.14);
 }
 
@@ -119,6 +121,7 @@
   --syntax-property: #4a7c9b;
   --syntax-string:  #297a3a;
   --syntax-number:  #b35c00;
+  --syntax-tag:     #255ea0;
   --selection:      rgba(74, 124, 155, 0.14);
 }
 
@@ -153,6 +156,7 @@
   --syntax-property: #82cfff;
   --syntax-string:  #7cc68a;
   --syntax-number:  #e8a36d;
+  --syntax-tag:     #d4778c;
   --selection:      rgba(90, 158, 143, 0.18);
 }
 
@@ -188,6 +192,7 @@
   --syntax-property: #66d9ef;
   --syntax-string:  #e6db74;
   --syntax-number:  #fd971f;
+  --syntax-tag:     #f92672;
   --selection:      rgba(249, 115, 22, 0.16);
 }
 
@@ -221,8 +226,10 @@
   --color-line-hl:     rgba(189, 147, 249, 0.06);
 
   --syntax-keyword: #ff79c6;
+  --syntax-property: #bd93f9;
   --syntax-string:  #50fa7b;
   --syntax-number:  #ffb86c;
+  --syntax-tag:     #8be9fd;
   --selection:      rgba(189, 147, 249, 0.18);
 }
 
@@ -256,8 +263,10 @@
   --color-line-hl:     rgba(34, 211, 238, 0.06);
 
   --syntax-keyword: #f472b6;
+  --syntax-property: #a78bfa;
   --syntax-string:  #4ade80;
   --syntax-number:  #fbbf24;
+  --syntax-tag:     #38bdf8;
   --selection:      rgba(34, 211, 238, 0.18);
 }
 
@@ -291,7 +300,9 @@
   --color-line-hl:     rgba(198, 120, 221, 0.06);
 
   --syntax-keyword: #36d7e0;
+  --syntax-property: #82aaff;
   --syntax-string:  #ffd580;
   --syntax-number:  #c792ea;
+  --syntax-tag:     #ff5572;
   --selection:      rgba(198, 120, 221, 0.18);
 }
