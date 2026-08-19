@@ -652,6 +652,7 @@ const { currentEditorContent, flushEditorContent, scheduleContentSync, syncOpenF
 watch(
   () => [props.embedded, props.workspacePath, props.workspacePaths],
   ([embedded, workspacePath, workspacePaths]) => {
+    console.log('[editor] workspace watcher fired | embedded:', embedded, '| path:', workspacePath, '| currentFile before:', fileManager.currentFile?.id ?? 'null', '| visibleFiles:', fileManager.visibleOpenFiles.length)
     prepareWorkspaceSwitch()
     if (embedded) fileManager.setWorkspaceScope(workspacePath, workspacePaths)
     else fileManager.clearWorkspaceScope()
