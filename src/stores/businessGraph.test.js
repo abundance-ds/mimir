@@ -255,4 +255,30 @@ describe('business graph store', () => {
     })
     expect(store.selectedNode.title).toBe('Extract evidence')
   })
+
+  it('keeps the inspected object while another node is patched', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    await store.openNode('issue-1')
+    vi.mocked(updateGraphNode).mockResolvedValue({
+      id: 'project-alpha',
+      kind: 'project',
+      title: 'Project Alpha',
+      tags: [],
+      relations: [],
+      properties: { status: 'in-progress' },
+      provenance: { scopeId: 'team:main', sourceRevision: 'rev-p2' },
+    })
+
+    await store.update({ id: 'project-alpha', setProperties: { status: 'in-progress' } })
+
+    // A board drag patches a card the user never opened: it must not borrow
+    // the open object's revision, nor take its place in the inspector.
+    expect(updateGraphNode).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'project-alpha',
+      expectedRevision: undefined,
+    }))
+    expect(store.selectedNode.id).toBe('issue-1')
+    expect(store.nodes.find(node => node.id === 'project-alpha').status).toBe('in-progress')
+  })
 })

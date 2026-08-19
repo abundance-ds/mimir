@@ -338,11 +338,14 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   }
 
   async function update(patch) {
-    const before = selectedNode.value ? cloneGraphValue(selectedNode.value) : null
+    // Only the inspected node moves optimistically, and only it lends its
+    // revision. A patch for another node — a board drag, a bulk edit — must
+    // leave the open object alone: taking it over would swap the inspected
+    // object under the user, and its revision belongs to a different source.
+    const inspected = selectedNode.value?.id === patch.id ? selectedNode.value : null
+    const before = inspected ? cloneGraphValue(inspected) : null
     conflict.value = null
-    if (selectedNode.value?.id === patch.id) {
-      selectedNode.value = optimisticNode(selectedNode.value, patch)
-    }
+    if (inspected) selectedNode.value = optimisticNode(inspected, patch)
     try {
       const updated = await updateGraphNode({
         ...patch,
@@ -350,7 +353,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
           || before?.provenance?.sourceRevision
           || before?.sourceRevision,
       })
-      selectedNode.value = updated
+      if (selectedNode.value?.id === updated.id) selectedNode.value = updated
       replaceSummary(updated)
       const historyItem = inspectionHistory.value[inspectionHistoryIndex.value]
       if (historyItem?.id === updated.id) {
