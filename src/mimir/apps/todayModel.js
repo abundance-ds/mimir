@@ -130,6 +130,42 @@ export function uncheckedTaskBlocks(markdown) {
     }))
 }
 
+export function stripCheckedTasks(markdown, excludeLineRanges = []) {
+  const lines = normalizeNewlines(markdown).split('\n')
+  const remove = new Set()
+
+  for (const range of excludeLineRanges) {
+    for (let j = range.start; j < range.end; j += 1) remove.add(j)
+  }
+
+  let i = 0
+  while (i < lines.length) {
+    const match = lines[i].match(TASK_PATTERN)
+    if (match && match[4].toLowerCase() === 'x') {
+      const indent = indentColumns(match[1])
+      let end = i + 1
+      while (end < lines.length) {
+        if (!lines[end].trim()) { end += 1; continue }
+        const childIndent = indentColumns(lines[end].match(/^[ \t]*/)?.[0] || '')
+        if (childIndent <= indent) break
+        const childMatch = lines[end].match(TASK_PATTERN)
+        if (childMatch && childMatch[4].toLowerCase() !== 'x') break
+        end += 1
+      }
+      while (end > i + 1 && !lines[end - 1].trim()) end -= 1
+      for (let j = i; j < end; j += 1) remove.add(j)
+      i = end
+    } else {
+      i += 1
+    }
+  }
+
+  return lines.filter((_, index) => !remove.has(index))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 export function carrySource(previous) {
   return String(previous?.carryText ?? previous?.text ?? '')
 }

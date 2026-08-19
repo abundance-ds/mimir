@@ -6,6 +6,7 @@ import {
   journalNodeId,
   parseTodayStorage,
   shiftDateKey,
+  stripCheckedTasks,
   uncheckedTaskBlocks,
   upsertJournalDay,
 } from './todayModel.js'
@@ -83,6 +84,70 @@ describe('todayModel', () => {
       '  - [ ] Open child',
     ].join('\n'))
     expect(blocks[1].markdown).toBe('- [ ] Child that is still open')
+  })
+
+  it('strips checked tasks and preserves all other content', () => {
+    const result = stripCheckedTasks([
+      '# Friday',
+      '',
+      '## Work',
+      '- [ ] Open parent',
+      '  - [x] Finished child',
+      '  - [ ] Open child',
+      '- [x] Finished parent',
+      '  - [ ] Still open',
+      '',
+      '## Notes',
+      'Talked to Sarah.',
+    ].join('\n'))
+
+    expect(result).toBe([
+      '# Friday',
+      '',
+      '## Work',
+      '- [ ] Open parent',
+      '  - [ ] Open child',
+      '  - [ ] Still open',
+      '',
+      '## Notes',
+      'Talked to Sarah.',
+    ].join('\n'))
+  })
+
+  it('strips checked tasks with non-task children', () => {
+    const result = stripCheckedTasks([
+      '- [x] Deploy staging',
+      '  Had to fix the config.',
+      '  Monitoring looks good.',
+      '- [ ] Write docs',
+    ].join('\n'))
+
+    expect(result).toBe('- [ ] Write docs')
+  })
+
+  it('returns empty string when all tasks are checked', () => {
+    expect(stripCheckedTasks('- [x] Done\n- [x] Also done')).toBe('')
+  })
+
+  it('returns full text when nothing is checked', () => {
+    const input = '# Plan\n\n- [ ] Task A\n\nSome notes.'
+    expect(stripCheckedTasks(input)).toBe(input)
+  })
+
+  it('excludes additional line ranges when provided', () => {
+    const input = [
+      '# Day',
+      '- [ ] Keep this',
+      '- [ ] Skip this',
+      '- [x] Done',
+      'Notes.',
+    ].join('\n')
+    const result = stripCheckedTasks(input, [{ start: 2, end: 3 }])
+    expect(result).toBe([
+      '# Day',
+      '- [ ] Keep this',
+      'Notes.',
+    ].join('\n'))
   })
 
   it('supports ordered task lists and excludes ordinary prose', () => {

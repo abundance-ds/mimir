@@ -231,11 +231,10 @@ describe('TodayApp', () => {
     await wrapper.get('[data-today-rollover] button:nth-of-type(1)').trigger('click')
 
     expect(view(wrapper).state.doc.toString()).toBe([
+      '# Friday',
       '- [ ] Open parent',
-      '  - [x] Finished child',
       '  - [ ] Open child',
-      '',
-      '- [ ] Still open',
+      '  - [ ] Still open',
     ].join('\n'))
     expect(wrapper.find('[data-today-rollover]').exists()).toBe(false)
   })

@@ -218,6 +218,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
+import { livePreviewExtension } from '../../editor/codemirror/livePreview.js'
 import { taskCheckboxExtension } from '../../editor/codemirror/taskCheckboxes.js'
 import { markdownListKeymap } from '../../editor/codemirror/markdownLists.js'
 import { loadAppData, saveAppData } from '../../services/appsCatalog.js'
@@ -229,6 +230,7 @@ import {
   parseTodayStorage,
   serializeTodayStorage,
   shiftDateKey,
+  stripCheckedTasks,
   uncheckedTaskBlocks,
 } from './todayModel.js'
 import {
@@ -428,6 +430,7 @@ function createMarkdownEditor() {
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       markdownListKeymap,
       syntaxHighlighting(todayHighlightStyle),
+      livePreviewExtension(() => true, null),
       taskCheckboxExtension(() => isEditableDate.value),
       todayEditorTheme,
       keymap.of([
@@ -494,7 +497,8 @@ function editorContextExtensions() {
   return [
     EditorView.contentAttributes.of({
       'aria-label': label,
-      spellcheck: historical ? 'false' : 'true',
+      spellcheck: 'false',
+      autocomplete: 'off',
       autocorrect: 'off',
       autocapitalize: 'off',
     }),
@@ -554,13 +558,11 @@ async function ensureCurrentDay() {
 
   const carrySources = []
   if (previous.value?.carryPending) {
-    const earlierCarry = uncheckedTaskBlocks(carrySource(previous.value))
-      .map(block => block.markdown)
-      .join('\n\n')
-    if (earlierCarry) {
+    const sourceText = carrySource(previous.value)
+    if (uncheckedTaskBlocks(sourceText).length) {
       carrySources.push({
         dates: previous.value.carryDates || [previous.value.date],
-        text: earlierCarry,
+        text: sourceText,
       })
     }
   }
@@ -686,8 +688,17 @@ function cancelHistoryLoad() {
 }
 
 function carryAll() {
-  carrySelection.value = new Set(carryCandidates.value.map(candidate => candidate.id))
-  applySelectedCarry()
+  const carried = stripCheckedTasks(carrySource(previous.value))
+  if (carried) {
+    const next = appendMarkdownBelow(text.value, carried)
+    editorView?.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: next },
+    })
+    showNotice('Unfinished content carried into Today. Undo is available.')
+  } else {
+    showNotice('No content to carry into Today.')
+  }
+  resolveCarry()
 }
 
 function toggleCarry(id) {
@@ -698,20 +709,21 @@ function toggleCarry(id) {
 }
 
 function applySelectedCarry() {
-  const blocks = carryCandidates.value
-    .filter(candidate => carrySelection.value.has(candidate.id))
-    .map(candidate => candidate.markdown)
-  if (blocks.length) {
-    const carried = blocks.join('\n\n')
+  const source = carrySource(previous.value)
+  const deselected = carryCandidates.value
+    .filter(candidate => !carrySelection.value.has(candidate.id))
+    .map(candidate => {
+      const [start, end] = candidate.id.split(':').map(Number)
+      return { start: start - 1, end }
+    })
+  const carried = stripCheckedTasks(source, deselected)
+  if (carried) {
     const next = appendMarkdownBelow(text.value, carried)
     editorView?.dispatch({
-      changes: {
-        from: 0,
-        to: editorView.state.doc.length,
-        insert: next,
-      },
+      changes: { from: 0, to: editorView.state.doc.length, insert: next },
     })
-    showNotice(`${blocks.length} ${blocks.length === 1 ? 'item' : 'items'} appended to Today. Undo is available.`)
+    const count = carryCandidates.value.length - deselected.length
+    showNotice(`${count} ${count === 1 ? 'item' : 'items'} carried into Today. Undo is available.`)
   } else {
     showNotice('No items were carried into Today.')
   }
