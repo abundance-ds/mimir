@@ -47,7 +47,6 @@ export const useFileStore = defineStore('files', () => {
     ])
     reconcileWorkspaceOwnership()
     if (!ensureWorkspaceSelection({ preferScoped: scopeChanged })) {
-      console.log('[files] no visible file after scope change to', nextScope, '→ creating blank')
       newFile()
     }
   }

@@ -24,13 +24,11 @@ export function useContentSync({
     const file = currentFile.value
     if (!file) return ''
     if (confirmedFileId !== null && file.id !== confirmedFileId) {
-      console.warn('[content-sync] BLOCKED stale flush: CM belongs to file %d but currentFile is %d (%s)', confirmedFileId, file.id, file.path || 'draft')
       syncDerivedContent(file.content || '', options)
       return file.content || ''
     }
     const content = currentEditorContent()
     if (content !== file.content) {
-      console.log('[content-sync] flush file %d (%s), content changed (%d→%d chars)', file.id, file.path || 'draft', file.content.length, content.length)
       fileManager.updateContent(content)
     }
     confirmedFileId = file.id
