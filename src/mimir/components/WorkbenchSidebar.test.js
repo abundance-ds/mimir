@@ -388,16 +388,24 @@ describe('WorkbenchSidebar', () => {
   })
 
   it('makes rename discoverable by double-click, F2, and the actions menu', async () => {
-    const wrapper = render()
+    const wrapper = render(false, true)
     const row = wrapper.get('[data-sidebar-row="activity:agent:one"]')
 
     await row.trigger('dblclick')
     const input = wrapper.get('[data-activity-rename="agent:one"]')
+    expect(input.element.closest('button')).toBeNull()
+    input.element.focus()
     await input.setValue('API review')
+    await input.trigger('keydown', { key: ' ' })
+    await input.trigger('keyup', { key: ' ' })
+    expect(document.activeElement).toBe(input.element)
+    expect(wrapper.get('[data-activity-rename="agent:one"]').element.value).toBe('API review')
+    expect(wrapper.emitted('renameActivity')).toBeUndefined()
     await input.trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('renameActivity').at(-1)).toEqual([
       { id: 'agent:one', title: 'API review' },
     ])
+    expect(wrapper.emitted('selectActivity').at(-1)).toEqual(['agent:one'])
 
     await row.find('button').trigger('keydown', { key: 'F2' })
     expect(wrapper.get('[data-activity-rename="agent:one"]').exists()).toBe(true)
@@ -405,6 +413,7 @@ describe('WorkbenchSidebar', () => {
 
     await row.trigger('contextmenu')
     expect(wrapper.get('[data-activity-menu="agent:one"]').text()).toContain('Rename')
+    wrapper.unmount()
   })
 
   it('opens row and sort menus from the keyboard with roving focus and Escape restore', async () => {

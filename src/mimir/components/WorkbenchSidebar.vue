@@ -345,6 +345,7 @@
         :collapsed="collapsed"
         :active="activeActivityId === activity.id"
         :selected="selectedActivityIds.has(activity.id)"
+        :editing="renamingId === activity.id"
         :copy-id="`activity:${activity.id}`"
         @pointerdown="onActivityPointerDown($event, activity.id)"
         @dblclick.stop="beginRename(activity)"
@@ -373,7 +374,7 @@
             class="h-6 w-full min-w-0 border border-accent bg-surface px-1.5 text-[12px] text-ink outline-none"
             aria-label="Activity name"
             @click.stop
-            @keydown.enter.prevent="commitRename(activity)"
+            @keydown.enter.prevent="commitRename(activity, { focusActivity: true })"
             @keydown.escape.prevent="cancelRename"
             @blur="commitRename(activity)"
           />
@@ -948,13 +949,14 @@ async function beginRename(activity) {
   field?.select()
 }
 
-function commitRename(activity) {
+function commitRename(activity, { focusActivity = false } = {}) {
   if (renamingId.value !== activity.id) return
   const title = renameDraft.value.trim()
   renamingId.value = ''
   if (title && title !== activity.title) {
     emit('renameActivity', { id: activity.id, title })
   }
+  if (focusActivity) selectActivity(activity.id)
 }
 
 function cancelRename() {

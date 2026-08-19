@@ -8,17 +8,18 @@
     :data-selected="selected ? 'true' : undefined"
     @click="$emit('click', $event)"
   >
-    <button
-      type="button"
+    <component
+      :is="editing ? 'div' : 'button'"
+      :type="editing ? undefined : 'button'"
       class="flex h-full min-w-0 flex-1 items-center text-left"
-      :aria-label="ariaLabel || (collapsed ? label : undefined)"
-      :aria-current="active ? 'page' : undefined"
-      :aria-pressed="selected ? 'true' : undefined"
-      :aria-disabled="$attrs['aria-disabled']"
-      :aria-expanded="ariaExpanded"
-      :aria-haspopup="ariaHaspopup || undefined"
-      :aria-controls="ariaControls || undefined"
-      :title="$attrs.title"
+      :aria-label="editing ? undefined : ariaLabel || (collapsed ? label : undefined)"
+      :aria-current="!editing && active ? 'page' : undefined"
+      :aria-pressed="!editing && selected ? 'true' : undefined"
+      :aria-disabled="editing ? undefined : $attrs['aria-disabled']"
+      :aria-expanded="editing ? undefined : ariaExpanded"
+      :aria-haspopup="editing ? undefined : ariaHaspopup || undefined"
+      :aria-controls="editing ? undefined : ariaControls || undefined"
+      :title="editing ? undefined : $attrs.title"
     >
       <span class="ml-3 grid size-7 shrink-0 place-items-center">
         <slot />
@@ -44,7 +45,7 @@
           <slot name="meta">{{ meta }}</slot>
         </span>
       </span>
-    </button>
+    </component>
     <span
       v-if="$slots.trailing && !collapsed"
       class="mr-1 shrink-0"
@@ -62,6 +63,7 @@ defineProps({
   collapsed: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
+  editing: { type: Boolean, default: false },
   copyId: { type: String, default: '' },
   muted: { type: Boolean, default: false },
   ariaExpanded: { type: [Boolean, String], default: undefined },

@@ -405,6 +405,32 @@ describe('WorkbenchApp', () => {
     expect(terminalFocus).toHaveBeenCalled()
   })
 
+  it('focuses the renamed Activity surface when Enter confirms its name', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const activity = activityRecord(
+      'agent:rename',
+      'Review API',
+      '2026-08-18T10:00:00Z',
+    )
+    useActivitiesStore().upsert(activity)
+    await nextTick()
+
+    await wrapper.get('[data-sidebar-row="activity:agent:rename"]').trigger('dblclick')
+    const input = wrapper.get('[data-activity-rename="agent:rename"]')
+    await input.setValue('Review API contract')
+    terminalFocus.mockClear()
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    await nextTick()
+
+    expect(activityApi.renameActivity).toHaveBeenCalledWith(
+      'agent:rename',
+      'Review API contract',
+    )
+    expect(useWorkbenchStore().activeActivityId).toBe('agent:rename')
+    expect(terminalFocus).toHaveBeenCalled()
+  })
+
   it('promotes a terminal API failure to the Activity row error state', async () => {
     const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
