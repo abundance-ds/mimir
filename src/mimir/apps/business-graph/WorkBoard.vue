@@ -1,5 +1,5 @@
 <template>
-  <div data-graph-work-board class="work-board">
+  <div ref="board" data-graph-work-board class="work-board">
     <div v-if="!issues.length" class="board-empty">
       <h2>No work matches this view</h2>
       <p>Create work, broaden the priority filter, or include another scope.</p>
@@ -22,10 +22,7 @@
         :key="column.id"
         :data-board-column="column.id"
         class="board-column"
-        :class="{ 'board-column-target': dragColumn === column.id }"
-        @dragover.prevent="dragColumn = column.id"
-        @dragleave.self="dragColumn = ''"
-        @drop.prevent="dropOnColumn(column.id)"
+        :class="{ 'board-column-target': dropTarget?.columnId === column.id }"
       >
         <header class="board-column-header">
           <span class="board-column-name">{{ column.label }}</span>
@@ -42,6 +39,7 @@
         </header>
 
         <div
+          data-board-column-body
           class="board-column-body"
           role="listbox"
           :aria-label="`${column.label} issues`"
@@ -50,24 +48,20 @@
           <article
             v-for="(issue, index) in grouped[column.id]"
             :key="issue.id"
-            draggable="true"
             role="option"
             tabindex="0"
             :data-board-card="issue.id"
             :data-board-row="issue.id"
-            :data-drop-before="dropBefore === issue.id ? 'true' : undefined"
+            :data-drop-before="dropTarget?.beforeId === issue.id ? 'true' : undefined"
             :aria-label="rowLabel(issue, column)"
             :aria-selected="selectedIds.includes(issue.id)"
             class="board-row"
             :class="{
               'board-row-selected': selectedIds.includes(issue.id),
-              'board-row-dragging': dragged === issue.id,
-              'board-row-drop-before': dropBefore === issue.id,
+              'board-row-dragging': draggedId === issue.id,
+              'board-row-drop-before': dropTarget?.beforeId === issue.id,
             }"
-            @dragstart="drag($event, issue.id)"
-            @dragover.prevent.stop="dragOverRow($event, issue.id, column.id)"
-            @drop.prevent.stop="dropOnRow(issue.id, column.id)"
-            @dragend="clearDrag"
+            @pointerdown="onPointerDown($event, issue.id)"
             @click="selectOrOpen($event, issue, column.id, index)"
             @keydown="onRowKeydown($event, issue, column.id, index)"
           >
@@ -174,6 +168,7 @@ import {
 } from '@tabler/icons-vue'
 import GraphDatePicker from './GraphDatePicker.vue'
 import GraphSelect from './GraphSelect.vue'
+import { useBoardDrag } from './useBoardDrag.js'
 
 const props = defineProps({
   issues: { type: Array, default: () => [] },
@@ -193,9 +188,7 @@ const emit = defineEmits([
   'bulk-patch',
   'reorder',
 ])
-const dragged = ref('')
-const dragColumn = ref('')
-const dropBefore = ref('')
+const board = ref(null)
 const selectedIds = ref([])
 const selectionAnchor = ref(null)
 
@@ -250,47 +243,34 @@ const grouped = computed(() => Object.fromEntries(
 ))
 const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
 
-function drag(event, id) {
-  dragged.value = id
-  event.dataTransfer?.setData('text/plain', id)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+const { draggedId, dropTarget, suppressClick, onPointerDown } = useBoardDrag({
+  boardRef: board,
+  onDrop: dropCard,
+})
+
+function dropCard(id, { columnId, beforeId }) {
+  const issue = props.issues.find(item => item.id === id)
+  if (!issue || restsInPlace(id, columnId, beforeId)) return
+  emit('reorder', {
+    issue,
+    columnId,
+    beforeId,
+    groupBy: props.groupBy,
+  })
 }
 
-function dragOverRow(event, id, columnId) {
-  dragColumn.value = columnId
-  if (id !== dragged.value) dropBefore.value = id
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-}
-
-function dropOnColumn(columnId) {
-  moveDragged(columnId, '')
-}
-
-function dropOnRow(beforeId, columnId) {
-  moveDragged(columnId, beforeId)
-}
-
-function moveDragged(columnId, beforeId) {
-  if (!dragged.value) return
-  const issue = props.issues.find(item => item.id === dragged.value)
-  if (issue) {
-    emit('reorder', {
-      issue,
-      columnId,
-      beforeId,
-      groupBy: props.groupBy,
-    })
-  }
-  clearDrag()
-}
-
-function clearDrag() {
-  dragged.value = ''
-  dragColumn.value = ''
-  dropBefore.value = ''
+/** Whether the card already sits where it was dropped, so nothing moves. */
+function restsInPlace(id, columnId, beforeId) {
+  const column = grouped.value[columnId] || []
+  const from = column.findIndex(item => item.id === id)
+  if (from < 0) return false
+  const rest = column.filter(item => item.id !== id)
+  const to = beforeId ? rest.findIndex(item => item.id === beforeId) : rest.length
+  return to === from
 }
 
 function selectOrOpen(event, issue, columnId, index) {
+  if (suppressClick.value) return
   if (event.shiftKey || event.metaKey || event.ctrlKey) {
     updateSelection(event, issue, columnId, index)
     return

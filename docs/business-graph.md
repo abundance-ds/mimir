@@ -102,7 +102,13 @@ a distributed audit log.
 
 ### Interaction modes
 
-- **Board**: two-line rows (priority control, title, metadata in mono). Drag reorder, keyboard movement, grouping, filter strip, settings-backed view state.
+- **Board**: two-line rows (priority control, title, metadata in mono). Drag
+  between columns and inside one, keyboard movement, grouping, filter strip,
+  settings-backed view state. Dragging is pointer-driven
+  (`business-graph/useBoardDrag.js`) because the webview never sees HTML5 DnD
+  ([gotchas.md](gotchas.md#html5-drag-and-drop-is-dead-inside-the-webview)); a
+  drop sets the column's status (or project) and rewrites the column's ranks,
+  and a drop that changes nothing writes nothing.
 - **Portfolio**: tabular ledger (open/waiting/done/completion, health as marker + word). Project Focus: standing summary with blocked-on, decisions, deliverables.
 - **Scan / Peek / Focus**: keyboard focus lands in projection on open. Peek: editable side surface beside the projection — title, status, priority, project, owner, due date, waiting-for, and the working note, all autosaving. Focus: full object workspace adding reminder, snooze, tags, deliverables, connections, and connected work. Peek and Focus keep history, mode, save, Markdown, overflow, and close actions in one header; neither uses a separate action footer.
 - **Inspector**: edit-first and revision-aware; autosaves the draft and commits it before navigation; a rejected save keeps the surface open with its error and releases the next explicit exit. Bounded relation vocabulary via two-step connection composer. Delete to OS Trash with in-session undo.

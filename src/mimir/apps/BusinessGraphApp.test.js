@@ -372,8 +372,16 @@ describe('BusinessGraphApp', () => {
     const wrapper = render()
     await flushPromises()
 
-    await wrapper.get('[data-board-card="issue-1"]').trigger('dragstart')
-    await wrapper.get('[data-board-column="in-progress"]').trigger('drop')
+    // Pointer-driven, because Tauri swallows the webview's HTML5 drag and drop
+    // (docs/gotchas.md#html5-drag-and-drop-is-dead-inside-the-webview).
+    const column = wrapper.get('[data-board-column="in-progress"]').element
+    document.elementFromPoint = vi.fn(() => column)
+    await wrapper.get('[data-board-card="issue-1"]')
+      .trigger('pointerdown', { button: 0, clientX: 0, clientY: 0 })
+    document.dispatchEvent(
+      Object.assign(new Event('pointermove'), { clientX: 200, clientY: 200 }),
+    )
+    document.dispatchEvent(new Event('pointerup'))
     await flushPromises()
 
     expect(updateGraphNode).toHaveBeenCalledWith(expect.objectContaining({

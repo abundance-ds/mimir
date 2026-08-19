@@ -597,9 +597,11 @@ window against the viewport so interface zoom is included; re-check
 The same Tauri drag-drop interception that delivers OS file drops (above)
 swallows the webview's native DnD, so `draggable` elements never receive
 `drop`. Disabling the interception would trade away folder drops from outside.
-Any in-app drag — Sidebar reorder, Files tree moves — must be pointer-event
-driven (`usePointerReorder.js`, `useFileTreeDrag.js`); do not reach for HTML5
-DnD when adding a new one.
+Any in-app drag — Sidebar reorder, Files tree moves, Work board cards — must
+be pointer-event driven (`usePointerReorder.js`, `useFileTreeDrag.js`,
+`useBoardDrag.js`); do not reach for HTML5 DnD when adding a new one. Component
+tests must drive pointer events too: jsdom dispatches `dragstart`/`drop`
+happily, so an HTML5 handler passes its test and does nothing in the app.
 
 ### External move recognition is identity-based and best-effort
 
