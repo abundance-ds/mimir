@@ -55,7 +55,7 @@ resizing, rails, widths, and Activity navigation history.
 ## Frontend map
 
 - Workbench shell: `src/mimir/WorkbenchApp.vue` (orchestration),
-  `src/mimir/components/` (shell, rails, sidebar, project switcher,
+  `src/mimir/components/` (shell, rails, sidebar, workspace switcher,
   quick-open, pane host), `src/mimir/composables/` (Activity lifecycle,
   bootstrap, keyboard routing, resize, pointer reorder),
   `src/mimir/quickOpenResults.js` (grouping, scope grammar, ranking, bounds). Docs:

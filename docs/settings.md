@@ -81,7 +81,7 @@ Shared scope settings follow the same mutation invariant:
 
 - `mimirTeamFolder` is the optional Team root configured in Settings > Scopes.
   It can contain `graph/`, `skills/`, and `agents/`. An empty value mounts only
-  Private and Project scopes. A configured folder that is temporarily missing
+  Private and Workspace scopes. A configured folder that is temporarily missing
   stays visible as unmounted and does not block local scopes.
 - `businessGraphViewState` stores the active section, per-section projection,
   Board grouping/sort/priority filter, and visible status columns. It is local
@@ -91,6 +91,11 @@ Changing the Team root remounts GraphRuntime against the current workspace.
 The scope inventory in Settings reports which component folders exist in each
 root. Changing view state must use `settings.set` with a newly constructed
 object.
+
+Settings > Graph also owns the compact Current workspace editor for its
+optional semantic Project link and Team/Workspace write default. The durable
+descriptor, local registry, setup prompt, and agent behavior are specified in
+[Business graph](business-graph.md#workspaces-and-projects).
 
 Files presentation state is also workspace-scoped. `workbenchFileFavorites`
 stores favorite paths, and `workbenchFileSort` stores the Project, Recent, and

@@ -1,9 +1,10 @@
 # Business graph
 
-Issues, clients, people, projects, evidence, decisions, and deliverables live
-in one source-aware graph. Work board, Changes, portfolio, timeline, and All
-are projections over that graph. The interface is a **dispatch desk**: agents
-file work; the human monitors, contributes, and corrects. No chat surface.
+Projects, companies, people, tasks, meetings, and reusable knowledge live in
+one graph. It is the consultancy's shared intelligence layer. Work board,
+Changes, portfolio, timeline, and All are projections over that graph. The
+interface is a **dispatch desk**: agents file work; the human monitors,
+contributes, and corrects. No chat surface.
 
 ## GraphStore contract
 
@@ -16,33 +17,98 @@ backlinks, diagnostics, and filesystem watchers that emit
 
 | Scope | Root | Intended use |
 |---|---|---|
-| Private | `~/.mimir/private/` | local notes, drafts, sensitive records |
-| Project | current workspace | engagement issues, decisions, evidence, deliverables |
-| Team | Settings > Team folder | shared companies, people, projects, methods, knowledge |
+| Private | `~/.mimir/private/` | Journal, personal drafts, sensitive records |
+| Workspace | current folder | rare graph data that must travel with one folder |
+| Team | Settings > Team folder | normal company knowledge and operational work |
 
 Each root contains a flat `graph/*.md` directory. Node kind stays in the file
 frontmatter. The Issue Board and Knowledge views are filtered projections over
 the same files.
-Scope ids filter queries, context packs, and projections; private nodes never
-leak into team-only views. This is a storage boundary, not a permission
-system. External collaborators share the project root without the team root.
+The native scope kind for Workspace storage remains `project` for file-format
+compatibility. Scope ids filter queries, context packs, and projections. A
+scope is a storage location. It is not the semantic Project that work belongs
+to.
 
 The workbench mounts `private:local`, `project:<root-hash>`, and optional
 `team:main`. Provenance carries `scopeId`, `scopeKind`, `sourcePath`,
 `sourceRevision`, and legacy format.
-Agent read results warn when they contain private data. Access is not blocked.
+Agent read results warn when they contain private data.
+If the open workspace is the configured Team folder, the one physical root has
+the Team identity. Mimir does not expose the same files as a duplicate Project
+scope.
+
+New graph items default to Team when it is mounted. Journal defaults to
+Private. Workspace storage is an explicit exception. All create paths can set
+another mounted physical scope. A Team scope that mounts after startup joins
+an unfiltered view; Mimir preserves an explicit scope filter.
+
+## Workspaces and Projects
+
+A workspace is a local folder. A Project is a business context in the graph.
+Mimir links them through `<workspace>/.mimir/workspace.toml`:
+
+```toml
+version = 1
+id = "ws-<stable-id>"
+project = "vandage-engagement"
+graphScope = "team"
+```
+
+`project` is optional. `graphScope` is `team` or `workspace`. One workspace
+links to at most one Project; one Project can have several workspaces. Mimir
+keeps a rebuildable local registry at `~/.mimir/workspaces.json`, so an agent
+can resolve a Project to folders available on the current machine. Absolute
+paths never enter the Team graph.
+
+When a Team graph exists and Mimir opens an unknown workspace, one compact
+dialog asks for `None`, an existing Project, or `New Project…`, plus Team or
+Workspace graph storage. The defaults are `None` and Team. Known workspaces
+open without a prompt. The rare later edit is in Settings > Graph > Current
+workspace. It is not in the daily workspace switcher. A changed link affects
+future writes; it does not move existing nodes.
+
+Activity-bound agent creates use this configuration. New tasks and suitable
+knowledge captures get `part_of` for the linked Project. Project graph results
+also include the locally resolved workspace paths. The workspace Project link
+does not restrict graph reads.
 
 ## Bounded ontology
 
-The ontology is intentionally business-specific:
+The primary ontology is intentionally small and business-specific:
 
-| Family | Kinds |
+| Entity | Meaning |
 |---|---|
-| Business | `issue`, `person`, `company`, `project`, `note`, `journal`, `decision`, `record` |
-| HEOR | `study`, `evidence`, `dataset`, `analysis`, `model`, `endpoint`, `publication`, `submission`, `research-question`, `method`, `client-request` |
+| `project` | Client engagement, product, lead, grant, or internal work hub |
+| `company` | The consultancy, client, prospect, partner, or vendor |
+| `person` | Team member, client contact, or collaborator |
+| `issue` | Task or operational next action; shown as Task in the UI |
+| `meeting` | Durable meeting context and outcomes |
+| `note`, `resource` | Reusable knowledge or a useful source/asset |
+| `journal` | Private chronological notes |
+| `decision` | A durable choice when later retrieval has value |
+| `record` | Explicitly sensitive structured material |
 
 Legacy `org` sources normalize to `company`. Unknown frontmatter is preserved
 through parse and serialization, but new public writes accept only known kinds.
+Older HEOR kinds such as `study`, `evidence`, `dataset`, `analysis`, `model`,
+`endpoint`, `publication`, `submission`, `research-question`, `method`, and
+`client-request` remain readable for compatibility. They are not primary
+creation choices. Files, notes, resources, tags, and properties are preferred
+until a concept needs independent identity and relations in repeated use.
+
+A client is a Company with `roles: [client]`, not a separate kind. Supported
+role values are `own`, `client`, `prospect`, `partner`, and `vendor`; a Company
+can have several. `status` is normally `active` or `former`. A Person can have
+`teamMember: true` and `status: active`. Only active team members appear in
+task assignment controls. `works_at` records affiliation independently, so a
+contractor can be a team member without a false employment relation.
+
+Projects use `projectType` (`client-engagement`, `product`, `lead`, `grant`, or
+`internal`), `projectStatus` (`warm-lead`, `planned`, `active`, `waiting`,
+`completed`, or `archived`).
+Loose retrieval topics are string tags such as `ai-native-heor`. Opportunity,
+Technology, Topic, Question, and Answer are not standard nodes. Do not turn
+agent actions or logs into business nodes.
 `journal` is the chronological artifact kind. It has a separate Journal
 projection and is excluded from the Knowledge/Notes projection. Today stores
 one private node per month, with ISO-date headings in the Markdown body.
@@ -59,8 +125,7 @@ dueDate, remindAt, snoozeUntil, waitingFor, labels, deliverables, rank
 Project and assignee are real `part_of` and `assigned_to` relations. The main
 relation vocabulary also includes `works_at`, `for_company`, `has_contact`,
 `blocked_by`, `depends_on`, `introduced_by`, `references`, and `related_to`.
-Backlinks provide inverse navigation; writers do not need redundant inverse
-edges.
+Write the forward relation only. Backlinks provide inverse navigation.
 
 `redactFromContext: true` writes the compatibility property `sensitive: true`.
 Those nodes and all `record` nodes remain directly readable and searchable, but

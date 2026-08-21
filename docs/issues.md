@@ -5,6 +5,13 @@ task scope.
 
 ## Open
 
+- Project-specific agent context is intentionally deferred. The unfinished
+  `contextPolicy` and isolation behavior were removed because the boundary and
+  user journey were not clear enough. Before this returns, define the retrieval
+  boundary, workspace behavior, and simple human control as one coherent design.
+  For now, a workspace Project link associates new work but does not restrict
+  graph reads.
+
 - Local Apps have no management surface. The empty `Settings > Apps` section
   was removed because it exposed no installed local definitions and duplicated
   built-in product navigation. The native app commands, catalog store/service,
