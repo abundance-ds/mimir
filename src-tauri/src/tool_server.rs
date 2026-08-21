@@ -66,6 +66,7 @@ struct AppState {
 struct McpClientContext {
     activity_id: Option<String>,
     agent_id: Option<String>,
+    cwd: Option<String>,
 }
 
 // ── Bearer auth (legacy HTTP API only) ───────────────────────────
@@ -516,7 +517,7 @@ async fn handle_mcp_request(
             let context = ToolCallContext {
                 request_id,
                 caller: ToolCaller::Mcp,
-                cwd: None,
+                cwd: client.cwd,
                 metadata,
             };
             let result = match state
@@ -953,6 +954,9 @@ mod tests {
             |context: ToolCallContext, input: serde_json::Value| async move {
                 assert_eq!(context.caller, ToolCaller::Mcp);
                 assert_eq!(context.request_id.as_deref(), Some("call-1"));
+                assert_eq!(context.cwd.as_deref(), Some("/work/client-a"));
+                assert_eq!(context.metadata["activityId"], "agent:one");
+                assert_eq!(context.metadata["agentId"], "codex");
                 Ok(ToolResult::new(json!({
                     "content": if input["include_content"] == true { "document" } else { "" }
                 })))
@@ -976,9 +980,14 @@ mod tests {
         let list_json: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
         assert_eq!(list_json["result"]["tools"][0]["name"], "mimir_state");
 
-        let call_response = handle_mcp(
-            State(state.clone()),
-            Json(json!({
+        let call_response = handle_mcp_request(
+            state.clone(),
+            McpClientContext {
+                activity_id: Some("agent:one".into()),
+                agent_id: Some("codex".into()),
+                cwd: Some("/work/client-a".into()),
+            },
+            json!({
                 "jsonrpc": "2.0",
                 "id": "call-1",
                 "method": "tools/call",
@@ -986,7 +995,7 @@ mod tests {
                     "name": "mimir_state",
                     "arguments": { "include_content": true }
                 }
-            })),
+            }),
         )
         .await
         .into_response();

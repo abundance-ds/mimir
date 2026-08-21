@@ -50,6 +50,7 @@ fn test_registry() -> ToolRegistry {
                 "id": input["id"],
                 "caller": serde_json::to_value(&context.caller).expect("caller serializes"),
                 "requestId": context.request_id,
+                "cwd": context.cwd,
             })))
         },
     )
@@ -349,6 +350,10 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
         serde_json::from_str(stdout_of(&call).trim()).expect("mimir call prints JSON");
     assert_eq!(payload["id"], "round-trip");
     assert_eq!(payload["caller"]["kind"], "mcp");
+    assert_eq!(
+        payload["cwd"].as_str(),
+        Some(std::env::current_dir().unwrap().to_string_lossy().as_ref())
+    );
     assert!(
         payload["requestId"]
             .as_str()

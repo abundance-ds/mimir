@@ -71,6 +71,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
       {
         activityId: id,
         agentId: resolved.agentId || resolved.presetId,
+        cwd: resolved.cwd,
       },
     )
     const record = {
@@ -197,6 +198,7 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     const mcpUrl = activityContextUrl(baseMcpUrl, {
       activityId: activity.id,
       agentId,
+      cwd: resolved.cwd,
     })
     // A continuation keeps the launch policy of the session it belongs to.
     // Resolving the launcher again supplies the current executable and identity,

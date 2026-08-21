@@ -114,6 +114,7 @@ describe('activity runtime store', () => {
         env: expect.objectContaining({
           APP_CHANNEL: 'review',
           MIMIR_ACTIVITY_ID: 'agent:new-id',
+          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp?activityId=agent%3Anew-id&agentId=codex&cwd=%2Fw',
         }),
       }),
     }), {}, null)
@@ -276,12 +277,12 @@ describe('activity runtime store', () => {
           '--model',
           'gpt-5.4',
           '-c',
-          'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex"',
+          'mcp_servers.mimir_workbench.url="http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex&cwd=%2Fw"',
         ],
         env: expect.objectContaining({
           MIMIR_ACTIVITY_ID: 'agent:one',
           MIMIR_AGENT_ID: 'codex',
-          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex',
+          MIMIR_MCP_URL: 'http://127.0.0.1:17532/mcp?activityId=agent%3Aone&agentId=codex&cwd=%2Fw',
         }),
       }),
     }), {}, '11111111-1111-4111-8111-111111111111')

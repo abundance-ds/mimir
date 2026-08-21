@@ -824,7 +824,14 @@ export function formatDoctor(report) {
 }
 
 function mcpEndpoint() {
-  return process.env.MIMIR_MCP_URL || FALLBACK_URL
+  const endpoint = process.env.MIMIR_MCP_URL || FALLBACK_URL
+  try {
+    const url = new URL(endpoint)
+    if (!url.searchParams.has('cwd')) url.searchParams.set('cwd', process.cwd())
+    return url.toString()
+  } catch {
+    return endpoint
+  }
 }
 
 function displayEndpoint(value, verbose = false) {

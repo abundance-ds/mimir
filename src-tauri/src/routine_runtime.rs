@@ -762,6 +762,7 @@ impl RoutineRuntime {
             &self.inner.config.mcp_url,
             &activity_id,
             agent_id.unwrap_or(&resolved.launch.preset_id),
+            &resolved.launch.cwd,
         );
         let mut env = resolved.launch.env.clone();
         env.insert("MIMIR_ACTIVITY_ID".into(), activity_id.clone());
@@ -840,6 +841,7 @@ impl RoutineRuntime {
             &self.inner.config.mcp_url,
             &activity_id,
             agent_id.unwrap_or(&resolved.launch.preset_id),
+            &resolved.launch.cwd,
         );
         let mut env = resolved.launch.env.clone();
         env.insert("MIMIR_ACTIVITY_ID".into(), activity_id.clone());
@@ -1093,17 +1095,18 @@ impl RoutineRuntime {
     }
 }
 
-fn activity_mcp_url(base: &str, activity_id: &str, agent_id: &str) -> String {
+fn activity_mcp_url(base: &str, activity_id: &str, agent_id: &str, cwd: &str) -> String {
     let Ok(mut url) = url::Url::parse(base) else {
         return base.to_string();
     };
     let mut pairs = url
         .query_pairs()
-        .filter(|(key, _)| key != "activityId" && key != "agentId")
+        .filter(|(key, _)| key != "activityId" && key != "agentId" && key != "cwd")
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect::<Vec<_>>();
     pairs.push(("activityId".into(), activity_id.into()));
     pairs.push(("agentId".into(), agent_id.into()));
+    pairs.push(("cwd".into(), cwd.into()));
     url.set_query(None);
     url.query_pairs_mut().extend_pairs(pairs);
     url.into()
@@ -2395,8 +2398,12 @@ mod tests {
         let launch = result.activity.launch.as_ref().unwrap();
         assert_eq!(launch.command, harness.binary.to_string_lossy());
         assert_eq!(&launch.args[..4], ["exec", "--model", "gpt 5", "-c"]);
-        let scoped_mcp_url =
-            activity_mcp_url("http://127.0.0.1:29999/mcp", &result.activity.id, "codex");
+        let scoped_mcp_url = activity_mcp_url(
+            "http://127.0.0.1:29999/mcp",
+            &result.activity.id,
+            "codex",
+            harness.workspace.to_str().unwrap(),
+        );
         assert_eq!(
             launch.args[4],
             format!(
