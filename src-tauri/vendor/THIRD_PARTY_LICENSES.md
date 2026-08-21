@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 696 Cargo packages, 318 npm packages, and 4 reviewed embedded/downloadable assets.
+Inventory: 696 Cargo packages, 319 npm packages, and 4 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -897,6 +897,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | npm:@vue/shared@3.5.34 | MIT | https://registry.npmjs.org/@vue/shared/-/shared-3.5.34.tgz | db8baa538388897dbdaf20b731e5a277f5dfd9f6b610545454b6fbee746193e52b4d5ae1fd7886b45005989040b4145b8f035db0f44ffa38ff38bdbb120d4d0c |
 | npm:@vue/test-utils@2.4.10 | MIT | https://registry.npmjs.org/@vue/test-utils/-/test-utils-2.4.10.tgz | 4a6a19e4403591888016cf4d918762145405f9c4a75309ef95811b63e0e8816419522a8e9bf636f5e49b7394faca2ef94a0485f7ceb74817979e2204a0f6a308 |
 | npm:@xterm/addon-fit@0.11.0 | MIT | https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-0.11.0.tgz | 8d87204fac6d558867860c61dd08180e79cd3184dc7fc1256f1c45cd7d08668faf69b42a48f0230b7735c09aca079135f55c107a2f3d40289964ff3a0c23c5ee |
+| npm:@xterm/addon-serialize@0.14.0 | MIT | https://registry.npmjs.org/@xterm/addon-serialize/-/addon-serialize-0.14.0.tgz | bad7b24d4d4492b41ad94c7a3ffb859767f3997238ea3cb9ba840c28438cd1f293ca25bb7129f45ab15e9c79b9bcee6e1175ff1a9c16fc58082efbf7af459b90 |
 | npm:@xterm/addon-unicode11@0.9.0 | MIT | https://registry.npmjs.org/@xterm/addon-unicode11/-/addon-unicode11-0.9.0.tgz | 1710e761ccae5e1365f974aa1992ffb7453d7a235bfeadc4593e6b624413ff3ba283c1b3fd56a09d000d287743585336953324f65cb4105431c71b5952845eb7 |
 | npm:@xterm/addon-web-links@0.12.0 | MIT | https://registry.npmjs.org/@xterm/addon-web-links/-/addon-web-links-0.12.0.tgz | e129a89b744fc95a7b64c60e603a02ffd78624926a6219cf2c61aa27ac0e05f07c5713d588935229d81161bf0da5a33a6127a510a6c0d924ad0fb946caa6a86f |
 | npm:@xterm/addon-webgl@0.19.0 | MIT | https://registry.npmjs.org/@xterm/addon-webgl/-/addon-webgl-0.19.0.tgz | 6f77cc3acc8b56e09e3495b1a25002114103d2f9bba82d1ccb8c11bdfde85114b30d361542218f8539e1599c081ddbc2e3c63ea0b86f6179d8e170d73e8268e8 |
