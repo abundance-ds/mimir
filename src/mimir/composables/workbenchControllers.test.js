@@ -446,6 +446,41 @@ describe('Workbench controllers', () => {
     modal.remove()
   })
 
+  it('allows typing in a teleported popover that belongs to a modal', () => {
+    const controller = useWorkbenchKeyboardRouting({
+      quickOpen: ref(false),
+      settings: { workbenchZoom: 1, set: vi.fn() },
+      editorRef: ref(null),
+      editorFiles: { openFiles: [] },
+      workbench: { activeActivityId: 'files' },
+      sidebarActivities: computed(() => []),
+      toggleSidebar: vi.fn(),
+      selectActivity: vi.fn(),
+      closeActivity: vi.fn(),
+      collapseEmptyEditor: vi.fn(),
+    })
+    const modal = document.createElement('section')
+    modal.setAttribute('aria-modal', 'true')
+    const portal = document.createElement('div')
+    portal.dataset.modalPortal = ''
+    const input = document.createElement('input')
+    portal.append(input)
+    document.body.append(modal, portal)
+    const event = {
+      key: 'a',
+      target: input,
+      preventDefault: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    }
+
+    controller.onKeydown(event)
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(event.stopImmediatePropagation).not.toHaveBeenCalled()
+    modal.remove()
+    portal.remove()
+  })
+
   it('owns startup hydration, core Activities, and responsive Editor visibility', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()
@@ -841,7 +876,7 @@ describe('Workbench controllers', () => {
     controller.dispose()
   })
 
-  it('creates an empty project folder and retains the complete project history', async () => {
+  it('creates an empty workspace folder and retains the complete workspace history', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()
     const activities = useActivitiesStore()
@@ -877,7 +912,7 @@ describe('Workbench controllers', () => {
     try {
       await expect(controller.createWorkspace()).resolves.toBe(true)
       expect(save).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'Create project',
+        title: 'Create workspace',
         defaultPath: '/work/Untitled project',
       }))
       expect(invoke).toHaveBeenNthCalledWith(1, 'path_exists', { path: '/work/new-project' })
@@ -896,7 +931,7 @@ describe('Workbench controllers', () => {
     }
   })
 
-  it('keeps Create project cancellation and failures recoverable', async () => {
+  it('keeps Create workspace cancellation and failures recoverable', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()
     const activities = useActivitiesStore()
@@ -939,7 +974,7 @@ describe('Workbench controllers', () => {
       expect(invoke).toHaveBeenLastCalledWith('path_exists', { path: '/work/existing' })
       expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
       expect(diagnostic.value).toBe(
-        'The project folder already exists. Use Open project instead.',
+        'The workspace folder already exists. Use Open workspace instead.',
       )
 
       diagnostic.value = ''
@@ -950,7 +985,7 @@ describe('Workbench controllers', () => {
       await expect(controller.createWorkspace()).resolves.toBe(false)
       expect(invoke).toHaveBeenLastCalledWith('create_dir', { path: '/work/broken' })
       expect(workspaceFiles.openWorkspace).not.toHaveBeenCalled()
-      expect(diagnostic.value).toBe('Project could not be created: Disk is full')
+      expect(diagnostic.value).toBe('Workspace could not be created: Disk is full')
     } finally {
       delete window.__TAURI_INTERNALS__
       controller.dispose()

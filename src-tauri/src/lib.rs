@@ -92,6 +92,7 @@ pub mod tool_server;
 pub mod tracker;
 #[cfg(test)]
 mod upgrade_fixtures;
+mod workspace_config;
 mod workspace_files;
 
 #[cfg(target_os = "macos")]
@@ -1116,6 +1117,9 @@ pub fn run() {
             path_exists,
             create_dir,
             list_dir,
+            workspace_config::workspace_config_load,
+            workspace_config::workspace_config_save,
+            workspace_config::workspace_project_paths,
             business_graph::runtime::graph_open,
             business_graph::runtime::graph_status,
             business_graph::runtime::graph_get,

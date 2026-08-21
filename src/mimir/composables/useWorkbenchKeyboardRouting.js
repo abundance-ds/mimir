@@ -48,8 +48,9 @@ export function useWorkbenchKeyboardRouting({
     if (document.querySelector('[aria-modal="true"]')) {
       // A modal that is still moving focus must never leak keystrokes into
       // CodeMirror or xterm behind it. Zoom was handled above and remains the
-      // one deliberate global chord while a dialog is open.
-      if (!event.target?.closest?.('[aria-modal="true"]')) consume(event)
+      // one deliberate global chord while a dialog is open. Popovers that are
+      // teleported to body remain part of the modal interaction.
+      if (!event.target?.closest?.('[aria-modal="true"], [data-modal-portal]')) consume(event)
       return
     }
 

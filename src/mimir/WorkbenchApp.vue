@@ -166,6 +166,16 @@
     @close="quickOpen = false"
     @activate="activateQuickOpenResult"
   />
+
+  <WorkspaceSetupDialog
+    :open="workspaceSetupOpen"
+    :workspace-path="workspaceSetupPath"
+    :projects="workspaceSetupProjects"
+    :initial-config="workspaceSetupInitialConfig"
+    :error="workspaceSetupError"
+    @cancel="finishWorkspaceSetup(null)"
+    @save="finishWorkspaceSetup"
+  />
 </template>
 
 <script setup>
@@ -205,6 +215,7 @@ import QuickOpen from './components/QuickOpen.vue'
 import WorkbenchShell from './components/WorkbenchShell.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import ChatPaneActions from './components/ChatPaneActions.vue'
+import WorkspaceSetupDialog from './components/WorkspaceSetupDialog.vue'
 import { useActivityLifecycle } from './composables/useActivityLifecycle.js'
 import { useWorkbenchKeyboardRouting } from './composables/useWorkbenchKeyboardRouting.js'
 import { useWorkbenchResize } from './composables/useWorkbenchResize.js'
@@ -265,6 +276,12 @@ const quickOpen = ref(false)
 const quickOpenInitialView = ref('root')
 const quickOpenPreferredTargetId = ref('')
 const diagnostic = ref('')
+const workspaceSetupOpen = ref(false)
+const workspaceSetupPath = ref('')
+const workspaceSetupProjects = ref([])
+const workspaceSetupInitialConfig = ref(null)
+const workspaceSetupError = ref('')
+let workspaceSetupResolver = null
 const activitySurfaces = new Map()
 
 const toolRuntime = createToolRuntime({
@@ -351,6 +368,7 @@ const workspaceBootstrap = useWorkspaceBootstrap({
   isActivityVisible: activity => activityIsVisibleInCurrentWorkspace(activity),
   getFocusOwner: () => lastWorkbenchFocus.value.owner,
   prepareEditorWorkspaceSwitch: () => editorRef.value?.mimirPrepareWorkspaceSwitch?.(),
+  requestWorkspaceSetup,
 })
 const {
   chooseWorkspace,
@@ -774,6 +792,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  finishWorkspaceSetup(null)
   persistWorkbench()
   void settings.flush()
   releaseSettingsSync()
@@ -1056,6 +1075,33 @@ function sortActivities(mode) {
 
 function openSettings(section = 'appearance') {
   editorRef.value?.mimirOpenSettings?.(section || 'appearance')
+}
+
+function requestWorkspaceSetup({
+  path,
+  projects = [],
+  initialConfig = null,
+  error = '',
+}) {
+  if (workspaceSetupResolver) {
+    workspaceSetupResolver(null)
+  }
+  workspaceSetupPath.value = String(path || '')
+  workspaceSetupProjects.value = Array.isArray(projects) ? projects : []
+  workspaceSetupInitialConfig.value = initialConfig
+  workspaceSetupError.value = String(error || '')
+  workspaceSetupOpen.value = true
+  return new Promise(resolve => {
+    workspaceSetupResolver = resolve
+  })
+}
+
+function finishWorkspaceSetup(result) {
+  const resolve = workspaceSetupResolver
+  workspaceSetupResolver = null
+  workspaceSetupOpen.value = false
+  workspaceSetupError.value = ''
+  resolve?.(result || null)
 }
 
 async function activateQuickOpenResult(result) {

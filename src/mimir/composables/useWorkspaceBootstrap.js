@@ -1,5 +1,14 @@
 import { ref, watch } from 'vue'
-import { openBusinessGraph } from '../../services/businessGraph.js'
+import {
+  createGraphNode,
+  getGraphNode,
+  openBusinessGraph,
+  queryGraph,
+} from '../../services/businessGraph.js'
+import {
+  loadWorkspaceConfig,
+  saveWorkspaceConfig,
+} from '../../services/workspaceConfig.js'
 import { activityWorkspacePath, normalizedWorkspacePath } from '../activityWorkspace.js'
 import { applyResponsiveZone, responsiveZoneFor } from '../responsiveLayout.js'
 
@@ -20,6 +29,7 @@ export function useWorkspaceBootstrap({
   isActivityVisible = () => true,
   getFocusOwner,
   prepareEditorWorkspaceSwitch = () => {},
+  requestWorkspaceSetup = async () => null,
 }) {
   const initialized = ref(false)
   const responsiveZone = ref('wide')
@@ -45,6 +55,7 @@ export function useWorkspaceBootstrap({
   async function start() {
     ensureCoreActivities()
     if (!settings.settingsReady) await settings.load()
+    registerRecentWorkspaceConfigs()
     restoreWorkbench()
 
     // The editor is a first-class startup surface, even when an old layout
@@ -247,7 +258,7 @@ export function useWorkspaceBootstrap({
 
   async function createWorkspace() {
     if (!window.__TAURI_INTERNALS__) {
-      diagnostic.value = 'Project creation is available in the Mimir desktop app.'
+      diagnostic.value = 'Workspace creation is available in the Mimir desktop app.'
       return false
     }
     try {
@@ -256,27 +267,32 @@ export function useWorkspaceBootstrap({
         import('@tauri-apps/plugin-dialog'),
       ])
       const selection = await save({
-        title: 'Create project',
+        title: 'Create workspace',
         defaultPath: newProjectDefaultPath(workspaceFiles.workspacePath),
       })
       const path = typeof selection === 'string' ? selection : selection?.path
       if (!path) return false
       if (await invoke('path_exists', { path })) {
-        diagnostic.value = 'The project folder already exists. Use Open project instead.'
+        diagnostic.value = 'The workspace folder already exists. Use Open workspace instead.'
         return false
       }
-      await invoke('create_dir', { path })
-      return openWorkspace(path)
+      return openWorkspace(path, { create: true })
     } catch (cause) {
-      diagnostic.value = `Project could not be created: ${errorMessage(cause)}`
+      diagnostic.value = `Workspace could not be created: ${errorMessage(cause)}`
       return false
     }
   }
 
-  async function openWorkspace(path, { persist = true, activate = true } = {}) {
-    await prepareEditorWorkspaceSwitch()
-    rememberActiveActivity(workspaceFiles.workspacePath)
+  async function openWorkspace(path, { persist = true, activate = true, create = false } = {}) {
     try {
+      const configuration = await ensureWorkspaceConfiguration(path, { create })
+      if (configuration === false) return false
+      if (create && configuration === null && window.__TAURI_INTERNALS__) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('create_dir', { path })
+      }
+      await prepareEditorWorkspaceSwitch()
+      rememberActiveActivity(workspaceFiles.workspacePath)
       await workspaceFiles.openWorkspace(path)
       const graphWarning = await mountBusinessGraph(path)
       ensureCoreActivities(path)
@@ -298,7 +314,8 @@ export function useWorkspaceBootstrap({
       queueInterruptedAgentsForActiveProject()
       return true
     } catch (cause) {
-      diagnostic.value = `Workspace index failed: ${errorMessage(cause)}`
+      const action = create ? 'be created' : 'open'
+      diagnostic.value = `Workspace could not ${action}: ${errorMessage(cause)}`
       return false
     }
   }
@@ -375,6 +392,73 @@ export function useWorkspaceBootstrap({
       diagnostic.value = message
       return message
     }
+  }
+
+  async function ensureWorkspaceConfiguration(path, { create = false } = {}) {
+    const workspace = String(path || '').trim()
+    const teamRoot = String(settings.mimirTeamFolder || '').trim()
+    if (!workspace || !teamRoot || !window.__TAURI_INTERNALS__) return null
+    const { invoke } = await import('@tauri-apps/api/core')
+    if (!await invoke('path_exists', { path: teamRoot })) return null
+
+    let existing = null
+    if (!create) existing = await loadWorkspaceConfig(workspace)
+
+    const graphRoot = create ? teamRoot : workspace
+    await openBusinessGraph(graphRoot, teamRoot)
+
+    if (existing?.project) {
+      const linked = await getGraphNode(existing.project)
+      if (linked?.kind === 'project') return existing
+    } else if (existing) {
+      return existing
+    }
+
+    const result = await queryGraph({
+      scopeIds: ['team:main'],
+      kinds: ['project'],
+      limit: 500,
+    })
+    const projects = Array.isArray(result?.items) ? result.items : []
+    const draft = await requestWorkspaceSetup({
+      path: workspace,
+      projects,
+      initialConfig: existing,
+      error: existing?.project
+        ? 'The linked Project is unavailable. Select another Project or None.'
+        : '',
+    })
+    if (!draft) {
+      if (workspaceFiles.workspacePath) {
+        await mountBusinessGraph(workspaceFiles.workspacePath)
+      }
+      return false
+    }
+
+    if (create) await invoke('create_dir', { path: workspace })
+    let project = String(draft.project || '').trim()
+    const newProjectTitle = String(draft.newProjectTitle || '').trim()
+    if (newProjectTitle) {
+      const created = await createGraphNode({
+        kind: 'project',
+        title: newProjectTitle,
+        scopeId: 'team:main',
+        properties: { projectStatus: 'planned' },
+      })
+      project = created.id
+    }
+    return saveWorkspaceConfig(workspace, {
+      id: existing?.id,
+      project,
+      graphScope: draft.graphScope,
+    })
+  }
+
+  function registerRecentWorkspaceConfigs() {
+    const paths = Array.isArray(settings.recentWorkspaceFolders)
+      ? settings.recentWorkspaceFolders
+      : []
+    void Promise.allSettled(paths.map(path => loadWorkspaceConfig(path)))
   }
 
   function rememberWorkspace(path) {

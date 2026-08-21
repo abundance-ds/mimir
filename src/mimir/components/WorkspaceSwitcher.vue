@@ -5,11 +5,11 @@
       type="button"
       data-sidebar-workspace
       class="no-drag group flex h-11 w-full min-w-0 items-center text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-      :aria-label="workspacePath ? `Switch project: ${workspaceName}` : 'Open project folder'"
+      :aria-label="workspacePath ? `Switch workspace: ${workspaceName}` : 'Open workspace folder'"
       :aria-expanded="popoverOpen"
       aria-haspopup="dialog"
       aria-controls="project-switcher-popover"
-      :title="workspacePath || 'Open project folder'"
+      :title="workspacePath || 'Open workspace folder'"
       @click.stop="togglePopover"
       @keydown.down.prevent="openPopover"
     >
@@ -18,7 +18,7 @@
       </span>
       <span v-if="!collapsed" class="ml-2 min-w-0 flex-1">
         <span class="block truncate text-[12px] font-semibold text-ink">
-          {{ workspaceName || 'Open project' }}
+          {{ workspaceName || 'Open workspace' }}
         </span>
         <span class="block truncate font-mono text-[9px] text-ink-3">
           {{ workspacePath || 'Choose a folder' }}
@@ -39,7 +39,7 @@
         ref="popoverRef"
         data-project-switcher-menu
         role="dialog"
-        aria-label="Switch project"
+        aria-label="Switch workspace"
         class="fixed z-[220] flex max-h-[min(420px,calc(100vh-16px))] w-[360px] max-w-[calc(100vw-16px)] flex-col overflow-hidden border border-rule bg-surface shadow-lg"
         :style="popoverStyle"
         @keydown="onPopoverKeydown"
@@ -51,7 +51,7 @@
             v-model="query"
             data-project-search
             type="search"
-            placeholder="Switch project…"
+            placeholder="Switch workspace…"
             autocomplete="off"
             autocorrect="off"
             autocapitalize="off"
@@ -77,7 +77,7 @@
           id="project-switcher-results"
           class="min-h-0 overflow-y-auto p-1"
           role="listbox"
-          aria-label="Projects and project actions"
+          aria-label="Workspaces and workspace actions"
         >
           <div
             v-if="filteredWorkspaces.length === 0"
@@ -85,7 +85,7 @@
             class="px-2.5 py-3 text-[10px] text-ink-3"
             role="status"
           >
-            No matching projects.
+            No matching workspaces.
           </div>
 
           <button
@@ -161,7 +161,7 @@ const query = ref('')
 const selectedIndex = ref(0)
 
 const monogram = computed(() => {
-  const parts = String(props.workspaceName || 'Project').trim().split(/[^a-zA-Z0-9]+/).filter(Boolean)
+  const parts = String(props.workspaceName || 'Workspace').trim().split(/[^a-zA-Z0-9]+/).filter(Boolean)
   const mark = parts.length > 1
     ? parts.slice(0, 2).map(part => part[0]).join('')
     : parts[0]?.slice(0, 2)
@@ -199,14 +199,14 @@ const options = computed(() => [
     id: `project-switcher-option-${filteredWorkspaces.value.length}`,
     key: 'project:open',
     type: 'open',
-    title: 'Open project…',
+    title: 'Open workspace…',
     divider: true,
   },
   {
     id: `project-switcher-option-${filteredWorkspaces.value.length + 1}`,
     key: 'project:create',
     type: 'create',
-    title: 'Create project…',
+    title: 'Create workspace…',
   },
 ])
 

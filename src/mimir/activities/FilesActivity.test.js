@@ -471,6 +471,7 @@ describe('FilesActivity', () => {
 
   it('builds Recent from actual editor history and keeps missing entries visible', async () => {
     const editorFiles = useFileStore()
+    useSettingsStore().set('workbenchFileSort', {})
     editorFiles.setRecentFiles(['/w/src/lib.rs', '/w/moved.md'])
     const wrapper = render()
 
