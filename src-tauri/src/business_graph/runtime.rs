@@ -1,9 +1,10 @@
 use super::markdown::source_revision;
 use super::model::{
-    GraphActor, GraphActorKind, GraphChanged, GraphDeleteResult, GraphDiagnostic, GraphEvent,
-    GraphEventPage, GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode, GraphNodeCreate,
-    GraphNodeDelete, GraphNodePatch, GraphOpenResult, GraphQuery, GraphQueryResult,
-    GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSourceRoot,
+    canonical_kind, GraphActor, GraphActorKind, GraphChanged, GraphDeleteResult, GraphDiagnostic,
+    GraphEvent, GraphEventPage, GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode,
+    GraphNodeCreate, GraphNodeDelete, GraphNodePatch, GraphOpenResult, GraphQuery,
+    GraphQueryResult, GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult,
+    GraphSourceRoot,
 };
 use super::store::{GraphMutationError, GraphStore};
 use super::{build_migration_report, GraphContextPack, GraphContextRequest, GraphMigrationReport};
@@ -284,6 +285,7 @@ impl GraphRuntime {
     }
 
     pub fn create(&self, create: GraphNodeCreate) -> Result<GraphNode, GraphMutationError> {
+        let scope_order = default_scope_order(&create.kind);
         let root = {
             let roots = self
                 .roots
@@ -295,19 +297,12 @@ impl GraphRuntime {
                     .find(|root| root.scope_id == scope_id)
                     .cloned()
                     .ok_or_else(|| GraphMutationError::ScopeNotFound(scope_id.into()))?,
-                None => roots
-                    .iter()
-                    .find(|root| root.scope_kind == GraphScopeKind::Project)
-                    .or_else(|| {
-                        roots
-                            .iter()
-                            .find(|root| root.scope_kind == GraphScopeKind::Private)
-                    })
+                None => scope_order
+                    .into_iter()
+                    .find_map(|kind| roots.iter().find(|root| root.scope_kind == kind))
                     .cloned()
                     .ok_or_else(|| {
-                        GraphMutationError::ScopeNotFound(
-                            "no project or private graph scope is open".into(),
-                        )
+                        GraphMutationError::ScopeNotFound("no graph scope is open".into())
                     })?,
             }
         };
@@ -1139,8 +1134,46 @@ fn project_scope_id(path: &Path) -> String {
 }
 
 fn deduplicate_roots(roots: &mut Vec<GraphSourceRoot>) {
-    let mut seen = HashSet::new();
-    roots.retain(|root| seen.insert(root.root.clone()));
+    let mut unique = Vec::<GraphSourceRoot>::new();
+    for root in roots.drain(..) {
+        if let Some(index) = unique
+            .iter()
+            .position(|candidate| candidate.root == root.root)
+        {
+            if scope_identity_priority(root.scope_kind)
+                > scope_identity_priority(unique[index].scope_kind)
+            {
+                unique[index] = root;
+            }
+        } else {
+            unique.push(root);
+        }
+    }
+    *roots = unique;
+}
+
+fn scope_identity_priority(kind: GraphScopeKind) -> u8 {
+    match kind {
+        GraphScopeKind::Private => 3,
+        GraphScopeKind::Team => 2,
+        GraphScopeKind::Project => 1,
+    }
+}
+
+fn default_scope_order(kind: &str) -> [GraphScopeKind; 3] {
+    if canonical_kind(kind) == "journal" {
+        [
+            GraphScopeKind::Private,
+            GraphScopeKind::Team,
+            GraphScopeKind::Project,
+        ]
+    } else {
+        [
+            GraphScopeKind::Team,
+            GraphScopeKind::Project,
+            GraphScopeKind::Private,
+        ]
+    }
 }
 
 fn open_result(roots: &[GraphSourceRoot], store: &GraphStore) -> GraphOpenResult {
@@ -1236,6 +1269,73 @@ mod tests {
         assert!(id.starts_with("project:heor-research-"));
         assert_eq!(id, project_scope_id(Path::new("/work/HEOR Research")));
         assert_ne!(id, project_scope_id(Path::new("/other/HEOR Research")));
+    }
+
+    #[test]
+    fn team_identity_wins_when_project_and_team_use_one_root() {
+        let shared = PathBuf::from("/shared/team");
+        let mut roots = vec![
+            GraphSourceRoot::new("private:local", GraphScopeKind::Private, "/private"),
+            GraphSourceRoot::new("project:test", GraphScopeKind::Project, &shared),
+            GraphSourceRoot::new("team:main", GraphScopeKind::Team, &shared),
+        ];
+
+        deduplicate_roots(&mut roots);
+
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[1].scope_id, "team:main");
+        assert_eq!(roots[1].scope_kind, GraphScopeKind::Team);
+    }
+
+    #[test]
+    fn omitted_create_scope_uses_team_except_for_private_journal() {
+        let private = TempDir::new().unwrap();
+        let project = TempDir::new().unwrap();
+        let team = TempDir::new().unwrap();
+        let runtime = GraphRuntime::from_roots(vec![
+            GraphSourceRoot::new("private:local", GraphScopeKind::Private, private.path()),
+            GraphSourceRoot::new("project:test", GraphScopeKind::Project, project.path()),
+            GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path()),
+        ]);
+
+        let company = runtime
+            .create(GraphNodeCreate {
+                kind: "company".into(),
+                title: "Shared client".into(),
+                ..GraphNodeCreate::default()
+            })
+            .unwrap();
+        let issue = runtime
+            .create(GraphNodeCreate {
+                kind: "issue".into(),
+                title: "Team action".into(),
+                ..GraphNodeCreate::default()
+            })
+            .unwrap();
+        let journal = runtime
+            .create(GraphNodeCreate {
+                kind: "journal".into(),
+                title: "2026-08".into(),
+                ..GraphNodeCreate::default()
+            })
+            .unwrap();
+
+        assert_eq!(company.provenance.scope_id, "team:main");
+        assert_eq!(issue.provenance.scope_id, "team:main");
+        assert_eq!(journal.provenance.scope_id, "private:local");
+
+        let team_only = GraphRuntime::from_roots(vec![
+            GraphSourceRoot::new("private:local", GraphScopeKind::Private, private.path()),
+            GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path()),
+        ]);
+        let shared_issue = team_only
+            .create(GraphNodeCreate {
+                kind: "issue".into(),
+                title: "Shared action".into(),
+                ..GraphNodeCreate::default()
+            })
+            .unwrap();
+        assert_eq!(shared_issue.provenance.scope_id, "team:main");
     }
 
     #[test]

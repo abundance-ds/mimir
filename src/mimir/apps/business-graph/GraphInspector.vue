@@ -278,6 +278,71 @@
             class="object-metadata-grid object-metadata-grid-peek"
             aria-label="Object details"
           >
+            <template v-if="node.kind === 'project'">
+              <div class="object-metadata-field">
+                <span>Type</span>
+                <GraphSelect
+                  :model-value="draft.projectType"
+                  variant="quiet"
+                  aria-label="Project type"
+                  :options="projectTypes"
+                  @update:model-value="updateDraft('projectType', $event)"
+                />
+              </div>
+              <div class="object-metadata-field">
+                <span>Status</span>
+                <GraphSelect
+                  :model-value="draft.projectStatus"
+                  variant="quiet"
+                  aria-label="Project status"
+                  :options="projectStatuses"
+                  @update:model-value="updateDraft('projectStatus', $event)"
+                />
+              </div>
+            </template>
+            <template v-else-if="node.kind === 'company'">
+              <label class="object-metadata-field">
+                <span>Relationships</span>
+                <input
+                  v-model="draft.companyRoles"
+                  data-graph-control="peek-company-roles"
+                  aria-label="Company relationships"
+                  placeholder="client, partner"
+                  @input="changed"
+                />
+              </label>
+              <div class="object-metadata-field">
+                <span>Status</span>
+                <GraphSelect
+                  :model-value="draft.entityStatus"
+                  variant="quiet"
+                  aria-label="Company status"
+                  :options="entityStatuses"
+                  @update:model-value="updateDraft('entityStatus', $event)"
+                />
+              </div>
+            </template>
+            <template v-else-if="node.kind === 'person'">
+              <div class="object-metadata-field">
+                <span>Status</span>
+                <GraphSelect
+                  :model-value="draft.entityStatus"
+                  variant="quiet"
+                  aria-label="Person status"
+                  :options="entityStatuses"
+                  @update:model-value="updateDraft('entityStatus', $event)"
+                />
+              </div>
+              <div class="object-metadata-field object-metadata-checkbox">
+                <span>Assignment</span>
+                <GraphCheckbox
+                  :model-value="draft.teamMember"
+                  @update:model-value="updateDraft('teamMember', $event)"
+                >
+                  Team member
+                </GraphCheckbox>
+              </div>
+            </template>
             <div class="object-metadata-field object-metadata-date">
               <span>Created</span>
               <strong data-inspector-created>{{ readableDateTime(node.createdAt) || 'Unknown' }}</strong>
@@ -626,9 +691,74 @@
 
             <div
               v-if="node.kind !== 'issue'"
-              class="object-metadata-grid object-metadata-grid-focus object-metadata-grid-dates"
+              class="object-metadata-grid object-metadata-grid-focus"
               aria-label="Object details"
             >
+              <template v-if="node.kind === 'project'">
+                <div class="object-metadata-field">
+                  <span>Type</span>
+                  <GraphSelect
+                    :model-value="draft.projectType"
+                    variant="quiet"
+                    aria-label="Project type"
+                    :options="projectTypes"
+                    @update:model-value="updateDraft('projectType', $event)"
+                  />
+                </div>
+                <div class="object-metadata-field">
+                  <span>Status</span>
+                  <GraphSelect
+                    :model-value="draft.projectStatus"
+                    variant="quiet"
+                    aria-label="Project status"
+                    :options="projectStatuses"
+                    @update:model-value="updateDraft('projectStatus', $event)"
+                  />
+                </div>
+              </template>
+              <template v-else-if="node.kind === 'company'">
+                <label class="object-metadata-field">
+                  <span>Relationships</span>
+                  <input
+                    v-model="draft.companyRoles"
+                    data-graph-control="focus-company-roles"
+                    aria-label="Company relationships"
+                    placeholder="client, partner"
+                    @input="changed"
+                  />
+                </label>
+                <div class="object-metadata-field">
+                  <span>Status</span>
+                  <GraphSelect
+                    :model-value="draft.entityStatus"
+                    variant="quiet"
+                    aria-label="Company status"
+                    :options="entityStatuses"
+                    @update:model-value="updateDraft('entityStatus', $event)"
+                  />
+                </div>
+              </template>
+              <template v-else-if="node.kind === 'person'">
+                <div class="object-metadata-field">
+                  <span>Status</span>
+                  <GraphSelect
+                    :model-value="draft.entityStatus"
+                    variant="quiet"
+                    aria-label="Person status"
+                    :options="entityStatuses"
+                    @update:model-value="updateDraft('entityStatus', $event)"
+                  />
+                </div>
+                <div class="object-metadata-field object-metadata-checkbox">
+                  <span>Assignment</span>
+                  <GraphCheckbox
+                    :model-value="draft.teamMember"
+                    @update:model-value="updateDraft('teamMember', $event)"
+                  >
+                    Team member
+                  </GraphCheckbox>
+                </div>
+              </template>
               <div class="object-metadata-field object-metadata-date">
                 <span>Created</span>
                 <strong data-inspector-created>{{ readableDateTime(node.createdAt) || 'Unknown' }}</strong>
@@ -896,6 +1026,7 @@ import {
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphRelationshipLine from './GraphRelationshipLine.vue'
 import ProjectStanding from './ProjectStanding.vue'
+import GraphCheckbox from './GraphCheckbox.vue'
 import GraphSelect from './GraphSelect.vue'
 import GraphDatePicker from './GraphDatePicker.vue'
 import GraphDateTimeField from './GraphDateTimeField.vue'
@@ -963,6 +1094,11 @@ const draft = reactive({
   snoozeUntil: '',
   labels: '',
   deliverables: '',
+  projectType: '',
+  projectStatus: 'planned',
+  companyRoles: '',
+  entityStatus: 'active',
+  teamMember: false,
   relations: [],
 })
 
@@ -980,6 +1116,26 @@ const priorities = Object.freeze([
   { id: 'high', label: 'High' },
   { id: 'normal', label: 'Normal' },
   { id: 'low', label: 'Low' },
+])
+const projectTypes = Object.freeze([
+  { id: '', label: 'Not set' },
+  { id: 'client-engagement', label: 'Client engagement' },
+  { id: 'product', label: 'Product' },
+  { id: 'lead', label: 'Lead' },
+  { id: 'grant', label: 'Grant' },
+  { id: 'internal', label: 'Internal' },
+])
+const projectStatuses = Object.freeze([
+  { id: 'warm-lead', label: 'Warm lead' },
+  { id: 'planned', label: 'Planned' },
+  { id: 'active', label: 'Active' },
+  { id: 'waiting', label: 'Waiting' },
+  { id: 'completed', label: 'Completed' },
+  { id: 'archived', label: 'Archived' },
+])
+const entityStatuses = Object.freeze([
+  { id: 'active', label: 'Active' },
+  { id: 'former', label: 'Former' },
 ])
 const RELATION_DEFINITIONS = Object.freeze([
   {
@@ -1041,6 +1197,10 @@ const RELATION_DEFINITIONS = Object.freeze([
 ])
 const projects = computed(() => props.nodes.filter(node => node.kind === 'project'))
 const people = computed(() => props.nodes.filter(node => node.kind === 'person'))
+const activeTeamPeople = computed(() => people.value.filter(person => (
+  (person.teamMember || person.properties?.teamMember)
+  && (person.status || person.properties?.status) === 'active'
+)))
 const projectOptions = computed(() => [
   { value: '', label: 'No project', hint: 'Remove project relation' },
   ...labelOption(draft.projectId, projects.value),
@@ -1052,13 +1212,23 @@ const projectOptions = computed(() => [
 ])
 const personOptions = computed(() => [
   { value: '', label: 'Unassigned', hint: 'Remove assignee relation' },
-  ...labelOption(draft.assigneeId, people.value),
-  ...people.value.map(person => ({
+  ...currentPersonOption(draft.assigneeId),
+  ...activeTeamPeople.value.map(person => ({
     value: person.id,
     label: displayTitle(person),
-    hint: `${human(scopeFor(person))} scope`,
+    hint: 'Team member',
   })),
 ])
+
+function currentPersonOption(value) {
+  const current = String(value || '').trim()
+  if (!current || activeTeamPeople.value.some(person => person.id === current)) return []
+  const person = people.value.find(candidate => candidate.id === current)
+  if (person) {
+    return [{ value: current, label: displayTitle(person), hint: 'Current owner' }]
+  }
+  return [{ value: current, label: current, hint: 'Label from the Markdown source' }]
+}
 
 // A legacy source value is a label, not an id. Offering it keeps the control
 // showing what the Markdown actually says instead of reading as unassigned.
@@ -1197,6 +1367,13 @@ function resetDraft(node) {
         : `${item.path}${item.label ? ` | ${item.label}` : ''}`
     ))
     .join('\n')
+  draft.projectType = node.properties?.projectType || ''
+  draft.projectStatus = node.properties?.projectStatus || (
+    node.kind === 'project' ? node.properties?.status || 'planned' : 'planned'
+  )
+  draft.companyRoles = (node.properties?.roles || []).join(', ')
+  draft.entityStatus = node.properties?.status || 'active'
+  draft.teamMember = Boolean(node.properties?.teamMember)
   draft.relations = (node.relations || []).map(edge => ({ ...edge }))
   connectionRelation.value = defaultRelationFor(node.kind)
   connectionTarget.value = ''
@@ -1249,6 +1426,17 @@ function save(afterSave = null) {
         const [path, ...label] = line.split('|').map(value => value.trim())
         return { path, ...(label.join(' | ') ? { label: label.join(' | ') } : {}) }
       })
+  } else if (props.node.kind === 'project') {
+    if (draft.projectType) setProperties.projectType = draft.projectType
+    else removeProperties.push('projectType')
+    setProperties.projectStatus = draft.projectStatus
+    removeProperties.push('status')
+  } else if (props.node.kind === 'company') {
+    setProperties.roles = splitValues(draft.companyRoles)
+    setProperties.status = draft.entityStatus
+  } else if (props.node.kind === 'person') {
+    setProperties.status = draft.entityStatus
+    setProperties.teamMember = draft.teamMember
   }
   const relations = props.node.kind === 'issue'
     ? [
@@ -1871,6 +2059,11 @@ onUnmounted(() => {
 .object-metadata-field :deep(.graph-select-quiet),
 .object-metadata-field :deep(.graph-date-quiet) {
   width: 100%;
+}
+
+.object-metadata-checkbox :deep(.graph-checkbox-control) {
+  min-height: 27px;
+  padding-inline: 5px;
 }
 
 .object-metadata-field input {

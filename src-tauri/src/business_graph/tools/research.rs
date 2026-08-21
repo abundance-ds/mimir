@@ -32,6 +32,31 @@ fn research_capture_evidence(
             properties.insert(key.into(), Value::String(value));
         }
     }
+    let project_id = optional_string(input, "project")
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            (focus.kind == "project")
+                .then(|| focus.id.clone())
+                .or_else(|| {
+                    focus
+                        .relations
+                        .iter()
+                        .find(|edge| edge.relation == "part_of")
+                        .map(|edge| edge.target.clone())
+                })
+        });
+    let mut relations = vec![GraphRelation {
+        relation: "related_to".into(),
+        target: focus.id,
+        legacy: false,
+    }];
+    if let Some(project_id) = project_id {
+        relations.push(GraphRelation {
+            relation: "part_of".into(),
+            target: project_id,
+            legacy: false,
+        });
+    }
     let created = runtime
         .create(GraphNodeCreate {
             scope_id: Some(focus.provenance.scope_id),
@@ -41,11 +66,7 @@ fn research_capture_evidence(
             summary: optional_string(input, "summary").unwrap_or_default(),
             body: optional_string(input, "body").unwrap_or_default(),
             tags: string_vec(input.get("tags")),
-            relations: vec![GraphRelation {
-                relation: "related_to".into(),
-                target: focus.id,
-                legacy: false,
-            }],
+            relations,
             properties,
         })
         .map_err(mutation_error)?;

@@ -423,6 +423,7 @@ fn graph_query() -> GraphQueryResult {
                 rank: Some(3),
                 slug: Some("sidebar-ordering".into()),
                 needs_detail: false,
+                team_member: false,
                 deliverables: vec![],
                 relations: vec![
                     GraphRelation {
@@ -457,6 +458,7 @@ fn graph_query() -> GraphQueryResult {
                 rank: None,
                 slug: None,
                 needs_detail: true,
+                team_member: true,
                 deliverables: vec![],
                 relations: vec![],
                 updated_at: "2026-07-20T08:00:00Z".into(),

@@ -12,6 +12,8 @@ pub const ENTITY_KINDS: &[&str] = &[
     "journal",
     "decision",
     "record",
+    "meeting",
+    "resource",
     "study",
     "evidence",
     "dataset",
@@ -126,7 +128,10 @@ pub struct GraphNode {
 
 impl GraphNode {
     pub fn status(&self) -> Option<&str> {
-        self.properties.get("status").and_then(Value::as_str)
+        self.properties
+            .get("status")
+            .or_else(|| self.properties.get("projectStatus"))
+            .and_then(Value::as_str)
     }
 
     pub fn priority(&self) -> Option<&str> {
@@ -193,6 +198,11 @@ impl GraphNode {
                 .get("needsDetail")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            team_member: self
+                .properties
+                .get("teamMember")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             deliverables: self
                 .properties
                 .get("deliverables")
@@ -248,6 +258,8 @@ pub struct GraphNodeSummary {
     pub slug: Option<String>,
     #[serde(default)]
     pub needs_detail: bool,
+    #[serde(default)]
+    pub team_member: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deliverables: Vec<String>,
     #[serde(default)]

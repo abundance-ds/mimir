@@ -408,7 +408,7 @@ fn query_properties() -> Value {
 
 fn graph_create_properties() -> Value {
     json!({
-        "scopeId": string_schema("Target physical scope id. Defaults to the current project."),
+        "scopeId": string_schema("Target physical scope id. When omitted, normal graph kinds prefer Team and Journal prefers Private."),
         "id": string_schema("Optional stable lowercase slug id."),
         "kind": { "type": "string", "enum": ENTITY_KINDS },
         "title": string_schema("Human-readable title."),

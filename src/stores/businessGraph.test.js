@@ -107,6 +107,58 @@ describe('business graph store', () => {
     expect(store.scopeCounts['project:alpha']).toBe(1)
   })
 
+  it('includes Team when it mounts after an initially complete Project view', async () => {
+    const withoutTeam = scopes.filter(scope => scope.kind !== 'team')
+    vi.mocked(openBusinessGraph)
+      .mockResolvedValueOnce({
+        scopes: withoutTeam,
+        nodeCount: 1,
+        diagnosticCount: 0,
+        graphRevision: 1,
+      })
+      .mockResolvedValueOnce({
+        scopes,
+        nodeCount: 2,
+        diagnosticCount: 0,
+        graphRevision: 2,
+      })
+    const store = useBusinessGraphStore()
+
+    await store.start('/alpha')
+    expect(store.activeScopeIds).toEqual(withoutTeam.map(scope => scope.id))
+    await store.start('/alpha', '/team')
+
+    expect(store.activeScopeIds).toEqual(scopes.map(scope => scope.id))
+    expect(queryGraph).toHaveBeenLastCalledWith({
+      scopeIds: scopes.map(scope => scope.id),
+      limit: 500,
+    })
+  })
+
+  it('keeps an intentional scope filter when another scope mounts', async () => {
+    const withoutTeam = scopes.filter(scope => scope.kind !== 'team')
+    vi.mocked(openBusinessGraph)
+      .mockResolvedValueOnce({
+        scopes: withoutTeam,
+        nodeCount: 1,
+        diagnosticCount: 0,
+        graphRevision: 1,
+      })
+      .mockResolvedValueOnce({
+        scopes,
+        nodeCount: 2,
+        diagnosticCount: 0,
+        graphRevision: 2,
+      })
+    const store = useBusinessGraphStore()
+
+    await store.start('/alpha')
+    await store.setScopes(['project:alpha'])
+    await store.start('/alpha', '/team')
+
+    expect(store.activeScopeIds).toEqual(['project:alpha'])
+  })
+
   it('loads change history in bounded pages', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')

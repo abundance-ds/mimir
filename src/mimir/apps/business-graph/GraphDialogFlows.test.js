@@ -47,6 +47,71 @@ describe('Business Graph dialogs', () => {
     }))
   })
 
+  it('routes shared business entities to Team by default', async () => {
+    wrapper = mount(GraphCreateDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        scopes: [
+          { id: 'private:local', kind: 'private', root: '/private' },
+          { id: 'project:atlas', kind: 'project', root: '/atlas' },
+          { id: 'team:main', kind: 'team', root: '/team' },
+        ],
+      },
+    })
+    await flushPromises()
+
+    expect(document.querySelector('[data-create-scope]').textContent).toContain('Team')
+    document.querySelector('[data-create-kind]').click()
+    await flushPromises()
+    document.querySelector('[data-graph-select-option="company"]').click()
+    await flushPromises()
+    expect(document.querySelector('[data-create-scope]').textContent).toContain('Team')
+
+    const title = document.querySelector('[data-create-title]')
+    title.value = 'Example client'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector('[data-create-submit]').click()
+    await flushPromises()
+
+    expect(wrapper.emitted('create')[0][0]).toEqual(expect.objectContaining({
+      kind: 'company',
+      scopeId: 'team:main',
+      title: 'Example client',
+    }))
+  })
+
+  it('creates a Project with lean business and context properties', async () => {
+    wrapper = mount(GraphCreateDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        initialKind: 'project',
+        scopes: [
+          { id: 'private:local', kind: 'private', root: '/private' },
+          { id: 'team:main', kind: 'team', root: '/team' },
+        ],
+      },
+    })
+    await flushPromises()
+
+    const title = document.querySelector('[data-create-title]')
+    title.value = 'New engagement'
+    title.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector('[data-create-submit]').click()
+    await flushPromises()
+
+    expect(wrapper.emitted('create')[0][0]).toEqual(expect.objectContaining({
+      kind: 'project',
+      scopeId: 'team:main',
+      properties: {
+        projectStatus: 'planned',
+      },
+    }))
+  })
+
   it('replaces browser confirmation with a focused, recoverable graph action', async () => {
     const opener = document.createElement('button')
     document.body.append(opener)

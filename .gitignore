@@ -23,6 +23,8 @@ tmp/
 
 # Workspace-local Mimir data
 graph/
+!src-tauri/tests/fixtures/business-graph/graph/
+!src-tauri/tests/fixtures/business-graph/graph/*.md
 
 # Spike experiments
 spike/

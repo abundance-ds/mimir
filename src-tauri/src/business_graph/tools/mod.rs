@@ -13,11 +13,12 @@ mod support;
 #[cfg(test)]
 mod tests;
 
-use super::{GraphActor, GraphActorKind, GraphNode, GraphRuntime};
+use super::{GraphActor, GraphActorKind, GraphNode, GraphRuntime, GraphScopeKind};
 use crate::tool_registry::{
     ToolCallContext, ToolCaller, ToolDescriptor, ToolError, ToolErrorCode, ToolOwner,
     ToolRegistration, ToolRegistry, ToolResult, ToolSource,
 };
+use crate::workspace_config::{self, WorkspaceConfig, WorkspaceGraphScope};
 use serde_json::Value;
 use std::path::PathBuf;
 use support::internal_error;
@@ -65,12 +66,20 @@ pub(crate) fn register_native_tools(
                 ToolOwner::Core,
                 ToolSource::Native,
             ),
-            move |context: ToolCallContext, input: Value| {
+            move |context: ToolCallContext, mut input: Value| {
                 let app = app.clone();
                 let dispatch_name = dispatch_name.clone();
                 async move {
                     ensure_open(&app, &context)?;
                     let runtime = app.state::<GraphRuntime>();
+                    let workspace = agent_workspace_config(&context)?;
+                    apply_workspace_defaults(
+                        &runtime,
+                        &context,
+                        &dispatch_name,
+                        &mut input,
+                        workspace.as_ref(),
+                    )?;
                     let before = mutation_before(&runtime, &dispatch_name, &input)?;
                     let execution = execute_native_tool(&runtime, &dispatch_name, input)?;
                     if let Some(path) = execution.changed_path.as_ref() {
@@ -95,6 +104,151 @@ pub(crate) fn register_native_tools(
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+fn apply_workspace_defaults(
+    runtime: &GraphRuntime,
+    context: &ToolCallContext,
+    action: &str,
+    input: &mut Value,
+    config: Option<&WorkspaceConfig>,
+) -> Result<(), ToolError> {
+    if !is_create_action(action) {
+        return Ok(());
+    }
+    let Some(config) = config else {
+        return Ok(());
+    };
+    let Some(object) = input.as_object_mut() else {
+        return Ok(());
+    };
+    if !object.contains_key("scopeId") {
+        let scope_id = configured_scope_id(runtime, context, config)?;
+        object.insert("scopeId".into(), Value::String(scope_id));
+    }
+    let Some(project_id) = config.project_id.as_deref() else {
+        return Ok(());
+    };
+    match action {
+        "issues.create" => {
+            object
+                .entry("project")
+                .or_insert_with(|| Value::String(project_id.into()));
+        }
+        "graph.create" => {
+            let kind = object
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if project_bound_kind(kind) {
+                add_project_relation(object, "relations", project_id);
+            }
+        }
+        "knowledge.create" => {
+            let kind = object.get("type").and_then(Value::as_str).unwrap_or("note");
+            if project_bound_kind(kind) {
+                add_project_relation(object, "links", project_id);
+            }
+        }
+        "research.capture_evidence" => {
+            object
+                .entry("project")
+                .or_insert_with(|| Value::String(project_id.into()));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn agent_workspace_config(context: &ToolCallContext) -> Result<Option<WorkspaceConfig>, ToolError> {
+    let workspace_bound = context
+        .metadata
+        .get("activityId")
+        .and_then(Value::as_str)
+        .is_some()
+        || matches!(
+            context.caller,
+            ToolCaller::Mcp | ToolCaller::MimirCli | ToolCaller::Routine(_)
+        );
+    if !workspace_bound {
+        return Ok(None);
+    }
+    let Some(cwd) = context.cwd.as_deref() else {
+        return Ok(None);
+    };
+    workspace_config::read_workspace_config(cwd)
+        .map_err(|error| ToolError::new(ToolErrorCode::Unavailable, error))
+}
+
+fn configured_scope_id(
+    runtime: &GraphRuntime,
+    context: &ToolCallContext,
+    config: &WorkspaceConfig,
+) -> Result<String, ToolError> {
+    let status = runtime.open_result().map_err(internal_error)?;
+    match config.graph_scope {
+        WorkspaceGraphScope::Team => status
+            .scopes
+            .iter()
+            .find(|scope| scope.kind == GraphScopeKind::Team)
+            .map(|scope| scope.id.clone())
+            .ok_or_else(|| {
+                ToolError::new(
+                    ToolErrorCode::Unavailable,
+                    "This workspace writes to Team, but no Team graph is mounted.",
+                )
+            }),
+        WorkspaceGraphScope::Workspace => {
+            let cwd = context.cwd.as_deref().unwrap_or_default();
+            let canonical = std::fs::canonicalize(cwd).map_err(|error| {
+                ToolError::new(
+                    ToolErrorCode::Unavailable,
+                    format!("Could not resolve the Activity workspace: {error}"),
+                )
+            })?;
+            status
+                .scopes
+                .iter()
+                .find(|scope| {
+                    scope.kind == GraphScopeKind::Project
+                        && std::fs::canonicalize(&scope.root).ok().as_ref() == Some(&canonical)
+                })
+                .map(|scope| scope.id.clone())
+                .ok_or_else(|| {
+                    ToolError::new(
+                        ToolErrorCode::Unavailable,
+                        "This Activity's Workspace graph is not mounted.",
+                    )
+                })
+        }
+    }
+}
+
+fn project_bound_kind(kind: &str) -> bool {
+    !matches!(kind, "" | "company" | "person" | "project" | "journal")
+}
+
+fn add_project_relation(
+    object: &mut serde_json::Map<String, Value>,
+    field: &str,
+    project_id: &str,
+) {
+    let relations = object
+        .entry(field)
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(relations) = relations.as_array_mut() else {
+        return;
+    };
+    if relations.iter().any(|edge| {
+        edge.get("relation").and_then(Value::as_str) == Some("part_of")
+            || edge.get("rel").and_then(Value::as_str) == Some("part_of")
+    }) {
+        return;
+    }
+    relations.push(serde_json::json!({
+        "relation": "part_of",
+        "target": project_id,
+    }));
 }
 
 fn mutation_before(
@@ -245,6 +399,7 @@ fn execute_native_tool(
         "research" => research::execute(runtime, name, input),
         _ => Err(unknown_tool(name)),
     }?;
+    workspace_config::enrich_graph_result(name, &mut execution.value);
     add_private_scope_warning(name, &mut execution.value);
     Ok(execution)
 }

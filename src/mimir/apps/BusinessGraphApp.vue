@@ -90,13 +90,6 @@
             @keydown.down.prevent="openScopeMenu('first')"
             @keydown.up.prevent="openScopeMenu('last')"
           >
-            <span class="graph-scope-dots" aria-hidden="true">
-              <span
-                v-for="scope in graph.selectedScopes.slice(0, 3)"
-                :key="scope.id"
-                :class="scopeDot(scope.kind)"
-              />
-            </span>
             <span>{{ scopeSummary }}</span>
             <IconChevronDown :size="12" />
           </button>
@@ -105,13 +98,10 @@
             ref="scopeMenuRoot"
             data-graph-scope-menu
             role="menu"
+            aria-label="Graph scopes"
             class="graph-scope-menu"
             @keydown="onScopeMenuKeydown"
           >
-            <div class="graph-menu-heading">
-              <span>Visible knowledge</span>
-              <span>{{ graph.activeScopeIds.length }}/{{ graph.scopes.length }}</span>
-            </div>
             <button
               v-for="scope in graph.scopes"
               :key="scope.id"
@@ -121,6 +111,7 @@
               :data-scope-option="scope.id"
               :data-graph-control="`scope-${scope.id}`"
               class="graph-scope-option"
+              :title="scope.root"
               @click="toggleScope(scope.id)"
             >
               <span
@@ -130,17 +121,10 @@
                 <IconCheck v-if="graph.activeScopeIds.includes(scope.id)" :size="11" />
               </span>
               <span class="graph-scope-copy">
-                <span>
-                  <i :class="scopeDot(scope.kind)" />
-                  {{ scope.kind }}
-                </span>
-                <small>{{ scope.root }}</small>
+                {{ scopeName(scope.kind) }}
               </span>
               <span class="graph-scope-count">{{ graph.scopeCounts[scope.id] || 0 }}</span>
             </button>
-            <p class="graph-menu-help">
-              Private stays on this device. Project and team scopes compose when selected.
-            </p>
           </div>
         </div>
 
@@ -504,6 +488,7 @@
       :scopes="graph.scopes"
       :initial-kind="createKind"
       :initial-status="createStatus"
+      :default-scope="graph.workspaceGraphScope"
       :saving="creating"
       :error="createError"
       @close="createOpen = false"
@@ -683,7 +668,7 @@ const viewsBySection = {
 }
 const allKindOptions = [
   { value: '', label: 'All kinds' },
-  { value: 'issue', label: 'Issues' },
+  { value: 'issue', label: 'Tasks' },
   { value: 'project', label: 'Projects' },
   { value: 'person', label: 'People' },
   { value: 'company', label: 'Companies' },
@@ -698,7 +683,7 @@ const viewOptions = computed(() => viewsBySection[graph.section] || viewsBySecti
 const scopeSummary = computed(() => {
   if (!graph.scopes.length) return 'No scopes'
   if (graph.activeScopeIds.length === graph.scopes.length) return 'All scopes'
-  if (graph.selectedScopes.length === 1) return `${human(graph.selectedScopes[0].kind)} only`
+  if (graph.selectedScopes.length === 1) return scopeName(graph.selectedScopes[0].kind)
   return `${graph.activeScopeIds.length} scopes`
 })
 const deleteTitle = computed(() => (
@@ -1230,13 +1215,15 @@ function onSearchEscape(event) {
 function openCreate(
   kind = defaultKind(),
   status = 'backlog',
-  projectId = '',
+  projectId = null,
   relations = [],
 ) {
   createError.value = ''
   createKind.value = kind
   createStatus.value = status
-  createProject.value = projectId
+  createProject.value = projectId === null && kind === 'issue'
+    ? graph.workspaceProjectId
+    : String(projectId || '')
   createRelations.value = relations
   createOpen.value = true
 }
@@ -1949,16 +1936,14 @@ function needsAttention(issue) {
   return issue.dueDate && issue.dueDate < today && !['done', 'cancelled'].includes(issue.status)
 }
 
-function scopeDot(kind) {
-  return {
-    private: 'bg-ink-3',
-    project: 'bg-accent',
-    team: 'bg-add',
-  }[kind] || 'bg-ink-4'
-}
-
 function human(value) {
   return String(value || '').replaceAll('-', ' ')
+}
+
+function scopeName(value) {
+  if (value === 'project') return 'Workspace'
+  const label = human(value)
+  return label ? `${label[0].toUpperCase()}${label.slice(1)}` : ''
 }
 
 function errorMessage(cause) {
@@ -2264,23 +2249,6 @@ onUnmounted(() => {
   color: var(--color-ink);
 }
 
-.graph-scope-dots {
-  display: flex;
-  align-items: center;
-}
-
-.graph-scope-dots > span {
-  width: 7px;
-  height: 7px;
-  margin-left: -2px;
-  border: 1px solid var(--graph-raised);
-  border-radius: 50%;
-}
-
-.graph-scope-dots > span:first-child {
-  margin-left: 0;
-}
-
 .graph-scope-menu,
 .graph-columns-menu {
   position: absolute;
@@ -2294,36 +2262,19 @@ onUnmounted(() => {
 .graph-scope-menu {
   top: 38px;
   right: 0;
-  width: min(310px, calc(100cqw - 24px));
+  width: min(220px, calc(100cqw - 24px));
   padding: 5px;
-}
-
-.graph-menu-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 9px 7px;
-  color: var(--color-ink-3);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.graph-menu-heading span:last-child {
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 400;
 }
 
 .graph-scope-option {
   display: grid;
   width: 100%;
-  min-height: 48px;
+  min-height: 34px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   border-radius: 5px;
-  padding: 5px 9px;
+  padding: 4px 8px;
   text-align: left;
 }
 
@@ -2351,32 +2302,10 @@ onUnmounted(() => {
 
 .graph-scope-copy {
   min-width: 0;
-}
-
-.graph-scope-copy > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   color: var(--color-ink-2);
-  font-size: 12px;
-  font-style: normal;
+  font-size: 11px;
   font-weight: 600;
-  text-transform: capitalize;
-}
-
-.graph-scope-copy i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.graph-scope-copy small {
-  display: block;
   overflow: hidden;
-  margin-top: 2px;
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2385,15 +2314,6 @@ onUnmounted(() => {
   color: var(--color-ink-4);
   font-family: var(--font-mono);
   font-size: 10px;
-}
-
-.graph-menu-help {
-  margin: 5px 5px 3px;
-  border-top: 1px solid var(--color-rule-light);
-  padding: 9px 5px 5px;
-  color: var(--color-ink-4);
-  font-size: 10px;
-  line-height: 1.45;
 }
 
 .graph-alert {

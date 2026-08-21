@@ -33,6 +33,7 @@
       ref="menu"
       :id="listboxId"
       data-graph-select-menu
+      data-modal-portal
       role="listbox"
       :aria-label="ariaLabel"
       class="graph-select-menu fixed z-[260] text-ink"
@@ -59,37 +60,45 @@
       </div>
 
       <div class="graph-select-options">
-        <button
+        <template
           v-for="(option, index) in filteredOptions"
-          :id="optionId(option.value)"
           :key="option.value"
-          :ref="element => setOptionRef(element, index)"
-          type="button"
-          role="option"
-          :aria-selected="option.value === modelValue"
-          :disabled="option.disabled"
-          :data-graph-select-option="option.value"
-          class="graph-select-option group"
-          @mouseenter="activeIndex = index"
-          @focus="activeIndex = index"
-          @click="choose(option)"
         >
-          <span
-            class="graph-select-check"
-            :class="{ 'graph-select-check-active': option.value === modelValue }"
+          <button
+            :id="optionId(option.value)"
+            :ref="element => setOptionRef(element, index)"
+            type="button"
+            role="option"
+            :aria-selected="option.value === modelValue"
+            :disabled="option.disabled"
+            :data-graph-select-option="option.value"
+            class="graph-select-option group"
+            @mouseenter="activeIndex = index"
+            @focus="activeIndex = index"
+            @click="choose(option)"
           >
-            <IconCheck :size="9" />
-          </span>
-          <span v-if="option.icon" class="graph-select-option-icon">
-            <component :is="option.icon" :size="13" />
-          </span>
-          <span class="min-w-0 flex-1">
-            <span class="graph-select-option-label">{{ option.label }}</span>
-            <span v-if="option.hint" class="graph-select-option-hint">
-              {{ option.hint }}
+            <span
+              class="graph-select-check"
+              :class="{ 'graph-select-check-active': option.value === modelValue }"
+            >
+              <IconCheck :size="9" />
             </span>
-          </span>
-        </button>
+            <span v-if="option.icon" class="graph-select-option-icon">
+              <component :is="option.icon" :size="13" />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="graph-select-option-label">{{ option.label }}</span>
+              <span v-if="option.hint" class="graph-select-option-hint">
+                {{ option.hint }}
+              </span>
+            </span>
+          </button>
+          <div
+            v-if="option.separatorAfter"
+            class="graph-select-separator"
+            role="separator"
+          />
+        </template>
 
         <p
           v-if="!filteredOptions.length"
@@ -153,6 +162,7 @@ const normalizedOptions = computed(() => props.options.map(option => (
         hint: option.hint ?? option.description ?? '',
         icon: option.icon || null,
         disabled: Boolean(option.disabled),
+        separatorAfter: Boolean(option.separatorAfter),
       }
 )))
 const selectedOption = computed(() => (
@@ -227,7 +237,9 @@ function positionMenu() {
   const width = Math.max(rect.width, props.menuMinWidth)
   const estimatedHeight = Math.min(
     props.searchable ? 292 : 252,
-    filteredOptions.value.length * 32 + (props.searchable ? 40 : 8),
+    filteredOptions.value.length * 32
+      + filteredOptions.value.filter(option => option.separatorAfter).length * 9
+      + (props.searchable ? 40 : 8),
   )
   const gap = 4
   const spaceBelow = window.innerHeight - rect.bottom - gap
@@ -472,6 +484,12 @@ let graphSelectCounter = 0
 .graph-select-options {
   max-height: 264px;
   overflow-y: auto;
+}
+
+.graph-select-separator {
+  height: 1px;
+  margin: 4px 5px;
+  background: var(--color-rule-light);
 }
 
 .graph-select-option {

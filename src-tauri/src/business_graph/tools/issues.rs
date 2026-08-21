@@ -618,7 +618,7 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
 
 fn issue_write_properties(create: bool) -> Value {
     let mut properties = json!({
-        "scopeId": string_schema("Target physical scope id. Defaults to the current project."),
+        "scopeId": string_schema("Target physical scope id. Defaults to Team when it is mounted."),
         "id": string_schema("Optional issue id."),
         "title": { "type": "string" },
         "status": { "type": "string", "enum": ISSUE_STATUSES },

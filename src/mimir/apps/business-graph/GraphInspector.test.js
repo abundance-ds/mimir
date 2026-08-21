@@ -203,6 +203,79 @@ describe('GraphInspector', () => {
     wrapper.unmount()
   })
 
+  it('offers active team members for task ownership without losing the current owner', async () => {
+    const activeTeamMember = {
+      id: 'person-paul',
+      kind: 'person',
+      title: 'Paul Schneider',
+      properties: { teamMember: true, status: 'active' },
+      scopeId: 'team:main',
+    }
+    const externalContact = {
+      id: 'person-client',
+      kind: 'person',
+      title: 'Client Contact',
+      properties: { status: 'active' },
+      scopeId: 'team:main',
+    }
+    const formerTeamMember = {
+      id: 'person-former',
+      kind: 'person',
+      title: 'Former Teammate',
+      properties: { teamMember: true, status: 'former' },
+      scopeId: 'team:main',
+    }
+    const wrapper = mount(GraphInspector, {
+      attachTo: document.body,
+      props: {
+        ...baseProps,
+        mode: 'peek',
+        nodes: [...baseProps.nodes, activeTeamMember, externalContact, formerTeamMember],
+      },
+    })
+    await wrapper.get('[data-inspector-assignee]').trigger('click')
+    await flushPromises()
+
+    expect(document.querySelector('[data-graph-select-option="person-alex"]')).not.toBeNull()
+    expect(document.querySelector('[data-graph-select-option="person-paul"]')).not.toBeNull()
+    expect(document.querySelector('[data-graph-select-option="person-client"]')).toBeNull()
+    expect(document.querySelector('[data-graph-select-option="person-former"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('normalizes Project properties when the inspector saves', async () => {
+    const projectNode = {
+      ...project,
+      summary: 'Client delivery context.',
+      tags: ['client'],
+      body: '',
+      createdAt: '2026-07-20T08:15:00Z',
+      updatedAt: '2026-08-15T14:45:00Z',
+      relations: [],
+      properties: { status: 'pipeline-warm' },
+      provenance: {
+        scopeId: 'team:main',
+        sourceRevision: 'project-revision-1',
+        sourcePath: '/team/graph/project-atlas.md',
+      },
+    }
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, node: projectNode, mode: 'peek' },
+    })
+
+    wrapper.vm.updateDraft('projectType', 'client-engagement')
+    wrapper.vm.updateDraft('projectStatus', 'active')
+    wrapper.vm.commitThen(() => {})
+
+    expect(wrapper.emitted('save')[0][0]).toEqual(expect.objectContaining({
+      setProperties: {
+        projectType: 'client-engagement',
+        projectStatus: 'active',
+      },
+      removeProperties: ['status'],
+    }))
+  })
+
   it('lets an explicit exit through after a rejected save instead of stranding the draft', async () => {
     const wrapper = mount(GraphInspector, {
       attachTo: document.body,

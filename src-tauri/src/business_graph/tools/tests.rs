@@ -3,8 +3,8 @@ use super::{
 };
 use crate::business_graph::{GraphRuntime, GraphScopeKind, GraphSourceRoot};
 use crate::tool_registry::{
-    ToolDescriptor, ToolErrorCode, ToolOwner, ToolRegistration, ToolRegistry, ToolResult,
-    ToolSource,
+    ToolCallContext, ToolCaller, ToolDescriptor, ToolErrorCode, ToolOwner, ToolRegistration,
+    ToolRegistry, ToolResult, ToolSource,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -117,6 +117,56 @@ fn graph_find_scans_the_whole_graph_past_the_store_page_size() {
     .unwrap();
     assert_eq!(filtered.value["total"], 1);
     assert_eq!(filtered.value["items"][0]["id"], "ancient-needle");
+}
+
+#[test]
+fn cli_and_activity_calls_read_the_workspace_descriptor() {
+    let root = TempDir::new().unwrap();
+    fs::create_dir(root.path().join(".mimir")).unwrap();
+    fs::write(
+        root.path().join(".mimir/workspace.toml"),
+        concat!(
+            "version = 1\n",
+            "id = \"ws-test\"\n",
+            "project = \"project-alpha\"\n",
+            "graphScope = \"team\"\n"
+        ),
+    )
+    .unwrap();
+
+    let cli = ToolCallContext {
+        caller: ToolCaller::MimirCli,
+        cwd: Some(root.path().to_string_lossy().into_owned()),
+        ..ToolCallContext::default()
+    };
+    assert_eq!(
+        super::agent_workspace_config(&cli)
+            .unwrap()
+            .unwrap()
+            .project_id
+            .as_deref(),
+        Some("project-alpha")
+    );
+
+    let mut activity = ToolCallContext {
+        caller: ToolCaller::Mcp,
+        cwd: cli.cwd,
+        ..ToolCallContext::default()
+    };
+    activity
+        .metadata
+        .insert("activityId".into(), json!("agent:one"));
+    assert!(super::agent_workspace_config(&activity).unwrap().is_some());
+
+    activity.metadata.clear();
+    assert!(super::agent_workspace_config(&activity).unwrap().is_some());
+
+    let ui = ToolCallContext {
+        caller: ToolCaller::Ui,
+        cwd: activity.cwd,
+        ..ToolCallContext::default()
+    };
+    assert!(super::agent_workspace_config(&ui).unwrap().is_none());
 }
 
 #[test]
@@ -460,14 +510,12 @@ fn heor_workflow_actions_persist_decisions_evidence_deliverables_and_follow_up()
             .properties["rationale"],
         "Reduce transcription risk"
     );
-    assert_eq!(
-        reopened
-            .get("evidence-landmark")
-            .unwrap()
-            .unwrap()
-            .properties["certainty"],
-        "moderate"
-    );
+    let evidence = reopened.get("evidence-landmark").unwrap().unwrap();
+    assert_eq!(evidence.properties["certainty"], "moderate");
+    assert!(evidence
+        .relations
+        .iter()
+        .any(|edge| edge.relation == "part_of" && edge.target == "project-alpha"));
     assert!(
         reopened.get("issue-1").unwrap().unwrap().properties["deliverables"]
             .as_array()

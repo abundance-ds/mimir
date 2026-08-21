@@ -434,7 +434,7 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
 
 fn knowledge_write_properties(create: bool) -> Value {
     let mut properties = json!({
-        "scopeId": string_schema("Target physical scope id. Defaults to the current project."),
+        "scopeId": string_schema("Target physical scope id. When omitted, normal graph kinds prefer Team and Journal prefers Private."),
         "id": string_schema("Stable lowercase slug id."),
         "type": { "type": "string", "enum": ENTITY_KINDS },
         "title": { "type": "string" },

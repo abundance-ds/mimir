@@ -17,6 +17,7 @@
       "rank": 3,
       "slug": "sidebar-ordering",
       "needsDetail": false,
+      "teamMember": false,
       "relations": [
         {
           "relation": "part_of",
@@ -40,6 +41,7 @@
       "summary": "",
       "tags": [],
       "needsDetail": true,
+      "teamMember": true,
       "relations": [],
       "updatedAt": "2026-07-20T08:00:00Z",
       "scopeId": "private",

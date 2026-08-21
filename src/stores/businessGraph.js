@@ -14,6 +14,8 @@ import {
   searchGraph,
   updateGraphNode,
 } from '../services/businessGraph.js'
+import { defaultGraphWriteScope } from './businessGraphScopes.js'
+import { cachedWorkspaceConfig } from '../services/workspaceConfig.js'
 
 export const BUSINESS_SECTIONS = Object.freeze([
   { id: 'work', label: 'Work', kinds: ['issue'] },
@@ -22,7 +24,7 @@ export const BUSINESS_SECTIONS = Object.freeze([
     id: 'knowledge',
     label: 'Knowledge',
     kinds: [
-      'note', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
+      'note', 'resource', 'meeting', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
       'model', 'endpoint', 'publication', 'submission', 'research-question',
       'method', 'client-request',
     ],
@@ -69,6 +71,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const lastDeletion = ref(null)
   const projectRoot = ref('')
   const teamRoot = ref('')
+  const workspaceProjectId = ref('')
+  const workspaceGraphScope = ref('team')
   let unlisten = null
   let refreshTimer = null
   let searchGeneration = 0
@@ -131,6 +135,11 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     loading.value = true
     error.value = ''
     try {
+      const workspaceConfig = cachedWorkspaceConfig(nextProject)
+      workspaceProjectId.value = String(workspaceConfig?.project || '').trim()
+      workspaceGraphScope.value = workspaceConfig?.graphScope === 'workspace'
+        ? 'workspace'
+        : (nextTeam ? 'team' : 'workspace')
       const mounted = await openBusinessGraph(nextProject, nextTeam)
       projectRoot.value = nextProject
       teamRoot.value = nextTeam
@@ -328,9 +337,22 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
 
   async function create(create) {
     conflict.value = null
+    const relations = Array.isArray(create.relations) ? [...create.relations] : []
+    if (
+      create.kind === 'issue'
+      && workspaceProjectId.value
+      && !relations.some(edge => edge.relation === 'part_of')
+    ) {
+      relations.push({
+        relation: 'part_of',
+        target: workspaceProjectId.value,
+        legacy: false,
+      })
+    }
     const created = await createGraphNode({
       ...create,
-      scopeId: create.scopeId || defaultWriteScope(),
+      relations,
+      scopeId: create.scopeId || defaultWriteScope(create.kind),
     })
     await refresh({ quiet: true })
     await openNode(created.id)
@@ -434,6 +456,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   }
 
   function applyStatus(next) {
+    const previousScopes = scopes.value
+    const previouslyComposedAll = previousScopes.length === 0
+      || previousScopes.every(scope => activeScopeIds.value.includes(scope.id))
     status.value = next || {
       scopes: [],
       nodeCount: 0,
@@ -442,7 +467,9 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
     const mounted = new Set(scopes.value.map(scope => scope.id))
     const retained = activeScopeIds.value.filter(id => mounted.has(id))
-    activeScopeIds.value = retained.length ? retained : scopes.value.map(scope => scope.id)
+    activeScopeIds.value = previouslyComposedAll || !retained.length
+      ? scopes.value.map(scope => scope.id)
+      : retained
   }
 
   async function startListening() {
@@ -486,6 +513,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     conflict.value = null
     projectRoot.value = ''
     teamRoot.value = ''
+    workspaceProjectId.value = ''
+    workspaceGraphScope.value = 'team'
   }
 
   async function reloadSelected() {
@@ -518,11 +547,13 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     if (origin.searchQuery !== searchQuery.value) void search(origin.searchQuery || '')
   }
 
-  function defaultWriteScope() {
-    return scopes.value.find(scope => scope.kind === 'project')?.id
-      || scopes.value.find(scope => scope.kind === 'private')?.id
-      || scopes.value[0]?.id
-      || ''
+  function defaultWriteScope(kind = '') {
+    return defaultGraphWriteScope(scopes.value, kind, workspaceGraphScope.value)
+  }
+
+  function setWorkspaceConfiguration(config) {
+    workspaceProjectId.value = String(config?.project || '').trim()
+    workspaceGraphScope.value = config?.graphScope === 'workspace' ? 'workspace' : 'team'
   }
 
   function replaceSummary(node) {
@@ -532,7 +563,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       title: node.title,
       summary: node.summary || '',
       tags: node.tags || [],
-      status: node.properties?.status,
+      status: node.properties?.status || node.properties?.projectStatus,
       priority: node.properties?.priority,
       dueDate: node.properties?.dueDate,
       projectId: node.relations?.find(edge => edge.relation === 'part_of')?.target
@@ -545,6 +576,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
       rank: node.properties?.rank,
       slug: node.properties?.slug,
       needsDetail: Boolean(node.properties?.needsDetail),
+      teamMember: Boolean(node.properties?.teamMember),
       deliverables: (Array.isArray(node.properties?.deliverables) ? node.properties.deliverables : [])
         .map(item => (typeof item === 'string' ? item : item?.path || ''))
         .filter(Boolean),
@@ -591,6 +623,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     lastDeletion,
     projectRoot,
     teamRoot,
+    workspaceProjectId,
+    workspaceGraphScope,
     scopes,
     selectedScopes,
     visibleNodes,
@@ -622,6 +656,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     stop,
     reset,
     defaultWriteScope,
+    setWorkspaceConfiguration,
   }
 })
 

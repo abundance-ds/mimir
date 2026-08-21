@@ -105,6 +105,71 @@
             </label>
           </div>
 
+          <div v-else-if="draft.kind === 'project'" class="create-kind-properties">
+            <label>
+              <span>Type</span>
+              <GraphSelect
+                v-model="draft.projectType"
+                data-create-project-type
+                variant="property"
+                aria-label="Project type"
+                :options="projectTypes"
+              />
+            </label>
+            <label>
+              <span>Status</span>
+              <GraphSelect
+                v-model="draft.projectStatus"
+                data-create-project-status
+                variant="property"
+                aria-label="Project status"
+                :options="projectStatuses"
+              />
+            </label>
+          </div>
+
+          <div v-else-if="draft.kind === 'company'" class="create-kind-properties">
+            <label>
+              <span>Relationship</span>
+              <GraphSelect
+                v-model="draft.companyRole"
+                data-create-company-role
+                variant="property"
+                aria-label="Company relationship"
+                :options="companyRoles"
+              />
+            </label>
+            <label>
+              <span>Status</span>
+              <GraphSelect
+                v-model="draft.entityStatus"
+                data-create-entity-status
+                variant="property"
+                aria-label="Company status"
+                :options="entityStatuses"
+              />
+            </label>
+          </div>
+
+          <div v-else-if="draft.kind === 'person'" class="create-kind-properties">
+            <label>
+              <span>Status</span>
+              <GraphSelect
+                v-model="draft.entityStatus"
+                data-create-entity-status
+                variant="property"
+                aria-label="Person status"
+                :options="entityStatuses"
+              />
+            </label>
+            <div class="create-team-member">
+              <span>Assignment</span>
+              <GraphCheckbox v-model="draft.teamMember" data-create-team-member>
+                Team member
+              </GraphCheckbox>
+            </div>
+          </div>
+
           <button
             type="button"
             data-graph-control="create-toggle-context"
@@ -195,12 +260,14 @@ import { IconAlertTriangle, IconChevronDown, IconX } from '@tabler/icons-vue'
 import GraphCheckbox from './GraphCheckbox.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 import GraphSelect from './GraphSelect.vue'
+import { defaultGraphWriteScope } from '../../../stores/businessGraphScopes.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   scopes: { type: Array, default: () => [] },
   initialKind: { type: String, default: 'issue' },
   initialStatus: { type: String, default: 'backlog' },
+  defaultScope: { type: String, default: 'team' },
   saving: { type: Boolean, default: false },
   error: { type: String, default: '' },
 })
@@ -211,25 +278,16 @@ const titleInput = ref(null)
 const createAnother = ref(false)
 const detailsOpen = ref(false)
 const kinds = Object.freeze([
-  { id: 'issue', label: 'Issue', hint: 'Operational work and next actions' },
+  { id: 'issue', label: 'Task', hint: 'Operational work and next actions' },
   { id: 'project', label: 'Project', hint: 'Client or internal delivery context' },
-  { id: 'person', label: 'Person', hint: 'Team member, client, or collaborator' },
   { id: 'company', label: 'Company', hint: 'Client, partner, or organization' },
+  { id: 'person', label: 'Person', hint: 'Team member, client, or collaborator' },
+  { id: 'meeting', label: 'Meeting', hint: 'Durable meeting context and outcomes' },
   { id: 'note', label: 'Knowledge note', hint: 'Reusable context and understanding' },
+  { id: 'resource', label: 'Resource', hint: 'A useful source, asset, or reference' },
   { id: 'journal', label: 'Journal', hint: 'Chronological notes and daily logs' },
   { id: 'decision', label: 'Decision', hint: 'A durable choice and its rationale' },
-  { id: 'record', label: 'Record' },
-  { id: 'research-question', label: 'Research question' },
-  { id: 'study', label: 'Study' },
-  { id: 'evidence', label: 'Evidence' },
-  { id: 'dataset', label: 'Dataset' },
-  { id: 'analysis', label: 'Analysis' },
-  { id: 'model', label: 'Model' },
-  { id: 'endpoint', label: 'Endpoint' },
-  { id: 'publication', label: 'Publication' },
-  { id: 'submission', label: 'Submission' },
-  { id: 'method', label: 'Method' },
-  { id: 'client-request', label: 'Client request' },
+  { id: 'record', label: 'Sensitive record', hint: 'Structured material that needs explicit handling' },
 ])
 const statuses = Object.freeze([
   { id: 'backlog', label: 'Backlog' },
@@ -245,10 +303,38 @@ const priorities = Object.freeze([
   { id: 'normal', label: 'Normal' },
   { id: 'low', label: 'Low' },
 ])
+const projectTypes = Object.freeze([
+  { id: '', label: 'Not set' },
+  { id: 'client-engagement', label: 'Client engagement' },
+  { id: 'product', label: 'Product' },
+  { id: 'lead', label: 'Lead' },
+  { id: 'grant', label: 'Grant' },
+  { id: 'internal', label: 'Internal' },
+])
+const projectStatuses = Object.freeze([
+  { id: 'warm-lead', label: 'Warm lead' },
+  { id: 'planned', label: 'Planned' },
+  { id: 'active', label: 'Active' },
+  { id: 'waiting', label: 'Waiting' },
+  { id: 'completed', label: 'Completed' },
+  { id: 'archived', label: 'Archived' },
+])
+const companyRoles = Object.freeze([
+  { id: '', label: 'Not set' },
+  { id: 'own', label: 'Our company' },
+  { id: 'client', label: 'Client' },
+  { id: 'prospect', label: 'Prospect' },
+  { id: 'partner', label: 'Partner' },
+  { id: 'vendor', label: 'Vendor' },
+])
+const entityStatuses = Object.freeze([
+  { id: 'active', label: 'Active' },
+  { id: 'former', label: 'Former' },
+])
 const draft = reactive(emptyDraft())
 const scopeOptions = computed(() => props.scopes.map(scope => ({
   value: scope.id,
-  label: human(scope.kind),
+  label: scopeName(scope.kind),
   hint: scopeHint(scope),
 })))
 
@@ -272,18 +358,27 @@ watch(() => props.initialStatus, status => {
   if (props.open && statuses.some(option => option.id === status)) draft.status = status
 })
 
+watch(() => draft.kind, kind => {
+  if (props.open) draft.scopeId = defaultScope(kind)
+})
+
 watch(() => props.scopes, applyDefaultScope, { immediate: true, deep: true })
 
 function emptyDraft() {
   return {
     kind: props.initialKind || 'issue',
-    scopeId: defaultScope(),
+    scopeId: defaultScope(props.initialKind),
     title: '',
     summary: '',
     tags: '',
     body: '',
     status: props.initialStatus || 'backlog',
     priority: 'normal',
+    projectType: '',
+    projectStatus: 'planned',
+    companyRole: '',
+    entityStatus: 'active',
+    teamMember: false,
   }
 }
 
@@ -293,18 +388,13 @@ function applyDefaultScope() {
   }
 }
 
-function defaultScope() {
-  return props.scopes.find(scope => scope.kind === 'project')?.id
-    || props.scopes.find(scope => scope.kind === 'private')?.id
-    || props.scopes[0]?.id
-    || ''
+function defaultScope(kind = draft.kind) {
+  return defaultGraphWriteScope(props.scopes, kind, props.defaultScope)
 }
 
 function submit() {
   if (!draft.title.trim() || !draft.scopeId || props.saving) return
-  const properties = draft.kind === 'issue'
-    ? { status: draft.status, priority: draft.priority }
-    : {}
+  const properties = createProperties()
   emit('create', {
     kind: draft.kind,
     scopeId: draft.scopeId,
@@ -322,6 +412,28 @@ function submit() {
       void nextTick(() => titleInput.value?.focus())
     },
   })
+}
+
+function createProperties() {
+  if (draft.kind === 'issue') {
+    return { status: draft.status, priority: draft.priority }
+  }
+  if (draft.kind === 'project') {
+    return {
+      ...(draft.projectType ? { projectType: draft.projectType } : {}),
+      projectStatus: draft.projectStatus,
+    }
+  }
+  if (draft.kind === 'company') {
+    return {
+      ...(draft.companyRole ? { roles: [draft.companyRole] } : {}),
+      status: draft.entityStatus,
+    }
+  }
+  if (draft.kind === 'person') {
+    return { status: draft.entityStatus, teamMember: draft.teamMember }
+  }
+  return {}
 }
 
 let restoreFocusTo = null
@@ -361,7 +473,7 @@ function trapFocus(event) {
 function scopeHint(scope) {
   const meaning = {
     private: 'Local to this device',
-    project: 'Shared inside this project',
+    project: 'Stored with this workspace',
     team: 'Shared across the team',
   }[scope.kind] || 'Graph source'
   return `${meaning} · ${scope.root}`
@@ -369,6 +481,12 @@ function scopeHint(scope) {
 
 function human(value) {
   return String(value || '').replaceAll('-', ' ')
+}
+
+function scopeName(value) {
+  if (value === 'project') return 'Workspace'
+  const label = human(value)
+  return label ? `${label[0].toUpperCase()}${label.slice(1)}` : ''
 }
 </script>
 
@@ -478,7 +596,8 @@ function human(value) {
 }
 
 .create-routing,
-.create-issue-properties {
+.create-issue-properties,
+.create-kind-properties {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
@@ -487,6 +606,8 @@ function human(value) {
 .create-routing label > span,
 .create-title-field > span,
 .create-issue-properties label > span,
+.create-kind-properties label > span,
+.create-team-member > span,
 .create-field > span,
 .create-note > span {
   display: block;
@@ -528,8 +649,19 @@ function human(value) {
   outline-offset: 1px;
 }
 
-.create-issue-properties {
+.create-issue-properties,
+.create-kind-properties {
   margin-top: 14px;
+}
+
+.create-kind-properties {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.create-team-member :deep(.graph-checkbox-control) {
+  min-height: 34px;
 }
 
 .create-context-toggle {
@@ -670,7 +802,8 @@ function human(value) {
   }
 
   .create-routing,
-  .create-issue-properties {
+  .create-issue-properties,
+  .create-kind-properties {
     grid-template-columns: 1fr;
   }
 
