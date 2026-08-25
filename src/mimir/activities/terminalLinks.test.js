@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Terminal } from '@xterm/xterm'
 import {
   createTerminalLinkProvider,
   findTerminalFileReferences,
@@ -75,6 +76,29 @@ describe('terminalLinks', () => {
     }))
   })
 
+  it('provides a clickable range from the real xterm buffer', async () => {
+    const terminal = new Terminal({ cols: 80, rows: 24 })
+    await writeTerminal(terminal, 'src/mimir/activities/TerminalActivity.vue:239\r\n')
+    const onOpenFile = vi.fn()
+    const provider = createTerminalLinkProvider(terminal, {
+      baseDirectory: '/work',
+      onOpenFile,
+    })
+
+    const links = await provide(provider, 1)
+    expect(links).toHaveLength(1)
+    expect(links[0].range).toEqual({
+      start: { x: 1, y: 1 },
+      end: { x: 45, y: 1 },
+    })
+
+    links[0].activate(new MouseEvent('click'), links[0].text)
+    expect(onOpenFile).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/work/src/mimir/activities/TerminalActivity.vue',
+      line: 239,
+    }))
+  })
+
   it('recovers an indented file reference split after a slash', async () => {
     const terminal = mockTerminal([
       { text: 'See src/mimir/activities/' },
@@ -130,6 +154,10 @@ describe('terminalLinks', () => {
 
 function provide(provider, line) {
   return new Promise(resolve => provider.provideLinks(line, resolve))
+}
+
+function writeTerminal(terminal, value) {
+  return new Promise(resolve => terminal.write(value, resolve))
 }
 
 function mockTerminal(lines, columns = 120) {
