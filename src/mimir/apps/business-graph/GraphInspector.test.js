@@ -107,6 +107,39 @@ describe('GraphInspector', () => {
       .toEqual(expected)
   })
 
+  it('keeps macOS autocorrect out of every editable Peek and Focus text field', async () => {
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, mode: 'peek' },
+    })
+    const expectManualText = (control, { structured = false } = {}) => {
+      const field = wrapper.get(`[data-graph-control="${control}"]`)
+      expect(field.attributes('autocorrect')).toBe('off')
+      expect(field.attributes('autocapitalize')).toBe('off')
+      if (structured) expect(field.attributes('spellcheck')).toBe('false')
+    }
+
+    expectManualText('peek-title')
+    expectManualText('peek-waiting', { structured: true })
+
+    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
+    expectManualText('focus-title')
+    expectManualText('focus-waiting', { structured: true })
+    expectManualText('focus-tags', { structured: true })
+    expectManualText('focus-deliverables', { structured: true })
+
+    const company = { ...issue, id: 'company-vandage', kind: 'company', relations: [] }
+    await wrapper.setProps({ mode: 'peek', node: company })
+    await flushPromises()
+    expectManualText('peek-summary')
+    expectManualText('peek-company-roles', { structured: true })
+
+    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
+    expectManualText('focus-summary')
+    expectManualText('focus-company-roles', { structured: true })
+  })
+
   it('lets a short Peek note fill the space above bottom-anchored Details', () => {
     const wrapper = mount(GraphInspector, {
       props: {

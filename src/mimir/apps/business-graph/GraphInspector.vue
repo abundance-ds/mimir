@@ -156,6 +156,8 @@
             data-graph-control="peek-title"
             class="peek-title-input"
             rows="1"
+            autocorrect="off"
+            autocapitalize="off"
             aria-label="Object title"
             @input="changedAndGrow"
           />
@@ -168,6 +170,8 @@
             data-graph-control="peek-summary"
             class="peek-summary-text"
             rows="1"
+            autocorrect="off"
+            autocapitalize="off"
             aria-label="Retrieval summary"
             placeholder="One sentence an agent can retrieve this by."
             @input="changedAndGrow"
@@ -253,6 +257,9 @@
                 v-model="draft.waitingFor"
                 data-inspector-waiting
                 data-graph-control="peek-waiting"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 placeholder="Nobody"
                 @input="changed"
               />
@@ -306,6 +313,9 @@
                 <input
                   v-model="draft.companyRoles"
                   data-graph-control="peek-company-roles"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
                   aria-label="Company relationships"
                   placeholder="client, partner"
                   @input="changed"
@@ -580,6 +590,8 @@
               data-graph-control="focus-title"
               class="focus-title-input"
               rows="1"
+              autocorrect="off"
+              autocapitalize="off"
               aria-label="Object title"
               @input="changedAndGrow"
             />
@@ -664,6 +676,9 @@
                   v-model="draft.waitingFor"
                   data-inspector-waiting
                   data-graph-control="focus-waiting"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
                   placeholder="Nobody"
                   @input="changed"
                 />
@@ -685,6 +700,8 @@
               data-inspector-summary
               data-graph-control="focus-summary"
               class="focus-summary-text"
+              autocorrect="off"
+              autocapitalize="off"
               aria-label="Retrieval summary"
               placeholder="A concise retrieval hint for people and agents"
               @input="changedAndGrow"
@@ -723,6 +740,9 @@
                   <input
                     v-model="draft.companyRoles"
                     data-graph-control="focus-company-roles"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
                     aria-label="Company relationships"
                     placeholder="client, partner"
                     @input="changed"
@@ -901,6 +921,9 @@
                   v-model="editableTags"
                   data-inspector-tags
                   data-graph-control="focus-tags"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
                   placeholder="strategy, evidence, client"
                   @input="changed"
                 />
@@ -916,6 +939,9 @@
                 v-model="draft.deliverables"
                 data-inspector-deliverables
                 data-graph-control="focus-deliverables"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 placeholder="outputs/evidence-map.xlsx | Evidence map"
                 @input="changedAndGrow"
               />
