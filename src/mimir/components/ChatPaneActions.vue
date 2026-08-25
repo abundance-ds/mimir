@@ -98,6 +98,8 @@
             ref="topicInput"
             v-model="topicDraft"
             maxlength="300"
+            autocorrect="off"
+            autocapitalize="off"
             placeholder="What is this channel for?"
             class="h-7 w-full border border-rule bg-canvas px-1.5 text-[10px] text-ink outline-none focus:border-accent"
           />
