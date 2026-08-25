@@ -434,6 +434,8 @@
                 data-routine-title-input
                 class="routine-input"
                 autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
               />
             </RoutineField>
           </template>
@@ -445,6 +447,8 @@
                 data-routine-title-input
                 class="routine-input"
                 autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
                 placeholder="Morning review"
               />
             </RoutineField>
@@ -455,6 +459,9 @@
                 data-routine-agent-input
                 class="routine-input font-mono"
                 autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 list="routine-agent-packages"
                 placeholder="evidence-sweep"
               />
@@ -535,6 +542,8 @@
                 v-model="draft.prompt"
                 data-routine-prompt-input
                 rows="4"
+                autocorrect="off"
+                autocapitalize="off"
                 placeholder="What should the agent do on each run?"
                 class="w-full resize-y border border-rule bg-surface px-2 py-2 text-[11px] leading-relaxed outline-none focus:border-accent"
               />
