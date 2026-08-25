@@ -139,6 +139,8 @@ overlays.
 - Disabled controls remain legible and do not respond to hover.
 - Filled accent buttons are reserved for the primary action in a local flow.
 - Inputs use surface background, a rule border, and accent focus.
+- Every `<input>`/`<textarea>` sets `autocorrect="off" autocapitalize="off"`;
+  add `spellcheck="false"` too unless the field holds prose.
 - Never use a native/system `<select>`. Selection controls use a Mimir-owned
   combobox and listbox popover styled with theme tokens. They expose an
   accessible name and selected state, and support Arrow keys, Home/End,
