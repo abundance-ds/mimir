@@ -75,6 +75,8 @@
               data-graph-control="create-title"
               type="text"
               autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
               placeholder="What should the team recognize this as?"
               required
             />
@@ -192,6 +194,8 @@
                 data-create-summary
                 data-graph-control="create-summary"
                 type="text"
+                autocorrect="off"
+                autocapitalize="off"
                 placeholder="One concise hint for people and agents"
               />
             </label>
@@ -203,6 +207,9 @@
                 data-create-tags
                 data-graph-control="create-tags"
                 type="text"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 placeholder="heor, evidence, client"
               />
             </label>

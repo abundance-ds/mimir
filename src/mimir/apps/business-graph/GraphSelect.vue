@@ -54,6 +54,9 @@
           :placeholder="searchPlaceholder"
           :aria-label="`Search ${ariaLabel.toLowerCase()}`"
           autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
           @keydown.down.prevent="focusOption(0)"
           @keydown.up.prevent="focusOption(filteredOptions.length - 1)"
         />

@@ -11,6 +11,9 @@
           type="search"
           placeholder="App, title, category"
           class="min-w-0 flex-1 border-0 bg-transparent px-1.5 text-[9px] text-ink outline-none placeholder:text-ink-4"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
           @input="$emit('search', $event.target.value)"
         >
       </label>

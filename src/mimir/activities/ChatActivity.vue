@@ -30,7 +30,7 @@
 
         <label class="chat-field mt-5">
           <span>Display name</span>
-          <input ref="setupName" v-model="setup.displayName" autocomplete="name" />
+          <input ref="setupName" v-model="setup.displayName" autocomplete="name" autocorrect="off" autocapitalize="off" />
         </label>
         <label class="chat-field mt-3">
           <span>Account</span>
@@ -112,6 +112,9 @@
                 class="h-8 w-full border border-rule bg-surface pl-7 pr-2 text-[12px] text-ink outline-none focus:border-accent"
                 :placeholder="`Search ${chat.activeTarget}`"
                 aria-label="Search chat messages"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
               />
             </div>
             <div class="flex h-8 shrink-0 border border-rule p-0.5" aria-label="Search scope">
@@ -335,6 +338,8 @@
                         rows="2"
                         class="max-h-28 w-full resize-y rounded-[2px] border border-rule bg-surface px-2 py-1.5 text-[13px] leading-relaxed text-ink outline-none focus:border-accent"
                         :disabled="editingBusy"
+                        autocorrect="off"
+                        autocapitalize="off"
                         @keydown.esc.prevent="cancelEdit"
                         @keydown.meta.enter.prevent="submitEdit(message)"
                         @keydown.ctrl.enter.prevent="submitEdit(message)"
@@ -633,6 +638,8 @@
                 v-model="draft"
                 data-chat-composer-input
                 rows="1"
+                autocorrect="off"
+                autocapitalize="off"
                 class="max-h-[132px] min-h-7 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1 text-[13px] leading-[1.4] text-ink outline-none placeholder:text-ink-4 disabled:text-ink-4"
                 :placeholder="composerPlaceholder"
                 :disabled="!chat.connected || sending"
@@ -744,12 +751,12 @@
             <span>Channel name</span>
             <div class="flex border border-rule bg-surface focus-within:border-accent">
               <span class="grid w-7 place-items-center text-[11px] text-ink-4">#</span>
-              <input ref="newFlowInput" v-model="newFlow.name" class="border-0" placeholder="product" />
+              <input ref="newFlowInput" v-model="newFlow.name" class="border-0" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="product" />
             </div>
           </label>
           <label class="chat-field mt-3">
             <span>Topic <em>optional</em></span>
-            <input v-model="newFlow.topic" placeholder="What this channel is for" />
+            <input v-model="newFlow.topic" autocorrect="off" autocapitalize="off" placeholder="What this channel is for" />
           </label>
           <button type="submit" class="chat-primary-button" :disabled="newFlow.busy || !newFlow.name.trim()">
             {{ newFlow.busy ? 'Creating…' : 'Create channel' }}
@@ -761,7 +768,7 @@
             <span>Channel name</span>
             <div class="flex border border-rule bg-surface focus-within:border-accent">
               <span class="grid w-7 place-items-center text-[11px] text-ink-4">#</span>
-              <input ref="newFlowInput" v-model="newFlow.name" class="border-0" placeholder="product" />
+              <input ref="newFlowInput" v-model="newFlow.name" class="border-0" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="product" />
             </div>
           </label>
           <button type="submit" class="chat-primary-button" :disabled="newFlow.busy || !newFlow.name.trim()">
@@ -772,7 +779,7 @@
         <form v-else class="mt-3" @submit.prevent="submitDirect">
           <label class="chat-field">
             <span>Find a person</span>
-            <input ref="newFlowInput" v-model="newFlow.person" placeholder="Name or account" />
+            <input ref="newFlowInput" v-model="newFlow.person" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Name or account" />
           </label>
           <div class="mt-2 max-h-52 overflow-y-auto border-y border-rule-light py-1">
             <button

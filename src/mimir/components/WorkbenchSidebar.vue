@@ -373,6 +373,9 @@
             v-model="renameDraft"
             class="h-6 w-full min-w-0 border border-accent bg-surface px-1.5 text-[12px] text-ink outline-none"
             aria-label="Activity name"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
             @click.stop
             @keydown.enter.prevent="commitRename(activity, { focusActivity: true })"
             @keydown.escape.prevent="cancelRename"

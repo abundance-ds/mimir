@@ -57,6 +57,8 @@
               data-workspace-new-project
               type="text"
               autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
               placeholder="Project name"
             />
           </label>

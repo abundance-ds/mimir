@@ -40,7 +40,7 @@
           <strong>Display name</strong>
           <small>The human-readable name teammates see.</small>
         </span>
-        <input v-model="form.displayName" autocomplete="name" />
+        <input v-model="form.displayName" autocomplete="name" autocorrect="off" autocapitalize="off" />
       </label>
       <label class="chat-setting-row">
         <span>

@@ -69,6 +69,8 @@
               data-graph-control="summary-instructions"
               rows="5"
               maxlength="4000"
+              autocorrect="off"
+              autocapitalize="off"
               placeholder="For example: focus on client decisions, delivery risks, and work that needs my attention."
             />
           </label>

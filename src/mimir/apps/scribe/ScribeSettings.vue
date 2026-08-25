@@ -373,6 +373,9 @@
                   v-model="customModel"
                   class="scribe-settings-input"
                   placeholder="gpt-live-transcribe"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
                   :disabled="configPending"
                   @change="save({ customModel })"
                 />
@@ -442,6 +445,8 @@
             data-scribe-summary-prompt
             rows="10"
             maxlength="16000"
+            autocorrect="off"
+            autocapitalize="off"
             class="scribe-settings-textarea"
             :disabled="configPending"
           />
