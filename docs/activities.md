@@ -168,6 +168,17 @@ from the last checkpoint plus the uncheckpointed event tail; overwritten raw
 TUI redraws are not the durable search model. Non-obvious constraints are in
 [gotchas.md](gotchas.md#terminal).
 
+Terminal links have two bounded routes. HTTP and HTTPS links open through the
+scheme-scoped native Tauri opener; the boundary is owned by
+[security.md](security.md#capability-boundaries). File references open in the
+Mimir Editor and preserve an
+optional one-based line and column. Relative files resolve against the
+Activity's recorded launch directory. The local xterm provider joins visual
+wraps and up to three indented physical lines only when each continued part
+follows a `/`. It does not perform fuzzy project search or infer arbitrary line
+joins. `src/mimir/activities/terminalLinks.js` owns this detection and path
+resolution contract.
+
 ## Resume
 
 Launcher detection, session identity, continuation adapters, and the respawn

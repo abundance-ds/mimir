@@ -120,7 +120,9 @@ import {
   readTerminalTheme,
   terminalBytes,
 } from './terminalActivity.js'
+import { createTerminalLinkProvider } from './terminalLinks.js'
 import { createTerminalPromptTitleTracker } from './terminalPromptTitle.js'
+import { openExternalUrl } from '../../services/externalLinks.js'
 import { SYSTEM_MONO_FONT_STACK } from '../../shared/fonts.js'
 
 const props = defineProps({
@@ -138,6 +140,8 @@ const emit = defineEmits([
   'restart',
   'restart-ready',
   'activity-input',
+  'diagnostic',
+  'open-file',
   'surface-error',
 ])
 
@@ -178,6 +182,7 @@ let fitAddon = null
 let serializeAddon = null
 let webglAddon = null
 let webglContextLossDisposable = null
+let terminalLinkDisposable = null
 let dataDisposable = null
 let resizeObserver = null
 let themeObserver = null
@@ -230,13 +235,22 @@ async function initialize() {
       customGlyphs: true,
       drawBoldTextInBrightColors: false,
       minimumContrastRatio: 3,
+      linkHandler: {
+        activate: (_event, uri) => openTerminalUrl(uri),
+      },
       // The Unicode 11 addon registers itself through xterm's proposed API.
       allowProposedApi: true,
     })
     fitAddon = new FitAddon()
     serializeAddon = new SerializeAddon()
+    terminalLinkDisposable = terminal.registerLinkProvider(createTerminalLinkProvider(terminal, {
+      baseDirectory: () => props.activity.launch?.cwd || props.activity.workspacePath || '',
+      homeDirectory: () => window.__MIMIR_HOME__ || '',
+      onOpenFile: reference => emit('open-file', reference),
+      onOpenUrl: openTerminalUrl,
+    }))
     terminal.loadAddon(fitAddon)
-    terminal.loadAddon(new WebLinksAddon())
+    terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalUrl(uri)))
     terminal.loadAddon(new Unicode11Addon())
     terminal.loadAddon(serializeAddon)
     terminal.unicode.activeVersion = UNICODE_VERSION
@@ -831,6 +845,8 @@ onBeforeUnmount(() => {
   unlistenEvents = null
   dataDisposable?.dispose()
   dataDisposable = null
+  terminalLinkDisposable?.dispose()
+  terminalLinkDisposable = null
   webglContextLossDisposable?.dispose()
   webglContextLossDisposable = null
   void finalCheckpoint.finally(async () => {
@@ -864,6 +880,12 @@ function clampFontSize(value) {
 
 function errorMessage(cause, fallback) {
   return cause instanceof Error ? cause.message : String(cause || fallback)
+}
+
+function openTerminalUrl(uri) {
+  void openExternalUrl(uri).catch((cause) => {
+    emit('diagnostic', `Could not open the link: ${errorMessage(cause, 'Unknown failure')}`)
+  })
 }
 
 function exposeSurfaceError(cause, fallback) {

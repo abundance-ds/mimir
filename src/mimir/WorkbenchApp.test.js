@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const editorOpen = vi.hoisted(() => vi.fn())
+const editorReveal = vi.hoisted(() => vi.fn())
 const editorOpenSettings = vi.hoisted(() => vi.fn())
 const editorClose = vi.hoisted(() => vi.fn())
 const editorCycle = vi.hoisted(() => vi.fn())
@@ -47,6 +48,7 @@ vi.mock('../editor/App.vue', async () => {
       setup(_props, { expose }) {
         expose({
           mimirOpen: editorOpen,
+          mimirReveal: editorReveal,
           mimirOpenSettings: editorOpenSettings,
           mimirCloseActiveTab: editorClose,
           mimirCycleTab: editorCycle,
@@ -66,7 +68,7 @@ vi.mock('./activities/TerminalActivity.vue', async () => {
     default: defineComponent({
       name: 'TerminalActivity',
       props: { activity: Object, active: Boolean },
-      emits: ['restart', 'surfaceError'],
+      emits: ['diagnostic', 'openFile', 'restart', 'surfaceError'],
       setup(props, { expose }) {
         expose({ focusEntry: terminalFocus, pasteText: terminalPaste })
         return () => h('div', {
@@ -219,6 +221,7 @@ describe('WorkbenchApp', () => {
     setActivePinia(pinia)
     vi.resetAllMocks()
     editorOpen.mockReset()
+    editorReveal.mockReset()
     editorOpenSettings.mockReset()
     editorClose.mockReset()
     editorCycle.mockReset()
@@ -1284,6 +1287,31 @@ describe('WorkbenchApp', () => {
       entry: expect.objectContaining({ openBehavior: 'text' }),
     })
     expect(useWorkbenchStore().activeActivityId).toBe('files')
+  })
+
+  it('reveals a terminal file reference at its source location', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const activity = activityRecord('agent:links', 'Link test', '2026-08-25T12:00:00Z')
+    useActivitiesStore().upsert(activity)
+    useWorkbenchStore().openActivity(activity.id)
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    await nextTick()
+
+    wrapper.findAllComponents({ name: 'TerminalActivity' })
+      .find(component => component.props('activity').id === activity.id)
+      .vm.$emit('openFile', {
+        path: '/w/src/App.vue',
+        line: 42,
+        column: 8,
+      })
+    await flushPromises()
+
+    expect(editorReveal).toHaveBeenCalledWith({
+      path: '/w/src/App.vue',
+      line: 42,
+      column: 8,
+    })
   })
 
   it('opens a Git change from Files in the mounted Editor review surface', async () => {

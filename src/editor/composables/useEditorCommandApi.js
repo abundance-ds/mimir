@@ -217,7 +217,7 @@ export function useEditorCommandApi({
     return { proposalId: review.proposalId, status: 'pending_review' }
   }
 
-  async function mimirReveal({ path, line, offset } = {}) {
+  async function mimirReveal({ path, line, column, offset } = {}) {
     if (path) {
       const index = openFiles.value.findIndex(file => file.path === path)
       if (index >= 0) {
@@ -232,7 +232,11 @@ export function useEditorCommandApi({
     const view = editorSurfaceRef.value?.getView?.()
     let position = Number.isFinite(offset) ? offset : 0
     if (view && Number.isFinite(line) && line > 0) {
-      position = view.state.doc.line(Math.min(line, view.state.doc.lines)).from
+      const documentLine = view.state.doc.line(Math.min(line, view.state.doc.lines))
+      position = documentLine.from
+      if (Number.isFinite(column) && column > 0) {
+        position = Math.min(documentLine.to, documentLine.from + column - 1)
+      }
     }
     editorSurfaceRef.value?.scrollToPos(position)
     restoreEditorFocus()

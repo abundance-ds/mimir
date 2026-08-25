@@ -1141,10 +1141,18 @@ async function openFileInEditor(request) {
   const path = typeof request === 'string' ? request : request?.path
   if (!path) return
   try {
-    await editorRef.value?.mimirOpen(path, {
-      preview: Boolean(typeof request === 'object' && request?.preview),
-      entry: typeof request === 'object' ? request?.entry || null : null,
-    })
+    if (typeof request === 'object' && Number.isFinite(request?.line)) {
+      await editorRef.value?.mimirReveal({
+        path,
+        line: request.line,
+        column: request.column,
+      })
+    } else {
+      await editorRef.value?.mimirOpen(path, {
+        preview: Boolean(typeof request === 'object' && request?.preview),
+        entry: typeof request === 'object' ? request?.entry || null : null,
+      })
+    }
     focusNarrowPane('editor')
     workbench.setPaneState('editor', 'expanded')
     diagnostic.value = ''

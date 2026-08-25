@@ -39,6 +39,7 @@ naming the exact boundary it enforces.
 | Tracker collector | disabled native guard; lazy Accessibility; browser host-only retention; no screen capture or public tools | enabled title/domain history is sensitive local data readable by the user's account |
 | Shell tool | timeout/output cap and heuristic secret-env filtering | executes a real shell as the user; not a process sandbox |
 | Launcher/Agent package/Routine PTY | exact argv, no shell reconstruction | child inherits user authority and merged environment; Project and Team packages are trusted teammate code |
+| Terminal link activation | renderer accepts only HTTP(S); Tauri opener scope repeats the HTTP(S)-only boundary; file references use the existing Editor path | a clicked URL can send its path/query to any public host; file references can target any user-readable path |
 | API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
 | Work connections | provider tokens and Granola API key stay in Mimir's OS-keychain service; Google OAuth uses PKCE and a loopback callback | connected providers receive agent-requested reads and explicit user-requested writes by design |
 | Chat transport | public WSS, mandatory SASL, loopback Ergo listeners behind Caddy | one small-team server; no per-room authorization UI or enterprise tenancy |

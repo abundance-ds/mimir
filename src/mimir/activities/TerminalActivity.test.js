@@ -6,6 +6,8 @@ const xterm = vi.hoisted(() => ({
   terminals: [],
   fits: [],
   serializers: [],
+  linkProviders: [],
+  webLinkAddons: [],
   webglAddons: [],
   failWebgl: false,
   deferWrites: false,
@@ -60,6 +62,11 @@ vi.mock('@xterm/xterm', () => ({
       this.attachCustomKeyEventHandler = vi.fn((handler) => {
         this.customKeyHandler = handler
       })
+      this.registerLinkProvider = vi.fn((provider) => {
+        const disposable = { dispose: vi.fn() }
+        xterm.linkProviders.push({ provider, disposable })
+        return disposable
+      })
       xterm.terminals.push(this)
     }
   },
@@ -88,7 +95,12 @@ vi.mock('@xterm/addon-serialize', () => ({
 }))
 
 vi.mock('@xterm/addon-web-links', () => ({
-  WebLinksAddon: class MockWebLinksAddon {},
+  WebLinksAddon: class MockWebLinksAddon {
+    constructor(handler) {
+      this.handler = handler
+      xterm.webLinkAddons.push(this)
+    }
+  },
 }))
 
 vi.mock('@xterm/addon-webgl', () => ({
@@ -121,6 +133,11 @@ vi.mock('../../services/activities.js', () => ({
   writeActivity: api.write,
 }))
 
+const externalLinks = vi.hoisted(() => ({ open: vi.fn() }))
+vi.mock('../../services/externalLinks.js', () => ({
+  openExternalUrl: externalLinks.open,
+}))
+
 import TerminalActivity from './TerminalActivity.vue'
 
 const agent = {
@@ -144,6 +161,8 @@ beforeEach(() => {
   xterm.terminals.length = 0
   xterm.fits.length = 0
   xterm.serializers.length = 0
+  xterm.linkProviders.length = 0
+  xterm.webLinkAddons.length = 0
   xterm.webglAddons.length = 0
   xterm.failWebgl = false
   xterm.deferWrites = false
@@ -165,6 +184,7 @@ beforeEach(() => {
   api.resize.mockResolvedValue()
   api.stop.mockResolvedValue()
   api.write.mockResolvedValue()
+  externalLinks.open.mockResolvedValue()
 
   resizeObservers = []
   vi.stubGlobal('ResizeObserver', class ResizeObserver {
@@ -295,6 +315,32 @@ describe('TerminalActivity', () => {
     // The Unicode 11 addon throws at load time without the proposed API flag.
     expect(xterm.terminals[0].options.allowProposedApi).toBe(true)
     expect(wrapper.get('[data-terminal-surface]').attributes('data-renderer')).toBe('webgl')
+  })
+
+  it('routes detected and OSC 8 web links through the external opener', async () => {
+    await initialize()
+    const terminal = xterm.terminals[0]
+
+    expect(terminal.registerLinkProvider).toHaveBeenCalledOnce()
+    xterm.webLinkAddons[0].handler(new MouseEvent('click'), 'https://example.com/addon')
+    terminal.options.linkHandler.activate(new MouseEvent('click'), 'https://example.com/osc8')
+    await flushPromises()
+
+    expect(externalLinks.open).toHaveBeenNthCalledWith(1, 'https://example.com/addon')
+    expect(externalLinks.open).toHaveBeenNthCalledWith(2, 'https://example.com/osc8')
+  })
+
+  it('reports a web-link open failure without marking the Activity as failed', async () => {
+    externalLinks.open.mockRejectedValueOnce(new Error('No browser is available.'))
+    const wrapper = await initialize()
+
+    xterm.webLinkAddons[0].handler(new MouseEvent('click'), 'https://example.com')
+    await flushPromises()
+
+    expect(wrapper.emitted('diagnostic').at(-1)).toEqual([
+      'Could not open the link: No browser is available.',
+    ])
+    expect(wrapper.emitted('surface-error')).toBeUndefined()
   })
 
   it('falls back to the DOM renderer after WebGL context loss', async () => {
@@ -845,6 +891,7 @@ describe('TerminalActivity', () => {
 
     expect(api.unlisten).toHaveBeenCalledTimes(1)
     expect(terminal.dataDisposable.dispose).toHaveBeenCalledTimes(1)
+    expect(xterm.linkProviders[0].disposable.dispose).toHaveBeenCalledTimes(1)
     expect(observer.disconnect).toHaveBeenCalledTimes(1)
     expect(addon.contextLossDisposable.dispose).toHaveBeenCalledTimes(1)
     expect(terminal.dispose).toHaveBeenCalledTimes(1)

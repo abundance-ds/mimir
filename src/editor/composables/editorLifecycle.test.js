@@ -81,6 +81,18 @@ describe('Editor lifecycle controllers', () => {
       getContent: () => currentFile.value.content,
       getCursor: () => ({ line: 1, column: 2 }),
       getSelection: () => ({ from: 0, to: 5, text: 'hello' }),
+      getView: () => ({
+        state: {
+          doc: {
+            lines: 3,
+            line: number => [
+              { from: 0, to: 5 },
+              { from: 6, to: 11 },
+              { from: 12, to: 17 },
+            ][number - 1],
+          },
+        },
+      }),
       replaceRange,
       scrollToPos: vi.fn(),
     })
@@ -135,6 +147,10 @@ describe('Editor lifecycle controllers', () => {
       expect.objectContaining({ kind: 'text', preview: true }),
     )
     expect(emitNavigate).toHaveBeenCalledWith({ path: '/w/b.md' })
+
+    await commands.mimirReveal({ path: '/w/a.md', line: 2, column: 3 })
+    expect(fileManager.setActiveTab).toHaveBeenCalledWith(0)
+    expect(editorSurfaceRef.value.scrollToPos).toHaveBeenLastCalledWith(8)
   })
 
   it('hydrates once, creates the fallback inside the transaction, and owns persistence', async () => {
