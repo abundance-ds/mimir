@@ -24,6 +24,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
 import { markdownListKeymap } from '../../../editor/codemirror/markdownLists.js'
+import { markdownLinkOpen } from './markdownLinkOpen.js'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -36,7 +37,7 @@ const props = defineProps({
   controlId: { type: String, default: 'working-note-input' },
 })
 
-const emit = defineEmits(['update:modelValue', 'change', 'save'])
+const emit = defineEmits(['update:modelValue', 'change', 'save', 'open-file'])
 const host = ref(null)
 const editableCompartment = new Compartment()
 let view = null
@@ -129,6 +130,7 @@ onMounted(() => {
       drawSelection(),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       markdownListKeymap,
+      markdownLinkOpen({ onOpen: target => emit('open-file', target) }),
       syntaxHighlighting(graphHighlightStyle),
       graphEditorTheme(props.framed),
       editorPlaceholder(props.placeholder),

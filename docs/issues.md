@@ -5,6 +5,12 @@ task scope.
 
 ## Open
 
+- `src/editor/composables/useDocumentBridge.test.js` has three failing
+  debounce/dispose cases ("publishes only the latest scheduled document after
+  the debounce", "flushes immediately and cancels pending content", "cancels
+  pending publication when disposed"). They fail on a clean tree, independent
+  of in-flight work.
+
 - Project-specific agent context is intentionally deferred. The unfinished
   `contextPolicy` and isolation behavior were removed because the boundary and
   user journey were not clear enough. Before this returns, define the retrieval

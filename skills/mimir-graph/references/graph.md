@@ -5,8 +5,8 @@
 - Use graph tools, never the backing Markdown files.
 - Find before get. Never guess an id.
 - `graph_find.query` searches ids, titles, tags, summaries, and bodies. `kinds`
-  filters node kinds. All filters combine. The maximum `limit` is 100.
-- After finding an exact node, use `graph_context` for its related context.
+  filters node kinds. All filters combine. Maximum `limit` is 100.
+- Use `graph_context` for an exact node's related context.
 
 ## Common reads
 
@@ -25,8 +25,7 @@ mimir call graph_find '{"query":"Rob Smith","kinds":["person"],"limit":20}'
 mimir call graph_context '{"focusId":"<exact returned id>","maxNodes":12}'
 ```
 
-A text match does not make that node the requested entity. Require an exact
-title or id.
+A text match does not identify the entity; require an exact title or id.
 
 Open high/urgent issues, newest first (`open` is not a status):
 
@@ -90,19 +89,20 @@ Store only the forward relation. Backlinks provide the inverse.
 
 - `private:local` is private, `project:*` is Workspace storage, and `team:*`
   is shared. With no `scopeId`, normal kinds prefer Team and Journal prefers
-  Private. An explicit `scopeId` wins.
-- `graph_status` lists the mounted scope ids. Call it before you write with an
-  explicit `scopeId`.
-- The runtime maps a scope id to its storage directory. Never write a file
-  into a `graph/` directory yourself.
+  Private. An explicit `scopeId` wins; `graph_status` lists the mounted ids.
+- The runtime maps scope ids to storage directories; never write into a
+  `graph/` directory yourself.
 - Omitted read `scopeIds` means every mounted scope, including Private.
 - Do not put private data in another scope unless the user asked.
 - Issue `status` and `priority` are properties. Project and assignee are
   `part_of` and `assigned_to` relations.
-- Agent calls read `.mimir/workspace.toml`. New tasks use its Project link. A
+- Agent calls read `.mimir/workspace.toml`; new tasks use its Project link. A
   Project result can include machine-local `localWorkspaces` paths. The link
   does not restrict graph reads.
+- File references (`deliverables`, body links) are relative to a workspace
+  linked to the node's Project — never absolute. Mimir resolves them against
+  the Project's local workspaces, then the open workspace.
 - Use `graph_get.sourceRevision` as `graph_update.expectedRevision` or
   `graph_delete.expectedRevision`. Delete returns the `graph_restore` token.
-- Sensitive nodes stay directly findable but are omitted from automatic
-  `graph_context` output.
+- Sensitive nodes stay findable but are omitted from automatic `graph_context`
+  output.

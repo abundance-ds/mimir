@@ -531,6 +531,7 @@ import { useSettingsStore } from '../../stores/settings.js'
 import { useActivitiesStore } from '../../stores/activities.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { graphContext } from '../../services/businessGraph.js'
+import { resolveProjectFile } from '../../services/workspaceConfig.js'
 import {
   BUSINESS_SECTIONS,
   useBusinessGraphStore,
@@ -1681,10 +1682,45 @@ function toggleScope(scopeId) {
   else change()
 }
 
-function openFile(path) {
+async function openFile(request) {
+  const path = typeof request === 'string' ? request : request?.path
   if (!path) return
-  const absolute = path.startsWith('/') || path.startsWith('~') || /^[A-Za-z]:[\\/]/.test(path)
-  emit('openFile', absolute ? path : `${props.workspacePath.replace(/\/$/, '')}/${path}`)
+  if (path.startsWith('/') || path.startsWith('~') || /^[A-Za-z]:[\\/]/.test(path)) {
+    emit('openFile', path)
+    return
+  }
+  const projectId = projectIdForNode(typeof request === 'object' ? request?.nodeId : null)
+  let resolved = null
+  try {
+    resolved = await resolveProjectFile({
+      projectId,
+      relativePath: path,
+      fallbackWorkspace: props.workspacePath,
+    })
+  } catch (cause) {
+    emit('diagnostic', errorMessage(cause))
+    return
+  }
+  if (resolved) {
+    emit('openFile', resolved)
+    return
+  }
+  const project = projectId ? graph.nodes.find(node => node.id === projectId) : null
+  emit('diagnostic', project
+    ? `${path} could not be opened. It is not in the current workspace or in a local folder of project ${project.title || projectId}.`
+    : `${path} could not be opened. It is not in the current workspace.`)
+}
+
+function projectIdForNode(nodeId) {
+  const node = nodeId ? graph.nodes.find(candidate => candidate.id === nodeId) : null
+  if (!node) return null
+  if (node.kind === 'project') return node.id
+  const edge = (node.relations || []).find(candidate => (
+    candidate.relation === 'part_of'
+    && graph.nodes.some(target => target.id === candidate.target && target.kind === 'project')
+  ))
+  if (edge) return edge.target
+  return node.projectId || null
 }
 
 function refresh() {

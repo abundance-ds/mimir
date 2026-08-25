@@ -366,6 +366,7 @@
             aria-label="Working note in Markdown"
             @change="changed"
             @save="save"
+            @open-file="openSource"
           />
         </section>
 
@@ -791,6 +792,7 @@
               aria-label="Working note in Markdown"
               @change="changed"
               @save="save"
+              @open-file="openSource"
             />
           </section>
 
@@ -1515,7 +1517,7 @@ function openRelated(id) {
 
 function openSource(path) {
   if (!path) return
-  commitThen(() => emit('openFile', path))
+  commitThen(() => emit('openFile', { path, nodeId: props.node?.id || null }))
 }
 
 function openActivity(id) {

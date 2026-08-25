@@ -1120,6 +1120,7 @@ pub fn run() {
             workspace_config::workspace_config_load,
             workspace_config::workspace_config_save,
             workspace_config::workspace_project_paths,
+            workspace_config::workspace_project_file_resolve,
             business_graph::runtime::graph_open,
             business_graph::runtime::graph_status,
             business_graph::runtime::graph_get,

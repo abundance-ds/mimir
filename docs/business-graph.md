@@ -60,6 +60,14 @@ keeps a rebuildable local registry at `~/.mimir/workspaces.json`, so an agent
 can resolve a Project to folders available on the current machine. Absolute
 paths never enter the Team graph.
 
+File references in the graph — the `deliverables` property and Markdown links
+in a node body — are relative to the root of a workspace linked to the node's
+Project. When the user opens one, Mimir resolves it against the Project's
+local workspaces from the registry first and the open workspace second; a
+path that matches nowhere produces a diagnostic, and a path that escapes the
+root (`..`) is rejected. In the working note, Cmd/Ctrl+click opens a file
+link.
+
 When a Team graph exists and Mimir opens an unknown workspace, one compact
 dialog asks for `None`, an existing Project, or `New Project…`, plus Team or
 Workspace graph storage. The defaults are `None` and Team. Known workspaces

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{Mutex, MutexGuard},
 };
 use uuid::Uuid;
@@ -360,6 +360,67 @@ pub fn workspace_project_paths(project_id: String) -> Result<Vec<LocalWorkspaceR
     local_workspace_refs(project_id.trim())
 }
 
+/// Resolves a graph-authored relative file path to an absolute path on this
+/// machine. Project-linked local workspaces win; the open workspace is the
+/// fallback. Paths that escape the root are rejected, never resolved.
+#[tauri::command]
+pub fn workspace_project_file_resolve(
+    project_id: Option<String>,
+    relative_path: String,
+    fallback_workspace: Option<String>,
+) -> Result<Option<String>, String> {
+    workspace_project_file_resolve_at(
+        &registry_path()?,
+        project_id.as_deref(),
+        &relative_path,
+        fallback_workspace.as_deref(),
+    )
+}
+
+fn workspace_project_file_resolve_at(
+    registry_path: &Path,
+    project_id: Option<&str>,
+    relative_path: &str,
+    fallback_workspace: Option<&str>,
+) -> Result<Option<String>, String> {
+    let relative = relative_path.trim();
+    if relative.is_empty() {
+        return Err("A relative path is required.".to_string());
+    }
+    let path = Path::new(relative);
+    if path.is_absolute() {
+        return Err("An absolute path does not need resolution.".to_string());
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(format!("Path escapes the workspace root: {relative}"));
+    }
+    let mut roots = Vec::new();
+    if let Some(project_id) = project_id.map(str::trim).filter(|value| !value.is_empty()) {
+        let _guard = lock_workspace_io();
+        roots.extend(
+            local_workspace_refs_at(registry_path, project_id)?
+                .into_iter()
+                .map(|reference| PathBuf::from(reference.path)),
+        );
+    }
+    if let Some(workspace) = fallback_workspace
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        roots.push(PathBuf::from(workspace));
+    }
+    for root in roots {
+        let candidate = root.join(path);
+        if candidate.exists() {
+            return Ok(Some(candidate.to_string_lossy().into_owned()));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,6 +539,111 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].id, saved.id);
         assert_eq!(refs[0].path, moved.to_string_lossy());
+    }
+
+    #[test]
+    fn project_file_resolve_prefers_project_workspaces_then_fallback() {
+        let root = tempdir().unwrap();
+        let linked = root.path().join("linked");
+        let fallback = root.path().join("fallback");
+        fs::create_dir(&linked).unwrap();
+        fs::create_dir(&fallback).unwrap();
+        let registry = root.path().join("workspaces.json");
+        save_at(
+            &linked,
+            &registry,
+            WorkspaceConfigDraft {
+                id: None,
+                project_id: Some("project-alpha".into()),
+                graph_scope: WorkspaceGraphScope::Team,
+            },
+        )
+        .unwrap();
+        fs::write(fallback.join("only-fallback.md"), "fallback").unwrap();
+        fs::write(linked.join("evidence.md"), "linked").unwrap();
+
+        assert_eq!(
+            workspace_project_file_resolve_at(
+                &registry,
+                Some("project-alpha"),
+                "evidence.md",
+                Some(fallback.to_str().unwrap()),
+            )
+            .unwrap(),
+            Some(linked.join("evidence.md").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            workspace_project_file_resolve_at(
+                &registry,
+                Some("project-alpha"),
+                "only-fallback.md",
+                Some(fallback.to_str().unwrap()),
+            )
+            .unwrap(),
+            Some(
+                fallback
+                    .join("only-fallback.md")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn project_file_resolve_rejects_escaping_and_absolute_paths() {
+        let root = tempdir().unwrap();
+        let registry = root.path().join("workspaces.json");
+
+        assert!(workspace_project_file_resolve_at(
+            &registry,
+            None,
+            "../outside.md",
+            Some(root.path().to_str().unwrap()),
+        )
+        .is_err());
+        assert!(workspace_project_file_resolve_at(
+            &registry,
+            None,
+            "/etc/passwd",
+            Some(root.path().to_str().unwrap()),
+        )
+        .is_err());
+        assert!(
+            workspace_project_file_resolve_at(&registry, None, "  ", None).is_err()
+        );
+    }
+
+    #[test]
+    fn project_file_resolve_returns_none_when_nowhere_contains_the_file() {
+        let root = tempdir().unwrap();
+        let workspace = root.path().join("work");
+        fs::create_dir(&workspace).unwrap();
+        let registry = root.path().join("workspaces.json");
+        save_at(
+            &workspace,
+            &registry,
+            WorkspaceConfigDraft {
+                id: None,
+                project_id: Some("project-alpha".into()),
+                graph_scope: WorkspaceGraphScope::Team,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            workspace_project_file_resolve_at(
+                &registry,
+                Some("project-alpha"),
+                "missing.md",
+                Some(workspace.to_str().unwrap()),
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            workspace_project_file_resolve_at(&registry, None, "missing.md", None).unwrap(),
+            None
+        );
     }
 
     #[test]
