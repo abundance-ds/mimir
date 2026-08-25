@@ -122,7 +122,7 @@
             <form class="space-y-4" @submit.prevent="saveMeetingEdits">
               <label class="block">
                 <span class="scribe-field-label">Title</span>
-                <input v-model="editedTitle" data-scribe-edit-title class="scribe-input" />
+                <input v-model="editedTitle" data-scribe-edit-title class="scribe-input" autocorrect="off" autocapitalize="off" />
               </label>
               <template v-if="!renameOnly">
                 <label class="block">
@@ -131,12 +131,14 @@
                     v-model="editedSummary"
                     data-scribe-edit-summary
                     rows="14"
+                    autocorrect="off"
+                    autocapitalize="off"
                     class="scribe-input scribe-summary-editor"
                   />
                 </label>
                 <label class="block">
                   <span class="scribe-field-label">Tags, separated by commas</span>
-                  <input v-model="editedTags" data-scribe-edit-tags class="scribe-input" />
+                  <input v-model="editedTags" data-scribe-edit-tags class="scribe-input" autocorrect="off" autocapitalize="off" spellcheck="false" />
                 </label>
               </template>
               <p
@@ -329,6 +331,8 @@
                     v-model="summaryPromptDraft"
                     data-scribe-summary-prompt
                     rows="8"
+                    autocorrect="off"
+                    autocapitalize="off"
                     class="scribe-input scribe-prompt-editor"
                   />
                 </label>
@@ -363,6 +367,8 @@
                       v-model="customTaskPrompt"
                       data-scribe-custom-task-prompt
                       rows="3"
+                      autocorrect="off"
+                      autocapitalize="off"
                       class="scribe-input scribe-custom-task-editor"
                     />
                   </label>
@@ -430,6 +436,9 @@
                   class="scribe-search-input"
                   placeholder="Search"
                   autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  spellcheck="false"
                 />
                 <button
                   v-if="meetingSearchDraft"

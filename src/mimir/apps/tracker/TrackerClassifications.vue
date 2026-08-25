@@ -13,6 +13,9 @@
           type="search"
           placeholder="Find app or domain"
           class="min-w-0 flex-1 border-0 bg-transparent px-1.5 text-[9px] outline-none placeholder:text-ink-4"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
         >
       </label>
     </header>
@@ -50,6 +53,9 @@
                 :value="draft(rule).subcategory"
                 class="h-7 w-full border border-rule bg-surface px-1.5 text-[10px] text-ink outline-none focus:border-accent"
                 placeholder="Uncategorized"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 @input="patch(rule, { subcategory: $event.target.value })"
                 @keydown.enter.prevent="save(rule)"
               >
