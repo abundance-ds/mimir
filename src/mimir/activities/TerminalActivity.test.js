@@ -13,6 +13,7 @@ const xterm = vi.hoisted(() => ({
   deferWrites: false,
   pendingWriteCallbacks: [],
   proposedSize: null,
+  bufferText: 'visible screen',
 }))
 const api = vi.hoisted(() => ({
   callback: null,
@@ -56,7 +57,10 @@ vi.mock('@xterm/xterm', () => ({
       this.buffer = {
         active: {
           length: 1,
-          getLine: () => ({ translateToString: () => 'visible screen' }),
+          getLine: index => (
+            index === 0 ? terminalBufferLine(xterm.bufferText, this.cols) : undefined
+          ),
+          getNullCell: () => terminalBufferCell(),
         },
       }
       this.attachCustomKeyEventHandler = vi.fn((handler) => {
@@ -133,6 +137,11 @@ vi.mock('../../services/activities.js', () => ({
   writeActivity: api.write,
 }))
 
+const dataDir = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('../../services/dataDir.js', () => ({
+  getDataDir: dataDir.get,
+}))
+
 const externalLinks = vi.hoisted(() => ({ open: vi.fn() }))
 vi.mock('../../services/externalLinks.js', () => ({
   openExternalUrl: externalLinks.open,
@@ -168,6 +177,7 @@ beforeEach(() => {
   xterm.deferWrites = false
   xterm.pendingWriteCallbacks.length = 0
   xterm.proposedSize = null
+  xterm.bufferText = 'visible screen'
   api.callback = null
   api.listen.mockImplementation(async (callback) => {
     api.callback = callback
@@ -185,6 +195,7 @@ beforeEach(() => {
   api.stop.mockResolvedValue()
   api.write.mockResolvedValue()
   externalLinks.open.mockResolvedValue()
+  dataDir.get.mockResolvedValue('/Users/test/.mimir')
 
   resizeObservers = []
   vi.stubGlobal('ResizeObserver', class ResizeObserver {
@@ -270,6 +281,32 @@ function flushRaf() {
   for (const callback of callbacks) callback(performance.now())
 }
 
+function terminalBufferLine(text, columns) {
+  return {
+    isWrapped: false,
+    length: columns,
+    translateToString: () => text,
+    getCell(index, cell) {
+      cell.chars = index < text.length ? text[index] : ''
+      cell.width = 1
+      return cell
+    },
+  }
+}
+
+function terminalBufferCell() {
+  return {
+    chars: '',
+    width: 1,
+    getChars() {
+      return this.chars
+    },
+    getWidth() {
+      return this.width
+    },
+  }
+}
+
 function writtenBytes(terminal) {
   return terminal.write.mock.calls.map(([bytes]) => Array.from(bytes))
 }
@@ -328,6 +365,36 @@ describe('TerminalActivity', () => {
 
     expect(externalLinks.open).toHaveBeenNthCalledWith(1, 'https://example.com/addon')
     expect(externalLinks.open).toHaveBeenNthCalledWith(2, 'https://example.com/osc8')
+  })
+
+  it('resolves a home-relative file from the native data directory', async () => {
+    xterm.bufferText = '~/Desktop/project/src/App.vue:42'
+    const wrapper = await initialize()
+    const links = await new Promise(resolve => (
+      xterm.linkProviders[0].provider.provideLinks(1, resolve)
+    ))
+
+    links[0].activate(new MouseEvent('click'), links[0].text)
+
+    expect(dataDir.get).toHaveBeenCalled()
+    expect(wrapper.emitted('open-file').at(-1)).toEqual([{
+      kind: 'file',
+      text: '~/Desktop/project/src/App.vue:42',
+      path: '/Users/test/Desktop/project/src/App.vue',
+      line: 42,
+      column: null,
+      start: 0,
+      end: 32,
+    }])
+  })
+
+  it('starts when the data directory is unavailable', async () => {
+    dataDir.get.mockRejectedValueOnce(new Error('Data directory unavailable'))
+
+    const wrapper = await initialize()
+
+    expect(xterm.terminals).toHaveLength(1)
+    expect(wrapper.emitted('surface-error')).toBeUndefined()
   })
 
   it('reports a web-link open failure without marking the Activity as failed', async () => {

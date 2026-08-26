@@ -185,7 +185,7 @@ function trimToken(text, start) {
     value = value.slice(1)
     offset++
   }
-  while (value && ')]},.;!?'.includes(value.at(-1))) value = value.slice(0, -1)
+  while (value && ')]},.;!?:'.includes(value.at(-1))) value = value.slice(0, -1)
   return {
     text: value,
     start: start + offset,

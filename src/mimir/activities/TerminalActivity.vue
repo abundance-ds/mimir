@@ -113,6 +113,7 @@ import {
   stopActivity,
   writeActivity,
 } from '../../services/activities.js'
+import { getDataDir } from '../../services/dataDir.js'
 import {
   eventActivityId,
   isEndedStatus,
@@ -124,6 +125,7 @@ import { createTerminalLinkProvider } from './terminalLinks.js'
 import { createTerminalPromptTitleTracker } from './terminalPromptTitle.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
 import { SYSTEM_MONO_FONT_STACK } from '../../shared/fonts.js'
+import { parentPath } from '../../shared/utils/path.js'
 
 const props = defineProps({
   activity: { type: Object, required: true },
@@ -183,6 +185,7 @@ let serializeAddon = null
 let webglAddon = null
 let webglContextLossDisposable = null
 let terminalLinkDisposable = null
+let terminalHomeDirectory = ''
 let dataDisposable = null
 let resizeObserver = null
 let themeObserver = null
@@ -217,7 +220,13 @@ onMounted(initialize)
 async function initialize() {
   try {
     const fontSize = clampFontSize(props.fontSize)
-    await prepareTerminalFonts(fontSize)
+    const [, homeDirectory] = await Promise.all([
+      prepareTerminalFonts(fontSize),
+      getDataDir()
+        .then(directory => parentPath(directory) || '')
+        .catch(() => ''),
+    ])
+    terminalHomeDirectory = homeDirectory
     if (disposed || !surface.value) return
     terminal = new Terminal({
       theme: readTerminalTheme(),
@@ -245,7 +254,7 @@ async function initialize() {
     serializeAddon = new SerializeAddon()
     terminalLinkDisposable = terminal.registerLinkProvider(createTerminalLinkProvider(terminal, {
       baseDirectory: () => props.activity.launch?.cwd || props.activity.workspacePath || '',
-      homeDirectory: () => window.__MIMIR_HOME__ || '',
+      homeDirectory: () => terminalHomeDirectory,
       onOpenFile: reference => emit('open-file', reference),
       onOpenUrl: openTerminalUrl,
     }))
