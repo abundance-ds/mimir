@@ -1534,7 +1534,15 @@ impl ActivitySupervisor {
             if recover_legacy_codex_session_id(&self.inner.config, &mut record) {
                 corrected = true;
             }
-            if record.status.is_live() {
+            // An agent can persist a short-lived `done` signal while its CLI
+            // process is still running. Only a session exit record proves
+            // that the process ended. After a restart, any started session
+            // without that record must therefore recover as interrupted.
+            let session_has_no_exit = record
+                .session
+                .as_ref()
+                .is_some_and(|session| session.exit.is_none());
+            if record.status.is_live() || session_has_no_exit {
                 corrected = true;
                 let now = timestamp();
                 let exit = SessionExitRecord {
@@ -1735,7 +1743,10 @@ impl SupervisorInner {
         {
             let dispatch = lock(&self.dispatch);
             let mut record = lock(&activity.record);
-            if record.status.is_ended() {
+            let live_completion_settled = record.status == ActivityStatus::Done
+                && change.status == ActivityStatus::Idle
+                && lock(&activity.command_tx).is_some();
+            if record.status.is_ended() && !live_completion_settled {
                 return;
             }
             let scrollback = lock(&activity.scrollback);
@@ -3058,6 +3069,52 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn live_agent_completion_signal_settles_back_to_idle() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let running = durable_record(
+            "live-completion",
+            "/bin/sh",
+            vec!["-c".into(), "printf '\\033]9;4;0;\\007'; sleep 30".into()],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(running, 80, 24))
+            .unwrap();
+
+        let done_deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = supervisor.snapshot("live-completion", None).unwrap();
+            if snapshot.record.status == ActivityStatus::Done {
+                assert!(snapshot.record.session.unwrap().exit.is_none());
+                break;
+            }
+            assert!(
+                Instant::now() < done_deadline,
+                "live completion signal was not observed"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let idle_deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = supervisor.snapshot("live-completion", None).unwrap();
+            if snapshot.record.status == ActivityStatus::Idle {
+                assert!(snapshot.live);
+                break;
+            }
+            assert!(
+                Instant::now() < idle_deadline,
+                "live completion signal did not settle to idle"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        supervisor.stop("live-completion").unwrap();
+        wait_for_end(&supervisor, "live-completion");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn respawn_reuses_the_ended_activity_identity_with_a_fresh_session() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
@@ -3203,7 +3260,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn durable_output_hydrates_and_stale_live_state_becomes_interrupted() {
+    fn durable_output_hydrates_and_unfinished_sessions_become_interrupted() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);
         let record = durable_record(
@@ -3224,21 +3281,25 @@ mod tests {
         assert_eq!(replay_bytes(&snapshot), replay_bytes(&finished));
 
         drop(hydrated);
-        rewrite_stored_record(&temp, "persisted", |record| {
-            record.status = ActivityStatus::Working;
-            record.updated_at = "2026-07-25T09:30:00Z".into();
-            record.session.as_mut().unwrap().exit = None;
-            record.session.as_mut().unwrap().ended_at = None;
-        });
 
-        let restarted = create_supervisor(&temp);
-        let snapshot = restarted.snapshot("persisted", None).unwrap();
-        assert_eq!(snapshot.record.status, ActivityStatus::Interrupted);
-        assert_eq!(snapshot.record.updated_at, "2026-07-25T09:30:00Z");
-        assert_eq!(
-            snapshot.record.session.unwrap().exit.unwrap().reason,
-            SessionExitReason::Interrupted
-        );
+        for stale_status in [ActivityStatus::Working, ActivityStatus::Done] {
+            rewrite_stored_record(&temp, "persisted", |record| {
+                record.status = stale_status;
+                record.updated_at = "2026-07-25T09:30:00Z".into();
+                record.session.as_mut().unwrap().exit = None;
+                record.session.as_mut().unwrap().ended_at = None;
+            });
+
+            let restarted = create_supervisor(&temp);
+            let snapshot = restarted.snapshot("persisted", None).unwrap();
+            assert_eq!(snapshot.record.status, ActivityStatus::Interrupted);
+            assert_eq!(snapshot.record.updated_at, "2026-07-25T09:30:00Z");
+            assert_eq!(
+                snapshot.record.session.unwrap().exit.unwrap().reason,
+                SessionExitReason::Interrupted
+            );
+            drop(restarted);
+        }
     }
 
     #[cfg(unix)]

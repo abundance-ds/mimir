@@ -128,7 +128,9 @@ durable agent/routine runs
 `supervisor.rs`); `ActivitySpawnRequest.scrollback_byte_cap` overrides the cap
 per spawn. Durable records restore after relaunch; any process that was live
 becomes interrupted because Mimir does not pretend that an old PTY is still
-attached.
+attached. Recovery uses the persisted session exit record as its authority. A
+live agent can briefly report `done`, so a started session without an exit
+record still becomes interrupted and remains eligible for exact-session resume.
 
 The renderer installs `mimir://activity-event` before calling `activity_list`.
 Events project upsert/status/output/resize/exit, while the initial list closes
