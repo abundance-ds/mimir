@@ -170,7 +170,8 @@ export function taskCheckboxExtension(isEnabled) {
           nowEnabled !== this._enabled ||
           update.docChanged ||
           update.viewportChanged ||
-          update.selectionSet
+          update.selectionSet ||
+          syntaxTree(update.state) !== syntaxTree(update.startState)
         ) {
           this._enabled = nowEnabled
           this.decorations = buildCheckboxDecorations(update.view, isEnabled)

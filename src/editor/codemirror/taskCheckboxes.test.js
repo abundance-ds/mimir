@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { EditorState } from '@codemirror/state'
+import { EditorState, StateEffect } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { Strikethrough } from '@lezer/markdown'
 import { ensureSyntaxTree } from '@codemirror/language'
-import { _buildCheckboxDecorations } from './taskCheckboxes.js'
+import { _buildCheckboxDecorations, taskCheckboxExtension } from './taskCheckboxes.js'
 
 function makeView(doc, cursorPos = 0) {
   const parent = document.createElement('div')
@@ -93,6 +93,28 @@ describe('taskCheckboxes', () => {
     const decos = getDecos(doc, 2)
     const box = decos.filter(d => d.widget === 'TaskCheckboxWidget')
     expect(box.length).toBe(0)
+  })
+
+  it('rebuilds when deferred Markdown parsing completes', () => {
+    const doc = '```\n- [ ] not a task\n```\n\nother'
+    const parent = document.createElement('div')
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.indexOf('other') },
+      extensions: [taskCheckboxExtension(() => true)],
+    })
+    const view = new EditorView({ state, parent })
+
+    expect(view.dom.querySelector('.cm-lp-task-checkbox')).not.toBeNull()
+
+    view.dispatch({
+      effects: StateEffect.appendConfig.of(
+        markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+      ),
+    })
+
+    expect(view.dom.querySelector('.cm-lp-task-checkbox')).toBeNull()
+    view.destroy()
   })
 
   it('ignores checkbox-like text inside fenced code blocks', () => {
