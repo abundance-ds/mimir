@@ -2,12 +2,12 @@
   <div ref="board" data-graph-work-board class="work-board">
     <div v-if="!issues.length" class="board-empty">
       <h2>No work matches this view</h2>
-      <p>Create work, broaden the priority filter, or include another scope.</p>
+      <p>Create work, broaden the project or priority filter, or include another scope.</p>
       <button
         type="button"
         data-graph-control="board-empty-create"
         @click="$emit('create', {
-          columnId: groupBy === 'status' ? (visibleStatuses[0] || 'backlog') : '__unassigned__',
+          columnId: groupBy === 'status' ? 'backlog' : '__unassigned__',
           groupBy,
         })"
       >
@@ -21,12 +21,30 @@
         v-for="column in boardColumns"
         :key="column.id"
         :data-board-column="column.id"
+        :data-board-column-collapsed="isCollapsed(column.id) ? 'true' : undefined"
         class="board-column"
-        :class="{ 'board-column-target': dropTarget?.columnId === column.id }"
+        :class="{
+          'board-column-collapsed': isCollapsed(column.id),
+          'board-column-target': dropTarget?.columnId === column.id,
+        }"
       >
-        <header class="board-column-header">
+        <button
+          v-if="isCollapsed(column.id)"
+          type="button"
+          class="board-column-collapsed-control"
+          :data-board-expand="column.id"
+          :data-graph-control="`board-expand-${column.id}`"
+          :aria-label="`Expand ${column.label}. ${issueCount(column.id)} ${issueCount(column.id) === 1 ? 'issue' : 'issues'}`"
+          :title="`Expand ${column.label}`"
+          @click="$emit('expand-column', column.id)"
+        >
+          <span class="board-column-count">{{ issueCount(column.id) }}</span>
+          <span class="board-column-vertical-name">{{ column.label }}</span>
+        </button>
+
+        <header v-if="!isCollapsed(column.id)" class="board-column-header">
           <span class="board-column-name">{{ column.label }}</span>
-          <span class="board-column-count">{{ grouped[column.id]?.length || 0 }}</span>
+          <span class="board-column-count">{{ issueCount(column.id) }}</span>
           <button
             type="button"
             :data-board-add="column.id"
@@ -39,6 +57,7 @@
         </header>
 
         <div
+          v-if="!isCollapsed(column.id)"
           data-board-column-body
           class="board-column-body"
           role="listbox"
@@ -147,8 +166,8 @@
     </div>
 
     <div v-else class="board-empty">
-      <h2>No visible board columns</h2>
-      <p>Enable a status column or change the grouping to see work.</p>
+      <h2>No board columns</h2>
+      <p>Add a project or change the grouping to see work.</p>
     </div>
 
     <div v-if="selectedIds.length > 1" class="board-selection-status" role="status">
@@ -176,7 +195,7 @@ const props = defineProps({
   projects: { type: Array, default: () => [] },
   actors: { type: Object, default: () => ({}) },
   groupBy: { type: String, default: 'status' },
-  visibleStatuses: { type: Array, default: () => [] },
+  collapsedStatuses: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
@@ -187,6 +206,7 @@ const emit = defineEmits([
   'patch',
   'bulk-patch',
   'reorder',
+  'expand-column',
 ])
 const board = ref(null)
 const selectedIds = ref([])
@@ -226,10 +246,7 @@ const boardColumns = computed(() => {
       { id: '__unassigned__', label: 'No project' },
     ]
   }
-  const visible = new Set(props.visibleStatuses.length
-    ? props.visibleStatuses
-    : statuses.map(status => status.id))
-  return statuses.filter(status => visible.has(status.id))
+  return statuses
 })
 const grouped = computed(() => Object.fromEntries(
   boardColumns.value.map(column => [
@@ -242,6 +259,14 @@ const grouped = computed(() => Object.fromEntries(
   ]),
 ))
 const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
+
+function isCollapsed(columnId) {
+  return props.groupBy === 'status' && props.collapsedStatuses.includes(columnId)
+}
+
+function issueCount(columnId) {
+  return grouped.value[columnId]?.length || 0
+}
 
 const { draggedId, dropTarget, suppressClick, onPointerDown } = useBoardDrag({
   boardRef: board,
@@ -472,8 +497,53 @@ function human(value) {
   background: var(--color-surface);
 }
 
+.board-column-collapsed {
+  width: 42px;
+  flex: 0 0 42px;
+}
+
+.board-column-collapsed-control {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  background: var(--color-chrome-high);
+  color: var(--color-ink-3);
+}
+
+.board-column-collapsed-control:hover {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.board-column-collapsed-control:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.board-column-vertical-name {
+  overflow: hidden;
+  max-height: calc(100% - 28px);
+  color: var(--color-ink-2);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
 .board-column-target {
   background: color-mix(in srgb, var(--color-accent-soft) 32%, var(--color-surface));
+}
+
+.board-column-target .board-column-collapsed-control {
+  background: color-mix(in srgb, var(--color-accent-soft) 68%, var(--color-chrome-high));
+  color: var(--color-ink);
 }
 
 .board-column-header {

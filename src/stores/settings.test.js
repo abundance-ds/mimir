@@ -55,10 +55,11 @@ describe('settings store', () => {
         all: 'list',
       },
       work: {
+        project: '',
         groupBy: 'status',
         sortBy: 'priority',
         priority: '',
-        visibleStatuses: ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done'],
+        collapsedStatuses: [],
       },
     })
     expect(store.recentWorkspaceFolders).toEqual([])
@@ -185,15 +186,15 @@ describe('settings store', () => {
     const state = {
       section: 'projects',
       sectionViews: { projects: 'graph' },
-      work: { visibleStatuses: ['plan'] },
+      work: { collapsedStatuses: ['plan'] },
     }
 
     store.set('businessGraphViewState', state)
     state.sectionViews.projects = 'list'
-    state.work.visibleStatuses.push('done')
+    state.work.collapsedStatuses.push('done')
 
     expect(store.businessGraphViewState.sectionViews.projects).toBe('graph')
-    expect(store.businessGraphViewState.work.visibleStatuses).toEqual(['plan'])
+    expect(store.businessGraphViewState.work.collapsedStatuses).toEqual(['plan'])
   })
 
   it('keeps all shell persistence in one detached workbench object', () => {

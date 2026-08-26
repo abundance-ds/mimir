@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../../services/businessGraph.js', () => ({
@@ -18,6 +18,10 @@ vi.mock('../../services/businessGraph.js', () => ({
   updateGraphNode: vi.fn(),
 }))
 
+vi.mock('../../services/externalLinks.js', () => ({
+  openExternalUrl: vi.fn(),
+}))
+
 import {
   createGraphNode,
   deleteGraphNode,
@@ -32,9 +36,11 @@ import {
   searchGraph,
   updateGraphNode,
 } from '../../services/businessGraph.js'
+import { openExternalUrl } from '../../services/externalLinks.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
+import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 
 const scopeRows = [
@@ -117,6 +123,7 @@ describe('BusinessGraphApp', () => {
   let pinia
 
   beforeEach(() => {
+    localStorage.removeItem('mimir:editor:settings:v1')
     summaries.splice(0, summaries.length, ...JSON.parse(JSON.stringify(initialSummaries)))
     pinia = createPinia()
     setActivePinia(pinia)
@@ -177,6 +184,11 @@ describe('BusinessGraphApp', () => {
     })
   })
 
+  afterEach(async () => {
+    await useSettingsStore(pinia).flush()
+    localStorage.removeItem('mimir:editor:settings:v1')
+  })
+
   function render() {
     return mount(BusinessGraphApp, {
       attachTo: document.body,
@@ -229,6 +241,45 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-inspector-history-forward]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
+    wrapper.unmount()
+  })
+
+  it('opens a web URL emitted by the editable working note', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
+    await flushPromises()
+
+    wrapper.findComponent(GraphInspector).vm.$emit(
+      'open-url',
+      'https://example.com/docs',
+    )
+    await flushPromises()
+
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/docs')
+    wrapper.unmount()
+  })
+
+  it('converts saved hidden status columns into collapsed columns', async () => {
+    const settings = useSettingsStore()
+    await settings.load()
+    settings.set('businessGraphViewState', {
+      section: 'work',
+      sectionViews: { work: 'board' },
+      work: {
+        groupBy: 'status',
+        sortBy: 'priority',
+        priority: '',
+        visibleStatuses: ['plan', 'in-progress', 'waiting', 'review', 'done'],
+      },
+    })
+
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.get('[data-board-column="backlog"]')
+      .attributes('data-board-column-collapsed')).toBe('true')
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
     wrapper.unmount()
   })
 
@@ -371,6 +422,12 @@ describe('BusinessGraphApp', () => {
   it('moves board cards through optimistic revision-aware graph patches', async () => {
     const wrapper = render()
     await flushPromises()
+
+    await wrapper.get('[data-board-columns-trigger]').trigger('click')
+    document.querySelector('[data-graph-control="board-column-in-progress"]').click()
+    await flushPromises()
+    expect(wrapper.get('[data-board-column="in-progress"]')
+      .attributes('data-board-column-collapsed')).toBe('true')
 
     // Pointer-driven, because Tauri swallows the webview's HTML5 drag and drop
     // (docs/gotchas.md#html5-drag-and-drop-is-dead-inside-the-webview).
@@ -625,6 +682,26 @@ describe('BusinessGraphApp', () => {
     const wrapper = render()
     await flushPromises()
 
+    const projectReset = wrapper.get('[data-graph-control="board-project-filter-clear"]')
+    expect(projectReset.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-board-project-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="project-alpha"]').click()
+    await flushPromises()
+    expect(projectReset.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-board-project-filter]').text()).toContain('Project Alpha')
+    expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
+      .toEqual(['issue-1'])
+    await projectReset.trigger('click')
+    expect(wrapper.get('[data-board-project-filter]').text()).toContain('All projects')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
+
+    await wrapper.get('[data-board-project-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="fde"]').click()
+    await flushPromises()
+    expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
+      .toEqual(['issue-legacy'])
+    await projectReset.trigger('click')
+
     const priorityReset = wrapper.get('[data-graph-control="board-priority-filter-clear"]')
     expect(priorityReset.attributes('disabled')).toBeDefined()
     await wrapper.get('[data-board-priority-filter]').trigger('click')
@@ -635,16 +712,29 @@ describe('BusinessGraphApp', () => {
     await priorityReset.trigger('click')
     expect(wrapper.get('[data-board-priority-filter]').text()).toContain('All priorities')
 
-    const columnsReset = wrapper.get('[data-graph-control="board-columns-filter-clear"]')
+    const columnsReset = wrapper.get('[data-graph-control="board-columns-expand-all"]')
     expect(columnsReset.attributes('disabled')).toBeDefined()
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
-    document.querySelector('[data-graph-control="board-column-backlog"]').click()
+    document.querySelector('[data-graph-control="board-column-plan"]').click()
     await flushPromises()
     expect(columnsReset.attributes('disabled')).toBeUndefined()
-    expect(columnsReset.attributes('aria-label')).toContain('Backlog')
+    expect(columnsReset.attributes('aria-label')).toContain('Plan')
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
+    expect(wrapper.get('[data-board-column="plan"]').attributes('data-board-column-collapsed'))
+      .toBe('true')
+    expect(wrapper.get('[data-board-expand="plan"]').text()).toContain('1')
+    await wrapper.get('[data-board-expand="plan"]').trigger('click')
+    expect(columnsReset.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-board-column="plan"]').attributes('data-board-column-collapsed'))
+      .toBeUndefined()
+
+    document.querySelector('[data-graph-control="board-column-plan"]').click()
+    await flushPromises()
     await columnsReset.trigger('click')
     expect(columnsReset.attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
+    expect(wrapper.get('[data-board-column="plan"]').attributes('data-board-column-collapsed'))
+      .toBeUndefined()
     wrapper.unmount()
   })
 

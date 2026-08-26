@@ -61,6 +61,32 @@ const baseProps = {
 }
 
 describe('GraphInspector', () => {
+  it('opens highlighted note links while keeping the note editor enabled', async () => {
+    const wrapper = mount(GraphInspector, {
+      props: {
+        ...baseProps,
+        mode: 'peek',
+        node: { ...issue, body: 'Read https://example.com/docs then update the note.' },
+      },
+    })
+    const editor = wrapper.findComponent(GraphMarkdownEditor)
+
+    expect(editor.props('openLinks')).toBe(true)
+    expect(editor.get('.cm-content').attributes('contenteditable')).toBe('true')
+    expect(editor.get('.cm-graph-link').text()).toBe('https://example.com/docs')
+    editor.vm.$emit('open-url', 'https://example.com/docs')
+    editor.vm.$emit('open-file', 'outputs/map.xlsx')
+
+    expect(wrapper.emitted('openUrl')).toEqual([['https://example.com/docs']])
+    expect(wrapper.emitted('openFile')).toEqual([[
+      { path: 'outputs/map.xlsx', nodeId: issue.id },
+    ]])
+
+    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
+    expect(wrapper.findComponent(GraphMarkdownEditor).props('openLinks')).toBe(true)
+  })
+
   it('keeps creation and update timestamps visible in Peek and Focus', async () => {
     const wrapper = mount(GraphInspector, {
       props: { ...baseProps, mode: 'peek' },

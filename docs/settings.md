@@ -84,8 +84,8 @@ Shared scope settings follow the same mutation invariant:
   Private and Workspace scopes. A configured folder that is temporarily missing
   stays visible as unmounted and does not block local scopes.
 - `businessGraphViewState` stores the active section, per-section projection,
-  Board grouping/sort/priority filter, and visible status columns. It is local
-  presentation state, never graph source data.
+  Board grouping/sort, project and priority filters, and collapsed status
+  columns. It is local presentation state, never graph source data.
 
 Changing the Team root remounts GraphRuntime against the current workspace.
 The scope inventory in Settings reports which component folders exist in each

@@ -372,11 +372,13 @@
             :disabled="saving"
             :min-height="150"
             :framed="false"
+            :open-links="true"
             control-id="peek-working-note"
             aria-label="Working note in Markdown"
             @change="changed"
             @save="save"
             @open-file="openSource"
+            @open-url="openUrl"
           />
         </section>
 
@@ -808,11 +810,13 @@
               :disabled="saving"
               :min-height="380"
               :framed="false"
+              :open-links="true"
               control-id="focus-working-note"
               aria-label="Working note in Markdown"
               @change="changed"
               @save="save"
               @open-file="openSource"
+              @open-url="openUrl"
             />
           </section>
 
@@ -1084,6 +1088,7 @@ const emit = defineEmits([
   'save',
   'openNode',
   'openFile',
+  'openUrl',
   'openActivity',
   'quickCreate',
   'delete',
@@ -1544,6 +1549,11 @@ function openRelated(id) {
 function openSource(path) {
   if (!path) return
   commitThen(() => emit('openFile', { path, nodeId: props.node?.id || null }))
+}
+
+function openUrl(url) {
+  if (!url) return
+  commitThen(() => emit('openUrl', url))
 }
 
 function openActivity(id) {

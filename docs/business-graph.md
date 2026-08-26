@@ -65,8 +65,9 @@ in a node body — are relative to the root of a workspace linked to the node's
 Project. When the user opens one, Mimir resolves it against the Project's
 local workspaces from the registry first and the open workspace second; a
 path that matches nowhere produces a diagnostic, and a path that escapes the
-root (`..`) is rejected. In the working note, Cmd/Ctrl+click opens a file
-link.
+root (`..`) is rejected. In the Peek and Focus working note, clicking
+highlighted link text opens a file in Mimir or an HTTP(S) URL in the system
+browser. Clicking elsewhere keeps the note editable and places the caret.
 
 When a Team graph exists and Mimir opens an unknown workspace, one compact
 dialog asks for `None`, an existing Project, or `New Project…`, plus Team or
@@ -176,8 +177,10 @@ a distributed audit log.
 ### Interaction modes
 
 - **Board**: two-line rows (priority control, title, metadata in mono). Drag
-  between columns and inside one, keyboard movement, grouping, filter strip,
-  settings-backed view state. Dragging is pointer-driven
+  between columns and inside one, keyboard movement, status/project grouping,
+  project and priority filters, and settings-backed view state. Status columns
+  can collapse to vertical strips that keep their item count and remain pointer
+  drop targets; clicking a strip expands it. Dragging is pointer-driven
   (`business-graph/useBoardDrag.js`) because the webview never sees HTML5 DnD
   ([gotchas.md](gotchas.md#html5-drag-and-drop-is-dead-inside-the-webview)); a
   drop sets the column's status (or project) and rewrites the column's ranks,

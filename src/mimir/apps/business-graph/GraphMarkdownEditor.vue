@@ -35,9 +35,10 @@ const props = defineProps({
   autofocus: { type: Boolean, default: false },
   framed: { type: Boolean, default: true },
   controlId: { type: String, default: 'working-note-input' },
+  openLinks: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:modelValue', 'change', 'save', 'open-file'])
+const emit = defineEmits(['update:modelValue', 'change', 'save', 'open-file', 'open-url'])
 const host = ref(null)
 const editableCompartment = new Compartment()
 let view = null
@@ -58,7 +59,7 @@ const graphHighlightStyle = HighlightStyle.define([
   },
   { tag: tags.strong, color: 'var(--color-ink)', fontWeight: '680' },
   { tag: tags.emphasis, fontStyle: 'italic' },
-  { tag: [tags.link, tags.url], color: 'var(--color-accent)', textDecoration: 'underline' },
+  { tag: [tags.link, tags.url], class: 'cm-graph-link' },
   {
     tag: tags.monospace,
     color: 'var(--code, var(--color-ink-2))',
@@ -68,7 +69,7 @@ const graphHighlightStyle = HighlightStyle.define([
   { tag: tags.contentSeparator, color: 'var(--color-ink-4)' },
 ])
 
-const graphEditorTheme = framed => EditorView.theme({
+const graphEditorTheme = (framed, openLinks) => EditorView.theme({
   '&': {
     minHeight: 'var(--graph-editor-min-height)',
     width: '100%',
@@ -111,6 +112,12 @@ const graphEditorTheme = framed => EditorView.theme({
     fontFamily: 'var(--font-sans)',
     fontStyle: 'normal',
   },
+  '.cm-graph-link': {
+    color: 'var(--color-accent)',
+    cursor: openLinks ? 'pointer' : 'text',
+    textDecoration: 'underline',
+    textUnderlineOffset: '2px',
+  },
 })
 
 onMounted(() => {
@@ -130,9 +137,13 @@ onMounted(() => {
       drawSelection(),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       markdownListKeymap,
-      markdownLinkOpen({ onOpen: target => emit('open-file', target) }),
+      markdownLinkOpen({
+        enabled: () => props.openLinks,
+        onOpenFile: target => emit('open-file', target),
+        onOpenUrl: target => emit('open-url', target),
+      }),
       syntaxHighlighting(graphHighlightStyle),
-      graphEditorTheme(props.framed),
+      graphEditorTheme(props.framed, props.openLinks),
       editorPlaceholder(props.placeholder),
       keymap.of([
         {

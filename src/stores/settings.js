@@ -48,10 +48,11 @@ const DEFAULTS = {
       all: 'list',
     },
     work: {
+      project: '',
       groupBy: 'status',
       sortBy: 'priority',
       priority: '',
-      visibleStatuses: ['backlog', 'plan', 'in-progress', 'waiting', 'review', 'done'],
+      collapsedStatuses: [],
     },
   },
   recentWorkspaceFolders: [],

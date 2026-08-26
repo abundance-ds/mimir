@@ -197,6 +197,7 @@
         @delete="deleteNode"
         @open-node="openRelatedNode"
         @open-file="openFile"
+        @open-url="openUrl"
         @open-activity="$emit('openActivity', $event)"
         @quick-create="openRelatedCreate"
         @navigate-history="navigateObjectHistory"
@@ -222,6 +223,31 @@
             </nav>
 
             <div v-if="graph.section === 'work'" class="graph-work-controls">
+              <GraphSelect
+                v-model="projectFilter"
+                data-board-project-filter
+                data-graph-control="board-project"
+                class="w-[148px]"
+                :class="{ 'graph-filter-active': projectFilter }"
+                variant="toolbar"
+                aria-label="Filter work by project"
+                :options="projectFilterOptions"
+                :searchable="projectFilterOptions.length > 8"
+                search-placeholder="Find a project"
+                :menu-min-width="196"
+              />
+              <button
+                type="button"
+                data-graph-control="board-project-filter-clear"
+                class="graph-filter-reset"
+                :class="{ 'graph-filter-reset-active': projectFilter }"
+                :disabled="!projectFilter"
+                :title="projectFilter ? 'Clear project filter' : undefined"
+                :aria-label="projectFilter ? 'Clear project filter' : 'No project filter to clear'"
+                @click="projectFilter = ''"
+              >
+                <IconX :size="12" />
+              </button>
               <GraphSelect
                 v-if="graph.view === 'board'"
                 v-model="boardGroup"
@@ -274,9 +300,9 @@
                   data-board-columns-trigger
                   data-graph-control="board-columns"
                   class="graph-icon-button graph-toolbar-icon"
-                  :class="{ 'graph-filter-active': hiddenBoardStatuses.length }"
-                  title="Visible columns"
-                  aria-label="Choose visible board columns"
+                  :class="{ 'graph-filter-active': collapsedBoardStatusLabels.length }"
+                  title="Collapse columns"
+                  aria-label="Choose collapsed board columns"
                   :aria-expanded="columnsMenu"
                   @click="toggleColumnsMenu"
                   @keydown.down.prevent="openColumnsMenu('first')"
@@ -286,13 +312,13 @@
                 </button>
                 <button
                   type="button"
-                  data-graph-control="board-columns-filter-clear"
+                  data-graph-control="board-columns-expand-all"
                   class="graph-filter-reset"
-                  :class="{ 'graph-filter-reset-active': hiddenBoardStatuses.length }"
-                  :disabled="!hiddenBoardStatuses.length"
-                  :title="hiddenBoardStatuses.length ? 'Show all board columns' : undefined"
-                  :aria-label="hiddenBoardStatuses.length ? `Show all board columns. Hidden: ${hiddenBoardStatuses.join(', ')}` : 'All board columns are visible'"
-                  @click="showAllBoardStatuses"
+                  :class="{ 'graph-filter-reset-active': collapsedBoardStatusLabels.length }"
+                  :disabled="!collapsedBoardStatusLabels.length"
+                  :title="collapsedBoardStatusLabels.length ? 'Expand all board columns' : undefined"
+                  :aria-label="collapsedBoardStatusLabels.length ? `Expand all board columns. Collapsed: ${collapsedBoardStatusLabels.join(', ')}` : 'All board columns are expanded'"
+                  @click="expandAllBoardStatuses"
                 >
                   <IconX :size="12" />
                 </button>
@@ -305,21 +331,21 @@
                     :style="columnsMenuStyle"
                     @keydown="onColumnsMenuKeydown"
                   >
-                    <p>Visible columns</p>
+                    <p>Collapse columns</p>
                     <button
                       v-for="status in boardStatuses"
                       :key="status.id"
                       type="button"
                       role="menuitemcheckbox"
-                      :aria-checked="visibleBoardStatuses.includes(status.id)"
+                      :aria-checked="collapsedBoardStatuses.includes(status.id)"
                       :data-graph-control="`board-column-${status.id}`"
-                      @click="toggleBoardStatus(status.id)"
+                      @click="toggleBoardStatusCollapse(status.id)"
                     >
                       <span
                         class="graph-checkbox"
-                        :class="{ 'graph-checkbox-checked': visibleBoardStatuses.includes(status.id) }"
+                        :class="{ 'graph-checkbox-checked': collapsedBoardStatuses.includes(status.id) }"
                       >
-                        <IconCheck v-if="visibleBoardStatuses.includes(status.id)" :size="11" />
+                        <IconCheck v-if="collapsedBoardStatuses.includes(status.id)" :size="11" />
                       </span>
                       {{ status.label }}
                     </button>
@@ -392,7 +418,7 @@
             :projects="graph.projects"
             :actors="graph.latestActors"
             :group-by="boardGroup"
-            :visible-statuses="visibleBoardStatuses"
+            :collapsed-statuses="collapsedBoardStatuses"
             @open="openNode"
             @move="moveIssue"
             @patch="patchIssue"
@@ -400,6 +426,7 @@
             @bulk-move="bulkMoveIssues"
             @reorder="reorderIssue"
             @create="createFromBoard"
+            @expand-column="expandBoardStatus"
           />
           <PortfolioView
             v-else-if="graph.section === 'projects' && graph.view === 'portfolio'"
@@ -449,6 +476,7 @@
           @delete="deleteNode"
           @open-node="openRelatedNode"
           @open-file="openFile"
+          @open-url="openUrl"
           @open-activity="$emit('openActivity', $event)"
           @quick-create="openRelatedCreate"
           @navigate-history="navigateObjectHistory"
@@ -531,6 +559,7 @@ import { useSettingsStore } from '../../stores/settings.js'
 import { useActivitiesStore } from '../../stores/activities.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { graphContext } from '../../services/businessGraph.js'
+import { openExternalUrl } from '../../services/externalLinks.js'
 import { resolveProjectFile } from '../../services/workspaceConfig.js'
 import {
   BUSINESS_SECTIONS,
@@ -593,6 +622,7 @@ const createProject = ref('')
 const createRelations = ref([])
 const creating = ref(false)
 const saving = ref(false)
+const projectFilter = ref('')
 const priorityFilter = ref('')
 const boardGroup = ref('status')
 const boardSort = ref('rank')
@@ -633,7 +663,7 @@ const priorityFilterOptions = [
   { value: 'normal', label: 'Normal' },
   { value: 'low', label: 'Low' },
 ]
-const visibleBoardStatuses = ref(boardStatuses.map(status => status.id))
+const collapsedBoardStatuses = ref([])
 let viewStateHydrated = false
 let searchTimer = null
 let searchDraftGeneration = 0
@@ -681,6 +711,40 @@ const summaryAgents = computed(() => launchers.availablePresets.filter(
   preset => preset.kind === 'agent',
 ))
 const viewOptions = computed(() => viewsBySection[graph.section] || viewsBySection.all)
+const projectFilterOptions = computed(() => {
+  const options = [...graph.projects]
+    .sort((left, right) => projectFilterLabel(left).localeCompare(projectFilterLabel(right)))
+    .map(project => ({
+      value: project.id,
+      label: projectFilterLabel(project),
+      hint: project.properties?.slug || project.slug || '',
+    }))
+  const knownIds = new Set(graph.projects.map(project => project.id))
+  const legacyProjects = [...new Set(
+    graph.issues
+      .map(issue => String(issue.projectId || '').trim())
+      .filter(projectId => projectId && !knownIds.has(projectId)),
+  )].sort((left, right) => left.localeCompare(right))
+  for (const projectId of legacyProjects) {
+    options.push({ value: projectId, label: projectId, hint: 'Legacy project' })
+  }
+  if (
+    projectFilter.value
+    && projectFilter.value !== '__unassigned__'
+    && !options.some(option => option.value === projectFilter.value)
+  ) {
+    options.push({
+      value: projectFilter.value,
+      label: projectFilter.value,
+      hint: 'Unavailable project',
+    })
+  }
+  return [
+    { value: '', label: 'All projects', separatorAfter: true },
+    ...options,
+    { value: '__unassigned__', label: 'No project' },
+  ]
+})
 const scopeSummary = computed(() => {
   if (!graph.scopes.length) return 'No scopes'
   if (graph.activeScopeIds.length === graph.scopes.length) return 'All scopes'
@@ -700,6 +764,11 @@ const composing = computed(() => graph.loading && !graph.nodes.length)
 const projectionNodes = computed(() => {
   let items = graph.visibleNodes
   if (graph.section === 'work') {
+    if (projectFilter.value === '__unassigned__') {
+      items = items.filter(item => !item.projectId)
+    } else if (projectFilter.value) {
+      items = items.filter(item => item.projectId === projectFilter.value)
+    }
     if (priorityFilter.value) items = items.filter(item => item.priority === priorityFilter.value)
     if (graph.view === 'attention') items = items.filter(needsAttention)
   }
@@ -716,9 +785,9 @@ function matchesAllKind(item, filter) {
   return item.kind === filter
 }
 const boardIssues = computed(() => [...projectionNodes.value].sort(issueSort(boardSort.value)))
-const hiddenBoardStatuses = computed(() => {
-  const visible = new Set(visibleBoardStatuses.value)
-  return boardStatuses.filter(status => !visible.has(status.id)).map(status => status.label)
+const collapsedBoardStatusLabels = computed(() => {
+  const collapsed = new Set(collapsedBoardStatuses.value)
+  return boardStatuses.filter(status => collapsed.has(status.id)).map(status => status.label)
 })
 const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
 const nowSeenAt = ref(settings.businessGraphNowSeenAt || '')
@@ -1102,6 +1171,7 @@ watch(
 
     const work = saved.work || {}
     if (['status', 'project'].includes(work.groupBy)) boardGroup.value = work.groupBy
+    if (typeof work.project === 'string') projectFilter.value = work.project
     if (['rank', 'priority', 'due', 'updated', 'title'].includes(work.sortBy)) {
       boardSort.value = work.sortBy
     }
@@ -1109,10 +1179,15 @@ watch(
       priorityFilter.value = work.priority
     }
     const knownStatuses = new Set(boardStatuses.map(status => status.id))
-    const visible = Array.isArray(work.visibleStatuses)
-      ? work.visibleStatuses.filter(status => knownStatuses.has(status))
-      : []
-    if (visible.length) visibleBoardStatuses.value = visible
+    if (Array.isArray(work.collapsedStatuses)) {
+      collapsedBoardStatuses.value = work.collapsedStatuses
+        .filter(status => knownStatuses.has(status))
+    } else if (Array.isArray(work.visibleStatuses)) {
+      const visible = new Set(work.visibleStatuses.filter(status => knownStatuses.has(status)))
+      collapsedBoardStatuses.value = boardStatuses
+        .map(status => status.id)
+        .filter(status => !visible.has(status))
+    }
     viewStateHydrated = true
   },
   { immediate: true },
@@ -1122,10 +1197,11 @@ watch(
   [
     () => graph.section,
     () => ({ ...graph.sectionViews }),
+    projectFilter,
     boardGroup,
     boardSort,
     priorityFilter,
-    visibleBoardStatuses,
+    collapsedBoardStatuses,
   ],
   () => {
     if (!viewStateHydrated) return
@@ -1133,10 +1209,11 @@ watch(
       section: graph.section,
       sectionViews: { ...graph.sectionViews },
       work: {
+        project: projectFilter.value,
         groupBy: boardGroup.value,
         sortBy: boardSort.value,
         priority: priorityFilter.value,
-        visibleStatuses: [...visibleBoardStatuses.value],
+        collapsedStatuses: [...collapsedBoardStatuses.value],
       },
     })
   },
@@ -1711,6 +1788,14 @@ async function openFile(request) {
     : `${path} could not be opened. It is not in the current workspace.`)
 }
 
+async function openUrl(url) {
+  try {
+    await openExternalUrl(url)
+  } catch (cause) {
+    emit('diagnostic', errorMessage(cause))
+  }
+}
+
 function projectIdForNode(nodeId) {
   const node = nodeId ? graph.nodes.find(candidate => candidate.id === nodeId) : null
   if (!node) return null
@@ -1870,13 +1955,13 @@ function positionColumnsMenu() {
   }
 }
 
-function toggleBoardStatus(id) {
-  const visible = new Set(visibleBoardStatuses.value)
-  if (visible.has(id) && visible.size > 1) visible.delete(id)
-  else visible.add(id)
-  visibleBoardStatuses.value = boardStatuses
+function toggleBoardStatusCollapse(id) {
+  const collapsed = new Set(collapsedBoardStatuses.value)
+  if (collapsed.has(id)) collapsed.delete(id)
+  else collapsed.add(id)
+  collapsedBoardStatuses.value = boardStatuses
     .map(status => status.id)
-    .filter(status => visible.has(status))
+    .filter(status => collapsed.has(status))
 }
 
 function toggleScopeMenu() {
@@ -1937,8 +2022,12 @@ function menuItems(menuRoot) {
   return [...(menuRoot?.querySelectorAll('[role^="menuitem"]:not(:disabled)') || [])]
 }
 
-function showAllBoardStatuses() {
-  visibleBoardStatuses.value = boardStatuses.map(status => status.id)
+function expandAllBoardStatuses() {
+  collapsedBoardStatuses.value = []
+}
+
+function expandBoardStatus(id) {
+  collapsedBoardStatuses.value = collapsedBoardStatuses.value.filter(status => status !== id)
 }
 
 function issueSort(mode) {
@@ -1974,6 +2063,10 @@ function needsAttention(issue) {
 
 function human(value) {
   return String(value || '').replaceAll('-', ' ')
+}
+
+function projectFilterLabel(project) {
+  return project?.title || project?.properties?.slug || project?.slug || project?.id || 'Untitled project'
 }
 
 function scopeName(value) {
@@ -2291,8 +2384,8 @@ onUnmounted(() => {
   z-index: 90;
   border: 1px solid var(--color-rule);
   border-radius: 3px;
-  background: var(--graph-raised);
-  box-shadow: var(--graph-shadow);
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 12%, transparent);
 }
 
 .graph-scope-menu {
@@ -2542,11 +2635,11 @@ onUnmounted(() => {
 }
 
 .graph-columns-menu > button:hover {
-  background: var(--graph-hover);
+  background: var(--color-chrome-mid);
 }
 
 .graph-columns-menu > button:focus-visible {
-  outline: 2px solid var(--graph-focus);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
   outline-offset: -2px;
 }
 

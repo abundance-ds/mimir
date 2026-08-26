@@ -63,6 +63,15 @@ describe('resolveBoardTarget', () => {
     expect(resolveBoardTarget(document.body, 10, '')).toBeNull()
     expect(resolveBoardTarget(null, 10, '')).toBeNull()
   })
+
+  it('keeps a collapsed column as an empty drop target', () => {
+    const column = board.elements.get('column-1')
+    column.replaceChildren()
+    column.setAttribute('data-board-column-collapsed', 'true')
+
+    expect(resolveBoardTarget(column, 10, 'issue-1'))
+      .toEqual({ columnId: 'in-progress', beforeId: '' })
+  })
 })
 
 describe('useBoardDrag', () => {
