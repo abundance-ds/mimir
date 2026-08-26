@@ -608,9 +608,7 @@ mod tests {
             Some(root.path().to_str().unwrap()),
         )
         .is_err());
-        assert!(
-            workspace_project_file_resolve_at(&registry, None, "  ", None).is_err()
-        );
+        assert!(workspace_project_file_resolve_at(&registry, None, "  ", None).is_err());
     }
 
     #[test]
