@@ -17,24 +17,11 @@
           v-if="live"
           type="button"
           data-terminal-interrupt
-          title="Interrupt process (Ctrl-C)"
-          aria-label="Interrupt process"
+          title="Interrupt command (Ctrl-C)"
+          aria-label="Interrupt command (Ctrl-C)"
           class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
           @pointerdown.stop
           @click.stop="interrupt"
-        >
-          <IconPlayerPause :size="13" :stroke-width="1.7" />
-        </button>
-        <button
-          v-if="live"
-          type="button"
-          data-terminal-stop
-          title="Stop process"
-          aria-label="Stop process"
-          :disabled="stopping"
-          class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-rem/10 hover:text-rem focus-visible:outline focus-visible:outline-1 focus-visible:outline-rem disabled:opacity-40"
-          @pointerdown.stop
-          @click.stop="stop"
         >
           <IconPlayerStop :size="13" :stroke-width="1.7" />
         </button>
@@ -99,7 +86,6 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import {
-  IconPlayerPause,
   IconPlayerStop,
   IconRefresh,
 } from '@tabler/icons-vue'
@@ -110,7 +96,6 @@ import {
   proposeActivityTitle,
   releaseTerminalActivity,
   resizeActivity,
-  stopActivity,
   writeActivity,
 } from '../../services/activities.js'
 import { getDataDir } from '../../services/dataDir.js'
@@ -138,7 +123,6 @@ const emit = defineEmits([
   'ready',
   'exit',
   'interrupt',
-  'stop',
   'restart',
   'restart-ready',
   'activity-input',
@@ -152,7 +136,6 @@ const status = ref(props.activity.status || 'starting')
 const hasExited = ref(Boolean(props.activity.session?.exit))
 const live = ref(status.value !== 'interrupted' && !hasExited.value)
 const loading = ref(true)
-const stopping = ref(false)
 const error = ref('')
 const renderer = ref('dom')
 
@@ -406,7 +389,6 @@ function applyEvent(event) {
     status.value = event.record?.status || statusFromExit(event.exit?.reason)
     hasExited.value = true
     live.value = false
-    stopping.value = false
     emit('exit', event)
     emit('restart-ready', {
       activityId: activityId.value,
@@ -629,19 +611,6 @@ async function interrupt() {
   terminal?.focus()
 }
 
-async function stop() {
-  if (stopping.value) return
-  stopping.value = true
-  error.value = ''
-  try {
-    await stopActivity(activityId.value)
-    emit('stop', { activityId: activityId.value })
-  } catch (cause) {
-    stopping.value = false
-    exposeSurfaceError(cause, 'Could not stop this Activity.')
-  }
-}
-
 function requestRestart() {
   emit('restart', {
     activityId: activityId.value,
@@ -785,7 +754,6 @@ async function resetForTerminalRun() {
 
   hasExited.value = false
   live.value = true
-  stopping.value = false
   error.value = ''
   appliedSequence = 0
   queuedSequence = 0
@@ -805,11 +773,9 @@ watch(
     status.value = nextStatus
     if (nextStatus === 'interrupted') {
       live.value = false
-      stopping.value = false
     } else if (sessionExit) {
       hasExited.value = true
       live.value = false
-      stopping.value = false
     } else if (!hasExited.value) {
       live.value = true
     }

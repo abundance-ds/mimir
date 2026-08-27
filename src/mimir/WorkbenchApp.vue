@@ -37,8 +37,7 @@
         @open-workspace="openWorkspace"
         @toggle-collapse="toggleSidebar"
         @rename-activity="renameActivity"
-        @stop-activity="stopActivity"
-        @archive-activity="archiveActivity"
+        @archive-activity="closeActivity"
         @clear-activity="clearActivity"
         @archive-activities="archiveActivities"
         @clear-activities="clearActivities"
@@ -403,7 +402,6 @@ const activityLifecycle = useActivityLifecycle({
 })
 const {
   archiveActivities,
-  archiveActivity,
   clearActivities,
   clearActivity,
   closeActivities,

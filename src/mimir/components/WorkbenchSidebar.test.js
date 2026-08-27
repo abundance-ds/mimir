@@ -425,7 +425,7 @@ describe('WorkbenchSidebar', () => {
     const activityMenu = wrapper.get('[data-activity-menu="agent:one"]')
     expect(document.activeElement.textContent).toContain('Rename')
     await activityMenu.trigger('keydown', { key: 'ArrowDown' })
-    expect(document.activeElement.textContent).toContain('Stop / kill')
+    expect(document.activeElement.textContent).toContain('Archive')
     await activityMenu.trigger('keydown', { key: 'Escape' })
     expect(document.activeElement).toBe(
       wrapper.get('[data-activity-menu-button="agent:one"]').element,
@@ -513,15 +513,16 @@ describe('WorkbenchSidebar', () => {
     wrapper.unmount()
   })
 
-  it('exposes real lifecycle actions and explains why a live run cannot archive', async () => {
+  it('archives live and ended Activities through the normal close path', async () => {
     const wrapper = render()
 
     await wrapper.get('[data-activity-menu-button="agent:one"]').trigger('click')
     const liveMenu = wrapper.get('[data-activity-menu="agent:one"]')
-    expect(liveMenu.text()).toContain('Stop / kill')
+    expect(liveMenu.text()).not.toContain('Stop / kill')
     const archive = liveMenu.findAll('button').find((button) => button.text().includes('Archive'))
-    expect(archive.attributes('disabled')).toBeDefined()
-    expect(archive.attributes('title')).toContain('Stop')
+    expect(archive.attributes('disabled')).toBeUndefined()
+    await archive.trigger('click')
+    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['agent:one'])
 
     await wrapper.setProps({
       activities: [

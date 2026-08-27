@@ -105,6 +105,12 @@ ordered record subscription for upserts, status, and exit.
   sequence. Replay therefore restores the geometry in which output occurred.
 - The native journal is the recovery transport. xterm.js is the terminal state
   engine; Mimir does not implement a second VT parser.
+- Interrupt (`^C`) sends Ctrl-C to the current command and keeps the PTY
+  Activity live.
+- Archive and Close stop a live PTY first, then preserve an archivable Activity
+  in History.
+- If the terminal renderer fails, its fallback screen exposes Stop because it
+  cannot deliver Ctrl-C through xterm.
 - Stop is safe to repeat.
 - Live agent status is inferred from output and silence without changing PTY
   ownership.

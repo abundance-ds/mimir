@@ -443,22 +443,11 @@
               <IconPencil :size="12" /> Rename
             </button>
             <button
-              v-if="canStop(activity)"
-              class="activity-menu-item text-rem"
-              role="menuitem"
-              tabindex="-1"
-              @click="runAction('stopActivity', activity.id)"
-            >
-              <IconPlayerStop :size="12" /> Stop / kill
-            </button>
-            <button
               v-if="canArchive(activity)"
               class="activity-menu-item"
-              :class="{ 'cursor-not-allowed opacity-45': canStop(activity) }"
               role="menuitem"
               tabindex="-1"
-              :disabled="canStop(activity)"
-              :title="canStop(activity) ? 'Stop this Activity before archiving it' : 'Archive Activity'"
+              title="Archive Activity"
               @click="runAction('archiveActivity', activity.id)"
             >
               <IconArchive :size="12" /> Archive
@@ -551,7 +540,6 @@ import {
   IconTimeline,
   IconSparkles,
   IconPencil,
-  IconPlayerStop,
   IconPlayerStopFilled,
   IconPlayerRecordFilled,
   IconTrash,
@@ -599,7 +587,6 @@ const emit = defineEmits([
   'openWorkspace',
   'toggleCollapse',
   'renameActivity',
-  'stopActivity',
   'archiveActivity',
   'clearActivity',
   'archiveActivities',

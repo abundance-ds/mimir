@@ -1275,6 +1275,26 @@ describe('WorkbenchApp', () => {
     expect(wrapper.find('[data-sidebar-row="activity:agent:failed"]').exists()).toBe(false)
   })
 
+  it('closes a live Activity before archiving it from the Sidebar menu', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    useActivitiesStore().upsert(
+      activityRecord('agent:menu-archive', 'Menu archive', '2026-07-25T13:00:00Z'),
+    )
+    await nextTick()
+    activityApi.closeActivity.mockClear()
+    activityApi.setActivityArchived.mockClear()
+
+    await wrapper.get('[data-activity-menu-button="agent:menu-archive"]').trigger('click')
+    const menu = wrapper.get('[data-activity-menu="agent:menu-archive"]')
+    const archive = menu.findAll('button').find(button => button.text().includes('Archive'))
+    expect(archive.attributes('disabled')).toBeUndefined()
+    await archive.trigger('click')
+    await flushPromises()
+
+    expect(activityApi.closeActivity).toHaveBeenCalledWith('agent:menu-archive')
+    expect(activityApi.setActivityArchived).not.toHaveBeenCalled()
+  })
+
   it('opens a Files result in the mounted Editor without changing Activity', async () => {
     const wrapper = await render({ workspace: '/w' })
     expect(useWorkbenchStore().activeActivityId).toBe('files')

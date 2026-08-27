@@ -38,7 +38,7 @@ Pane controls are local and keep stable positions:
   Activity, that header adds a traffic-safe leading inset before restore and
   history controls.
 - Activity history sits at the leading edge of the Activity header.
-- PTY-specific process actions such as interrupt, stop, and resume join that
+- PTY-specific process actions such as interrupt and resume join that
   shared header. Native terminal interactions such as paste stay on their
   standard keyboard shortcuts. Terminal and agent surfaces do not stack a
   second identity or status row beneath it.
