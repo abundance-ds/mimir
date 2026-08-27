@@ -960,7 +960,8 @@ function focusModal(container) {
     modalReturnFocus = document.activeElement
   }
   nextTick(() => {
-    const target = container.querySelector('[data-modal-initial], button:not(:disabled), input:not(:disabled)')
+    const target = container.querySelector('[data-modal-initial]')
+      || container.querySelector('button:not(:disabled), input:not(:disabled)')
     target?.focus()
   })
 }
