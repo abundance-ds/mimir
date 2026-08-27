@@ -24,6 +24,7 @@
       @rewrite-selection="onRewriteSelection"
       @select-tab="selectEditorTab"
       @close-tab="closeEditorTab"
+      @discard-tab="requestDiscardTab"
       @add-tab="openNewTabPage"
       @reorder-tab="onReorderTab"
     />
@@ -71,9 +72,11 @@
           :active-formats="activeFormats"
           :has-selection="Boolean(selectionText)"
           :comment-count="commentManager.visibleComments.length"
+          :lifecycle-action="discardModeForFile(currentFile)"
           @format="onFormat"
           @comment="onComment"
           @navigate-comment="commentPresentation.navigateComment"
+          @discard-file="requestDiscardFile(currentFile)"
         />
         <div class="editor-panes flex-1 flex min-h-0 overflow-hidden">
           <GitDiffView v-if="gitReviewVisible" />
@@ -174,6 +177,56 @@
     <Teleport to="body">
       <Transition name="settings-fade">
         <div
+          v-if="discardConfirm"
+          ref="discardOverlayRef"
+          class="fixed inset-0 bg-black/30 z-[200] flex items-center justify-center outline-none"
+          @click.self="cancelDiscard"
+        >
+          <div
+            class="close-confirm-card"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="discard-confirm-title"
+            aria-describedby="discard-confirm-description"
+            @keydown="onModalKeydown($event, cancelDiscard)"
+          >
+            <p id="discard-confirm-title" class="close-confirm-title">
+              {{ discardConfirmMode === 'trash' ? `Move ${discardConfirmFileName} to Trash?` : 'Discard this draft?' }}
+            </p>
+            <p id="discard-confirm-description" class="close-confirm-body">
+              <template v-if="discardConfirmMode === 'trash'">
+                The file moves to the system Trash and can be restored there.
+                <span v-if="discardConfirm.file.dirty"> Unsaved changes will be discarded.</span>
+              </template>
+              <template v-else>
+                This draft{{ discardConfirm.file.dirty ? ' and its unsaved changes' : '' }} will be discarded. This action cannot be undone.
+              </template>
+            </p>
+            <p v-if="discardError" class="discard-confirm-error" role="alert">{{ discardError }}</p>
+            <div class="close-confirm-actions">
+              <button
+                type="button"
+                class="close-confirm-btn btn-cancel"
+                :disabled="discardPending"
+                @click="cancelDiscard"
+              >Cancel</button>
+              <button
+                type="button"
+                data-modal-initial
+                data-discard-confirm
+                class="close-confirm-btn btn-remove"
+                :disabled="discardPending"
+                @click="confirmDiscard"
+              >{{ discardPending ? 'Working…' : (discardConfirmMode === 'trash' ? 'Move to Trash' : 'Discard Draft') }}</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="settings-fade">
+        <div
           v-if="restoreConfirmMeta"
           ref="restoreOverlayRef"
           class="fixed inset-0 bg-black/30 z-[200] flex items-center justify-center outline-none"
@@ -240,13 +293,14 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, provide } from 
 import { storeToRefs } from 'pinia'
 import { useEditorUIStore } from '../stores/editorUI.js'
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts.js'
-import { useFileStore } from '../stores/files.js'
+import { pathIsInsideWorkspace, useFileStore } from '../stores/files.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useDocumentBridge } from './composables/useDocumentBridge.js'
 import { isTauriRuntime, platformKind } from '../shared/platform.js'
 import { relativeTime } from '../shared/time.js'
 import { basename, parentPath } from '../shared/utils/path.js'
 import { readFile } from '../services/fileSystem.js'
+import { trashWorkspaceEntries } from '../services/workspaceFileOperations.js'
 import { absoluteWorkspacePath } from '../services/gitChanges.js'
 import { createWindowCloseGuard } from './windowCloseGuard.js'
 import { ghostExtension } from './codemirror/ghost.js'
@@ -275,7 +329,7 @@ import { createAutoSaveController } from './autoSaveController.js'
 import { fileDisplayName, footerSaveStatus, tabFromFile } from './saveStatus.js'
 import { useSaveFeedbackStore } from '../stores/saveFeedback.js'
 import { useAppUpdateStore } from '../stores/appUpdate.js'
-import { diffIsVisibleForFile } from './workspaceDiffProjection.js'
+import { diffIsVisibleForFile, singleDiffTargetsFile } from './workspaceDiffProjection.js'
 
 import AppFooter from './components/shell/AppFooter.vue'
 import AppHeader from './components/shell/AppHeader.vue'
@@ -368,6 +422,7 @@ const editorToolbarVisible = computed(() => (
 ))
 const inlineAIProjectPath = computed(() => parentPath(currentFile.value?.path))
 const closeOverlayRef = ref(null)
+const discardOverlayRef = ref(null)
 const restoreConfirmMeta = ref(null)
 const restoreOverlayRef = ref(null)
 const commentGateVisible = ref(false)
@@ -376,6 +431,7 @@ const commentGateOverlayRef = ref(null)
 const editorModalOpen = computed(() => Boolean(
   state.settingsOpen
   || closeConfirmFile?.value
+  || discardConfirm?.value
   || restoreConfirmMeta.value
   || commentGateVisible.value
 ))
@@ -387,6 +443,17 @@ let editorDisposed = false
 function isMarkdownPath(path) {
   if (!path) return true
   return /\.(?:md|markdown|mdown|mkd)$/i.test(String(path))
+}
+
+function discardModeForFile(file) {
+  if (!file || file.newTab || file.kind !== 'text' || file.reviews?.length) return ''
+  if (diffStore.active) {
+    if (!diffStore.isBatch && singleDiffTargetsFile(diffStore, file)) return ''
+    if (diffStore.isBatch && (diffStore.files || []).some(item => item.path === file.path)) return ''
+  }
+  if (!file.path) return 'draft'
+  if (!props.embedded || !props.workspacePath) return ''
+  return pathIsInsideWorkspace(file.path, props.workspacePath) ? 'trash' : ''
 }
 
 function reportSessionError(error) {
@@ -453,6 +520,7 @@ const editorTabs = computed(() => {
       autoSaveEnabled: editorSettings.editorAutoSave,
       untitledIndex: file.path ? 0 : ++untitledCount,
     }),
+    lifecycleAction: discardModeForFile(file),
     fileIndex: openFiles.value.indexOf(file),
   }))
 })
@@ -737,6 +805,11 @@ const tabMgmt = useTabManagement({
   activeFileIndex,
   flushEditorContent,
   saveCurrentFile,
+  trashWorkspaceEntries,
+  discardModeForFile,
+  cancelAutoSave: file => autoSave.clear(file),
+  resumeAutoSave: file => autoSave.schedule(file),
+  flushSession: () => editorSession.flush().catch(reportSessionError),
   requestWindowClose: requestEditorWindowClose,
   embedded: props.embedded,
   onEmpty: () => emit('empty'),
@@ -744,6 +817,11 @@ const tabMgmt = useTabManagement({
 const {
   closeConfirmFile,
   closeConfirmFileName,
+  discardConfirm,
+  discardConfirmFileName,
+  discardConfirmMode,
+  discardError,
+  discardPending,
   arrivedTabIndex,
   onSelectTab,
   onCloseTab,
@@ -751,6 +829,10 @@ const {
   onNewFile,
   onReorderTab,
   confirmFileClose,
+  requestDiscardTab,
+  requestDiscardFile,
+  cancelDiscard,
+  confirmDiscard,
 } = tabMgmt
 
 const windowCloseGuard = createWindowCloseGuard({
@@ -827,6 +909,10 @@ async function dismissEditorSurface() {
   }
   if (closeConfirmFile.value) {
     onCloseConfirm('cancel')
+    return true
+  }
+  if (discardConfirm.value) {
+    cancelDiscard()
     return true
   }
   if (restoreConfirmMeta.value) {
@@ -917,6 +1003,10 @@ function onModalKeydown(event, onCancel) {
 
 watch(closeConfirmFile, (value, previous) => {
   if (value) nextTick(() => focusModal(closeOverlayRef.value))
+  else if (previous) restoreModalReturnFocus()
+})
+watch(discardConfirm, (value, previous) => {
+  if (value) nextTick(() => focusModal(discardOverlayRef.value))
   else if (previous) restoreModalReturnFocus()
 })
 watch(restoreConfirmMeta, (value, previous) => {
@@ -1585,6 +1675,10 @@ function normalizeComparablePath(path) {
   border-radius: 6px;
 }
 .close-confirm-btn:hover { opacity: 0.85; }
+.close-confirm-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
 
 .btn-cancel {
   background: none;
@@ -1602,5 +1696,19 @@ function normalizeComparablePath(path) {
   background: var(--color-accent);
   color: var(--color-accent-ink, #fff);
   border: none;
+}
+
+.btn-remove {
+  background: var(--color-rem);
+  color: var(--color-accent-ink, #fff);
+  border: none;
+}
+
+.discard-confirm-error {
+  margin: -12px 0 16px;
+  color: var(--color-rem);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.4;
 }
 </style>

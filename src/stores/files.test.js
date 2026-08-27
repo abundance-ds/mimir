@@ -830,6 +830,31 @@ describe('files store', () => {
       })
       expect(store.recentFiles).toEqual([])
     })
+
+    it('removes an explicitly discarded dirty file instead of recovering a draft', async () => {
+      const store = useFileStore()
+      const discarded = await store.openFile('/w/temp-note.md', 'draft')
+      store.updateContent('unsaved draft')
+      await store.openFile('/w/keep.md', 'keep')
+
+      expect(store.discardFile(discarded)).toBe(true)
+
+      expect(store.openFiles.map(file => file.path)).toEqual(['/w/keep.md'])
+      expect(store.openFiles.some(file => file.content === 'unsaved draft')).toBe(false)
+      expect(store.recentFiles).not.toContain('/w/temp-note.md')
+    })
+
+    it('discards an untitled document and keeps one fallback in a standalone editor', () => {
+      const store = useFileStore()
+      store.newFile()
+      const draft = store.currentFile
+      store.updateContent('temporary text')
+
+      expect(store.discardFile(draft)).toBe(true)
+
+      expect(store.openFiles).toHaveLength(1)
+      expect(store.currentFile).toMatchObject({ path: null, content: '', dirty: false })
+    })
   })
 
   // ── removeTabForTransfer ──

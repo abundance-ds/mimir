@@ -8,11 +8,17 @@ const { readFile, loadSession, saveSession } = vi.hoisted(() => ({
   loadSession: vi.fn(),
   saveSession: vi.fn(),
 }))
+const workspaceOperations = vi.hoisted(() => ({
+  trash: vi.fn(),
+}))
 const nativeMenu = vi.hoisted(() => ({
   install: vi.fn(async () => true),
 }))
 
 vi.mock('../services/fileSystem.js', () => ({ readFile }))
+vi.mock('../services/workspaceFileOperations.js', () => ({
+  trashWorkspaceEntries: workspaceOperations.trash,
+}))
 vi.mock('../services/session.js', () => ({ loadSession, saveSession }))
 vi.mock('./nativeMenu.js', () => ({
   installNativeEditorMenu: nativeMenu.install,
@@ -63,6 +69,7 @@ describe('Editor Settings bridge', () => {
     loadSession.mockReset().mockResolvedValue(null)
     saveSession.mockReset().mockResolvedValue()
     nativeMenu.install.mockClear()
+    workspaceOperations.trash.mockReset().mockResolvedValue(['temp-note.md'])
   })
 
   it('consumes native Close Tab by dismissing teleported Settings first', async () => {
@@ -268,6 +275,85 @@ describe('Editor Settings bridge', () => {
     files.currentFile.path = '/work/notes.md'
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('confirms and trashes a dirty workspace file from the Markdown toolbar', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(App, {
+      props: { embedded: true, workspacePath: '/work', workspacePaths: ['/work'] },
+      attachTo: document.body,
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppHeader: true,
+          AppFooter: true,
+          SettingsDialog: SettingsDialogStub,
+          EditorSurface: EditorSurfaceStub,
+          InlineAI: true,
+          DiffBar: true,
+          DiffView: true,
+          BatchDiffView: true,
+          NewTabPage: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    const files = useFileStore(pinia)
+    const file = await files.openFile('/work/temp-note.md', 'draft', { workspacePath: '/work' })
+    files.updateContent('unsaved draft')
+    await wrapper.vm.$nextTick()
+
+    const action = wrapper.get('[data-toolbar-action="discard-file"]')
+    expect(action.attributes('aria-label')).toBe('Move this file to the Trash')
+    await action.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.get('[role="alertdialog"][aria-labelledby="discard-confirm-title"]')
+    expect(dialog.text()).toContain('Move temp-note.md to Trash?')
+    expect(dialog.text()).toContain('Unsaved changes will be discarded.')
+    const confirm = dialog.get('[data-discard-confirm]')
+    expect(document.activeElement).toBe(confirm.element)
+    await confirm.trigger('click')
+    await flushPromises()
+
+    expect(workspaceOperations.trash).toHaveBeenCalledWith(['/work/temp-note.md'])
+    expect(files.openFiles).not.toContain(file)
+    expect(files.recentFiles).not.toContain('/work/temp-note.md')
+    expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps named files outside the active workspace out of the discard command', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const files = useFileStore(pinia)
+    await files.openFile('/outside/keep.md', 'keep')
+    const wrapper = mount(App, {
+      props: { embedded: true, workspacePath: '/work', workspacePaths: ['/work'] },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppHeader: true,
+          AppFooter: true,
+          SettingsDialog: SettingsDialogStub,
+          EditorSurface: EditorSurfaceStub,
+          InlineAI: true,
+          DiffBar: true,
+          DiffView: true,
+          BatchDiffView: true,
+          NewTabPage: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-toolbar-action="discard-file"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

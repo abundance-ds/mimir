@@ -160,6 +160,55 @@ describe('TabStrip', () => {
     expect(closeButton.attributes('title')).toBe('Close tab')
   })
 
+  it('offers close and Move to Trash actions in a named-file tab menu', async () => {
+    const w = mountStrip({
+      tabs: [{
+        id: 'trash-tab',
+        name: 'temp-note.md',
+        path: '/work/temp-note.md',
+        dirty: true,
+        lifecycleAction: 'trash',
+      }],
+    }, {
+      attachTo: document.body,
+      global: { stubs: { Teleport: true, Transition: false } },
+    })
+
+    await fileTabs(w)[0].trigger('contextmenu', { clientX: 40, clientY: 20 })
+    await w.vm.$nextTick()
+    const menu = w.get('[role="menu"][aria-label="Tab actions"]')
+    expect(menu.findAll('[role="menuitem"]').map(item => item.text())).toEqual([
+      expect.stringContaining('Close tab'),
+      'Move to Trash…',
+    ])
+    expect(document.activeElement).toBe(menu.get('[data-tab-menu-action="close"]').element)
+
+    await menu.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(menu.get('[data-tab-menu-action="discard"]').element)
+    await menu.trigger('keydown', { key: 'Escape' })
+    await w.vm.$nextTick()
+    expect(document.activeElement).toBe(fileTabs(w)[0].element)
+
+    await fileTabs(w)[0].trigger('contextmenu', { clientX: 40, clientY: 20 })
+    await w.get('[data-tab-menu-action="discard"]').trigger('click')
+    expect(w.emitted('discard-tab')).toEqual([[0]])
+    w.unmount()
+  })
+
+  it('uses draft language in the tab menu and hides lifecycle actions when unavailable', async () => {
+    const w = mountStrip({
+      tabs: [{ id: 'draft-tab', name: 'Untitled.md', dirty: true, lifecycleAction: 'draft' }],
+    }, { global: { stubs: { Teleport: true, Transition: false } } })
+
+    await fileTabs(w)[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    expect(w.get('[data-tab-menu-action="discard"]').text()).toBe('Discard draft…')
+
+    await w.setProps({ tabs: [{ id: 'draft-tab', name: 'Untitled.md', dirty: true }] })
+    await fileTabs(w)[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    expect(w.find('[data-tab-menu-action="discard"]').exists()).toBe(false)
+    w.unmount()
+  })
+
   it('applies active class to selected tab', () => {
     const w = mountStrip({ activeTab: 1 })
     const tabs = fileTabs(w)

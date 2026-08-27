@@ -9,22 +9,29 @@ export function createAutoSaveController({
   clearTimeoutFn = clearTimeout,
 }) {
   let timer = null
+  let timerFile = null
 
-  function clear() {
+  function clear(file = null) {
+    if (file && timerFile !== file) return false
     if (timer != null) {
       clearTimeoutFn(timer)
       timer = null
+      timerFile = null
+      return true
     }
+    return false
   }
 
-  function schedule() {
+  function schedule(file = getFile()) {
     clear()
     if (!isAutoSaveEnabled()) return
-    const scheduledFile = getFile()
+    const scheduledFile = file
     if (!scheduledFile?.path) return
 
+    timerFile = scheduledFile
     timer = setTimeoutFn(async () => {
       timer = null
+      timerFile = null
       // Switching tabs flushes the old editor before changing active identity.
       // If the scheduled file is still active, synchronize the last pending
       // CodeMirror transaction here as well.

@@ -114,4 +114,27 @@ describe('EditorToolbar', () => {
     expect(w.findAll('button.toolbar-btn')).toHaveLength(17)
   })
 
+  it('keeps the named-file Trash action separate and emits one lifecycle command', async () => {
+    const w = mountToolbar({ lifecycleAction: 'trash' })
+    const button = w.get('[data-toolbar-action="discard-file"]')
+
+    expect(button.text()).toBe('')
+    expect(button.attributes('title')).toBe('Move this file to the Trash')
+    expect(button.attributes('aria-label')).toBe('Move this file to the Trash')
+    expect(button.element.previousElementSibling?.classList).toContain('toolbar-sep')
+
+    await button.trigger('mousedown')
+    await button.trigger('click')
+    expect(w.emitted('discard-file')).toHaveLength(1)
+  })
+
+  it('uses explicit draft language for an untitled document', () => {
+    const w = mountToolbar({ lifecycleAction: 'draft' })
+    const button = w.get('[data-toolbar-action="discard-file"]')
+
+    expect(button.text()).toBe('')
+    expect(button.attributes('title')).toBe('Discard this draft')
+    expect(button.attributes('aria-label')).toBe('Discard this draft')
+  })
+
 })

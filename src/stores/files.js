@@ -510,6 +510,17 @@ export const useFileStore = defineStore('files', () => {
     ensureWorkspaceSelection()
   }
 
+  // Remove one explicitly discarded document. Unlike handleWorkspaceTrash,
+  // this path does not recover dirty text as an untitled draft: the caller
+  // has already confirmed that the buffer can be lost.
+  function discardFile(file, { ensureOne = true } = {}) {
+    const index = openFiles.value.indexOf(file)
+    if (index < 0) return false
+    if (file.path) removeRecentFile(file.path)
+    closeFile(index, { ensureOne })
+    return true
+  }
+
   // Save current file
   async function save(file = currentFile.value) {
     if (!file || file.kind !== 'text') return false
@@ -709,6 +720,7 @@ export const useFileStore = defineStore('files', () => {
     workspaceForPath,
     pathIsVisible,
     closeFile,
+    discardFile,
     addRecentFile,
     removeRecentFile,
     setRecentFiles,

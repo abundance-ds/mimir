@@ -115,6 +115,8 @@ Files mutations reconcile open Editor state before refreshing projections:
   Editor paths and affected favorite paths;
 - Trash waits for pending writes, uses the OS Trash, then lets the Editor close
   clean tabs or preserve dirty text as drafts;
+- the Editor's explicit discard command has a separate confirmed-buffer
+  contract; see [Editor](editor-system.md#files-and-tabs);
 - successful mutations immediately force-reload only their affected parent
   directories; the native watcher reconciles the metadata index;
 - explicit user refresh rebuilds the metadata index and force-reloads every

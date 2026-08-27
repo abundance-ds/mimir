@@ -124,4 +124,22 @@ describe('auto-save controller', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(save).not.toHaveBeenCalled()
   })
+
+  it('cancels only the timer for the requested file', async () => {
+    const fileA = { id: 'a', path: '/tmp/a.md', dirty: true }
+    const fileB = { id: 'b', path: '/tmp/b.md', dirty: true }
+    const { controller, save, state } = setup({ file: fileA })
+
+    controller.schedule(fileA)
+    expect(controller.clear(fileB)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(save).toHaveBeenCalledWith({ source: 'auto', file: fileA })
+
+    save.mockClear()
+    state.file = fileB
+    controller.schedule(fileA)
+    expect(controller.clear(fileA)).toBe(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(save).not.toHaveBeenCalled()
+  })
 })

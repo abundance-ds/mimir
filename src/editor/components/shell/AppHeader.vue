@@ -54,6 +54,7 @@
             :arrivedTabIndex="arrivedTabIndex"
             @select-tab="$emit('select-tab', $event)"
             @close-tab="$emit('close-tab', $event)"
+            @discard-tab="$emit('discard-tab', $event)"
             @add-tab="$emit('add-tab')"
             @reorder-tab="(from, to) => $emit('reorder-tab', from, to)"
         />
@@ -362,6 +363,7 @@ const emit = defineEmits([
     "rewrite-selection",
     "select-tab",
     "close-tab",
+    "discard-tab",
     "add-tab",
     "reorder-tab",
 ]);

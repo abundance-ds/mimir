@@ -22,7 +22,7 @@ subsystems:
 | proposal registration, native events, and review projection | `useEditorProposalLifecycle.js` |
 | clean-buffer refresh after external workspace edits | `useExternalFileSync.js` |
 | public Mimir/MCP editor inspection and mutation contract | `useEditorCommandApi.js` |
-| tab close/reorder/new behavior | `useTabManagement.js` |
+| tab close/reorder/new/discard behavior | `useTabManagement.js` |
 | CodeMirror/store/document synchronization | `useContentSync.js` |
 | debounced document context fallback (`localStorage`) | `useDocumentBridge.js` |
 
@@ -41,6 +41,16 @@ the native dialog chooses the location. The Open chooser also starts at the
 active project root in the embedded Workbench; without an active project, the
 native dialog chooses its starting folder. Canceling a chooser leaves the
 current document unchanged.
+
+The Markdown toolbar keeps its document lifecycle action at the right edge,
+separate from formatting. The tab context menu exposes the same action when
+the toolbar is hidden. `Discard draft…` removes an untitled document without
+creating a file. `Move to Trash…` is available for a named text file inside the
+active workspace. It uses the guarded system Trash operation, removes the
+recent entry, and closes the buffer after confirmation. If the buffer is dirty,
+the confirmed action discards its unsaved text instead of recovering it as a
+new untitled draft. Files outside the active workspace and files with an active
+proposal do not expose this action. File names do not change these rules.
 
 In the embedded Workbench, named tabs opened inside a retained project record
 that project as their owner. The tab strip projects the active project plus
@@ -101,6 +111,10 @@ explicit leading so its larger glyph box cannot crowd the next row.
 `EditorSurface.vue` asks CodeMirror to measure again after Commit Mono loads and
 after a font, size, theme weight, or zoom change. Font loading does not block the
 surface, and a completed load cannot measure a destroyed editor.
+
+The CodeMirror editing host disables browser and macOS writing suggestions,
+autocorrection, and autocapitalization. The Spellcheck setting controls only
+spelling marks; it does not enable system text completion.
 
 Line numbers are an optional compartment. Their gutter shares the editor paper
 instead of adding a separate slab or divider. The current line always uses a

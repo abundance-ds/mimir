@@ -69,20 +69,35 @@
       </div>
     </div>
     <div class="min-w-2 flex-1"></div>
+    <div v-if="props.lifecycleAction" class="flex shrink-0 items-center gap-1.5">
+      <span class="toolbar-sep"></span>
+      <button
+        type="button"
+        class="toolbar-btn toolbar-lifecycle"
+        data-toolbar-action="discard-file"
+        :title="props.lifecycleAction === 'trash' ? 'Move this file to the Trash' : 'Discard this draft'"
+        :aria-label="props.lifecycleAction === 'trash' ? 'Move this file to the Trash' : 'Discard this draft'"
+        @mousedown.prevent
+        @click="emit('discard-file')"
+      >
+        <IconTrash :size="13" />
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { IconList, IconListNumbers, IconListCheck, IconQuote, IconLineDashed, IconLink, IconPhoto, IconCode, IconMessagePlus, IconMessage, IconChevronLeft, IconChevronRight } from '@tabler/icons-vue'
+import { IconList, IconListNumbers, IconListCheck, IconQuote, IconLineDashed, IconLink, IconPhoto, IconCode, IconMessagePlus, IconMessage, IconChevronLeft, IconChevronRight, IconTrash } from '@tabler/icons-vue'
 
 const props = defineProps({
   activeFormats: { type: Array, default: () => [] },
   hasSelection: { type: Boolean, default: false },
   commentCount: { type: Number, default: 0 },
+  lifecycleAction: { type: String, default: '' },
 })
 
-const emit = defineEmits(['format', 'comment', 'navigate-comment'])
+const emit = defineEmits(['format', 'comment', 'navigate-comment', 'discard-file'])
 const toolbarRef = ref(null)
 const compact = ref(false)
 let fullContentWidth = 0
@@ -122,7 +137,10 @@ onMounted(() => {
   if (toolbarRef.value) observer.observe(toolbarRef.value)
 })
 onUnmounted(() => observer?.disconnect())
-watch(() => props.commentCount, () => nextTick(checkOverflow))
+watch(
+  () => [props.commentCount, props.lifecycleAction],
+  () => nextTick(checkOverflow),
+)
 </script>
 
 <style scoped>
@@ -166,6 +184,17 @@ watch(() => props.commentCount, () => nextTick(checkOverflow))
 .toolbar-disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+.toolbar-lifecycle:hover,
+.toolbar-lifecycle:focus-visible {
+  color: var(--color-rem);
+}
+
+.toolbar-lifecycle:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+  border-radius: 3px;
 }
 
 .comment-nav {

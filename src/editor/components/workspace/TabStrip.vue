@@ -43,6 +43,7 @@
                 @focus="showTooltip(i, $event.currentTarget)"
                 @blur="hideTooltip(i)"
                 @pointerdown="onPointerDown(i, $event)"
+                @contextmenu.prevent.stop="openTabMenu(i, $event)"
                 @keydown.left.prevent.stop="selectKeyboardTab(i, -1)"
                 @keydown.right.prevent.stop="selectKeyboardTab(i, 1)"
                 @keydown.home.prevent.stop="selectKeyboardTab(i, -i)"
@@ -102,11 +103,53 @@
             </div>
         </Transition>
     </Teleport>
+
+    <Teleport to="body">
+        <template v-if="tabMenu.visible">
+            <div
+                class="tab-menu-overlay"
+                @pointerdown="closeTabMenu"
+                @contextmenu.prevent="closeTabMenu"
+            ></div>
+            <div
+                ref="tabMenuEl"
+                class="tab-menu"
+                role="menu"
+                aria-label="Tab actions"
+                :style="{ left: `${tabMenu.left}px`, top: `${tabMenu.top}px` }"
+                @keydown="onTabMenuKeydown"
+            >
+                <button
+                    type="button"
+                    role="menuitem"
+                    class="tab-menu-item"
+                    data-tab-menu-action="close"
+                    @click="closeContextTab"
+                >
+                    <span>Close tab</span>
+                    <kbd>{{ closeShortcut }}</kbd>
+                </button>
+                <template v-if="contextTab?.lifecycleAction">
+                    <div class="tab-menu-divider"></div>
+                    <button
+                        type="button"
+                        role="menuitem"
+                        class="tab-menu-item tab-menu-danger"
+                        data-tab-menu-action="discard"
+                        @click="discardContextTab"
+                    >
+                        {{ contextTab.lifecycleAction === 'trash' ? 'Move to Trash…' : 'Discard draft…' }}
+                    </button>
+                </template>
+            </div>
+        </template>
+    </Teleport>
 </template>
 
 <script setup>
 import { IconPlus } from "@tabler/icons-vue";
-import { ref, reactive, watch, nextTick, onUnmounted } from "vue";
+import { computed, ref, reactive, watch, nextTick, onUnmounted } from "vue";
+import { platformKind } from "../../../shared/platform.js";
 import { dirname } from "../../../shared/utils/path.js";
 import { splitTabName, tabIdealWidth } from "../../tabPresentation.js";
 
@@ -123,6 +166,7 @@ const props = defineProps({
 const emit = defineEmits([
     "select-tab",
     "close-tab",
+    "discard-tab",
     "add-tab",
     "reorder-tab",
 ]);
@@ -139,6 +183,16 @@ const tooltip = reactive({
     top: 0,
 });
 let tooltipTimer = null;
+let tabMenuReturnFocus = null;
+const tabMenuEl = ref(null);
+const tabMenu = reactive({
+    visible: false,
+    index: -1,
+    left: 0,
+    top: 0,
+});
+const contextTab = computed(() => props.tabs[tabMenu.index] || null);
+const closeShortcut = platformKind() === "macos" ? "⌘W" : "Ctrl+W";
 
 const dragState = reactive({
     fromIndex: -1,
@@ -191,6 +245,8 @@ watch(
         });
     },
 );
+
+watch(() => props.tabs.length, () => closeTabMenu({ restoreFocus: false }));
 
 function getTabButtons() {
     if (!stripEl.value) return [];
@@ -247,6 +303,74 @@ function hideTooltip(index) {
     if (index !== undefined && tooltip.index !== index) return;
     tooltip.visible = false;
     tooltip.index = -1;
+}
+
+function openTabMenu(index, event) {
+    if (!props.tabs[index]) return;
+    hideTooltip();
+    cancelDrag();
+    tabMenuReturnFocus = event.currentTarget;
+    tabMenu.index = index;
+    tabMenu.left = event.clientX;
+    tabMenu.top = event.clientY;
+    tabMenu.visible = true;
+    nextTick(() => {
+        const menu = tabMenuEl.value;
+        if (!menu) return;
+        const edge = 8;
+        const rect = menu.getBoundingClientRect();
+        tabMenu.left = Math.max(edge, Math.min(tabMenu.left, window.innerWidth - rect.width - edge));
+        tabMenu.top = Math.max(edge, Math.min(tabMenu.top, window.innerHeight - rect.height - edge));
+        menu.querySelector("button")?.focus();
+    });
+}
+
+function closeTabMenu({ restoreFocus = true } = {}) {
+    const returnFocus = tabMenuReturnFocus;
+    tabMenu.visible = false;
+    tabMenu.index = -1;
+    tabMenuReturnFocus = null;
+    if (restoreFocus) {
+        nextTick(() => {
+            if (returnFocus?.isConnected) returnFocus.focus();
+        });
+    }
+}
+
+function closeContextTab() {
+    const index = tabMenu.index;
+    closeTabMenu({ restoreFocus: false });
+    if (index >= 0) emit("close-tab", index);
+}
+
+function discardContextTab() {
+    const index = tabMenu.index;
+    closeTabMenu({ restoreFocus: false });
+    if (index >= 0) emit("discard-tab", index);
+}
+
+function onTabMenuKeydown(event) {
+    if (event.key === "Escape") {
+        event.preventDefault();
+        closeTabMenu();
+        return;
+    }
+    const items = Array.from(tabMenuEl.value?.querySelectorAll("button") || []);
+    if (!items.length) return;
+    if (event.key === "Tab") {
+        event.preventDefault();
+        closeTabMenu();
+        return;
+    }
+    const current = Math.max(0, items.indexOf(document.activeElement));
+    let next = null;
+    if (event.key === "ArrowDown") next = (current + 1) % items.length;
+    else if (event.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = items.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    items[next].focus();
 }
 
 /* ── Ghost ── */
@@ -438,6 +562,7 @@ function resetDrag() {
 
 onUnmounted(() => {
     hideTooltip();
+    closeTabMenu({ restoreFocus: false });
     cancelDrag();
 });
 </script>
@@ -665,6 +790,62 @@ onUnmounted(() => {
 .tab-tooltip-leave-to {
     opacity: 0;
     transform: translate(-50%, -2px);
+}
+
+.tab-menu-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 209;
+}
+
+.tab-menu {
+    position: fixed;
+    z-index: 210;
+    min-width: 184px;
+    padding: 4px;
+    border: 1px solid var(--color-rule);
+    border-radius: 6px;
+    background: var(--color-surface);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+}
+
+.tab-menu-item {
+    display: flex;
+    width: 100%;
+    min-height: 28px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    color: var(--color-ink-2);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    text-align: left;
+}
+
+.tab-menu-item:hover,
+.tab-menu-item:focus-visible {
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
+    outline: none;
+}
+
+.tab-menu-item kbd {
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    font-size: 10px;
+}
+
+.tab-menu-divider {
+    height: 1px;
+    margin: 4px;
+    background: var(--color-rule-light);
+}
+
+.tab-menu-danger:hover,
+.tab-menu-danger:focus-visible {
+    color: var(--color-rem);
 }
 
 @media (prefers-reduced-motion: reduce) {

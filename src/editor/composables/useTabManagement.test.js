@@ -10,6 +10,8 @@ function setup({
   activeIndex = 0,
   gitActive = false,
   diffActive = false,
+  discardMode = file => file?.path ? 'trash' : 'draft',
+  trashError = null,
 } = {}) {
   const openFiles = reactive(files)
   const activeFileIndex = ref(activeIndex)
@@ -21,6 +23,13 @@ function setup({
     closeFile: vi.fn((index) => {
       openFiles.splice(index, 1)
     }),
+    discardFile: vi.fn((file) => {
+      const index = openFiles.indexOf(file)
+      if (index < 0) return false
+      openFiles.splice(index, 1)
+      return true
+    }),
+    waitForWorkspacePaths: vi.fn(async () => {}),
     moveTab: vi.fn(),
     newFile: vi.fn(),
   }
@@ -36,6 +45,13 @@ function setup({
   const requestWindowClose = vi.fn(async () => true)
   const onEmpty = vi.fn()
   const saveCurrentFile = vi.fn(async () => saveResult)
+  const trashWorkspaceEntries = vi.fn(async () => {
+    if (trashError) throw trashError
+  })
+  const cancelAutoSave = vi.fn(() => true)
+  const resumeAutoSave = vi.fn()
+  const flushSession = vi.fn(async () => {})
+  const flushEditorContent = vi.fn()
   const gitReviewStore = reactive({ active: gitActive, deactivate: vi.fn() })
   const gitReviewTabActive = ref(false)
   const reviewTabActive = ref(false)
@@ -60,8 +76,13 @@ function setup({
     gitReviewTabActive,
     inlineAIState: ref(null),
     activeFileIndex,
-    flushEditorContent: vi.fn(),
+    flushEditorContent,
     saveCurrentFile,
+    trashWorkspaceEntries,
+    discardModeForFile: discardMode,
+    cancelAutoSave,
+    resumeAutoSave,
+    flushSession,
     requestWindowClose,
     embedded,
     onEmpty,
@@ -77,6 +98,11 @@ function setup({
     gitReviewStore,
     gitReviewTabActive,
     displayTabs,
+    trashWorkspaceEntries,
+    cancelAutoSave,
+    resumeAutoSave,
+    flushSession,
+    flushEditorContent,
   }
 }
 
@@ -191,5 +217,58 @@ describe('useTabManagement close safety', () => {
     await h.manager.onCloseTab(1)
     expect(h.gitReviewStore.deactivate).toHaveBeenCalledTimes(1)
     expect(h.diffStore.deactivate).not.toHaveBeenCalled()
+  })
+
+  it('moves a confirmed named file to Trash and removes its dirty buffer', async () => {
+    const file = { id: 1, path: '/work/temp-note.md', dirty: true }
+    const h = setup({ files: [file], embedded: true })
+
+    expect(h.manager.requestDiscardTab(0)).toBe(true)
+    expect(h.manager.discardConfirm.value).toEqual({ file, mode: 'trash' })
+    await expect(h.manager.confirmDiscard()).resolves.toBe(true)
+
+    expect(h.cancelAutoSave).toHaveBeenCalledWith(file)
+    expect(h.flushEditorContent).toHaveBeenCalledWith({ bridge: 'flush' })
+    expect(h.fileManager.waitForWorkspacePaths).toHaveBeenCalledWith([file.path])
+    expect(h.trashWorkspaceEntries).toHaveBeenCalledWith([file.path])
+    expect(h.fileManager.discardFile).toHaveBeenCalledWith(file, { ensureOne: false })
+    expect(h.fileManager.openFiles).toEqual([])
+    expect(h.onEmpty).toHaveBeenCalledTimes(1)
+    expect(h.flushSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('discards an untitled draft without calling the native Trash operation', async () => {
+    const file = { id: 1, path: null, dirty: true }
+    const h = setup({ files: [file], embedded: true })
+
+    expect(h.manager.requestDiscardFile(file)).toBe(true)
+    expect(h.manager.discardConfirmMode.value).toBe('draft')
+    await expect(h.manager.confirmDiscard()).resolves.toBe(true)
+
+    expect(h.fileManager.waitForWorkspacePaths).not.toHaveBeenCalled()
+    expect(h.trashWorkspaceEntries).not.toHaveBeenCalled()
+    expect(h.fileManager.openFiles).toEqual([])
+  })
+
+  it('keeps the file and resumes its autosave timer when Trash fails', async () => {
+    const file = { id: 1, path: '/work/temp-note.md', dirty: true }
+    const error = new Error('Trash is unavailable')
+    const h = setup({ files: [file], embedded: true, trashError: error })
+
+    h.manager.requestDiscardFile(file)
+    await expect(h.manager.confirmDiscard()).resolves.toBe(false)
+
+    expect(h.fileManager.openFiles).toEqual([file])
+    expect(h.fileManager.discardFile).not.toHaveBeenCalled()
+    expect(h.manager.discardError.value).toBe('Trash is unavailable')
+    expect(h.resumeAutoSave).toHaveBeenCalledWith(file)
+    expect(h.flushSession).not.toHaveBeenCalled()
+  })
+
+  it('does not open a discard dialog when the file lifecycle is blocked', () => {
+    const h = setup({ discardMode: () => '' })
+
+    expect(h.manager.requestDiscardTab(0)).toBe(false)
+    expect(h.manager.discardConfirm.value).toBeNull()
   })
 })

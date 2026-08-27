@@ -13,12 +13,20 @@ export function useTabManagement({
   activeFileIndex,
   flushEditorContent,
   saveCurrentFile,
+  trashWorkspaceEntries = null,
+  discardModeForFile = () => '',
+  cancelAutoSave = () => {},
+  resumeAutoSave = () => {},
+  flushSession = async () => {},
   requestWindowClose,
   embedded = false,
   onEmpty,
 }) {
   const closeConfirmFile = ref(null)
   let closeConfirmResolve = null
+  const discardConfirm = ref(null)
+  const discardPending = ref(false)
+  const discardError = ref('')
   const arrivedTabIndex = ref(-1)
 
   const closeConfirmFileName = computed(() => {
@@ -26,6 +34,13 @@ export function useTabManagement({
     if (!f) return ''
     return f.path ? basename(f.path) : 'Untitled'
   })
+
+  const discardConfirmFileName = computed(() => {
+    const file = discardConfirm.value?.file
+    return file?.path ? basename(file.path) : 'Untitled'
+  })
+
+  const discardConfirmMode = computed(() => discardConfirm.value?.mode || '')
 
   function onSelectTab(idx) {
     const tab = displayTabs.value[idx]
@@ -146,6 +161,75 @@ export function useTabManagement({
     }
   }
 
+  function requestDiscardTab(idx) {
+    const tab = displayTabs.value[idx]
+    if (tab?.type !== 'file') return false
+    const file = fileManager.openFiles[tabFileIndex(tab, idx)]
+    return requestDiscardFile(file)
+  }
+
+  function requestDiscardFile(file) {
+    const mode = discardModeForFile(file)
+    if (!file || !mode) return false
+    discardError.value = ''
+    discardConfirm.value = { file, mode }
+    return true
+  }
+
+  function cancelDiscard() {
+    if (discardPending.value) return false
+    discardConfirm.value = null
+    discardError.value = ''
+    return true
+  }
+
+  async function confirmDiscard() {
+    const request = discardConfirm.value
+    if (!request || discardPending.value) return false
+    const { file, mode } = request
+    const openIndex = fileManager.openFiles.indexOf(file)
+    if (openIndex < 0) {
+      cancelDiscard()
+      return false
+    }
+
+    discardPending.value = true
+    discardError.value = ''
+    const wasActive = openIndex === activeFileIndex.value
+    const autoSaveCancelled = cancelAutoSave(file)
+    try {
+      if (wasActive) {
+        flushEditorContent({ bridge: 'flush' })
+      }
+      if (mode === 'trash') {
+        if (typeof trashWorkspaceEntries !== 'function') {
+          throw new Error('Moving files to the Trash is unavailable.')
+        }
+        await fileManager.waitForWorkspacePaths([file.path])
+        await trashWorkspaceEntries([file.path])
+      }
+
+      const visibleFileCount = displayTabs.value.filter(tab => tab.type === 'file').length
+      if (wasActive) inlineAIState.value = null
+      fileManager.discardFile(file, { ensureOne: !embedded })
+      discardConfirm.value = null
+      discardError.value = ''
+      if (embedded && visibleFileCount === 1) onEmpty?.()
+      await flushSession()
+      return true
+    } catch (error) {
+      discardError.value = error instanceof Error
+        ? error.message
+        : String(error || (mode === 'trash'
+          ? 'Could not move the file to the Trash.'
+          : 'Could not discard the draft.'))
+      if (autoSaveCancelled) resumeAutoSave(file)
+      return false
+    } finally {
+      discardPending.value = false
+    }
+  }
+
   async function closeEditorWindow() {
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
@@ -172,10 +256,19 @@ export function useTabManagement({
   return {
     closeConfirmFile,
     closeConfirmFileName,
+    discardConfirm,
+    discardConfirmFileName,
+    discardConfirmMode,
+    discardError,
+    discardPending,
     arrivedTabIndex,
     onSelectTab,
     onCloseTab,
     confirmFileClose,
+    requestDiscardTab,
+    requestDiscardFile,
+    cancelDiscard,
+    confirmDiscard,
     onCloseConfirm,
     onNewFile,
     onReorderTab,

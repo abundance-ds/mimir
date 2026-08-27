@@ -71,6 +71,32 @@ describe('embedded editor header', () => {
     expect(wrapper.get('[data-header-drag-spacer]').exists()).toBe(true)
   })
 
+  it('forwards the tab discard action to the Editor owner', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppHeader, {
+      props: {
+        embedded: true,
+        hideSidebar: true,
+        tabs: [{
+          id: 'temp-tab',
+          name: 'temp-note.md',
+          lifecycleAction: 'trash',
+        }],
+      },
+      global: {
+        plugins: [pinia],
+        stubs: { Teleport: true, Transition: false },
+      },
+    })
+
+    await wrapper.get('button.file-tab').trigger('contextmenu', { clientX: 20, clientY: 20 })
+    await wrapper.get('[data-tab-menu-action="discard"]').trigger('click')
+
+    expect(wrapper.emitted('discard-tab')).toEqual([[0]])
+    wrapper.unmount()
+  })
+
   it('expands Editor into focus, restores the split, and keeps collapse separate', async () => {
     const wrapper = render()
     const workbench = useWorkbenchStore()
