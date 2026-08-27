@@ -140,6 +140,7 @@ describe('QuickOpen', () => {
       autocomplete: 'off',
       autocorrect: 'off',
       autocapitalize: 'off',
+      writingsuggestions: 'false',
       spellcheck: 'false',
     })
     expect(wrapper.emitted('activate')).toBeUndefined()

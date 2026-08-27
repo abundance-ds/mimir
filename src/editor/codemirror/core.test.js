@@ -111,10 +111,12 @@ describe('lineIndicatorExtensions', () => {
 })
 
 describe('editorInputAttributesExtension', () => {
-  it('disables grammar tooling and toggles spellcheck on the content DOM', () => {
+  it('disables writing suggestions and grammar tooling while toggling spellcheck', () => {
     const on = makeView(editorInputAttributesExtension(true))
     expect(on.contentDOM.getAttribute('spellcheck')).toBe('true')
     expect(on.contentDOM.getAttribute('autocorrect')).toBe('off')
+    expect(on.contentDOM.getAttribute('autocomplete')).toBe('off')
+    expect(on.contentDOM.getAttribute('writingsuggestions')).toBe('false')
     expect(on.contentDOM.getAttribute('data-gramm')).toBe('false')
 
     const off = makeView(editorInputAttributesExtension(false))

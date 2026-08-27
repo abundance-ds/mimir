@@ -53,6 +53,7 @@
               autocomplete="off"
               autocorrect="off"
               autocapitalize="off"
+              writingsuggestions="false"
               spellcheck="false"
               role="combobox"
               aria-autocomplete="list"

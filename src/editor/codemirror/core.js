@@ -190,6 +190,7 @@ const editorInputAttributes = {
   autocorrect: 'off',
   autocapitalize: 'off',
   autocomplete: 'off',
+  writingsuggestions: 'false',
   translate: 'no',
   'data-gramm': 'false',
   'data-gramm_editor': 'false',
