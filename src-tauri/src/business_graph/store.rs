@@ -1,8 +1,8 @@
 use super::markdown::{parse_graph_markdown, serialize_graph_markdown, source_revision};
 use super::model::{
     canonical_kind, is_known_kind, is_valid_id, GraphDeleteResult, GraphDiagnostic, GraphNeighbor,
-    GraphNode, GraphNodeCreate, GraphNodeDelete, GraphNodePatch, GraphProvenance, GraphQuery,
-    GraphQueryResult, GraphRelationDirection, GraphSearchResult, GraphSourceFormat,
+    GraphNode, GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphProvenance,
+    GraphQuery, GraphQueryResult, GraphRelationDirection, GraphSearchResult, GraphSourceFormat,
     GraphSourceRoot, ISSUE_PRIORITIES, ISSUE_STATUSES,
 };
 use crate::persistence;
@@ -358,6 +358,62 @@ impl GraphStore {
                 message: error.to_string(),
             }
         })?;
+        node.provenance.source_revision = source_revision(&serialized);
+        self.nodes.insert(node.id.clone(), node.clone());
+        self.revision = self.revision.saturating_add(1);
+        self.rebuild_indexes();
+        Ok(node)
+    }
+
+    pub fn move_node(
+        &mut self,
+        root: &GraphSourceRoot,
+        request: GraphNodeMove,
+    ) -> Result<GraphNode, GraphMutationError> {
+        let mut node = self
+            .nodes
+            .get(&request.id)
+            .cloned()
+            .ok_or_else(|| GraphMutationError::NotFound(request.id.clone()))?;
+        if node.provenance.scope_id == root.scope_id {
+            return Ok(node);
+        }
+        let source_path = PathBuf::from(&node.provenance.source_path);
+        let current_raw =
+            fs::read_to_string(&source_path).map_err(|error| GraphMutationError::Read {
+                path: source_path.to_string_lossy().into_owned(),
+                message: error.to_string(),
+            })?;
+        let actual_revision = source_revision(&current_raw);
+        let expected = request
+            .expected_revision
+            .unwrap_or_else(|| node.provenance.source_revision.clone());
+        if expected != actual_revision {
+            return Err(GraphMutationError::Conflict {
+                id: node.id,
+                expected,
+                actual: actual_revision,
+            });
+        }
+
+        let target_path = root.root.join("graph").join(format!("{}.md", node.id));
+        node.provenance.scope_id = root.scope_id.clone();
+        node.provenance.scope_kind = root.scope_kind;
+        node.provenance.source_path = target_path.to_string_lossy().into_owned();
+        node.updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let serialized =
+            serialize_graph_markdown(&node).map_err(|error| GraphMutationError::Serialize {
+                id: node.id.clone(),
+                message: error.to_string(),
+            })?;
+        create_new_source(&target_path, serialized.as_bytes())?;
+        if let Err(error) = fs::remove_file(&source_path) {
+            let _ = fs::remove_file(&target_path);
+            return Err(GraphMutationError::Delete {
+                path: source_path.to_string_lossy().into_owned(),
+                message: error.to_string(),
+            });
+        }
         node.provenance.source_revision = source_revision(&serialized);
         self.nodes.insert(node.id.clone(), node.clone());
         self.revision = self.revision.saturating_add(1);
@@ -1205,6 +1261,46 @@ mod tests {
             .join("graph")
             .join(format!("{}.md", issue.id))
             .is_file());
+    }
+
+    #[test]
+    fn meeting_scope_move_keeps_identity_and_removes_the_old_source() {
+        let project = TempDir::new().unwrap();
+        let team = TempDir::new().unwrap();
+        let project_root =
+            GraphSourceRoot::new("project:test", GraphScopeKind::Project, project.path());
+        let team_root = GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path());
+        let mut store = GraphStore::load(&[project_root.clone(), team_root.clone()]);
+        let meeting = store
+            .create_node(
+                &team_root,
+                GraphNodeCreate {
+                    id: Some("meeting-1".into()),
+                    kind: "meeting".into(),
+                    title: "Launch review".into(),
+                    body: "- Ship Friday.".into(),
+                    ..GraphNodeCreate::default()
+                },
+            )
+            .unwrap();
+        let old_path = PathBuf::from(&meeting.provenance.source_path);
+
+        let moved = store
+            .move_node(
+                &project_root,
+                GraphNodeMove {
+                    id: meeting.id.clone(),
+                    target_scope_id: project_root.scope_id.clone(),
+                    expected_revision: Some(meeting.provenance.source_revision),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(moved.id, "meeting-1");
+        assert_eq!(moved.provenance.scope_id, "project:test");
+        assert!(!old_path.exists());
+        assert!(Path::new(&moved.provenance.source_path).is_file());
+        assert_eq!(store.get("meeting-1").unwrap().body, "- Ship Friday.");
     }
 
     #[test]

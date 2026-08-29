@@ -78,6 +78,7 @@ mod git;
 mod ipc_fixtures;
 mod launchers;
 mod local_settings;
+mod meeting_filing;
 pub mod meetings;
 pub mod mimir_cli;
 mod persistence;
@@ -1135,8 +1136,10 @@ pub fn run() {
             business_graph::runtime::graph_refresh,
             business_graph::runtime::graph_update,
             business_graph::runtime::graph_create,
+            business_graph::runtime::graph_move_scope,
             business_graph::runtime::graph_delete,
             business_graph::runtime::graph_restore,
+            meeting_filing::meetings_file_to_graph,
             git::git_status,
             git::git_changes,
             git::git_file_diff,
@@ -1154,6 +1157,7 @@ pub fn run() {
             app_quit_confirmed,
             app_prepare_relaunch,
             meetings::commands::meetings_snapshot,
+            meetings::commands::meetings_get,
             meetings::commands::meetings_library_page,
             meetings::commands::meetings_search_library,
             meetings::commands::meetings_transcript_page,
@@ -1165,6 +1169,7 @@ pub fn run() {
             meetings::commands::meetings_audio_test_start,
             meetings::commands::meetings_audio_test_stop,
             meetings::commands::meetings_dismiss_candidate,
+            meetings::commands::meetings_prepare,
             meetings::commands::meetings_issue_start_consent,
             meetings::commands::meetings_start,
             meetings::commands::meetings_stop,

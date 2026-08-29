@@ -2,7 +2,7 @@ use super::markdown::source_revision;
 use super::model::{
     canonical_kind, GraphActor, GraphActorKind, GraphChanged, GraphDeleteResult, GraphDiagnostic,
     GraphEvent, GraphEventPage, GraphEventQuery, GraphFieldChange, GraphNeighbor, GraphNode,
-    GraphNodeCreate, GraphNodeDelete, GraphNodePatch, GraphOpenResult, GraphQuery,
+    GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphOpenResult, GraphQuery,
     GraphQueryResult, GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult,
     GraphSourceRoot,
 };
@@ -316,6 +316,35 @@ impl GraphRuntime {
             Some(created.provenance.source_revision.clone()),
         )?;
         Ok(created)
+    }
+
+    pub fn move_scope(&self, request: GraphNodeMove) -> Result<GraphNode, GraphMutationError> {
+        let previous_path = self
+            .store
+            .read()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .get(&request.id)
+            .map(|node| node.provenance.source_path.clone())
+            .ok_or_else(|| GraphMutationError::NotFound(request.id.clone()))?;
+        let root = self
+            .roots
+            .read()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .iter()
+            .find(|root| root.scope_id == request.target_scope_id)
+            .cloned()
+            .ok_or_else(|| GraphMutationError::ScopeNotFound(request.target_scope_id.clone()))?;
+        let moved = self
+            .store
+            .write()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .move_node(&root, request)?;
+        self.remember_source_revision(previous_path, None)?;
+        self.remember_source_revision(
+            moved.provenance.source_path.clone(),
+            Some(moved.provenance.source_revision.clone()),
+        )?;
+        Ok(moved)
     }
 
     pub fn delete(
@@ -935,6 +964,41 @@ pub fn graph_create(
 }
 
 #[tauri::command]
+pub fn graph_move_scope(
+    app: AppHandle,
+    runtime: tauri::State<'_, GraphRuntime>,
+    request: GraphNodeMove,
+    actor: Option<GraphActor>,
+) -> Result<GraphNode, String> {
+    let before = runtime
+        .get(&request.id)?
+        .ok_or_else(|| format!("Graph node not found: {}", request.id))?;
+    let previous_path = before.provenance.source_path.clone();
+    let moved = runtime
+        .move_scope(request)
+        .map_err(|error| error.to_string())?;
+    runtime.record_mutation(
+        "graph.move-scope",
+        actor.unwrap_or_else(GraphActor::human),
+        Some(before),
+        Some(moved.clone()),
+        moved.provenance.source_path.clone(),
+    )?;
+    let status = runtime.open_result()?;
+    app.emit(
+        GRAPH_CHANGED_EVENT,
+        GraphChanged {
+            graph_revision: status.graph_revision,
+            node_count: status.node_count,
+            diagnostic_count: status.diagnostic_count,
+            paths: vec![previous_path, moved.provenance.source_path.clone()],
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(moved)
+}
+
+#[tauri::command]
 pub fn graph_delete(
     app: AppHandle,
     runtime: tauri::State<'_, GraphRuntime>,
@@ -975,7 +1039,7 @@ pub fn graph_restore(
     Ok(restored)
 }
 
-fn emit_mutation_changed(
+pub(crate) fn emit_mutation_changed(
     app: &AppHandle,
     runtime: &GraphRuntime,
     source_path: String,
