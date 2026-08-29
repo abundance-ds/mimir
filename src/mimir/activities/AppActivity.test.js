@@ -198,6 +198,24 @@ describe('AppActivity', () => {
     expect(wrapper.emitted('startWork')).toEqual([[payload]])
   })
 
+  it('bubbles a Graph meeting source link back to the workbench', async () => {
+    const record = activity({
+      id: 'business-graph',
+      title: 'Business graph',
+      mode: 'rust-helper',
+      helper: 'business-graph',
+    }, { helper: 'business-graph' })
+    const wrapper = mount(AppActivity, {
+      props: { activity: record, active: true },
+      global: { stubs: { BusinessGraphApp: true } },
+    })
+
+    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('openMeeting', 'meeting-1')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('openMeeting')).toEqual([['meeting-1']])
+  })
+
   it('routes embedded apps and gives their host a stable instance identity', () => {
     const record = activity({
       id: 'ledger',

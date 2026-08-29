@@ -307,6 +307,81 @@
                 />
               </div>
             </template>
+            <template v-else-if="node.kind === 'meeting'">
+              <div class="object-metadata-field">
+                <span>Project</span>
+                <GraphSelect
+                  :model-value="draft.projectId"
+                  data-inspector-meeting-project
+                  variant="quiet"
+                  aria-label="Meeting project"
+                  placeholder="No project"
+                  :options="projectOptions"
+                  :menu-min-width="260"
+                  searchable
+                  search-placeholder="Find a project"
+                  @update:model-value="updateDraft('projectId', $event)"
+                />
+              </div>
+              <div class="object-metadata-field">
+                <span>Scope</span>
+                <GraphSelect
+                  :model-value="draft.scopeId"
+                  data-inspector-meeting-scope
+                  variant="quiet"
+                  aria-label="Meeting scope"
+                  :options="scopeOptions"
+                  @update:model-value="updateDraft('scopeId', $event)"
+                />
+              </div>
+              <div class="object-metadata-field object-metadata-date">
+                <span>Date</span>
+                <strong>{{ readableDateTime(node.properties?.occurredAt) || 'Unknown' }}</strong>
+              </div>
+              <div class="object-metadata-field object-metadata-date">
+                <span>Duration</span>
+                <strong>{{ readableDuration(node.properties?.durationMs) }}</strong>
+              </div>
+              <div class="object-metadata-field meeting-people-field">
+                <span>People</span>
+                <div v-if="meetingAttendees.length" class="meeting-attendees">
+                  <button
+                    v-for="person in meetingAttendees"
+                    :key="person.id"
+                    type="button"
+                    :data-graph-control="`peek-meeting-person-remove-${person.id}`"
+                    :aria-label="`Remove ${displayTitle(person)}`"
+                    @click="removeMeetingAttendee(person.id)"
+                  >
+                    {{ displayTitle(person) }}
+                    <IconX :size="11" />
+                  </button>
+                </div>
+                <GraphSelect
+                  v-if="meetingPersonOptions.length"
+                  :model-value="attendeeToAdd"
+                  variant="quiet"
+                  aria-label="Add meeting person"
+                  placeholder="Add a person…"
+                  :options="meetingPersonOptions"
+                  :menu-min-width="260"
+                  searchable
+                  search-placeholder="Find a person"
+                  @update:model-value="addMeetingAttendee"
+                />
+              </div>
+              <div v-if="node.properties?.sourceMeetingId" class="object-metadata-field">
+                <span>Transcript</span>
+                <button
+                  type="button"
+                  data-graph-control="peek-meeting-transcript"
+                  class="meeting-transcript-action"
+                  @click="$emit('openMeeting', node.properties.sourceMeetingId)"
+                >
+                  Open in Scribe
+                </button>
+              </div>
+            </template>
             <template v-else-if="node.kind === 'company'">
               <label class="object-metadata-field">
                 <span>Relationships</span>
@@ -736,6 +811,81 @@
                   />
                 </div>
               </template>
+              <template v-else-if="node.kind === 'meeting'">
+                <div class="object-metadata-field">
+                  <span>Project</span>
+                  <GraphSelect
+                    :model-value="draft.projectId"
+                    data-inspector-meeting-project
+                    variant="quiet"
+                    aria-label="Meeting project"
+                    placeholder="No project"
+                    :options="projectOptions"
+                    :menu-min-width="280"
+                    searchable
+                    search-placeholder="Find a project"
+                    @update:model-value="updateDraft('projectId', $event)"
+                  />
+                </div>
+                <div class="object-metadata-field">
+                  <span>Scope</span>
+                  <GraphSelect
+                    :model-value="draft.scopeId"
+                    data-inspector-meeting-scope
+                    variant="quiet"
+                    aria-label="Meeting scope"
+                    :options="scopeOptions"
+                    @update:model-value="updateDraft('scopeId', $event)"
+                  />
+                </div>
+                <div class="object-metadata-field object-metadata-date">
+                  <span>Date</span>
+                  <strong>{{ readableDateTime(node.properties?.occurredAt) || 'Unknown' }}</strong>
+                </div>
+                <div class="object-metadata-field object-metadata-date">
+                  <span>Duration</span>
+                  <strong>{{ readableDuration(node.properties?.durationMs) }}</strong>
+                </div>
+                <div class="object-metadata-field meeting-people-field">
+                  <span>People</span>
+                  <div v-if="meetingAttendees.length" class="meeting-attendees">
+                    <button
+                      v-for="person in meetingAttendees"
+                      :key="person.id"
+                      type="button"
+                      :data-graph-control="`focus-meeting-person-remove-${person.id}`"
+                      :aria-label="`Remove ${displayTitle(person)}`"
+                      @click="removeMeetingAttendee(person.id)"
+                    >
+                      {{ displayTitle(person) }}
+                      <IconX :size="11" />
+                    </button>
+                  </div>
+                  <GraphSelect
+                    v-if="meetingPersonOptions.length"
+                    :model-value="attendeeToAdd"
+                    variant="quiet"
+                    aria-label="Add meeting person"
+                    placeholder="Add a person…"
+                    :options="meetingPersonOptions"
+                    :menu-min-width="280"
+                    searchable
+                    search-placeholder="Find a person"
+                    @update:model-value="addMeetingAttendee"
+                  />
+                </div>
+                <div v-if="node.properties?.sourceMeetingId" class="object-metadata-field">
+                  <span>Transcript</span>
+                  <button
+                    type="button"
+                    data-graph-control="focus-meeting-transcript"
+                    class="meeting-transcript-action"
+                    @click="$emit('openMeeting', node.properties.sourceMeetingId)"
+                  >
+                    Open in Scribe
+                  </button>
+                </div>
+              </template>
               <template v-else-if="node.kind === 'company'">
                 <label class="object-metadata-field">
                   <span>Relationships</span>
@@ -1093,6 +1243,7 @@ const emit = defineEmits([
   'quickCreate',
   'delete',
   'navigateHistory',
+  'openMeeting',
 ])
 const titleInput = ref(null)
 const inspectorRoot = ref(null)
@@ -1106,6 +1257,7 @@ const saved = ref(false)
 const moreOpen = ref(false)
 const connectionRelation = ref('')
 const connectionTarget = ref('')
+const attendeeToAdd = ref('')
 let autosaveTimer = null
 let savedTimer = null
 let editVersion = 0
@@ -1122,6 +1274,8 @@ const draft = reactive({
   dueDate: '',
   remindAt: '',
   projectId: '',
+  scopeId: '',
+  attendeeIds: [],
   assigneeId: '',
   waitingFor: '',
   snoozeUntil: '',
@@ -1214,6 +1368,13 @@ const RELATION_DEFINITIONS = Object.freeze([
     to: ['person'],
   },
   {
+    value: 'attended_by',
+    label: 'Attended by',
+    hint: 'Connect a meeting to a person',
+    from: ['meeting'],
+    to: ['person'],
+  },
+  {
     value: 'references',
     label: 'References',
     hint: 'Cite another graph object',
@@ -1252,6 +1413,18 @@ const personOptions = computed(() => [
     hint: 'Team member',
   })),
 ])
+const scopeOptions = computed(() => props.scopes.map(scope => ({
+  value: scope.id,
+  label: scope.kind === 'project' ? 'Project' : titleCase(scope.kind),
+  hint: scope.kind === 'project' ? 'Current workspace' : '',
+})))
+const meetingAttendees = computed(() => draft.attendeeIds
+  .map(id => people.value.find(person => person.id === id))
+  .filter(Boolean))
+const meetingPersonOptions = computed(() => people.value
+  .filter(person => !draft.attendeeIds.includes(person.id))
+  .map(person => ({ value: person.id, label: displayTitle(person) }))
+  .sort((left, right) => left.label.localeCompare(right.label)))
 
 function currentPersonOption(value) {
   const current = String(value || '').trim()
@@ -1310,6 +1483,10 @@ const connectionRows = computed(() => (
     .filter(connection => !(
       props.node?.kind === 'issue'
       && ['part_of', 'assigned_to'].includes(connection.edge.relation)
+    ))
+    .filter(connection => !(
+      props.node?.kind === 'meeting'
+      && ['part_of', 'attended_by'].includes(connection.edge.relation)
     ))
 ))
 const canAddConnection = computed(() => (
@@ -1386,6 +1563,10 @@ function resetDraft(node) {
   draft.dueDate = node.properties?.dueDate || ''
   draft.remindAt = localDateTime(node.properties?.remindAt)
   draft.projectId = relationTarget(node, 'part_of') || node.properties?.legacyProject || ''
+  draft.scopeId = node.provenance?.scopeId || node.scopeId || ''
+  draft.attendeeIds = (node.relations || [])
+    .filter(edge => edge.relation === 'attended_by')
+    .map(edge => edge.target)
   draft.assigneeId = relationTarget(node, 'assigned_to') || node.properties?.legacyAssignee || ''
   draft.waitingFor = node.properties?.waitingFor || ''
   draft.snoozeUntil = node.properties?.snoozeUntil || ''
@@ -1410,6 +1591,7 @@ function resetDraft(node) {
   draft.relations = (node.relations || []).map(edge => ({ ...edge }))
   connectionRelation.value = defaultRelationFor(node.kind)
   connectionTarget.value = ''
+  attendeeToAdd.value = ''
   dirty.value = false
   saveBlocked.value = false
   saved.value = false
@@ -1471,13 +1653,22 @@ function save(afterSave = null) {
     setProperties.status = draft.entityStatus
     setProperties.teamMember = draft.teamMember
   }
-  const relations = props.node.kind === 'issue'
-    ? [
+  let relations
+  if (props.node.kind === 'issue') {
+    relations = [
         ...draft.relations.filter(edge => !['part_of', 'assigned_to'].includes(edge.relation)),
         ...entityRelation('part_of', draft.projectId, 'project'),
         ...entityRelation('assigned_to', draft.assigneeId, 'person'),
       ]
-    : draft.relations.map(edge => ({ ...edge }))
+  } else if (props.node.kind === 'meeting') {
+    relations = [
+      ...draft.relations.filter(edge => !['part_of', 'attended_by'].includes(edge.relation)),
+      ...entityRelation('part_of', draft.projectId, 'project'),
+      ...draft.attendeeIds.flatMap(id => entityRelation('attended_by', id, 'person')),
+    ]
+  } else {
+    relations = draft.relations.map(edge => ({ ...edge }))
+  }
   emit('save', {
     id: props.node.id,
     expectedRevision: props.node.provenance?.sourceRevision,
@@ -1512,7 +1703,22 @@ function save(afterSave = null) {
       pendingAction = null
       clearTimeout(autosaveTimer)
     },
+  }, {
+    targetScopeId: props.node.kind === 'meeting' ? draft.scopeId : '',
   })
+}
+
+function addMeetingAttendee(id) {
+  if (id && !draft.attendeeIds.includes(id)) {
+    draft.attendeeIds = [...draft.attendeeIds, id]
+    changed()
+  }
+  attendeeToAdd.value = ''
+}
+
+function removeMeetingAttendee(id) {
+  draft.attendeeIds = draft.attendeeIds.filter(personId => personId !== id)
+  changed()
 }
 
 // Legacy issue sources carry a plain label (`project: "fde"`, `assignee: "Paul"`)
@@ -1808,6 +2014,16 @@ function readableDateTime(value) {
   }).format(date)
 }
 
+function readableDuration(value) {
+  const milliseconds = Number(value) || 0
+  if (milliseconds <= 0) return 'Unknown'
+  const minutes = Math.max(1, Math.round(milliseconds / 60_000))
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder ? `${hours} h ${remainder} min` : `${hours} h`
+}
+
 function isOverdue(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value || '')
     && value < new Date().toISOString().slice(0, 10)
@@ -1832,6 +2048,11 @@ function fileExtension(path) {
 
 function human(value) {
   return String(value || '').replaceAll('_', ' ').replaceAll('-', ' ')
+}
+
+function titleCase(value) {
+  const label = human(value)
+  return label ? `${label[0].toUpperCase()}${label.slice(1)}` : ''
 }
 
 onMounted(() => {
@@ -2097,6 +2318,45 @@ onUnmounted(() => {
 .object-metadata-field :deep(.graph-select-quiet),
 .object-metadata-field :deep(.graph-date-quiet) {
   width: 100%;
+}
+
+.meeting-people-field {
+  grid-column: span 2;
+}
+
+.meeting-attendees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 3px 5px 5px;
+}
+
+.meeting-attendees button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  padding: 3px 7px;
+  color: var(--color-ink-2);
+  font-size: 10px;
+}
+
+.meeting-attendees button:hover {
+  border-color: var(--color-ink-4);
+}
+
+.meeting-transcript-action {
+  min-height: 27px;
+  border-radius: 2px;
+  padding: 0 5px;
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.meeting-transcript-action:hover {
+  background: var(--color-chrome-mid);
 }
 
 .object-metadata-checkbox :deep(.graph-checkbox-control) {

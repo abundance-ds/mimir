@@ -13,6 +13,32 @@ export async function loadMeetingSnapshot() {
   return normalizeMeetingSnapshot(await invoke('meetings_snapshot'))
 }
 
+export async function loadMeeting(meetingId) {
+  return normalizeMeeting(await invoke('meetings_get', {
+    meetingId: requiredId(meetingId, 'meeting'),
+  }))
+}
+
+export async function prepareMeeting(request = {}) {
+  return normalizeMeetingSnapshot(await invoke('meetings_prepare', {
+    request: {
+      title: optionalString(request.title),
+      workspacePath: optionalString(request.workspacePath),
+    },
+  }))
+}
+
+export async function fileMeetingToGraph(request = {}) {
+  return invoke('meetings_file_to_graph', {
+    request: {
+      meetingId: requiredId(request.meetingId, 'meeting'),
+      scopeId: requiredString(request.scopeId, 'Graph scope'),
+      projectId: optionalString(request.projectId),
+      peopleIds: uniqueStrings(request.peopleIds),
+    },
+  })
+}
+
 export async function loadMeetingTranscriptPage(
   meetingId,
   before = null,
@@ -181,9 +207,12 @@ export async function updateMeeting(meetingId, patch = {}) {
     patch: {
       ...(patch.title == null ? {} : { title: String(patch.title).trim() }),
       ...(patch.summary == null ? {} : { summary: String(patch.summary) }),
+      ...(patch.notes == null ? {} : { notes: String(patch.notes) }),
       ...(patch.tags == null ? {} : {
         tags: serializeMeetingTags(patch.tags),
       }),
+      ...(patch.graphNodeId == null ? {} : { graphNodeId: String(patch.graphNodeId).trim() }),
+      ...(patch.graphDraft == null ? {} : { graphDraft: serializeMeetingGraphDraft(patch.graphDraft) }),
     },
   }))
 }
@@ -452,14 +481,37 @@ function normalizeMeeting(value) {
       .filter(isPlainObject)
       .map(normalizeSegment),
     summary: optionalString(meeting.summary),
+    notes: String(meeting.notes || ''),
     summaryTruncated: Boolean(meeting.summaryTruncated ?? meeting.summary_truncated),
     summaryState: String(meeting.summaryState ?? meeting.summary_state ?? 'not-started'),
     kgState: String(meeting.kgState ?? meeting.kg_state ?? 'not-offered'),
+    graphNodeId: optionalString(meeting.graphNodeId ?? meeting.graph_node_id),
+    graphDraft: normalizeMeetingGraphDraft(meeting.graphDraft ?? meeting.graph_draft),
     jobs: (Array.isArray(meeting.jobs) ? meeting.jobs : [])
       .filter(isPlainObject)
       .map(normalizeJob),
     error: optionalString(meeting.error),
     updatedAt: optionalString(meeting.updatedAt ?? meeting.updated_at),
+  }
+}
+
+function normalizeMeetingGraphDraft(value) {
+  const draft = object(value)
+  return {
+    projectResolved: Boolean(draft.projectResolved ?? draft.project_resolved),
+    projectId: optionalString(draft.projectId ?? draft.project_id),
+    peopleIds: uniqueStrings(draft.peopleIds ?? draft.people_ids),
+    scopeId: optionalString(draft.scopeId ?? draft.scope_id),
+  }
+}
+
+function serializeMeetingGraphDraft(value) {
+  const draft = normalizeMeetingGraphDraft(value)
+  return {
+    projectResolved: draft.projectResolved,
+    projectId: draft.projectResolved ? draft.projectId : null,
+    peopleIds: draft.peopleIds,
+    scopeId: draft.scopeId,
   }
 }
 
@@ -695,7 +747,11 @@ function requiredString(value, label) {
 }
 
 function uniqueStrings(value) {
-  return [...new Set((Array.isArray(value) ? value : []).map(String).filter(Boolean))]
+  return [...new Set(
+    (Array.isArray(value) ? value : [])
+      .map(candidate => String(candidate).trim())
+      .filter(Boolean),
+  )]
 }
 
 function normalizeMeetingTags(value) {

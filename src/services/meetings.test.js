@@ -5,15 +5,18 @@ import {
   checkMeetingAudio,
   decideMeetingKgProposal,
   dismissMeetingCandidate,
+  fileMeetingToGraph,
   issueMeetingStartConsent,
   listenToMeetingAudioTestEvents,
   listenToMeetingEvents,
   loadMeetingMicrophones,
+  loadMeeting,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   normalizeMeetingTranscriptPage,
   normalizeMeetingSnapshot,
   openMeetingSystemAudioSettings,
+  prepareMeeting,
   prepareMeetingFollowUpContext,
   requestMeetingMicrophonePermission,
   requestMeetingSystemAudioPermission,
@@ -165,6 +168,89 @@ describe('meetings service', () => {
       tags: ['x'.repeat(81)],
     })).rejects.toThrow('80')
     expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('keeps blank versus None in the small meeting Graph draft', async () => {
+    const normalized = normalizeMeetingSnapshot({
+      revision: 1,
+      meetings: [{
+        id: 'prepared',
+        graph_draft: {
+          project_resolved: true,
+          project_id: null,
+          people_ids: ['person-ana', 'person-ana'],
+          scope_id: 'team:main',
+        },
+      }],
+    })
+    expect(normalized.meetings[0].graphDraft).toEqual({
+      projectResolved: true,
+      projectId: null,
+      peopleIds: ['person-ana'],
+      scopeId: 'team:main',
+    })
+
+    vi.mocked(invoke).mockResolvedValue({ revision: 2, meetings: [] })
+    await updateMeeting('prepared', {
+      graphDraft: {
+        projectResolved: false,
+        projectId: 'must-be-cleared',
+        peopleIds: [],
+        scopeId: null,
+      },
+    })
+    expect(invoke).toHaveBeenCalledWith('meetings_update', {
+      meetingId: 'prepared',
+      patch: {
+        graphDraft: {
+          projectResolved: false,
+          projectId: null,
+          peopleIds: [],
+          scopeId: null,
+        },
+      },
+    })
+  })
+
+  it('prepares a notes-first meeting and loads its exact detail', async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({
+        revision: 2,
+        meetings: [{ id: 'prepared', lifecycle: 'arming', notes: 'Ask about timing.' }],
+      })
+      .mockResolvedValueOnce({
+        id: 'prepared', lifecycle: 'arming', notes: 'Ask about timing.', graph_node_id: null,
+      })
+
+    await expect(prepareMeeting({ workspacePath: '/work' })).resolves.toMatchObject({
+      meetings: [{ id: 'prepared', lifecycle: 'arming', notes: 'Ask about timing.' }],
+    })
+    expect(invoke).toHaveBeenNthCalledWith(1, 'meetings_prepare', {
+      request: { title: null, workspacePath: '/work' },
+    })
+    await expect(loadMeeting('prepared')).resolves.toMatchObject({
+      id: 'prepared', notes: 'Ask about timing.', graphNodeId: null,
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'meetings_get', { meetingId: 'prepared' })
+  })
+
+  it('files one summary with only the selected Graph relationships', async () => {
+    vi.mocked(invoke).mockResolvedValue({ id: 'meeting-1', kind: 'meeting' })
+
+    await expect(fileMeetingToGraph({
+      meetingId: 'meeting-1',
+      scopeId: 'team:main',
+      projectId: '',
+      peopleIds: ['person-ana', 'person-ana', ' person-lee '],
+    })).resolves.toEqual({ id: 'meeting-1', kind: 'meeting' })
+    expect(invoke).toHaveBeenCalledWith('meetings_file_to_graph', {
+      request: {
+        meetingId: 'meeting-1',
+        scopeId: 'team:main',
+        projectId: null,
+        peopleIds: ['person-ana', 'person-lee'],
+      },
+    })
   })
 
   it('requests explicit retranscription without a renderer consent checkbox', async () => {

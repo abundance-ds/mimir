@@ -37,9 +37,10 @@ use crate::launchers::{
 };
 use crate::meetings::commands::{MeetingStartConsentDisclosure, MeetingStartConsentGrant};
 use crate::meetings::runtime::{
-    MeetingCandidate, MeetingConfig, MeetingExport, MeetingGapView, MeetingJobView,
-    MeetingLibraryCursor, MeetingLibraryPage, MeetingModel, MeetingPermissions, MeetingSegmentView,
-    MeetingSnapshot, MeetingTranscriptCursor, MeetingTranscriptPage, MeetingView,
+    MeetingCandidate, MeetingConfig, MeetingExport, MeetingGapView, MeetingGraphDraft,
+    MeetingJobView, MeetingLibraryCursor, MeetingLibraryPage, MeetingModel, MeetingPermissions,
+    MeetingSegmentView, MeetingSnapshot, MeetingTranscriptCursor, MeetingTranscriptPage,
+    MeetingView,
 };
 use crate::routine_runtime::{RoutineRuntimeCatalog, RoutineRuntimeEntry};
 use crate::routines::{
@@ -607,6 +608,9 @@ fn live_meeting() -> MeetingView {
         workspace_path: None,
         source_app: Some("Zoom".into()),
         tags: vec!["architecture".into()],
+        notes: String::new(),
+        graph_node_id: None,
+        graph_draft: MeetingGraphDraft::default(),
         mic_muted: false,
         channels: vec!["microphone".into(), "system".into()],
         gaps: vec![],
@@ -641,6 +645,9 @@ fn finalized_meeting() -> MeetingView {
         workspace_path: None,
         source_app: Some("Google Meet".into()),
         tags: vec!["launch".into(), "reviewed".into()],
+        notes: String::new(),
+        graph_node_id: None,
+        graph_draft: MeetingGraphDraft::default(),
         mic_muted: false,
         channels: vec!["microphone".into(), "system".into()],
         gaps: vec![MeetingGapView {

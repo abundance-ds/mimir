@@ -8,6 +8,7 @@ import {
   graphEvents,
   graphNeighbors,
   listenForGraphChanges,
+  moveGraphNodeScope,
   openBusinessGraph,
   queryGraph,
   restoreGraphNode,
@@ -394,6 +395,22 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     }
   }
 
+  async function moveScope(id, targetScopeId, expectedRevision = null) {
+    const current = selectedNode.value?.id === id
+      ? selectedNode.value
+      : await getGraphNode(id)
+    const moved = await moveGraphNodeScope({
+      id,
+      targetScopeId,
+      expectedRevision: expectedRevision
+        || current?.provenance?.sourceRevision
+        || current?.sourceRevision,
+    })
+    if (selectedNode.value?.id === moved.id) selectedNode.value = moved
+    replaceSummary(moved)
+    return moved
+  }
+
   async function remove(id, expectedRevision = null) {
     const node = selectedNode.value?.id === id
       ? cloneGraphValue(selectedNode.value)
@@ -647,6 +664,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     closeInspector,
     create,
     update,
+    moveScope,
     remove,
     undoDelete,
     setSection,

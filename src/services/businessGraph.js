@@ -76,6 +76,17 @@ export function updateGraphNode(patch, actor = localGraphActor()) {
   return invoke('graph_update', { patch, actor })
 }
 
+export function moveGraphNodeScope(request, actor = localGraphActor()) {
+  return invoke('graph_move_scope', {
+    request: {
+      id: requiredId(request.id),
+      targetScopeId: requiredId(request.targetScopeId),
+      ...(request.expectedRevision ? { expectedRevision: String(request.expectedRevision) } : {}),
+    },
+    actor,
+  })
+}
+
 export function deleteGraphNode(request, actor = localGraphActor()) {
   return invoke('graph_delete', { request, actor })
 }

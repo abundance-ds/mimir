@@ -62,6 +62,33 @@ describe('GraphSelect', () => {
     wrapper.unmount()
   })
 
+  it('offers one direct create action only when search has no exact match', async () => {
+    const wrapper = mount(GraphSelect, {
+      attachTo: document.body,
+      props: {
+        modelValue: '',
+        ariaLabel: 'Meeting person',
+        searchable: true,
+        createLabel: 'Create person',
+        options: [{ value: 'ana', label: 'Ana Smith' }],
+      },
+    })
+
+    await wrapper.get('[role="combobox"]').trigger('click')
+    const search = new DOMWrapper(document.querySelector('[data-graph-select-search]'))
+    await search.setValue('New Person')
+    expect(document.querySelector('[data-graph-select-create]').textContent).toContain(
+      'Create person “New Person”',
+    )
+    await search.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('create')).toEqual([['New Person']])
+
+    await wrapper.get('[role="combobox"]').trigger('click')
+    await new DOMWrapper(document.querySelector('[data-graph-select-search]')).setValue('ana smith')
+    expect(document.querySelector('[data-graph-select-create]')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('moves Tab focus past a teleported menu instead of dropping it on body', async () => {
     const before = document.createElement('button')
     before.textContent = 'Before'

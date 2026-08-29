@@ -44,6 +44,7 @@ defineEmits(['open'])
 // lowercase metadata; the linked object carries the meaning.
 const RELATION_PHRASES = Object.freeze({
   part_of: ['part of', 'contains'],
+  attended_by: ['attended by', 'attended'],
   assigned_to: ['assigned to', 'owns'],
   for_company: ['for', 'commissions'],
   has_contact: ['contact', 'contact for'],
@@ -79,6 +80,7 @@ function phrase(neighbor) {
 function relationOrder(relation) {
   const order = [
     'part_of',
+    'attended_by',
     'for_company',
     'assigned_to',
     'has_contact',

@@ -8,6 +8,7 @@
     @choose-workspace="$emit('chooseWorkspace')"
     @open-activity="$emit('openActivity', $event)"
     @start-work="$emit('startWork', $event)"
+    @open-meeting="$emit('openMeeting', $event)"
     @diagnostic="$emit('diagnostic', $event)"
   />
   <ScribeApp
@@ -89,6 +90,7 @@ defineEmits([
   'openActivity',
   'openSettings',
   'startWork',
+  'openMeeting',
   'chooseWorkspace',
   'launchPlan',
   'diagnostic',

@@ -107,6 +107,7 @@
                 @open-activity="openActivityRecord"
                 @open-settings="openSettings"
                 @start-work="startGraphWork"
+                @open-meeting="openScribeMeeting"
                 @diagnostic="showDiagnostic"
                 @surface-error="recordActivitySurfaceError"
                 @activity-input="activityRuntime.markActivityInteraction(hostedActivity.id)"
@@ -853,6 +854,15 @@ async function onLaunch(id) {
     selectActivity(record.id)
   } catch (cause) {
     diagnostic.value = `${preset.title} did not launch: ${errorMessage(cause)}`
+  }
+}
+
+async function openScribeMeeting(meetingId) {
+  try {
+    await meetings.requestOpen(meetingId)
+    await onLaunch('app:scribe')
+  } catch (cause) {
+    diagnostic.value = `Meeting could not open: ${errorMessage(cause)}`
   }
 }
 

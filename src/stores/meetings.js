@@ -14,9 +14,11 @@ import {
   listenToMeetingEvents,
   loadMeetingMicrophones,
   loadMeetingLibraryPage,
+  loadMeeting,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
+  prepareMeeting,
   requestMeetingMicrophonePermission,
   requestMeetingSystemAudioPermission,
   retranscribeMeeting,
@@ -56,6 +58,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   const searchQuery = ref('')
   const models = ref([])
   const selectedId = ref('')
+  const requestedMeetingId = ref('')
   const activeMeetingId = ref(null)
   const loaded = ref(false)
   const loading = ref(false)
@@ -70,6 +73,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
   let queuedConfigMutations = 0
   let searchGeneration = 0
   const transcriptRefreshIds = new Set()
+  const meetingDrafts = new Map()
+  const meetingDraftFlushTails = new Map()
+  const meetingMutationTails = new Map()
 
   const selectedMeeting = computed(() => {
     const meeting = meetingRecord(selectedId.value)
@@ -185,6 +191,21 @@ export const useMeetingsStore = defineStore('meetings', () => {
     })
   }
 
+  async function prepare(request = {}) {
+    if (activeMeeting.value || pending.value.prepare) {
+      throw new Error('A meeting is already active.')
+    }
+    return runPending('prepare', async () => {
+      const before = new Set(meetings.value.map(meeting => meeting.id))
+      applySnapshot(await prepareMeeting(request))
+      const prepared = meetings.value.find(meeting => !before.has(meeting.id) && meeting.lifecycle === 'arming')
+        || meetings.value.find(meeting => meeting.lifecycle === 'arming')
+        || null
+      if (prepared) selectedId.value = prepared.id
+      return prepared
+    })
+  }
+
   async function dismissCandidate(id) {
     return runPending(`candidate:${id}`, async () => {
       applySnapshot(await dismissMeetingCandidate(id))
@@ -195,6 +216,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   async function stop() {
     const active = activeMeeting.value
     if (!active || pending.value.stop) return null
+    await flushMeetingDraft(active.id)
     return runPending('stop', async () => {
       applySnapshot(await stopMeeting(active.id))
       void refreshVisibleTranscripts()
@@ -212,10 +234,59 @@ export const useMeetingsStore = defineStore('meetings', () => {
   }
 
   async function saveMeeting(id, patch) {
-    return runPending(`update:${id}`, async () => {
-      applySnapshot(await updateMeeting(id, patch))
-      return meetings.value.find(meeting => meeting.id === id) || null
+    const previous = meetingMutationTails.get(id) || Promise.resolve()
+    const operation = previous.catch(() => {}).then(() => (
+      runPending(`update:${id}`, async () => {
+        applySnapshot(await updateMeeting(id, patch))
+        return meetings.value.find(meeting => meeting.id === id) || null
+      })
+    ))
+    meetingMutationTails.set(id, operation)
+    try {
+      return await operation
+    } finally {
+      if (meetingMutationTails.get(id) === operation) meetingMutationTails.delete(id)
+    }
+  }
+
+  function stageMeetingPatch(id, patch = {}) {
+    const meetingId = String(id || '').trim()
+    if (!meetingId) return
+    meetingDrafts.set(meetingId, {
+      ...(meetingDrafts.get(meetingId) || {}),
+      ...patch,
     })
+  }
+
+  function stageMeetingNotes(id, notes) {
+    stageMeetingPatch(id, { notes: String(notes ?? '') })
+  }
+
+  async function flushMeetingDraft(id) {
+    const meetingId = String(id || '').trim()
+    if (!meetingId || !meetingDrafts.has(meetingId)) return null
+    const previous = meetingDraftFlushTails.get(meetingId) || Promise.resolve()
+    const operation = previous.catch(() => {}).then(async () => {
+      let result = null
+      while (meetingDrafts.has(meetingId)) {
+        const patch = meetingDrafts.get(meetingId)
+        result = await saveMeeting(meetingId, patch)
+        if (meetingDrafts.get(meetingId) === patch) meetingDrafts.delete(meetingId)
+      }
+      return result
+    })
+    meetingDraftFlushTails.set(meetingId, operation)
+    try {
+      return await operation
+    } finally {
+      if (meetingDraftFlushTails.get(meetingId) === operation) {
+        meetingDraftFlushTails.delete(meetingId)
+      }
+    }
+  }
+
+  function flushMeetingNotes(id) {
+    return flushMeetingDraft(id)
   }
 
   async function decideKg(id, decision) {
@@ -249,6 +320,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
   async function remove(id, mode = 'all') {
     return runPending(`delete:${id}`, async () => {
       applySnapshot(await deleteMeeting(id, mode))
+      meetingDrafts.delete(id)
       return true
     })
   }
@@ -425,6 +497,31 @@ export const useMeetingsStore = defineStore('meetings', () => {
     selectedId.value = id
     pruneTranscriptWindows()
     void refreshTranscript(id).catch(() => {})
+  }
+
+  async function hydrateMeeting(id) {
+    const meetingId = String(id || '').trim()
+    if (!meetingId) throw new Error('Meeting id is required.')
+    return runPending(`detail:${meetingId}`, async () => {
+      const meeting = await loadMeeting(meetingId)
+      meetings.value = [meeting, ...meetings.value.filter(candidate => candidate.id !== meetingId)]
+      selectedId.value = meetingId
+      pruneTranscriptWindows()
+      return meeting
+    })
+  }
+
+  async function requestOpen(id) {
+    const meetingId = String(id || '').trim()
+    if (!meetingId) throw new Error('Meeting id is required.')
+    const meeting = await hydrateMeeting(meetingId)
+    requestedMeetingId.value = meetingId
+    void refreshTranscript(meetingId).catch(() => {})
+    return meeting
+  }
+
+  function clearOpenRequest(id = '') {
+    if (!id || requestedMeetingId.value === id) requestedMeetingId.value = ''
   }
 
   function applySnapshot(snapshot) {
@@ -628,6 +725,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
     transcriptRefreshIds.clear()
     transcriptWindows.value = {}
     audioCheck.value = null
+    meetingDrafts.clear()
+    meetingDraftFlushTails.clear()
+    meetingMutationTails.clear()
   }
 
   return {
@@ -646,6 +746,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     searchQuery,
     models,
     selectedId,
+    requestedMeetingId,
     activeMeetingId,
     loaded,
     loading,
@@ -669,9 +770,14 @@ export const useMeetingsStore = defineStore('meetings', () => {
     openSystemAudioSettings,
     dismissCandidate,
     start,
+    prepare,
     stop,
     setMicMuted,
     saveMeeting,
+    stageMeetingPatch,
+    flushMeetingDraft,
+    stageMeetingNotes,
+    flushMeetingNotes,
     decideKg,
     retryJob,
     runSummary,
@@ -686,6 +792,9 @@ export const useMeetingsStore = defineStore('meetings', () => {
     installModel,
     deleteModel,
     select,
+    hydrateMeeting,
+    requestOpen,
+    clearOpenRequest,
     loadOlderMeetings,
     loadEarlierTranscript,
     loadLatestTranscript,

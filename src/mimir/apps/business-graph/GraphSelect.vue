@@ -59,6 +59,7 @@
           spellcheck="false"
           @keydown.down.prevent="focusOption(0)"
           @keydown.up.prevent="focusOption(filteredOptions.length - 1)"
+          @keydown.enter.prevent="createFromQuery"
         />
       </div>
 
@@ -104,11 +105,24 @@
         </template>
 
         <p
-          v-if="!filteredOptions.length"
+          v-if="!filteredOptions.length && !canCreate"
           class="px-3 py-7 text-center text-[11px] text-ink-4"
         >
           No matching options
         </p>
+        <button
+          v-if="canCreate"
+          type="button"
+          role="option"
+          aria-selected="false"
+          data-graph-control="select-create"
+          data-graph-select-create
+          class="graph-select-create"
+          @click="createFromQuery"
+        >
+          <span>+</span>
+          {{ createLabel }} “{{ normalizedQuery }}”
+        </button>
       </div>
     </div>
   </Teleport>
@@ -141,9 +155,10 @@ const props = defineProps({
   },
   menuMinWidth: { type: Number, default: 148 },
   chevron: { type: Boolean, default: true },
+  createLabel: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits(['update:modelValue', 'change', 'create'])
 const attrs = useAttrs()
 const trigger = ref(null)
 const menu = ref(null)
@@ -180,6 +195,13 @@ const filteredOptions = computed(() => {
   })
 })
 const activeOption = computed(() => filteredOptions.value[activeIndex.value])
+const normalizedQuery = computed(() => query.value.trim())
+const canCreate = computed(() => (
+  Boolean(props.createLabel && normalizedQuery.value)
+  && !normalizedOptions.value.some(option => (
+    option.label.trim().localeCompare(normalizedQuery.value, undefined, { sensitivity: 'accent' }) === 0
+  ))
+))
 
 watch(filteredOptions, () => {
   activeIndex.value = Math.min(activeIndex.value, Math.max(0, filteredOptions.value.length - 1))
@@ -234,6 +256,13 @@ function choose(option) {
   close({ restoreFocus: true })
 }
 
+function createFromQuery() {
+  if (!canCreate.value) return
+  const value = normalizedQuery.value
+  emit('create', value)
+  close({ restoreFocus: true })
+}
+
 function positionMenu() {
   const rect = trigger.value?.getBoundingClientRect()
   if (!rect) return
@@ -242,6 +271,7 @@ function positionMenu() {
     props.searchable ? 292 : 252,
     filteredOptions.value.length * 32
       + filteredOptions.value.filter(option => option.separatorAfter).length * 9
+      + (canCreate.value ? 34 : 0)
       + (props.searchable ? 40 : 8),
   )
   const gap = 4
@@ -559,6 +589,26 @@ let graphSelectCounter = 0
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.graph-select-create {
+  display: flex;
+  min-height: 32px;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--color-rule-light);
+  padding: 5px 8px;
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.graph-select-create:hover,
+.graph-select-create:focus-visible {
+  background: var(--color-chrome-mid);
+  outline: none;
 }
 
 .graph-select-chevron {

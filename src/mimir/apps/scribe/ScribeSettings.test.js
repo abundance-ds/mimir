@@ -254,7 +254,7 @@ describe('ScribeSettings', () => {
       .trigger('click')
     expect(wrapper.emitted('save').at(-1)).toEqual([expect.objectContaining({
       summaryTemplate: 'brief',
-      summaryPrompt: expect.stringContaining('compact executive summary'),
+      summaryPrompt: expect.stringContaining('BLUF approach'),
     })])
   })
 

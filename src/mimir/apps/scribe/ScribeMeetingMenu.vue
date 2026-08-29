@@ -9,7 +9,7 @@
     @keydown="onKeydown"
   >
     <button
-      v-if="canContinue"
+      v-if="context === 'row' && canContinue"
       type="button"
       role="menuitem"
       data-scribe-continue-meeting
@@ -17,8 +17,23 @@
     >
       Continue recording
     </button>
-    <button type="button" role="menuitem" data-scribe-rename-meeting @click="choose('rename')">
+    <button
+      v-if="context === 'row'"
+      type="button"
+      role="menuitem"
+      data-scribe-rename-meeting
+      @click="choose('rename')"
+    >
       Rename
+    </button>
+    <button
+      v-if="context === 'detail'"
+      type="button"
+      role="menuitem"
+      data-scribe-ask-agent
+      @click="choose('askAgent')"
+    >
+      Ask agent…
     </button>
     <button type="button" role="menuitem" data-scribe-show-files :disabled="filesPending" @click="choose('files')">
       Show in Finder
@@ -56,6 +71,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 defineProps({
   position: { type: Object, required: true },
+  context: { type: String, default: 'row' },
   canRetranscribe: { type: Boolean, default: false },
   canContinue: { type: Boolean, default: false },
   filesPending: { type: Boolean, default: false },
@@ -67,6 +83,7 @@ defineProps({
 const emit = defineEmits([
   'close',
   'rename',
+  'askAgent',
   'continue',
   'files',
   'saveMarkdown',

@@ -29,7 +29,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // unified business graph
   'graph_open', 'graph_status', 'graph_get', 'graph_query', 'graph_search',
   'graph_neighbors', 'graph_diagnostics', 'graph_refresh', 'graph_update',
-  'graph_create', 'graph_delete', 'graph_restore', 'graph_migration_report',
+  'graph_create', 'graph_move_scope', 'graph_delete', 'graph_restore', 'graph_migration_report',
   'graph_context', 'graph_events',
   'workspace_config_load', 'workspace_config_save', 'workspace_project_paths',
   'workspace_project_file_resolve',
@@ -72,7 +72,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // scoped agent packages and scope inventory
   'agent_run', 'agent_list', 'scope_inventory',
   // Scribe meetings
-  'meetings_snapshot', 'meetings_library_page', 'meetings_search_library', 'meetings_transcript_page',
+  'meetings_snapshot', 'meetings_get', 'meetings_prepare', 'meetings_library_page', 'meetings_search_library', 'meetings_transcript_page',
   'meetings_request_microphone_permission', 'meetings_request_system_audio_permission',
   'meetings_open_system_audio_settings',
   'meetings_check_audio',
@@ -81,7 +81,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'meetings_issue_start_consent',
   'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
   'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_run_summary', 'meetings_follow_up_context', 'meetings_retranscribe', 'meetings_delete',
-  'meetings_export', 'meetings_update_config', 'meetings_set_api_key',
+  'meetings_export', 'meetings_file_to_graph', 'meetings_update_config', 'meetings_set_api_key',
   'meetings_clear_api_key', 'meetings_install_model', 'meetings_delete_model',
   // first-party Tracker
   'tracker_status', 'tracker_config_update', 'tracker_set_enabled', 'tracker_set_armed',

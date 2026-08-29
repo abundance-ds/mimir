@@ -199,6 +199,7 @@
         @open-file="openFile"
         @open-url="openUrl"
         @open-activity="$emit('openActivity', $event)"
+        @open-meeting="$emit('openMeeting', $event)"
         @quick-create="openRelatedCreate"
         @navigate-history="navigateObjectHistory"
       />
@@ -411,6 +412,23 @@
             @seen="markNowSeen"
             @summarise="summaryOpen = true"
           />
+          <MeetingInbox
+            v-else-if="graph.section === 'knowledge' && graph.view === 'meetings'"
+            :meetings="pendingMeetings"
+            :projects="graph.projects"
+            :people="graph.people"
+            :scopes="graph.scopes"
+            :default-project-id="graph.workspaceProjectId"
+            :filing-id="filingMeetingId"
+            :error="filingError"
+            :has-more="meetings.meetingsTruncated"
+            :loading-more="Boolean(meetings.pending['library-page'])"
+            @file="fileMeeting"
+            @open-meeting="$emit('openMeeting', $event)"
+            @select="loadMeetingDetail"
+            @change="saveMeetingGraphDraft"
+            @load-more="loadOlderMeetings"
+          />
           <WorkBoard
             v-else-if="graph.section === 'work' && graph.view === 'board'"
             :issues="boardIssues"
@@ -478,6 +496,7 @@
           @open-file="openFile"
           @open-url="openUrl"
           @open-activity="$emit('openActivity', $event)"
+          @open-meeting="$emit('openMeeting', $event)"
           @quick-create="openRelatedCreate"
           @navigate-history="navigateObjectHistory"
         />
@@ -558,7 +577,9 @@ import {
 import { useSettingsStore } from '../../stores/settings.js'
 import { useActivitiesStore } from '../../stores/activities.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
+import { useMeetingsStore } from '../../stores/meetings.js'
 import { graphContext } from '../../services/businessGraph.js'
+import { fileMeetingToGraph } from '../../services/meetings.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
 import { resolveProjectFile } from '../../services/workspaceConfig.js'
 import {
@@ -572,6 +593,7 @@ import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSelect from './business-graph/GraphSelect.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
+import MeetingInbox from './business-graph/MeetingInbox.vue'
 import NowView from './business-graph/NowView.vue'
 import PortfolioView from './business-graph/PortfolioView.vue'
 import TimelineView from './business-graph/TimelineView.vue'
@@ -590,10 +612,12 @@ const emit = defineEmits([
   'startWork',
   'chooseWorkspace',
   'diagnostic',
+  'openMeeting',
 ])
 const settings = useSettingsStore()
 const activities = useActivitiesStore()
 const launchers = useLaunchersStore()
+const meetings = useMeetingsStore()
 const graph = useBusinessGraphStore()
 const root = ref(null)
 const objectInspector = ref(null)
@@ -622,6 +646,8 @@ const createProject = ref('')
 const createRelations = ref([])
 const creating = ref(false)
 const saving = ref(false)
+const filingMeetingId = ref('')
+const filingError = ref('')
 const projectFilter = ref('')
 const priorityFilter = ref('')
 const boardGroup = ref('status')
@@ -685,6 +711,7 @@ const viewsBySection = {
     { id: 'timeline', label: 'Timeline' },
   ],
   knowledge: [
+    { id: 'meetings', label: 'Meetings' },
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
   ],
@@ -777,6 +804,57 @@ const projectionNodes = computed(() => {
   }
   return items
 })
+const pendingMeetings = computed(() => meetings.meetings.filter(meeting => (
+  meeting.lifecycle === 'ready'
+  && Boolean(meeting.summary)
+  && !meeting.graphNodeId
+)))
+
+async function fileMeeting(request) {
+  if (filingMeetingId.value) return
+  filingMeetingId.value = request.meetingId
+  filingError.value = ''
+  try {
+    await meetings.flushMeetingDraft(request.meetingId)
+    await fileMeetingToGraph(request)
+    await Promise.all([
+      meetings.refresh(),
+      graph.refresh({ quiet: true }),
+    ])
+  } catch (cause) {
+    filingError.value = errorMessage(cause)
+    emit('diagnostic', filingError.value)
+  } finally {
+    filingMeetingId.value = ''
+  }
+}
+
+async function saveMeetingGraphDraft({ meetingId, graphDraft }) {
+  meetings.stageMeetingPatch(meetingId, { graphDraft })
+  try {
+    await meetings.flushMeetingDraft(meetingId)
+  } catch (cause) {
+    filingError.value = errorMessage(cause)
+    emit('diagnostic', filingError.value)
+  }
+}
+
+async function loadMeetingDetail(id) {
+  try {
+    await meetings.hydrateMeeting(id)
+  } catch (cause) {
+    filingError.value = errorMessage(cause)
+    emit('diagnostic', filingError.value)
+  }
+}
+
+async function loadOlderMeetings() {
+  try {
+    await meetings.loadOlderMeetings()
+  } catch (cause) {
+    emit('diagnostic', errorMessage(cause))
+  }
+}
 function matchesAllKind(item, filter) {
   if (filter === 'knowledge') {
     const definition = sections.find(section => section.id === 'knowledge')
@@ -1141,7 +1219,9 @@ watch(
   ([active, workspace, teamFolder]) => {
     const projectRoot = String(workspace || '').trim()
     const teamRoot = String(teamFolder || '').trim()
-    if (!active || !projectRoot || mountsRoots(projectRoot, teamRoot)) return
+    if (!active) return
+    void meetings.initialize().catch(cause => emit('diagnostic', errorMessage(cause)))
+    if (!projectRoot || mountsRoots(projectRoot, teamRoot)) return
     startGraph(projectRoot, teamRoot)
   },
   { immediate: true },
@@ -1357,12 +1437,21 @@ function openRelatedCreate({ kind, parent }) {
   }
 }
 
-async function saveNode(patch, controls) {
+async function saveNode(patch, controls, options = {}) {
   saving.value = true
   saveError.value = ''
   try {
     validateIssueEntityRelations(patch)
-    await graph.update(patch)
+    const updated = await graph.update(patch)
+    const currentScopeId = updated.provenance?.scopeId || updated.scopeId || ''
+    const targetScopeId = String(options.targetScopeId || '').trim()
+    if (targetScopeId && targetScopeId !== currentScopeId) {
+      await graph.moveScope(
+        updated.id,
+        targetScopeId,
+        updated.provenance?.sourceRevision || updated.sourceRevision,
+      )
+    }
     controls.done()
   } catch (cause) {
     saveError.value = errorMessage(cause)

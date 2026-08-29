@@ -5,9 +5,11 @@ import {
   issueMeetingStartConsent,
   listenToMeetingAudioTestEvents,
   listenToMeetingEvents,
+  loadMeeting,
   loadMeetingLibraryPage,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
+  prepareMeeting,
   requestMeetingMicrophonePermission,
   requestMeetingSystemAudioPermission,
   startMeetingAudioTest,
@@ -15,6 +17,7 @@ import {
   searchMeetingLibrary,
   startMeeting,
   stopMeeting,
+  updateMeeting,
   updateMeetingsConfig,
 } from '../services/meetings.js'
 import { useMeetingsStore } from './meetings.js'
@@ -31,9 +34,11 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   issueMeetingStartConsent: vi.fn(),
   listenToMeetingAudioTestEvents: vi.fn(),
   listenToMeetingEvents: vi.fn(),
+  loadMeeting: vi.fn(),
   loadMeetingLibraryPage: vi.fn(),
   loadMeetingSnapshot: vi.fn(),
   loadMeetingTranscriptPage: vi.fn(),
+  prepareMeeting: vi.fn(),
   requestMeetingMicrophonePermission: vi.fn(),
   requestMeetingSystemAudioPermission: vi.fn(),
   startMeetingAudioTest: vi.fn(),
@@ -104,6 +109,8 @@ describe('meetings store', () => {
       ...emptyTranscriptPage,
       meetingId,
     }))
+    vi.mocked(loadMeeting).mockReset()
+    vi.mocked(prepareMeeting).mockReset()
     vi.mocked(requestMeetingMicrophonePermission).mockReset()
       .mockResolvedValue(emptySnapshot)
     vi.mocked(requestMeetingSystemAudioPermission).mockReset()
@@ -118,6 +125,7 @@ describe('meetings store', () => {
     })
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
+    vi.mocked(updateMeeting).mockReset()
     vi.mocked(updateMeetingsConfig).mockReset()
   })
 
@@ -136,6 +144,92 @@ describe('meetings store', () => {
     await store.initialize()
     expect(order).toEqual(['listener', 'snapshot'])
     expect(store.loaded).toBe(true)
+  })
+
+  it('keeps a prepared row and hydrates exact detail for Graph and Scribe routes', async () => {
+    const prepared = {
+      id: 'prepared', title: 'Untitled meeting', lifecycle: 'arming', notes: '',
+      jobs: [], gaps: [], channels: ['microphone', 'system'],
+    }
+    vi.mocked(prepareMeeting).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      meetings: [prepared],
+    })
+    vi.mocked(loadMeeting).mockResolvedValue({
+      ...prepared,
+      notes: 'Ask about delivery.',
+      summary: '- Ship Friday.\n\n## User notes\nAsk about delivery.',
+    })
+    const store = useMeetingsStore()
+
+    await expect(store.prepare({ workspacePath: '/work' })).resolves.toMatchObject({ id: 'prepared' })
+    expect(prepareMeeting).toHaveBeenCalledWith({ workspacePath: '/work' })
+    await expect(store.hydrateMeeting('prepared')).resolves.toMatchObject({
+      notes: 'Ask about delivery.',
+    })
+    expect(store.meetings[0].summary).toContain('## User notes')
+
+    await store.requestOpen('prepared')
+    expect(loadMeeting).toHaveBeenCalledTimes(2)
+    expect(store.requestedMeetingId).toBe('prepared')
+    store.clearOpenRequest('prepared')
+    expect(store.requestedMeetingId).toBe('')
+  })
+
+  it('flushes the latest staged meeting document before a sidebar Stop', async () => {
+    const active = {
+      id: 'live', title: 'Live', lifecycle: 'capturing', notes: '',
+      jobs: [], gaps: [], channels: ['microphone', 'system'],
+    }
+    const order = []
+    vi.mocked(updateMeeting).mockImplementation(async (_id, patch) => {
+      order.push(`update:${patch.notes}`)
+      return {
+        ...emptySnapshot,
+        revision: 2,
+        activeMeetingId: 'live',
+        meetings: [{ ...active, ...patch }],
+      }
+    })
+    vi.mocked(stopMeeting).mockImplementation(async () => {
+      order.push('stop')
+      return {
+        ...emptySnapshot,
+        revision: 3,
+        meetings: [{ ...active, lifecycle: 'ready', notes: 'Final question.' }],
+      }
+    })
+    const store = useMeetingsStore()
+    store.applySnapshot({
+      ...emptySnapshot,
+      activeMeetingId: 'live',
+      meetings: [active],
+    })
+    store.stageMeetingNotes('live', 'Final question.')
+    store.stageMeetingPatch('live', {
+      title: 'Client planning',
+      graphDraft: {
+        projectResolved: true,
+        projectId: 'project-alpha',
+        peopleIds: ['person-ana'],
+        scopeId: 'team:main',
+      },
+    })
+
+    await store.stop()
+
+    expect(order).toEqual(['update:Final question.', 'stop'])
+    expect(updateMeeting).toHaveBeenCalledWith('live', {
+      notes: 'Final question.',
+      title: 'Client planning',
+      graphDraft: {
+        projectResolved: true,
+        projectId: 'project-alpha',
+        peopleIds: ['person-ana'],
+        scopeId: 'team:main',
+      },
+    })
   })
 
   it('keeps a bounded per-source audio-check result outside meeting history', async () => {

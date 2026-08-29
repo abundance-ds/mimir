@@ -635,4 +635,63 @@ describe('GraphInspector', () => {
     wrapper.emitted('save')[0][1].done()
     expect(wrapper.emitted('back')).toHaveLength(1)
   })
+
+  it('edits filed meeting context and opens the exact Scribe source', async () => {
+    const filedMeeting = {
+      id: 'meeting-1',
+      kind: 'meeting',
+      title: 'Launch review',
+      summary: 'Ship Friday.',
+      body: '- Ship Friday.\n\n## User notes\nAsk about rollout.',
+      tags: [],
+      createdAt: '2026-08-28T10:00:00Z',
+      updatedAt: '2026-08-28T10:45:00Z',
+      relations: [
+        { relation: 'part_of', target: project.id, legacy: false },
+        { relation: 'attended_by', target: person.id, legacy: false },
+      ],
+      properties: {
+        sourceMeetingId: 'meeting-1',
+        occurredAt: '2026-08-28T10:00:00Z',
+        durationMs: 2_700_000,
+      },
+      provenance: {
+        scopeId: 'team:main',
+        sourceRevision: 'meeting-revision-1',
+        sourcePath: '/team/graph/meeting-1.md',
+      },
+    }
+    const wrapper = mount(GraphInspector, {
+      attachTo: document.body,
+      props: {
+        ...baseProps,
+        mode: 'focus',
+        node: filedMeeting,
+        nodes: [filedMeeting, project, person],
+        scopes: [
+          ...baseProps.scopes,
+          { id: 'private:local', kind: 'private' },
+        ],
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-inspector-meeting-project]').text()).toContain('Project Atlas')
+    expect(wrapper.text()).toContain('45 min')
+    expect(wrapper.text()).toContain('Alex Rivera')
+    await wrapper.get('[data-graph-control="focus-meeting-transcript"]').trigger('click')
+    expect(wrapper.emitted('openMeeting')).toEqual([['meeting-1']])
+
+    await wrapper.get('[data-inspector-meeting-scope]').trigger('click')
+    document.querySelector('[data-graph-select-option="private:local"]').click()
+    await wrapper.get('[data-graph-control="focus-meeting-person-remove-person-alex"]').trigger('click')
+    await wrapper.get('[data-inspector-save]').trigger('click')
+
+    const [patch, , options] = wrapper.emitted('save')[0]
+    expect(patch.relations).toEqual([
+      { relation: 'part_of', target: 'project-atlas', legacy: false },
+    ])
+    expect(options).toEqual({ targetScopeId: 'private:local' })
+    wrapper.unmount()
+  })
 })

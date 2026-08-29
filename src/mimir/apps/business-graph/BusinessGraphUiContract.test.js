@@ -111,12 +111,13 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(19)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(20)
     expect(BUSINESS_GRAPH_SURFACES).toContain('../../../shared/ui/DatePicker.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphMarkdownEditor.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphRelationshipLine.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphSummaryDialog.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('MeetingInbox.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('NowView.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('DispatchBar.vue')
     expect(BUSINESS_GRAPH_SURFACES).not.toContain('GraphFilterBanner.vue')
