@@ -645,12 +645,23 @@ impl MeetingPlatformPort for FakePlatform {
         let content = state.contents.entry(meeting_id.into()).or_default();
         if let Some(value) = &patch.title {
             content.title = Some(value.clone());
+        } else if let Some(value) = &patch.generated_title {
+            content.title = Some(value.clone());
         }
         if let Some(value) = &patch.summary {
             content.summary = Some(value.clone());
         }
+        if let Some(value) = &patch.notes {
+            content.notes = value.clone();
+        }
         if let Some(value) = &patch.tags {
             content.tags = value.clone();
+        }
+        if let Some(value) = &patch.graph_node_id {
+            content.graph_node_id = Some(value.clone());
+        }
+        if let Some(value) = &patch.graph_draft {
+            content.graph_draft = value.clone();
         }
         Ok(())
     }
@@ -770,6 +781,62 @@ fn start_request_for_candidate(
         consent_token: None,
         authorized_consent: Some(runtime.start_consent_context(candidate_id).unwrap()),
     }
+}
+
+#[test]
+fn prepared_meeting_keeps_one_identity_and_notes_when_recording_starts() {
+    let fixture = make_fixture();
+    let prepared = fixture
+        .runtime
+        .prepare(PrepareMeetingRequest {
+            title: Some("Client planning".into()),
+            workspace_path: Some("/workspace".into()),
+        })
+        .unwrap();
+    let meeting = prepared.meetings.first().unwrap();
+    assert_eq!(meeting.lifecycle, "arming");
+    let meeting_id = meeting.id.clone();
+
+    fixture
+        .runtime
+        .update_meeting(
+            &meeting_id,
+            MeetingUpdatePatch {
+                notes: Some("Ask about delivery.\nOpening words.".into()),
+                ..MeetingUpdatePatch::default()
+            },
+        )
+        .unwrap();
+    let consent = fixture
+        .runtime
+        .start_consent_context_for(None, Some(&meeting_id))
+        .unwrap();
+    let started = fixture
+        .runtime
+        .start(StartMeetingRequest {
+            request_id: Some("prepared-start".into()),
+            title: None,
+            workspace_path: Some("/workspace".into()),
+            candidate_id: None,
+            continue_meeting_id: Some(meeting_id.clone()),
+            consent_token: None,
+            authorized_consent: Some(consent),
+        })
+        .unwrap();
+
+    assert_eq!(
+        started.active_meeting_id.as_deref(),
+        Some(meeting_id.as_str())
+    );
+    assert_eq!(started.meetings[0].lifecycle, "capturing");
+    assert_eq!(
+        started.meetings[0].notes,
+        "Ask about delivery.\nOpening words."
+    );
+    assert_eq!(
+        fixture.capture.starts.lock().unwrap()[0].meeting_id,
+        meeting_id
+    );
 }
 
 #[test]
@@ -2946,6 +3013,7 @@ fn mtg_153_running_activity_only_releases_deletion_wait_and_cannot_recreate_cont
                 title: Some("late Activity title".into()),
                 summary: Some("late Activity summary".into()),
                 tags: None,
+                ..MeetingUpdatePatch::default()
             },
         )
         .unwrap_err()

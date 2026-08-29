@@ -29,7 +29,9 @@ use std::{
 const SAMPLE_RATE_HZ: usize = 16_000;
 const CHANNEL_COUNT: usize = 2;
 const BYTES_PER_FRAME: usize = size_of::<f32>() * CHANNEL_COUNT;
-const DEFAULT_WINDOW_CHUNKS: usize = 8;
+/// Checkpoint each capture channel at Whisper's thirty-second acoustic window.
+/// Stop still flushes any shorter durable tail immediately.
+const DEFAULT_WINDOW_CHUNKS: usize = 30;
 const MAX_TAIL_CHUNKS: usize = 32;
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_HISTORY_BYTES: usize = 2_048;
@@ -835,7 +837,7 @@ fn signal_rms(samples: &[f32]) -> f32 {
 /// or an open microphone preamp. Earshot supplies a speech-likelihood score
 /// over 16 ms spectral frames; the energy and duration requirements prevent a
 /// single click or numerical dither from opening the gate. Detector state is
-/// retained per capture channel so speech at an eight-second boundary is not
+/// retained per capture channel so speech at a checkpoint boundary is not
 /// treated as a new stream.
 fn contains_speech(samples: &[f32], detector: &mut VoiceActivityDetector) -> bool {
     if samples.len() < VAD_FRAME_SAMPLES {
@@ -1286,7 +1288,7 @@ mod tests {
             )
             .unwrap(),
             backend,
-            8,
+            DEFAULT_WINDOW_CHUNKS,
             Duration::from_millis(1),
         )
         .unwrap();
@@ -1311,9 +1313,10 @@ mod tests {
             })
             .unwrap();
 
-        // Five eight-second windows, independently transcribed per channel.
-        assert_eq!(calls.lock().unwrap().len(), 10);
-        assert_eq!(sink.final_segment_count(), 10);
+        // One thirty-second checkpoint and one ten-second Stop tail,
+        // independently transcribed per channel.
+        assert_eq!(calls.lock().unwrap().len(), 4);
+        assert_eq!(sink.final_segment_count(), 4);
         let last_end = sink
             .batches
             .iter()

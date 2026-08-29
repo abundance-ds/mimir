@@ -275,6 +275,45 @@ impl MeetingStore {
         load_meeting(&connection, meeting_id)
     }
 
+    pub fn arm_detected_meeting(
+        &self,
+        meeting_id: &str,
+        expected_revision: u64,
+        metadata: &Value,
+        observed_at: &str,
+    ) -> Result<MeetingRecord, MeetingStoreError> {
+        validate_id(meeting_id, "meeting id").map_err(MeetingStoreError::Validation)?;
+        let observed_at = timestamp(observed_at)?;
+        let metadata = json(metadata.clone())?;
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_meeting_tx(&transaction, meeting_id)?;
+        if current.revision != expected_revision {
+            return Err(MeetingStoreError::RevisionConflict {
+                meeting_id: meeting_id.into(),
+                expected: expected_revision,
+                actual: current.revision,
+            });
+        }
+        if current.status != MeetingStatus::Detected {
+            return Err(MeetingStoreError::InvalidTransition {
+                meeting_id: meeting_id.into(),
+                from: current.status,
+                to: MeetingStatus::Recording,
+            });
+        }
+        transaction.execute(
+            "UPDATE meetings SET
+               status='recording', metadata_json=?2, updated_at=?3,
+               started_at=COALESCE(started_at,?3), revision=revision+1
+             WHERE id=?1",
+            params![meeting_id, metadata, observed_at],
+        )?;
+        let meeting = load_meeting_tx(&transaction, meeting_id)?;
+        transaction.commit()?;
+        Ok(meeting)
+    }
+
     pub fn list_meetings(&self, limit: u32) -> Result<Vec<MeetingRecord>, MeetingStoreError> {
         Ok(self.list_meetings_page(None, limit)?.meetings)
     }

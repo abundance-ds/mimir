@@ -87,6 +87,15 @@ pub struct StartMeetingRequest {
     pub(crate) authorized_consent: Option<MeetingStartConsentContext>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareMeetingRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
+}
+
 /// The exact recording disclosure protected by a native consent grant.
 ///
 /// This never contains the grant token and is never persisted. Candidate
@@ -112,7 +121,29 @@ pub struct MeetingUpdatePatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_draft: Option<MeetingGraphDraft>,
+    /// Generated titles must not replace a title that the user entered.
+    #[serde(skip)]
+    pub(crate) generated_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingGraphDraft {
+    #[serde(default)]
+    pub project_resolved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub people_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,6 +315,8 @@ pub struct MeetingContentProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
@@ -291,6 +324,10 @@ pub struct MeetingContentProjection {
     pub source_app: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kg_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_node_id: Option<String>,
+    #[serde(default)]
+    pub graph_draft: MeetingGraphDraft,
     #[serde(default)]
     pub deleted: bool,
 }
@@ -579,15 +616,31 @@ pub struct MeetingView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
     pub summary_truncated: bool,
     pub summary_state: String,
     pub kg_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_node_id: Option<String>,
+    #[serde(default)]
+    pub graph_draft: MeetingGraphDraft,
     #[serde(default)]
     pub jobs: Vec<MeetingJobView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MeetingFilingSource {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    pub started_at: Option<String>,
+    pub duration_ms: u64,
+    pub graph_node_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -854,9 +907,12 @@ impl MeetingRuntime {
         if let Some(meeting_id) = continue_meeting_id {
             require_nonempty(meeting_id, "meeting id")?;
             let meeting = self.inner.store.get_meeting(meeting_id)?;
-            if meeting.status != MeetingStatus::Completed {
+            if !matches!(
+                meeting.status,
+                MeetingStatus::Detected | MeetingStatus::Completed
+            ) {
                 return Err(MeetingRuntimeError::Validation(format!(
-                    "meeting '{meeting_id}' is {} and cannot be continued",
+                    "meeting '{meeting_id}' is {} and cannot be recorded",
                     meeting.status
                 )));
             }
@@ -864,6 +920,49 @@ impl MeetingRuntime {
         let projection = self.platform_projection()?;
         validate_config(&projection.config)?;
         consent_context_for_projection(&projection, candidate_id, continue_meeting_id)
+    }
+
+    pub fn prepare(
+        &self,
+        request: PrepareMeetingRequest,
+    ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        if let Some(active) = self.active()?.as_ref() {
+            return Err(MeetingRuntimeError::ActiveMeeting {
+                meeting_id: active.meeting_id.clone(),
+            });
+        }
+        let title = request
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Untitled meeting")
+            .to_string();
+        require_nonempty(&title, "meeting title")?;
+        if title.chars().count() > 512 {
+            return Err(MeetingRuntimeError::Validation(
+                "meeting title exceeds 512 characters".into(),
+            ));
+        }
+        let observed_at = self.inner.clock.now();
+        let meeting_id = format!("meeting-{}", Uuid::new_v4());
+        self.inner.store.create_meeting(
+            &MeetingDraft {
+                id: meeting_id.clone(),
+                title,
+                origin: MeetingOrigin::default(),
+                // Prepared meetings define both possible channels. Recording
+                // later selects only the channels allowed at that moment.
+                channels: prepared_channels(),
+                metadata: json!({
+                    "workspacePath": request.workspace_path,
+                    "prepared": true,
+                }),
+            },
+            &observed_at,
+        )?;
+        self.publish_unlocked("meeting-prepared", Some(meeting_id), None)
     }
 
     pub fn start(
@@ -905,11 +1004,33 @@ impl MeetingRuntime {
             });
         }
 
-        if request.continue_meeting_id.is_some() {
-            return self.continue_completed_unlocked(request, &projection, request_key);
+        let prepared = match request.continue_meeting_id.as_deref() {
+            Some(meeting_id) => {
+                let meeting = self.inner.store.get_meeting(meeting_id)?;
+                if meeting.status == MeetingStatus::Completed {
+                    return self.continue_completed_unlocked(request, &projection, request_key);
+                }
+                if meeting.status != MeetingStatus::Detected {
+                    return Err(MeetingRuntimeError::Validation(format!(
+                        "meeting '{meeting_id}' is {} and cannot be recorded",
+                        meeting.status
+                    )));
+                }
+                Some(meeting)
+            }
+            None => None,
+        };
+
+        if prepared.is_some() && request.candidate_id.is_some() {
+            return Err(MeetingRuntimeError::Validation(
+                "a prepared meeting and a detected meeting cannot share one recording".into(),
+            ));
         }
 
-        let meeting_id = format!("meeting-{}", Uuid::new_v4());
+        let meeting_id = prepared
+            .as_ref()
+            .map(|meeting| meeting.id.clone())
+            .unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
         let run_id = format!("run-{}", Uuid::new_v4());
         let observed_at = self.inner.clock.now();
         let title = request
@@ -917,6 +1038,7 @@ impl MeetingRuntime {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .or_else(|| prepared.as_ref().map(|meeting| meeting.title.as_str()))
             .unwrap_or("Untitled meeting")
             .to_string();
         let channels = capture_channels(&projection.permissions);
@@ -931,23 +1053,26 @@ impl MeetingRuntime {
                 "the selected meeting candidate is no longer available".into(),
             ));
         }
-        let origin = MeetingOrigin {
-            kind: if candidate.is_some() {
-                "detected".into()
-            } else {
-                "manual".into()
-            },
-            external_id: request.candidate_id.clone(),
-            confidence: candidate.map(|value| value.confidence),
-            evidence: candidate
-                .map(|value| {
-                    json!({
-                        "appId": value.app_id,
-                        "appName": value.app_name,
+        let origin = prepared
+            .as_ref()
+            .map(|meeting| meeting.origin.clone())
+            .unwrap_or_else(|| MeetingOrigin {
+                kind: if candidate.is_some() {
+                    "detected".into()
+                } else {
+                    "manual".into()
+                },
+                external_id: request.candidate_id.clone(),
+                confidence: candidate.map(|value| value.confidence),
+                evidence: candidate
+                    .map(|value| {
+                        json!({
+                            "appId": value.app_id,
+                            "appName": value.app_name,
+                        })
                     })
-                })
-                .unwrap_or_else(|| json!({})),
-        };
+                    .unwrap_or_else(|| json!({})),
+            });
         let (transcription_route, transcription_model) = transcription_route(&projection.config);
         let metadata = json!({
             "workspacePath": request.workspace_path.clone(),
@@ -960,14 +1085,25 @@ impl MeetingRuntime {
             "microphoneDeviceId": projection.config.microphone_device_id.clone(),
             "runId": run_id.clone(),
         });
-        let draft = MeetingDraft {
-            id: meeting_id.clone(),
-            title,
-            origin,
-            channels: channels.clone(),
-            metadata,
+        let created = if let Some(prepared) = prepared {
+            self.inner.store.arm_detected_meeting(
+                &meeting_id,
+                prepared.revision,
+                &metadata,
+                &observed_at,
+            )?
+        } else {
+            self.inner.store.create_meeting(
+                &MeetingDraft {
+                    id: meeting_id.clone(),
+                    title,
+                    origin,
+                    channels: channels.clone(),
+                    metadata,
+                },
+                &observed_at,
+            )?
         };
-        let created = self.inner.store.create_meeting(&draft, &observed_at)?;
         let capture_request = CaptureStart {
             meeting_id: meeting_id.clone(),
             run_id: run_id.clone(),
@@ -981,13 +1117,17 @@ impl MeetingRuntime {
         // transition closes the attempt. This ordering ensures there is no
         // fallible persistence boundary after a worker starts but before the
         // runtime owns it.
-        let recording = self.inner.store.transition_meeting(
-            &meeting_id,
-            created.revision,
-            MeetingStatus::Recording,
-            &self.inner.clock.now(),
-            None,
-        )?;
+        let recording = if created.status == MeetingStatus::Recording {
+            created
+        } else {
+            self.inner.store.transition_meeting(
+                &meeting_id,
+                created.revision,
+                MeetingStatus::Recording,
+                &self.inner.clock.now(),
+                None,
+            )?
+        };
         // Install runtime ownership before the native worker is spawned. The
         // capture port returns once that worker is registered, while Core
         // Audio opens on the worker thread. A terminal open failure can
@@ -1948,6 +2088,71 @@ impl MeetingRuntime {
         self.publish_unlocked("meeting-updated", Some(meeting_id.into()), None)
     }
 
+    pub(crate) fn filing_source(
+        &self,
+        meeting_id: &str,
+    ) -> Result<MeetingFilingSource, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let record = self.inner.store.get_meeting(meeting_id)?;
+        if record.status != MeetingStatus::Completed {
+            return Err(MeetingRuntimeError::Validation(
+                "only a completed meeting can be filed to Graph".into(),
+            ));
+        }
+        let content = self
+            .inner
+            .platform
+            .content(meeting_id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        let summary = content
+            .summary
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                MeetingRuntimeError::Validation(
+                    "the meeting summary must finish before filing to Graph".into(),
+                )
+            })?;
+        Ok(MeetingFilingSource {
+            id: record.id.clone(),
+            title: content.title.unwrap_or_else(|| record.title.clone()),
+            summary,
+            started_at: record.started_at.clone(),
+            duration_ms: duration_ms(&record),
+            graph_node_id: content.graph_node_id,
+        })
+    }
+
+    pub(crate) fn link_graph_node(
+        &self,
+        meeting_id: &str,
+        graph_node_id: &str,
+    ) -> Result<(), MeetingRuntimeError> {
+        let source = self.filing_source(meeting_id)?;
+        if source
+            .graph_node_id
+            .as_deref()
+            .is_some_and(|existing| existing != graph_node_id)
+        {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is already linked to Graph item '{}'",
+                source.graph_node_id.unwrap_or_default()
+            )));
+        }
+        self.inner
+            .platform
+            .update_content(
+                meeting_id,
+                &MeetingUpdatePatch {
+                    graph_node_id: Some(graph_node_id.into()),
+                    ..MeetingUpdatePatch::default()
+                },
+            )
+            .map_err(|message| port_error("meeting Graph link update", message))?;
+        let _ = self.publish_unlocked("meeting-filed", Some(meeting_id.into()), None)?;
+        Ok(())
+    }
+
     pub fn update_config(
         &self,
         patch: MeetingConfigPatch,
@@ -2208,6 +2413,27 @@ fn capture_channels(permissions: &MeetingPermissions) -> Vec<AudioChannelDraft> 
     channels
 }
 
+fn prepared_channels() -> Vec<AudioChannelDraft> {
+    vec![
+        AudioChannelDraft {
+            id: "microphone".into(),
+            kind: AudioChannelKind::Microphone,
+            sample_rate_hz: 16_000,
+            channels: 1,
+            sample_format: "f32le".into(),
+            device_id: None,
+        },
+        AudioChannelDraft {
+            id: "system".into(),
+            kind: AudioChannelKind::System,
+            sample_rate_hz: 16_000,
+            channels: 1,
+            sample_format: "f32le".into(),
+            device_id: None,
+        },
+    ]
+}
+
 fn transcription_route(config: &MeetingConfig) -> (String, String) {
     if config.transcription_mode == "custom" {
         (config.custom_url.clone(), config.custom_model.clone())
@@ -2350,13 +2576,13 @@ fn require_summary_preset(value: &str) -> Result<(), MeetingRuntimeError> {
 pub(crate) fn summary_template_instructions(value: &str) -> Option<&'static str> {
     match value {
         "standard" => Some(
-            "Write a balanced meeting summary with context, decisions, action items, and open questions. Use short Markdown sections only when they improve scanning.",
+            "Use the BLUF approach. Return a concise Markdown document. Use these sections in order: # BLUF, # Key points, and # Follow-up. Under # BLUF, write one short paragraph of one or two sentences that states the outcome or direction. Under # Key points, write short flat bullets for only the essential decisions, facts, constraints, or risks. Under # Follow-up, combine actions, open questions, and blockers in one flat list; start each bullet with a useful bold cue such as **Action — Paul:**, **Open:**, or **Blocker:**. Omit # Follow-up when nothing useful belongs there. Prefer more short bullets over fewer long bullets. Keep each bullet to one sentence and at most 25 words. Do not repeat information across sections. Document height is not a target; achieve concision by selecting useful information, not by flattening structure. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.",
         ),
         "brief" => Some(
-            "Write a compact executive summary. Keep only the outcome, key decisions, named action items, and unresolved blockers.",
+            "Use the BLUF approach. Return a short Markdown document with # BLUF and # Key points, plus # Follow-up only when needed. BLUF is one sentence. Key points contain 2 to 4 short flat bullets. Follow-up combines only critical actions, open questions, or blockers; label each with **Action — Name:**, **Open:**, or **Blocker:**. Keep each bullet to one sentence and at most 20 words. Prefer more short bullets over fewer long bullets. Do not repeat information. Read the user notes with judgment.",
         ),
         "decisions-actions" => Some(
-            "Prioritize decisions and action items. Use explicit Decisions, Actions, and Open questions sections; preserve owners and dates only when the transcript states them.",
+            "Use the BLUF approach. Return a concise Markdown document with # BLUF and # Decisions and follow-up. BLUF is one short paragraph. Combine decisions, actions, open questions, and blockers in one flat list; label each bullet with **Decision:**, **Action — Name:**, **Open:**, or **Blocker:**. Keep each bullet to one sentence and at most 25 words. Prefer more short bullets over fewer long bullets. Preserve owners and dates only when stated. Do not repeat information. Read the user notes with judgment.",
         ),
         "detailed" => Some(
             "Write a detailed chronological summary that preserves important reasoning, decisions, action items, risks, disagreements, and open questions without inventing facts.",
@@ -2394,13 +2620,32 @@ pub(crate) fn require_summary_prompt(value: &str) -> Result<(), MeetingRuntimeEr
 }
 
 fn validate_update_patch(patch: &MeetingUpdatePatch) -> Result<(), MeetingRuntimeError> {
-    if let Some(title) = &patch.title {
+    if let Some(title) = patch.title.as_ref().or(patch.generated_title.as_ref()) {
         require_nonempty(title, "meeting title")?;
         if title.chars().count() > 512 {
             return Err(MeetingRuntimeError::Validation(
                 "meeting title exceeds 512 characters".into(),
             ));
         }
+    }
+    if patch
+        .notes
+        .as_ref()
+        .is_some_and(|notes| notes.len() > 4 * 1024 * 1024 || notes.contains('\0'))
+    {
+        return Err(MeetingRuntimeError::Validation(
+            "meeting notes exceed the 4 MiB safety limit or contain invalid text".into(),
+        ));
+    }
+    if patch.graph_node_id.as_ref().is_some_and(|id| {
+        id.trim().is_empty() || id.len() > 120 || id.chars().any(|character| character.is_control())
+    }) {
+        return Err(MeetingRuntimeError::Validation(
+            "linked Graph meeting id is invalid".into(),
+        ));
+    }
+    if let Some(graph_draft) = &patch.graph_draft {
+        validate_graph_draft(graph_draft)?;
     }
     if let Some(tags) = &patch.tags {
         if tags.len() > 64
@@ -2416,6 +2661,51 @@ fn validate_update_patch(patch: &MeetingUpdatePatch) -> Result<(), MeetingRuntim
                     .into(),
             ));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_graph_draft(
+    graph_draft: &MeetingGraphDraft,
+) -> Result<(), MeetingRuntimeError> {
+    if !graph_draft.project_resolved && graph_draft.project_id.is_some() {
+        return Err(MeetingRuntimeError::Validation(
+            "an unresolved meeting project cannot have a Project id".into(),
+        ));
+    }
+    let mut ids = Vec::new();
+    if let Some(id) = &graph_draft.project_id {
+        ids.push(("meeting Project id", id));
+    }
+    if let Some(id) = &graph_draft.scope_id {
+        ids.push(("meeting scope id", id));
+    }
+    ids.extend(
+        graph_draft
+            .people_ids
+            .iter()
+            .map(|id| ("meeting Person id", id)),
+    );
+    if graph_draft.people_ids.len() > 100
+        || ids.iter().any(|(_, id)| {
+            id.trim().is_empty()
+                || id.len() > 200
+                || id.chars().any(|character| character.is_control())
+        })
+    {
+        return Err(MeetingRuntimeError::Validation(
+            "meeting Graph context contains an invalid id".into(),
+        ));
+    }
+    let mut unique = std::collections::BTreeSet::new();
+    if graph_draft
+        .people_ids
+        .iter()
+        .any(|id| !unique.insert(id.trim()))
+    {
+        return Err(MeetingRuntimeError::Validation(
+            "meeting People must be unique".into(),
+        ));
     }
     Ok(())
 }

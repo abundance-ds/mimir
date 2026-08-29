@@ -120,6 +120,7 @@ fn execute(runtime: &MeetingRuntime, action: &str, input: Value) -> Result<Value
                 title: optional_string(&input, "title")?,
                 summary: optional_string(&input, "summary")?,
                 tags: optional_tags(&input, "tags")?,
+                ..MeetingUpdatePatch::default()
             };
             runtime
                 .update_meeting(meeting_id, patch)
@@ -732,12 +733,17 @@ mod tests {
             let content = contents.entry(meeting_id.into()).or_default();
             if let Some(title) = &patch.title {
                 content.title = Some(title.clone());
+            } else if let Some(title) = &patch.generated_title {
+                content.title = Some(title.clone());
             }
             if let Some(summary) = &patch.summary {
                 content.summary = Some(summary.clone());
             }
             if let Some(tags) = &patch.tags {
                 content.tags = tags.clone();
+            }
+            if let Some(graph_draft) = &patch.graph_draft {
+                content.graph_draft = graph_draft.clone();
             }
             Ok(())
         }

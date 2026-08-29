@@ -12,8 +12,8 @@ use super::runtime::{
     MeetingConfigPatch, MeetingDeleteMode, MeetingEvent, MeetingEventSink, MeetingExport,
     MeetingExportFormat, MeetingLibraryCursor, MeetingLibraryPage, MeetingLibrarySearchHit,
     MeetingRuntime, MeetingSnapshot, MeetingStartConsentContext, MeetingSummaryRunRequest,
-    MeetingTranscriptCursor, MeetingTranscriptPage, MeetingUpdatePatch, StartMeetingRequest,
-    MEETING_EVENT,
+    MeetingTranscriptCursor, MeetingTranscriptPage, MeetingUpdatePatch, PrepareMeetingRequest,
+    StartMeetingRequest, MEETING_EVENT,
 };
 use super::transcriber::TranscriptionChangeSink;
 use serde::{Deserialize, Serialize};
@@ -614,6 +614,20 @@ pub async fn meetings_snapshot(
 }
 
 #[tauri::command]
+pub async fn meetings_get(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    meeting_id: String,
+) -> Result<super::runtime::MeetingView, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting detail", move || {
+        runtime
+            .meeting_detail(&meeting_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn meetings_transcript_page(
     runtime: tauri::State<'_, MeetingRuntime>,
     meeting_id: String,
@@ -997,6 +1011,18 @@ pub async fn meetings_dismiss_candidate(
         runtime
             .dismiss_candidate(&candidate_id)
             .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn meetings_prepare(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    request: PrepareMeetingRequest,
+) -> Result<MeetingSnapshot, String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting preparation", move || {
+        runtime.prepare(request).map_err(|error| error.to_string())
     })
     .await
 }

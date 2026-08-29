@@ -39,6 +39,30 @@ impl MeetingRuntime {
         self.meeting_view(&record, &content, active.as_ref(), &hook_config.kg_prompt)
     }
 
+    pub fn meeting_detail(&self, meeting_id: &str) -> Result<MeetingView, MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let record = self.inner.store.get_meeting(meeting_id)?;
+        let content = self
+            .inner
+            .platform
+            .content(meeting_id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        if content.deleted {
+            return Err(MeetingRuntimeError::Validation(format!(
+                "meeting '{meeting_id}' is deleted"
+            )));
+        }
+        let active = self.active()?.clone();
+        let hook_config = self.hook_config()?;
+        let mut view =
+            self.meeting_view(&record, &content, active.as_ref(), &hook_config.kg_prompt)?;
+        if let Some(summary) = content.summary {
+            view.summary = Some(summary);
+            view.summary_truncated = false;
+        }
+        Ok(view)
+    }
+
     pub fn transcript_page(
         &self,
         meeting_id: &str,
@@ -531,9 +555,12 @@ impl MeetingRuntime {
             // accidental whole-history regressions at the IPC boundary.
             segments: Vec::new(),
             summary,
+            notes: content.notes.clone(),
             summary_truncated,
             summary_state,
             kg_state,
+            graph_node_id: content.graph_node_id.clone(),
+            graph_draft: content.graph_draft.clone(),
             jobs: jobs.iter().map(job_view).collect(),
             error: record
                 .failure

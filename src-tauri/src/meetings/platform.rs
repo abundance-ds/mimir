@@ -13,11 +13,13 @@ use super::{
         MIN_MODEL_DISK_RESERVE_BYTES, MODEL_MANIFEST_SCHEMA_VERSION,
     },
     runtime::{
-        MeetingCandidate, MeetingConfig, MeetingConfigPatch, MeetingContentProjection,
-        MeetingDeleteMode, MeetingExport, MeetingExportFormat, MeetingHookConfig, MeetingModel,
-        MeetingPermissions, MeetingPlatformPort, MeetingPlatformProjection, MeetingUpdatePatch,
+        validate_graph_draft, MeetingCandidate, MeetingConfig, MeetingConfigPatch,
+        MeetingContentProjection, MeetingDeleteMode, MeetingExport, MeetingExportFormat,
+        MeetingGraphDraft, MeetingHookConfig, MeetingModel, MeetingPermissions,
+        MeetingPlatformPort, MeetingPlatformProjection, MeetingUpdatePatch,
     },
     MeetingDeletionMode as StoreDeletionMode, MeetingDeletionStage, MeetingStore,
+    TranscriptGapRecord, TranscriptSegmentRecord,
 };
 use crate::persistence::{
     ensure_private_directory, ensure_private_subdirectory, load_json_optional_quarantining,
@@ -563,7 +565,9 @@ impl From<MeetingConfig> for StoredMeetingConfig {
 
 impl From<StoredMeetingConfig> for MeetingConfig {
     fn from(config: StoredMeetingConfig) -> Self {
-        let summary_prompt = if config.summary_prompt.trim().is_empty() {
+        let summary_prompt = if config.summary_prompt.trim().is_empty()
+            || replaced_builtin_summary_prompt(config.summary_prompt.trim())
+        {
             super::runtime::summary_template_instructions(&config.summary_template)
                 .unwrap_or_else(|| {
                     super::runtime::summary_template_instructions("standard")
@@ -595,6 +599,21 @@ impl From<StoredMeetingConfig> for MeetingConfig {
 
 fn default_summary_template() -> String {
     "standard".into()
+}
+
+const LEGACY_BALANCED_SUMMARY_PROMPT: &str = "Write a balanced meeting summary with context, decisions, action items, and open questions. Use short Markdown sections only when they improve scanning.";
+const LEGACY_LOOSE_BLUF_SUMMARY_PROMPT: &str = "Use the BLUF approach. Write an ultra-concise meeting brief in Markdown bullets, usually 5 to 8 bullets. Put the bottom line first; keep one useful idea per bullet; use active voice; include owners and dates when known; omit greetings, repetition, obvious background, and discussion that produced no useful result. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.";
+const LEGACY_FLAT_BLUF_SUMMARY_PROMPT: &str = "Use the BLUF approach. Return one flat Markdown list of 5 to 8 bullets, with no headings, sections, paragraphs, or nested bullets. Put the bottom line first. Keep one useful idea per bullet and use active voice. Include owners and dates only when known. Omit greetings, repetition, obvious background, and discussion that produced no useful result. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.";
+const LEGACY_LABELED_BLUF_SUMMARY_PROMPT: &str = "Use the BLUF approach. Return one flat Markdown list of 5 to 8 bullets. Start the first bullet with **BLUF:**. Start each later bullet with one short bold cue chosen for its meaning, such as **Decision:**, **Action — Paul:**, **Open:**, **Risk:**, **Blocker:**, or **Context:**. Use only useful cues; do not force categories. Each bullet must contain one sentence and no more than 25 words after its cue. Do not bundle points with semicolons. Prefer concrete nouns and active verbs. Include owners and dates only when known. Use no headings, sections, paragraphs, or nested bullets. Omit greetings, repetition, obvious background, and low-value discussion. Read the user notes with judgment: use useful facts, questions, decisions, actions, or context; ignore noise or memory aids that add nothing.";
+
+fn replaced_builtin_summary_prompt(value: &str) -> bool {
+    matches!(
+        value,
+        LEGACY_BALANCED_SUMMARY_PROMPT
+            | LEGACY_LOOSE_BLUF_SUMMARY_PROMPT
+            | LEGACY_FLAT_BLUF_SUMMARY_PROMPT
+            | LEGACY_LABELED_BLUF_SUMMARY_PROMPT
+    )
 }
 
 impl<'de> Deserialize<'de> for PersistedMeetingConfig {
@@ -641,6 +660,8 @@ struct PersistedMeetingContent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
     #[serde(default)]
+    notes: String,
+    #[serde(default)]
     tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace_path: Option<String>,
@@ -648,6 +669,12 @@ struct PersistedMeetingContent {
     source_app: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     kg_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    graph_node_id: Option<String>,
+    #[serde(default)]
+    graph_draft: MeetingGraphDraft,
+    #[serde(default)]
+    title_user_set: bool,
     #[serde(default)]
     deleted: bool,
 }
@@ -664,10 +691,17 @@ impl<'de> Deserialize<'de> for PersistedMeetingContent {
             title: Option<String>,
             summary: Option<String>,
             #[serde(default)]
+            notes: String,
+            #[serde(default)]
             tags: Vec<String>,
             workspace_path: Option<String>,
             source_app: Option<String>,
             kg_decision: Option<String>,
+            graph_node_id: Option<String>,
+            #[serde(default)]
+            graph_draft: MeetingGraphDraft,
+            #[serde(default)]
+            title_user_set: bool,
             #[serde(default)]
             deleted: bool,
         }
@@ -678,18 +712,25 @@ impl<'de> Deserialize<'de> for PersistedMeetingContent {
         validate_content_fields(
             wire.title.as_deref(),
             wire.summary.as_deref(),
+            &wire.notes,
             &wire.tags,
             wire.kg_decision.as_deref(),
+            wire.graph_node_id.as_deref(),
+            &wire.graph_draft,
         )
         .map_err(de::Error::custom)?;
         Ok(Self {
             schema_version: wire.schema_version,
             title: wire.title,
             summary: wire.summary,
+            notes: wire.notes,
             tags: wire.tags,
             workspace_path: wire.workspace_path,
             source_app: wire.source_app,
             kg_decision: wire.kg_decision,
+            graph_node_id: wire.graph_node_id,
+            graph_draft: wire.graph_draft,
+            title_user_set: wire.title_user_set,
             deleted: wire.deleted,
         })
     }
@@ -1913,18 +1954,12 @@ impl NativeMeetingPlatform {
             markdown.push_str("\n\n");
         }
         markdown.push_str("## Transcript\n\n");
-        for segment in transcript.segments {
-            let speaker = segment
-                .segment
-                .speaker
-                .as_deref()
-                .or(segment.segment.channel_id.as_deref())
-                .unwrap_or("Speaker");
+        for segment in readable_transcript_segments(&transcript.segments, &transcript.gaps) {
             markdown.push_str(&format!(
                 "**{} · {}**  \n{}\n\n",
-                format_timestamp(segment.segment.start_ms),
-                speaker,
-                segment.segment.text.trim()
+                format_timestamp(segment.start_ms),
+                segment.speaker,
+                segment.text
             ));
         }
         if !transcript.gaps.is_empty() {
@@ -2106,10 +2141,13 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         Ok(MeetingContentProjection {
             title: content.title,
             summary: content.summary,
+            notes: content.notes,
             tags: content.tags,
             workspace_path: content.workspace_path,
             source_app: content.source_app,
             kg_decision: content.kg_decision,
+            graph_node_id: content.graph_node_id,
+            graph_draft: content.graph_draft,
             deleted: content.deleted,
         })
     }
@@ -2254,18 +2292,35 @@ impl MeetingPlatformPort for NativeMeetingPlatform {
         }
         if let Some(value) = &patch.title {
             content.title = Some(value.trim().to_string());
+            content.title_user_set = true;
+        } else if let Some(value) = &patch.generated_title {
+            if !content.title_user_set {
+                content.title = Some(value.trim().to_string());
+            }
         }
         if let Some(value) = &patch.summary {
             content.summary = Some(value.trim().to_string());
         }
+        if let Some(value) = &patch.notes {
+            content.notes = value.clone();
+        }
         if let Some(value) = &patch.tags {
             content.tags = value.iter().map(|tag| tag.trim().to_string()).collect();
+        }
+        if let Some(value) = &patch.graph_node_id {
+            content.graph_node_id = Some(value.trim().to_string());
+        }
+        if let Some(value) = &patch.graph_draft {
+            content.graph_draft = value.clone();
         }
         validate_content_fields(
             content.title.as_deref(),
             content.summary.as_deref(),
+            &content.notes,
             &content.tags,
             content.kg_decision.as_deref(),
+            content.graph_node_id.as_deref(),
+            &content.graph_draft,
         )?;
         self.save_content(meeting_id, &content)
     }
@@ -2435,8 +2490,11 @@ fn custom_stt_endpoint_from_https_url(raw: &str) -> Result<CustomSttEndpoint, St
 fn validate_content_fields(
     title: Option<&str>,
     summary: Option<&str>,
+    notes: &str,
     tags: &[String],
     kg_decision: Option<&str>,
+    graph_node_id: Option<&str>,
+    graph_draft: &MeetingGraphDraft,
 ) -> Result<(), String> {
     if let Some(title) = title {
         if title.trim().is_empty() || title.chars().count() > 512 {
@@ -2445,6 +2503,9 @@ fn validate_content_fields(
     }
     if summary.is_some_and(|value| value.len() > MAX_SUMMARY_BYTES) {
         return Err("Meeting summary exceeds the 4 MiB safety limit".into());
+    }
+    if notes.len() > MAX_SUMMARY_BYTES || notes.contains('\0') {
+        return Err("Meeting notes exceed the 4 MiB safety limit or contain invalid text".into());
     }
     if tags.len() > MAX_TAGS
         || tags.iter().any(|tag| {
@@ -2460,6 +2521,12 @@ fn validate_content_fields(
     {
         return Err("Invalid persisted knowledge-graph decision".into());
     }
+    if graph_node_id.is_some_and(|id| {
+        id.trim().is_empty() || id.len() > 120 || id.chars().any(|character| character.is_control())
+    }) {
+        return Err("Invalid linked Graph meeting id".into());
+    }
+    validate_graph_draft(graph_draft).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -2749,6 +2816,72 @@ fn format_timestamp(milliseconds: i64) -> String {
         (seconds / 60) % 60,
         seconds % 60
     )
+}
+
+const READABLE_TRANSCRIPT_MAX_GAP_MS: i64 = 1_500;
+const READABLE_TRANSCRIPT_MAX_DURATION_MS: i64 = 30_000;
+
+struct ReadableTranscriptSegment {
+    start_ms: i64,
+    end_ms: i64,
+    channel_id: Option<String>,
+    speaker: String,
+    text: String,
+    is_final: bool,
+}
+
+fn readable_transcript_segments(
+    segments: &[TranscriptSegmentRecord],
+    gaps: &[TranscriptGapRecord],
+) -> Vec<ReadableTranscriptSegment> {
+    let mut readable: Vec<ReadableTranscriptSegment> = Vec::new();
+    for record in segments {
+        let segment = &record.segment;
+        let speaker = segment
+            .speaker
+            .as_deref()
+            .or(segment.channel_id.as_deref())
+            .unwrap_or("Speaker")
+            .to_string();
+        let can_merge = readable.last().is_some_and(|previous| {
+            previous.is_final
+                && segment.is_final
+                && previous.channel_id == segment.channel_id
+                && previous.speaker == speaker
+                && segment.start_ms >= previous.start_ms
+                && segment.start_ms.saturating_sub(previous.end_ms)
+                    <= READABLE_TRANSCRIPT_MAX_GAP_MS
+                && segment
+                    .end_ms
+                    .max(previous.end_ms)
+                    .saturating_sub(previous.start_ms)
+                    <= READABLE_TRANSCRIPT_MAX_DURATION_MS
+                && !gaps.iter().any(|gap| {
+                    gap.gap
+                        .channel_id
+                        .as_ref()
+                        .is_none_or(|channel| Some(channel) == segment.channel_id.as_ref())
+                        && gap.gap.end_ms > previous.end_ms
+                        && gap.gap.start_ms < segment.start_ms
+                })
+        });
+        if can_merge {
+            let previous = readable.last_mut().expect("readable segment exists");
+            previous.end_ms = previous.end_ms.max(segment.end_ms);
+            previous.text.push(' ');
+            previous.text.push_str(segment.text.trim());
+            continue;
+        }
+        readable.push(ReadableTranscriptSegment {
+            start_ms: segment.start_ms,
+            end_ms: segment.end_ms,
+            channel_id: segment.channel_id.clone(),
+            speaker,
+            text: segment.text.trim().to_string(),
+            is_final: segment.is_final,
+        });
+    }
+    readable
 }
 
 fn content_file_fingerprint(path: &Path) -> Result<String, String> {
@@ -3195,6 +3328,44 @@ mod tests {
         .expect("a symlinked managed model root must be refused");
         assert!(error.contains("symbolic link") || error.contains("private managed path"));
         assert!(fs::read_dir(&outside).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn legacy_balanced_summary_default_migrates_to_the_selected_recipe() {
+        let mut stored = StoredMeetingConfig::from(MeetingConfig::default());
+        stored.summary_template = "brief".into();
+        stored.summary_prompt = LEGACY_BALANCED_SUMMARY_PROMPT.into();
+
+        let migrated = MeetingConfig::from(stored);
+
+        assert_eq!(
+            migrated.summary_prompt,
+            super::super::runtime::summary_template_instructions("brief").unwrap()
+        );
+
+        let mut stored = StoredMeetingConfig::from(MeetingConfig::default());
+        stored.summary_prompt = LEGACY_LOOSE_BLUF_SUMMARY_PROMPT.into();
+        let migrated = MeetingConfig::from(stored);
+        assert_eq!(
+            migrated.summary_prompt,
+            super::super::runtime::summary_template_instructions("standard").unwrap()
+        );
+
+        let mut stored = StoredMeetingConfig::from(MeetingConfig::default());
+        stored.summary_prompt = LEGACY_FLAT_BLUF_SUMMARY_PROMPT.into();
+        let migrated = MeetingConfig::from(stored);
+        assert_eq!(
+            migrated.summary_prompt,
+            super::super::runtime::summary_template_instructions("standard").unwrap()
+        );
+
+        let mut stored = StoredMeetingConfig::from(MeetingConfig::default());
+        stored.summary_prompt = LEGACY_LABELED_BLUF_SUMMARY_PROMPT.into();
+        let migrated = MeetingConfig::from(stored);
+        assert_eq!(
+            migrated.summary_prompt,
+            super::super::runtime::summary_template_instructions("standard").unwrap()
+        );
     }
 
     #[test]
@@ -3654,6 +3825,84 @@ mod tests {
         let tag_hits = fixture.store.search_content("lea", 10).unwrap();
         assert_eq!(tag_hits.len(), 1);
         assert!(tag_hits[0].tags_match);
+    }
+
+    #[test]
+    fn readable_transcript_groups_fragments_without_crossing_speakers() {
+        let segment =
+            |id: &str, start_ms: i64, end_ms: i64, text: &str, channel: &str, speaker: &str| {
+                TranscriptSegmentRecord {
+                    segment: TranscriptSegmentInput {
+                        id: id.into(),
+                        start_ms,
+                        end_ms,
+                        text: text.into(),
+                        channel_id: Some(channel.into()),
+                        speaker: Some(speaker.into()),
+                        confidence: None,
+                        is_final: true,
+                        metadata: json!({}),
+                    },
+                    created_revision: 1,
+                    updated_revision: 1,
+                }
+            };
+        let readable = readable_transcript_segments(
+            &[
+                segment("s1", 0, 2_000, "The contract is", "system", "Others"),
+                segment("s2", 2_000, 4_000, "ready.", "system", "Others"),
+                segment("s3", 4_000, 5_000, "Good.", "microphone", "You"),
+            ],
+            &[],
+        );
+
+        assert_eq!(readable.len(), 2);
+        assert_eq!(readable[0].text, "The contract is ready.");
+        assert_eq!((readable[0].start_ms, readable[0].end_ms), (0, 4_000));
+        assert_eq!(readable[1].text, "Good.");
+    }
+
+    #[test]
+    fn user_title_and_graph_draft_survive_generated_summary_updates() {
+        let fixture = fixture();
+        create_meeting(&fixture, "meeting-context");
+        fixture
+            .platform
+            .update_content(
+                "meeting-context",
+                &MeetingUpdatePatch {
+                    title: Some("Client planning".into()),
+                    graph_draft: Some(MeetingGraphDraft {
+                        project_resolved: true,
+                        project_id: Some("project-alpha".into()),
+                        people_ids: vec!["person-ana".into()],
+                        scope_id: Some("team:main".into()),
+                    }),
+                    ..MeetingUpdatePatch::default()
+                },
+            )
+            .unwrap();
+        fixture
+            .platform
+            .update_content(
+                "meeting-context",
+                &MeetingUpdatePatch {
+                    generated_title: Some("Generated replacement title".into()),
+                    summary: Some("- Ship Friday.".into()),
+                    ..MeetingUpdatePatch::default()
+                },
+            )
+            .unwrap();
+
+        let content = fixture.platform.content("meeting-context").unwrap();
+        assert_eq!(content.title.as_deref(), Some("Client planning"));
+        assert_eq!(content.summary.as_deref(), Some("- Ship Friday."));
+        assert_eq!(
+            content.graph_draft.project_id.as_deref(),
+            Some("project-alpha")
+        );
+        assert_eq!(content.graph_draft.people_ids, ["person-ana"]);
+        assert_eq!(content.graph_draft.scope_id.as_deref(), Some("team:main"));
     }
 
     #[test]

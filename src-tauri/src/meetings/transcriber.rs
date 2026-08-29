@@ -74,7 +74,10 @@ const MAX_INITIAL_CONNECT_ATTEMPTS: u8 = 2;
 const BASE_RECONNECT_DELAY: Duration = Duration::from_millis(250);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(4);
 const OPENAI_SAMPLE_RATE_HZ: u32 = 24_000;
-const OPENAI_COMMIT_CHUNKS: usize = 2;
+const OPENAI_VAD_THRESHOLD: f64 = 0.5;
+const OPENAI_VAD_PREFIX_PADDING_MS: u64 = 300;
+const OPENAI_VAD_SILENCE_DURATION_MS: u64 = 800;
+const OPENAI_VAD_SETTLE_TIMEOUT: Duration = Duration::from_millis(1_500);
 const OPENAI_FINALIZE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// A selected provider. The runtime route is resolved once per recording and
@@ -1433,6 +1436,10 @@ struct OpenAiItemState {
 
 struct OpenAiTranscriptState {
     channel: OpenAiChannel,
+    session_start_ms: Option<u64>,
+    latest_audio_end_ms: Option<u64>,
+    active_speech: Option<(String, u64)>,
+    pending_items: HashSet<String>,
     pending_ranges: VecDeque<OpenAiAudioRange>,
     buffered_range: Option<OpenAiAudioRange>,
     buffered_items: HashSet<String>,
@@ -1446,13 +1453,16 @@ struct OpenAiTranscriptState {
 #[derive(Default)]
 struct OpenAiEventEffect {
     batches: Vec<NormalizedTranscriptBatch>,
-    completed_turn: bool,
 }
 
 impl OpenAiTranscriptState {
     fn new(channel: OpenAiChannel, provider_sequence: Arc<AtomicU64>) -> Self {
         Self {
             channel,
+            session_start_ms: None,
+            latest_audio_end_ms: None,
+            active_speech: None,
+            pending_items: HashSet::new(),
             pending_ranges: VecDeque::new(),
             buffered_range: None,
             buffered_items: HashSet::new(),
@@ -1465,6 +1475,11 @@ impl OpenAiTranscriptState {
     }
 
     fn observe_audio(&mut self, range: OpenAiAudioRange) {
+        self.session_start_ms.get_or_insert(range.start_ms);
+        self.latest_audio_end_ms = Some(
+            self.latest_audio_end_ms
+                .map_or(range.end_ms, |end| end.max(range.end_ms)),
+        );
         let merged = self
             .buffered_range
             .map_or(range, |buffered| OpenAiAudioRange {
@@ -1472,6 +1487,16 @@ impl OpenAiTranscriptState {
                 end_ms: buffered.end_ms.max(range.end_ms),
             });
         self.buffered_range = Some(merged);
+        if let Some((item_id, start_ms)) = &self.active_speech {
+            let active = OpenAiAudioRange {
+                start_ms: *start_ms,
+                end_ms: range.end_ms.max(start_ms.saturating_add(1)),
+            };
+            self.item_ranges.insert(item_id.clone(), active);
+            if let Some(item) = self.items.get_mut(item_id) {
+                item.range = Some(active);
+            }
+        }
         for item_id in &self.buffered_items {
             self.item_ranges.insert(item_id.clone(), merged);
             if let Some(item) = self.items.get_mut(item_id) {
@@ -1480,6 +1505,7 @@ impl OpenAiTranscriptState {
         }
     }
 
+    #[cfg(test)]
     fn queue_commit(&mut self, range: OpenAiAudioRange) {
         for item_id in self.buffered_items.drain() {
             self.item_ranges.insert(item_id.clone(), range);
@@ -1497,8 +1523,67 @@ impl OpenAiTranscriptState {
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
         match event_type {
+            "input_audio_buffer.speech_started" => {
+                let item_id = required_openai_string(value, "item_id")?;
+                let relative_start_ms = required_openai_u64(value, "audio_start_ms")?;
+                let start_ms = self.session_time(relative_start_ms)?;
+                let end_ms = self
+                    .latest_audio_end_ms
+                    .unwrap_or_else(|| start_ms.saturating_add(1))
+                    .max(start_ms.saturating_add(1));
+                let range = OpenAiAudioRange { start_ms, end_ms };
+                self.active_speech = Some((item_id.to_string(), start_ms));
+                if !self.completed_items.contains(item_id) {
+                    self.pending_items.insert(item_id.to_string());
+                }
+                self.item_ranges.insert(item_id.to_string(), range);
+                self.last_bound_range = Some(range);
+                Ok(OpenAiEventEffect::default())
+            }
+            "input_audio_buffer.speech_stopped" => {
+                let item_id = required_openai_string(value, "item_id")?;
+                let relative_end_ms = required_openai_u64(value, "audio_end_ms")?;
+                let start_ms = self
+                    .item_ranges
+                    .get(item_id)
+                    .map(|range| range.start_ms)
+                    .or_else(|| {
+                        self.active_speech
+                            .as_ref()
+                            .filter(|(active, _)| active == item_id)
+                            .map(|(_, start_ms)| *start_ms)
+                    })
+                    .ok_or_else(|| {
+                        "OpenAI stopped speech before reporting its start".to_string()
+                    })?;
+                let end_ms = self
+                    .session_time(relative_end_ms)?
+                    .max(start_ms.saturating_add(1));
+                let range = OpenAiAudioRange { start_ms, end_ms };
+                self.item_ranges.insert(item_id.to_string(), range);
+                if let Some(item) = self.items.get_mut(item_id) {
+                    item.range = Some(range);
+                }
+                if self
+                    .active_speech
+                    .as_ref()
+                    .is_some_and(|(active, _)| active == item_id)
+                {
+                    self.active_speech = None;
+                }
+                if !self.completed_items.contains(item_id) {
+                    self.pending_items.insert(item_id.to_string());
+                }
+                self.buffered_range = None;
+                self.buffered_items.remove(item_id);
+                self.last_bound_range = Some(range);
+                Ok(OpenAiEventEffect::default())
+            }
             "input_audio_buffer.committed" => {
                 let item_id = required_openai_string(value, "item_id")?;
+                if !self.completed_items.contains(item_id) {
+                    self.pending_items.insert(item_id.to_string());
+                }
                 // OpenAI can begin emitting transcription deltas before its
                 // committed acknowledgement reaches us. In that case
                 // `range_for` has already bound the oldest queued range to
@@ -1540,6 +1625,7 @@ impl OpenAiTranscriptState {
                 if delta.trim().is_empty() || self.completed_items.contains(item_id) {
                     return Ok(OpenAiEventEffect::default());
                 }
+                self.pending_items.insert(item_id.to_string());
                 let range = self.range_for(item_id)?;
                 let item = self.items.entry(item_id.to_string()).or_default();
                 item.text.push_str(delta);
@@ -1555,7 +1641,6 @@ impl OpenAiTranscriptState {
                 )?;
                 Ok(OpenAiEventEffect {
                     batches: vec![self.batch(segment)?],
-                    completed_turn: false,
                 })
             }
             "conversation.item.input_audio_transcription.completed" => {
@@ -1565,6 +1650,14 @@ impl OpenAiTranscriptState {
                 }
                 let range = self.range_for(item_id)?;
                 self.completed_items.insert(item_id.to_string());
+                self.pending_items.remove(item_id);
+                if self
+                    .active_speech
+                    .as_ref()
+                    .is_some_and(|(active, _)| active == item_id)
+                {
+                    self.active_speech = None;
+                }
                 let completed = value
                     .get("transcript")
                     .and_then(serde_json::Value::as_str)
@@ -1591,10 +1684,7 @@ impl OpenAiTranscriptState {
                         &text,
                     )?)?]
                 };
-                Ok(OpenAiEventEffect {
-                    batches,
-                    completed_turn: true,
-                })
+                Ok(OpenAiEventEffect { batches })
             }
             "conversation.item.input_audio_transcription.failed" | "error" => {
                 let code = value
@@ -1611,13 +1701,31 @@ impl OpenAiTranscriptState {
         }
     }
 
+    fn session_time(&self, relative_ms: u64) -> Result<u64, String> {
+        let start_ms = self.session_start_ms.ok_or_else(|| {
+            "OpenAI reported voice activity before any audio was appended".to_string()
+        })?;
+        let timeline_ms = start_ms.saturating_add(relative_ms);
+        Ok(self
+            .latest_audio_end_ms
+            .map_or(timeline_ms, |end_ms| timeline_ms.min(end_ms)))
+    }
+
+    fn pending_turn_count(&self) -> usize {
+        self.pending_items.len()
+    }
+
+    fn has_active_speech(&self) -> bool {
+        self.active_speech.is_some()
+    }
+
     fn range_for(&mut self, item_id: &str) -> Result<OpenAiAudioRange, String> {
         if let Some(range) = self.item_ranges.get(item_id).copied() {
             return Ok(range);
         }
         // A long-lived transcription session can emit a trailing item after
-        // the committed turn's final event but before the next two-second
-        // commit exists. It still belongs to the last confirmed audio window;
+        // the committed turn's final event but before the next voice boundary
+        // exists. It still belongs to the last confirmed audio window;
         // terminating the worker here made live transcription freeze at four
         // seconds while capture continued normally.
         let pending = self.pending_ranges.front().copied();
@@ -1654,6 +1762,13 @@ fn required_openai_string<'a>(
         .get(field)
         .and_then(serde_json::Value::as_str)
         .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("OpenAI realtime event omitted {field}"))
+}
+
+fn required_openai_u64(value: &serde_json::Value, field: &str) -> Result<u64, String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| format!("OpenAI realtime event omitted {field}"))
 }
 
@@ -1853,7 +1968,12 @@ async fn openai_session(
                                 "model": model,
                                 "delay": "low"
                             },
-                            "turn_detection": null
+                            "turn_detection": {
+                                "type": "server_vad",
+                                "threshold": OPENAI_VAD_THRESHOLD,
+                                "prefix_padding_ms": OPENAI_VAD_PREFIX_PADDING_MS,
+                                "silence_duration_ms": OPENAI_VAD_SILENCE_DURATION_MS
+                            }
                         }
                     }
                 }
@@ -1905,12 +2025,9 @@ async fn drive_openai_channel(
     let (mut writer, mut reader) = websocket.split();
     let mut transcript = OpenAiTranscriptState::new(channel, sequence);
     let mut next_sequence = first_sequence;
-    let mut turn_start_ms = None;
-    let mut turn_end_ms = first_sequence.saturating_mul(1_000);
-    let mut turn_chunks = 0_usize;
-    let mut outstanding_turns = 0_usize;
     let mut finalizing = *finalizing_rx.borrow();
-    let mut finalizing_since = finalizing.then(Instant::now);
+    let mut source_exhausted_since = None;
+    let mut vad_tail_padded = false;
     let mut poll = tokio::time::interval(AUDIO_POLL_INTERVAL);
 
     loop {
@@ -1918,7 +2035,6 @@ async fn drive_openai_channel(
             changed = finalizing_rx.changed(), if !finalizing => {
                 if changed.is_err() || *finalizing_rx.borrow() {
                     finalizing = true;
-                    finalizing_since = Some(Instant::now());
                 }
             }
             message = reader.next() => {
@@ -1934,7 +2050,9 @@ async fn drive_openai_channel(
                             .unwrap_or("unknown");
                         if matches!(
                             event_type,
-                            "input_audio_buffer.committed"
+                            "input_audio_buffer.speech_started"
+                                | "input_audio_buffer.speech_stopped"
+                                | "input_audio_buffer.committed"
                                 | "conversation.item.input_audio_transcription.completed"
                                 | "conversation.item.input_audio_transcription.failed"
                                 | "error"
@@ -1951,9 +2069,6 @@ async fn drive_openai_channel(
                             );
                         }
                         let effect = transcript.handle(&value)?;
-                        if effect.completed_turn {
-                            outstanding_turns = outstanding_turns.saturating_sub(1);
-                        }
                         for batch in effect.batches {
                             batches.send(batch)
                                 .map_err(|_| "OpenAI transcript consumer stopped".to_string())?;
@@ -1972,6 +2087,7 @@ async fn drive_openai_channel(
             _ = poll.tick() => {
                 let chunks = audio.chunks_from(next_sequence, finalizing, 1)?;
                 if let Some(chunk) = chunks.first() {
+                    source_exhausted_since = None;
                     let pcm = openai_pcm16_mono(&chunk.bytes, channel)?;
                     writer.send(Message::text(json!({
                         "type": "input_audio_buffer.append",
@@ -1982,9 +2098,6 @@ async fn drive_openai_channel(
                         start_ms: chunk.start_ms,
                         end_ms: chunk.end_ms,
                     });
-                    turn_start_ms.get_or_insert(chunk.start_ms);
-                    turn_end_ms = chunk.end_ms;
-                    turn_chunks = turn_chunks.saturating_add(1);
                     next_sequence = chunk.sequence.saturating_add(1);
                     diagnostics.record(
                         "openai.audio.appended",
@@ -1995,40 +2108,33 @@ async fn drive_openai_channel(
                             "endMs": chunk.end_ms,
                         }),
                     );
-                    if turn_chunks >= OPENAI_COMMIT_CHUNKS {
-                        let committed_start_ms = turn_start_ms.take().unwrap_or(chunk.start_ms);
-                        commit_openai_turn(
-                            &mut writer,
-                            &mut transcript,
-                            committed_start_ms,
-                            turn_end_ms,
-                        ).await?;
-                        turn_chunks = 0;
-                        outstanding_turns = outstanding_turns.saturating_add(1);
-                        diagnostics.record(
-                            "openai.turn.committed",
-                            json!({
-                                "channel": channel.id(),
-                                "startMs": committed_start_ms,
-                                "endMs": turn_end_ms,
-                                "outstandingTurns": outstanding_turns,
-                            }),
-                        );
-                    }
                     continue;
                 }
                 if finalizing {
-                    if turn_chunks > 0 {
-                        commit_openai_turn(
-                            &mut writer,
-                            &mut transcript,
-                            turn_start_ms.take().unwrap_or(turn_end_ms.saturating_sub(1)),
-                            turn_end_ms,
-                        ).await?;
-                        turn_chunks = 0;
-                        outstanding_turns = outstanding_turns.saturating_add(1);
+                    if !vad_tail_padded {
+                        let silence = vec![
+                            0_u8;
+                            OPENAI_SAMPLE_RATE_HZ as usize * size_of::<i16>()
+                        ];
+                        writer.send(Message::text(json!({
+                            "type": "input_audio_buffer.append",
+                            "audio": BASE64_STANDARD.encode(silence),
+                        }).to_string())).await
+                            .map_err(|_| "could not flush OpenAI voice activity at Stop".to_string())?;
+                        vad_tail_padded = true;
+                        source_exhausted_since = Some(Instant::now());
+                        diagnostics.record(
+                            "openai.vad.tail-padded",
+                            json!({ "channel": channel.id() }),
+                        );
+                        continue;
                     }
-                    if outstanding_turns == 0 {
+                    let settled = source_exhausted_since
+                        .is_some_and(|started| started.elapsed() >= OPENAI_VAD_SETTLE_TIMEOUT);
+                    if settled
+                        && transcript.pending_turn_count() == 0
+                        && !transcript.has_active_speech()
+                    {
                         diagnostics.record(
                             "openai.channel.finished",
                             json!({ "channel": channel.id(), "nextSequence": next_sequence }),
@@ -2036,33 +2142,15 @@ async fn drive_openai_channel(
                         let _ = writer.send(Message::Close(None)).await;
                         return Ok(());
                     }
-                    if finalizing_since.is_some_and(|started| started.elapsed() > OPENAI_FINALIZE_TIMEOUT) {
+                    if source_exhausted_since
+                        .is_some_and(|started| started.elapsed() > OPENAI_FINALIZE_TIMEOUT)
+                    {
                         return Err("OpenAI realtime transcript did not finish before the recovery deadline".into());
                     }
                 }
             }
         }
     }
-}
-
-async fn commit_openai_turn<S>(
-    writer: &mut S,
-    transcript: &mut OpenAiTranscriptState,
-    start_ms: u64,
-    end_ms: u64,
-) -> Result<(), String>
-where
-    S: futures_util::Sink<Message> + Unpin,
-    S::Error: std::fmt::Debug,
-{
-    writer
-        .send(Message::text(
-            json!({ "type": "input_audio_buffer.commit" }).to_string(),
-        ))
-        .await
-        .map_err(|_| "could not commit audio to OpenAI".to_string())?;
-    transcript.queue_commit(OpenAiAudioRange { start_ms, end_ms });
-    Ok(())
 }
 
 struct CustomRunContext<'a> {
@@ -3813,7 +3901,53 @@ mod tests {
         assert_eq!(completed.state, SegmentState::Final);
         assert_eq!(completed.text, "Guten Morgen");
         assert_eq!(completed.segment_id, partial.segment_id);
-        assert!(final_event.completed_turn);
+        assert_eq!(state.pending_turn_count(), 0);
+    }
+
+    #[test]
+    fn openai_server_vad_maps_a_natural_turn_onto_a_continued_timeline() {
+        let mut state =
+            OpenAiTranscriptState::new(OpenAiChannel::System, Arc::new(AtomicU64::new(1)));
+        state.observe_audio(OpenAiAudioRange {
+            start_ms: 42_000,
+            end_ms: 43_000,
+        });
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.speech_started",
+                "item_id": "natural-turn",
+                "audio_start_ms": 250,
+            }))
+            .unwrap();
+        state.observe_audio(OpenAiAudioRange {
+            start_ms: 43_000,
+            end_ms: 44_000,
+        });
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.speech_stopped",
+                "item_id": "natural-turn",
+                "audio_end_ms": 1_750,
+            }))
+            .unwrap();
+        state
+            .handle(&json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "natural-turn",
+            }))
+            .unwrap();
+        let completed = state
+            .handle(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "natural-turn",
+                "transcript": "A complete thought with context.",
+            }))
+            .unwrap();
+
+        let segment = &completed.batches[0].segments[0];
+        assert_eq!((segment.start_ms, segment.end_ms), (42_250, 43_750));
+        assert_eq!(state.pending_turn_count(), 0);
+        assert!(!state.has_active_speech());
     }
 
     #[test]
@@ -4280,7 +4414,15 @@ mod tests {
             configuration["session"]["audio"]["input"]["transcription"]["model"],
             "gpt-live-transcribe"
         );
-        assert!(configuration["session"]["audio"]["input"]["turn_detection"].is_null());
+        assert_eq!(
+            configuration["session"]["audio"]["input"]["turn_detection"],
+            json!({
+                "type": "server_vad",
+                "threshold": OPENAI_VAD_THRESHOLD,
+                "prefix_padding_ms": OPENAI_VAD_PREFIX_PADDING_MS,
+                "silence_duration_ms": OPENAI_VAD_SILENCE_DURATION_MS,
+            })
+        );
         websocket
             .send(Message::text(
                 json!({ "type": "session.updated" }).to_string(),
@@ -4288,9 +4430,9 @@ mod tests {
             .await
             .unwrap();
 
-        let mut turn_audio = Vec::new();
         let mut total_audio_bytes = 0_usize;
         let mut turns = 0_usize;
+        let mut source_chunks = 0_usize;
         let mut channel = None;
         loop {
             match websocket.next().await.unwrap().unwrap() {
@@ -4312,36 +4454,55 @@ mod tests {
                                 });
                             }
                             total_audio_bytes = total_audio_bytes.saturating_add(bytes.len());
-                            turn_audio.push(bytes);
-                        }
-                        "input_audio_buffer.commit" => {
-                            assert_eq!(turn_audio.len(), OPENAI_COMMIT_CHUNKS);
-                            turns = turns.saturating_add(1);
-                            let channel = channel.expect("source audio identifies a channel");
-                            let transcript = format!("{channel} live turn {turns}");
-                            let item_id = format!("{channel}-item-{turns}");
-                            for event in [
-                                json!({
-                                    "type": "input_audio_buffer.committed",
-                                    "item_id": item_id,
-                                }),
-                                json!({
-                                    "type": "conversation.item.input_audio_transcription.delta",
-                                    "item_id": item_id,
-                                    "delta": transcript.split_whitespace().next().unwrap(),
-                                }),
-                                json!({
-                                    "type": "conversation.item.input_audio_transcription.completed",
-                                    "item_id": item_id,
-                                    "transcript": transcript,
-                                }),
-                            ] {
-                                websocket
-                                    .send(Message::text(event.to_string()))
-                                    .await
-                                    .unwrap();
+                            let is_tail_padding = bytes.iter().all(|byte| *byte == 0);
+                            if !is_tail_padding {
+                                source_chunks = source_chunks.saturating_add(1);
+                                let channel = channel.expect("source audio identifies a channel");
+                                let item_id = format!("{channel}-item-1");
+                                if source_chunks == 1 {
+                                    websocket
+                                        .send(Message::text(
+                                            json!({
+                                                "type": "input_audio_buffer.speech_started",
+                                                "item_id": item_id,
+                                                "audio_start_ms": 0,
+                                            })
+                                            .to_string(),
+                                        ))
+                                        .await
+                                        .unwrap();
+                                }
+                                if source_chunks == 4 {
+                                    turns = 1;
+                                    let transcript = format!("{channel} natural speech turn");
+                                    for event in [
+                                        json!({
+                                            "type": "input_audio_buffer.speech_stopped",
+                                            "item_id": item_id,
+                                            "audio_end_ms": 4_000,
+                                        }),
+                                        json!({
+                                            "type": "input_audio_buffer.committed",
+                                            "item_id": item_id,
+                                        }),
+                                        json!({
+                                            "type": "conversation.item.input_audio_transcription.delta",
+                                            "item_id": item_id,
+                                            "delta": transcript.split_whitespace().next().unwrap(),
+                                        }),
+                                        json!({
+                                            "type": "conversation.item.input_audio_transcription.completed",
+                                            "item_id": item_id,
+                                            "transcript": transcript,
+                                        }),
+                                    ] {
+                                        websocket
+                                            .send(Message::text(event.to_string()))
+                                            .await
+                                            .unwrap();
+                                    }
+                                }
                             }
-                            turn_audio.clear();
                         }
                         unexpected => panic!("unexpected OpenAI client event {unexpected}"),
                     }
@@ -4551,12 +4712,12 @@ mod tests {
         channels.sort_unstable();
         assert_eq!(channels, ["microphone", "system"]);
         assert!(sessions.0 .1 > 0 && sessions.1 .1 > 0);
-        assert_eq!(sessions.0 .2, 2);
-        assert_eq!(sessions.1 .2, 2);
+        assert_eq!(sessions.0 .2, 1);
+        assert_eq!(sessions.1 .2, 1);
         assert_eq!(accepted_handshakes.load(Ordering::Relaxed), 2);
 
         let transcript = store.transcript_snapshot("meeting-1", None).unwrap();
-        assert_eq!(transcript.segments.len(), 4);
+        assert_eq!(transcript.segments.len(), 2);
         let microphone = transcript
             .segments
             .iter()
@@ -4568,10 +4729,10 @@ mod tests {
             .find(|segment| segment.segment.channel_id.as_deref() == Some("system"))
             .unwrap();
         assert_eq!(microphone.segment.speaker.as_deref(), Some("You"));
-        assert!(microphone.segment.text.starts_with("microphone live turn"));
+        assert_eq!(microphone.segment.text, "microphone natural speech turn");
         assert!(microphone.segment.is_final);
         assert_eq!(system.segment.speaker.as_deref(), Some("Others"));
-        assert!(system.segment.text.starts_with("system live turn"));
+        assert_eq!(system.segment.text, "system natural speech turn");
         assert!(system.segment.is_final);
     }
 

@@ -42,6 +42,7 @@ const DEFAULT_MCP_URL: &str = "http://127.0.0.1:17532/mcp";
 const ROUTINE_COLS: u16 = 100;
 const ROUTINE_ROWS: u16 = 30;
 const MEETING_TRANSCRIPT_PATH_ENV: &str = "MIMIR_MEETING_TRANSCRIPT_PATH";
+const MEETING_NOTES_PATH_ENV: &str = "MIMIR_MEETING_NOTES_PATH";
 const MEETING_OUTPUT_PATH_ENV: &str = "MIMIR_MEETING_OUTPUT_PATH";
 
 #[derive(Debug, Clone)]
@@ -1521,7 +1522,7 @@ fn validate_meeting_hook(request: &MeetingHookLaunch) -> Result<(), String> {
     if request.env.keys().any(|key| {
         !matches!(
             key.as_str(),
-            MEETING_TRANSCRIPT_PATH_ENV | MEETING_OUTPUT_PATH_ENV
+            MEETING_TRANSCRIPT_PATH_ENV | MEETING_NOTES_PATH_ENV | MEETING_OUTPUT_PATH_ENV
         )
     }) || request.env.values().any(|value| value.contains('\0'))
     {
@@ -2532,7 +2533,10 @@ mod tests {
                 prompt: prompt.into(),
                 preset_id: Some("review-agent".into()),
                 workspace: harness.workspace.to_string_lossy().into_owned(),
-                env: BTreeMap::from([(MEETING_OUTPUT_PATH_ENV.into(), "summary.json".into())]),
+                env: BTreeMap::from([
+                    (MEETING_NOTES_PATH_ENV.into(), "user-notes.txt".into()),
+                    (MEETING_OUTPUT_PATH_ENV.into(), "summary.json".into()),
+                ]),
             })
             .unwrap();
 
@@ -2566,6 +2570,10 @@ mod tests {
                 .get("MIMIR_MEETING_TRANSCRIPT_REVISION")
                 .map(String::as_str),
             Some("9")
+        );
+        assert_eq!(
+            launch.env.get(MEETING_NOTES_PATH_ENV).map(String::as_str),
+            Some("user-notes.txt")
         );
         assert_eq!(
             launch.env.get(MEETING_OUTPUT_PATH_ENV).map(String::as_str),
