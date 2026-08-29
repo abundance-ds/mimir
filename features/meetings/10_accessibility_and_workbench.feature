@@ -53,18 +53,18 @@ Feature: Keep recording state operable and understandable throughout Mimir
     And accepted mutations commit in request order without returning an empty success
 
   @MTG-207 @automated @renderer @contract
-  Scenario: Reviewed tags remain visible and editable
+  Scenario: Legacy meeting tags stay searchable without adding review chrome
     Given a terminal meeting has reviewed tags
-    When the meeting appears in native detail, agent metadata, and the Scribe review surface
-    Then the same bounded tags are visible instead of becoming write-only metadata
-    And the user can keyboard-edit at most 64 tags of at most 80 characters each
+    When the meeting appears in native detail, agent metadata, search, and the Scribe review surface
+    Then the same bounded tags remain available to native search and agent updates
+    And Scribe does not add a second tag editor beside Graph filing metadata
 
   @MTG-208 @automated @renderer @accessibility
   Scenario: Review opens on the useful result without duplicating global settings
     Given a completed meeting already has a summary
     When the user opens that meeting
-    Then Summary is the default tab and its task controls precede the summary
-    And the detail header contains only Back and one actions menu
+    Then Summary is the default tab and Regenerate opens one compact per-run dialog
+    And the detail header contains Back, shared save state, eligible Continue, and one actions menu
     And the global summary prompt remains editable in exactly one settings surface
 
   @MTG-209 @automated @renderer @contract
@@ -78,7 +78,8 @@ Feature: Keep recording state operable and understandable throughout Mimir
   Scenario: Meeting actions are consistent from list and detail
     Given a meeting is visible in the library or detail view
     When the user opens its context or overflow menu with pointer or keyboard
-    Then Rename, Show in Finder, save-copy actions, and Delete are available in one menu
+    Then the list menu provides Rename and eligible Continue while detail provides direct title and header Continue
+    And file, recovery, follow-up, and Delete actions remain available where applicable
     And destructive deletion still requires explicit confirmation
 
   @MTG-211 @automated @renderer @recovery

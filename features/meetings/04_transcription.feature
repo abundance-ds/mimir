@@ -115,6 +115,7 @@ Feature: Produce live and batch transcripts through local or custom routes
     Given a verified local model needs longer than the former startup deadline to initialize
     When the user starts and later stops recording
     Then recording starts promptly with transcription shown as initializing
+    And local decoding checkpoints both channels in thirty-second windows and flushes the shorter Stop tail
     And the owned worker either finalizes normally or queues one durable delayed repair without exposing worker internals
 
   @MTG-076 @automated @native @contract @performance
@@ -122,6 +123,8 @@ Feature: Produce live and batch transcripts through local or custom routes
     Given the hosted route uses the OpenAI Realtime transcription contract
     When committed microphone and system chunks arrive during recording
     Then Mimir streams each channel through an independently owned session
+    And server voice activity commits natural speech turns instead of fixed timer windows
+    And sustained silence produces no transcript turn
     And transcript deltas retain Mimir's You and Others channel provenance
     And whitespace-only provider framing never becomes an empty segment or stops either session
 
@@ -149,6 +152,7 @@ Feature: Produce live and batch transcripts through local or custom routes
     When the user stops or reopens that meeting in Review
     Then Review renders the paged transcript rather than the empty library projection
     And final transcript text does not disappear during the recording-to-review handoff
+    And adjacent final fragments from one speaker appear as one bounded readable utterance
 
   @MTG-080 @automated @frontend @contract
   Scenario: Visible live words supersede a lagging readiness label
@@ -169,10 +173,10 @@ Feature: Produce live and batch transcripts through local or custom routes
     And only one all-final replacement generation advances the transcript revision
 
   @MTG-082 @automated @native @recovery @contract
-  Scenario: Continued OpenAI transcription accepts words before the first explicit commit
+  Scenario: Continued OpenAI transcription maps server voice boundaries onto durable time
     Given a continued meeting already has durable transcript time
-    And OpenAI emits transcript deltas after the first appended audio chunk but before its commit
-    When the continued live worker maps the provider item onto Mimir's timeline
+    And OpenAI reports session-relative speech start and stop offsets
+    When the continued live worker maps the natural turn onto Mimir's timeline
     Then the words retain the continued meeting's audio time
-    And the later commit expands the same item to the complete turn
+    And the final speech boundary expands the same item to the complete turn
     And the live worker remains available

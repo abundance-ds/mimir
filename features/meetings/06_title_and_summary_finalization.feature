@@ -15,7 +15,7 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
   Scenario: A finalization job launches with exact immutable inputs
     Given a queued title and summary job is eligible to run
     When Mimir launches its configured editable summary instructions and CLI agent preset
-    Then the durable Activity receives exact argv and an immutable transcript snapshot identity
+    Then the durable Activity receives exact argv and immutable transcript and notes paths
     And an authority-expanding launcher preset is reduced to a private hook-only sandbox
     And the exact user-reviewed summary instructions are part of the immutable job input
     And no shell string is parsed or evaluated
@@ -26,6 +26,7 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
     When Mimir projects the completed meeting
     Then the generated title and summary are visible in Scribe
     And the user can deliberately edit the persisted title or summary
+    And a title written before the agent completes is not replaced by generated output
 
   @MTG-113 @automated @domain @native
   Scenario: Summary output is accepted only for the exact terminal revision
@@ -79,9 +80,9 @@ Feature: Finalize a meeting title and summary from a terminal transcript revisio
     And the global summary defaults remain unchanged
 
   @MTG-120 @automated @renderer @desktop
-  Scenario: Custom follow-up opens as an interactive agent Activity
+  Scenario: Ask agent opens an interactive follow-up Activity
     Given the user is reviewing a completed meeting
-    When they choose Custom, select a CLI agent, enter a prompt, and run it
+    When they choose Ask agent, select a CLI agent, enter a prompt, and run it
     Then Mimir opens a durable interactive Activity with that exact meeting identity
-    And the agent can retrieve the meeting through meetings_get
+    And the agent receives the immutable terminal transcript path and revision
     And no knowledge-graph action is presented as a Scribe task

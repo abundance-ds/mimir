@@ -249,6 +249,39 @@ global settings. `meetings_run_summary` freezes the exact format, prompt, and
 launcher preset into a new retry-generation job. The native safety/output
 envelope remains fixed around the editable instructions. Custom follow-up is a
 separate interactive Activity, not a summary template or graph shortcut.
+When a built-in default changes, migrate the exact old built-in text during
+configuration load. Otherwise the saved text still wins and silently defeats
+the new recipe. Never migrate a different user-written prompt.
+
+### Meeting notes are evidence, not instructions
+
+Preparation and live notes can contain useful facts, actions, scratch words,
+or text the user planned to say. Materialize them as a controlled input beside
+the transcript and tell the summary agent to use them with judgment. Treat
+both inputs as untrusted data. The agent must not reproduce a notes appendix;
+native code appends the exact user text once after it validates the summary.
+
+### Meeting follow-up paths use one strict allowlist
+
+The automatic summary Activity receives controlled transcript, notes, and
+output paths. `routine_runtime.rs` must allow all three environment keys. If a
+new controlled input is added in `meetings/jobs.rs`, update the validator and
+its exact-launch test in the same change. Otherwise the Activity fails before
+the summarizer starts with an invalid environment key or value.
+
+### A user-written meeting title wins
+
+Persist whether the title came from the user. Automatic summary output can
+fill an untouched title, but it must not overwrite a title entered before or
+during the meeting. Do not infer authorship from the title text.
+
+### Graph filing copies the brief, not the transcript
+
+Scribe and Business Graph are separate app owners. File one existing `meeting`
+node with the Scribe meeting id as its stable source link. Keep the full
+transcript in Scribe and load it by exact id when the user follows the link.
+Project can be `None`; do not block automatic summary or inbox entry on missing
+metadata.
 
 ### Classify staged audio before accepting terminal text
 

@@ -41,6 +41,9 @@ New graph items default to Team when it is mounted. Journal defaults to
 Private. Workspace storage is an explicit exception. All create paths can set
 another mounted physical scope. A Team scope that mounts after startup joins
 an unfiltered view; Mimir preserves an explicit scope filter.
+Meeting detail can move a filed meeting between mounted scopes. The move keeps
+the node id and removes the old Markdown source only after the new source is
+durable.
 
 ## Workspaces and Projects
 
@@ -112,6 +115,13 @@ can have several. `status` is normally `active` or `former`. A Person can have
 task assignment controls. `works_at` records affiliation independently, so a
 contractor can be a team member without a false employment relation.
 
+A filed meeting uses the existing `meeting` kind. Its body is the concise
+Scribe summary, including the exact `# User notes` appendix when present. Its
+primary links are optional `part_of` → Project and zero or more
+`attended_by` → Person relations. `sourceMeetingId`, `occurredAt`, and
+`durationMs` preserve the Scribe route and source timing. The transcript stays
+in Scribe.
+
 Projects use `projectType` (`client-engagement`, `product`, `lead`, `grant`, or
 `internal`), `projectStatus` (`warm-lead`, `planned`, `active`, `waiting`,
 `completed`, or `archived`).
@@ -149,7 +159,7 @@ stays in the Activity pane; files open in the persistent Editor.
 |---|---|
 | Work | Board, List, Attention |
 | Projects | Portfolio, List, Timeline |
-| Knowledge | List, Timeline |
+| Knowledge | Meetings, List, Timeline |
 | Journal | List, Timeline |
 | All | List, Timeline (kind filter) |
 | Changes | History |
@@ -158,6 +168,15 @@ Work is the startup surface. Changes is a paginated (50-event pages)
 time-ordered history of graph events with action, type, title, field changes,
 actor, and project context. Waiting-on-you pins at top; seen cursor +
 Mark caught up replaces unread counts.
+
+The Knowledge **Meetings** view is an inbox for completed Scribe summaries that
+have no Graph link. Selecting a row loads its full summary. A Project, People,
+or scope choice saved while preparing the meeting in Scribe prefills the inbox.
+An untouched Project stays unresolved; an explicit `None` remains `None`.
+Filing requires the Project question to be resolved, People are optional, and
+scope defaults to Team. The filed meeting then leaves the inbox. Its Peek and
+Focus surfaces keep Project, People, and scope editable and provide **Open in
+Scribe** for the full transcript.
 
 **Summarise** launcher: select CLI agent, Since date, optional instructions.
 Mimir fetches retained events from selected scopes, attaches a compact
@@ -306,7 +325,9 @@ Renderer ownership is split between `src/services/businessGraph.js`,
 `src/stores/businessGraph.js`, the built-in app, and its components under
 `src/mimir/apps/business-graph/` — including `WorkBoard.vue`, `NowView.vue`,
 `DispatchBar.vue`, `PortfolioView.vue`, `ProjectStanding.vue`,
-`EntityList.vue`, `TimelineView.vue`, and `GraphInspector.vue`.
+`MeetingInbox.vue`, `EntityList.vue`, `TimelineView.vue`, and
+`GraphInspector.vue`. `src-tauri/src/meeting_filing.rs` owns the narrow Scribe
+summary-to-Graph bridge.
 `WorkbenchApp.vue` mounts roots and owns the
 work-Activity handoff (foreground delegate or background dispatch);
 `AppActivity.vue` only routes the built-in surface.

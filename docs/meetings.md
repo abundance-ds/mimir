@@ -72,10 +72,27 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
   genuinely silent transcript completes without inventing a title, summary,
   or follow-up. A failed or unresolved transcript remains visibly
   recoverable and is never labelled complete.
-- Summary offers three clear starting points—Summary, Brief, and Decisions +
-  actions—plus Custom. Presets seed a per-run prompt that stays collapsed until
-  the user wants to fine-tune it. Custom opens an interactive CLI-agent
-  Activity for the reviewed meeting.
+- Summary offers three clear formats—Standard, Brief, and Decisions + actions.
+  A compact per-run dialog contains the format, agent, and collapsed editable
+  prompt. **Ask agent** is a separate interactive CLI-agent Activity for the
+  reviewed meeting.
+- **Prepare meeting** creates one Scribe row before capture. The user can edit
+  its title, Project, People, scope, and Markdown notes directly, then start
+  recording from that same row. These fields remain editable during capture
+  and Review. Project and People support search and minimal creation. Project
+  can stay unresolved or be set explicitly to `None`.
+- Notes and Summary are normal CodeMirror Markdown documents. They use the
+  available surface height, support Markdown highlighting and preview, and let
+  Tab indent content. They are not bounded text-area forms.
+- A title written by the user is authoritative. Later automatic summary work
+  can fill an untouched title, but it cannot replace a user-written title.
+- Scribe owns preparation notes, source audio, transcript, and summary. The
+  Business Graph owns the durable filed meeting. A completed summary appears
+  automatically in the Graph meeting inbox until it is filed.
+- Filing asks only for Project (`None` is valid), People, and physical scope.
+  Scope defaults to Team. Date, start time, and duration come from Scribe.
+  The Graph meeting stores a stable Scribe meeting id, so **Open in Scribe**
+  returns to the full transcript without copying it into Graph Markdown.
 
 ## Native composition
 
@@ -99,6 +116,10 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 | `native.rs` | startup composition and native lifecycle owners |
 | `permissions.rs` | bundle/responsibility identity and truthful TCC projection |
 
+`src-tauri/src/meeting_filing.rs` is the small boundary between the two apps.
+It copies one completed summary into one Graph `meeting` node and writes the
+stable link back to Scribe. It does not move or duplicate the transcript.
+
 Two deliberately small extracted crates sit under `src-tauri/crates/`:
 
 - `mimir-meeting-audio` contains the audited Anarlog-derived Core Audio process
@@ -113,12 +134,15 @@ application. The upstream workspace is not a runtime or build dependency.
 
 ## Lifecycle and crash contract
 
-The durable lifecycle is:
+The durable capture lifecycle is:
 
 ```text
 Created → Recording → Stopping → Finalizing → Completed
                   ↘ Interrupted / Failed ↗
 ```
+
+A notes-first row stays in the pre-capture `Detected` state, projected as
+`arming`, until Record changes that same row to `Recording`.
 
 Only one meeting may own capture. Lifecycle transitions use optimistic
 revisions in SQLite WAL mode. A one-second channel chunk is first staged in the
@@ -221,6 +245,9 @@ network provider. Separate microphone and system windows preserve the
 gate requires sustained speech evidence before Whisper inference; deterministic
 decoding, no-speech/log-probability thresholds, and bounded repetition
 filtering prevent room tone and isolated clicks from becoming invented text.
+Each channel checkpoints every 30 seconds, which matches Whisper's acoustic
+window and gives the decoder full sentence context. Stop flushes only the
+shorter durable tail before summary and follow-up work starts.
 
 ### OpenAI Realtime and advanced URLs
 
@@ -269,11 +296,16 @@ disclosing the audio a second time.
 
 OpenAI uses two independently owned Realtime transcription WebSockets: one for
 microphone and one for system audio. Native code converts each committed 16
-kHz `f32le` channel to 24 kHz PCM16, commits bounded two-second turns, accepts
-delta/completed events, and assigns session-relative time plus `You`/`Others`
-provenance because the model does not supply word timing or speaker labels.
-The API key appears only in the TLS WebSocket `Authorization: Bearer` header.
-OpenAI does not receive Mimir's private provider subprotocol.
+kHz `f32le` channel to 24 kHz PCM16 and enables server voice activity
+detection. OpenAI commits natural turns after 800 ms of silence instead of
+receiving fixed timer windows, so sustained silence produces no transcript
+turn and a sentence keeps enough context for accurate decoding. Stop appends
+one in-memory second of silence to close speech at the end of the recording;
+that pad is neither stored nor added to the meeting timeline. Native code
+accepts delta/completed events and maps the session-relative voice boundaries
+back to the durable audio timeline with `You`/`Others` provenance. The API key
+appears only in the TLS WebSocket `Authorization: Bearer` header. OpenAI does
+not receive Mimir's private provider subprotocol.
 
 Other advanced endpoints use the versioned `mimir.stt.v1` WebSocket session,
 which sends model, sample format, and ordered `microphone`/`system` channel
@@ -307,11 +339,18 @@ than one live attempt in a generation.
 
 The default successful flow is:
 
-1. generate a concise title and Markdown summary from the terminal transcript;
+1. generate a concise title and Markdown summary from the terminal transcript
+   and the user's notes;
 2. compare-and-set the reviewed content projection;
-3. open completed meetings on Summary when a summary exists;
-4. let the user create another summary from a seeded preset or launch a Custom
-   interactive agent task.
+3. append the user's exact notes under `# User notes` when they are not empty;
+4. open completed meetings on Summary and expose them in the Graph meeting
+   inbox;
+5. let the user create another summary from a seeded preset or use **Ask agent**
+   for an interactive follow-up task.
+
+The follow-up Activity receives three controlled paths: the immutable
+transcript, the immutable user-notes snapshot, and its output file. The strict
+environment allowlist must accept all three or the job fails before launch.
 
 The visible summary presets are `standard`, `brief`, and `decisions-actions`.
 Each seeds an editable per-run prompt. A separate optional launcher selector
@@ -320,6 +359,16 @@ exact prompt text, and agent identity are copied into the durable job payload,
 so later settings edits cannot alter an already queued run and fine-tuning one
 meeting cannot silently change future meetings. The globally saved prompt is
 editable only in Scribe settings.
+
+The normal recipes use a short Markdown document, not a flat list. Standard
+uses `# BLUF`, `# Key points`, and an optional `# Follow-up`. Follow-up combines
+actions, open questions, and blockers. Brief uses the same shape with fewer
+items. Decisions + actions uses `# BLUF` and `# Decisions and follow-up`.
+Document height is not a target: the agent prefers more short bullets over a
+few dense bullets, keeps one sentence per bullet, and avoids repetition. It
+uses preparation and live notes with judgment and ignores memory aids or noise.
+The agent does not reproduce a notes section; the native host appends the exact
+notes after validating the agent output.
 
 The editable text is not the entire agent prompt. Native code wraps it in a
 fixed safety and output envelope: it identifies the immutable transcript as
@@ -330,7 +379,7 @@ instruction inside that envelope. A completed meeting can deliberately enqueue
 a new title-and-summary generation; ordinary retry and regeneration remain
 separate from capture state.
 
-Custom is deliberately different from summary generation. It requires a CLI
+**Ask agent** is deliberately different from summary generation. It requires a CLI
 agent and prompt, then opens a durable interactive Activity with the exact
 meeting id in provenance and `MIMIR_MEETING_ID`. Before launch, native code
 materializes the exact complete terminal revision as immutable private JSONL
@@ -348,16 +397,39 @@ user export: hook execution never creates a copy in `meetings/exports/`.
 
 ## Renderer and agent surface
 
-`src/mimir/apps/ScribeApp.vue` owns a three-state Ready → Recording → Review
-flow, inline candidate suggestions, live ledger, transcript, summary, job
-diagnostics, custom agent tasks, file access, deletion, and separate settings. Record is
-one action; there is no consent screen. During recording, the fixed transport
-keeps Stop above every nonblocking diagnostic. Review opens on Summary when it
-exists; its header contains Back, **Continue** when eligible, and one actions
-menu. Continue recording, Rename, Show in Finder, save-copy actions,
-retranscription, and Delete use the same accessible menu from detail and list
-context. Failed transcripts also expose an inline
-**Transcribe again** action. `src/stores/meetings.js` is an independent
+`src/mimir/apps/ScribeApp.vue` owns a Prepare/Ready → Recording → Review flow,
+inline candidate suggestions, direct title and Graph-context editing,
+CodeMirror Markdown Notes and Summary documents, live ledger, transcript, job
+diagnostics, custom agent tasks, file access, deletion, and separate settings.
+Project and People selectors query mounted Graph scopes but do not make Scribe
+part of the Graph app. The small filing draft stays on the Scribe meeting and
+prefills the Graph inbox later. Record is one action; there is no consent
+screen. During recording, the fixed transport
+keeps the timer, compact transcript state, save state, Mute, and Stop on one
+line above every nonblocking diagnostic. The visible transcript states are
+**Transcript starting**, **Transcript live**, **Finishing transcript**, and
+explicit recovery states; silence initially says that the transcript will
+appear shortly instead of claiming that no speech occurred.
+
+Review is one continuous document surface. It opens on Summary when a result
+exists. Its compact header contains Back, one shared save state, **Continue**
+when eligible, and one actions menu. Title, date, duration, Project, People,
+and Scope form one identity block. Notes, Transcript, and Summary share one tab
+rail. Transcript adds **Earlier** and **Latest** only when paging needs them.
+Summary adds **Regenerate** only when a summary exists; empty or failed states
+put **Create summary** or **Try again** beside the status. Format, agent, and
+the optional editable per-run prompt live in one small dialog instead of a
+permanent control panel. A general **Ask agent** task is separate in the detail
+menu.
+
+The library context menu owns Rename and valid Continue shortcuts. Detail owns
+direct title editing and its header Continue action, so its menu does not
+repeat them. Show in Finder, save-copy actions, retranscription, and Delete
+remain available where applicable. Failed transcripts also expose an inline
+**Transcribe again** action. Each compact library row puts the title first,
+then date and duration, Project, up to two People plus a remaining count, and
+Scope. Recovery uses a small warning mark instead of another long label.
+`src/stores/meetings.js` is an independent
 workspace bootstrap initializer; it does not wait for MCP or Activities.
 Recorder readiness also does not wait for transcript-window hydration, and
 native startup secures private roots and authority files without recursively
@@ -365,6 +437,13 @@ walking every historical audio chunk or model artifact.
 Library snapshots deliberately omit transcript text. Recording and Review both
 render the selected meeting's separately paged transcript window, so the final
 words visible live cannot disappear during Stop or when the meeting is reopened.
+Review groups adjacent final fragments from one speaker into bounded readable
+utterances. Capture gaps, channel changes, partial wording, and long turns
+remain separate. This is a presentation projection: SQLite keeps every exact
+provider segment for repair, search, and provenance. Markdown materialization
+uses the same bounded grouping rule without deleting transcript text.
+Graph-to-Scribe navigation loads the exact meeting detail by stable id before
+it opens Review; it does not depend on the bounded recent library.
 Configuration mutations share one ordered renderer queue. While it is nonempty,
 every configuration control exposes and disables for the pending state; a
 second accepted mutation runs after the first instead of returning an empty
@@ -399,13 +478,14 @@ the Pinia store exposes `retranscribe(id)`; both invoke
 `meetings_retranscribe` and receive the ordinary authoritative snapshot. This
 command is intentionally absent from the public agent tool projection.
 
-Reviewed tags use the same projection in native meeting detail, list/search
-agent metadata, and the Scribe review surface, so they cannot become
-write-only metadata. The renderer presents tags as restrained inline text and
-offers one keyboard-editable comma-separated field. Public inputs are trimmed,
-deduplicated, and rejected before IPC above 64 entries, 80 characters, or the
-native 160-byte per-tag storage bound; malformed native payloads are discarded
-at renderer normalization rather than entering application state.
+Legacy reviewed tags remain in native meeting detail, full-library search, and
+agent metadata. Scribe does not show a second tag editor in the meeting
+document, and these tags do not transfer to Graph. Graph owns classification
+after filing. Public tag updates remain available through the meeting agent
+contract; inputs are trimmed, deduplicated, and rejected before IPC above 64
+entries, 80 characters, or the native 160-byte per-tag storage bound. Malformed
+native payloads are discarded at renderer normalization rather than entering
+application state.
 
 The public agent projection is bounded and read-only for live recordings:
 
@@ -455,7 +535,7 @@ rows after an interrupted write.
 | `~/.mimir/meetings/<id>/meeting.md` | current reviewed summary and transcript, materialized by **Files** |
 | `~/.mimir/meetings/<id>/followups/<job>/` | immutable bounded hook transcript input and controlled output |
 | `~/.mimir/meetings/<id>/scribe-debug.jsonl` | rotating owner-only pipeline events; no transcript text, audio, credential, or provider URL |
-| `~/.mimir/meetings/.content/` | reviewed title, summary, tags, and KG decision |
+| `~/.mimir/meetings/.content/` | reviewed title and its authorship, summary, user notes, tags, small Graph filing draft, Graph link, and legacy KG decision |
 | `~/.mimir/meetings/exports/` | explicit user exports |
 | `~/.mimir/models/stt/` | verified managed model and installation state |
 

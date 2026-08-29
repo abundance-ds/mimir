@@ -33,9 +33,14 @@
       "transcriptAllFinal": true,
       "segments": [],
       "summary": "Release readiness is confirmed; prepare the deployment checklist.",
+      "notes": "",
       "summaryTruncated": false,
       "summaryState": "succeeded",
       "kgState": "awaiting-decision",
+      "graphDraft": {
+        "projectResolved": false,
+        "peopleIds": []
+      },
       "jobs": [
         {
           "id": "job-summary-01",

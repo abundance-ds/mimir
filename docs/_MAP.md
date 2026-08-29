@@ -45,7 +45,7 @@ resizing, rails, widths, and Activity navigation history.
 | Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
 | Tracker/Argus migration | [Tracker](tracker.md), [persistence](persistence.md), [security](security.md) | native `tracker/`; Tracker service/store; `TrackerApp.vue`, tracker components, Tracker Settings panel; Workbench optional-app projection | native engine/store/report/import/runtime; tracker service/store/app/settings/timeline/classification tests |
 | Agent packages/Routines/scheduler | [Agent interface](agent-interface.md), [Routines](routines.md), [persistence](persistence.md) | `agent_packages.rs`, `routines.rs`, `routine_runtime.rs`, `bin/mimir-agents.mjs`, Routine store/service/activity | native package/schema/runtime; CLI and Routine store/service/activity |
-| Scribe meetings/capture/transcription/follow-up | [Scribe meetings](meetings.md), [security](security.md), [persistence](persistence.md) | native `meetings/`, `crates/mimir-meeting-{audio,detect}`; Scribe service/store/app/settings; meeting hooks in `routine_runtime.rs` | Gherkin evidence; native runtime/audio/detection/STT/job/tool tests; Scribe service/store/app; packaged macOS hardware |
+| Scribe meetings/capture/transcription/follow-up/Graph filing | [Scribe meetings](meetings.md), [Business graph](business-graph.md), [security](security.md), [persistence](persistence.md) | native `meetings/`, `meeting_filing.rs`, `crates/mimir-meeting-{audio,detect}`; Scribe service/store/app/settings; Graph meeting inbox; meeting hooks in `routine_runtime.rs` | Gherkin evidence; native runtime/audio/detection/STT/job/tool tests; Scribe service/store/app; Meeting inbox/Graph inspector; packaged macOS hardware |
 | Editor/tabs/diffs/proposals/Git review | [Editor](editor-system.md), [IPC](ipc.md), [persistence](persistence.md) | `editor/App.vue`, editor composables/CodeMirror, editor stores, Git review store, proposal coordinator in `lib.rs` | editor/store/composable tests; proposal and Git Rust logic |
 | Inline/ghost/provider AI | [AI system](ai-system.md), [inline AI](inline-ai.md), [security](security.md) | native `ai*` modules/resources; renderer `services/ai/`, `InlineAI.vue`, ghost extension | native AI tests; AI service/model/InlineAI/ghost tests |
 | Settings/theme/layout persistence | [settings](settings.md), [persistence](persistence.md) | `stores/settings.js`, `local_settings.rs`, settings UI, workbench persistence | native settings; settings store/UI/workbench tests |
@@ -88,7 +88,7 @@ resizing, rails, widths, and Activity navigation history.
   `src/shared/ui/settings/TrackerSettingsPanel.vue`. Docs:
   [tracker.md](tracker.md).
 - Business graph UI: `src/mimir/apps/BusinessGraphApp.vue` (scope/projection
-  shell), `src/mimir/apps/business-graph/` (board, portfolio, timeline,
+  shell), `src/mimir/apps/business-graph/` (meeting inbox, board, portfolio, timeline,
   inspector, dispatch bar, create flows), `src/stores/businessGraph.js`,
   `src/services/businessGraph.js`. Docs: [business-graph.md](business-graph.md).
 - Routines: `src/stores/routines.js`, `src/services/routines.js`,
@@ -148,7 +148,7 @@ resizing, rails, widths, and Activity navigation history.
 - Apps/Routines: `src-tauri/src/apps.rs`, `src-tauri/src/routines.rs`,
   `src-tauri/src/routine_runtime.rs`. Docs: [apps-system.md](apps-system.md),
   [routines.md](routines.md).
-- Scribe: `src-tauri/src/meetings/`,
+- Scribe: `src-tauri/src/meetings/`, `src-tauri/src/meeting_filing.rs`,
   `src-tauri/crates/mimir-meeting-audio/`, and
   `src-tauri/crates/mimir-meeting-detect/`. Docs:
   [meetings.md](meetings.md).

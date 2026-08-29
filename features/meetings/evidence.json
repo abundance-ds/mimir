@@ -79,10 +79,10 @@
       "verificationScope": ["atomic completed-lifecycle summary outbox", "controlled argv and output", "monotonic retry and revision identity"]
     },
     {
-      "feature": "features/meetings/07_knowledge_graph_proposals.feature",
+      "feature": "features/meetings/07_graph_filing.feature",
       "idRange": ["MTG-130", "MTG-137"],
-      "owner": "meeting-graph-proposals",
-      "verificationScope": ["explicit post-summary decision", "review-only controlled proposal", "idempotency and deletion"]
+      "owner": "meeting-graph-filing",
+      "verificationScope": ["notes-first preparation", "BLUF summary and exact notes appendix", "meeting inbox, stable transcript link, and editable Graph context"]
     },
     {
       "feature": "features/meetings/08_retention_privacy_and_security.feature",
@@ -100,7 +100,7 @@
       "feature": "features/meetings/10_accessibility_and_workbench.feature",
       "idRange": ["MTG-200", "MTG-213"],
       "owner": "meeting-workbench",
-      "verificationScope": ["global mute/Stop and permission-repair tests", "ordered settings mutation", "bounded reviewed-tag projection and editing", "manual keyboard and assistive technology audit", "release visual matrix"]
+      "verificationScope": ["global mute/Stop and permission-repair tests", "ordered settings mutation", "bounded legacy-tag search and agent updates without review chrome", "manual keyboard and assistive technology audit", "release visual matrix"]
     },
     {
       "feature": "features/meetings/11_packaging_upgrade_and_supply_chain.feature",
@@ -436,6 +436,12 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/local_whisper.rs",
+      "selector": "finalization_drains_every_bounded_tail_page_before_returning",
+      "scenarios": ["MTG-075"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "explicit_retranscription_freezes_the_current_route_and_preserves_the_old_transcript",
       "scenarios": ["MTG-070", "MTG-081"]
@@ -467,7 +473,7 @@
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/transcriber.rs",
-      "selector": "openai_continuation_accepts_a_delta_before_its_first_explicit_commit",
+      "selector": "openai_server_vad_maps_a_natural_turn_onto_a_continued_timeline",
       "scenarios": ["MTG-082"]
     },
     {
@@ -491,7 +497,19 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "opens a summarized meeting on Summary with Continue beside its compact header actions",
+      "selector": "opens a summarized meeting as one document with compact header and tab actions",
+      "scenarios": ["MTG-079"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/transcriptPresentation.test.js",
+      "selector": "groups adjacent final fragments from one speaker into bounded utterances",
+      "scenarios": ["MTG-079"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/platform.rs",
+      "selector": "readable_transcript_groups_fragments_without_crossing_speakers",
       "scenarios": ["MTG-079"]
     },
     {
@@ -582,7 +600,7 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/runtime/tests.rs",
       "selector": "stop_finalizes_transcript_then_summary_then_offers_and_queues_kg",
-      "scenarios": ["MTG-110", "MTG-112", "MTG-130", "MTG-135"]
+      "scenarios": ["MTG-110", "MTG-112"]
     },
     {
       "kind": "rust-test",
@@ -594,7 +612,7 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/jobs.rs",
       "selector": "gherkin_stop_hook_prompt_marks_transcript_untrusted_and_output_controlled",
-      "scenarios": ["MTG-111", "MTG-115", "MTG-131", "MTG-132"]
+      "scenarios": ["MTG-111", "MTG-115"]
     },
     {
       "kind": "rust-test",
@@ -617,7 +635,7 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "expands Custom into its own prompt and visible agent selector",
+      "selector": "opens a custom agent task from the detail menu",
       "scenarios": ["MTG-120"]
     },
     {
@@ -641,13 +659,25 @@
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "edits reviewed title summary and bounded tags",
+      "selector": "edits title and Markdown summary while keeping tags out of the review surface",
       "scenarios": ["MTG-112", "MTG-116", "MTG-207"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/meetings/platform.rs",
+      "selector": "user_title_and_graph_draft_survive_generated_summary_updates",
+      "scenarios": ["MTG-112", "MTG-130", "MTG-133"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/routine_runtime.rs",
+      "selector": "meeting_hook_uses_exact_argv_and_durable_meeting_provenance",
+      "scenarios": ["MTG-111"]
     },
     {
       "kind": "js-test",
       "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "opens a summarized meeting on Summary with Continue beside its compact header actions",
+      "selector": "opens a summarized meeting as one document with compact header and tab actions",
       "scenarios": ["MTG-208"]
     },
     {
@@ -696,7 +726,7 @@
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "gherkin_job_idempotency_rejects_same_key_with_different_intent",
-      "scenarios": ["MTG-117", "MTG-136"]
+      "scenarios": ["MTG-117"]
     },
     {
       "kind": "rust-test",
@@ -712,15 +742,69 @@
     },
     {
       "kind": "rust-test",
+      "path": "src-tauri/src/meetings/runtime/tests.rs",
+      "selector": "prepared_meeting_keeps_one_identity_and_notes_when_recording_starts",
+      "scenarios": ["MTG-130"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "prepares one meeting row, saves notes, and records into that row",
+      "scenarios": ["MTG-131"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/ScribeMarkdownEditor.test.js",
+      "selector": "is an unframed Markdown document editor with Tab indentation",
+      "scenarios": ["MTG-131"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/scribe/ScribeMeetingContext.test.js",
+      "selector": "keeps blank, None, and an exact Project as distinct choices",
+      "scenarios": ["MTG-130"]
+    },
+    {
+      "kind": "rust-test",
       "path": "src-tauri/src/meetings/jobs.rs",
-      "selector": "kg_proposal_is_review_only_and_rejects_dangling_relations",
-      "scenarios": ["MTG-133", "MTG-134"]
+      "selector": "summary_appends_user_notes_once_and_verbatim_after_agent_output",
+      "scenarios": ["MTG-132"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/business-graph/MeetingInbox.test.js",
+      "selector": "keeps project explicit, defaults scope to Team, and files concise context",
+      "scenarios": ["MTG-133"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/business-graph/MeetingInbox.test.js",
+      "selector": "restores context saved while the meeting was prepared",
+      "scenarios": ["MTG-133"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/services/meetings.test.js",
+      "selector": "files one summary with only the selected Graph relationships",
+      "scenarios": ["MTG-134"]
+    },
+    {
+      "kind": "js-test",
+      "path": "src/mimir/apps/business-graph/GraphInspector.test.js",
+      "selector": "edits filed meeting context and opens the exact Scribe source",
+      "scenarios": ["MTG-135", "MTG-137"]
+    },
+    {
+      "kind": "rust-test",
+      "path": "src-tauri/src/business_graph/store.rs",
+      "selector": "meeting_scope_move_keeps_identity_and_removes_the_old_source",
+      "scenarios": ["MTG-136"]
     },
     {
       "kind": "rust-test",
       "path": "src-tauri/src/meetings/store.rs",
       "selector": "permanent_deletion_tombstone_cancels_pending_work_and_waits_for_running_activity",
-      "scenarios": ["MTG-137", "MTG-153"]
+      "scenarios": ["MTG-153"]
     },
     {
       "kind": "rust-test",
@@ -840,12 +924,6 @@
       "kind": "js-test",
       "path": "src/services/meetings.test.js",
       "selector": "normalizes bounded reviewed tags and validates tag updates before IPC",
-      "scenarios": ["MTG-207"]
-    },
-    {
-      "kind": "js-test",
-      "path": "src/mimir/apps/ScribeApp.test.js",
-      "selector": "keeps oversized reviewed tags local",
       "scenarios": ["MTG-207"]
     },
     {
