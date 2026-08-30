@@ -599,7 +599,6 @@
           <p class="text-[11px] leading-relaxed text-ink-2">
             The selection moves to the system Trash and can be restored there.
           </p>
-          <p v-if="deleteError" class="text-[10px] leading-relaxed text-rem">{{ deleteError }}</p>
           <div class="flex justify-end gap-2">
             <button
               type="button"
@@ -617,7 +616,7 @@
               @keydown.enter.prevent.stop="confirmDelete"
               @click="confirmDelete"
             >
-              {{ operationBusy ? 'Moving…' : 'Move to Trash' }}
+              Move to Trash
             </button>
           </div>
         </div>
@@ -848,11 +847,12 @@ const gitDirectoryCounts = computed(() => {
   return counts
 })
 const activePath = computed(() => normalizePath(editorFiles.currentFile?.path))
+const pendingTrashPaths = ref(new Set())
 
 const visibleRows = computed(() => {
   if (contentMode.value || viewMode.value === 'changes') return []
   if (gitOnly.value && viewMode.value === 'project' && !query.value.trim()) {
-    return gitChangeRows()
+    return gitChangeRows().filter(row => !isPendingTrashPath(row.entry.path))
   }
   let rows
   if (viewMode.value === 'recent') rows = recentRows()
@@ -862,7 +862,8 @@ const visibleRows = computed(() => {
     rows = []
     flattenDirectory('', 0, rows)
   }
-  return gitOnly.value ? rows.filter(rowHasGitChange) : rows
+  if (gitOnly.value) rows = rows.filter(rowHasGitChange)
+  return rows.filter(row => !isPendingTrashPath(row.entry.path))
 })
 
 const contentMatches = computed(() => {
@@ -933,7 +934,6 @@ const {
   confirmDelete,
   copyContextPath,
   deleteEntries,
-  deleteError,
   duplicateContext,
   isEditing,
   moveEntries,
@@ -963,6 +963,7 @@ const {
   updateFavoritePaths,
   refreshGit,
   emitOpenFile: payload => emit('openFile', payload),
+  pendingTrashPaths,
 })
 
 watch(deleteEntries, async (entries, previous = []) => {
@@ -1400,6 +1401,14 @@ function fallbackFileEntry(path) {
     isDirectory: false,
     textReadable: inferOpenBehavior(path) === 'text',
     openBehavior: inferOpenBehavior(path),
+  })
+}
+
+function isPendingTrashPath(path) {
+  const candidate = normalizePath(path)
+  return [...pendingTrashPaths.value].some((target) => {
+    const normalized = normalizePath(target)
+    return candidate === normalized || candidate.startsWith(`${normalized}/`)
   })
 }
 

@@ -28,6 +28,7 @@ export function useFileMutations({
   updateFavoritePaths,
   refreshGit,
   emitOpenFile,
+  pendingTrashPaths = ref(new Set()),
 }) {
   const nameAction = ref(null)
   const nameDraft = ref('')
@@ -38,7 +39,6 @@ export function useFileMutations({
   // dressed up as a failure.
   const operationNotice = ref('')
   const deleteEntries = ref([])
-  const deleteError = ref('')
   const refreshing = ref(false)
 
   async function promptNew(kind, parent = selectedDirectory()) {
@@ -227,36 +227,39 @@ export function useFileMutations({
     closeContextMenu()
     const unique = new Map(entries.filter(Boolean).map(entry => [entry.path, entry]))
     deleteEntries.value = [...unique.values()]
-    deleteError.value = ''
   }
 
   function closeDeleteDialog() {
     if (operationBusy.value) return
     deleteEntries.value = []
-    deleteError.value = ''
   }
 
   async function confirmDelete() {
     if (!deleteEntries.value.length || operationBusy.value) return
     operationBusy.value = true
-    deleteError.value = ''
+    operationError.value = ''
     const paths = deleteEntries.value.map(entry => entry.path)
     const parentDirectories = deleteEntries.value.map(
       entry => parentDirectory(entry.relativePath),
     )
+    pendingTrashPaths.value = new Set([...pendingTrashPaths.value, ...paths])
+    deleteEntries.value = []
+    clearSelection()
     try {
       await editorFiles.waitForWorkspacePaths(paths)
       await trashWorkspaceEntries(paths)
       editorFiles.handleWorkspaceTrash(paths)
-      deleteEntries.value = []
-      clearSelection()
-      await reconcileMutationDirectories(parentDirectories)
     } catch (error) {
-      deleteError.value = describeFileError(
+      operationError.value = describeFileError(
         error,
         'Could not move the selection to the Trash',
       )
     } finally {
+      await reconcileMutationDirectories(parentDirectories)
+      const completed = new Set(paths.map(normalizePath))
+      pendingTrashPaths.value = new Set(
+        [...pendingTrashPaths.value].filter(path => !completed.has(normalizePath(path))),
+      )
       operationBusy.value = false
     }
   }
@@ -338,7 +341,6 @@ export function useFileMutations({
     confirmDelete,
     copyContextPath,
     deleteEntries,
-    deleteError,
     duplicateContext,
     focusInlineInput,
     isEditing,
@@ -349,6 +351,7 @@ export function useFileMutations({
     operationBusy,
     operationError,
     operationNotice,
+    pendingTrashPaths,
     promptDelete,
     promptNew,
     promptNewInside,

@@ -180,6 +180,55 @@ describe('Files controllers', () => {
     expect(files.refresh).not.toHaveBeenCalled()
   })
 
+  it('owns optimistic Trash state and rolls it back after a native failure', async () => {
+    const files = reactive({
+      workspacePath: '/w',
+      expandedDirectories: new Set(),
+      error: '',
+      loadTreeDirectory: vi.fn(async () => []),
+      refresh: vi.fn(async () => null),
+    })
+    const editorFiles = {
+      waitForWorkspacePaths: vi.fn(async () => {}),
+      moveWorkspacePath: vi.fn(),
+      handleWorkspaceTrash: vi.fn(),
+    }
+    let rejectTrash
+    operations.trashWorkspaceEntries.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectTrash = reject
+    }))
+    const clearSelection = vi.fn()
+    const controller = useFileMutations({
+      files,
+      editorFiles,
+      listRef: ref(null),
+      contextEntry: ref(null),
+      selectedDirectory: () => '',
+      closeContextMenu: vi.fn(),
+      clearSelection,
+      updateFavoritePaths: vi.fn(),
+      refreshGit: vi.fn(async () => {}),
+      emitOpenFile: vi.fn(),
+    })
+    const entry = { path: '/w/notes.md', relativePath: 'notes.md', name: 'notes.md' }
+
+    controller.promptDelete([entry])
+    const operation = controller.confirmDelete()
+
+    expect(controller.deleteEntries.value).toEqual([])
+    expect([...controller.pendingTrashPaths.value]).toEqual(['/w/notes.md'])
+    expect(clearSelection).toHaveBeenCalledTimes(1)
+
+    await Promise.resolve()
+    rejectTrash(new Error('permission denied'))
+    await operation
+
+    expect(controller.pendingTrashPaths.value.size).toBe(0)
+    expect(controller.operationError.value).toContain('permission denied')
+    expect(files.loadTreeDirectory).toHaveBeenCalledWith('', { force: true })
+    expect(editorFiles.handleWorkspaceTrash).not.toHaveBeenCalled()
+  })
+
   it('moves only what a drop would change and reconciles editor, favorites, and tree', async () => {
     const files = reactive({
       workspacePath: '/w',

@@ -422,6 +422,28 @@ describe('FilesActivity', () => {
     ])
   })
 
+  it('closes Trash confirmation and hides the row before the native operation settles', async () => {
+    let rejectTrash
+    operations.trashWorkspaceEntries.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectTrash = reject
+    }))
+    const wrapper = render()
+    const list = wrapper.get('[data-files-list]')
+
+    await wrapper.get('[data-file-row="/w/new.md"] button').trigger('click')
+    await list.trigger('keydown', { key: 'Backspace', metaKey: true })
+    await wrapper.get('[data-files-confirm-delete]').trigger('click')
+
+    expect(wrapper.find('[data-files-delete-dialog]').exists()).toBe(false)
+    expect(wrapper.find('[data-file-row="/w/new.md"]').exists()).toBe(false)
+
+    rejectTrash(new Error('Trash is unavailable'))
+    await flushPromises()
+
+    expect(wrapper.get('[data-file-row="/w/new.md"]').exists()).toBe(true)
+    expect(wrapper.get('[data-files-operation-error]').text()).toContain('Trash is unavailable')
+  })
+
   it('moves focus into Trash confirmation and accepts Return', async () => {
     const wrapper = render()
     document.body.appendChild(wrapper.element)
