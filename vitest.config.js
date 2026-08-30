@@ -7,11 +7,6 @@ export default defineConfig({
     environment: 'happy-dom',
     include: ['src/**/*.test.js'],
     setupFiles: ['src/test/setup.js'],
-    server: {
-      deps: {
-        inline: ['mammoth'],
-      },
-    },
     coverage: {
       provider: 'v8',
       include: ['src/**/*.js', 'src/**/*.vue'],
