@@ -197,7 +197,10 @@ a distributed audit log.
 
 - **Board**: two-line rows (priority control, title, metadata in mono). Drag
   between columns and inside one, keyboard movement, status/project grouping,
-  project and priority filters, and settings-backed view state. Status columns
+  project and priority filters, and settings-backed view state. The Project
+  selector sits beside Board/List/Attention because it changes the
+  visible work context. A selected Project uses a persistent accent treatment,
+  and its adjacent reset returns directly to All projects. Status columns
   can collapse to vertical strips that keep their item count and remain pointer
   drop targets; clicking a strip expands it. Dragging is pointer-driven
   (`business-graph/useBoardDrag.js`) because the webview never sees HTML5 DnD
@@ -323,10 +326,14 @@ Native ownership is under `src-tauri/src/business_graph/`:
 
 Renderer ownership is split between `src/services/businessGraph.js`,
 `src/stores/businessGraph.js`, the built-in app, and its components under
-`src/mimir/apps/business-graph/` — including `WorkBoard.vue`, `NowView.vue`,
-`DispatchBar.vue`, `PortfolioView.vue`, `ProjectStanding.vue`,
-`MeetingInbox.vue`, `EntityList.vue`, `TimelineView.vue`, and
-`GraphInspector.vue`. `src-tauri/src/meeting_filing.rs` owns the narrow Scribe
+`src/mimir/apps/business-graph/`. `BusinessGraphApp.vue` is the composition
+root only. `GraphAppHeader.vue`, `GraphWorkspace.vue`, and
+`GraphAppFeedback.vue` own the shell surfaces. Domain composables named
+`useGraph*.js` own persisted view state, search, lifecycle, meetings,
+summaries, dispatch, mutations, navigation, and keyboard behavior. Projection
+and editor components keep their existing focused ownership. The UI inventory
+in `businessGraphUiInventory.js` is the audit list for all interactive Graph
+surfaces. `src-tauri/src/meeting_filing.rs` owns the narrow Scribe
 summary-to-Graph bridge.
 `WorkbenchApp.vue` mounts roots and owns the
 work-Activity handoff (foreground delegate or background dispatch);

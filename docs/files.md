@@ -115,6 +115,11 @@ Files mutations reconcile open Editor state before refreshing projections:
   Editor paths and affected favorite paths;
 - Trash waits for pending writes, uses the OS Trash, then lets the Editor close
   clean tabs or preserve dirty text as drafts;
+- after confirmation, Trash hides the affected rows and closes the dialog
+  immediately. This is a presentation-only optimistic state: native Trash and
+  Editor reconciliation remain authoritative. A failure reloads the affected
+  parents, restores entries that still exist, and reports the error on the
+  Files surface;
 - the Editor's explicit discard command has a separate confirmed-buffer
   contract; see [Editor](editor-system.md#files-and-tabs);
 - successful mutations immediately force-reload only their affected parent

@@ -74,7 +74,12 @@ The permanent rail system is the signature:
   focuses the filter immediately, shows a bounded recent set when empty, and
   searches the complete retained project history by name or path. Project rows
   contain only name and parent path. Projects with live Activities remain
-  searchable without exposing Activity counts or status. Open project and
+  searchable without exposing Activity counts or status. Opening the switcher
+  starts one cached native batch check without delaying the popover. Confirmed
+  missing recent folders leave the projection; a missing folder retained by a
+  live Activity stays visible as a disabled `Missing` row. Metadata failures do
+  not hide a folder. If the open workspace is missing, its trigger shows that
+  state until the user opens another folder. Open project and
   Create project remain keyboard-accessible final actions. The display bound
   lives in `WorkspaceSwitcher.vue`.
   The workspace projection and background-runtime contract live in
