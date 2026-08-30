@@ -13,6 +13,7 @@
         :collapsed="collapsed"
         :workspace-name="workspaceName"
         :workspace-path="workspaceFiles.workspacePath"
+        :workspace-missing="currentWorkspaceMissing"
         :recent-workspaces="recentWorkspaces"
         :tools="toolRows"
         :new-activity="newActivityRows"
@@ -35,6 +36,7 @@
         @choose-workspace="chooseWorkspace"
         @create-workspace="createWorkspace"
         @open-workspace="openWorkspace"
+        @reconcile-workspaces="reconcileWorkspaces"
         @toggle-collapse="toggleSidebar"
         @rename-activity="renameActivity"
         @archive-activity="closeActivity"
@@ -159,7 +161,7 @@
     :preferred-target-id="quickOpenPreferredTargetId"
     :tools="toolRows"
     :chats="chat.config.enabled ? chat.targets : []"
-    :projects="recentWorkspaces"
+    :projects="availableWorkspaces"
     :current-project-path="workspaceFiles.workspacePath"
     :new-activity="newActivityRows"
     :history="historyActivities"
@@ -378,8 +380,10 @@ const {
   initialized,
   openWorkspace,
   persistWorkbench,
+  reconcileWorkspaces,
   responsiveZone,
   syncResponsiveLayout,
+  unavailableWorkspacePaths,
   viewportWidth,
 } = workspaceBootstrap
 
@@ -489,6 +493,9 @@ const activityMeta = computed(() => {
   return humanStatus(activity.status)
 })
 const workspaceName = computed(() => basename(workspaceFiles.workspacePath))
+const currentWorkspaceMissing = computed(() => unavailableWorkspacePaths.value.has(
+  normalizedWorkspacePath(workspaceFiles.workspacePath),
+))
 const meetingCapture = computed(() => {
   const meeting = meetings.activeMeeting
   if (!meeting) return null
@@ -509,9 +516,19 @@ const recentWorkspaces = computed(() => (
     name: basename(path),
     current: normalizedWorkspacePath(path)
       === normalizedWorkspacePath(workspaceFiles.workspacePath),
+    missing: unavailableWorkspacePaths.value.has(normalizedWorkspacePath(path)),
   }))
 ))
-const workspaceProjectPaths = computed(() => recentWorkspaces.value.map(workspace => workspace.path))
+const availableWorkspaces = computed(() => (
+  recentWorkspaces.value.filter(workspace => !workspace.missing)
+))
+const workspaceProjectPaths = computed(() => availableWorkspaces.value.map(workspace => workspace.path))
+const activityProjectPaths = computed(() => new Set(
+  navigableActivities.value
+    .map(workspaceForActivity)
+    .map(normalizedWorkspacePath)
+    .filter(Boolean),
+))
 
 function projectPaths() {
   const paths = []
@@ -525,7 +542,15 @@ function projectPaths() {
   add(workspaceFiles.workspacePath)
   for (const path of Array.isArray(settings.recentWorkspaceFolders)
     ? settings.recentWorkspaceFolders
-    : []) add(path)
+    : []) {
+    const normalized = normalizedWorkspacePath(path)
+    if (
+      !unavailableWorkspacePaths.value.has(normalized)
+      || activityProjectPaths.value.has(normalized)
+    ) {
+      add(path)
+    }
+  }
   for (const activity of navigableActivities.value) add(workspaceForActivity(activity))
   return paths
 }

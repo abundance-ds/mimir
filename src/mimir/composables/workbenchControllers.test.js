@@ -931,6 +931,57 @@ describe('Workbench controllers', () => {
     }
   })
 
+  it('checks project folders in one background batch and caches the result', async () => {
+    const settings = useSettingsStore()
+    const workbench = useWorkbenchStore()
+    const activities = useActivitiesStore()
+    settings.settingsReady = true
+    settings.mimirWorkspaceFolder = '/work/current'
+    settings.recentWorkspaceFolders = ['/work/current', '/work/gone']
+    activities.upsert(activity('agent:gone', {
+      workspacePath: '/work/activity-gone',
+      source: { workspaceScope: 'workspace' },
+    }))
+    const controller = useWorkspaceBootstrap({
+      settings,
+      workbench,
+      activities,
+      activityRuntime: {},
+      launchers: { byId: vi.fn() },
+      appsCatalog: {},
+      workspaceFiles: { workspacePath: '/work/current' },
+      editorFiles: { currentFile: null },
+      toolRuntime: {},
+      diagnostic: ref(''),
+      coreActivities: [],
+      openCoreActivity: vi.fn(),
+      getFocusOwner: () => 'none',
+    })
+
+    window.__TAURI_INTERNALS__ = {}
+    vi.mocked(invoke).mockResolvedValueOnce([
+      { path: '/work/current', available: true },
+      { path: '/work/gone', available: false },
+      { path: '/work/activity-gone', available: false },
+    ])
+    try {
+      await expect(controller.reconcileWorkspaces()).resolves.toBe(true)
+      await expect(controller.reconcileWorkspaces()).resolves.toBe(true)
+
+      expect(invoke).toHaveBeenCalledTimes(1)
+      expect(invoke).toHaveBeenCalledWith('workspace_paths_status', {
+        paths: ['/work/current', '/work/gone', '/work/activity-gone'],
+      })
+      expect([...controller.unavailableWorkspacePaths.value]).toEqual([
+        '/work/gone',
+        '/work/activity-gone',
+      ])
+    } finally {
+      delete window.__TAURI_INTERNALS__
+      controller.dispose()
+    }
+  })
+
   it('keeps Create workspace cancellation and failures recoverable', async () => {
     const settings = useSettingsStore()
     const workbench = useWorkbenchStore()

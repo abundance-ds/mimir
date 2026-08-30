@@ -25,7 +25,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'connections_set_google_default',
   // filesystem (top-level)
   'read_text_file', 'read_binary_file', 'write_text_file', 'write_binary_file',
-  'path_exists', 'create_dir', 'list_dir',
+  'path_exists', 'workspace_paths_status', 'create_dir', 'list_dir',
   // unified business graph
   'graph_open', 'graph_status', 'graph_get', 'graph_query', 'graph_search',
   'graph_neighbors', 'graph_diagnostics', 'graph_refresh', 'graph_update',

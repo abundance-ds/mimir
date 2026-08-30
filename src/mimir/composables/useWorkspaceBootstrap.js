@@ -9,8 +9,11 @@ import {
   loadWorkspaceConfig,
   saveWorkspaceConfig,
 } from '../../services/workspaceConfig.js'
+import { workspacePathStatuses } from '../../services/workspaceAvailability.js'
 import { activityWorkspacePath, normalizedWorkspacePath } from '../activityWorkspace.js'
 import { applyResponsiveZone, responsiveZoneFor } from '../responsiveLayout.js'
+
+const WORKSPACE_STATUS_TTL_MS = 30_000
 
 export function useWorkspaceBootstrap({
   settings,
@@ -34,12 +37,16 @@ export function useWorkspaceBootstrap({
   const initialized = ref(false)
   const responsiveZone = ref('wide')
   const viewportWidth = ref(window.innerWidth)
+  const unavailableWorkspacePaths = ref(new Set())
   const workspaceViewByPath = new Map()
   let desktopLayout = null
   let automaticResumeEnabled = false
   let automaticResumeLauncherFailure = ''
   let automaticResumeWorkers = 0
   let automaticResumeQueue = []
+  let workspaceStatusPromise = null
+  let workspaceStatusSignature = ''
+  let workspaceStatusCheckedAt = 0
   const queuedAutomaticResumeIds = new Set()
   const attemptedAutomaticResumeIds = new Set()
 
@@ -86,6 +93,7 @@ export function useWorkspaceBootstrap({
     if (savedWorkspace) {
       await openWorkspace(savedWorkspace, { persist: false, activate: false })
     }
+    void reconcileWorkspaces()
 
     const savedActivity = settings.workbenchLayout?.activeActivityId
     const savedRecord = savedActivity ? activities.byId(savedActivity) : null
@@ -298,6 +306,7 @@ export function useWorkspaceBootstrap({
       ensureCoreActivities(path)
       if (persist) settings.set('mimirWorkspaceFolder', path)
       rememberWorkspace(path)
+      markWorkspaceAvailable(path)
       editorFiles.setWorkspaceScope?.(path, settings.recentWorkspaceFolders)
       diagnostic.value = graphWarning
       const workspaceView = rememberedWorkspaceView(path)
@@ -473,6 +482,72 @@ export function useWorkspaceBootstrap({
     )
   }
 
+  function workspaceStatusCandidates() {
+    const paths = []
+    const seen = new Set()
+    const add = (path) => {
+      const normalized = normalizedWorkspacePath(path)
+      if (!normalized || seen.has(normalized)) return
+      seen.add(normalized)
+      paths.push(String(path).trim())
+    }
+    add(workspaceFiles.workspacePath)
+    add(settings.mimirWorkspaceFolder)
+    for (const path of Array.isArray(settings.recentWorkspaceFolders)
+      ? settings.recentWorkspaceFolders
+      : []) add(path)
+    for (const activity of Array.isArray(activities.visibleActivities)
+      ? activities.visibleActivities
+      : []) {
+      add(activityWorkspacePath(activity, id => launchers.byId?.(id)))
+    }
+    return paths
+  }
+
+  function reconcileWorkspaces({ force = false } = {}) {
+    if (typeof window === 'undefined' || !window.__TAURI_INTERNALS__) {
+      return Promise.resolve(false)
+    }
+    const paths = workspaceStatusCandidates()
+    const signature = paths.map(normalizedWorkspacePath).sort().join('\n')
+    const fresh = signature === workspaceStatusSignature
+      && Date.now() - workspaceStatusCheckedAt < WORKSPACE_STATUS_TTL_MS
+    if (!force && fresh) return Promise.resolve(true)
+    if (workspaceStatusPromise) return workspaceStatusPromise
+
+    workspaceStatusPromise = workspacePathStatuses(paths)
+      .then((statuses) => {
+        const candidates = new Set(paths.map(normalizedWorkspacePath))
+        const nextUnavailable = new Set(
+          [...unavailableWorkspacePaths.value].filter(path => candidates.has(path)),
+        )
+        for (const status of Array.isArray(statuses) ? statuses : []) {
+          const path = normalizedWorkspacePath(status?.path)
+          if (!path) continue
+          if (status.available === false) nextUnavailable.add(path)
+          else if (status.available === true) nextUnavailable.delete(path)
+        }
+        unavailableWorkspacePaths.value = nextUnavailable
+        workspaceStatusSignature = signature
+        workspaceStatusCheckedAt = Date.now()
+        return true
+      })
+      .catch(() => false)
+      .finally(() => {
+        workspaceStatusPromise = null
+      })
+    return workspaceStatusPromise
+  }
+
+  function markWorkspaceAvailable(path) {
+    const normalized = normalizedWorkspacePath(path)
+    if (!normalized || !unavailableWorkspacePaths.value.has(normalized)) return
+    const next = new Set(unavailableWorkspacePaths.value)
+    next.delete(normalized)
+    unavailableWorkspacePaths.value = next
+    workspaceStatusCheckedAt = 0
+  }
+
   function dispose() {
     automaticResumeEnabled = false
     automaticResumeQueue = []
@@ -490,9 +565,11 @@ export function useWorkspaceBootstrap({
     mountBusinessGraph,
     openWorkspace,
     persistWorkbench,
+    reconcileWorkspaces,
     responsiveZone,
     start,
     syncResponsiveLayout,
+    unavailableWorkspacePaths,
     viewportWidth,
   }
 }

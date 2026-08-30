@@ -1,6 +1,10 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fs, io,
+    path::PathBuf,
+};
 use tauri::{Emitter, Manager};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +192,70 @@ fn write_binary_file(path: String, data_base64: String) -> Result<(), String> {
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     PathBuf::from(path).exists()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathStatus {
+    path: String,
+    /// `None` preserves a path when metadata failed for a reason other than
+    /// absence, such as a temporarily unavailable volume.
+    available: Option<bool>,
+}
+
+fn inspect_workspace_paths(paths: Vec<String>) -> Vec<WorkspacePathStatus> {
+    let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let path = path.trim().to_string();
+            if path.is_empty() || !seen.insert(path.clone()) {
+                return None;
+            }
+            let available = match fs::metadata(&path) {
+                Ok(metadata) => Some(metadata.is_dir()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Some(false),
+                Err(_) => None,
+            };
+            Some(WorkspacePathStatus { path, available })
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn workspace_paths_status(paths: Vec<String>) -> Result<Vec<WorkspacePathStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_workspace_paths(paths))
+        .await
+        .map_err(|error| format!("Workspace path check failed: {error}"))
+}
+
+#[cfg(test)]
+mod workspace_path_status_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn reports_directories_and_confirmed_missing_paths_in_one_ordered_batch() {
+        let root = tempdir().expect("tempdir");
+        let directory = root.path().join("project");
+        let file = root.path().join("notes.md");
+        let missing = root.path().join("missing");
+        fs::create_dir(&directory).expect("create project");
+        fs::write(&file, "notes").expect("write file");
+
+        let statuses = inspect_workspace_paths(vec![
+            directory.to_string_lossy().into_owned(),
+            file.to_string_lossy().into_owned(),
+            missing.to_string_lossy().into_owned(),
+            directory.to_string_lossy().into_owned(),
+            " ".into(),
+        ]);
+
+        assert_eq!(statuses.len(), 3);
+        assert_eq!(statuses[0].available, Some(true));
+        assert_eq!(statuses[1].available, Some(false));
+        assert_eq!(statuses[2].available, Some(false));
+    }
 }
 
 #[tauri::command]
@@ -1117,6 +1185,7 @@ pub fn run() {
             write_text_file,
             write_binary_file,
             path_exists,
+            workspace_paths_status,
             create_dir,
             list_dir,
             workspace_config::workspace_config_load,

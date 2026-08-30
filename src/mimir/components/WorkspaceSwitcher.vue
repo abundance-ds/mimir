@@ -5,11 +5,13 @@
       type="button"
       data-sidebar-workspace
       class="no-drag group flex h-11 w-full min-w-0 items-center text-left hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-      :aria-label="workspacePath ? `Switch workspace: ${workspaceName}` : 'Open workspace folder'"
+      :aria-label="workspaceMissing
+        ? `Workspace unavailable: ${workspaceName}`
+        : workspacePath ? `Switch workspace: ${workspaceName}` : 'Open workspace folder'"
       :aria-expanded="popoverOpen"
       aria-haspopup="dialog"
       aria-controls="project-switcher-popover"
-      :title="workspacePath || 'Open workspace folder'"
+      :title="workspaceMissing ? `${workspacePath} is unavailable` : workspacePath || 'Open workspace folder'"
       @click.stop="togglePopover"
       @keydown.down.prevent="openPopover"
     >
@@ -20,8 +22,11 @@
         <span class="block truncate text-[12px] font-semibold text-ink">
           {{ workspaceName || 'Open workspace' }}
         </span>
-        <span class="block truncate font-mono text-[9px] text-ink-3">
-          {{ workspacePath || 'Choose a folder' }}
+        <span
+          class="block truncate font-mono text-[9px]"
+          :class="workspaceMissing ? 'text-rem' : 'text-ink-3'"
+        >
+          {{ workspaceMissing ? `Missing · ${workspacePath}` : workspacePath || 'Choose a folder' }}
         </span>
       </span>
       <IconChevronDown
@@ -99,8 +104,10 @@
             :data-project-create="option.type === 'create' ? '' : undefined"
             role="option"
             :aria-selected="index === selectedIndex"
+            :aria-disabled="option.disabled ? 'true' : undefined"
+            :disabled="option.disabled"
             tabindex="-1"
-            class="flex h-8 w-full min-w-0 items-center px-2.5 text-left hover:bg-chrome-high focus:outline-none"
+            class="flex h-8 w-full min-w-0 items-center px-2.5 text-left hover:bg-chrome-high focus:outline-none disabled:cursor-default disabled:hover:bg-transparent"
             :class="[
               { 'bg-accent-soft': index === selectedIndex },
               option.divider ? 'mt-1 border-t border-rule-light pt-px' : '',
@@ -110,10 +117,16 @@
             @click="activateOption(option)"
           >
             <template v-if="option.type === 'project'">
-              <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">
+              <span
+                class="min-w-0 flex-1 truncate text-[11px] font-medium"
+                :class="option.disabled ? 'text-ink-4' : 'text-ink'"
+              >
                 {{ option.title }}
               </span>
-              <span class="ml-3 max-w-[55%] shrink-0 truncate font-mono text-[9px] text-ink-4">
+              <span
+                class="ml-3 max-w-[55%] shrink-0 truncate font-mono text-[9px]"
+                :class="option.disabled ? 'text-rem' : 'text-ink-4'"
+              >
                 {{ option.meta }}
               </span>
             </template>
@@ -148,10 +161,16 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   workspaceName: { type: String, default: '' },
   workspacePath: { type: String, default: '' },
+  workspaceMissing: { type: Boolean, default: false },
   recentWorkspaces: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['chooseWorkspace', 'createWorkspace', 'openWorkspace'])
+const emit = defineEmits([
+  'chooseWorkspace',
+  'createWorkspace',
+  'openWorkspace',
+  'reconcileWorkspaces',
+])
 const triggerRef = ref(null)
 const popoverRef = ref(null)
 const inputRef = ref(null)
@@ -192,8 +211,9 @@ const options = computed(() => [
     key: `project:${workspace.path}`,
     type: 'project',
     title: workspace.name || basename(workspace.path),
-    meta: parentPath(workspace.path),
+    meta: workspace.missing ? 'Missing' : parentPath(workspace.path),
     path: workspace.path,
+    disabled: Boolean(workspace.missing),
   })),
   {
     id: `project-switcher-option-${filteredWorkspaces.value.length}`,
@@ -213,9 +233,12 @@ const options = computed(() => [
 const selectedOption = computed(() => options.value[selectedIndex.value] || null)
 
 watch(
-  () => options.value.map(option => option.key).join('|'),
+  () => options.value.map(option => `${option.key}:${option.disabled ? 'disabled' : 'enabled'}`).join('|'),
   () => {
-    selectedIndex.value = Math.min(selectedIndex.value, Math.max(options.value.length - 1, 0))
+    const bounded = Math.min(selectedIndex.value, Math.max(options.value.length - 1, 0))
+    selectedIndex.value = options.value[bounded]?.disabled
+      ? firstSelectableIndex()
+      : bounded
   },
 )
 
@@ -227,8 +250,9 @@ function togglePopover() {
 async function openPopover() {
   if (popoverOpen.value) return
   query.value = ''
-  selectedIndex.value = 0
+  selectedIndex.value = firstSelectableIndex()
   popoverOpen.value = true
+  emit('reconcileWorkspaces')
   document.addEventListener('pointerdown', onPointerDown)
   window.addEventListener('resize', positionPopover)
   window.addEventListener('scroll', positionPopover, true)
@@ -265,23 +289,40 @@ function onPointerDown(event) {
 }
 
 function onInput() {
-  selectedIndex.value = 0
+  selectedIndex.value = firstSelectableIndex()
   void scrollSelectionIntoView()
 }
 
 function selectIndex(index) {
-  selectedIndex.value = Math.min(Math.max(index, 0), Math.max(options.value.length - 1, 0))
+  const bounded = Math.min(Math.max(index, 0), Math.max(options.value.length - 1, 0))
+  if (!options.value[bounded]?.disabled) selectedIndex.value = bounded
 }
 
 function moveSelection(delta) {
   if (!options.value.length) return
-  selectedIndex.value = (selectedIndex.value + delta + options.value.length) % options.value.length
+  for (let step = 1; step <= options.value.length; step++) {
+    const index = (selectedIndex.value + (delta * step) + options.value.length) % options.value.length
+    if (options.value[index]?.disabled) continue
+    selectedIndex.value = index
+    break
+  }
   void scrollSelectionIntoView()
 }
 
 function selectEdge(edge) {
-  selectedIndex.value = edge === 'end' ? Math.max(options.value.length - 1, 0) : 0
+  selectedIndex.value = firstSelectableIndex(edge)
   void scrollSelectionIntoView()
+}
+
+function firstSelectableIndex(edge = 'start') {
+  if (edge === 'end') {
+    for (let index = options.value.length - 1; index >= 0; index--) {
+      if (!options.value[index]?.disabled) return index
+    }
+    return 0
+  }
+  const index = options.value.findIndex(option => !option.disabled)
+  return index >= 0 ? index : 0
 }
 
 async function scrollSelectionIntoView() {
@@ -295,6 +336,7 @@ function activateSelected() {
 }
 
 function activateOption(option) {
+  if (option.disabled) return
   closePopover()
   if (option.type === 'project') emit('openWorkspace', option.path)
   else if (option.type === 'open') emit('chooseWorkspace')

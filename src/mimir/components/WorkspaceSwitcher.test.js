@@ -91,6 +91,28 @@ describe('WorkspaceSwitcher', () => {
     wrapper.unmount()
   })
 
+  it('opens immediately, requests reconciliation, and disables missing Activity projects', async () => {
+    const wrapper = render({
+      recentWorkspaces: [
+        { name: 'mimir', path: '/work/mimir', current: true },
+        { name: 'removed', path: '/work/removed', missing: true },
+      ],
+    })
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+
+    expect(wrapper.emitted('reconcileWorkspaces')).toHaveLength(1)
+    const missing = document.body.querySelector('[data-project-path="/work/removed"]')
+    expect(missing).not.toBeNull()
+    expect(missing.disabled).toBe(true)
+    expect(missing.textContent).toContain('Missing')
+
+    const input = document.body.querySelector('[data-project-search]')
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(wrapper.emitted('openWorkspace')).toBeUndefined()
+    expect(wrapper.emitted('chooseWorkspace')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('closes without trapping Tab focus', async () => {
     const wrapper = render()
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
@@ -107,6 +129,15 @@ describe('WorkspaceSwitcher', () => {
     expect(wrapper.get('[data-sidebar-workspace]').text()).toBe('MI')
     await wrapper.get('[data-sidebar-workspace]').trigger('click')
     expect(document.body.querySelector('[data-project-switcher-menu]')).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('marks the current workspace when its folder is missing', () => {
+    const wrapper = render({ workspaceMissing: true })
+
+    expect(wrapper.get('[data-sidebar-workspace]').attributes('aria-label'))
+      .toBe('Workspace unavailable: mimir')
+    expect(wrapper.get('[data-sidebar-workspace]').text()).toContain('Missing · /work/mimir')
     wrapper.unmount()
   })
 })

@@ -708,6 +708,39 @@ describe('WorkbenchApp', () => {
     expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toContain('/w')
   })
 
+  it('opens the project selector before it hides a confirmed missing recent folder', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
+      mimirWorkspaceFolder: '/w',
+      recentWorkspaceFolders: ['/w', '/gone'],
+    }))
+    const wrapper = await render()
+    let resolveStatuses
+    window.__TAURI_INTERNALS__ = {}
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveStatuses = resolve
+    }))
+    try {
+      await wrapper.get('[data-sidebar-workspace]').trigger('click')
+
+      expect(wrapper.get('[data-project-switcher-menu]').exists()).toBe(true)
+      expect(wrapper.get('[data-project-path="/gone"]').exists()).toBe(true)
+      expect(invoke).toHaveBeenCalledWith('workspace_paths_status', {
+        paths: ['/w', '/gone'],
+      })
+
+      resolveStatuses([
+        { path: '/w', available: true },
+        { path: '/gone', available: false },
+      ])
+      await flushPromises()
+
+      expect(wrapper.find('[data-project-path="/gone"]').exists()).toBe(false)
+      expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toEqual(['/w'])
+    } finally {
+      delete window.__TAURI_INTERNALS__
+    }
+  })
+
   it('shows only the current project Activities while hidden tasks keep running', async () => {
     localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
       mimirWorkspaceFolder: '/w',

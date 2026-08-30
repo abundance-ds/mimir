@@ -27,10 +27,12 @@
       :collapsed="collapsed"
       :workspace-name="workspaceName"
       :workspace-path="workspacePath"
+      :workspace-missing="workspaceMissing"
       :recent-workspaces="recentWorkspaces"
       @choose-workspace="$emit('chooseWorkspace')"
       @create-workspace="$emit('createWorkspace')"
       @open-workspace="$emit('openWorkspace', $event)"
+      @reconcile-workspaces="$emit('reconcileWorkspaces')"
     />
 
     <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Tools, chats, and activity history">
@@ -560,6 +562,7 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   workspaceName: { type: String, default: '' },
   workspacePath: { type: String, default: '' },
+  workspaceMissing: { type: Boolean, default: false },
   recentWorkspaces: { type: Array, default: () => [] },
   tools: { type: Array, default: () => [] },
   newActivity: { type: Array, default: () => [] },
@@ -585,6 +588,7 @@ const emit = defineEmits([
   'chooseWorkspace',
   'createWorkspace',
   'openWorkspace',
+  'reconcileWorkspaces',
   'toggleCollapse',
   'renameActivity',
   'archiveActivity',
