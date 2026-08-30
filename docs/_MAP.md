@@ -126,7 +126,8 @@ resizing, rails, widths, and Activity navigation history.
   Docs: [activities.md](activities.md), [agent-setup.md](agent-setup.md).
 - MCP/tools: `src-tauri/src/tool_registry.rs`, `src-tauri/src/tool_bridge.rs`,
   `src-tauri/src/tool_runtime.rs`, `src-tauri/src/tool_server.rs`,
-  `src-tauri/src/connections.rs` (Google/Slack/Granola),
+  `src-tauri/src/connections.rs`, `src-tauri/src/connections/`
+  (Google/Slack/Granola),
   `src-tauri/src/shell_exec.rs`; CLI `bin/mimir.mjs`, `bin/mimir-scopes.mjs`,
   `bin/mimir-packages.mjs`, `bin/mimir-skills.mjs`, `bin/mimir-agents.mjs`,
   `bin/pi-mimir-extension.ts`;
