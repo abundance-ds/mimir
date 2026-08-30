@@ -91,7 +91,7 @@ describe('WorkspaceSwitcher', () => {
     wrapper.unmount()
   })
 
-  it('opens immediately, requests reconciliation, and disables missing Activity projects', async () => {
+  it('shows a missing project once, then removes it on the next open', async () => {
     const wrapper = render({
       recentWorkspaces: [
         { name: 'mimir', path: '/work/mimir', current: true },
@@ -104,12 +104,37 @@ describe('WorkspaceSwitcher', () => {
     const missing = document.body.querySelector('[data-project-path="/work/removed"]')
     expect(missing).not.toBeNull()
     expect(missing.disabled).toBe(true)
-    expect(missing.textContent).toContain('Missing')
+    expect(missing.textContent).toContain('removed - not found')
 
     const input = document.body.querySelector('[data-project-search]')
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(wrapper.emitted('openWorkspace')).toBeUndefined()
     expect(wrapper.emitted('chooseWorkspace')).toHaveLength(1)
+
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    expect(document.body.querySelector('[data-project-switcher-menu]')).not.toBeNull()
+    expect(document.body.querySelector('[data-project-path="/work/removed"]')).toBeNull()
+    expect(wrapper.emitted('dismissMissingWorkspaces')).toEqual([[['/work/removed']]])
+    wrapper.unmount()
+  })
+
+  it('shows a project that becomes missing while the selector is open', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+
+    await wrapper.setProps({
+      recentWorkspaces: [
+        { name: 'mimir', path: '/work/mimir', current: true },
+        { name: 'other-project', path: '/work/other-project', missing: true },
+      ],
+    })
+
+    expect(document.body.querySelector('[data-project-path="/work/other-project"]')?.textContent)
+      .toContain('other-project - not found')
+
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    await wrapper.get('[data-sidebar-workspace]').trigger('click')
+    expect(document.body.querySelector('[data-project-path="/work/other-project"]')).toBeNull()
     wrapper.unmount()
   })
 
@@ -137,7 +162,8 @@ describe('WorkspaceSwitcher', () => {
 
     expect(wrapper.get('[data-sidebar-workspace]').attributes('aria-label'))
       .toBe('Workspace unavailable: mimir')
-    expect(wrapper.get('[data-sidebar-workspace]').text()).toContain('Missing · /work/mimir')
+    expect(wrapper.get('[data-sidebar-workspace]').text()).toContain('mimir - not found')
+    expect(wrapper.get('[data-sidebar-workspace]').text()).toContain('/work/mimir')
     wrapper.unmount()
   })
 })

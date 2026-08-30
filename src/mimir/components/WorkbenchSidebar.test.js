@@ -425,6 +425,8 @@ describe('WorkbenchSidebar', () => {
     const activityMenu = wrapper.get('[data-activity-menu="agent:one"]')
     expect(document.activeElement.textContent).toContain('Rename')
     await activityMenu.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement.textContent).toContain('Stop')
+    await activityMenu.trigger('keydown', { key: 'ArrowDown' })
     expect(document.activeElement.textContent).toContain('Archive')
     await activityMenu.trigger('keydown', { key: 'Escape' })
     expect(document.activeElement).toBe(
@@ -518,8 +520,14 @@ describe('WorkbenchSidebar', () => {
 
     await wrapper.get('[data-activity-menu-button="agent:one"]').trigger('click')
     const liveMenu = wrapper.get('[data-activity-menu="agent:one"]')
-    expect(liveMenu.text()).not.toContain('Stop / kill')
-    const archive = liveMenu.findAll('button').find((button) => button.text().includes('Archive'))
+    const stop = liveMenu.findAll('button').find((button) => button.text().includes('Stop'))
+    expect(stop.attributes('disabled')).toBeUndefined()
+    await stop.trigger('click')
+    expect(wrapper.emitted('stopActivity').at(-1)).toEqual(['agent:one'])
+
+    await wrapper.get('[data-activity-menu-button="agent:one"]').trigger('click')
+    const reopenedLiveMenu = wrapper.get('[data-activity-menu="agent:one"]')
+    const archive = reopenedLiveMenu.findAll('button').find((button) => button.text().includes('Archive'))
     expect(archive.attributes('disabled')).toBeUndefined()
     await archive.trigger('click')
     expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['agent:one'])

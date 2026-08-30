@@ -31,6 +31,7 @@
       :recent-workspaces="recentWorkspaces"
       @choose-workspace="$emit('chooseWorkspace')"
       @create-workspace="$emit('createWorkspace')"
+      @dismiss-missing-workspaces="$emit('dismissMissingWorkspaces', $event)"
       @open-workspace="$emit('openWorkspace', $event)"
       @reconcile-workspaces="$emit('reconcileWorkspaces')"
     />
@@ -445,6 +446,16 @@
               <IconPencil :size="12" /> Rename
             </button>
             <button
+              v-if="canStop(activity)"
+              class="activity-menu-item"
+              role="menuitem"
+              tabindex="-1"
+              title="Stop Activity"
+              @click="runAction('stopActivity', activity.id)"
+            >
+              <IconPlayerStopFilled :size="12" /> Stop
+            </button>
+            <button
               v-if="canArchive(activity)"
               class="activity-menu-item"
               role="menuitem"
@@ -587,10 +598,12 @@ const emit = defineEmits([
   'newChat',
   'chooseWorkspace',
   'createWorkspace',
+  'dismissMissingWorkspaces',
   'openWorkspace',
   'reconcileWorkspaces',
   'toggleCollapse',
   'renameActivity',
+  'stopActivity',
   'archiveActivity',
   'clearActivity',
   'archiveActivities',

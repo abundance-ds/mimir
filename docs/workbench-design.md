@@ -73,15 +73,17 @@ The permanent rail system is the signature:
   The trigger alone identifies the current project. Its anchored switcher
   focuses the filter immediately, shows a bounded recent set when empty, and
   searches the complete retained project history by name or path. Project rows
-  contain only name and parent path. Projects with live Activities remain
-  searchable without exposing Activity counts or status. Opening the switcher
-  starts one cached native batch check without delaying the popover. Confirmed
-  missing recent folders leave the projection; a missing folder retained by a
-  live Activity stays visible as a disabled `Missing` row. Metadata failures do
-  not hide a folder. If the open workspace is missing, its trigger shows that
-  state until the user opens another folder. Open project and
-  Create project remain keyboard-accessible final actions. The display bound
-  lives in `WorkspaceSwitcher.vue`.
+  contain only name and parent path. Activity records never add or retain a
+  project row. Opening the switcher starts one cached native batch check
+  without delaying the popover. A confirmed missing recent folder appears as
+  a disabled `name - not found` row for one switcher opening. The next opening
+  removes it from retained recent projects. If the folder is opened again and
+  later disappears, the one-opening notice can appear again. Metadata failures
+  do not hide a folder.
+  If the open workspace is missing, its trigger shows `name - not found` until
+  the user opens another folder. Open project and Create project remain
+  keyboard-accessible final actions. The display bound and one-opening notice
+  state live in `WorkspaceSwitcher.vue`.
   The workspace projection and background-runtime contract live in
   [activities.md](activities.md#workspace-projection).
 - Tools remain directly available. Chats and Activities have independent
@@ -123,18 +125,24 @@ recreate an overflowing two-pane split.
 
 Cmd/Ctrl+P opens a compact grouped launcher near window top.
 
-- Empty view: Start new activity, Tools, recent projects, recent files, and
-  Reopen last closed (open project only). Entering Start new activity drills
-  into launch sources; Back/Backspace/Escape returns.
-- Current Activities excluded (Option/Alt+Cmd/Ctrl+Left/Right cycles them).
-- Without a prefix, typing filters New activity, Tools, Projects, Files, Chats,
-  and History together. A group is present only when it has a match. Groups
-  keep that order and show a bounded mixed result set; exact and name-prefix
-  matches rank first inside a group. Arrow keys cross group boundaries and
-  skip headings. Result bounds live in `quickOpenResults.js`.
-- Typed scopes are `n:` New activity, `t:` Tools, `p:` Projects, `f:` Files,
-  `c:` Chats, and `h:` History. A scoped search shows the full bounded result
-  set for that group. Group headings teach their scope prefix.
+- Empty view: Start new activity, Activities from unavailable workspaces when
+  present, Tools, recent projects, recent files, and Reopen last closed (open
+  project only). Entering Start new activity drills into launch sources;
+  Back/Backspace/Escape returns.
+- Current Activities are excluded (Option/Alt+Cmd/Ctrl+Left/Right cycles them).
+  An Activity from an unavailable workspace is the exception: it stays
+  searchable and opens without switching projects.
+- Without a prefix, typing filters New activity, unavailable Activities,
+  Tools, Projects, Files, Chats, and History together. A group is present only
+  when it has a match. Groups keep that order and show a bounded mixed result
+  set; exact and name-prefix matches rank first inside a group. Arrow keys
+  cross group boundaries and skip headings. Result bounds live in
+  `quickOpenResults.js`.
+- Typed scopes are `a:` Activities, `n:` New activity, `t:` Tools, `p:`
+  Projects, `f:` Files, `c:` Chats, and `h:` History. A scoped search shows the
+  full bounded result set for that group. Group headings teach their scope
+  prefix. The Activities scope contains only records whose workspace is not
+  available; ordinary current-project Activities stay in the Sidebar.
 - `h:` History browses the open project only; the empty state points to search.
   A search term reaches every project, open-project matches first; rows from
   another project carry a project chip, and selecting one switches to that

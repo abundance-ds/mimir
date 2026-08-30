@@ -20,13 +20,15 @@
       </span>
       <span v-if="!collapsed" class="ml-2 min-w-0 flex-1">
         <span class="block truncate text-[12px] font-semibold text-ink">
-          {{ workspaceName || 'Open workspace' }}
+          {{ workspaceMissing
+            ? `${workspaceName || 'Workspace'} - not found`
+            : workspaceName || 'Open workspace' }}
         </span>
         <span
           class="block truncate font-mono text-[9px]"
           :class="workspaceMissing ? 'text-rem' : 'text-ink-3'"
         >
-          {{ workspaceMissing ? `Missing · ${workspacePath}` : workspacePath || 'Choose a folder' }}
+          {{ workspacePath || 'Choose a folder' }}
         </span>
       </span>
       <IconChevronDown
@@ -168,6 +170,7 @@ const props = defineProps({
 const emit = defineEmits([
   'chooseWorkspace',
   'createWorkspace',
+  'dismissMissingWorkspaces',
   'openWorkspace',
   'reconcileWorkspaces',
 ])
@@ -178,6 +181,8 @@ const popoverOpen = ref(false)
 const popoverStyle = ref({})
 const query = ref('')
 const selectedIndex = ref(0)
+const shownMissingPaths = ref(new Set())
+const hiddenMissingPaths = ref(new Set())
 
 const monogram = computed(() => {
   const parts = String(props.workspaceName || 'Workspace').trim().split(/[^a-zA-Z0-9]+/).filter(Boolean)
@@ -188,7 +193,11 @@ const monogram = computed(() => {
 })
 
 const otherWorkspaces = computed(() => props.recentWorkspaces.filter(
-  workspace => workspace?.path && !samePath(workspace.path, props.workspacePath),
+  workspace => (
+    workspace?.path
+    && !samePath(workspace.path, props.workspacePath)
+    && !(workspace.missing && hiddenMissingPaths.value.has(normalizePath(workspace.path)))
+  ),
 ))
 
 const filteredWorkspaces = computed(() => {
@@ -210,8 +219,10 @@ const options = computed(() => [
     id: `project-switcher-option-${index}`,
     key: `project:${workspace.path}`,
     type: 'project',
-    title: workspace.name || basename(workspace.path),
-    meta: workspace.missing ? 'Missing' : parentPath(workspace.path),
+    title: workspace.missing
+      ? `${workspace.name || basename(workspace.path)} - not found`
+      : workspace.name || basename(workspace.path),
+    meta: parentPath(workspace.path),
     path: workspace.path,
     disabled: Boolean(workspace.missing),
   })),
@@ -242,6 +253,23 @@ watch(
   },
 )
 
+watch(
+  () => props.recentWorkspaces
+    .map(workspace => `${normalizePath(workspace?.path)}:${workspace?.missing ? 'missing' : 'available'}`)
+    .join('|'),
+  () => {
+    const missing = currentMissingPaths()
+    shownMissingPaths.value = retainedPaths(shownMissingPaths.value, missing)
+    hiddenMissingPaths.value = retainedPaths(hiddenMissingPaths.value, missing)
+    if (!popoverOpen.value) return
+    const nextShown = new Set(shownMissingPaths.value)
+    for (const path of missing) {
+      if (!hiddenMissingPaths.value.has(path)) nextShown.add(path)
+    }
+    shownMissingPaths.value = nextShown
+  },
+)
+
 function togglePopover() {
   if (popoverOpen.value) closePopover()
   else void openPopover()
@@ -249,6 +277,7 @@ function togglePopover() {
 
 async function openPopover() {
   if (popoverOpen.value) return
+  advanceMissingNotices()
   query.value = ''
   selectedIndex.value = firstSelectableIndex()
   popoverOpen.value = true
@@ -259,6 +288,38 @@ async function openPopover() {
   await nextTick()
   positionPopover()
   inputRef.value?.focus()
+}
+
+function advanceMissingNotices() {
+  const missing = currentMissingPaths()
+  const nextHidden = new Set(hiddenMissingPaths.value)
+  const dismissed = []
+  for (const path of shownMissingPaths.value) {
+    if (!missing.has(path)) continue
+    nextHidden.add(path)
+    dismissed.push(path)
+  }
+  hiddenMissingPaths.value = nextHidden
+  shownMissingPaths.value = new Set(
+    [...missing].filter(path => !nextHidden.has(path)),
+  )
+  if (dismissed.length) emit('dismissMissingWorkspaces', dismissed)
+}
+
+function currentMissingPaths() {
+  return new Set(
+    props.recentWorkspaces
+      .filter(workspace => (
+        workspace?.missing
+        && workspace.path
+        && !samePath(workspace.path, props.workspacePath)
+      ))
+      .map(workspace => normalizePath(workspace.path)),
+  )
+}
+
+function retainedPaths(paths, available) {
+  return new Set([...paths].filter(path => available.has(path)))
 }
 
 function closePopover({ restoreFocus = false } = {}) {
@@ -372,8 +433,11 @@ function parentPath(path) {
 }
 
 function samePath(left, right) {
-  const normalize = value => String(value || '').replaceAll('\\', '/').replace(/\/+$/, '')
-  return Boolean(left && right) && normalize(left) === normalize(right)
+  return Boolean(left && right) && normalizePath(left) === normalizePath(right)
+}
+
+function normalizePath(value) {
+  return String(value || '').replaceAll('\\', '/').replace(/\/+$/, '')
 }
 
 onUnmounted(() => closePopover())

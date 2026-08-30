@@ -2,6 +2,7 @@ const DEFAULT_GROUP_LIMIT = 5
 const FILE_SCOPE_LIMIT = 100
 
 const TYPED_SCOPES = {
+  'a:': 'activities',
   'p:': 'projects',
   'f:': 'files',
   'h:': 'history',
@@ -37,6 +38,7 @@ export function buildQuickOpenResults({
   projects = [],
   currentProjectPath = '',
   newActivity = [],
+  activities = [],
   history = [],
   files = [],
   historySnippets = new Map(),
@@ -57,6 +59,11 @@ export function buildQuickOpenResults({
     else results.push(...mixedMatches(newActivity.map(newActivityResult), normalized))
   } else if (scope === 'new-activity') {
     results.push(...matchingRows(newActivity.map(newActivityResult), normalized))
+  }
+
+  if (scope === 'all' || scope === 'activities') {
+    const matches = matchingRows(activities.map(activityResult), normalized)
+    results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
   }
 
   if (scope === 'all' || scope === 'tools') {
@@ -226,6 +233,32 @@ function newActivityEnterResult(launchers) {
     verb: 'Enter',
     icon: 'new-activity',
     search: [],
+  })
+}
+
+function activityResult(activity) {
+  const provider = activityProvider(activity)
+  const workspacePath = String(activity.workspacePath || activity.launch?.cwd || '')
+  return result({
+    key: `activity:${activity.id}`,
+    type: 'activity',
+    group: 'Activities',
+    title: activity.title || provider,
+    project: basename(workspacePath),
+    meta: joinMeta(provider, humanStatus(activity.status), 'workspace not found'),
+    detail: workspacePath,
+    verb: 'Open',
+    icon: providerIcon(provider, activity.kind),
+    activityId: activity.id,
+    search: [
+      activity.title,
+      provider,
+      activity.status,
+      activity.id,
+      workspacePath,
+      basename(workspacePath),
+      'workspace not found',
+    ],
   })
 }
 

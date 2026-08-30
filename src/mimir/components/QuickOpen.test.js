@@ -44,6 +44,14 @@ const history = [{
   archivedAt: '2026-07-25T12:00:00Z',
   source: { presetId: 'codex' },
 }]
+const unavailableActivities = [{
+  id: 'agent:orphaned',
+  kind: 'agent',
+  title: 'Recover release notes',
+  status: 'interrupted',
+  workspacePath: '/work/removed',
+  source: { presetId: 'codex' },
+}]
 
 enableAutoUnmount(afterEach)
 
@@ -284,6 +292,23 @@ describe('QuickOpen', () => {
     expect(wrapper.findAll('[data-quick-open-type]').map(row => row.attributes('data-quick-open-type')))
       .toEqual(['history'])
     expect(wrapper.get('[data-quick-open-detail]').text()).toBe('/w')
+  })
+
+  it('opens an Activity whose workspace is not available from a:', async () => {
+    const wrapper = render(true, { props: { activities: unavailableActivities } })
+    const input = wrapper.get('[data-quick-open-input]')
+
+    await input.setValue('a:release')
+
+    expect(wrapper.get('[data-quick-open-scope]').text()).toBe('Activities')
+    expect(wrapper.get('[data-quick-open-type="activity"]').text())
+      .toContain('workspace not found')
+    await input.trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({
+      type: 'activity',
+      activityId: 'agent:orphaned',
+    })
   })
 
   it('loads recent transcript context when browsing History without a search term', async () => {

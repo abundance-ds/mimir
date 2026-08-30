@@ -22,6 +22,14 @@ const archived = {
   archivedAt: '2026-07-25T12:00:00Z',
   source: { presetId: 'codex' },
 }
+const unavailableActivity = {
+  id: 'agent:orphaned',
+  kind: 'agent',
+  title: 'Recover release notes',
+  status: 'interrupted',
+  workspacePath: '/work/removed',
+  source: { presetId: 'codex' },
+}
 const files = Array.from({ length: 10 }, (_, index) => ({
   path: `/work/mimir/${index}.md`,
   name: `${index}.md`,
@@ -31,6 +39,7 @@ const files = Array.from({ length: 10 }, (_, index) => ({
 describe('quick open results', () => {
   it('parses optional scopes without requiring them', () => {
     expect(parseQuickOpenQuery('review')).toEqual({ scope: 'all', term: 'review' })
+    expect(parseQuickOpenQuery('a:release')).toEqual({ scope: 'activities', term: 'release' })
     expect(parseQuickOpenQuery('p:mimir')).toEqual({ scope: 'projects', term: 'mimir' })
     expect(parseQuickOpenQuery('f:README')).toEqual({ scope: 'files', term: 'README' })
     expect(parseQuickOpenQuery('h:closed')).toEqual({ scope: 'history', term: 'closed' })
@@ -98,6 +107,30 @@ describe('quick open results', () => {
     expect(results[0].verb).toBe('Start')
   })
 
+  it('keeps Activities from unavailable workspaces searchable without adding projects', () => {
+    const [result] = buildQuickOpenResults({
+      query: 'a:release',
+      activities: [unavailableActivity],
+      projects,
+    })
+
+    expect(result).toMatchObject({
+      key: 'activity:agent:orphaned',
+      type: 'activity',
+      group: 'Activities',
+      title: 'Recover release notes',
+      project: 'removed',
+      detail: '/work/removed',
+      verb: 'Open',
+    })
+    expect(result.meta).toContain('workspace not found')
+    expect(buildQuickOpenResults({
+      query: 'p:',
+      activities: [unavailableActivity],
+      projects,
+    }).map(row => row.type)).not.toContain('activity')
+  })
+
   it('uses workspace and time instead of a provider-only history title', () => {
     expect(historyDisplayTitle(archived)).toMatch(/^mimir · /)
     const result = buildQuickOpenResults({
@@ -130,11 +163,14 @@ describe('quick open results', () => {
       tools: [tool],
       projects,
       newActivity: [launcher],
+      activities: [unavailableActivity],
       history: [archived],
       files,
     }
     expect(buildQuickOpenResults({ ...common, query: 'n:codex' }).map(result => result.type))
       .toEqual(['new-activity'])
+    expect(buildQuickOpenResults({ ...common, query: 'a:release' }).map(result => result.type))
+      .toEqual(['activity'])
     expect(buildQuickOpenResults({ ...common, query: 'f:1' }).map(result => result.type))
       .toEqual(['file'])
     expect(buildQuickOpenResults({ ...common, query: 'h:mimir' }).map(result => result.type))

@@ -35,10 +35,12 @@
         @new-chat="openNewChat"
         @choose-workspace="chooseWorkspace"
         @create-workspace="createWorkspace"
+        @dismiss-missing-workspaces="dismissMissingWorkspaces"
         @open-workspace="openWorkspace"
         @reconcile-workspaces="reconcileWorkspaces"
         @toggle-collapse="toggleSidebar"
         @rename-activity="renameActivity"
+        @stop-activity="stopActivity"
         @archive-activity="closeActivity"
         @clear-activity="clearActivity"
         @archive-activities="archiveActivities"
@@ -164,6 +166,7 @@
     :projects="availableWorkspaces"
     :current-project-path="workspaceFiles.workspacePath"
     :new-activity="newActivityRows"
+    :activities="unavailableActivities"
     :history="historyActivities"
     @close="quickOpen = false"
     @activate="activateQuickOpenResult"
@@ -435,7 +438,13 @@ const navigableActivities = computed(() => (
 ))
 const sidebarActivities = computed(() => (
   orderActivities(
-    navigableActivities.value.filter(activity => activityIsVisibleInCurrentWorkspace(activity)),
+    navigableActivities.value.filter(activity => (
+      activityIsVisibleInCurrentWorkspace(activity)
+      || (
+        activity.id === workbench.activeActivityId
+        && activityWorkspaceIsUnavailable(activity)
+      )
+    )),
     {
       mode: activityNavigator.value.mode,
       manualOrder: activityNavigator.value.order,
@@ -443,6 +452,12 @@ const sidebarActivities = computed(() => (
       restoringActivityIds: activityRuntime.resumingActivityIds,
     },
   )
+))
+const unavailableActivities = computed(() => (
+  navigableActivities.value.filter(activity => (
+    !activityIsVisibleInCurrentWorkspace(activity)
+    && activityWorkspaceIsUnavailable(activity)
+  ))
 ))
 const historyActivities = computed(() => (
   activities.archivedActivities
@@ -488,9 +503,16 @@ const activityMeta = computed(() => {
     return [topic, members].filter(Boolean).join(' · ')
   }
   if (activity.source?.chatTarget) {
-    return `${humanStatus(activity.status)} · ${activity.source.chatTarget}`
+    return [
+      humanStatus(activity.status),
+      activity.source.chatTarget,
+      activityWorkspaceIsUnavailable(activity) ? 'workspace not found' : '',
+    ].filter(Boolean).join(' · ')
   }
-  return humanStatus(activity.status)
+  return [
+    humanStatus(activity.status),
+    activityWorkspaceIsUnavailable(activity) ? 'workspace not found' : '',
+  ].filter(Boolean).join(' · ')
 })
 const workspaceName = computed(() => basename(workspaceFiles.workspacePath))
 const currentWorkspaceMissing = computed(() => unavailableWorkspacePaths.value.has(
@@ -523,12 +545,6 @@ const availableWorkspaces = computed(() => (
   recentWorkspaces.value.filter(workspace => !workspace.missing)
 ))
 const workspaceProjectPaths = computed(() => availableWorkspaces.value.map(workspace => workspace.path))
-const activityProjectPaths = computed(() => new Set(
-  navigableActivities.value
-    .map(workspaceForActivity)
-    .map(normalizedWorkspacePath)
-    .filter(Boolean),
-))
 
 function projectPaths() {
   const paths = []
@@ -543,16 +559,23 @@ function projectPaths() {
   for (const path of Array.isArray(settings.recentWorkspaceFolders)
     ? settings.recentWorkspaceFolders
     : []) {
-    const normalized = normalizedWorkspacePath(path)
-    if (
-      !unavailableWorkspacePaths.value.has(normalized)
-      || activityProjectPaths.value.has(normalized)
-    ) {
-      add(path)
-    }
+    add(path)
   }
-  for (const activity of navigableActivities.value) add(workspaceForActivity(activity))
   return paths
+}
+
+function dismissMissingWorkspaces(paths) {
+  const dismissed = new Set(
+    (Array.isArray(paths) ? paths : [])
+      .map(normalizedWorkspacePath)
+      .filter(Boolean),
+  )
+  if (!dismissed.size) return
+  const recent = Array.isArray(settings.recentWorkspaceFolders)
+    ? settings.recentWorkspaceFolders
+    : []
+  const retained = recent.filter(path => !dismissed.has(normalizedWorkspacePath(path)))
+  if (retained.length !== recent.length) settings.set('recentWorkspaceFolders', retained)
 }
 const editorTitle = computed(() => {
   const path = editorFiles.currentFile?.path
@@ -658,6 +681,11 @@ function activityIsVisibleInCurrentWorkspace(activity) {
     workspaceFiles.workspacePath,
     id => launchers.byId(id),
   )
+}
+
+function activityWorkspaceIsUnavailable(activity) {
+  const path = normalizedWorkspacePath(workspaceForActivity(activity))
+  return Boolean(path && unavailableWorkspacePaths.value.has(path))
 }
 
 const sidebarSelectedActivityIds = ref([])
@@ -1161,6 +1189,10 @@ async function activateQuickOpenResult(result) {
   }
   if (result.type === 'tool' || result.type === 'new-activity') {
     void onLaunch(result.targetId)
+    return
+  }
+  if (result.type === 'activity') {
+    selectActivity(result.activityId)
     return
   }
   if (result.type === 'history') {

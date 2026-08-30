@@ -95,6 +95,13 @@ Explicitly restoring an Activity from another workspace opens that workspace
 first. Project-switcher presentation and search behavior are owned by
 [workbench-design.md](workbench-design.md#rail-contract).
 
+An Activity does not contribute its recorded workspace path to the project
+switcher. If that path is not available, an unarchived Activity remains in the
+working set and is searchable through Go to with `a:`. Selecting it does not
+switch projects. While selected, its Sidebar row remains available for Stop,
+Archive, and Delete actions. An archived record continues to use History and
+keeps its original workspace path as provenance.
+
 ## Lifecycle
 
 `ActivitySupervisor` owns PTYs and child processes. The runtime store keeps one

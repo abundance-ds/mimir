@@ -197,7 +197,7 @@
             <span>↑↓ select</span>
             <span>↵ {{ selectedResult?.verb || 'open' }}</span>
             <span class="ml-auto">
-              {{ inNewActivityView ? 'Esc back · choose a source' : 'p: projects · f: files · n: new · h: history' }}
+              {{ inNewActivityView ? 'Esc back · choose a source' : 'a: activities · p: projects · f: files · n: new · h: history' }}
             </span>
           </div>
         </div>
@@ -249,6 +249,7 @@ const props = defineProps({
   projects: { type: Array, default: () => [] },
   currentProjectPath: { type: String, default: '' },
   newActivity: { type: Array, default: () => [] },
+  activities: { type: Array, default: () => [] },
   history: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'activate'])
@@ -289,6 +290,7 @@ const emptyMessage = computed(() => {
     : 'No matching activities, tools, projects, chats, or history.'
 })
 const scopeLabel = computed(() => ({
+  activities: 'Activities',
   projects: 'Projects',
   files: 'Files',
   history: 'History',
@@ -303,6 +305,7 @@ const results = computed(() => buildQuickOpenResults({
   projects: props.projects,
   currentProjectPath: props.currentProjectPath,
   newActivity: props.newActivity,
+  activities: props.activities,
   history: props.history,
   files: files.visibleFiles,
   historySnippets: historySnippets.value,
@@ -492,6 +495,7 @@ function startsGroup(index) {
 function prefixForGroup(group) {
   return {
     'New activity': 'n:',
+    Activities: 'a:',
     Tools: 't:',
     Projects: 'p:',
     Files: 'f:',

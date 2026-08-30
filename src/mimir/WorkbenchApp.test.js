@@ -708,12 +708,21 @@ describe('WorkbenchApp', () => {
     expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toContain('/w')
   })
 
-  it('opens the project selector before it hides a confirmed missing recent folder', async () => {
+  it('shows a missing project once without letting its Activity retain the project row', async () => {
     localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
       mimirWorkspaceFolder: '/w',
       recentWorkspaceFolders: ['/w', '/gone'],
     }))
     const wrapper = await render()
+    const store = useActivitiesStore()
+    store.upsert({
+      ...activityRecord('agent:gone', 'Recover removed work', '2026-07-25T10:00:00Z'),
+      workspacePath: '/gone',
+      status: 'interrupted',
+      source: { presetId: 'review' },
+      launch: { command: '/bin/codex', args: [], cwd: '/gone', env: {} },
+    })
+    await nextTick()
     let resolveStatuses
     window.__TAURI_INTERNALS__ = {}
     vi.mocked(invoke).mockImplementationOnce(() => new Promise((resolve) => {
@@ -734,8 +743,33 @@ describe('WorkbenchApp', () => {
       ])
       await flushPromises()
 
-      expect(wrapper.find('[data-project-path="/gone"]').exists()).toBe(false)
+      const missing = wrapper.get('[data-project-path="/gone"]')
+      expect(missing.attributes('disabled')).toBeDefined()
+      expect(missing.text()).toContain('gone - not found')
       expect(wrapper.findComponent({ name: 'EditorApp' }).props('workspacePaths')).toEqual(['/w'])
+
+      await wrapper.get('[data-sidebar-workspace]').trigger('click')
+      await wrapper.get('[data-sidebar-workspace]').trigger('click')
+      expect(wrapper.find('[data-project-path="/gone"]').exists()).toBe(false)
+      expect(useSettingsStore().recentWorkspaceFolders).toEqual(['/w'])
+
+      await wrapper.get('[data-sidebar-workspace]').trigger('click')
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'p',
+        metaKey: true,
+        bubbles: true,
+      }))
+      await nextTick()
+      const input = wrapper.get('[data-quick-open-input]')
+      await input.setValue('a:Recover removed work')
+      expect(wrapper.get('[data-quick-open-key="activity:agent:gone"]').text())
+        .toContain('workspace not found')
+      await input.trigger('keydown', { key: 'Enter' })
+      await flushPromises()
+
+      expect(useSettingsStore().mimirWorkspaceFolder).toBe('/w')
+      expect(useWorkbenchStore().activeActivityId).toBe('agent:gone')
+      expect(wrapper.get('[data-sidebar-row="activity:agent:gone"]').exists()).toBe(true)
     } finally {
       delete window.__TAURI_INTERNALS__
     }
