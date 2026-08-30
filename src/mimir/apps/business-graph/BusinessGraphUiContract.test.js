@@ -17,6 +17,8 @@ const componentSource = BUSINESS_GRAPH_SURFACES
 const source = `${appSource}\n${componentSource}`
 const workBoardSource = readFileSync(join(graphDirectory, 'WorkBoard.vue'), 'utf8')
 const portfolioSource = readFileSync(join(graphDirectory, 'PortfolioView.vue'), 'utf8')
+const headerSource = readFileSync(join(graphDirectory, 'GraphAppHeader.vue'), 'utf8')
+const viewbarSource = readFileSync(join(graphDirectory, 'GraphViewbar.vue'), 'utf8')
 
 describe('Business Graph UI contract', () => {
   it('keeps every inventoried control represented in source', () => {
@@ -75,8 +77,8 @@ describe('Business Graph UI contract', () => {
     expect(workBoardSource).not.toMatch(/priorityGlyph|statusCode|meta-flag/)
     expect(portfolioSource).toContain('class="portfolio-table"')
     expect(portfolioSource).not.toContain('project-progress')
-    const sectionActive = appSource.match(/\.graph-section-active\s*\{[^}]*\}/s)?.[0] || ''
-    const viewActive = appSource.match(/\.graph-view-active\s*\{[^}]*\}/s)?.[0] || ''
+    const sectionActive = headerSource.match(/\.graph-section-active\s*\{[^}]*\}/s)?.[0] || ''
+    const viewActive = viewbarSource.match(/\.graph-view-active\s*\{[^}]*\}/s)?.[0] || ''
     expect(sectionActive).not.toMatch(/border|box-shadow/)
     expect(viewActive).not.toMatch(/border|box-shadow/)
   })
@@ -111,12 +113,16 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(20)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(24)
     expect(BUSINESS_GRAPH_SURFACES).toContain('../../../shared/ui/DatePicker.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphAppHeader.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphAppFeedback.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphMarkdownEditor.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphRelationshipLine.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphSummaryDialog.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphViewbar.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphWorkspace.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('MeetingInbox.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('NowView.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('DispatchBar.vue')

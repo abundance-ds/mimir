@@ -1,0 +1,316 @@
+<template>
+  <div class="graph-workspace relative flex min-h-0 flex-1">
+    <GraphInspector
+      v-if="graph.selectedNode && focusMode"
+      ref="inspector"
+      mode="focus"
+      :node="graph.selectedNode"
+      :neighbors="graph.selectedNeighbors"
+      :scopes="graph.scopes"
+      :nodes="graph.nodes"
+      :conflict="graph.conflict"
+      :error="saveError"
+      :saving="saving"
+      :activities="relatedActivities"
+      :history-back="graph.historyBack"
+      :history-forward="graph.historyForward"
+      @back="$emit('returnToPeek')"
+      @close="$emit('finalizeObjectClose')"
+      @save="forwardSave"
+      @delete="$emit('deleteNode', $event)"
+      @open-node="$emit('openRelatedNode', $event)"
+      @open-file="$emit('openFile', $event)"
+      @open-url="$emit('openUrl', $event)"
+      @open-activity="$emit('openActivity', $event)"
+      @open-meeting="$emit('openMeeting', $event)"
+      @quick-create="$emit('openRelatedCreate', $event)"
+      @navigate-history="$emit('navigateObjectHistory', $event)"
+    />
+
+    <template v-else>
+      <main class="flex min-w-0 flex-1 flex-col">
+        <GraphViewbar
+          ref="viewbar"
+          :section="graph.section"
+          :section-label="currentSection?.label"
+          :view="graph.view"
+          :view-options="viewOptions"
+          :project-filter="projectFilter"
+          :project-options="projectFilterOptions"
+          :group-by="boardGroup"
+          :group-options="boardGroupOptions"
+          :sort-by="boardSort"
+          :sort-options="boardSortOptions"
+          :priority-filter="priorityFilter"
+          :priority-options="priorityFilterOptions"
+          :collapsed-statuses="collapsedBoardStatuses"
+          :statuses="boardStatuses"
+          :kind-filter="allKindFilter"
+          :kind-options="allKindOptions"
+          @set-view="$emit('setView', $event)"
+          @update:project-filter="$emit('update:projectFilter', $event)"
+          @update:group-by="$emit('update:boardGroup', $event)"
+          @update:sort-by="$emit('update:boardSort', $event)"
+          @update:priority-filter="$emit('update:priorityFilter', $event)"
+          @update:kind-filter="$emit('update:allKindFilter', $event)"
+          @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
+          @expand-all="$emit('expandAllBoardStatuses')"
+        />
+        <div v-if="composing" data-graph-loading class="graph-state">
+          <span class="graph-loading-mark" aria-hidden="true" />
+          <h2>Composing your graph</h2>
+          <p>Private, project, and team knowledge are being indexed.</p>
+        </div>
+        <EntityList
+          v-else-if="graph.searchQuery"
+          ref="entityList"
+          :nodes="projectionNodes"
+          :scopes="graph.scopes"
+          :actors="graph.latestActors"
+          :empty-title="emptyTitle"
+          :empty-copy="emptyCopy"
+          @open="$emit('openNode', $event)"
+          @create="$emit('openCreate')"
+        />
+        <NowView
+          v-else-if="graph.section === 'now'"
+          :events="graph.events"
+          :waiting="waitingOnYouIssues"
+          :nodes="graph.nodes"
+          :seen-at="nowSeenAt"
+          :total="graph.eventTotal"
+          :offset="graph.eventOffset"
+          :limit="graph.eventLimit"
+          :loading="graph.eventsLoading"
+          :can-summarise="canSummarise"
+          @open="$emit('openNode', $event)"
+          @page="$emit('loadNowPage', $event)"
+          @seen="$emit('markNowSeen', $event)"
+          @summarise="$emit('openSummary')"
+        />
+        <MeetingInbox
+          v-else-if="graph.section === 'knowledge' && graph.view === 'meetings'"
+          :meetings="pendingMeetings"
+          :projects="graph.projects"
+          :people="graph.people"
+          :scopes="graph.scopes"
+          :default-project-id="graph.workspaceProjectId"
+          :filing-id="filingMeetingId"
+          :error="filingError"
+          :has-more="meetings.meetingsTruncated"
+          :loading-more="Boolean(meetings.pending['library-page'])"
+          @file="$emit('fileMeeting', $event)"
+          @open-meeting="$emit('openMeeting', $event)"
+          @select="$emit('loadMeetingDetail', $event)"
+          @change="$emit('saveMeetingGraphDraft', $event)"
+          @load-more="$emit('loadOlderMeetings')"
+        />
+        <WorkBoard
+          v-else-if="graph.section === 'work' && graph.view === 'board'"
+          :issues="boardIssues"
+          :nodes="graph.nodes"
+          :projects="graph.projects"
+          :actors="graph.latestActors"
+          :group-by="boardGroup"
+          :collapsed-statuses="collapsedBoardStatuses"
+          @open="$emit('openNode', $event)"
+          @move="$emit('moveIssue', $event)"
+          @patch="$emit('patchIssue', $event)"
+          @bulk-patch="$emit('bulkPatchIssues', $event)"
+          @bulk-move="$emit('bulkMoveIssues', $event)"
+          @reorder="$emit('reorderIssue', $event)"
+          @create="$emit('createFromBoard', $event)"
+          @expand-column="$emit('expandBoardStatus', $event)"
+        />
+        <PortfolioView
+          v-else-if="graph.section === 'projects' && graph.view === 'portfolio'"
+          :projects="projectionNodes"
+          :issues="graph.issues"
+          :nodes="graph.nodes"
+          :scopes="graph.scopes"
+          @open="$emit('openNode', $event)"
+          @create="$emit('openCreate', 'project')"
+        />
+        <TimelineView
+          v-else-if="graph.view === 'timeline'"
+          :nodes="projectionNodes"
+          @open="$emit('openNode', $event)"
+          @create="$emit('openCreate')"
+        />
+        <EntityList
+          v-else
+          ref="entityList"
+          :nodes="projectionNodes"
+          :scopes="graph.scopes"
+          :actors="graph.latestActors"
+          :empty-title="emptyTitle"
+          :empty-copy="emptyCopy"
+          @open="$emit('openNode', $event)"
+          @create="$emit('openCreate')"
+        />
+      </main>
+
+      <GraphInspector
+        v-if="graph.selectedNode"
+        ref="inspector"
+        mode="peek"
+        :node="graph.selectedNode"
+        :neighbors="graph.selectedNeighbors"
+        :scopes="graph.scopes"
+        :nodes="graph.nodes"
+        :conflict="graph.conflict"
+        :error="saveError"
+        :saving="saving"
+        :activities="relatedActivities"
+        :history-back="graph.historyBack"
+        :history-forward="graph.historyForward"
+        @focus="$emit('enterFocus')"
+        @close="$emit('finalizeObjectClose')"
+        @save="forwardSave"
+        @delete="$emit('deleteNode', $event)"
+        @open-node="$emit('openRelatedNode', $event)"
+        @open-file="$emit('openFile', $event)"
+        @open-url="$emit('openUrl', $event)"
+        @open-activity="$emit('openActivity', $event)"
+        @open-meeting="$emit('openMeeting', $event)"
+        @quick-create="$emit('openRelatedCreate', $event)"
+        @navigate-history="$emit('navigateObjectHistory', $event)"
+      />
+    </template>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useMeetingsStore } from '../../../stores/meetings.js'
+import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
+import EntityList from './EntityList.vue'
+import GraphInspector from './GraphInspector.vue'
+import GraphViewbar from './GraphViewbar.vue'
+import MeetingInbox from './MeetingInbox.vue'
+import NowView from './NowView.vue'
+import PortfolioView from './PortfolioView.vue'
+import TimelineView from './TimelineView.vue'
+import WorkBoard from './WorkBoard.vue'
+
+defineProps({
+  focusMode: { type: Boolean, default: false },
+  currentSection: { type: Object, default: null },
+  viewOptions: { type: Array, default: () => [] },
+  projectFilter: { type: String, default: '' },
+  projectFilterOptions: { type: Array, default: () => [] },
+  boardGroup: { type: String, default: 'status' },
+  boardGroupOptions: { type: Array, default: () => [] },
+  boardSort: { type: String, default: 'rank' },
+  boardSortOptions: { type: Array, default: () => [] },
+  priorityFilter: { type: String, default: '' },
+  priorityFilterOptions: { type: Array, default: () => [] },
+  collapsedBoardStatuses: { type: Array, default: () => [] },
+  boardStatuses: { type: Array, default: () => [] },
+  allKindFilter: { type: String, default: '' },
+  allKindOptions: { type: Array, default: () => [] },
+  composing: { type: Boolean, default: false },
+  projectionNodes: { type: Array, default: () => [] },
+  emptyTitle: { type: String, default: '' },
+  emptyCopy: { type: String, default: '' },
+  waitingOnYouIssues: { type: Array, default: () => [] },
+  nowSeenAt: { type: String, default: '' },
+  canSummarise: { type: Boolean, default: false },
+  pendingMeetings: { type: Array, default: () => [] },
+  filingMeetingId: { type: String, default: '' },
+  filingError: { type: String, default: '' },
+  boardIssues: { type: Array, default: () => [] },
+  saveError: { type: String, default: '' },
+  saving: { type: Boolean, default: false },
+  relatedActivities: { type: Array, default: () => [] },
+})
+
+const emit = defineEmits([
+  'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard', 'deleteNode', 'enterFocus',
+  'expandAllBoardStatuses', 'expandBoardStatus', 'fileMeeting', 'finalizeObjectClose',
+  'loadMeetingDetail', 'loadNowPage', 'loadOlderMeetings', 'markNowSeen', 'moveIssue',
+  'navigateObjectHistory', 'openActivity', 'openCreate', 'openFile', 'openMeeting',
+  'openNode', 'openRelatedCreate', 'openRelatedNode', 'openSummary', 'openUrl',
+  'patchIssue', 'reorderIssue', 'returnToPeek', 'saveMeetingGraphDraft', 'saveNode',
+  'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:boardGroup',
+  'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
+])
+
+const graph = useBusinessGraphStore()
+const meetings = useMeetingsStore()
+const inspector = ref(null)
+const entityList = ref(null)
+const viewbar = ref(null)
+
+function forwardSave(...args) {
+  emit('saveNode', ...args)
+}
+
+defineExpose({
+  closeMenus: options => viewbar.value?.closeMenus(options) || false,
+  commitThen(action) {
+    if (!inspector.value?.commitThen) return false
+    inspector.value.commitThen(action)
+    return true
+  },
+  focusInspectorEntry: () => inspector.value?.focusEntry?.(),
+  focusListEdge(edge) {
+    if (!entityList.value) return false
+    entityList.value.focusEdge(edge)
+    return true
+  },
+  focusNode: id => entityList.value?.focusNode(id),
+  requestBack: () => inspector.value?.requestBack?.(),
+  requestClose: () => inspector.value?.requestClose?.(),
+})
+</script>
+
+<style scoped>
+.graph-workspace {
+  gap: 1px;
+  background: var(--color-rule);
+}
+
+.graph-workspace > main {
+  background: var(--graph-canvas);
+}
+
+.graph-state {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  place-content: center;
+  justify-items: center;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.graph-state h2 {
+  margin-top: 15px;
+  color: var(--color-ink);
+  font-size: 16px;
+  font-weight: 660;
+  letter-spacing: -0.018em;
+}
+
+.graph-state p {
+  max-width: 400px;
+  margin-top: 7px;
+  color: var(--color-ink-3);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.graph-loading-mark {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-rule);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: graph-spin 750ms linear infinite;
+}
+
+@keyframes graph-spin {
+  to { transform: rotate(360deg); }
+}
+</style>

@@ -22,6 +22,11 @@ vi.mock('../../services/externalLinks.js', () => ({
   openExternalUrl: vi.fn(),
 }))
 
+vi.mock('../../services/meetings.js', async importOriginal => ({
+  ...(await importOriginal()),
+  fileMeetingToGraph: vi.fn(),
+}))
+
 import {
   createGraphNode,
   deleteGraphNode,
@@ -37,9 +42,13 @@ import {
   updateGraphNode,
 } from '../../services/businessGraph.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
+import { fileMeetingToGraph } from '../../services/meetings.js'
+import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
+import { useMeetingsStore } from '../../stores/meetings.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
+import DispatchBar from './business-graph/DispatchBar.vue'
 import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 
@@ -182,6 +191,7 @@ describe('BusinessGraphApp', () => {
       id: 'issue-1',
       undoToken: 'undo-issue-1',
     })
+    vi.mocked(fileMeetingToGraph).mockResolvedValue({ graphNodeId: 'meeting-filed' })
   })
 
   afterEach(async () => {
@@ -283,6 +293,119 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
+  it('persists and restores the complete Work view state', async () => {
+    const settings = useSettingsStore()
+    await settings.load()
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-board-project-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="project-alpha"]').click()
+    await flushPromises()
+    await wrapper.get('[data-board-group]').trigger('click')
+    document.querySelector('[data-graph-select-option="project"]').click()
+    await flushPromises()
+    await wrapper.get('[data-board-sort]').trigger('click')
+    document.querySelector('[data-graph-select-option="updated"]').click()
+    await flushPromises()
+    await wrapper.get('[data-board-priority-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="high"]').click()
+    await flushPromises()
+    await wrapper.get('[data-board-group]').trigger('click')
+    document.querySelector('[data-graph-select-option="status"]').click()
+    await flushPromises()
+    await wrapper.get('[data-board-columns-trigger]').trigger('click')
+    document.querySelector('[data-graph-control="board-column-backlog"]').click()
+    await flushPromises()
+
+    expect(settings.businessGraphViewState.work).toEqual({
+      project: 'project-alpha',
+      groupBy: 'status',
+      sortBy: 'updated',
+      priority: 'high',
+      collapsedStatuses: ['backlog'],
+    })
+    await settings.flush()
+    wrapper.unmount()
+
+    pinia = createPinia()
+    setActivePinia(pinia)
+    const restoredSettings = useSettingsStore()
+    await restoredSettings.load()
+    const restored = render()
+    await flushPromises()
+
+    expect(restored.get('[data-board-project-filter]').text()).toContain('Project Alpha')
+    expect(restored.get('[data-board-sort]').text()).toContain('Updated')
+    expect(restored.get('[data-board-priority-filter]').text()).toContain('High')
+    expect(restored.get('[data-board-column="backlog"]')
+      .attributes('data-board-column-collapsed')).toBe('true')
+    restored.unmount()
+  })
+
+  it('keeps the Project view across Work views and section navigation', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-board-project-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="project-alpha"]').click()
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['issue-1'])
+
+    await wrapper.get('[data-graph-section="projects"]').trigger('click')
+    await wrapper.get('[data-graph-section="work"]').trigger('click')
+
+    expect(wrapper.get('[data-board-project-filter]').text()).toContain('Project Alpha')
+    expect(wrapper.get('[data-board-project-filter]').classes()).toContain('graph-project-view-active')
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['issue-1'])
+    wrapper.unmount()
+  })
+
+  it('files a meeting and refreshes both Scribe and Graph projections', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const meetings = useMeetingsStore()
+    const graph = useBusinessGraphStore()
+    meetings.meetings = [{
+      id: 'meeting-ready',
+      title: 'Delivery review',
+      lifecycle: 'ready',
+      summary: '# BLUF\n\n- Ship Friday.',
+      startedAt: '2026-08-28T10:00:00.000Z',
+      durationMs: 1_800_000,
+      graphNodeId: null,
+      graphDraft: {
+        projectResolved: true,
+        projectId: null,
+        peopleIds: [],
+        scopeId: 'team:main',
+      },
+    }]
+    const flushMeeting = vi.spyOn(meetings, 'flushMeetingDraft').mockResolvedValue(true)
+    vi.spyOn(meetings, 'hydrateMeeting').mockResolvedValue(meetings.meetings[0])
+    const refreshMeetings = vi.spyOn(meetings, 'refresh').mockResolvedValue(true)
+    const refreshGraph = vi.spyOn(graph, 'refresh').mockResolvedValue(true)
+
+    await wrapper.get('[data-graph-section="knowledge"]').trigger('click')
+    await wrapper.get('[data-graph-view="meetings"]').trigger('click')
+    await wrapper.get('[data-meeting-inbox-row="meeting-ready"]').trigger('click')
+    await wrapper.get('[data-meeting-file]').trigger('click')
+    await flushPromises()
+
+    expect(flushMeeting).toHaveBeenCalledWith('meeting-ready')
+    expect(fileMeetingToGraph).toHaveBeenCalledWith({
+      meetingId: 'meeting-ready',
+      scopeId: 'team:main',
+      projectId: null,
+      peopleIds: [],
+    })
+    expect(refreshMeetings).toHaveBeenCalled()
+    expect(refreshGraph).toHaveBeenCalledWith({ quiet: true })
+    wrapper.unmount()
+  })
+
   it('mounts the shared team root once settings resolve after the first open', async () => {
     const settings = useSettingsStore()
     const wrapper = render()
@@ -295,6 +418,28 @@ describe('BusinessGraphApp', () => {
     expect(openBusinessGraph).toHaveBeenCalledTimes(2)
     expect(openBusinessGraph).toHaveBeenLastCalledWith('/alpha', '/team')
     wrapper.unmount()
+  })
+
+  it('stops a graph mount that finishes after the app unmounts', async () => {
+    let resolveMount
+    const unlisten = vi.fn()
+    vi.mocked(openBusinessGraph).mockImplementationOnce(() => new Promise(resolve => {
+      resolveMount = resolve
+    }))
+    vi.mocked(listenForGraphChanges).mockResolvedValueOnce(unlisten)
+    const wrapper = render()
+
+    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha', '')
+    wrapper.unmount()
+    resolveMount({
+      scopes: scopeRows,
+      nodeCount: 2,
+      diagnosticCount: 0,
+      graphRevision: 7,
+    })
+    await flushPromises()
+
+    expect(unlisten).toHaveBeenCalledOnce()
   })
 
   it('saves an issue whose project is a legacy label instead of a graph node', async () => {
@@ -417,6 +562,38 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.emitted('startWork')).toBeUndefined()
     expect(dialog.props('busy')).toBe(false)
     wrapper.unmount()
+  })
+
+  it('does not launch a change summary after the app unmounts', async () => {
+    const wrapper = render()
+    await flushPromises()
+    let resolveEvents
+    vi.mocked(graphEvents).mockImplementationOnce(() => new Promise(resolve => {
+      resolveEvents = resolve
+    }))
+    wrapper.findComponent(GraphSummaryDialog).vm.$emit('launch', {
+      presetId: 'review',
+      since: '2026-07-20',
+      instructions: '',
+    })
+    await Promise.resolve()
+
+    wrapper.unmount()
+    resolveEvents({
+      items: [{
+        timestamp: '2026-07-29T12:00:00Z',
+        eventType: 'updated',
+        action: 'graph.update',
+        nodeKind: 'issue',
+        title: 'Should not launch',
+        actor: { kind: 'human', id: 'local-human', label: 'You' },
+        changes: [],
+      }],
+      total: 1,
+    })
+    await flushPromises()
+
+    expect(wrapper.emitted('startWork')).toBeUndefined()
   })
 
   it('moves board cards through optimistic revision-aware graph patches', async () => {
@@ -682,17 +859,30 @@ describe('BusinessGraphApp', () => {
     const wrapper = render()
     await flushPromises()
 
+    const viewbarGroups = wrapper.get('.graph-viewbar').element.children
+    expect([...viewbarGroups].map(group => group.className)).toEqual([
+      'graph-views',
+      'graph-project-view',
+      'graph-work-controls',
+    ])
     const projectReset = wrapper.get('[data-graph-control="board-project-filter-clear"]')
     expect(projectReset.attributes('disabled')).toBeDefined()
+    expect(projectReset.attributes('aria-label')).toBe('All projects are shown')
+    expect(wrapper.get('[data-board-project-filter]').classes()).not.toContain('graph-project-view-active')
     await wrapper.get('[data-board-project-filter]').trigger('click')
     document.querySelector('[data-graph-select-option="project-alpha"]').click()
     await flushPromises()
     expect(projectReset.attributes('disabled')).toBeUndefined()
+    expect(projectReset.attributes('aria-label')).toBe('Show all projects')
     expect(wrapper.get('[data-board-project-filter]').text()).toContain('Project Alpha')
+    expect(wrapper.get('[data-board-project-filter]').classes()).toContain('graph-project-view-active')
+    expect(wrapper.get('[data-board-project-filter]').attributes('aria-label'))
+      .toBe('Project view: Project Alpha')
     expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
       .toEqual(['issue-1'])
     await projectReset.trigger('click')
     expect(wrapper.get('[data-board-project-filter]').text()).toContain('All projects')
+    expect(wrapper.get('[data-board-project-filter]').classes()).not.toContain('graph-project-view-active')
     expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
 
     await wrapper.get('[data-board-project-filter]').trigger('click')
@@ -1147,5 +1337,29 @@ describe('BusinessGraphApp', () => {
     expect(request.prompt).toContain('file the payer objection from the call')
     expect(request.prompt).toContain('untrusted business data')
     wrapper.unmount()
+  })
+
+  it('does not pump queued dispatch work after the app unmounts', async () => {
+    vi.useFakeTimers()
+    try {
+      const wrapper = render()
+      await flushPromises()
+      const dispatch = wrapper.findComponent(DispatchBar)
+
+      dispatch.vm.$emit('dispatch', 'first capture')
+      dispatch.vm.$emit('dispatch', 'second capture')
+      await flushPromises()
+      expect(graphContext).toHaveBeenCalledTimes(1)
+      expect(wrapper.emitted('startWork')).toHaveLength(1)
+
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(1_600)
+      await flushPromises()
+
+      expect(graphContext).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 })
