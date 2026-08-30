@@ -100,17 +100,15 @@ lifecycle, MCP transport, persistence helpers, and visual language remain in
 
 | Owner | Responsibility |
 |---|---|
-| `runtime.rs` | serialized capture lifecycle, recovery, and config policy |
-| `runtime/library.rs` | bounded library, transcript, search, and renderer projections |
-| `runtime/followups.rs` | durable summary reruns and retained-audio retranscription |
-| `runtime/tests.rs` | runtime contract fakes and behavioral tests |
-| `store.rs` | SQLite authority, transcript revisions, chunk staging, leases |
+| `runtime.rs`, `runtime/` | serialized capture lifecycle, recovery, config policy, library projections, and follow-up work |
+| `runtime/tests.rs`, `runtime/tests/` | runtime contract fakes and behavioral tests |
+| `store.rs`, `store/` | SQLite authority, transcript revisions, chunk staging, leases |
 | `capture.rs` | native audio streams, resampling, durable chunk commit, gaps |
 | `audio_test.rs` | ephemeral level streaming, window ownership, native teardown |
-| `transcriber.rs` | provider selection, durable tailing, live/final persistence |
+| `transcriber.rs`, `transcriber/` | provider selection, durable tailing, live/final persistence |
 | `local_whisper.rs` | in-process, Metal-only whisper.cpp inference |
 | `stt.rs` | versioned provider-neutral WebSocket contract |
-| `platform.rs` | config, Keychain, model manager, content, export, retention |
+| `platform.rs`, `platform/` | config, Keychain, model manager, content, export, retention |
 | `jobs.rs` | durable title/summary, transcription repair, and KG-proposal work |
 | `tools.rs` | bounded, post-recording agent projection |
 | `native.rs` | startup composition and native lifecycle owners |

@@ -153,10 +153,7 @@ fn retrieval_summary(body: &str) -> String {
     body.lines()
         .map(str::trim)
         .find(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            line.trim_start_matches(|character: char| matches!(character, '-' | '*' | '•' | ' '))
-                .trim()
-        })
+        .map(|line| line.trim_start_matches(['-', '*', '•', ' ']).trim())
         .unwrap_or("Meeting brief")
         .chars()
         .take(280)
