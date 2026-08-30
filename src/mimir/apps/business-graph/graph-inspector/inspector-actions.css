@@ -1,0 +1,153 @@
+.peek-details {
+  flex: 0 0 auto;
+  margin-top: auto;
+  border-top: 1px solid var(--color-rule-light);
+  padding: 1px 18px 2px;
+}
+
+.peek-details[open] {
+  padding-bottom: 11px;
+}
+
+.peek-details summary {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--color-ink-4);
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.peek-details summary small {
+  margin-left: auto;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.peek-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.peek-details summary::after {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--color-ink-4);
+  content: "+";
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.peek-details[open] summary::after {
+  content: "−";
+}
+
+.peek-details summary:hover::after {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.peek-details summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  outline-offset: 2px;
+}
+
+.peek-details-content {
+  padding-top: 7px;
+}
+
+.peek-details-group .object-section-label {
+  margin-bottom: 6px;
+}
+
+.object-primary-action,
+.object-secondary-action {
+  display: inline-flex;
+  min-height: 29px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 3px;
+  padding: 0 9px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.object-primary-action {
+  background: var(--color-accent);
+  color: var(--color-accent-ink, white);
+}
+
+.object-primary-action:hover {
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink));
+}
+
+.object-secondary-action {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ink-3);
+}
+
+.object-secondary-action:hover {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.peek-focus-action {
+  min-height: 26px;
+  padding-inline: 7px;
+}
+
+.object-primary-action kbd,
+.object-secondary-action kbd,
+.focus-save-button kbd {
+  margin-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0.65;
+}
+
+.object-more-wrap {
+  position: relative;
+}
+
+.object-more-menu {
+  position: absolute;
+  z-index: 90;
+  top: 34px;
+  right: 0;
+  width: 196px;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: var(--color-surface);
+  padding: 3px;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--color-ink) 15%, transparent);
+}
+
+.object-more-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 31px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 2px;
+  padding: 0 7px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  text-align: left;
+}
+
+.object-more-menu button:hover {
+  background: var(--color-chrome-mid);
+}
+
+.object-more-menu button.danger {
+  color: var(--color-rem);
+}

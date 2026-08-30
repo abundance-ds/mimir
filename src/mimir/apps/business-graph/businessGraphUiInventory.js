@@ -160,6 +160,8 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphDatePicker.vue',
   'GraphDateTimeField.vue',
   'GraphInspector.vue',
+  'GraphInspectorFocus.vue',
+  'GraphInspectorPeek.vue',
   'GraphMarkdownEditor.vue',
   'GraphRelationshipLine.vue',
   'GraphSelect.vue',

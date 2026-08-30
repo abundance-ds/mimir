@@ -113,7 +113,7 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(24)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(26)
     expect(BUSINESS_GRAPH_SURFACES).toContain('../../../shared/ui/DatePicker.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphAppHeader.vue')

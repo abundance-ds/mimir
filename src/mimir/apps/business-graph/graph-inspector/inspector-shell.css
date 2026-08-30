@@ -1,0 +1,212 @@
+.graph-object {
+  min-height: 0;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.graph-object-peek {
+  position: relative;
+  display: flex;
+  width: min(410px, 92cqw);
+  flex: 0 0 auto;
+  flex-direction: column;
+}
+
+.graph-object-focus {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  background: var(--color-chrome-high);
+}
+
+.peek-header,
+.focus-header {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--color-rule-light);
+  background: var(--color-surface);
+  padding: 5px 7px 5px 12px;
+}
+
+.object-history-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+}
+
+.object-header-spacer {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.object-icon-button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 3px;
+  color: var(--color-ink-4);
+}
+
+.object-icon-button:hover {
+  background: var(--color-chrome-mid);
+  color: var(--color-ink);
+}
+
+.object-icon-button:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.object-icon-button:disabled:hover {
+  background: transparent;
+  color: var(--color-ink-4);
+}
+
+.object-icon-button:focus-visible,
+.object-primary-action:focus-visible,
+.object-secondary-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
+  outline-offset: 1px;
+}
+
+.object-conflict {
+  display: flex;
+  min-height: 46px;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-rem) 26%, var(--color-rule));
+  background: color-mix(in srgb, var(--color-rem) 5%, var(--color-surface));
+  padding: 9px 13px;
+  color: var(--color-rem);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.object-conflict svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.peek-scroll,
+.focus-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.peek-scroll {
+  display: flex;
+  flex-direction: column;
+}
+
+.peek-lookup-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.peek-fact {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--color-rule-light);
+  padding: 8px 12px 9px;
+  text-align: left;
+}
+
+.peek-fact:last-child {
+  border-right: 0;
+}
+
+.peek-fact:hover,
+.peek-fact:focus-visible {
+  background: var(--color-chrome-mid);
+}
+
+.peek-fact span {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.peek-fact strong {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek-hero {
+  padding: 13px 18px 12px;
+}
+
+.peek-title-input {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--color-ink);
+  font-size: 19px;
+  font-weight: 670;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.peek-title-input:focus-visible {
+  outline: none;
+}
+
+.peek-title-input::selection {
+  background: var(--selection);
+}
+
+/* Ghost summary: plain secondary text, no box. */
+.peek-summary-text {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  margin-top: 8px;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.peek-summary-text::placeholder {
+  color: var(--color-ink-4);
+}
+
+.peek-summary-text:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 2px;
+}
+
+.peek-save-state {
+  flex: 0 0 auto;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}

@@ -1,0 +1,289 @@
+.object-metadata-grid {
+  display: grid;
+  gap: 9px 14px;
+  margin-top: 13px;
+  margin-inline: -5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.object-metadata-grid-peek {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.object-metadata-grid-focus {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.object-metadata-grid-dates {
+  grid-template-columns: repeat(2, minmax(0, 240px));
+}
+
+.object-metadata-field {
+  display: block;
+  min-width: 0;
+}
+
+.object-metadata-field > span,
+.focus-deliverables-field > span {
+  display: block;
+  margin: 0 0 2px 5px;
+  color: var(--color-ink-3);
+  font-size: 9px;
+  font-weight: 620;
+  line-height: 1.3;
+}
+
+.object-metadata-field :is(.graph-select-quiet),
+.object-metadata-field :is(.graph-date-quiet) {
+  width: 100%;
+}
+
+.meeting-people-field {
+  grid-column: span 2;
+}
+
+.meeting-attendees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 3px 5px 5px;
+}
+
+.meeting-attendees button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  padding: 3px 7px;
+  color: var(--color-ink-2);
+  font-size: 10px;
+}
+
+.meeting-attendees button:hover {
+  border-color: var(--color-ink-4);
+}
+
+.meeting-transcript-action {
+  min-height: 27px;
+  border-radius: 2px;
+  padding: 0 5px;
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.meeting-transcript-action:hover {
+  background: var(--color-chrome-mid);
+}
+
+.object-metadata-checkbox :is(.graph-checkbox-control) {
+  min-height: 27px;
+  padding-inline: 5px;
+}
+
+.object-metadata-field input {
+  width: 100%;
+  height: 27px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0 5px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+}
+
+.object-metadata-field input::placeholder {
+  color: var(--color-ink-4);
+}
+
+.object-metadata-field input:hover {
+  background: var(--color-chrome-mid);
+}
+
+.object-metadata-field input:focus-visible {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--color-surface);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+  outline-offset: 1px;
+}
+
+.object-metadata-date strong {
+  display: flex;
+  min-height: 27px;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 5px;
+  color: var(--color-ink-2);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek-attention {
+  margin-top: 8px;
+  color: var(--color-rem);
+  font-size: 10px;
+}
+
+.peek-section {
+  border-top: 1px solid var(--color-rule-light);
+  padding: 12px 18px;
+}
+
+.peek-note-section {
+  padding-top: 6px;
+}
+
+.peek-scroll-fill-note .peek-note-section {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.peek-scroll-fill-note .peek-note-section :is(.graph-markdown-editor) {
+  display: flex;
+  flex: 1 1 auto;
+}
+
+.peek-scroll-fill-note .peek-note-section :is(.cm-editor),
+.peek-scroll-fill-note .peek-note-section :is(.cm-scroller),
+.peek-scroll-fill-note .peek-note-section :is(.cm-content) {
+  min-height: 100%;
+}
+
+.object-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.object-section-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+  font-weight: 680;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.object-section-heading .object-section-label {
+  margin-bottom: 0;
+}
+
+.object-section-heading > button {
+  min-height: 27px;
+  border-radius: 4px;
+  padding: 0 7px;
+  color: var(--color-accent);
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.object-section-heading > button:hover {
+  background: var(--color-accent-soft);
+}
+
+.object-section-count {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.object-metadata-field :is(.graph-date-trigger.attention) {
+  color: var(--color-rem);
+}
+
+.object-link-row {
+  display: grid;
+  width: 100%;
+  min-height: 36px;
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 3px;
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.object-link-row:hover {
+  background: var(--color-chrome-mid);
+}
+
+.object-link-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
+  outline-offset: 1px;
+}
+
+.object-link-row > span:nth-child(2) {
+  min-width: 0;
+}
+
+.object-link-row strong,
+.object-link-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.object-link-row strong {
+  color: var(--color-ink-2);
+  font-size: 10px;
+  font-weight: 610;
+}
+
+.object-link-row small {
+  margin-top: 2px;
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.object-link-row > svg {
+  color: var(--color-ink-4);
+}
+
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--color-ink-4);
+}
+
+.activity-active {
+  background: var(--color-accent);
+}
+
+.activity-attention {
+  background: var(--color-rem);
+}
+
+.activity-done {
+  background: var(--color-add);
+}
+
+.file-mark,
+.relation-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 3px;
+  background: var(--color-chrome-mid);
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 680;
+}
+
+.relation-mark {
+  color: var(--color-accent);
+  font-size: 11px;
+}

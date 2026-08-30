@@ -1,0 +1,344 @@
+.focus-header {
+  min-height: 42px;
+  padding-inline: 10px;
+}
+
+.focus-save-state {
+  color: var(--color-ink-4);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.save-state-conflict {
+  color: var(--color-rem) !important;
+}
+
+.save-state-dirty {
+  color: var(--color-accent) !important;
+}
+
+.save-state-saved {
+  color: var(--color-add) !important;
+}
+
+.focus-document {
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  padding: 24px clamp(20px, 4cqw, 48px) 40px;
+}
+
+.focus-hero {
+  border-bottom: 1px solid var(--color-rule-light);
+  padding-bottom: 16px;
+}
+
+.focus-title-input {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 6px 0 4px;
+  color: var(--color-ink);
+  font-size: clamp(24px, 3.1cqw, 34px);
+  font-weight: 690;
+  letter-spacing: -0.035em;
+  line-height: 1.18;
+}
+
+.focus-title-input:focus-visible {
+  outline: none;
+}
+
+.focus-title-input::selection {
+  background: var(--selection);
+}
+
+/* Ghost summary: plain secondary text, no box. */
+.focus-summary-text {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--color-ink-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.focus-summary-text::placeholder {
+  color: var(--color-ink-4);
+}
+
+.focus-summary-text:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 2px;
+}
+
+.focus-connections-section,
+.focus-note,
+.focus-details-section,
+.focus-connected-section {
+  margin-top: 22px;
+}
+
+.focus-connections-section {
+  border-bottom: 1px solid var(--color-rule-light);
+  padding-bottom: 20px;
+}
+
+.connection-composer {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.72fr) minmax(220px, 1.55fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.connection-add {
+  display: inline-flex;
+  min-width: 68px;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 3px;
+  background: var(--color-accent);
+  padding: 0 10px;
+  color: var(--color-accent-ink, white);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.connection-add:hover {
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink));
+}
+
+.connection-add:disabled {
+  cursor: default;
+  opacity: 0.42;
+  filter: none;
+}
+
+.connection-add:focus-visible,
+.connection-row > button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  outline-offset: 1px;
+}
+
+.connection-list {
+  margin-top: 10px;
+  border: 1px solid var(--color-rule-light);
+  border-radius: 2px;
+  background: var(--color-surface);
+}
+
+.connection-row {
+  display: grid;
+  min-height: 36px;
+  grid-template-columns: 18px minmax(0, 1fr) auto 26px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 9px;
+}
+
+.connection-row + .connection-row {
+  border-top: 1px solid var(--color-rule-light);
+}
+
+.connection-row > svg {
+  color: var(--color-accent);
+}
+
+.connection-row > span:nth-of-type(1) {
+  min-width: 0;
+}
+
+.connection-row strong,
+.connection-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-row strong {
+  color: var(--color-ink-2);
+  font-size: 10px;
+  font-weight: 630;
+  text-transform: capitalize;
+}
+
+.connection-row small {
+  margin-top: 2px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+}
+
+.connection-row > span:nth-of-type(2) {
+  padding: 0;
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.connection-row > button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 3px;
+  color: var(--color-ink-4);
+}
+
+.connection-row > button:hover {
+  background: color-mix(in srgb, var(--color-rem) 8%, transparent);
+  color: var(--color-rem);
+}
+
+.connection-empty {
+  margin-top: 10px;
+  border: 1px dashed var(--color-rule);
+  border-radius: 2px;
+  padding: 11px 12px;
+  color: var(--color-ink-4);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.focus-property-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin-inline: -5px;
+}
+
+.focus-classification-grid {
+  margin-top: 8px;
+}
+
+/* Ghost text inputs: borderless until hover/focus. */
+.focus-deliverables-field textarea {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink-2);
+  font-size: 12px;
+}
+
+.focus-deliverables-field textarea::placeholder {
+  color: var(--color-ink-4);
+}
+
+.focus-deliverables-field textarea:hover {
+  background: var(--color-chrome-mid);
+}
+
+.focus-deliverables-field textarea:focus-visible {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--color-surface);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+  outline-offset: 1px;
+}
+
+.object-metadata-field small {
+  display: block;
+  margin: 3px 0 0 5px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+}
+
+.focus-deliverables-field {
+  display: block;
+  margin: 12px -5px 0;
+}
+
+.focus-deliverables-field > small {
+  display: block;
+  margin: 0 0 5px 5px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+}
+
+.focus-deliverables-field textarea {
+  min-height: 68px;
+  overflow: hidden;
+  resize: none;
+  padding: 4px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.focus-connected-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.focus-connected-grid h3 {
+  margin-bottom: 5px;
+  color: var(--color-ink-3);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.focus-save-button {
+  min-width: 116px;
+}
+
+.focus-save-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+  filter: none;
+}
+
+@container business-graph (max-width: 840px) {
+  .graph-object-peek {
+    position: absolute;
+    z-index: 70;
+    inset: 0 0 0 auto;
+    width: min(430px, 100%);
+  }
+
+  .connection-composer {
+    grid-template-columns: 1fr 1.4fr auto;
+  }
+
+  .object-metadata-grid-focus {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container business-graph (max-width: 560px) {
+  .focus-header .object-secondary-action {
+    width: 34px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .focus-save-state {
+    display: none;
+  }
+
+  .focus-document {
+    padding: 22px 16px 40px;
+  }
+
+  .focus-property-grid,
+  .connection-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .connection-add {
+    justify-self: start;
+  }
+
+}
