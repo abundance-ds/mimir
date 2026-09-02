@@ -446,7 +446,7 @@ impl MeetingRuntime {
         }
 
         debug_assert_eq!(recording.status, MeetingStatus::Recording);
-        self.publish_unlocked("capture-started", Some(meeting_id), Some(run_id))
+        self.publish_start_unlocked("capture-started", &recording, &projection, run_id)
     }
 
     fn continue_completed_unlocked(
@@ -609,6 +609,6 @@ impl MeetingRuntime {
         {
             active.transcription = transcription;
         }
-        self.publish_unlocked("capture-continued", Some(meeting_id.into()), Some(run_id))
+        self.publish_start_unlocked("capture-continued", &recording, projection, run_id)
     }
 }

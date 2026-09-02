@@ -45,6 +45,12 @@ const VAD_MIN_CONSECUTIVE_FRAMES: usize = 2;
 const MAX_NO_SPEECH_PROBABILITY: f32 = 0.60;
 const MIN_SEGMENT_CONFIDENCE: f32 = 0.30;
 const MAX_IDENTICAL_SEGMENTS_PER_WINDOW: usize = 2;
+const MAX_REPEATED_PHRASE_TOKENS: usize = 8;
+// A real-model probe found that six repeated backchannels can dominate the
+// next window, while five remain safe. Keep short speech in the transcript,
+// but never reuse it as decoder context once it reaches that boundary.
+const MIN_UNSAFE_PROMPT_REPETITIONS: usize = 6;
+const MIN_IMPLAUSIBLE_SEGMENT_REPETITIONS: usize = 12;
 
 /// Production local runner. The catalog must be the same immutable manifest
 /// catalog exposed by [`super::platform::NativeMeetingPlatform`].
@@ -635,8 +641,9 @@ impl StreamingState {
         if !window.contains_speech {
             return Ok(());
         }
+        let history = safe_history_prompt(&window.history);
         let decoded =
-            suppress_implausible_segments(inference.transcribe(&window.samples, &window.history)?);
+            suppress_implausible_segments(inference.transcribe(&window.samples, history)?);
         let duration_ms = window.end_ms.saturating_sub(window.start_ms);
         let mut partials = Vec::new();
         for (index, segment) in decoded.into_iter().enumerate() {
@@ -884,10 +891,39 @@ fn suppress_implausible_segments(decoded: Vec<DecodedSegment>) -> Vec<DecodedSeg
             {
                 return false;
             }
+            if contains_repeated_phrase(&normalized, MIN_IMPLAUSIBLE_SEGMENT_REPETITIONS) {
+                return false;
+            }
             repetitions.get(&normalized).copied().unwrap_or_default()
                 <= MAX_IDENTICAL_SEGMENTS_PER_WINDOW
         })
         .collect()
+}
+
+fn safe_history_prompt(history: &str) -> &str {
+    let normalized = normalized_phrase(history);
+    if contains_repeated_phrase(&normalized, MIN_UNSAFE_PROMPT_REPETITIONS) {
+        ""
+    } else {
+        history
+    }
+}
+
+fn contains_repeated_phrase(normalized: &str, minimum_repetitions: usize) -> bool {
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    if minimum_repetitions < 2 || tokens.len() < minimum_repetitions {
+        return false;
+    }
+    let maximum_phrase_tokens = MAX_REPEATED_PHRASE_TOKENS.min(tokens.len() / minimum_repetitions);
+    (1..=maximum_phrase_tokens).any(|phrase_tokens| {
+        let run_tokens = phrase_tokens.saturating_mul(minimum_repetitions);
+        tokens.windows(run_tokens).any(|window| {
+            let phrase = &window[..phrase_tokens];
+            window[phrase_tokens..]
+                .chunks_exact(phrase_tokens)
+                .all(|candidate| candidate == phrase)
+        })
+    })
 }
 
 fn normalized_phrase(text: &str) -> String {
@@ -1254,17 +1290,33 @@ mod tests {
             language: Some("en".into()),
             confidence: Some(confidence),
         };
+        let short_backchannel = ["Yeah."; MIN_UNSAFE_PROMPT_REPETITIONS + 1].join(" ");
         let filtered = suppress_implausible_segments(vec![
             segment("Subscribe", 0.99),
             segment(" subscribe! ", 0.95),
             segment("SUBSCRIBE.", 0.97),
             segment("investigación 같이", 0.12),
             segment("...", 0.99),
+            segment(&["Yeah."; 110].join(" "), 0.98),
+            segment(&["Mm."; 109].join(" "), 0.98),
+            segment(&short_backchannel, 0.98),
             segment("The deployment is ready.", 0.86),
         ]);
 
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].text, "The deployment is ready.");
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].text, short_backchannel);
+        assert_eq!(filtered[1].text, "The deployment is ready.");
+    }
+
+    #[test]
+    fn repeated_decoder_output_never_becomes_the_next_history_prompt() {
+        let safe = ["Yeah."; MIN_UNSAFE_PROMPT_REPETITIONS - 1].join(" ");
+        let poisoned = ["Yeah."; MIN_UNSAFE_PROMPT_REPETITIONS].join(" ");
+        let repeated_phrase = ["Thank you."; MIN_UNSAFE_PROMPT_REPETITIONS].join(" ");
+
+        assert_eq!(safe_history_prompt(&safe), safe);
+        assert_eq!(safe_history_prompt(&poisoned), "");
+        assert_eq!(safe_history_prompt(&repeated_phrase), "");
     }
 
     #[test]

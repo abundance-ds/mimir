@@ -4,8 +4,8 @@ import {
   queryGraph,
 } from './businessGraph.js'
 
-export async function loadMeetingGraphCatalog(workspacePath, teamRoot = '') {
-  const status = await openBusinessGraph(workspacePath, teamRoot)
+export async function loadMeetingGraphCatalog(workspacePath) {
+  const status = await openBusinessGraph(workspacePath)
   const scopes = Array.isArray(status?.scopes) ? status.scopes : []
   const page = await queryGraph({
     scopeIds: scopes.map(scope => scope.id),

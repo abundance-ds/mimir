@@ -379,6 +379,7 @@ export function normalizeMeetingSnapshot(value) {
   return {
     revision: nonnegativeInteger(snapshot.revision),
     meetings,
+    startProjection: Boolean(snapshot.startProjection ?? snapshot.start_projection),
     meetingsTruncated: Boolean(snapshot.meetingsTruncated ?? snapshot.meetings_truncated),
     nextMeetingsBefore: snapshot.nextMeetingsBefore || snapshot.next_meetings_before
       ? normalizeMeetingLibraryCursor(

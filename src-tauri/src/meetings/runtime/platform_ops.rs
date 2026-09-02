@@ -197,6 +197,53 @@ impl MeetingRuntime {
         meeting_id: Option<String>,
         run_id: Option<String>,
     ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let revision = self.publish_event_unlocked(kind, meeting_id, run_id)?;
+        self.snapshot_unlocked(revision)
+    }
+
+    pub(super) fn publish_start_unlocked(
+        &self,
+        kind: &str,
+        record: &MeetingRecord,
+        projection: &MeetingPlatformProjection,
+        run_id: String,
+    ) -> Result<MeetingSnapshot, MeetingRuntimeError> {
+        let active = self.active()?.clone();
+        let content = self
+            .inner
+            .platform
+            .content(&record.id)
+            .map_err(|message| port_error("meeting content projection", message))?;
+        let meeting = self.meeting_view(
+            record,
+            &content,
+            active.as_ref(),
+            &projection.config.kg_prompt,
+        )?;
+        let revision = self.publish_event_unlocked(kind, Some(record.id.clone()), Some(run_id))?;
+        let runtime_diagnostic = self.diagnostic()?.clone();
+
+        Ok(MeetingSnapshot {
+            revision,
+            meetings: vec![meeting],
+            start_projection: true,
+            meetings_truncated: false,
+            next_meetings_before: None,
+            active_meeting_id: Some(record.id.clone()),
+            candidates: Vec::new(),
+            config: projection.config.clone(),
+            permissions: projection.permissions.clone(),
+            models: projection.models.clone(),
+            diagnostic: runtime_diagnostic.or_else(|| projection.diagnostic.clone()),
+        })
+    }
+
+    fn publish_event_unlocked(
+        &self,
+        kind: &str,
+        meeting_id: Option<String>,
+        run_id: Option<String>,
+    ) -> Result<u64, MeetingRuntimeError> {
         let revision = self.inner.revision.fetch_add(1, Ordering::AcqRel) + 1;
         let event = MeetingEvent {
             revision,
@@ -213,7 +260,7 @@ impl MeetingRuntime {
                 bounded_error(&error)
             ))?;
         }
-        self.snapshot_unlocked(revision)
+        Ok(revision)
     }
 
     pub(super) fn interrupt_after_stop_failure(

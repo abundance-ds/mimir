@@ -186,6 +186,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
       })
       applySnapshot(snapshot)
       if (snapshot.activeMeetingId) selectedId.value = snapshot.activeMeetingId
+      if (snapshot.startProjection) queueRefresh()
       void refreshVisibleTranscripts()
       return activeMeeting.value
     })
@@ -527,9 +528,17 @@ export const useMeetingsStore = defineStore('meetings', () => {
   function applySnapshot(snapshot) {
     if (!snapshot || snapshot.revision < revision.value) return false
     revision.value = snapshot.revision
-    meetings.value = snapshot.meetings
-    meetingsTruncated.value = snapshot.meetingsTruncated
-    nextMeetingsBefore.value = snapshot.nextMeetingsBefore
+    if (snapshot.startProjection) {
+      const projectedIds = new Set(snapshot.meetings.map(meeting => meeting.id))
+      meetings.value = [
+        ...snapshot.meetings,
+        ...meetings.value.filter(meeting => !projectedIds.has(meeting.id)),
+      ]
+    } else {
+      meetings.value = snapshot.meetings
+      meetingsTruncated.value = snapshot.meetingsTruncated
+      nextMeetingsBefore.value = snapshot.nextMeetingsBefore
+    }
     candidates.value = snapshot.candidates
     config.value = snapshot.config
     permissions.value = snapshot.permissions

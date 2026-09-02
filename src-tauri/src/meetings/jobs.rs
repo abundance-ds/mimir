@@ -717,12 +717,12 @@ fn materialize_hook_notes(
         .meeting_detail(&job.definition.meeting_id)
         .map_err(|error| format!("Could not read meeting user notes: {error}"))?
         .notes;
-    publish_immutable_hook_transcript(&notes_path, notes.as_bytes())?;
+    publish_immutable_hook_input(&notes_path, notes.as_bytes(), MAX_OUTPUT_BYTES, true)?;
     Ok(notes_path)
 }
 
 fn read_user_notes(path: &Path) -> Result<String, String> {
-    let mut file = open_controlled_file(path, MAX_OUTPUT_BYTES)?;
+    let mut file = open_controlled_file_allow_empty(path, MAX_OUTPUT_BYTES)?;
     let mut notes = String::new();
     file.read_to_string(&mut notes)
         .map_err(|error| format!("Could not read private meeting user notes: {error}"))?;
@@ -785,7 +785,12 @@ fn materialize_transcript_revision(
 ) -> Result<PathBuf, String> {
     let transcript_path = contained_join(root, "transcript.jsonl")?;
     let transcript = render_hook_transcript(source, meeting_id, requested_revision)?;
-    publish_immutable_hook_transcript(&transcript_path, &transcript)?;
+    publish_immutable_hook_input(
+        &transcript_path,
+        &transcript,
+        MAX_HOOK_TRANSCRIPT_BYTES,
+        false,
+    )?;
     Ok(transcript_path)
 }
 
@@ -894,10 +899,15 @@ fn append_jsonl(bytes: &mut Vec<u8>, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn publish_immutable_hook_transcript(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn publish_immutable_hook_input(
+    path: &Path,
+    bytes: &[u8],
+    maximum_bytes: u64,
+    allow_empty: bool,
+) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
-            let mut existing = open_controlled_file(path, MAX_HOOK_TRANSCRIPT_BYTES)?;
+            let mut existing = open_controlled_file_with_policy(path, maximum_bytes, allow_empty)?;
             let mut persisted = Vec::new();
             existing
                 .read_to_end(&mut persisted)
@@ -923,7 +933,7 @@ fn publish_immutable_hook_transcript(path: &Path, bytes: &[u8]) -> Result<(), St
             ));
         }
     }
-    require_regular_file(path, MAX_HOOK_TRANSCRIPT_BYTES)
+    open_controlled_file_with_policy(path, maximum_bytes, allow_empty).map(drop)
 }
 
 fn launch_hook(
@@ -1201,16 +1211,35 @@ fn read_controlled_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, 
 }
 
 fn open_controlled_file(path: &Path, maximum_bytes: u64) -> Result<fs::File, String> {
+    open_controlled_file_with_policy(path, maximum_bytes, false)
+}
+
+fn open_controlled_file_allow_empty(path: &Path, maximum_bytes: u64) -> Result<fs::File, String> {
+    open_controlled_file_with_policy(path, maximum_bytes, true)
+}
+
+fn open_controlled_file_with_policy(
+    path: &Path,
+    maximum_bytes: u64,
+    allow_empty: bool,
+) -> Result<fs::File, String> {
     repair_private_file(path)
         .map_err(|error| format!("Could not secure meeting artifact: {error}"))?;
     let before = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect meeting artifact: {error}"))?;
-    if before.file_type().is_symlink()
-        || !before.file_type().is_file()
-        || before.len() == 0
-        || before.len() > maximum_bytes
-    {
-        return Err("Meeting artifact is not a bounded regular file".into());
+    if before.file_type().is_symlink() {
+        return Err("Meeting artifact is a symbolic link".into());
+    }
+    if !before.file_type().is_file() {
+        return Err("Meeting artifact is not a regular file".into());
+    }
+    if !allow_empty && before.len() == 0 {
+        return Err("Meeting artifact is empty".into());
+    }
+    if before.len() > maximum_bytes {
+        return Err(format!(
+            "Meeting artifact exceeds its {maximum_bytes}-byte limit"
+        ));
     }
     let file = OpenOptions::new()
         .read(true)
@@ -1220,8 +1249,16 @@ fn open_controlled_file(path: &Path, maximum_bytes: u64) -> Result<fs::File, Str
     let opened = file
         .metadata()
         .map_err(|error| format!("Could not inspect open meeting artifact: {error}"))?;
-    if !opened.file_type().is_file() || opened.len() == 0 || opened.len() > maximum_bytes {
-        return Err("Open meeting artifact is not a bounded regular file".into());
+    if !opened.file_type().is_file() {
+        return Err("Open meeting artifact is not a regular file".into());
+    }
+    if !allow_empty && opened.len() == 0 {
+        return Err("Open meeting artifact is empty".into());
+    }
+    if opened.len() > maximum_bytes {
+        return Err(format!(
+            "Open meeting artifact exceeds its {maximum_bytes}-byte limit"
+        ));
     }
     #[cfg(unix)]
     {
@@ -1231,20 +1268,6 @@ fn open_controlled_file(path: &Path, maximum_bytes: u64) -> Result<fs::File, Str
         }
     }
     Ok(file)
-}
-
-fn require_regular_file(path: &Path, maximum_bytes: u64) -> Result<(), String> {
-    repair_private_file(path)
-        .map_err(|error| format!("Could not secure meeting artifact: {error}"))?;
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("Could not inspect meeting artifact: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err("Meeting artifact is not a regular file".into());
-    }
-    if metadata.len() == 0 || metadata.len() > maximum_bytes {
-        return Err("Meeting artifact has an invalid size".into());
-    }
-    Ok(())
 }
 
 fn remove_previous_output(path: &Path) -> Result<(), String> {
@@ -1607,7 +1630,6 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&output, fs::Permissions::from_mode(0o666)).unwrap();
         }
-        assert!(require_regular_file(&output, 1024).is_ok());
         assert!(open_controlled_file(&output, 1024).is_ok());
         assert!(controlled_output_exists(&output).unwrap());
         #[cfg(unix)]
@@ -1623,10 +1645,26 @@ mod tests {
             use std::os::unix::fs::symlink;
             let link = directory.path().join("link.json");
             symlink(&output, &link).unwrap();
-            assert!(require_regular_file(&link, 1024).is_err());
             assert!(open_controlled_file(&link, 1024).is_err());
             assert!(controlled_output_exists(&link).is_err());
         }
+    }
+
+    #[test]
+    fn empty_user_notes_are_valid_controlled_input_but_empty_output_is_not() {
+        let directory = tempfile::tempdir().unwrap();
+        let notes = directory.path().join("user-notes.txt");
+        publish_immutable_hook_input(&notes, b"", 1_024, true).unwrap();
+
+        assert_eq!(read_user_notes(&notes).unwrap(), "");
+        let output_error = match read_controlled_json::<SummaryOutput>(&notes) {
+            Ok(_) => panic!("an empty generated output must not be accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(output_error, "Meeting artifact is empty");
+
+        let transcript = directory.path().join("transcript.jsonl");
+        assert!(publish_immutable_hook_input(&transcript, b"", 1_024, false).is_err());
     }
 
     #[test]

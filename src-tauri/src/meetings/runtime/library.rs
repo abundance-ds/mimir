@@ -371,6 +371,7 @@ impl MeetingRuntime {
         Ok(MeetingSnapshot {
             revision,
             meetings,
+            start_projection: false,
             meetings_truncated: page.has_more,
             next_meetings_before: page.next_before,
             active_meeting_id,

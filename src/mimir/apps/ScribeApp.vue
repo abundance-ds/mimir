@@ -976,8 +976,10 @@ watch(
 )
 
 watch(
-  [() => props.workspacePath, () => settings.mimirTeamFolder],
-  () => void loadGraphContextCatalog(),
+  [() => props.workspacePath, () => props.active],
+  ([, active]) => {
+    if (active) void loadGraphContextCatalog()
+  },
   { immediate: true },
 )
 
@@ -1198,7 +1200,7 @@ async function loadGraphContextCatalog() {
   graphCatalogLoading.value = true
   graphCatalogError.value = ''
   try {
-    const catalog = await loadMeetingGraphCatalog(workspace, settings.mimirTeamFolder)
+    const catalog = await loadMeetingGraphCatalog(workspace)
     if (generation !== graphCatalogGeneration) return
     graphCatalog.value = catalog
     await maybeSeedGraphDraft(meetings.activeMeeting || detailMeeting.value)

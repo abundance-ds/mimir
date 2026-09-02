@@ -216,6 +216,19 @@ fn detected_start_rejects_stale_candidates_and_suppresses_the_accepted_prompt() 
 #[test]
 fn listener_is_installed_before_snapshot_and_event_revisions_are_monotonic() {
     let fixture = make_fixture();
+    fixture
+        .store
+        .create_meeting(
+            &MeetingDraft {
+                id: "earlier-meeting".into(),
+                title: "Earlier meeting".into(),
+                origin: MeetingOrigin::default(),
+                channels: Vec::new(),
+                metadata: json!({}),
+            },
+            NOW,
+        )
+        .unwrap();
     let base = fixture.runtime.snapshot().unwrap();
     assert_eq!(base.revision, 0);
 
@@ -223,6 +236,8 @@ fn listener_is_installed_before_snapshot_and_event_revisions_are_monotonic() {
         .runtime
         .start(start_request(&fixture.runtime, "ordered"))
         .unwrap();
+    assert!(started.start_projection);
+    assert_eq!(started.meetings.len(), 1);
     let events = fixture.events.published.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(events[0].revision > base.revision);
@@ -235,6 +250,8 @@ fn listener_is_installed_before_snapshot_and_event_revisions_are_monotonic() {
     drop(events);
 
     let reconciled = fixture.runtime.snapshot().unwrap();
+    assert!(!reconciled.start_projection);
+    assert_eq!(reconciled.meetings.len(), 2);
     assert_eq!(reconciled.revision, started.revision);
     assert_eq!(reconciled.active_meeting_id, started.active_meeting_id);
 }
@@ -291,4 +308,3 @@ fn library_and_summary_projections_have_explicit_payload_budgets() {
         .unwrap();
     assert_eq!(detail.summary.unwrap().len(), 100_000);
 }
-

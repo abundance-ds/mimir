@@ -1563,6 +1563,7 @@ mod consent_tests {
         MeetingSnapshot {
             revision: 1,
             meetings: Vec::new(),
+            start_projection: false,
             meetings_truncated: false,
             next_meetings_before: None,
             active_meeting_id: None,

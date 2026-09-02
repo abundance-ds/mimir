@@ -795,6 +795,7 @@ mod tests {
         MeetingSnapshot {
             revision: 7,
             meetings: vec![],
+            start_projection: false,
             meetings_truncated: false,
             next_meetings_before: None,
             active_meeting_id: None,

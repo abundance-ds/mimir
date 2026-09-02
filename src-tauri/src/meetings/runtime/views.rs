@@ -5,6 +5,11 @@ use super::*;
 pub struct MeetingSnapshot {
     pub revision: u64,
     pub meetings: Vec<MeetingView>,
+    /// A start response contains the active meeting only. The renderer merges
+    /// it into the current library and reconciles the full library after the
+    /// recording surface is usable.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub start_projection: bool,
     #[serde(default)]
     pub meetings_truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -19,6 +24,10 @@ pub struct MeetingSnapshot {
     pub models: Vec<MeetingModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<String>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

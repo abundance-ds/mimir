@@ -81,6 +81,7 @@ function snapshot(overrides = {}) {
   return {
     revision: 1,
     meetings: [],
+    startProjection: false,
     activeMeetingId: null,
     activeMeeting: null,
     candidates: [],
@@ -192,14 +193,32 @@ describe('ScribeApp', () => {
     vi.mocked(showMeetingFiles).mockReset()
   })
 
+  it('reloads graph context when Scribe becomes active', async () => {
+    const wrapper = mount(ScribeApp, { props: { workspacePath: '/work', active: false } })
+    await flushPromises()
+    expect(loadGraphCatalog).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+
+    expect(loadGraphCatalog).toHaveBeenCalledWith('/work')
+  })
+
   it('starts recording with one action and no participant attestation gate', async () => {
-    vi.mocked(startMeeting).mockResolvedValue(snapshot({
+    const started = snapshot({
       revision: 2,
+      startProjection: true,
       activeMeetingId: 'm1',
       meetings: [meeting({ lifecycle: 'capturing', transcription: 'initializing' })],
-    }))
+    })
+    vi.mocked(startMeeting).mockResolvedValue(started)
     const wrapper = mount(ScribeApp, { props: { workspacePath: '/work', active: true } })
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-new]').attributes('disabled')).toBeUndefined())
+
+    let finishLibraryRefresh
+    vi.mocked(loadMeetingSnapshot).mockImplementation(() => new Promise(resolve => {
+      finishLibraryRefresh = resolve
+    }))
 
     expect(wrapper.get('[data-scribe-home-toolbar]').text()).not.toContain('Record this meeting')
     expect(wrapper.text()).not.toContain('Mimir records your microphone')
@@ -212,6 +231,10 @@ describe('ScribeApp', () => {
       requestId: 'scribe-start-native',
       consentToken: 'native-secret',
     })))
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
+
+    finishLibraryRefresh({ ...started, startProjection: false })
+    await vi.waitFor(() => expect(loadMeetingSnapshot).toHaveBeenCalledTimes(2))
   })
 
   it('prepares one meeting row, saves notes, and records into that row', async () => {

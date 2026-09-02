@@ -101,6 +101,7 @@ const expectedFinalMeeting = {
 const expectedSnapshot = {
   revision: 73,
   meetings: [expectedLiveMeeting, expectedFinalMeeting],
+  startProjection: false,
   meetingsTruncated: true,
   nextMeetingsBefore: {
     createdAt: '2026-07-30T14:00:00.000Z',

@@ -432,6 +432,10 @@ workspace bootstrap initializer; it does not wait for MCP or Activities.
 Recorder readiness also does not wait for transcript-window hydration, and
 native startup secures private roots and authority files without recursively
 walking every historical audio chunk or model artifact.
+The native start command returns an active-meeting projection after capture
+and transcription start. It does not wait for recent-library hydration. The
+renderer merges that projection into its current library, opens Recording,
+then reconciles the bounded authoritative library in the background.
 Library snapshots deliberately omit transcript text. Recording and Review both
 render the selected meeting's separately paged transcript window, so the final
 words visible live cannot disappear during Stop or when the meeting is reopened.

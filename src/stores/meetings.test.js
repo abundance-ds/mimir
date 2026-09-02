@@ -57,6 +57,7 @@ vi.mock('../services/meetings.js', async importOriginal => ({
 const emptySnapshot = {
   revision: 1,
   meetings: [],
+  startProjection: false,
   activeMeetingId: null,
   activeMeeting: null,
   candidates: [],
@@ -465,6 +466,62 @@ describe('meetings store', () => {
     }))
     await expect(store.start({}))
       .rejects.toThrow('already active')
+  })
+
+  it('opens recording from the start projection before library reconciliation finishes', async () => {
+    const history = {
+      id: 'history-1',
+      title: 'Earlier meeting',
+      lifecycle: 'ready',
+      durationMs: 60_000,
+      segments: [],
+      jobs: [],
+      gaps: [],
+      channels: ['microphone'],
+    }
+    const live = {
+      id: 'live-1',
+      title: 'Planning',
+      lifecycle: 'capturing',
+      durationMs: 0,
+      segments: [],
+      jobs: [],
+      gaps: [],
+      channels: ['microphone', 'system'],
+    }
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue({
+      ...emptySnapshot,
+      meetings: [history],
+    })
+    const store = useMeetingsStore()
+    await store.initialize()
+
+    let finishLibraryRefresh
+    vi.mocked(loadMeetingSnapshot).mockImplementation(() => new Promise(resolve => {
+      finishLibraryRefresh = resolve
+    }))
+    vi.mocked(startMeeting).mockResolvedValue({
+      ...emptySnapshot,
+      revision: 2,
+      startProjection: true,
+      activeMeetingId: 'live-1',
+      meetings: [live],
+    })
+
+    await expect(store.start({ title: 'Planning' })).resolves.toMatchObject({
+      id: 'live-1',
+      lifecycle: 'capturing',
+    })
+    expect(store.meetings.map(meeting => meeting.id)).toEqual(['live-1', 'history-1'])
+    await vi.waitFor(() => expect(loadMeetingSnapshot).toHaveBeenCalledTimes(2))
+
+    finishLibraryRefresh({
+      ...emptySnapshot,
+      revision: 2,
+      activeMeetingId: 'live-1',
+      meetings: [live, history],
+    })
+    await vi.waitFor(() => expect(store.loading).toBe(false))
   })
 
   it('continues a completed meeting under the same identity with fresh consent', async () => {
