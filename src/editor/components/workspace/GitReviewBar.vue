@@ -67,7 +67,7 @@
           <span class="git-action-label">Review new edits</span>
         </button>
         <button
-          v-if="currentStaged && canUnstage"
+          v-if="!managed && currentStaged && canUnstage"
           type="button"
           data-git-unstage
           class="git-review-action"
@@ -81,7 +81,7 @@
           <span class="git-action-label">Unstage</span>
         </button>
         <button
-          v-if="currentUnstaged && !review.conflicted && (canStage || dirty)"
+          v-if="!managed && currentUnstaged && !review.conflicted && (canStage || dirty)"
           type="button"
           data-git-stage
           class="git-review-action git-review-primary"
@@ -153,6 +153,7 @@ import { useLaunchersStore } from '../../../stores/launchers.js'
 
 const props = defineProps({
   dirty: { type: Boolean, default: false },
+  managed: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['openFile', 'askAgent', 'close'])
@@ -180,6 +181,8 @@ const canUnstage = computed(() => (
   && !(review.value.scope === 'all' && currentUnstaged.value)
 ))
 const reviewNewEditsVisible = computed(() => (
+  !props.managed
+  &&
   currentStaged.value
   && currentUnstaged.value
   && review.value?.scope !== 'unstaged'
@@ -188,17 +191,18 @@ const stageTitle = computed(() => {
   if (props.dirty) return 'Save the open file before staging it'
   return 'Include this reviewed file in the next commit. This does not create a commit.'
 })
-const scopeLabel = computed(() => ({
+const scopeLabel = computed(() => props.managed ? 'automatic sync' : ({
   all: 'all changes',
   unstaged: 'unstaged diff',
   staged: 'staged diff',
 })[review.value?.scope] || '')
-const scopeDetail = computed(() => ({
+const scopeDetail = computed(() => props.managed ? 'Mimir publishes this change batch' : ({
   all: 'Last commit to working file',
   unstaged: 'Staged version to working file',
   staged: 'Last commit to staged version',
 })[review.value?.scope] || '')
 const stateLabel = computed(() => {
+  if (props.managed) return props.dirty ? 'Unsaved' : 'Waiting for batch'
   if (props.dirty && currentUnstaged.value) return 'Unsaved text not included'
   if (review.value?.conflicted) return 'Conflict'
   if (currentStaged.value && currentUnstaged.value) return 'New edits not staged'

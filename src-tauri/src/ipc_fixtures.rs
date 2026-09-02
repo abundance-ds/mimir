@@ -693,6 +693,7 @@ fn meetings_snapshot() -> MeetingSnapshot {
     MeetingSnapshot {
         revision: 73,
         meetings: vec![live_meeting(), finalized_meeting()],
+        start_projection: false,
         meetings_truncated: true,
         next_meetings_before: Some(MeetingLibraryCursor {
             created_at: "2026-07-30T14:00:00.000Z".into(),

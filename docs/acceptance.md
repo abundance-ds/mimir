@@ -112,11 +112,14 @@ requirements; they do not replace runtime verification.
   client tutorials.
 - Every connection uses the product-owned `mimir_workbench` identity and
   preserves unrelated client configuration.
-- Settings > Connections shows Google, Slack, and Granola as Not connected,
-  Connected as, or Needs sign-in. Connect and Disconnect change the public
-  tool catalog immediately, without an app restart.
-- Connection credentials use only Mimir's keychain service. Granola uses its
-  public REST API and a user-supplied supported API key; no provider desktop
+- Settings > Connections shows GitHub, Google, Slack, and Granola with one
+  plain state. Provider Connect and Disconnect actions change the public tool
+  catalog immediately, without an app restart. GitHub reports the local GitHub
+  CLI login and adds no agent tools. Its Manage action states that the login is
+  shared before it signs the active account out of GitHub CLI.
+- Provider credentials use only Mimir's keychain service. GitHub is the explicit
+  exception and uses the installed GitHub CLI login. Granola uses its public
+  REST API and a user-supplied supported API key; no other provider desktop
   cache or token file is read.
 - Private and Team skills trigger natively in every client; Project skills
   trigger natively in Claude and Pi and remain one explicit lookup away in
@@ -196,6 +199,18 @@ requirements; they do not replace runtime verification.
   tree branches.
 - Git folders show changed-descendant counts. The footer summary opens a named,
   one-click-clearable Git-change queue that also represents deleted paths.
+- Mimir-created workspaces start as local Git repositories. After the user
+  pastes an existing empty GitHub repository URL, quiet managed sync starts.
+  Existing repositories with a GitHub HTTPS or SSH `origin` use it
+  automatically. Managed Changes is informational and excludes ignored,
+  binary, and files larger than 10 MiB from automatic commits.
+- Managed Project history opens text versions in the Editor diff and restores
+  a selected version as a new change. The Files context menu provides the same
+  History drill-in for text files in manual Git repositories. Routine fetch,
+  commit, and push state is not shown unless an error requires action.
+- An excluded binary or oversized Project file does not block an unrelated
+  incoming change. If both sides changed that excluded path, sync stops before
+  it moves `HEAD` or overwrites the local file and reports the path.
 - Single-click opens or reuses a clean preview tab; Enter/double-click pins the
   tab. Text mounts CodeMirror, PDFs render in the Editor, and unsupported
   resources expose metadata plus default-app/reveal actions.
@@ -285,8 +300,24 @@ requirements; they do not replace runtime verification.
 
 - Every graph node kind is canonical Markdown under `graph/` and loads through
   one Rust-owned GraphStore.
-- Private, current-project, and optional team roots compose into projections
-  without losing scope, source path, source revision, or legacy metadata.
+- Private, current-Workspace, and optional managed Team roots compose into
+  projections without losing scope, source path, source revision, or legacy
+  metadata.
+- The Team root is the Mimir-owned `~/.mimir/team-graph/` Git checkout with
+  `mimir-team.toml`, `graph/`, `resources/`, and optional `skills/` and
+  `agents/`. Before setup, Team is absent. Setup validates and syncs a temporary
+  clone before atomically installing the fixed root. Old Team-folder settings
+  are ignored.
+- Team resources are ordinary files linked through structured `files` entries
+  on Resource nodes. Unlinked files remain visible as repairable attachments;
+  Project deliverables keep Workspace-relative semantics.
+- Managed Team changes close after five quiet minutes, thirty continuous
+  minutes, or application close. Incoming fetches do not close a young batch;
+  offline edits amend one unpublished commit; published history is never
+  force-pushed or squashed.
+- Different-file changes merge normally. For a same-file conflict, the later
+  recorded edit wins and the losing content remains recoverable through file
+  History and bounded local recovery references.
 - A query limited to project or team scopes never returns private nodes,
   backlinks, counts, or context.
 - The bounded ontology accepts business and HEOR kinds, normalizes legacy

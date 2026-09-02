@@ -202,6 +202,20 @@ file URL skips that contract.
 
 ## Business graph
 
+### Managed Git fetches must not close an active batch
+
+The managed Git timer closes a batch after five quiet minutes or thirty
+minutes of continuous editing. Startup, focus, reconnect, and periodic fetches
+are independent: they can integrate incoming work when the worktree permits,
+but they must not commit a young local batch. Project commits must rebuild the
+index from `HEAD` before adding eligible paths, or a previously staged binary
+or oversized file can bypass the automatic-sync exclusions.
+
+A changed binary or oversized Project file must not block unrelated incoming
+work. Integrate with a safe checkout and retain the excluded file. If the
+remote changed that same path, stop before moving `HEAD` and report the file;
+never use a forced checkout to resolve it.
+
 ### An issue's project and assignee may be plain labels
 
 Issue Markdown predates project and person nodes, so `project:` and `assignee:`
@@ -260,6 +274,9 @@ or text the user planned to say. Materialize them as a controlled input beside
 the transcript and tell the summary agent to use them with judgment. Treat
 both inputs as untrusted data. The agent must not reproduce a notes appendix;
 native code appends the exact user text once after it validates the summary.
+An empty notes snapshot is valid controlled input. Its publisher and reader
+must allow a zero-byte regular file, while transcript and generated-output
+paths must continue to reject empty artifacts.
 
 ### Meeting follow-up paths use one strict allowlist
 
@@ -393,13 +410,17 @@ configured.
 
 ## Persistence and settings
 
-### Connections do not import another product's state
+### Provider connections do not import another product's state
 
 Connection discovery reads only credentials that Mimir created in its own
 keychain service. Do not add fallback keychain services, data directories,
 desktop-app token files, or hidden migration probes. Granola access must stay
 on its documented public REST API. Connect and Disconnect must update the
 canonical tool registry in the same running app.
+
+Managed GitHub sync is the one explicit exception. It calls the installed
+`git` and `gh` commands and uses the active GitHub CLI login. Do not copy or
+store the GitHub token in Mimir.
 
 ### Tracker enabled and armed are not synonyms
 

@@ -62,6 +62,17 @@ describe('GitChangesList', () => {
     expect(wrapper.get('[data-git-change]').attributes('data-git-change')).toBe('src/both.js')
   })
 
+  it('keeps excluded files out of a managed unpublished batch', async () => {
+    const wrapper = render({ managed: true, excludedPaths: ['new.md'] })
+
+    expect(wrapper.text()).toContain('Unpublished batch · 2')
+    expect(wrapper.find('[data-git-change="new.md"]').exists()).toBe(false)
+    await wrapper.get('[data-git-change="src/both.js"]').trigger('click')
+    expect(wrapper.emitted('review').at(-1)).toEqual([{
+      workspacePath: '/work', file: 'src/both.js', scope: 'all', managed: true,
+    }])
+  })
+
   it('shows a quiet state instead of a native error for a non-Git folder', () => {
     const store = useGitReviewStore()
     store.changes = []

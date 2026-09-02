@@ -79,15 +79,18 @@ content zoom.
 
 Shared scope settings follow the same mutation invariant:
 
-- `mimirTeamFolder` is the optional Team root configured in Settings > Scopes.
-  It can contain `graph/`, `skills/`, and `agents/`. An empty value mounts only
-  Private and Workspace scopes. A configured folder that is temporarily missing
-  stays visible as unmounted and does not block local scopes.
+- Mimir owns the Team root at `~/.mimir/team-graph/`. Settings connects it to a
+  GitHub repository; it does not ask the user to choose or maintain a folder.
+  Mimir uses the installed Git and GitHub CLI login; it stores no GitHub token.
+  The root is created only after a temporary clone validates and completes its
+  first sync. Until setup, Team is absent and Private and Workspace continue to
+  work. Saved Team-folder settings are ignored. **Change repository** moves the
+  current Team history to a pasted empty repository URL and keeps the old
+  remote intact.
 - `businessGraphViewState` stores the active section, per-section projection,
   Board grouping/sort, project and priority filters, and collapsed status
   columns. It is local presentation state, never graph source data.
 
-Changing the Team root remounts GraphRuntime against the current workspace.
 The scope inventory in Settings reports which component folders exist in each
 root. Changing view state must use `settings.set` with a newly constructed
 object.
@@ -96,6 +99,11 @@ Settings > Graph also owns the compact Current workspace editor for its
 optional semantic Project link and Team/Workspace write default. The durable
 descriptor, local registry, setup prompt, and agent behavior are specified in
 [Business graph](business-graph.md#workspaces-and-projects).
+Project repositories with a GitHub HTTPS or SSH `origin` use managed Git
+automatically. GitHub identity comes from the local GitHub CLI, not renderer
+settings. For repositories without an origin, Settings connects an existing
+empty GitHub repository from its pasted URL; repository creation, ownership,
+and visibility stay on GitHub.
 
 Files presentation state is also workspace-scoped. `workbenchFileFavorites`
 stores favorite paths, and `workbenchFileSort` stores the Project, Recent, and
@@ -135,7 +143,12 @@ manager owns credentials in the OS keychain. The Settings section calls native
 connect and disconnect commands and projects only provider state and account
 labels. Tool registration changes in the same operation, without a restart.
 
-Team graph, skill, and agent content all use `editor.mimirTeamFolder`.
+Team graph, resource, skill, and agent content lives under the fixed managed
+root `~/.mimir/team-graph/`. It is not renderer setting state. GitHub appears in
+Connections and reports the local GitHub CLI login used by Team and Project
+sync. **Manage** explains that this login is shared with Terminal and other
+tools. Signing out removes the active account from GitHub CLI; it does not
+delete local files or edit a Mimir configuration file.
 
 ## Internal settings handler
 

@@ -43,6 +43,7 @@ constructing a Tauri application.
 | Workspace indexing/mutations | `file_index.rs`, `workspace_files.rs`, `file_index_commands.rs` |
 | App manifests/protocol/mutations | `apps.rs` |
 | Business graph parsing/index/scopes/mutations/context/migration | `business_graph/markdown.rs`, `store.rs`, `runtime.rs`, `context.rs`, `migration.rs`, `tools.rs` |
+| Managed Team and Project Git | `managed_git.rs`, `git.rs`; use temporary local bare remotes for pull/push/conflict tests |
 | Tracker transitions/store/reports/import/lifecycle | `tracker/engine.rs`, `store.rs`, `report.rs`, `import.rs`, `runtime.rs`, `platform.rs` |
 | Routine schema/planner/runtime | `routines.rs`, `routine_runtime.rs` |
 | Persistence/recovery | `persistence.rs`, `session.rs`, `local_settings.rs`, `ai_models.rs` |
@@ -94,6 +95,7 @@ components call `enableAutoUnmount(afterEach)` to prevent this.
 | MCP definition/alias | Rust runtime/registry/server tests and `services/toolRuntime.test.js`; `mimir tools/call` smoke |
 | App manifest/SDK/provider | `apps.rs`, app catalog service/store, embedded host tests; local app smoke |
 | Business graph source/tool/projection | native graph modules and golden fixtures; graph service/store/app/projection/CLI tests; desktop board/inspector smoke |
+| Managed Git setup, batching, or conflict policy | native `managed_git.rs` tests with temporary and two-clone bare remotes; invalid-root, non-empty-remote, and resource-limit tests; managed repository service/Settings/Files tests; signed-build system Git, GitHub CLI login, personal/organization repository URL setup, and private-repository smoke before release |
 | Tracker collection/report/migration | native tracker modules and golden IPC fixtures; tracker service/store/app/settings/component tests; desktop permission/tray/sleep/import smoke |
 | Routine planner/mutation | `routines.rs`, `routine_runtime.rs`, store/service/activity tests |
 | File index/mutation | native index/workspace tests and workspace store/Files Activity tests |

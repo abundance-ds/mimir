@@ -14,7 +14,8 @@ small trusted team.
   [Editor](docs/editor-system.md) — Markdown editing with agent changes as
   reviewable diffs.
 - [Business graph](docs/business-graph.md) — linked projects, issues,
-  decisions, and knowledge stored as Markdown.
+  decisions, shared resources, and knowledge stored as Markdown; Mimir keeps
+  the Team graph synchronized through GitHub.
 - [Tracker](docs/tracker.md) — optional native desktop activity timeline,
   classification, breaks, and humane drift nudges.
 - [Chats](docs/chat.md) — team channels and DMs; an agent launched from a room
@@ -23,8 +24,8 @@ small trusted team.
   [Routines](docs/routines.md) — scheduled agent or command runs.
 - [Scribe](docs/meetings.md) — notes-first meeting preparation, dual-channel
   recording, transcription, concise summaries, and Graph filing.
-- [Connections](docs/agent-interface.md#connections) — connect Google, Slack,
-  and Granola once, then use their tools from any agent.
+- [Connections](docs/agent-interface.md#connections) — use the local GitHub
+  CLI login and connect Google, Slack, and Granola.
 
 ## Develop
 

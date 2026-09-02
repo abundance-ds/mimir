@@ -84,11 +84,13 @@ Preserve that isolation rather than replacing it with one all-or-nothing
 bootstrap promise.
 
 Opening or switching a workspace mounts the Business graph separately through
-`useWorkspaceBootstrap.js`: local private, current-project, and optional team
-roots are normalized into one `GraphRuntime`. Native filesystem watchers
+`useWorkspaceBootstrap.js`: the local Private root, current Workspace root,
+and optional managed `~/.mimir/team-graph/` root are normalized into one
+`GraphRuntime`. Native filesystem watchers
 rebuild the disposable index after an external Markdown change and emit
-`mimir://graph-changed`; the renderer reloads its projection. A failed team root
-does not change the physical meaning of the private or project source.
+`mimir://graph-changed`; the renderer reloads its projection. An unavailable
+managed Team root does not change the physical meaning of the Private or
+Workspace source.
 
 `useEditorSessionLifecycle.js` owns a second hydration transaction inside the
 mounted Editor. Ordering constraints: session restore must complete before

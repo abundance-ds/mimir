@@ -42,7 +42,7 @@ describe('settings store', () => {
     expect(store.aiGhostModel).toBe('auto')
     expect(store.aiInlineRewrite).toBe(true)
     expect(store.mimirWorkspaceFolder).toBe('')
-    expect(store.mimirTeamFolder).toBe('')
+    expect(store.mimirTeamFolder).toBeUndefined()
     expect(store.sidebarToolOrder).toEqual([])
     expect(store.sidebarNewActivityOrder).toEqual([])
     expect(store.sidebarChatsCollapsed).toBe(false)
@@ -101,7 +101,7 @@ describe('settings store', () => {
 
     await store.load()
 
-    expect(store.mimirTeamFolder).toBe('')
+    expect(store.mimirTeamFolder).toBeUndefined()
     expect(store.mimirTeamGraphFolder).toBeUndefined()
   })
 
@@ -321,19 +321,17 @@ describe('settings store', () => {
     store.set('editorTheme', 'monokai')
     store.set('editorFontSize', 18)
     store.set('editorWordWrap', false)
-    store.set('mimirTeamFolder', '/shared/team')
     await store.save()
 
     store.set('editorTheme', 'parchment')
     store.set('editorFontSize', 12)
     store.set('editorWordWrap', true)
-    store.set('mimirTeamFolder', '')
 
     await store.load()
     expect(store.editorTheme).toBe('monokai')
     expect(store.editorFontSize).toBe(18)
     expect(store.editorWordWrap).toBe(false)
-    expect(store.mimirTeamFolder).toBe('/shared/team')
+    expect(store.mimirTeamFolder).toBeUndefined()
   })
 
   it('set() before settingsReady does not schedule save', async () => {

@@ -42,6 +42,7 @@ naming the exact boundary it enforces.
 | Terminal link activation | renderer accepts only HTTP(S); Tauri opener scope repeats the HTTP(S)-only boundary; file references use the existing Editor path | a clicked URL can send its path/query to any public host; file references can target any user-readable path |
 | API-key persistence | release keychain; debug owner-only fallback | environment keys are inherited by Mimir before filtering elsewhere |
 | Work connections | provider tokens and Granola API key stay in Mimir's OS-keychain service; Google OAuth uses PKCE and a loopback callback | connected providers receive agent-requested reads and explicit user-requested writes by design |
+| Managed GitHub sync | installed `git` performs clone/fetch/push; installed `gh` owns browser login and credentials; remotes are GitHub HTTPS or SSH | GitHub receives managed Team and GitHub-origin Project repository content by design; GitHub CLI state is shared with the user's other local tools |
 | Chat transport | public WSS, mandatory SASL, loopback Ergo listeners behind Caddy | one small-team server; no per-room authorization UI or enterprise tenancy |
 | Chat administration | bearer token checked by a loopback Node service; server stores only its digest; dedicated narrow Ergo OPER | possession of the raw token grants full teammate/channel lifecycle administration |
 | Linked chat agent | Activity-to-room link rejects target changes | an unlinked trusted-local MCP caller may pass a room explicitly |

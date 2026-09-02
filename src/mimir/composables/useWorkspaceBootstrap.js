@@ -10,6 +10,11 @@ import {
   saveWorkspaceConfig,
 } from '../../services/workspaceConfig.js'
 import { workspacePathStatuses } from '../../services/workspaceAvailability.js'
+import {
+  managedProjectStatus,
+  setManagedProjectEnabled,
+  teamRepositoryStatus,
+} from '../../services/managedRepositories.js'
 import { activityWorkspacePath, normalizedWorkspacePath } from '../activityWorkspace.js'
 import { applyResponsiveZone, responsiveZoneFor } from '../responsiveLayout.js'
 
@@ -49,15 +54,6 @@ export function useWorkspaceBootstrap({
   let workspaceStatusCheckedAt = 0
   const queuedAutomaticResumeIds = new Set()
   const attemptedAutomaticResumeIds = new Set()
-
-  const stopGraphFolderWatch = watch(
-    () => settings.mimirTeamFolder,
-    () => {
-      if (initialized.value && workspaceFiles.workspacePath) {
-        void mountBusinessGraph()
-      }
-    },
-  )
 
   async function start() {
     ensureCoreActivities()
@@ -298,10 +294,15 @@ export function useWorkspaceBootstrap({
       if (create && configuration === null && window.__TAURI_INTERNALS__) {
         const { invoke } = await import('@tauri-apps/api/core')
         await invoke('create_dir', { path })
+        await setManagedProjectEnabled(path, true, { initialize: true })
+        await setManagedProjectEnabled(path, false)
       }
       await prepareEditorWorkspaceSwitch()
       rememberActiveActivity(workspaceFiles.workspacePath)
       await workspaceFiles.openWorkspace(path)
+      if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+        void Promise.resolve(managedProjectStatus(path)).catch(() => {})
+      }
       const graphWarning = await mountBusinessGraph(path)
       ensureCoreActivities(path)
       if (persist) settings.set('mimirWorkspaceFolder', path)
@@ -394,7 +395,7 @@ export function useWorkspaceBootstrap({
   async function mountBusinessGraph(projectRoot = workspaceFiles.workspacePath) {
     if (!projectRoot) return ''
     try {
-      await openBusinessGraph(projectRoot, settings.mimirTeamFolder)
+      await openBusinessGraph(projectRoot)
       return ''
     } catch (cause) {
       const message = `Business graph could not open: ${errorMessage(cause)}`
@@ -405,16 +406,19 @@ export function useWorkspaceBootstrap({
 
   async function ensureWorkspaceConfiguration(path, { create = false } = {}) {
     const workspace = String(path || '').trim()
-    const teamRoot = String(settings.mimirTeamFolder || '').trim()
-    if (!workspace || !teamRoot || !window.__TAURI_INTERNALS__) return null
-    const { invoke } = await import('@tauri-apps/api/core')
-    if (!await invoke('path_exists', { path: teamRoot })) return null
+    if (!workspace || !window.__TAURI_INTERNALS__) return null
+    let teamRoot = ''
+    try {
+      const team = await teamRepositoryStatus()
+      if (team?.managed) teamRoot = team.root
+    } catch { /* Team setup is optional */ }
+    if (!teamRoot) return null
 
     let existing = null
     if (!create) existing = await loadWorkspaceConfig(workspace)
 
     const graphRoot = create ? teamRoot : workspace
-    await openBusinessGraph(graphRoot, teamRoot)
+    await openBusinessGraph(graphRoot)
 
     if (existing?.project) {
       const linked = await getGraphNode(existing.project)
@@ -444,7 +448,13 @@ export function useWorkspaceBootstrap({
       return false
     }
 
-    if (create) await invoke('create_dir', { path: workspace })
+    if (create) {
+      await invoke('create_dir', { path: workspace })
+      await setManagedProjectEnabled(workspace, true, { initialize: true })
+      // Repository ownership and visibility stay on GitHub. Until the user
+      // connects an existing remote in Settings, this local repository is manual.
+      await setManagedProjectEnabled(workspace, false)
+    }
     let project = String(draft.project || '').trim()
     const newProjectTitle = String(draft.newProjectTitle || '').trim()
     if (newProjectTitle) {
@@ -552,7 +562,6 @@ export function useWorkspaceBootstrap({
     automaticResumeEnabled = false
     automaticResumeQueue = []
     queuedAutomaticResumeIds.clear()
-    stopGraphFolderWatch()
   }
 
   return {

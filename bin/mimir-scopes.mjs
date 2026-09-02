@@ -12,17 +12,10 @@ export async function scopeRoots(options = {}) {
       || process.env.MIMIR_HOME
       || path.join(os.homedir(), '.mimir'),
   )
-  const settings = await readJsonFile(path.join(home, 'settings.json'), {})
   const projectRoot = await resolveProjectRoot(options.cwd || process.cwd())
-  const configuredTeamRoot = firstString(settings?.editor?.mimirTeamFolder)
-  const requestedTeamRoot = Object.hasOwn(options, 'teamRoot')
-    ? String(options.teamRoot || '').trim()
-    : String(configuredTeamRoot || '').trim()
-  if (requestedTeamRoot && !path.isAbsolute(requestedTeamRoot)) {
-    throw new Error('The Mimir Team folder must be an absolute path.')
-  }
-  const team = requestedTeamRoot
-    ? await fs.realpath(requestedTeamRoot).catch(() => path.resolve(requestedTeamRoot))
+  const managedTeam = path.join(home, 'team-graph')
+  const team = await isManagedTeam(managedTeam)
+    ? await fs.realpath(managedTeam).catch(() => managedTeam)
     : ''
   return {
     home,
@@ -30,6 +23,34 @@ export async function scopeRoots(options = {}) {
     project: projectRoot,
     team,
     projectRoot,
+  }
+}
+
+async function isManagedTeam(root) {
+  const [git, graph, resources, manifest] = await Promise.all([
+    fs.stat(path.join(root, '.git')).catch(() => null),
+    fs.stat(path.join(root, 'graph')).catch(() => null),
+    fs.stat(path.join(root, 'resources')).catch(() => null),
+    fs.readFile(path.join(root, 'mimir-team.toml'), 'utf8').catch(() => ''),
+  ])
+  if (
+    !git?.isDirectory()
+    || !graph?.isDirectory()
+    || !resources?.isDirectory()
+    || !/^version\s*=\s*1\s*$/m.test(manifest)
+    || !/^name\s*=\s*["'][^"']+["']\s*$/m.test(manifest)
+  ) {
+    return false
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', root, 'remote', 'get-url', 'origin'],
+      { timeout: 2_000, windowsHide: true },
+    )
+    return /^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)[^/?#]+\/[^/?#]+(?:\.git)?\/?$/i.test(stdout.trim())
+  } catch {
+    return false
   }
 }
 
@@ -54,17 +75,4 @@ export function expandHomePath(value) {
     return path.join(os.homedir(), input.slice(2))
   }
   return input
-}
-
-async function readJsonFile(file, fallback) {
-  try {
-    return JSON.parse(await fs.readFile(file, 'utf8'))
-  } catch (error) {
-    if (error?.code === 'ENOENT') return fallback
-    throw new Error(`Invalid Mimir settings at ${file}: ${error.message}`)
-  }
-}
-
-function firstString(...values) {
-  return values.find(value => typeof value === 'string' && value.trim())?.trim() || ''
 }

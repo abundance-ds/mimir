@@ -5,6 +5,19 @@ task scope.
 
 ## Open
 
+- Review the local Git and GitHub CLI dependency after real Team onboarding.
+  Keep it while it reuses existing small-team setup with no Mimir-owned token.
+  Reconsider GitHub device login only if installing or signing in to `gh`
+  creates repeated setup friction. Also review the existing-repository-only
+  URL handoff. Keep it while GitHub's form is the simplest place to choose a
+  personal or organization owner, visibility, and collaborators.
+
+- Managed Team needs one signed-release smoke record for real GitHub login,
+  personal/organization repository URL setup, two-machine sync, offline
+  recovery, History, and moving Team between repositories.
+  Local automated coverage owns setup rollback, repository validation,
+  resource limits, batching, merging, and recovery references.
+
 - Project-specific agent context is intentionally deferred. The unfinished
   `contextPolicy` and isolation behavior were removed because the boundary and
   user journey were not clear enough. Before this returns, define the retrieval

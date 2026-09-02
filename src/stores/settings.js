@@ -38,7 +38,6 @@ const DEFAULTS = {
   workbenchFileSort: {},
   commentGateSkip: false,
   mimirWorkspaceFolder: '',
-  mimirTeamFolder: '',
   businessGraphViewState: {
     section: 'work',
     sectionViews: {

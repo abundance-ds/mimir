@@ -274,6 +274,7 @@ const gitClass = computed(() => ({
   modified: 'text-accent',
   deleted: 'text-rem',
   renamed: 'text-ink-3',
+  excluded: 'text-ink-4',
 }[props.row.gitStatus] || (props.row.gitCount ? 'text-accent' : 'text-ink-4')))
 const entryAriaLabel = computed(() => {
   const parts = [entry.value.name]

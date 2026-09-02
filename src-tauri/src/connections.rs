@@ -21,7 +21,7 @@ mod status;
 
 pub use commands::*;
 use helpers::*;
-use oauth::*;
+pub(crate) use oauth::{open_system_browser, OauthLoopback};
 use registration::*;
 pub(crate) use status::local_diagnostics;
 use status::{
@@ -29,7 +29,7 @@ use status::{
     slack_status,
 };
 
-const MIMIR_KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
+pub(crate) const MIMIR_KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
 const DEFAULT_ACCOUNT: &str = "default";
 const GOOGLE_ACCOUNTS_KEY: &str = "google:accounts";
 const GOOGLE_SCOPES: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/drive.readonly";
@@ -43,8 +43,8 @@ struct ConnectionRuntime {
 }
 
 #[derive(Clone)]
-struct Secret {
-    value: String,
+pub(crate) struct Secret {
+    pub(crate) value: String,
 }
 
 pub struct ConnectionManager {
@@ -421,7 +421,7 @@ fn granola_bundle() -> Result<Option<GranolaBundle>, String> {
     }))
 }
 
-fn read_secret(account: &str) -> Result<Option<Secret>, String> {
+pub(crate) fn read_secret(account: &str) -> Result<Option<Secret>, String> {
     let entry =
         keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
     match entry.get_password() {
@@ -431,14 +431,14 @@ fn read_secret(account: &str) -> Result<Option<Secret>, String> {
     }
 }
 
-fn write_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
+pub(crate) fn write_secret(service: &str, account: &str, value: &str) -> Result<(), String> {
     keyring::Entry::new(service, account)
         .map_err(|error| error.to_string())?
         .set_password(value)
         .map_err(|error| error.to_string())
 }
 
-fn delete_secret(account: &str) -> Result<(), String> {
+pub(crate) fn delete_secret(account: &str) -> Result<(), String> {
     let entry =
         keyring::Entry::new(MIMIR_KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())?;
     match entry.delete_credential() {

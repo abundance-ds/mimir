@@ -8,6 +8,7 @@ Bun owns the JavaScript workspace. Cargo owns the Rust workspace.
 - Node.js 22 for build, test, and release scripts
 - stable Rust with `rustfmt`
 - platform dependencies for Tauri v2
+- Git and GitHub CLI for managed Team and Project repositories
 - macOS Scribe builds: Xcode command-line tools, CMake, and libclang
 
 The embedded whisper.cpp build uses Metal on macOS arm64. Ubuntu CI
@@ -60,6 +61,11 @@ The Google client must be a Desktop app client with Gmail, Calendar, Drive,
 Sheets, Slides, and OpenID services enabled. Its consent configuration must
 allow the scopes declared in `src-tauri/src/connections.rs`. Release packaging
 requires both values. They identify the Mimir app; end users never enter them.
+
+GitHub access uses the user's installed `git` and `gh` commands. **Sign in to
+GitHub** starts `gh auth login --web`; Mimir uses `gh` as the credential helper
+for its Git commands without changing the user's global Git configuration. No
+GitHub client id, client secret, or Mimir-owned token is a build input.
 
 Slack uses a per-user `xoxp-` personal token entered in Settings after
 installation. Mimir verifies it and stores it in the OS keychain. A Slack token
@@ -120,7 +126,7 @@ cargo clean --manifest-path src-tauri/Cargo.toml
 Before packaging, confirm these connection inputs:
 
 - The reference Mac's ignored `.env` contains the Google OAuth client ID and
-  secret. GitHub Actions needs the same two values for CI packaging.
+  secret. GitHub Actions needs the same values for CI packaging.
 - Slack personal tokens belong only in each user's OS keychain. They are not
   release inputs and must never enter the build.
 

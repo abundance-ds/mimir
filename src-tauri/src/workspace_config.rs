@@ -235,7 +235,7 @@ fn save_at(
         .id
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .or_else(|| existing.map(|config| config.id))
+        .or_else(|| existing.as_ref().map(|config| config.id.clone()))
         .unwrap_or_else(|| format!("ws-{}", Uuid::new_v4().simple()));
     let config = WorkspaceConfig {
         version: DESCRIPTOR_VERSION,
@@ -366,15 +366,41 @@ pub fn workspace_project_paths(project_id: String) -> Result<Vec<LocalWorkspaceR
 #[tauri::command]
 pub fn workspace_project_file_resolve(
     project_id: Option<String>,
+    scope_id: Option<String>,
     relative_path: String,
     fallback_workspace: Option<String>,
 ) -> Result<Option<String>, String> {
+    if scope_id.as_deref() == Some("team:main") {
+        if let Some(team_root) = crate::managed_git::team_scope_root()? {
+            let relative = normalized_relative_path(&relative_path)?;
+            let candidate = team_root.join(relative);
+            if candidate.exists() {
+                return Ok(Some(candidate.to_string_lossy().into_owned()));
+            }
+        }
+    }
     workspace_project_file_resolve_at(
         &registry_path()?,
         project_id.as_deref(),
         &relative_path,
         fallback_workspace.as_deref(),
     )
+}
+
+fn normalized_relative_path(value: &str) -> Result<&Path, String> {
+    let relative = value.trim();
+    if relative.is_empty() {
+        return Err("A relative path is required.".to_string());
+    }
+    let path = Path::new(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(format!("Path escapes its managed root: {relative}"));
+    }
+    Ok(path)
 }
 
 fn workspace_project_file_resolve_at(

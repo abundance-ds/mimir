@@ -78,6 +78,14 @@
       </button>
     </header>
 
+    <FileHistoryPanel
+      v-if="fileHistoryEntry"
+      :path="fileHistoryEntry.path"
+      :name="fileHistoryEntry.name"
+      @close="closeFileHistory"
+      @open="$emit('openFile', $event)"
+    />
+
     <div
       v-if="files.workspacePath && !(viewMode === 'changes' && gitReview.repositoryState === 'not-repository')"
       class="mx-2 my-2 flex h-8 shrink-0 items-center"
@@ -243,6 +251,8 @@
       v-if="files.workspacePath && viewMode === 'changes'"
       ref="gitListRef"
       :query="query"
+      :managed="managedGit"
+      :excluded-paths="[...excludedGitPaths.keys()]"
       @review="$emit('reviewGit', $event)"
       @open-file="$emit('openFile', $event)"
     />
@@ -554,6 +564,12 @@
             @select="openContextNative"
           />
           <ContextAction
+            v-if="projectHasGit && !contextEntry.isDirectory && contextEntry.textReadable"
+            label="History"
+            action="history"
+            @select="openFileHistory"
+          />
+          <ContextAction
             :label="isFavorite(contextEntry) ? 'Remove from Favorites' : 'Add to Favorites'"
             action="favorite"
             @select="favoriteContextEntry"
@@ -652,6 +668,7 @@ import {
 } from '@tabler/icons-vue'
 import FileSortHeader from '../components/FileSortHeader.vue'
 import FileSortMenu from '../components/FileSortMenu.vue'
+import FileHistoryPanel from '../components/FileHistoryPanel.vue'
 import FileTreeRow from '../components/FileTreeRow.vue'
 import GitChangesList from '../components/GitChangesList.vue'
 import { pathIsInsideWorkspace, useFileStore } from '../../stores/files.js'
@@ -681,6 +698,7 @@ import {
   gitLabel,
 } from '../files/fileLedger.js'
 import { importWorkspaceEntries } from '../../services/workspaceFileOperations.js'
+import { managedProjectStatus } from '../../services/managedRepositories.js'
 import { basename } from '../../shared/utils/path.js'
 
 const ContextAction = defineComponent({
@@ -742,6 +760,15 @@ const contextMenuRef = ref(null)
 const deleteDialogRef = ref(null)
 const deleteConfirmRef = ref(null)
 const gitChanges = ref([])
+const managedGitStatus = ref(null)
+const managedGit = computed(() => Boolean(managedGitStatus.value?.managed))
+const projectHasGit = computed(() => (
+  Boolean(managedGitStatus.value) && managedGitStatus.value.state !== 'notRepository'
+))
+const fileHistoryEntry = ref(null)
+const excludedGitPaths = computed(() => new Map(
+  (managedGitStatus.value?.excluded || []).map(entry => [normalizeRelative(entry.path), entry.reason]),
+))
 const gitOnly = ref(false)
 const contentFocusedIndex = ref(-1)
 const sortStateByView = ref(defaultFileSortStates())
@@ -1692,6 +1719,18 @@ function activateRow(row, preview) {
   emit('openFile', { path: row.entry.path, preview, entry: row.entry })
 }
 
+function openFileHistory() {
+  const entry = contextEntry.value
+  if (!projectHasGit.value || !entry || entry.isDirectory || !entry.textReadable) return
+  closeContextMenu()
+  fileHistoryEntry.value = entry
+}
+
+function closeFileHistory() {
+  fileHistoryEntry.value = null
+  nextTick(() => listRef.value?.focus())
+}
+
 function activateFocused(preview) {
   const row = visibleRows.value[focusedIndex.value]
   if (row) activateRow(row, preview)
@@ -1758,14 +1797,21 @@ async function refreshGit() {
     return
   }
   try {
-    gitChanges.value = await loadGitChanges(files.workspacePath)
+    const [changes, status] = await Promise.all([
+      loadGitChanges(files.workspacePath),
+      Promise.resolve(managedProjectStatus(files.workspacePath)).catch(() => null),
+    ])
+    gitChanges.value = changes
+    managedGitStatus.value = status
   } catch {
     gitChanges.value = []
+    managedGitStatus.value = null
   }
 }
 
 function gitStatusFor(entry) {
   const relativePath = normalizeRelative(entry.relativePath)
+  if (excludedGitPaths.value.has(relativePath)) return 'excluded'
   const exact = gitByPath.value.get(relativePath)
   return exact || ''
 }

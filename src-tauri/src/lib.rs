@@ -82,6 +82,7 @@ mod git;
 mod ipc_fixtures;
 mod launchers;
 mod local_settings;
+mod managed_git;
 mod meeting_filing;
 pub mod meetings;
 pub mod mimir_cli;
@@ -979,8 +980,10 @@ fn settings_changed(window: tauri::WebviewWindow) -> Result<(), String> {
 fn app_quit_confirmed(
     app: tauri::AppHandle,
     meetings: tauri::State<'_, meetings::runtime::MeetingRuntime>,
+    managed_git: tauri::State<'_, managed_git::ManagedGitRuntime>,
 ) -> Result<(), String> {
     stop_active_meeting(meetings.inner())?;
+    managed_git.flush();
     app.exit(0);
     Ok(())
 }
@@ -988,8 +991,11 @@ fn app_quit_confirmed(
 #[tauri::command]
 fn app_prepare_relaunch(
     meetings: tauri::State<'_, meetings::runtime::MeetingRuntime>,
+    managed_git: tauri::State<'_, managed_git::ManagedGitRuntime>,
 ) -> Result<(), String> {
-    stop_active_meeting(meetings.inner())
+    stop_active_meeting(meetings.inner())?;
+    managed_git.flush();
+    Ok(())
 }
 
 fn stop_active_meeting(meetings: &meetings::runtime::MeetingRuntime) -> Result<(), String> {
@@ -1043,6 +1049,7 @@ pub fn run() {
         .manage(tracker_runtime)
         .manage(ai_proxy::AiStreamState::default())
         .manage(business_graph::GraphRuntime::default())
+        .manage(managed_git::ManagedGitRuntime::default())
         .manage(file_open::PendingFilePaths::default())
         .manage(file_index_commands::FileIndexState::default())
         .manage(tool_server::ToolServerState::default())
@@ -1116,6 +1123,8 @@ pub fn run() {
             app.state::<connections::ConnectionManager>()
                 .install()
                 .map_err(std::io::Error::other)?;
+            app.state::<managed_git::ManagedGitRuntime>()
+                .install(app.handle());
             app.state::<chat::ChatRuntime>()
                 .install(
                     app.handle(),
@@ -1214,6 +1223,22 @@ pub fn run() {
             git::git_file_diff,
             git::git_stage_file,
             git::git_unstage_file,
+            git::git_file_history,
+            git::git_file_version,
+            git::git_restore_file_version,
+            managed_git::team_repository_status,
+            managed_git::team_repository_setup,
+            managed_git::team_repository_move,
+            managed_git::team_repository_sync,
+            managed_git::team_resource_import,
+            managed_git::managed_project_status,
+            managed_git::managed_project_set_enabled,
+            managed_git::managed_project_set_remote,
+            managed_git::managed_project_sync,
+            managed_git::managed_repositories_sync,
+            managed_git::github_connection_status,
+            managed_git::github_connect,
+            managed_git::github_disconnect,
             get_proposals_for_path,
             proposal_create,
             proposal_list,

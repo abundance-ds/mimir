@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import { useFileStore } from '../../stores/files.js'
 import { useSettingsStore } from '../../stores/settings.js'
@@ -81,6 +82,10 @@ describe('FilesActivity', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     vi.clearAllMocks()
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === 'managed_project_status') return Promise.resolve({ managed: false, state: 'notRepository' })
+      return undefined
+    })
     loadGitReviewChanges.mockResolvedValue([])
     const store = useWorkspaceFilesStore()
     store.workspacePath = '/w'
@@ -360,6 +365,54 @@ describe('FilesActivity', () => {
     expect(menu.text()).toContain('Reveal in Finder')
     expect(menu.text()).toContain('Copy path')
     expect(menu.text()).toContain('Move to Trash')
+    expect(menu.text()).not.toContain('History')
+  })
+
+  it('opens a Git-backed text file version from its History drill-in', async () => {
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === 'managed_project_status') {
+        return Promise.resolve({ managed: false, state: 'manual', remoteUrl: 'https://gitlab.com/acme/project.git' })
+      }
+      if (command === 'git_file_history') {
+        return Promise.resolve([{
+          hash: 'abcdef1234567890',
+          shortHash: 'abcdef12',
+          message: 'Update brief',
+          authoredAt: '2026-08-15T14:45:00Z',
+          author: 'Ada',
+          binary: false,
+          size: 120,
+        }])
+      }
+      return undefined
+    })
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-file-row="/w/new.md"]').trigger('contextmenu', {
+      clientX: 22,
+      clientY: 31,
+    })
+    expect(wrapper.get('[data-file-action="history"]').text()).toBe('History')
+    await wrapper.get('[data-file-action="history"]').trigger('click')
+    await flushPromises()
+
+    expect(invoke).toHaveBeenCalledWith('git_file_history', { path: '/w/new.md', limit: 50 })
+    expect(wrapper.get('[data-file-history-panel]').text()).toContain('Update brief')
+    await wrapper.get('[data-file-history-version="abcdef1234567890"]').trigger('click')
+    expect(wrapper.emitted('openFile').at(-1)).toEqual([{
+      path: '/w/new.md',
+      preview: false,
+      history: {
+        hash: 'abcdef1234567890',
+        shortHash: 'abcdef12',
+        label: 'Update brief',
+        timestamp: '2026-08-15T14:45:00Z',
+      },
+    }])
+
+    await wrapper.get('[data-file-history-back]').trigger('click')
+    expect(wrapper.find('[data-file-history-panel]').exists()).toBe(false)
   })
 
   it('renames through F2 and keeps open editor paths coherent', async () => {

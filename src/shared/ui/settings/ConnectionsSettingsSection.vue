@@ -2,7 +2,7 @@
   <section class="font-sans text-ink" aria-label="Connections settings">
     <h2 class="section-title mb-0">Connections</h2>
     <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
-      Connect the accounts you use. Mimir makes their tools available to every agent immediately.
+      Connect the accounts and services Mimir uses.
     </p>
 
     <div class="connection-list mt-5 border-y border-rule-light">
@@ -36,6 +36,7 @@
               Use personal token
             </button>
             <button
+              v-if="showConnectionAction(connection)"
               type="button"
               class="connection-action"
               :class="{ 'connection-action-disconnect': connection.state === 'connected' && connection.provider !== 'google' }"
@@ -44,6 +45,50 @@
             >
               {{ actionLabel(connection) }}
             </button>
+          </div>
+        </div>
+
+        <div
+          v-if="connection.provider === 'github' && showGithubManagement"
+          class="github-management"
+          data-github-management
+        >
+          <p v-if="githubSignOutArmed">
+            This signs {{ connection.account || 'the active account' }} out of GitHub CLI for Mimir, Terminal, and other tools.
+          </p>
+          <p v-else>
+            Mimir has no separate GitHub login. This account is shared with Terminal and other tools.
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              v-if="!githubSignOutArmed"
+              type="button"
+              class="connection-cancel text-rem"
+              data-github-sign-out
+              :disabled="busyProvider !== ''"
+              @click="githubSignOutArmed = true"
+            >
+              Sign out of GitHub CLI
+            </button>
+            <template v-else>
+              <button
+                type="button"
+                class="connection-cancel"
+                :disabled="busyProvider !== ''"
+                @click="githubSignOutArmed = false"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="connection-action connection-action-disconnect text-rem"
+                data-github-confirm-sign-out
+                :disabled="busyProvider !== ''"
+                @click="disconnectGithubCli"
+              >
+                {{ busyProvider === 'github' ? 'Signing out…' : 'Confirm sign out' }}
+              </button>
+            </template>
           </div>
         </div>
 
@@ -147,7 +192,8 @@
 
 <script setup>
 import { invoke } from '@tauri-apps/api/core'
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { openExternalUrl } from '../../../services/externalLinks.js'
 
 const connections = ref([])
 const loading = ref(true)
@@ -158,17 +204,26 @@ const granolaKeyInput = ref(null)
 const showSlackToken = ref(false)
 const slackToken = ref('')
 const slackTokenInput = ref(null)
+const showGithubManagement = ref(false)
+const githubSignOutArmed = ref(false)
 const notice = ref('')
 const error = ref('')
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  window.addEventListener('focus', refreshGithub)
+})
+onUnmounted(() => window.removeEventListener('focus', refreshGithub))
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const value = await invoke('connections_status')
-    connections.value = Array.isArray(value) ? value : []
+    const [value, github] = await Promise.all([
+      invoke('connections_status'),
+      invoke('github_connection_status'),
+    ])
+    connections.value = [githubConnection(github), ...(Array.isArray(value) ? value : [])]
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -179,8 +234,23 @@ async function load() {
 async function handleAction(connection) {
   error.value = ''
   notice.value = ''
+  if (connection.provider === 'github' && connection.action.startsWith('install-')) {
+    try {
+      const installGit = connection.action === 'install-git'
+      await openExternalUrl(installGit ? 'https://git-scm.com/downloads' : 'https://cli.github.com/')
+      notice.value = `Install ${installGit ? 'Git' : 'GitHub CLI'}, then return to Mimir.`
+    } catch (cause) {
+      error.value = errorMessage(cause)
+    }
+    return
+  }
   if (connection.provider === 'google') {
     await connectBrowserProvider(connection)
+    return
+  }
+  if (connection.provider === 'github' && connection.action === 'manage') {
+    showGithubManagement.value = !showGithubManagement.value
+    githubSignOutArmed.value = false
     return
   }
   if (connection.state === 'connected') {
@@ -200,14 +270,34 @@ async function handleAction(connection) {
   await connectBrowserProvider(connection)
 }
 
+async function disconnectGithubCli() {
+  busyProvider.value = 'github'
+  error.value = ''
+  notice.value = ''
+  try {
+    replaceConnection(githubConnection(await invoke('github_disconnect')))
+    showGithubManagement.value = false
+    githubSignOutArmed.value = false
+    notice.value = 'Signed out of GitHub CLI. Local files are unchanged.'
+  } catch (cause) {
+    error.value = errorMessage(cause)
+  } finally {
+    busyProvider.value = ''
+  }
+}
+
 async function connectBrowserProvider(connection) {
   busyProvider.value = connection.provider
   try {
-    const updated = await invoke(`connections_connect_${connection.provider}`)
+    const updated = connection.provider === 'github'
+      ? githubConnection(await invoke('github_connect'))
+      : await invoke(`connections_connect_${connection.provider}`)
     replaceConnection(updated)
-    notice.value = connection.provider === 'google'
-      ? 'Google account added. Its tools are ready now.'
-      : `${connection.name} is connected. Its tools are ready now.`
+    notice.value = connection.provider === 'github'
+      ? 'GitHub is ready.'
+      : connection.provider === 'google'
+        ? 'Google account added. Its tools are ready now.'
+        : `${connection.name} is connected. Its tools are ready now.`
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -259,7 +349,7 @@ async function disconnect(connection) {
   busyProvider.value = connection.provider
   try {
     const updated = await invoke('connections_disconnect', { provider: connection.provider })
-    if (Array.isArray(updated)) connections.value = updated
+    replaceProviderConnections(updated)
     notice.value = `${connection.name} is disconnected. Its tools are no longer available.`
   } catch (cause) {
     error.value = errorMessage(cause)
@@ -274,13 +364,19 @@ async function disconnectGoogleAccount(account) {
   notice.value = ''
   try {
     const updated = await invoke('connections_disconnect', { provider: 'google', account: account.id })
-    if (Array.isArray(updated)) connections.value = updated
+    replaceProviderConnections(updated)
     notice.value = `${account.label} is disconnected.`
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
     busyProvider.value = ''
   }
+}
+
+function replaceProviderConnections(updated) {
+  if (!Array.isArray(updated)) return
+  const github = connections.value.find(item => item.provider === 'github')
+  connections.value = [github, ...updated.filter(item => item.provider !== 'github')].filter(Boolean)
 }
 
 async function setGoogleDefault(account) {
@@ -315,6 +411,36 @@ function replaceConnection(updated) {
   ))
 }
 
+function githubConnection(status = {}) {
+  return {
+    provider: 'github',
+    name: 'GitHub',
+    state: status.connected ? 'connected' : 'disconnected',
+    account: status.login || '',
+    action: status.connected
+      ? 'manage'
+      : !status.gitAvailable
+        ? 'install-git'
+        : !status.cliAvailable
+          ? 'install-gh'
+          : 'connect',
+    detail: status.connected
+      ? 'Managed by GitHub CLI. Mimir uses this account for Team and Project sync.'
+      : !status.gitAvailable
+        ? 'Git is not installed.'
+        : !status.cliAvailable
+          ? 'GitHub CLI is not installed.'
+          : 'Sign in with your existing GitHub CLI setup.',
+  }
+}
+
+async function refreshGithub() {
+  if (loading.value || busyProvider.value) return
+  try {
+    replaceConnection(githubConnection(await invoke('github_connection_status')))
+  } catch { /* the visible state stays unchanged until the next explicit action */ }
+}
+
 function statusLabel(connection) {
   if (connection.provider === 'google' && connection.accounts?.length > 1) {
     return `${connection.accounts.length} accounts`
@@ -327,13 +453,23 @@ function statusLabel(connection) {
 }
 
 function actionLabel(connection) {
-  if (busyProvider.value === connection.provider) return 'Working…'
+  if (busyProvider.value === connection.provider) {
+    return connection.provider === 'github' ? 'Waiting for GitHub…' : 'Working…'
+  }
+  if (connection.provider === 'github' && connection.action === 'install-git') return 'Install Git'
+  if (connection.provider === 'github' && connection.action === 'install-gh') return 'Install GitHub CLI'
+  if (connection.provider === 'github' && connection.action === 'manage') return 'Manage'
+  if (connection.provider === 'github') return 'Sign in'
   if (connection.provider === 'google') {
     return connection.accounts?.length ? 'Add account' : 'Connect'
   }
   if (connection.state === 'connected') return 'Disconnect'
   if (connection.provider === 'slack' && !connection.oauthAvailable) return 'Use personal token'
   return connection.state === 'needs_sign_in' ? 'Sign in again' : 'Connect'
+}
+
+function showConnectionAction(connection) {
+  return true
 }
 
 function showSlackTokenAlternative(connection) {
@@ -370,7 +506,7 @@ function errorMessage(cause) {
 }
 
 .connection-row {
-  min-height: 72px;
+  min-height: 58px;
   border-bottom: 1px solid var(--color-rule-light);
 }
 
@@ -379,7 +515,7 @@ function errorMessage(cause) {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 20px;
-  min-height: 72px;
+  min-height: 58px;
 }
 
 .connection-row:last-child {
@@ -475,6 +611,25 @@ function errorMessage(cause) {
 
 .connection-account-action:disabled {
   opacity: 0.5;
+}
+
+.github-management {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--color-rule-light);
+  padding: 6px 0 6px 16px;
+  color: var(--color-ink-3);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.github-management > p {
+  min-width: 220px;
+  flex: 1 1 300px;
 }
 
 .connection-cancel {

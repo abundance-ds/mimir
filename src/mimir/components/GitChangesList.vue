@@ -4,7 +4,10 @@
       v-if="git.repositoryState !== 'not-repository'"
       class="flex h-8 shrink-0 items-center border-b border-rule-light bg-chrome-high px-2"
     >
-      <div class="flex h-6 items-center border border-rule-light" role="group" aria-label="Git change scope">
+      <span v-if="managed" class="font-mono text-[9px] text-ink-4">
+        Unpublished batch · {{ eligibleChanges.length }}
+      </span>
+      <div v-else class="flex h-6 items-center border border-rule-light" role="group" aria-label="Git change scope">
         <button
           v-for="option in scopes"
           :key="option.id"
@@ -66,7 +69,7 @@
         </span>
         <span class="ml-2 flex shrink-0 items-center gap-1.5 font-mono text-[9px] text-ink-4">
           <span v-if="change.conflicted" class="text-rem">conflict</span>
-          <template v-else-if="git.scope === 'all'">
+          <template v-else-if="!managed && git.scope === 'all'">
             <span v-if="change.staged">staged</span>
             <span v-if="change.unstaged">unstaged</span>
           </template>
@@ -140,6 +143,8 @@ import { basename, dirname } from '../../shared/utils/path.js'
 
 const props = defineProps({
   query: { type: String, default: '' },
+  managed: { type: Boolean, default: false },
+  excludedPaths: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['review', 'openFile'])
@@ -153,14 +158,20 @@ const scopes = computed(() => [
   { id: 'staged', label: 'Staged', count: git.stagedCount },
 ])
 
+const excludedPaths = computed(() => new Set(props.excludedPaths.map(path => String(path))))
+const eligibleChanges = computed(() => (
+  props.managed
+    ? git.visibleChanges.filter(change => !excludedPaths.value.has(change.path))
+    : git.visibleChanges
+))
 const filteredChanges = computed(() => {
   const needle = props.query.trim().toLowerCase()
   return needle
-    ? git.visibleChanges.filter(change => (
+    ? eligibleChanges.value.filter(change => (
         change.path.toLowerCase().includes(needle)
         || change.oldPath?.toLowerCase().includes(needle)
       ))
-    : git.visibleChanges
+    : eligibleChanges.value
 })
 
 const selectedPath = computed(() => git.active ? git.review?.path || '' : '')
@@ -179,6 +190,10 @@ watch(filteredChanges, (changes) => {
   focusedIndex.value = Math.min(focusedIndex.value, Math.max(changes.length - 1, 0))
 })
 
+watch(() => props.managed, (managed) => {
+  if (managed && git.scope !== 'all') void git.setScope('all')
+}, { immediate: true })
+
 async function selectScope(scope) {
   await git.setScope(scope)
   focusedIndex.value = 0
@@ -192,6 +207,7 @@ function review(change, index) {
     workspacePath: git.workspacePath,
     file: change.path,
     scope: git.scope,
+    ...(props.managed ? { managed: true } : {}),
   })
 }
 

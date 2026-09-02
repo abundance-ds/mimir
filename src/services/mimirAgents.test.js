@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -16,8 +17,15 @@ describe('mimir agent packages', () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'mimir-agents-'))
     home = path.join(root, 'home')
     project = path.join(root, 'project')
-    team = path.join(root, 'team')
-    await Promise.all([fs.mkdir(project, { recursive: true }), fs.mkdir(team, { recursive: true })])
+    team = path.join(home, 'team-graph')
+    await Promise.all([
+      fs.mkdir(project, { recursive: true }),
+      fs.mkdir(path.join(team, 'graph'), { recursive: true }),
+      fs.mkdir(path.join(team, 'resources'), { recursive: true }),
+    ])
+    await fs.writeFile(path.join(team, 'mimir-team.toml'), 'version = 1\nname = "Test"\n')
+    execFileSync('git', ['init', team])
+    execFileSync('git', ['-C', team, 'remote', 'add', 'origin', 'https://github.com/test/team-graph.git'])
   })
 
   afterEach(async () => {
@@ -108,15 +116,16 @@ describe('mimir agent packages', () => {
     }])
   })
 
-  it('does not recreate a missing Team folder during install', async () => {
+  it('does not use a legacy Team root option during install', async () => {
     const missingTeam = path.join(root, 'missing-team')
     const source = await sourceAgent(path.join(root, 'source'), 'review', 'Team review')
+    await fs.rm(team, { recursive: true, force: true })
 
     await expect(addAgent(source, 'team', {
       home,
       cwd: project,
       teamRoot: missingTeam,
-    })).rejects.toThrow(`The Team folder does not exist: ${missingTeam}`)
+    })).rejects.toThrow('The team scope is not mounted.')
     await expect(fs.lstat(missingTeam)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 

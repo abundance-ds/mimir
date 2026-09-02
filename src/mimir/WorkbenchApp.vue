@@ -209,6 +209,7 @@ import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
 import { callAppAction, loadAppData, openAppWindow } from '../services/appsCatalog.js'
+import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
 import { localDateKey, parseTodayStorage } from './apps/todayModel.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
@@ -244,6 +245,7 @@ const optionalSurfaces = {
   routine: RoutinesActivity,
   chat: ChatActivity,
 }
+let stopManagedSyncLifecycle = () => {}
 
 // Both surfaces are code-split, and an async component renders nothing while
 // its chunk loads — first open of a terminal or an app would otherwise show an
@@ -814,6 +816,11 @@ watch(
 )
 
 onMounted(async () => {
+  stopManagedSyncLifecycle = installManagedSyncLifecycle({
+    onError(message) {
+      if (!diagnostic.value) diagnostic.value = `Automatic sync needs attention: ${message}`
+    },
+  })
   document.addEventListener('keydown', onKeydown, true)
   document.addEventListener('focusin', rememberWorkbenchFocus, true)
   // focusin alone misses Sidebar clicks: WebKit does not focus buttons on
@@ -844,6 +851,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopManagedSyncLifecycle()
   finishWorkspaceSetup(null)
   persistWorkbench()
   void settings.flush()
@@ -1206,7 +1214,12 @@ async function openFileInEditor(request) {
   const path = typeof request === 'string' ? request : request?.path
   if (!path) return
   try {
-    if (typeof request === 'object' && Number.isFinite(request?.line)) {
+    if (typeof request === 'object' && request?.history) {
+      await editorRef.value?.mimirReviewHistory?.({
+        path,
+        ...request.history,
+      })
+    } else if (typeof request === 'object' && Number.isFinite(request?.line)) {
       await editorRef.value?.mimirReveal({
         path,
         line: request.line,

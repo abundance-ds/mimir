@@ -3,6 +3,7 @@ const GIT_MARKS = Object.freeze({
   modified: 'M',
   deleted: 'D',
   renamed: 'R',
+  excluded: '·',
 })
 
 const GIT_LABELS = Object.freeze({
@@ -10,6 +11,7 @@ const GIT_LABELS = Object.freeze({
   modified: 'Modified in Git',
   deleted: 'Deleted in Git',
   renamed: 'Renamed in Git',
+  excluded: 'Not included in automatic sync',
 })
 
 const GIT_SORT_RANK = Object.freeze({

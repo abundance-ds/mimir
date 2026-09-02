@@ -19,7 +19,7 @@ backlinks, diagnostics, and filesystem watchers that emit
 |---|---|---|
 | Private | `~/.mimir/private/` | Journal, personal drafts, sensitive records |
 | Workspace | current folder | rare graph data that must travel with one folder |
-| Team | Settings > Team folder | normal company knowledge and operational work |
+| Team | `~/.mimir/team-graph/` | normal company knowledge and operational work |
 
 Each root contains a flat `graph/*.md` directory. Node kind stays in the file
 frontmatter. The Issue Board and Knowledge views are filtered projections over
@@ -30,12 +30,40 @@ scope is a storage location. It is not the semantic Project that work belongs
 to.
 
 The workbench mounts `private:local`, `project:<root-hash>`, and optional
-`team:main`. Provenance carries `scopeId`, `scopeKind`, `sourcePath`,
+`team:main`. Mimir owns the Team checkout and connects it to one GitHub
+repository. Provenance carries `scopeId`, `scopeKind`, `sourcePath`,
 `sourceRevision`, and legacy format.
 Agent read results warn when they contain private data.
-If the open workspace is the configured Team folder, the one physical root has
-the Team identity. Mimir does not expose the same files as a duplicate Project
-scope.
+The managed checkout has this fixed shape:
+
+```text
+~/.mimir/team-graph/
+├── .git/
+├── mimir-team.toml
+├── graph/
+├── resources/
+├── skills/       (optional)
+└── agents/       (optional)
+```
+
+`graph/` contains Mimir-written Markdown nodes. `resources/` contains shared
+files such as templates, CSV files, reference documents, and brand assets.
+Skills and agents remain optional. The local Git metadata is an implementation
+detail. **Reveal repository** is an escape hatch, not a normal workflow.
+
+Team does not exist before setup. Settings offers one **Set up Team** action,
+then asks for an existing GitHub repository URL. Repository creation, owner or
+organization, visibility, and collaborator access stay on GitHub. Settings
+links to GitHub's repository form. The user pastes the repository URL when it
+is ready. Mimir clones into a temporary sibling, validates and completes the
+first sync, then atomically installs the fixed root. A non-empty
+repository must already contain `.git`, a GitHub HTTPS or SSH `origin`, a valid
+`mimir-team.toml`, `graph/`, and `resources/`. Failed setup leaves no Team root.
+Old Team-folder settings are ignored; migration is a manual repository
+preparation step.
+**Change repository** moves the complete current Team history to a pasted empty
+repository URL. Mimir publishes pending work to the old repository first and
+leaves that repository on GitHub as a backup.
 
 New graph items default to Team when it is mounted. Journal defaults to
 Private. Workspace storage is an explicit exception. All create paths can set
@@ -71,6 +99,55 @@ path that matches nowhere produces a diagnostic, and a path that escapes the
 root (`..`) is rejected. In the Peek and Focus working note, clicking
 highlighted link text opens a file in Mimir or an HTTP(S) URL in the system
 browser. Clicking elsewhere keeps the note editable and places the caret.
+
+Team resources use a separate root-relative `files` property:
+
+```yaml
+files:
+  - path: resources/templates/proposal.html
+    label: HTML template
+```
+
+Any Team node can own supporting files. A reusable asset normally uses
+`kind: resource`; other nodes connect to it with `references`. One resource
+node can own several related files. Project deliverables remain relative to a
+Project workspace and never acquire Team-resource semantics.
+
+Knowledge projects resource nodes, not a raw attachment gallery. Files found
+under `resources/` without an owning node are repairable unlinked files. Import
+attaches a file to the open node or creates a Resource node. Files larger than
+100 MB are rejected before copy because GitHub cannot synchronize them.
+
+## Managed synchronization and history
+
+The user never commits, pulls, pushes, stages, or resolves Git conflicts for
+the Team repository. Mimir uses the installed Git command for network work,
+the local GitHub CLI login for access, and one managed GitHub branch. Mimir
+does not store a GitHub token.
+
+A local change batch closes after five quiet minutes, after thirty minutes of
+continuous changes, or when Mimir closes. All stable changes in the batch form
+one commit. Closing Mimir saves the commit locally; the next available sync
+fetches, integrates, and pushes it. Incoming-only
+fetches run at startup, on application focus, after network recovery, and every
+five minutes while the application is active.
+
+Offline changes remain in one unpublished commit; later offline changes amend
+it. A rejected push fetches again and rebuilds the same unpublished commit on
+the new remote head. Published history is never squashed or force-pushed.
+Before Mimir rewrites an unpublished batch, it retains a bounded local recovery
+reference. Normal History remains the user-facing recovery path.
+
+Different files merge normally. When both sides changed one file, the version
+with the later recorded edit wins as a complete file. The losing version stays
+available through file history. A Graph node's **History** action lists its Git
+versions, opens the selected version in the Editor's existing history diff,
+and restores it as a new change. Routine synchronization has no status UI;
+Mimir surfaces only failures that require user action.
+
+After successful setup, network or GitHub sign-in loss does not unmount Team.
+Local reads and writes continue offline, and Mimir publishes them after the
+connection returns.
 
 When a Team graph exists and Mimir opens an unknown workspace, one compact
 dialog asks for `None`, an existing Project, or `New Project…`, plus Team or
@@ -269,6 +346,7 @@ Public graph tools — registry and transport details in [mcp.md](mcp.md):
 
 ```bash
 mimir call graph_find '{"query":"cost effectiveness evidence"}'
+mimir call graph_status '{}'
 mimir call graph_get '{"id":"project-alpha"}'
 mimir call graph_create '{"kind":"issue","title":"Extract evidence"}'
 mimir call graph_update '{"id":"project-alpha","expectedRevision":"...","title":"Atlas"}'
@@ -276,6 +354,7 @@ mimir call graph_delete '{"id":"obsolete-note"}'
 mimir call graph_restore '{"undoToken":"<token returned by graph_delete>"}'
 mimir call graph_context '{"focusId":"project-alpha"}'
 mimir call graph_events '{"scopeIds":["project:alpha"],"since":"2026-07-20T00:00:00Z","offset":0,"limit":50}'
+mimir call graph_resource_add '{"sourcePath":"/tmp/proposal.html","title":"Proposal template","label":"HTML template"}'
 ```
 
 Issues are `kind: "issue"` graph nodes. Internal compatibility and semantic

@@ -908,6 +908,7 @@ describe('Workbench controllers', () => {
     vi.mocked(save).mockResolvedValueOnce('/work/new-project')
     vi.mocked(invoke)
       .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(undefined)
     try {
       await expect(controller.createWorkspace()).resolves.toBe(true)
@@ -916,7 +917,18 @@ describe('Workbench controllers', () => {
         defaultPath: '/work/Untitled project',
       }))
       expect(invoke).toHaveBeenNthCalledWith(1, 'path_exists', { path: '/work/new-project' })
-      expect(invoke).toHaveBeenNthCalledWith(2, 'create_dir', { path: '/work/new-project' })
+      expect(invoke).toHaveBeenNthCalledWith(2, 'team_repository_status')
+      expect(invoke).toHaveBeenNthCalledWith(3, 'create_dir', { path: '/work/new-project' })
+      expect(invoke).toHaveBeenNthCalledWith(4, 'managed_project_set_enabled', {
+        workspace: '/work/new-project',
+        enabled: true,
+        initialize: true,
+      })
+      expect(invoke).toHaveBeenNthCalledWith(5, 'managed_project_set_enabled', {
+        workspace: '/work/new-project',
+        enabled: false,
+        initialize: false,
+      })
       expect(workspaceFiles.openWorkspace).toHaveBeenCalledWith('/work/new-project')
 
       for (let index = 0; index < 10; index++) {
@@ -1032,6 +1044,7 @@ describe('Workbench controllers', () => {
       vi.mocked(save).mockResolvedValueOnce('/work/broken')
       vi.mocked(invoke)
         .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(null)
         .mockRejectedValueOnce(new Error('Disk is full'))
       await expect(controller.createWorkspace()).resolves.toBe(false)
       expect(invoke).toHaveBeenLastCalledWith('create_dir', { path: '/work/broken' })

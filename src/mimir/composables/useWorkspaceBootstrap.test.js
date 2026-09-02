@@ -20,7 +20,12 @@ import { useWorkspaceBootstrap } from './useWorkspaceBootstrap.js'
 describe('workspace bootstrap graph configuration', () => {
   it('configures an unknown workspace once before opening it', async () => {
     window.__TAURI_INTERNALS__ = {}
-    vi.mocked(invoke).mockResolvedValue(true)
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'team_repository_status') {
+        return { managed: true, root: '/home/me/.mimir/team-graph' }
+      }
+      return true
+    })
     graph.openBusinessGraph.mockResolvedValue({})
     graph.queryGraph.mockResolvedValue({
       items: [{ id: 'vandage-engagement', kind: 'project', title: 'Vandage' }],
@@ -37,7 +42,6 @@ describe('workspace bootstrap graph configuration', () => {
       graphScope: 'team',
     })
     const settings = {
-      mimirTeamFolder: '/team',
       recentWorkspaceFolders: [],
       set: vi.fn((key, value) => { settings[key] = value }),
     }
@@ -79,8 +83,8 @@ describe('workspace bootstrap graph configuration', () => {
       graphScope: 'team',
     })
     expect(workspaceFiles.openWorkspace).toHaveBeenCalledWith('/new')
-    expect(graph.openBusinessGraph).toHaveBeenNthCalledWith(1, '/new', '/team')
-    expect(graph.openBusinessGraph).toHaveBeenNthCalledWith(2, '/new', '/team')
+    expect(graph.openBusinessGraph).toHaveBeenNthCalledWith(1, '/new')
+    expect(graph.openBusinessGraph).toHaveBeenNthCalledWith(2, '/new')
     bootstrap.dispose()
     delete window.__TAURI_INTERNALS__
   })

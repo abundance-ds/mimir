@@ -270,8 +270,6 @@ pub fn resolve(home_path: &Path, request: &AgentRunRequest) -> Result<AgentRunPl
 
 pub fn inventory(home_path: &Path, workspace: &Path) -> Result<Vec<ScopeInventoryEntry>, String> {
     let roots = scope_roots(home_path, workspace)?;
-    let mimir_home = home_path.join(".mimir");
-    let configured_team = configured_team_path(&mimir_home)?;
     let mut entries = Vec::new();
     for kind in [
         GraphScopeKind::Private,
@@ -280,16 +278,12 @@ pub fn inventory(home_path: &Path, workspace: &Path) -> Result<Vec<ScopeInventor
     ] {
         let root = roots.iter().find(|root| root.kind == kind);
         let Some(root) = root else {
+            if kind == GraphScopeKind::Team {
+                continue;
+            }
             entries.push(ScopeInventoryEntry {
                 scope: kind,
-                root: if kind == GraphScopeKind::Team {
-                    configured_team
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                },
+                root: String::new(),
                 mounted: false,
                 components: Vec::new(),
             });
@@ -298,6 +292,9 @@ pub fn inventory(home_path: &Path, workspace: &Path) -> Result<Vec<ScopeInventor
         let mut components = Vec::new();
         if root.root.join("graph").is_dir() {
             components.push("graph".into());
+        }
+        if root.root.join("resources").is_dir() {
+            components.push("resources".into());
         }
         if root.root.join("skills").is_dir() {
             components.push("skills".into());
@@ -550,39 +547,8 @@ fn project_root(workspace: &Path) -> PathBuf {
 }
 
 fn configured_team_path(mimir_home: &Path) -> Result<Option<PathBuf>, String> {
-    let settings_path = mimir_home.join("settings.json");
-    let raw = match fs::read_to_string(&settings_path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(format!(
-                "Could not read '{}': {error}",
-                settings_path.display()
-            ))
-        }
-    };
-    let settings = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| {
-        format!(
-            "Invalid Mimir settings at '{}': {error}",
-            settings_path.display()
-        )
-    })?;
-    let configured = settings
-        .get("editor")
-        .and_then(|editor| editor.get("mimirTeamFolder"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let Some(configured) = configured else {
-        return Ok(None);
-    };
-    let path = PathBuf::from(configured);
-    if !path.is_absolute() {
-        return Err(format!(
-            "Team folder must be an absolute path: {configured}"
-        ));
-    }
-    Ok(Some(path))
+    let managed = mimir_home.join("team-graph");
+    Ok(crate::managed_git::is_valid_team_repository(&managed).then_some(managed))
 }
 
 fn canonical_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
@@ -642,6 +608,21 @@ fn scope_rank(scope: GraphScopeKind) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn install_team_contract(home: &Path) -> PathBuf {
+        let team = home.join(".mimir/team-graph");
+        fs::create_dir_all(team.join("graph")).unwrap();
+        fs::create_dir_all(team.join("resources")).unwrap();
+        fs::write(
+            team.join("mimir-team.toml"),
+            "version = 1\nname = \"Test Team\"\n",
+        )
+        .unwrap();
+        let repo = git2::Repository::init(&team).unwrap();
+        repo.remote("origin", "https://github.com/example/test-team-graph.git")
+            .unwrap();
+        team
+    }
 
     fn request(name: &str, workspace: &Path) -> AgentRunRequest {
         AgentRunRequest {
@@ -731,26 +712,17 @@ mod tests {
     fn project_package_shadows_private_and_team() {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
-        let team = tempfile::tempdir().unwrap();
+        let team = install_team_contract(home.path());
         fs::create_dir_all(home.path().join(".mimir/private/agents/review")).unwrap();
         fs::create_dir_all(workspace.path().join("agents/review")).unwrap();
-        fs::create_dir_all(team.path().join("agents/review")).unwrap();
-        fs::create_dir_all(home.path().join(".mimir")).unwrap();
-        fs::write(
-            home.path().join(".mimir/settings.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "editor": { "mimirTeamFolder": team.path() }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+        fs::create_dir_all(team.join("agents/review")).unwrap();
         for (path, mission) in [
             (workspace.path().join("agents/review/AGENT.md"), "Project"),
             (
                 home.path().join(".mimir/private/agents/review/AGENT.md"),
                 "Private",
             ),
-            (team.path().join("agents/review/AGENT.md"), "Team"),
+            (team.join("agents/review/AGENT.md"), "Team"),
         ] {
             fs::write(path, mission).unwrap();
         }
@@ -769,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn inventory_reports_only_current_components_and_keeps_missing_team_visible() {
+    fn inventory_omits_team_until_the_fixed_repository_is_valid() {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         let missing_team = home.path().join("missing-team");
@@ -794,15 +766,11 @@ mod tests {
             .iter()
             .find(|entry| entry.scope == GraphScopeKind::Project)
             .unwrap();
-        let team = entries
-            .iter()
-            .find(|entry| entry.scope == GraphScopeKind::Team)
-            .unwrap();
-
         assert_eq!(private.components, ["graph", "skills"]);
         assert_eq!(project.components, ["graph"]);
-        assert!(!team.mounted);
-        assert_eq!(team.root, missing_team.to_string_lossy());
+        assert!(entries
+            .iter()
+            .all(|entry| entry.scope != GraphScopeKind::Team));
     }
 
     #[test]
@@ -946,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn list_deduplicates_identical_project_and_team_roots() {
+    fn legacy_setting_cannot_mount_the_project_as_team() {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         fs::create_dir_all(home.path().join(".mimir")).unwrap();

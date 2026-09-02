@@ -21,11 +21,14 @@ crash.
 | `~/.mimir/apps/*.toml`, `*/app.toml` | user, Apps UI | source definitions are authoritative; catalog diagnostics do not hide healthy definitions |
 | `~/.mimir/app-data/<app-id>/<key>.json` | app SDK through `apps.rs` | namespaced by validated app id/key; value bytes are opaque to Rust |
 | Private/Project/Team `graph/*.md` | user, GraphRuntime UI/tools | Markdown is canonical; every node retains physical scope/path/revision; older frontmatter shapes normalize on read; the in-memory GraphStore is disposable |
+| `~/.mimir/team-graph/` | `managed_git.rs`, GraphRuntime, agent-package runtime | managed Git checkout containing Team graph, resources, and optional skills/agents; unpublished batches are amended locally and bounded recovery refs protect rewrites |
+| `<workspace>/.mimir/workspace.toml` | `workspace_config.rs`, workspace setup/Settings | stable workspace id, optional semantic Project, and graph write scope; local registry is rebuildable |
 | `~/.mimir/tracker/tracker.sqlite` | `tracker/store.rs`, `tracker/runtime.rs` | WAL database for configuration, exact activity intervals, rules/jobs, usage, nudges, and idempotent imports; disabled state retains data |
 | `~/.mimir/keys.env` | `ai_keys.rs`, debug only | owner-only atomic plaintext fallback when keychain storage fails |
 
 API keys in release builds are not file persistence: the OS keychain service
-is `rs.shoulde.mimir`, keyed by the provider environment-variable name.
+is `rs.shoulde.mimir`, keyed by the provider environment-variable name. GitHub
+credentials belong to the installed GitHub CLI and are not Mimir persistence.
 
 ## Atomic writer
 

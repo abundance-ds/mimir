@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -18,13 +19,22 @@ describe('mimir skills', () => {
   let home
   let project
   let nativeRoot
+  let teamRoot
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'mimir-skills-'))
     home = path.join(root, 'home')
     project = path.join(root, 'project')
     nativeRoot = path.join(root, 'native')
-    await fs.mkdir(project, { recursive: true })
+    teamRoot = path.join(home, 'team-graph')
+    await Promise.all([
+      fs.mkdir(project, { recursive: true }),
+      fs.mkdir(path.join(teamRoot, 'graph'), { recursive: true }),
+      fs.mkdir(path.join(teamRoot, 'resources'), { recursive: true }),
+    ])
+    await fs.writeFile(path.join(teamRoot, 'mimir-team.toml'), 'version = 1\nname = "Test"\n')
+    execFileSync('git', ['init', teamRoot])
+    execFileSync('git', ['-C', teamRoot, 'remote', 'add', 'origin', 'https://github.com/test/team-graph.git'])
   })
 
   afterEach(async () => {
@@ -36,8 +46,7 @@ describe('mimir skills', () => {
     const team = await sourceSkill(root, 'release-review', 'Review a release before publishing.')
     const privateSkill = await sourceSkill(root, 'writing-style', 'Apply my personal writing style.')
     const projectSkill = await sourceSkill(root, 'deploy-api', 'Deploy this project API.')
-    const options = { home, cwd: project, nativeRoot, teamRoot: path.join(root, 'team') }
-    await fs.mkdir(options.teamRoot, { recursive: true })
+    const options = { home, cwd: project, nativeRoot }
 
     await addSkill(team, 'team', options)
     await addSkill(privateSkill, 'private', options)
@@ -57,11 +66,10 @@ describe('mimir skills', () => {
     })
   })
 
-  it('uses the Team folder configured in settings', async () => {
+  it('uses only the fixed valid Team repository', async () => {
     const sharedTeam = path.join(root, 'shared-team')
     const release = await sourceSkill(root, 'release-review', 'Review a release.')
     await fs.mkdir(sharedTeam, { recursive: true })
-    await fs.mkdir(home, { recursive: true })
     await fs.writeFile(
       path.join(home, 'settings.json'),
       `${JSON.stringify({ editor: { mimirTeamFolder: sharedTeam } }, null, 2)}\n`,
@@ -70,9 +78,11 @@ describe('mimir skills', () => {
     await addSkill(release, 'team', { home, cwd: project, nativeRoot })
 
     await expect(fs.readFile(
-      path.join(sharedTeam, 'skills', 'release-review', 'SKILL.md'),
+      path.join(teamRoot, 'skills', 'release-review', 'SKILL.md'),
       'utf8',
     )).resolves.toContain('name: release-review')
+    await expect(fs.lstat(path.join(sharedTeam, 'skills', 'release-review')))
+      .rejects.toMatchObject({ code: 'ENOENT' })
     await expect(fs.lstat(path.join(home, 'skills', 'catalog', 'release-review')))
       .rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -162,16 +172,17 @@ metadata:
       ])
   })
 
-  it('does not recreate a missing Team folder during install', async () => {
+  it('does not use a legacy Team root option during install', async () => {
     const missingTeam = path.join(root, 'missing-team')
     const release = await sourceSkill(root, 'release-review', 'Review a release.')
+    await fs.rm(teamRoot, { recursive: true, force: true })
 
     await expect(addSkill(release, 'team', {
       home,
       cwd: project,
       nativeRoot,
       teamRoot: missingTeam,
-    })).rejects.toThrow(`The Team folder does not exist: ${missingTeam}`)
+    })).rejects.toThrow('The team scope is not mounted.')
     await expect(fs.lstat(missingTeam)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -200,9 +211,8 @@ metadata:
   it('matches the packaged graph skill for knowledge tasks', async () => {
     const options = {
       home,
-      cwd: project,
+      cwd: path.resolve('.'),
       nativeRoot,
-      teamRoot: path.resolve('.'),
     }
 
     const found = await findSkill('knowledge', options)
@@ -210,7 +220,7 @@ metadata:
     expect(found).toMatchObject({
       skill: {
         name: 'mimir-graph',
-        description: 'Mimir knowledge graph.',
+        description: 'Use the Mimir knowledge graph, Team resources, scopes, and history.',
       },
     })
     await expect(fs.readFile(
@@ -220,11 +230,16 @@ metadata:
   })
 
   it('preserves packaged graph references in native and Claude projections', async () => {
+    await fs.mkdir(path.join(teamRoot, 'skills'), { recursive: true })
+    await fs.cp(
+      path.resolve('skills/mimir-graph'),
+      path.join(teamRoot, 'skills/mimir-graph'),
+      { recursive: true },
+    )
     const options = {
       home,
       cwd: project,
       nativeRoot,
-      teamRoot: path.resolve('.'),
     }
 
     const prepared = await prepareSkills('claude', options)
@@ -245,6 +260,8 @@ metadata:
 
     await expect(fs.readFile(nativeReference, 'utf8'))
       .resolves.toContain('## Ontology')
+    await expect(fs.readFile(nativeReference, 'utf8'))
+      .resolves.toContain('graph_resource_add')
     await expect(fs.readFile(claudeReference, 'utf8'))
       .resolves.toContain('## Ontology')
   })
@@ -252,8 +269,7 @@ metadata:
   it('uses Private to shadow a Team skill with the same name', async () => {
     const first = await sourceSkill(path.join(root, 'one'), 'release-review', 'Team release review.')
     const second = await sourceSkill(path.join(root, 'two'), 'release-review', 'Private release review.')
-    const options = { home, cwd: project, nativeRoot, teamRoot: path.join(root, 'team') }
-    await fs.mkdir(options.teamRoot, { recursive: true })
+    const options = { home, cwd: project, nativeRoot }
     await addSkill(first, 'team', options)
     await addSkill(second, 'private', options)
 

@@ -131,6 +131,28 @@ fn test_registry() -> ToolRegistry {
     .expect("register graph.status");
     register_core_tool(
         &registry,
+        "graph.resource_add",
+        "graph_resource_add",
+        "Add one Team resource.",
+        json!({
+            "type": "object",
+            "properties": {
+                "sourcePath": { "type": "string", "minLength": 1 }
+            },
+            "required": ["sourcePath"],
+            "additionalProperties": false
+        }),
+        ToolSource::Native,
+        |_context: ToolCallContext, input: Value| async move {
+            Ok(ToolResult::new(json!({
+                "id": "resource-contract",
+                "sourcePath": input["sourcePath"]
+            })))
+        },
+    )
+    .expect("register graph.resource_add");
+    register_core_tool(
+        &registry,
         "meetings.get",
         "meetings_get",
         "Read one Mimir Scribe meeting.",
@@ -623,7 +645,7 @@ async fn mimir_doctor_reports_connection_context_scopes_and_catalog() {
     assert_success(&output, "mimir doctor");
     assert_eq!(
         stdout_of(&output),
-        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      4\n"
+        "Mimir OK\nEndpoint   reachable\nContext    attached\nScopes     private, project\nConnection tools none\nTools      6\n"
     );
     assert!(!stdout_of(&output).contains("agent:contract"));
     assert!(!stdout_of(&output).contains("codex"));
@@ -943,9 +965,12 @@ async fn mimir_cli_loop_discovers_the_lean_alias_and_round_trips_a_call() {
     let tools = catalog.as_array().expect("catalog is an array");
     assert_eq!(
         tools.len(),
-        4,
-        "public projection should include state, graph get, graph events, and meetings get: {catalog}",
+        6,
+        "public projection should include status, resource import, state, graph reads, and meetings: {catalog}",
     );
+    assert!(tools
+        .iter()
+        .any(|tool| tool["name"] == "graph_resource_add"));
     let state = tools
         .iter()
         .find(|tool| tool["name"] == "mimir_state")

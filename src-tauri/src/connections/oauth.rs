@@ -1,15 +1,15 @@
 use super::*;
 
-pub(super) struct OauthLoopback {
-    pub(super) listener: tokio::net::TcpListener,
-    pub(super) redirect_uri: String,
-    pub(super) state: String,
-    pub(super) verifier: String,
-    pub(super) challenge: String,
+pub(crate) struct OauthLoopback {
+    pub(crate) listener: tokio::net::TcpListener,
+    pub(crate) redirect_uri: String,
+    pub(crate) state: String,
+    pub(crate) verifier: String,
+    pub(crate) challenge: String,
 }
 
 impl OauthLoopback {
-    pub(super) async fn new() -> Result<Self, String> {
+    pub(crate) async fn new() -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
             .map_err(|error| format!("Mimir could not start the sign-in callback: {error}"))?;
@@ -32,7 +32,7 @@ impl OauthLoopback {
         })
     }
 
-    pub(super) async fn receive_code(&self) -> Result<String, String> {
+    pub(crate) async fn receive_code(&self) -> Result<String, String> {
         let (mut stream, _) =
             tokio::time::timeout(Duration::from_secs(180), self.listener.accept())
                 .await
@@ -82,7 +82,7 @@ impl OauthLoopback {
     }
 }
 
-pub(super) fn open_system_browser(url: &str) -> Result<(), String> {
+pub(crate) fn open_system_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut command = std::process::Command::new("open");
     #[cfg(target_os = "linux")]

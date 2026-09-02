@@ -40,7 +40,7 @@ resizing, rails, widths, and Activity navigation history.
 | Activity/PTY/agent lifecycle | [activities](activities.md), [agent setup](agent-setup.md), [persistence](persistence.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores/surfaces | native supervisor/model/status/scrollback; Activity stores/components |
 | Team chat and chat-linked agents | [Chats](chat.md), [security](security.md), [MCP](mcp.md) | native `chat/`; chat service/store; Chat Activity/sidebar/header/settings; `deploy/chat/` | native chat/db; chat service/store/components; production protocol smoke |
 | MCP/tool/provider | [MCP](mcp.md), [IPC](ipc.md), [security](security.md) | `tool_registry.rs`, `tool_bridge.rs`, `tool_runtime.rs`, `tool_server.rs`, renderer relays | four Rust tool modules; `toolRuntime.test.js`, app host/catalog tests |
-| Files/tree/search/preview/mutation/Git changes | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, `git.rs`, Files and Git review stores/services/activity/rows, Editor typed-preview and Git review paths | native file/Git modules; workspace/file/Git stores; Files Activity; Editor preview/review tests |
+| Files/tree/search/preview/mutation/Git changes | [files](files.md), [Editor](editor-system.md), [security](security.md) | `file_index.rs`, `workspace_files.rs`, `git.rs`, `managed_git.rs`, Files and Git review stores/services/activity/rows, Editor typed-preview and Git review paths | native file/Git modules; workspace/file/Git stores; Files Activity; Editor preview/review tests |
 | Apps/SDK/local tools | [Apps](apps-system.md), [IPC](ipc.md), [security](security.md) | `apps.rs`, Apps catalog store/service, embedded/launch-plan hosts, SDK | `apps.rs`; catalog/app host tests |
 | Business graph/Issue Board/CRM | [Business graph](business-graph.md), [MCP](mcp.md), [persistence](persistence.md) | native `business_graph/`; graph service/store; `BusinessGraphApp.vue` and projection components; Workbench Start Work handoff | native graph modules/fixtures/performance; graph store/service/app/projection/CLI tests |
 | Tracker/Argus migration | [Tracker](tracker.md), [persistence](persistence.md), [security](security.md) | native `tracker/`; Tracker service/store; `TrackerApp.vue`, tracker components, Tracker Settings panel; Workbench optional-app projection | native engine/store/report/import/runtime; tracker service/store/app/settings/timeline/classification tests |
@@ -144,7 +144,8 @@ resizing, rails, widths, and Activity navigation history.
   [tracker.md](tracker.md).
 - Files: `src-tauri/src/file_index.rs`,
   `src-tauri/src/file_index_commands.rs`, `src-tauri/src/workspace_files.rs`,
-  `src-tauri/src/file_open.rs`, `src-tauri/src/git.rs`. Docs:
+  `src-tauri/src/file_open.rs`, `src-tauri/src/git.rs`,
+  `src-tauri/src/managed_git.rs`. Docs:
   [files.md](files.md).
 - Apps/Routines: `src-tauri/src/apps.rs`, `src-tauri/src/routines.rs`,
   `src-tauri/src/routine_runtime.rs`. Docs: [apps-system.md](apps-system.md),
@@ -184,6 +185,7 @@ ordering: [ipc.md](ipc.md).
 | `~/.mimir/apps/` | local app TOML and app directories |
 | `~/.mimir/app-data/` | app-owned JSON values |
 | `~/.mimir/private/` | Private `graph/`, `skills/`, and `agents/` sources |
+| `~/.mimir/team-graph/` | Mimir-managed Git checkout for Team `graph/`, `resources/`, optional `skills/`, and optional `agents/` |
 | `~/.mimir/tracker/tracker.sqlite` | Tracker configuration, timeline, classifications, usage, nudges, and imports |
 | `~/.mimir/routines/` | routine TOML |
 | `~/.mimir/routines-state.json` | next-fire planner state |

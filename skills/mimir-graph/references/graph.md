@@ -2,40 +2,20 @@
 
 ## Fast path
 
-- Use graph tools, never the backing Markdown files.
-- Find before get. Never guess an id.
+- Use graph tools, never backing Markdown files.
+- Find before get. Never guess an id. A text match identifies an entity only
+  when its title or id is exact.
 - `graph_find.query` searches ids, titles, tags, summaries, and bodies. `kinds`
-  filters node kinds. All filters combine. Maximum `limit` is 100.
+  filters kinds; all filters combine; maximum `limit` is 100.
 - Use `graph_context` for an exact node's related context.
 
-## Common reads
-
-Latest matching entry:
-
 ```bash
-mimir call graph_find '{"query":"FDE","limit":100}' \
-  | jq '.items | max_by(.updatedAt) | {id,title,updatedAt}'
-mimir call graph_get '{"id":"<returned id>"}'
+mimir call graph_find '{"query":"FDE","limit":100}'
+mimir call graph_get '{"id":"<exact returned id>"}'
 ```
 
-Exact person and direct context:
-
-```bash
-mimir call graph_find '{"query":"Rob Smith","kinds":["person"],"limit":20}'
-mimir call graph_context '{"focusId":"<exact returned id>","maxNodes":12}'
-```
-
-A text match does not identify the entity; require an exact title or id.
-
-Open high/urgent issues, newest first (`open` is not a status):
-
-```bash
-mimir call graph_find '{"kinds":["issue"],"limit":100}' \
-  | jq '[.items[] | select(
-      (.status != "done" and .status != "cancelled")
-      and (.priority == "high" or .priority == "urgent")
-    )] | sort_by(.updatedAt) | reverse'
-```
+For open work, select issues whose status is not `done` or `cancelled`; `open`
+is not a status.
 
 ## Ontology
 
@@ -45,64 +25,64 @@ Primary kinds:
 project company person issue meeting note resource journal decision record
 ```
 
-Older HEOR kinds remain readable:
+HEOR kinds:
 
 ```text
 study evidence dataset analysis model endpoint publication submission
 research-question method client-request
 ```
 
-Companies use `roles: [own|client|prospect|partner|vendor]`. Assignable People
-use `teamMember: true` and `status: active`. Projects use `projectType` and
-`projectStatus`. Use tags for loose topics. Do not create Client, Opportunity,
-Technology, Topic, Question, or Answer nodes.
+Companies use `roles` from
+`own|client|prospect|partner|vendor`. Assignable People use
+`teamMember: true` and `status: active`. Projects use `projectType` and
+`projectStatus`. Use tags for loose topics.
 
-Issue statuses:
-
-```text
-backlog plan in-progress waiting review done cancelled
-```
-
-Issue priorities:
-
-```text
-low normal high urgent
-```
+Issue statuses: `backlog plan in-progress waiting review done cancelled`.
+Priorities: `low normal high urgent`.
 
 Preferred relations:
 
 ```text
-person  --works_at-----> company
+person --works_at--> company
 project --for_company--> company
 project --has_contact--> person
-issue   --part_of------> project
-issue   --assigned_to--> person
-issue   --blocked_by---> issue
+issue --part_of--> project
+issue --assigned_to--> person
+issue --blocked_by--> issue
 issue/project --depends_on--> issue/project
 person/project --introduced_by--> person
 any --references/related_to--> any
 ```
 
-Store only the forward relation. Backlinks provide the inverse.
+Store only the forward relation; backlinks provide the inverse.
+Opportunity, Technology, Topic, Question, and Answer are not standard kinds.
 
 ## Writes and scopes
 
-- `private:local` is private, `project:*` is Workspace storage, and `team:*`
-  is shared. With no `scopeId`, normal kinds prefer Team and Journal prefers
-  Private. An explicit `scopeId` wins; `graph_status` lists the mounted ids.
-- The runtime maps scope ids to storage directories; never write into a
-  `graph/` directory yourself.
-- Omitted read `scopeIds` means every mounted scope, including Private.
-- Do not put private data in another scope unless the user asked.
-- Issue `status` and `priority` are properties. Project and assignee are
-  `part_of` and `assigned_to` relations.
-- Agent calls read `.mimir/workspace.toml`; new tasks use its Project link. A
-  Project result can include machine-local `localWorkspaces` paths. The link
-  does not restrict graph reads.
-- File references (`deliverables`, body links) are relative to a workspace
-  linked to the node's Project — never absolute. Mimir resolves them against
-  the Project's local workspaces, then the open workspace.
-- Use `graph_get.sourceRevision` as `graph_update.expectedRevision` or
-  `graph_delete.expectedRevision`. Delete returns the `graph_restore` token.
-- Sensitive nodes stay findable but are omitted from automatic `graph_context`
-  output.
+- `private:local` is private, `project:*` is Workspace, and `team:*` is shared.
+  Without `scopeId`, normal kinds prefer Team and Journal prefers Private.
+  `graph_status` lists mounted ids.
+- Agent calls read `.mimir/workspace.toml`; new tasks use its Project link.
+  This link does not restrict reads.
+- Workspace file references are relative, never absolute. Mimir resolves them
+  through the node's Project workspaces, then the open workspace.
+- Use `graph_get.sourceRevision` as `expectedRevision` for update or delete.
+  Delete returns a `graph_restore` token.
+- Private data stays Private. Sensitive nodes are omitted from automatic
+  `graph_context` output.
+
+## Team resources
+
+- Mimir owns and synchronizes `~/.mimir/team-graph/`; do not run Git commands
+  there during normal work.
+- `graph/*.md` contains nodes. `resources/` contains shared templates,
+  documents, CSV files, and brand assets.
+- Reusable files normally belong to a `resource` node. Store paths in `files`,
+  for example `{ "path": "resources/proposal.html", "label": "Template" }`.
+  Connect other nodes to that Resource with `references`.
+- `deliverables` remain Project-workspace paths, not Team resources.
+- Import bytes with `graph_resource_add` or the Graph inspector's **Add Team
+  file** action; do not write into the checkout. For an existing Resource, pass
+  `resourceId` and its `sourceRevision` as `expectedRevision`. Mimir batches
+  synchronization. The later recorded edit wins a same-file conflict; older
+  versions remain in History.

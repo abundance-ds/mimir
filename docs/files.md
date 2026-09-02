@@ -21,6 +21,32 @@ Project `graph/`, `skills/`, and `agents/` folders are ordinary repository
 content. Files shows them through the normal tree and Git projections; their
 special meaning belongs to the graph and agent runtimes.
 
+## Managed Project Git
+
+An existing repository uses managed synchronization automatically when its
+`origin` is a GitHub HTTPS or SSH repository. Other repositories keep the
+current Changes, Stage, and Unstage flow. A workspace created by Mimir starts
+as a local Git repository in manual mode.
+If a local repository has no remote, the user creates an empty repository on
+GitHub and pastes its URL in Settings. Mimir checks that the remote is empty
+before it changes the local repository. Repository owner or organization and
+visibility stay on GitHub. Mimir does not create repositories or merge an
+unrelated remote repository into local Project files during setup.
+
+Managed repositories use the same five-minute idle/thirty-minute maximum batch
+as the Team repository. One batch becomes one commit and one push. Incoming
+fetches remain independent and do not close an active local batch. Mimir
+respects Git ignore rules and excludes
+binary files and regular files larger than 10 MiB from automatic commits. The
+Git column uses one quiet excluded marker with an explanatory tooltip; it does
+not add routine sync state to the Files surface.
+
+Managed Changes is informational. It shows the unpublished batch and file
+history but has no Stage or Unstage controls. In any Git-backed Project, a text
+file's context menu opens its History drill-in. Selecting a version reuses the
+Editor's history diff. Restoring writes a new working-file change; managed
+Projects include it in the next batch.
+
 ## View composition
 
 - Project flattens `treeChildren` according to `expandedDirectories`. Expanding

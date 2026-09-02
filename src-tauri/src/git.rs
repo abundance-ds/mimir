@@ -1,8 +1,30 @@
-use git2::{Diff, DiffOptions, Index, Patch, Repository, Status, StatusOptions, Tree};
+use git2::{Diff, DiffOptions, Index, Oid, Patch, Repository, Sort, Status, StatusOptions, Tree};
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
 const MAX_REVIEW_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHistoryEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub authored_at: String,
+    pub author: String,
+    pub binary: bool,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHistoryVersion {
+    pub hash: String,
+    pub path: String,
+    pub content: Option<String>,
+    pub binary: bool,
+    pub size: usize,
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GitStatusEntry {
@@ -110,6 +132,170 @@ pub async fn git_unstage_file(
     })
     .await
     .map_err(|error| format!("Git unstage task failed: {error}"))?
+}
+
+/// Lists committed versions of one file. This is also used by graph nodes,
+/// whose source path lives inside the managed Team checkout.
+#[tauri::command]
+pub async fn git_file_history(
+    path: String,
+    limit: Option<usize>,
+) -> Result<Vec<GitHistoryEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_file_history_blocking(Path::new(&path), limit.unwrap_or(50).clamp(1, 200))
+    })
+    .await
+    .map_err(|error| format!("Git history task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn git_file_version(path: String, hash: String) -> Result<GitHistoryVersion, String> {
+    tauri::async_runtime::spawn_blocking(move || git_file_version_blocking(Path::new(&path), &hash))
+        .await
+        .map_err(|error| format!("Git history task failed: {error}"))?
+}
+
+/// Restoring writes a new working-file change. Managed Git publishes it in
+/// the next batch; repository history is never rewound.
+#[tauri::command]
+pub async fn git_restore_file_version(path: String, hash: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_restore_file_version_blocking(Path::new(&path), &hash)
+    })
+    .await
+    .map_err(|error| format!("Git restore task failed: {error}"))?
+}
+
+struct HistoryPath {
+    repo: Repository,
+    absolute: PathBuf,
+    relative: PathBuf,
+}
+
+fn open_history_path(path: &Path) -> Result<HistoryPath, String> {
+    let absolute = std::fs::canonicalize(path)
+        .map_err(|error| format!("Could not resolve {}: {error}", path.display()))?;
+    if !absolute.is_file() {
+        return Err(format!(
+            "History is only available for files: {}",
+            absolute.display()
+        ));
+    }
+    let parent = absolute
+        .parent()
+        .ok_or_else(|| "The file has no parent folder.".to_string())?;
+    let repo = Repository::discover(parent)
+        .map_err(|error| format!("Could not find file history: {error}"))?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| "Bare Git repositories are not supported.".to_string())?;
+    let relative = absolute
+        .strip_prefix(workdir)
+        .map(Path::to_path_buf)
+        .map_err(|_| "The file is outside the Git worktree.".to_string())?;
+    Ok(HistoryPath {
+        repo,
+        absolute,
+        relative,
+    })
+}
+
+fn git_file_history_blocking(path: &Path, limit: usize) -> Result<Vec<GitHistoryEntry>, String> {
+    let context = open_history_path(path)?;
+    let mut walk = context.repo.revwalk().map_err(|error| error.to_string())?;
+    walk.push_head()
+        .map_err(|error| format!("Could not read file history: {error}"))?;
+    walk.set_sorting(Sort::TIME)
+        .map_err(|error| error.to_string())?;
+    let mut entries = Vec::new();
+    for oid in walk {
+        let commit = context
+            .repo
+            .find_commit(oid.map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+        let tree = commit.tree().map_err(|error| error.to_string())?;
+        let current = tree
+            .get_path(&context.relative)
+            .ok()
+            .map(|entry| entry.id());
+        let previous = commit
+            .parent(0)
+            .ok()
+            .and_then(|parent| parent.tree().ok())
+            .and_then(|tree| {
+                tree.get_path(&context.relative)
+                    .ok()
+                    .map(|entry| entry.id())
+            });
+        if current.is_none() || current == previous {
+            continue;
+        }
+        let blob = context
+            .repo
+            .find_blob(current.unwrap())
+            .map_err(|error| error.to_string())?;
+        let binary = unavailable_reason(blob.content(), blob.content()).is_some();
+        let seconds = commit.time().seconds();
+        let authored_at = chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0)
+            .unwrap_or_default()
+            .to_rfc3339();
+        let hash = commit.id().to_string();
+        entries.push(GitHistoryEntry {
+            short_hash: hash.chars().take(8).collect(),
+            hash,
+            message: commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or("Saved version")
+                .to_string(),
+            authored_at,
+            author: commit.author().name().ok().unwrap_or("Unknown").to_string(),
+            binary,
+            size: blob.size(),
+        });
+        if entries.len() >= limit {
+            break;
+        }
+    }
+    Ok(entries)
+}
+
+fn history_blob(context: &HistoryPath, hash: &str) -> Result<(Oid, Vec<u8>), String> {
+    let oid = Oid::from_str(hash).map_err(|_| "The history version is invalid.".to_string())?;
+    let commit = context
+        .repo
+        .find_commit(oid)
+        .map_err(|_| "The history version is unavailable.".to_string())?;
+    let tree = commit.tree().map_err(|error| error.to_string())?;
+    let entry = tree
+        .get_path(&context.relative)
+        .map_err(|_| "This file did not exist in that version.".to_string())?;
+    let blob = context
+        .repo
+        .find_blob(entry.id())
+        .map_err(|error| error.to_string())?;
+    Ok((oid, blob.content().to_vec()))
+}
+
+fn git_file_version_blocking(path: &Path, hash: &str) -> Result<GitHistoryVersion, String> {
+    let context = open_history_path(path)?;
+    let (oid, bytes) = history_blob(&context, hash)?;
+    let binary = unavailable_reason(&bytes, &bytes).is_some();
+    Ok(GitHistoryVersion {
+        hash: oid.to_string(),
+        path: context.absolute.to_string_lossy().into_owned(),
+        content: (!binary).then(|| String::from_utf8_lossy(&bytes).into_owned()),
+        binary,
+        size: bytes.len(),
+    })
+}
+
+fn git_restore_file_version_blocking(path: &Path, hash: &str) -> Result<(), String> {
+    let context = open_history_path(path)?;
+    let (_, bytes) = history_blob(&context, hash)?;
+    crate::persistence::write_bytes_atomic(&context.absolute, &bytes)
+        .map_err(|error| format!("Could not restore {}: {error}", context.absolute.display()))
 }
 
 fn git_status_blocking(path: &str) -> Result<Vec<GitStatusEntry>, String> {
@@ -716,8 +902,22 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let signature = git2::Signature::now("Mimir", "mimir@example.test").unwrap();
-        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
-            .unwrap();
+        let parents = repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_commit().ok())
+            .into_iter()
+            .collect::<Vec<_>>();
+        let parent_refs = parents.iter().collect::<Vec<_>>();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "initial",
+            &tree,
+            &parent_refs,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -740,6 +940,30 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let error = git_status_blocking(&root.path().to_string_lossy()).unwrap_err();
         assert!(error.contains("Could not find a Git repository"));
+    }
+
+    #[test]
+    fn file_history_lists_versions_and_restore_creates_a_worktree_change() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = Repository::init(root.path()).unwrap();
+        commit_file(&repo, "graph/resource.md", "first");
+        let first = repo.head().unwrap().target().unwrap().to_string();
+        commit_file(&repo, "graph/resource.md", "second");
+        let path = root.path().join("graph/resource.md");
+
+        let entries = git_file_history_blocking(&path, 10).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            git_file_version_blocking(&path, &first)
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("first")
+        );
+
+        git_restore_file_version_blocking(&path, &first).unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "first");
+        assert!(!repo.statuses(None).unwrap().is_empty());
     }
 
     #[cfg(unix)]
