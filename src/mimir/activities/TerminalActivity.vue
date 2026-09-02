@@ -69,9 +69,19 @@
       v-if="displayError"
       data-terminal-error
       role="alert"
-      class="shrink-0 border-t border-rem/30 bg-rem/5 px-3 py-2 text-[10px] text-rem"
+      class="flex shrink-0 items-start gap-2 border-t border-rem/30 bg-rem/5 px-3 py-2 text-[10px] text-rem"
     >
-      {{ displayError }}
+      <span class="min-w-0 flex-1">{{ displayError }}</span>
+      <button
+        type="button"
+        data-terminal-error-dismiss
+        title="Dismiss terminal error"
+        aria-label="Dismiss terminal error"
+        class="grid size-5 shrink-0 place-items-center hover:bg-chrome focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+        @click="dismissError"
+      >
+        <IconX :size="12" :stroke-width="1.8" />
+      </button>
     </div>
   </section>
 </template>
@@ -88,6 +98,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import {
   IconPlayerStop,
   IconRefresh,
+  IconX,
 } from '@tabler/icons-vue'
 import {
   attachTerminalActivity,
@@ -137,6 +148,7 @@ const hasExited = ref(Boolean(props.activity.session?.exit))
 const live = ref(status.value !== 'interrupted' && !hasExited.value)
 const loading = ref(true)
 const error = ref('')
+const dismissedActivityError = ref('')
 const renderer = ref('dom')
 
 const CHECKPOINT_FORMAT_VERSION = 1
@@ -149,7 +161,11 @@ const CHECKPOINT_OUTPUT_BYTES = 512 * 1024
 const activityId = computed(() => props.activity.id)
 const mode = computed(() => props.activity.kind === 'agent' ? 'agent' : 'terminal')
 const ended = computed(() => hasExited.value || (!live.value && isEndedStatus(status.value)))
-const displayError = computed(() => error.value || props.activity.error || '')
+const displayError = computed(() => error.value || (
+  props.activity.error !== dismissedActivityError.value
+    ? props.activity.error || ''
+    : ''
+))
 const canResume = computed(() => (
   mode.value === 'agent'
   && Boolean(props.activity.host?.resumeStrategy)
@@ -450,6 +466,12 @@ async function persistCheckpoint(force = false) {
     return checkpointInFlight
   }
   await terminalEventQueue
+  // Another caller can start while both calls wait for xterm to finish its
+  // asynchronous write. Re-check here so only one request uses this revision.
+  if (checkpointInFlight) {
+    checkpointAgain = checkpointAgain || force || appliedSequence > checkpointThroughSequence
+    return checkpointInFlight
+  }
   if (!force && appliedSequence <= checkpointThroughSequence) return null
   if (appliedSequence < checkpointThroughSequence) return null
 
@@ -804,6 +826,13 @@ watch(
   },
 )
 
+watch(
+  () => props.activity.error,
+  (nextError) => {
+    if (!nextError) dismissedActivityError.value = ''
+  },
+)
+
 onBeforeUnmount(() => {
   const finalCheckpoint = persistCheckpoint(true)
   const finalRunId = runId
@@ -864,12 +893,20 @@ function openTerminalUrl(uri) {
 }
 
 function exposeSurfaceError(cause, fallback) {
+  dismissedActivityError.value = ''
   error.value = errorMessage(cause, fallback)
   emit('surface-error', {
     activityId: activityId.value,
     error: error.value,
   })
   return error.value
+}
+
+function dismissError() {
+  const dismissed = displayError.value
+  if (!dismissed) return
+  if (error.value === dismissed) error.value = ''
+  if (props.activity.error === dismissed) dismissedActivityError.value = dismissed
 }
 
 function statusFromExit(reason) {

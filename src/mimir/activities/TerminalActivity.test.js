@@ -256,6 +256,7 @@ function render(props = {}, { stubTeleport = true } = {}) {
     IconPlayerPause: true,
     IconPlayerStop: true,
     IconRefresh: true,
+    IconX: true,
   }
   if (stubTeleport) stubs.Teleport = true
 
@@ -464,6 +465,9 @@ describe('TerminalActivity', () => {
     expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
     expect(wrapper.find('[data-terminal-interrupt]').exists()).toBe(false)
     expect(wrapper.find('[data-terminal-stop]').exists()).toBe(false)
+
+    await wrapper.get('[data-terminal-error-dismiss]').trigger('click')
+    expect(wrapper.find('[data-terminal-error]').exists()).toBe(false)
   })
 
   it('places active process controls in the shared Activity header target', async () => {
@@ -535,6 +539,32 @@ describe('TerminalActivity', () => {
     }))
     wrapper.unmount()
     await flushPromises()
+  })
+
+  it('coalesces exit and teardown checkpoints while xterm finishes a write', async () => {
+    const wrapper = await initialize()
+    xterm.deferWrites = true
+
+    api.callback({ type: 'output', activityId: 'agent:one', sequence: 3, bytes: [3] })
+    await flushPromises()
+    expect(xterm.pendingWriteCallbacks).toHaveLength(1)
+    api.callback({
+      type: 'exit',
+      activityId: 'agent:one',
+      exit: { reason: 'completed', code: 0 },
+      record: { ...agent, status: 'done' },
+    })
+    wrapper.unmount()
+
+    expect(api.checkpoint).not.toHaveBeenCalled()
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+
+    expect(api.checkpoint).toHaveBeenCalledTimes(1)
+    expect(api.checkpoint).toHaveBeenCalledWith(expect.objectContaining({
+      throughSequence: 3,
+      baseRevision: 0,
+    }))
   })
 
   it('restores a checkpoint at its original size before ordered resize and output events', async () => {
@@ -742,6 +772,9 @@ describe('TerminalActivity', () => {
         error: 'terminal transport unavailable',
       },
     ]])
+
+    await wrapper.get('[data-terminal-error-dismiss]').trigger('click')
+    expect(wrapper.find('[data-terminal-error]').exists()).toBe(false)
   })
 
   it('snaps the surface onto the device pixel grid so WebGL glyphs stay crisp', async () => {
