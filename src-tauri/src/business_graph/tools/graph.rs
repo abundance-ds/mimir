@@ -12,7 +12,7 @@ use crate::business_graph::{
     GraphContextRequest, GraphEventQuery, GraphNodeCreate, GraphNodeDelete, GraphNodePatch,
     GraphQuery, GraphRelation, GraphRestoreRequest, GraphRuntime, ENTITY_KINDS,
 };
-use crate::tool_registry::ToolError;
+use crate::tool_registry::{ToolError, ToolErrorCode};
 use serde_json::{json, Map, Value};
 
 pub(super) fn execute(
@@ -22,6 +22,7 @@ pub(super) fn execute(
 ) -> Result<NativeExecution, ToolError> {
     match name {
         "graph.status" => value(runtime.open_result().map_err(internal_error)?),
+        "graph.resource_add" => resource_add(runtime, input),
         "graph.find" => find(runtime, input),
         "graph.list" | "graph.query" => {
             let query = parse_input::<GraphQuery>(input)?;
@@ -86,6 +87,91 @@ pub(super) fn execute(
         }
         _ => Err(super::unknown_tool(name)),
     }
+}
+
+fn resource_add(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolError> {
+    let source_path = required_string(&input, "sourcePath")?;
+    let resource_id = input
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let existing = if let Some(id) = resource_id {
+        let expected = required_string(&input, "expectedRevision")?;
+        let node = require_node(runtime, id)?;
+        if node.kind != "resource" || node.provenance.scope_id != "team:main" {
+            return Err(invalid_input(
+                "resourceId must identify a Resource node in the Team scope",
+            ));
+        }
+        if node.provenance.source_revision != expected {
+            return Err(ToolError::new(
+                ToolErrorCode::Handler,
+                "The Resource changed. Read it again before adding the file.",
+            )
+            .with_data(json!({
+                "conflict": true,
+                "id": node.id,
+                "expectedRevision": expected,
+                "actualRevision": node.provenance.source_revision,
+            })));
+        }
+        Some(node)
+    } else {
+        None
+    };
+    let relative_path = crate::managed_git::import_team_resource(source_path)
+        .map_err(|error| ToolError::new(ToolErrorCode::Unavailable, error))?;
+    let label = input
+        .get("label")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let file = match label {
+        Some(label) => json!({ "path": relative_path, "label": label }),
+        None => json!({ "path": relative_path }),
+    };
+    if let Some(node) = existing {
+        let mut files = node
+            .properties
+            .get("files")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        files.push(file);
+        let updated = runtime
+            .update(GraphNodePatch {
+                id: node.id,
+                expected_revision: expected_revision(&input),
+                set_properties: Map::from_iter([("files".into(), Value::Array(files))]),
+                ..GraphNodePatch::default()
+            })
+            .map_err(mutation_error)?;
+        return mutation_value(updated.clone(), updated.provenance.source_path);
+    }
+    let title = input
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::path::Path::new(source_path)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| invalid_input("title is required when the source file has no name"))?;
+    let created = runtime
+        .create(GraphNodeCreate {
+            scope_id: Some("team:main".into()),
+            kind: "resource".into(),
+            title,
+            properties: Map::from_iter([("files".into(), Value::Array(vec![file]))]),
+            ..GraphNodeCreate::default()
+        })
+        .map_err(mutation_error)?;
+    mutation_value(created.clone(), created.provenance.source_path)
 }
 
 fn find(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolError> {
@@ -262,6 +348,19 @@ pub(super) fn definitions() -> Vec<(&'static str, &'static str, &'static str, Va
             "Describe mounted private, project, and team graph scopes and the current graph revision.",
             json!({}),
             &[],
+        ),
+        definition(
+            "graph.resource_add",
+            "graph_resource_add",
+            "Copy one file into Team resources and attach it to a new or existing Team Resource node.",
+            json!({
+                "sourcePath": string_schema("Absolute path of the local file to copy."),
+                "resourceId": string_schema("Existing Team Resource node id. Omit to create one."),
+                "title": string_schema("Title for a new Resource node. Defaults to the file name."),
+                "label": string_schema("Optional display label for the attached file."),
+                "expectedRevision": string_schema("Required source revision when updating an existing Resource node."),
+            }),
+            &["sourcePath"],
         ),
         definition(
             "graph.list",

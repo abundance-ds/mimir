@@ -1,10 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
-export function openBusinessGraph(projectRoot, teamRoot = '') {
+export function openBusinessGraph(projectRoot) {
   return invoke('graph_open', {
     projectRoot: requiredPath(projectRoot, 'project graph root'),
-    teamRoot: optionalPath(teamRoot),
   })
 }
 
@@ -127,11 +126,6 @@ function requiredPath(value, label) {
   const path = String(value || '').trim()
   if (!path) throw new Error(`${label} is required.`)
   return path
-}
-
-function optionalPath(value) {
-  const path = String(value || '').trim()
-  return path || null
 }
 
 function localGraphActor() {

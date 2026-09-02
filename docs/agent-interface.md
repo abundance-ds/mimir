@@ -59,6 +59,7 @@ Graph:
 
 ```text
 graph_find     find nodes by text, type, status, relation, or date
+graph_status   read mounted graph scopes and counts
 graph_get      read one complete node
 graph_create   create a validated node
 graph_update   update with revision checks
@@ -66,6 +67,7 @@ graph_delete   move a node to graph Trash
 graph_restore  restore a deleted node
 graph_context  build bounded context around a node
 graph_events   read recent authored graph changes
+graph_resource_add copy a file into Team and link a Resource node
 ```
 
 Meetings:
@@ -112,8 +114,8 @@ slack_search     slack_read       slack_send
 `drive_read` detects Google Docs, Sheets, and Slides files and returns their
 content as normalized text. Sheets and Slides do not add separate agent tools.
 
-The maximum surface is 42 tools; without connections it is 28, without chat
-and connections it is 23. `mimir doctor` reports the public count, registered
+The maximum surface is 44 tools; without connections it is 30, without chat
+and connections it is 25. `mimir doctor` reports the public count, registered
 connection tools, and local credential state. It does not test each remote
 service.
 
@@ -145,9 +147,11 @@ the current request.
 
 The user owns setup in **Settings → Connections**. Each provider row has one
 plain state: **Not connected**, **Connected as …**, or **Needs sign-in**.
-Google opens its normal sign-in page in the system browser. Slack accepts an
-existing `xoxp-` personal token and verifies it before saving it to the user's
-OS keychain.
+GitHub supplies managed Team and Project repository access; it does not add
+agent tools. Mimir uses the installed Git and GitHub CLI login. Google opens
+its normal sign-in page in the system browser. Slack accepts an existing
+`xoxp-` personal token and verifies it before saving it to the user's OS
+keychain.
 Granola accepts a supported API key created in Granola under **Settings →
 Connectors → API keys**. Granola API access requires an eligible workspace
 plan.
@@ -158,9 +162,11 @@ field whose live schema lists the connected accounts. Omitting it uses the
 marked default. Results include the selected account so a later read, reply, or
 send can keep the correct identity.
 
-Credentials stay in the OS keychain under Mimir's service. Mimir does not read
-another product's keychain entries, data directory, desktop cache, or token
-files. Granola uses only `https://public-api.granola.ai/v1`.
+Provider credentials stay in the OS keychain under Mimir's service. GitHub is
+the explicit exception: GitHub CLI owns that login and its credential helper.
+Mimir does not read its token. Settings can sign the active account out of
+GitHub CLI after an explicit shared-login warning. Granola uses only
+`https://public-api.granola.ai/v1`.
 
 After Connect succeeds, Mimir registers the provider tools immediately. Adding,
 removing, or changing the default Google account refreshes their account
@@ -174,9 +180,9 @@ matching remote write. Mimir does not add a second confirmation layer. The
 agent asks only when the destination or content is missing. If a provider tool
 is unavailable, the error directs the user to **Mimir Settings → Connections**.
 
-Release builds embed the public desktop OAuth client identifiers described in
+Release builds embed the Google desktop OAuth client identifiers described in
 [building.md](building.md#connection-sign-in-clients). End users do not enter
-client identifiers or client secrets.
+client identifiers or client secrets. GitHub has no Mimir build credential.
 
 ## Skills
 
@@ -191,12 +197,12 @@ given name wins.
 |---|---|---|
 | Project | one repository | repo-specific workflows and overrides |
 | Private | every project for one user | private reusable workflows |
-| Team | configured team folder | shared team workflows |
+| Team | managed Team repository | shared team workflows |
 
 ```text
 <project>/skills/
 ~/.mimir/private/skills/
-<team>/skills/
+~/.mimir/team-graph/skills/
 ```
 
 ```bash
@@ -242,7 +248,7 @@ Private, and Team roots and the same resolution order as skills.
 ```text
 <project>/agents/
 ~/.mimir/private/agents/
-<team>/agents/
+~/.mimir/team-graph/agents/
 ```
 
 `AGENT.md` frontmatter can set `title`, `description`, `preset`, `args`,
@@ -266,7 +272,8 @@ caller's current directory and become normal durable Activities. `--follow`
 streams ordered PTY bytes for a headless run and returns the process exit
 status. Interactive packages run without `--follow` and continue in Mimir's
 terminal Activity. A malformed package is reported without hiding valid
-packages. A missing Team folder does not block Project or Private packages.
+packages. A Team repository that is not set up does not block Project or
+Private packages.
 After an active package is selected, a missing include or required skill fails
 that run; Mimir does not silently switch to a different mission.
 When two scopes resolve to the same physical root, the higher-precedence scope

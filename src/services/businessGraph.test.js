@@ -17,17 +17,10 @@ describe('business graph service', () => {
     vi.mocked(invoke).mockClear()
   })
 
-  it('mounts project and optional team roots without inventing a policy layer', async () => {
-    await openBusinessGraph('/work/project', ' /work/team-graph ')
+  it('mounts the project while native code owns the fixed Team root', async () => {
+    await openBusinessGraph('/work/project')
     expect(invoke).toHaveBeenCalledWith('graph_open', {
       projectRoot: '/work/project',
-      teamRoot: '/work/team-graph',
-    })
-
-    await openBusinessGraph('/work/project')
-    expect(invoke).toHaveBeenLastCalledWith('graph_open', {
-      projectRoot: '/work/project',
-      teamRoot: null,
     })
   })
 

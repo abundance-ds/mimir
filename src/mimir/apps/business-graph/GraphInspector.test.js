@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { invoke } from '@tauri-apps/api/core'
 import GraphInspector from './GraphInspector.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
 
@@ -412,6 +413,43 @@ describe('GraphInspector', () => {
 
     await back.trigger('click')
     expect(wrapper.emitted('navigateHistory')).toEqual([[-1]])
+  })
+
+  it('opens a saved graph version through the Editor history diff', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce([{
+      hash: 'abcdef123456',
+      shortHash: 'abcdef12',
+      message: 'Mimir sync',
+      authoredAt: '2026-08-15T14:45:00Z',
+      author: 'Mimir',
+      binary: false,
+      size: 120,
+    }])
+    const wrapper = mount(GraphInspector, {
+      props: { ...baseProps, mode: 'peek' },
+    })
+
+    await wrapper.get('[data-graph-control="peek-more"]').trigger('click')
+    await wrapper.get('[data-inspector-file-history]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-file-history-version="abcdef123456"]').trigger('click')
+
+    expect(invoke).toHaveBeenCalledWith('git_file_history', {
+      path: issue.provenance.sourcePath,
+      limit: 50,
+    })
+    expect(wrapper.emitted('openFile')).toEqual([[
+      {
+        path: issue.provenance.sourcePath,
+        nodeId: issue.id,
+        history: {
+          hash: 'abcdef123456',
+          shortHash: 'abcdef12',
+          label: 'Mimir sync',
+          timestamp: '2026-08-15T14:45:00Z',
+        },
+      },
+    ]])
   })
 
   it('puts every issue property and syntax-aware Markdown editing in Focus', async () => {

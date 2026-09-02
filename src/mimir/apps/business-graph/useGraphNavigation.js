@@ -159,14 +159,18 @@ export function useGraphNavigation({
     const path = typeof request === 'string' ? request : request?.path
     if (!path) return
     if (path.startsWith('/') || path.startsWith('~') || /^[A-Za-z]:[\\/]/.test(path)) {
-      openFileResult(path)
+      openFileResult(typeof request === 'object' ? { ...request, path } : path)
       return
     }
     const projectId = projectIdForNode(typeof request === 'object' ? request?.nodeId : null)
+    const sourceNode = typeof request === 'object' && request?.nodeId
+      ? graph.nodes.find(node => node.id === request.nodeId)
+      : null
     let resolved = null
     try {
       resolved = await resolveProjectFile({
         projectId,
+        scopeId: sourceNode?.provenance?.scopeId || '',
         relativePath: path,
         fallbackWorkspace: workspacePath(),
       })
@@ -175,7 +179,7 @@ export function useGraphNavigation({
       return
     }
     if (resolved) {
-      openFileResult(resolved)
+      openFileResult(typeof request === 'object' ? { ...request, path: resolved } : resolved)
       return
     }
     const project = projectId ? graph.nodes.find(node => node.id === projectId) : null

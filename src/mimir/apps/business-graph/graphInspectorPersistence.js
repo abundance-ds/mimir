@@ -37,6 +37,13 @@ export function hydrateInspectorDraft(draft, node) {
         : `${item.path}${item.label ? ` | ${item.label}` : ''}`
     ))
     .join('\n')
+  draft.files = (node.properties?.files || [])
+    .map(item => (
+      typeof item === 'string'
+        ? item
+        : `${item.path}${item.label ? ` | ${item.label}` : ''}`
+    ))
+    .join('\n')
   draft.projectType = node.properties?.projectType || ''
   draft.projectStatus = node.properties?.projectStatus || (
     node.kind === 'project' ? node.properties?.status || 'planned' : 'planned'
@@ -52,6 +59,9 @@ export function hydrateInspectorDraft(draft, node) {
 export function buildInspectorSave({ node, nodes, draft, tags }) {
   const setProperties = {}
   const removeProperties = []
+  const files = structuredFiles(draft.files)
+  if (files.length) setProperties.files = files
+  else if (node.properties?.files) removeProperties.push('files')
   if (node.kind === 'issue') {
     setProperties.status = draft.status
     setProperties.priority = draft.priority
@@ -113,6 +123,17 @@ export function buildInspectorSave({ node, nodes, draft, tags }) {
     },
     targetScopeId: node.kind === 'meeting' ? draft.scopeId : '',
   }
+}
+
+function structuredFiles(value) {
+  return String(value || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const [path, ...label] = line.split('|').map(part => part.trim())
+      return { path, ...(label.join(' | ') ? { label: label.join(' | ') } : {}) }
+    })
 }
 
 function buildRelations(node, nodes, draft) {

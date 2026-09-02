@@ -151,3 +151,52 @@
 .object-more-menu button.danger {
   color: var(--color-rem);
 }
+
+.object-file-history {
+  position: relative;
+  z-index: 12;
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--color-rule-light);
+  background: var(--color-surface);
+  padding: 6px 10px;
+}
+
+.object-file-history > p {
+  padding: 8px 4px;
+  color: var(--color-ink-4);
+  font-size: 9px;
+}
+
+.object-file-history > button {
+  display: grid;
+  gap: 2px;
+  border-radius: 3px;
+  padding: 7px 6px;
+  text-align: left;
+}
+
+.object-file-history > button:hover,
+.object-file-history > button:focus-visible {
+  background: var(--color-chrome-mid);
+  outline: none;
+}
+
+.object-file-history > button span {
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.object-file-history > button small {
+  color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.object-file-history .object-file-history-error {
+  color: var(--color-rem);
+}

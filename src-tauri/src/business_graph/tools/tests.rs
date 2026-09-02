@@ -59,7 +59,7 @@ fn definitions_are_accepted_by_the_canonical_registry() {
             ))
             .unwrap();
     }
-    assert_eq!(registry.list().len(), 39);
+    assert_eq!(registry.list().len(), 40);
 }
 
 #[test]

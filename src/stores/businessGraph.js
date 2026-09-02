@@ -126,9 +126,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   // installed before it (no file change can slip through the mount window) and
   // diagnostics plus change history hydrate after the board is already on
   // screen instead of holding the loading state open.
-  async function start(workspace, sharedTeamRoot = '') {
+  async function start(workspace) {
     const nextProject = String(workspace || '').trim()
-    const nextTeam = String(sharedTeamRoot || '').trim()
     if (!nextProject) {
       reset()
       return
@@ -138,10 +137,11 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     try {
       const workspaceConfig = cachedWorkspaceConfig(nextProject)
       workspaceProjectId.value = String(workspaceConfig?.project || '').trim()
+      const mounted = await openBusinessGraph(nextProject)
+      const nextTeam = mounted?.scopes?.find(scope => scope.kind === 'team')?.root || ''
       workspaceGraphScope.value = workspaceConfig?.graphScope === 'workspace'
         ? 'workspace'
         : (nextTeam ? 'team' : 'workspace')
-      const mounted = await openBusinessGraph(nextProject, nextTeam)
       projectRoot.value = nextProject
       teamRoot.value = nextTeam
       applyStatus(mounted)

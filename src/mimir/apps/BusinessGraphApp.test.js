@@ -406,17 +406,11 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('mounts the shared team root once settings resolve after the first open', async () => {
-    const settings = useSettingsStore()
+  it('lets native graph mounting own the fixed Team root', async () => {
     const wrapper = render()
     await flushPromises()
-    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha', '')
-
-    settings.mimirTeamFolder = '/team'
-    await flushPromises()
-
-    expect(openBusinessGraph).toHaveBeenCalledTimes(2)
-    expect(openBusinessGraph).toHaveBeenLastCalledWith('/alpha', '/team')
+    expect(openBusinessGraph).toHaveBeenCalledOnce()
+    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha')
     wrapper.unmount()
   })
 
@@ -429,7 +423,7 @@ describe('BusinessGraphApp', () => {
     vi.mocked(listenForGraphChanges).mockResolvedValueOnce(unlisten)
     const wrapper = render()
 
-    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha', '')
+    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha')
     wrapper.unmount()
     resolveMount({
       scopes: scopeRows,
@@ -659,7 +653,7 @@ describe('BusinessGraphApp', () => {
 
     expect(createGraphNode).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'issue',
-      scopeId: 'project:alpha',
+      scopeId: 'team:main',
       title: 'Draft evidence map',
     }))
     wrapper.unmount()

@@ -96,6 +96,15 @@
       </button>
       <button
         type="button"
+        data-inspector-file-history
+        data-graph-control="focus-file-history"
+        @click="toggleHistory"
+      >
+        <IconHistory :size="14" />
+        History
+      </button>
+      <button
+        type="button"
         data-inspector-delete
         data-graph-control="focus-delete"
         class="danger"
@@ -128,6 +137,25 @@
   <IconAlertTriangle :size="15" />
   <span>{{ error }}</span>
 </div>
+
+<section v-if="historyOpen" data-inspector-file-history-panel class="object-file-history">
+  <p v-if="historyLoading">Loading History…</p>
+  <p v-else-if="historyError" role="alert" class="object-file-history-error">{{ historyError }}</p>
+  <p v-else-if="!historyEntries.length">No saved versions yet.</p>
+  <template v-else>
+    <button
+      v-for="entry in historyEntries"
+      :key="entry.hash"
+      type="button"
+      :data-file-history-version="entry.hash"
+      :data-graph-control="`focus-history-${entry.hash}`"
+      @click="openHistoryVersion(entry)"
+    >
+      <span>{{ entry.message }}</span>
+      <small>{{ entry.shortHash }} · {{ readableDateTime(entry.authoredAt) }}</small>
+    </button>
+  </template>
+</section>
 
 <main class="focus-scroll">
   <article class="focus-document">
@@ -572,10 +600,38 @@
           @input="changedAndGrow"
         />
       </label>
+
+      <label class="focus-deliverables-field">
+        <span>Files</span>
+        <small>One path per line; add an optional label after “|”.</small>
+        <textarea
+          ref="filesInput"
+          v-model="draft.files"
+          data-inspector-files
+          data-graph-control="focus-files"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="resources/proposal-template.html | Proposal template"
+          @input="changedAndGrow"
+        />
+        <button
+          v-if="canAddTeamResource"
+          type="button"
+          data-inspector-add-resource
+          data-graph-control="focus-add-resource"
+          class="object-secondary-action self-start"
+          @click.prevent="addResourceFile"
+        >
+          <IconPaperclip :size="13" />
+          Add Team file
+        </button>
+        <small v-if="resourceError" role="alert" class="text-rem">{{ resourceError }}</small>
+      </label>
     </section>
 
     <section
-      v-if="neighbors.length || activities.length || deliverableItems.length"
+      v-if="neighbors.length || activities.length || deliverableItems.length || resourceItems.length"
       class="focus-connected-section"
     >
       <span class="object-section-label">Connected work</span>
@@ -641,6 +697,25 @@
             <IconArrowUpRight :size="14" />
           </button>
         </div>
+        <div v-if="resourceItems.length">
+          <h3>Files</h3>
+          <button
+            v-for="resource in resourceItems"
+            :key="resource.path"
+            type="button"
+            :data-resource-path="resource.path"
+            :data-graph-control="`focus-resource-${resource.path}`"
+            class="object-link-row"
+            @click="openSource(resource.path)"
+          >
+            <span class="file-mark">{{ fileExtension(resource.path) }}</span>
+            <span>
+              <strong>{{ resource.label || fileName(resource.path) }}</strong>
+              <small>{{ resource.path }}</small>
+            </span>
+            <IconArrowUpRight :size="14" />
+          </button>
+        </div>
       </div>
     </section>
 
@@ -659,6 +734,8 @@ import {
   IconChevronRight,
   IconDots,
   IconFileCode,
+  IconHistory,
+  IconPaperclip,
   IconLink,
   IconPlus,
   IconScale,
@@ -685,9 +762,15 @@ const {
   titleInput,
   summaryInput,
   deliverablesInput,
+  filesInput,
   dirty,
   copiedFact,
   moreOpen,
+  historyOpen,
+  historyLoading,
+  historyError,
+  historyEntries,
+  resourceError,
   connectionRelation,
   connectionTarget,
   attendeeToAdd,
@@ -707,6 +790,8 @@ const {
   connectionRows,
   canAddConnection,
   deliverableItems,
+  resourceItems,
+  canAddTeamResource,
   attentionLabel,
   saveStateLabel,
   saveStateClass,
@@ -734,6 +819,9 @@ const {
   displayTitle,
   remove,
   moreAction,
+  toggleHistory,
+  openHistoryVersion,
+  addResourceFile,
   readableDate,
   readableDateTime,
   readableDuration,

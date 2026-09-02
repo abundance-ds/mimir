@@ -40,7 +40,7 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 42] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 44] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -144,6 +144,15 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 42] = [
         connection: None,
     },
     AgentToolSpec {
+        canonical_name: "graph.status",
+        public_name: "graph_status",
+        description: "Read mounted graph scopes and counts.",
+        group: "graph",
+        effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
         canonical_name: "graph.get",
         public_name: "graph_get",
         description: "Read a complete graph node.",
@@ -203,6 +212,15 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 42] = [
         description: "Read recent graph changes.",
         group: "graph",
         effect: "read",
+        direct: false,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "graph.resource_add",
+        public_name: "graph_resource_add",
+        description: "Add a file to a Team Resource node.",
+        group: "graph",
+        effect: "write",
         direct: false,
         connection: None,
     },
@@ -1555,7 +1573,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 42);
+        assert_eq!(AGENT_TOOLS.len(), 44);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();

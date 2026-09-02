@@ -9,6 +9,8 @@ import {
   toRefs,
   watch,
 } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import { GRAPH_INSPECTOR_CONTEXT } from './graphInspectorContext.js'
 import {
   buildInspectorSave,
@@ -52,12 +54,18 @@ export function useGraphInspector(props, emit) {
   const inspectorRoot = ref(null)
   const summaryInput = ref(null)
   const deliverablesInput = ref(null)
+  const filesInput = ref(null)
   const dirty = ref(false)
   const saveBlocked = ref(false)
   const copiedFact = ref('')
   let copiedFactTimer = null
   const saved = ref(false)
   const moreOpen = ref(false)
+  const historyOpen = ref(false)
+  const historyLoading = ref(false)
+  const historyError = ref('')
+  const historyEntries = ref([])
+  const resourceError = ref('')
   const connectionRelation = ref('')
   const connectionTarget = ref('')
   const attendeeToAdd = ref('')
@@ -84,6 +92,7 @@ export function useGraphInspector(props, emit) {
     snoozeUntil: '',
     labels: '',
     deliverables: '',
+    files: '',
     projectType: '',
     projectStatus: 'planned',
     companyRoles: '',
@@ -207,6 +216,18 @@ export function useGraphInspector(props, emit) {
       ))
       .filter(item => item.path)
   ))
+  const resourceItems = computed(() => (
+    (props.node?.properties?.files || [])
+      .map(item => (
+        typeof item === 'string'
+          ? { path: item, label: '' }
+          : { path: item?.path || '', label: item?.label || '' }
+      ))
+      .filter(item => item.path)
+  ))
+  const canAddTeamResource = computed(() => (
+    props.node?.provenance?.scopeId === 'team:main'
+  ))
   const attentionLabel = computed(() => {
     if (draft.snoozeUntil) return `Snoozed until ${readableDate(draft.snoozeUntil)}`
     if (isOverdue(draft.dueDate)) return 'Overdue'
@@ -265,6 +286,10 @@ export function useGraphInspector(props, emit) {
     saved.value = false
     editVersion = 0
     pendingAction = null
+    historyOpen.value = false
+    historyEntries.value = []
+    historyError.value = ''
+    resourceError.value = ''
     void nextTick(growAll)
   }
   
@@ -448,7 +473,7 @@ export function useGraphInspector(props, emit) {
   }
   
   function growAll() {
-    for (const input of [titleInput.value, summaryInput.value, deliverablesInput.value]) grow(input)
+    for (const input of [titleInput.value, summaryInput.value, deliverablesInput.value, filesInput.value]) grow(input)
   }
   
   // Peek and Focus size the same fields differently, so the floor comes from the
@@ -483,6 +508,72 @@ export function useGraphInspector(props, emit) {
   function moreAction(action) {
     moreOpen.value = false
     action()
+  }
+
+  async function toggleHistory() {
+    moreOpen.value = false
+    historyOpen.value = !historyOpen.value
+    if (!historyOpen.value || historyEntries.value.length || historyLoading.value) return
+    historyLoading.value = true
+    historyError.value = ''
+    try {
+      const entries = await invoke('git_file_history', {
+        path: props.node?.provenance?.sourcePath,
+        limit: 50,
+      })
+      historyEntries.value = Array.isArray(entries) ? entries : []
+    } catch (cause) {
+      historyError.value = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      historyLoading.value = false
+    }
+  }
+
+  async function openHistoryVersion(entry) {
+    const path = props.node?.provenance?.sourcePath
+    if (!path || !entry?.hash) return
+    if (entry.binary) {
+      if (!window.confirm('Restore this file version? The current version remains in History.')) return
+      try {
+        await invoke('git_restore_file_version', { path, hash: entry.hash })
+        historyOpen.value = false
+      } catch (cause) {
+        historyError.value = cause instanceof Error ? cause.message : String(cause)
+      }
+      return
+    }
+    historyOpen.value = false
+    emit('openFile', {
+      path,
+      nodeId: props.node?.id || null,
+      history: {
+        hash: entry.hash,
+        shortHash: entry.shortHash,
+        label: entry.message,
+        timestamp: entry.authoredAt,
+      },
+    })
+  }
+
+  async function addResourceFile() {
+    if (!canAddTeamResource.value) return
+    resourceError.value = ''
+    try {
+      const selection = await open({
+        directory: false,
+        multiple: false,
+        title: 'Add Team resource',
+      })
+      const source = Array.isArray(selection) ? selection[0] : selection
+      const sourcePath = typeof source === 'string' ? source : source?.path
+      if (!sourcePath) return
+      const path = await invoke('team_resource_import', { source: sourcePath })
+      draft.files = [draft.files.trim(), path].filter(Boolean).join('\n')
+      changed()
+      await nextTick(() => grow(filesInput.value))
+    } catch (cause) {
+      resourceError.value = cause instanceof Error ? cause.message : String(cause)
+    }
   }
   
   function onKeydown(event) {
@@ -544,9 +635,15 @@ export function useGraphInspector(props, emit) {
       titleInput,
       summaryInput,
       deliverablesInput,
+      filesInput,
       dirty,
       copiedFact,
       moreOpen,
+      historyOpen,
+      historyLoading,
+      historyError,
+      historyEntries,
+      resourceError,
       connectionRelation,
       connectionTarget,
       attendeeToAdd,
@@ -566,6 +663,8 @@ export function useGraphInspector(props, emit) {
       connectionRows,
       canAddConnection,
       deliverableItems,
+      resourceItems,
+      canAddTeamResource,
       attentionLabel,
       saveStateLabel,
       saveStateClass,
@@ -593,6 +692,9 @@ export function useGraphInspector(props, emit) {
       displayTitle,
       remove,
       moreAction,
+      toggleHistory,
+      openHistoryVersion,
+      addResourceFile,
       readableDate,
       readableDateTime,
       readableDuration,

@@ -158,8 +158,8 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { useSettingsStore } from '../../stores/settings.js'
 import { useActivitiesStore } from '../../stores/activities.js'
+import { useSettingsStore } from '../../stores/settings.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { useMeetingsStore } from '../../stores/meetings.js'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
@@ -193,8 +193,8 @@ const emit = defineEmits([
   'diagnostic',
   'openMeeting',
 ])
-const settings = useSettingsStore()
 const activities = useActivitiesStore()
+const settings = useSettingsStore()
 const launchers = useLaunchersStore()
 const meetings = useMeetingsStore()
 const graph = useBusinessGraphStore()
@@ -205,7 +205,6 @@ const dispatchBar = ref(null)
 useGraphLifecycle({
   graph,
   meetings,
-  settings,
   active: () => props.active,
   workspacePath: () => props.workspacePath,
   diagnostic: message => emit('diagnostic', message),

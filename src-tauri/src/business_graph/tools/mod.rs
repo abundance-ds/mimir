@@ -259,6 +259,12 @@ fn mutation_before(
     if is_create_action(action) || action == "graph.restore" {
         return Ok(None);
     }
+    if action == "graph.resource_add" {
+        let Some(id) = input.get("resourceId").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+        return runtime.get(id).map_err(internal_error);
+    }
     let Some(id) = input.get("id").and_then(Value::as_str) else {
         return Ok(None);
     };
@@ -363,7 +369,7 @@ fn ensure_open(app: &tauri::AppHandle, context: &ToolCallContext) -> Result<(), 
         )
     })?;
     runtime
-        .open(app, PathBuf::from(cwd), None)
+        .open(app, PathBuf::from(cwd))
         .map_err(|error| ToolError::new(ToolErrorCode::Unavailable, error))?;
     Ok(())
 }

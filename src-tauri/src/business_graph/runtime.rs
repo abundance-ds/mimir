@@ -62,7 +62,6 @@ impl GraphRuntime {
         &self,
         app: &AppHandle,
         project_root: impl Into<PathBuf>,
-        team_root: Option<PathBuf>,
     ) -> Result<GraphOpenResult, String> {
         let project_root = canonical_directory(project_root.into(), "project graph root")?;
         let private_root = private_root()?;
@@ -78,7 +77,7 @@ impl GraphRuntime {
                 project_root.clone(),
             ),
         ];
-        if let Some(team_root) = team_root {
+        if let Some(team_root) = crate::managed_git::team_scope_root()? {
             if let Some(team_root) = optional_directory(team_root, "team graph root")? {
                 roots.push(GraphSourceRoot::new(
                     "team:main",
@@ -817,15 +816,11 @@ fn human_kind(value: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn graph_open(
-    app: AppHandle,
-    project_root: String,
-    team_root: Option<String>,
-) -> Result<GraphOpenResult, String> {
+pub async fn graph_open(app: AppHandle, project_root: String) -> Result<GraphOpenResult, String> {
     let worker_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let runtime = worker_app.state::<GraphRuntime>();
-        runtime.open(&worker_app, project_root, team_root.map(PathBuf::from))
+        runtime.open(&worker_app, project_root)
     })
     .await
     .map_err(|error| format!("Business graph open task failed: {error}"))?

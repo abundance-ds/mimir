@@ -89,9 +89,9 @@ describe('business graph store', () => {
 
   it('mounts and composes all physical scopes by default', async () => {
     const store = useBusinessGraphStore()
-    await store.start('/alpha', '/team')
+    await store.start('/alpha')
 
-    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha', '/team')
+    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha')
     expect(store.activeScopeIds).toEqual(scopes.map(scope => scope.id))
     expect(queryGraph).toHaveBeenCalledWith({
       scopeIds: scopes.map(scope => scope.id),
