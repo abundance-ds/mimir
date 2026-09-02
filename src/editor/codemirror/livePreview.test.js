@@ -5,6 +5,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { Strikethrough } from '@lezer/markdown'
 import { syntaxHighlighting, syntaxTree, ensureSyntaxTree } from '@codemirror/language'
 import { livePreviewExtension, _buildDecorations, _parseMarkdownTable, _resolveImagePath } from './livePreview.js'
+import { markdownLinkOpen } from './markdownLinks.js'
 import { editorHighlightStyle } from './core.js'
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -116,6 +117,21 @@ describe('livePreview', () => {
       expect(link.length).toBe(1)
     })
 
+    it('makes bare and angle-bracket web URLs actionable away from the cursor', () => {
+      const doc = 'https://example.com/docs\n<https://example.com/help>\n\nother'
+      const cursorPos = doc.indexOf('other')
+      const decos = getDecos(doc, cursorPos)
+      const links = decos.filter(d => d.class === 'cm-lp-link')
+      expect(links).toHaveLength(2)
+    })
+
+    it('does not mark unsafe or document-only destinations as actionable', () => {
+      const doc = '[unsafe](javascript:alert(1))\n[jump](#components)\n\nother'
+      const cursorPos = doc.indexOf('other')
+      const decos = getDecos(doc, cursorPos)
+      expect(decos.filter(d => d.class === 'cm-lp-link')).toHaveLength(0)
+    })
+
     it('styles heading marks when cursor is away', () => {
       const doc = '# Heading\n\nother'
       const cursorPos = doc.indexOf('other')
@@ -220,6 +236,54 @@ describe('livePreview', () => {
       attachLanguage(view)
       expect(view.dom.querySelector('.cm-lp-table')).not.toBeNull()
       view.destroy()
+    })
+  })
+
+  describe('rendered link interaction', () => {
+    it('opens a rendered file link with one click without moving the caret', () => {
+      const doc = '[Layout](layout-2.html)\n\nother'
+      const cursor = doc.indexOf('other')
+      const onOpenFile = vi.fn()
+      const parent = document.createElement('div')
+      document.body.appendChild(parent)
+      const state = EditorState.create({
+        doc,
+        selection: { anchor: cursor },
+        extensions: [
+          markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+          livePreviewExtension(() => true, () => '/work/README.md'),
+          markdownLinkOpen({
+            selector: '.cm-lp-link',
+            preserveRenderedLink: true,
+            onOpenFile,
+          }),
+        ],
+      })
+      ensureSyntaxTree(state, state.doc.length, 1000)
+      const view = new EditorView({ state, parent })
+      vi.spyOn(view, 'posAtCoords').mockReturnValue(doc.indexOf('Layout') + 2)
+      const link = view.dom.querySelector('.cm-lp-link')
+
+      expect(link).not.toBeNull()
+      link.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+      }))
+      link.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+      }))
+
+      expect(onOpenFile).toHaveBeenCalledWith('layout-2.html')
+      expect(view.state.selection.main.head).toBe(cursor)
+      view.destroy()
+      parent.remove()
     })
   })
 

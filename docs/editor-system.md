@@ -96,6 +96,11 @@ compartments. `formatting.js` implements Markdown formatting commands.
 syntax markers and replacing images, tables, and rules with widgets. There is
 no separate rendered preview pane.
 
+In Live Preview, one click on a rendered Markdown link opens it. Relative file
+targets resolve from the Markdown file and open in the Editor; `http` and
+`https` targets open in the default browser. A link on the active line stays
+raw and editable. Other URI schemes and document-only anchors do not open.
+
 The default authoring face is bundled Commit Mono. Editor and diff surfaces
 share a 1.35 line-height ratio and use weight 450 on light themes or 400 on dark
 themes. The editor paper has 16px top and side padding. Normal and Wide line

@@ -2,6 +2,7 @@ import { EditorView, Decoration, ViewPlugin, WidgetType, keymap } from '@codemir
 import { syntaxTree } from '@codemirror/language'
 import { RangeSetBuilder, StateField, Prec } from '@codemirror/state'
 import { readBinaryFile } from '../../services/fileSystem.js'
+import { markdownLinkDestination } from './markdownLinks.js'
 
 const imageCache = new Map()
 
@@ -315,12 +316,16 @@ function buildDecorations(view, isEnabled, getFilePath) {
 
       if (name === 'Link' && !onCursorLine) {
         let linkMarks = []
+        let destination = null
         syntaxTree(state).iterate({
           from: nFrom, to: nTo,
           enter(child) {
             if (child.from < nFrom || child.to > nTo) return
             if (child.type.name === 'LinkMark') {
               linkMarks.push({ from: child.from, to: child.to })
+            }
+            if (child.type.name === 'URL') {
+              destination = markdownLinkDestination(state.sliceDoc(child.from, child.to))
             }
           },
         })
@@ -329,7 +334,34 @@ function buildDecorations(view, isEnabled, getFilePath) {
         }
         if (linkMarks.length >= 2) {
           decos.push(Decoration.replace({}).range(linkMarks[1].from, nTo))
-          decos.push(Decoration.mark({ class: 'cm-lp-link' }).range(linkMarks[0].to, linkMarks[1].from))
+          if (destination) {
+            decos.push(Decoration.mark({ class: 'cm-lp-link' }).range(linkMarks[0].to, linkMarks[1].from))
+          }
+        }
+        return false
+      }
+
+      if (name === 'Autolink' && !onCursorLine) {
+        const marks = []
+        let url = null
+        syntaxTree(state).iterate({
+          from: nFrom, to: nTo,
+          enter(child) {
+            if (child.from < nFrom || child.to > nTo) return
+            if (child.type.name === 'LinkMark') marks.push({ from: child.from, to: child.to })
+            if (child.type.name === 'URL') url = { from: child.from, to: child.to }
+          },
+        })
+        for (const mark of marks) decos.push(Decoration.replace({}).range(mark.from, mark.to))
+        if (url && markdownLinkDestination(state.sliceDoc(url.from, url.to))) {
+          decos.push(Decoration.mark({ class: 'cm-lp-link' }).range(url.from, url.to))
+        }
+        return false
+      }
+
+      if (name === 'URL' && !onCursorLine) {
+        if (markdownLinkDestination(state.sliceDoc(nFrom, nTo))) {
+          decos.push(Decoration.mark({ class: 'cm-lp-link' }).range(nFrom, nTo))
         }
         return false
       }
@@ -500,8 +532,13 @@ const livePreviewTheme = EditorView.baseTheme({
   },
   '.cm-lp-link': {
     color: 'var(--color-accent)',
+    cursor: 'pointer',
     textDecoration: 'underline',
+    textDecorationThickness: '1px',
     textUnderlineOffset: '2px',
+  },
+  '.cm-lp-link:hover': {
+    textDecorationThickness: '2px',
   },
   '.cm-lp-heading-mark': {
     color: 'var(--syntax-keyword)',

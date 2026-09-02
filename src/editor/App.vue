@@ -55,6 +55,7 @@
         <GitReviewBar
           v-else-if="gitReviewVisible"
           :dirty="gitReviewDirty"
+          :managed="gitReviewManaged"
           @open-file="onGitReviewOpenFile"
           @ask-agent="onGitReviewAskAgent"
           @close="closeGitReview"
@@ -305,6 +306,7 @@ import { absoluteWorkspacePath } from '../services/gitChanges.js'
 import { createWindowCloseGuard } from './windowCloseGuard.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { livePreviewExtension } from './codemirror/livePreview.js'
+import { markdownLinkOpen, resolveMarkdownFileTarget } from './codemirror/markdownLinks.js'
 import { taskCheckboxExtension } from './codemirror/taskCheckboxes.js'
 import { commentsExtension, getCommentsFromState, commentMutation } from './codemirror/comments.js'
 import { escapeAttr } from '../services/comments/parser.js'
@@ -330,6 +332,7 @@ import { fileDisplayName, footerSaveStatus, tabFromFile } from './saveStatus.js'
 import { useSaveFeedbackStore } from '../stores/saveFeedback.js'
 import { useAppUpdateStore } from '../stores/appUpdate.js'
 import { diffIsVisibleForFile, singleDiffTargetsFile } from './workspaceDiffProjection.js'
+import { openExternalUrl } from '../services/externalLinks.js'
 
 import AppFooter from './components/shell/AppFooter.vue'
 import AppHeader from './components/shell/AppHeader.vue'
@@ -527,6 +530,7 @@ const editorTabs = computed(() => {
 
 const reviewTabActive = ref(false)
 const gitReviewTabActive = ref(false)
+const gitReviewManaged = ref(false)
 const gitReviewVisible = computed(() => gitReview.active && gitReviewTabActive.value)
 const gitReviewPath = computed(() => {
   const relativePath = gitReview.review?.path || gitReview.requestedFile
@@ -672,6 +676,24 @@ async function onDiscardPendingReviews() {
   }
 }
 
+function openMarkdownFileLink(target) {
+  const path = resolveMarkdownFileTarget(target, {
+    sourcePath: currentFile.value?.path,
+    fallbackDirectory: props.workspacePath,
+    homeDirectory: typeof window !== 'undefined' ? window.__MIMIR_HOME__ : '',
+  })
+  if (!path) return
+  void mimirOpen(path, { preview: false }).catch(error => {
+    console.error('[markdown-link] file open failed', error)
+  })
+}
+
+function openMarkdownUrlLink(target) {
+  void openExternalUrl(target).catch(error => {
+    console.error('[markdown-link] URL open failed', error)
+  })
+}
+
 const editorExtensions = computed(() => [
   commentsExtension({
     onCommentClick: (id) => {
@@ -704,6 +726,13 @@ const editorExtensions = computed(() => [
     () => editorSettings.editorLivePreview,
     () => currentFile.value?.path,
   ),
+  markdownLinkOpen({
+    enabled: () => editorSettings.editorLivePreview && isMarkdownPath(currentFile.value?.path),
+    selector: '.cm-lp-link',
+    preserveRenderedLink: true,
+    onOpenFile: openMarkdownFileLink,
+    onOpenUrl: openMarkdownUrlLink,
+  }),
   ...taskCheckboxExtension(() => editorSettings.editorLivePreview && isMarkdownPath(currentFile.value?.path)),
 ])
 
@@ -1430,9 +1459,36 @@ async function mimirReviewGit(request = {}) {
   inlineAIState.value = null
   reviewTabActive.value = false
   gitReviewTabActive.value = true
+  gitReviewManaged.value = Boolean(request.managed)
   return gitReview.reviewFile(request.file, {
     workspacePath: request.workspacePath || props.workspacePath,
     scope: request.scope || gitReview.scope,
+  })
+}
+
+async function mimirReviewHistory(request = {}) {
+  const path = String(request.path || '').trim()
+  const hash = String(request.hash || '').trim()
+  if (!path || !hash) throw new Error('A file and history version are required.')
+  await mimirOpen(path, { preview: false })
+  flushEditorContent({ bridge: 'flush' })
+  if (currentFile.value?.dirty) {
+    throw new Error('Save or discard the current edits before opening History.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  const version = await invoke('git_file_version', { path, hash })
+  if (version?.binary || typeof version?.content !== 'string') {
+    throw new Error('This file version does not have a text diff.')
+  }
+  const current = currentFile.value?.content || ''
+  activateDiffForCurrentFile(version.content, current, {
+    review: {
+      type: 'history',
+      label: request.label || 'Saved version',
+      hash: request.shortHash || hash.slice(0, 8),
+      timestamp: request.timestamp || '',
+      path,
+    },
   })
 }
 
@@ -1459,6 +1515,7 @@ function onGitReviewAskAgent(presetId) {
 function closeGitReview() {
   gitReview.deactivate()
   gitReviewTabActive.value = false
+  gitReviewManaged.value = false
   restoreEditorFocus()
 }
 
@@ -1469,6 +1526,7 @@ watch(() => gitReview.active, (active) => {
 defineExpose({
   mimirOpen,
   mimirReviewGit,
+  mimirReviewHistory,
   mimirState,
   mimirActive,
   mimirTabs,
