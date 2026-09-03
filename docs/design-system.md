@@ -15,6 +15,9 @@ must explain the interface without decorative copy or motion.
 - Keep normal UI at 9 px or larger and row data at 10 px or larger.
 - Use the system UI font for interface and prose, system mono for technical
   values, and Commit Mono for Editor content.
+- Editor bold and italic pair weight or slant with ink tinted by the theme
+  syntax colour (`--ink-strong`, `--ink-emphasis`); the accent stays reserved
+  for links.
 - Workbench surfaces are square with one-pixel rules. Shadows and rounded
   corners are reserved for functional overlays.
 - Raw ids, revisions, counters, and technical state do not belong in normal UI.
