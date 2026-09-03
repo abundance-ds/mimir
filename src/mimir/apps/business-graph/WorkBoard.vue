@@ -2,12 +2,12 @@
   <div ref="board" data-graph-work-board class="work-board">
     <div v-if="!issues.length" class="board-empty">
       <h2>No work matches this view</h2>
-      <p>Create work, broaden the project or priority filter, or include another scope.</p>
+      <p>Create work, broaden the project, owner, or priority filter, or include another scope.</p>
       <button
         type="button"
         data-graph-control="board-empty-create"
         @click="$emit('create', {
-          columnId: groupBy === 'status' ? 'backlog' : '__unassigned__',
+          columnId: groupBy === 'status' ? 'backlog' : UNASSIGNED,
           groupBy,
         })"
       >
@@ -90,6 +90,7 @@
               variant="row"
               class="board-priority"
               :class="`priority-${issue.priority || 'normal'}`"
+              :chevron="false"
               :data-card-priority="issue.id"
               :data-graph-control="`card-priority-${issue.id}`"
               :aria-label="`${human(issue.priority || 'normal')} priority for ${issue.title || 'issue'}`"
@@ -100,8 +101,8 @@
               <template #trigger>
                 <component
                   :is="priorityIcons[issue.priority || 'normal']"
-                  :size="16"
-                  :stroke-width="2.2"
+                  :size="15"
+                  :stroke-width="issue.priority === 'urgent' ? 2.6 : 2.2"
                 />
               </template>
             </GraphSelect>
@@ -121,7 +122,11 @@
                 @click.stop
                 @update:model-value="setStatus(issue, $event)"
               />
-              <span v-else-if="projectLabel(issue)" class="meta-project">
+              <span
+                v-else-if="!hideProject && projectLabel(issue)"
+                class="meta-project"
+                :title="projectLabel(issue)"
+              >
                 {{ projectLabel(issue) }}
               </span>
               <GraphDatePicker
@@ -130,23 +135,30 @@
                 :data-graph-control="`card-due-${issue.id}`"
                 variant="row"
                 class="meta-due"
-                placeholder="set date"
-                :class="{
-                  overdue: overdue(issue.dueDate),
-                  soon: dueSoon(issue.dueDate),
-                }"
-                :aria-label="`Due date for ${issue.title || 'issue'}`"
+                :class="`due-${due(issue).state}`"
+                :aria-label="dueAccessibleLabel(issue)"
                 @click.stop
                 @update:model-value="patchDue(issue, $event)"
-              />
-              <span v-if="overdue(issue.dueDate)" class="meta-overdue">overdue</span>
-              <span v-if="issue.waitingFor" class="meta-waiting">waiting</span>
-              <span
-                v-if="actorDisplay(actorFor(issue.id))"
-                class="meta-author"
-                :title="actorFor(issue.id)?.label"
               >
-                {{ actorDisplay(actorFor(issue.id)) }}
+                <template #trigger>
+                  <IconCalendar v-if="!issue.dueDate" :size="12" aria-hidden="true" />
+                  <template v-else>{{ due(issue).label }}</template>
+                </template>
+              </GraphDatePicker>
+              <span
+                v-if="waitingReason(issue)"
+                class="meta-waiting"
+                :title="`Waiting for ${waitingReason(issue)}`"
+              >
+                <span class="meta-key">waiting for</span> {{ waitingReason(issue) }}
+              </span>
+              <span
+                v-if="assignee(issue)"
+                class="meta-assignee"
+                :class="{ 'meta-assignee-self': assignee(issue).self }"
+                :title="assignee(issue).self ? 'Assigned to you' : `Assigned to ${assignee(issue).name}`"
+              >
+                {{ assignee(issue).label }}
               </span>
             </span>
           </article>
@@ -179,23 +191,34 @@
 <script setup>
 import { computed, ref } from 'vue'
 import {
-  IconAntennaBars2,
   IconAntennaBars3,
-  IconAntennaBars4,
+  IconAntennaBars5,
+  IconArrowNarrowDown,
+  IconCalendar,
   IconExclamationMark,
   IconPlus,
 } from '@tabler/icons-vue'
 import GraphDatePicker from './GraphDatePicker.vue'
 import GraphSelect from './GraphSelect.vue'
 import { useBoardDrag } from './useBoardDrag.js'
+import {
+  UNASSIGNED,
+  WORK_STATUSES,
+  assigneeDisplay,
+  dueInfo,
+  waitingReason,
+} from './workRow.js'
 
 const props = defineProps({
   issues: { type: Array, default: () => [] },
   nodes: { type: Array, default: () => [] },
   projects: { type: Array, default: () => [] },
-  actors: { type: Object, default: () => ({}) },
   groupBy: { type: String, default: 'status' },
   collapsedStatuses: { type: Array, default: () => [] },
+  /** Person id the reader is; that assignee renders as "you". */
+  selfId: { type: String, default: '' },
+  /** Hide the project token when one project already scopes the board. */
+  hideProject: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -212,28 +235,21 @@ const board = ref(null)
 const selectedIds = ref([])
 const selectionAnchor = ref(null)
 
-const statuses = Object.freeze([
-  { id: 'backlog', label: 'Backlog' },
-  { id: 'plan', label: 'Plan' },
-  { id: 'in-progress', label: 'In progress' },
-  { id: 'waiting', label: 'Waiting' },
-  { id: 'review', label: 'Review' },
-  { id: 'done', label: 'Done' },
-])
+const statuses = WORK_STATUSES
 const statusOptions = Object.freeze(
   statuses.map(status => ({ value: status.id, label: status.label })),
 )
 const priorities = Object.freeze([
   { value: 'urgent', label: 'Urgent', icon: IconExclamationMark },
-  { value: 'high', label: 'High', icon: IconAntennaBars4 },
+  { value: 'high', label: 'High', icon: IconAntennaBars5 },
   { value: 'normal', label: 'Normal', icon: IconAntennaBars3 },
-  { value: 'low', label: 'Low', icon: IconAntennaBars2 },
+  { value: 'low', label: 'Low', icon: IconArrowNarrowDown },
 ])
 const priorityIcons = Object.freeze({
   urgent: IconExclamationMark,
-  high: IconAntennaBars4,
+  high: IconAntennaBars5,
   normal: IconAntennaBars3,
-  low: IconAntennaBars2,
+  low: IconArrowNarrowDown,
 })
 const priorityOrder = ['low', 'normal', 'high', 'urgent']
 const boardColumns = computed(() => {
@@ -241,9 +257,9 @@ const boardColumns = computed(() => {
     return [
       ...props.projects.map(project => ({
         id: project.id,
-        label: project.properties?.slug || project.slug || project.title || 'Untitled project',
+        label: project.title || project.properties?.slug || project.slug || 'Untitled project',
       })),
-      { id: '__unassigned__', label: 'No project' },
+      { id: UNASSIGNED, label: 'No project' },
     ]
   }
   return statuses
@@ -253,7 +269,7 @@ const grouped = computed(() => Object.fromEntries(
     column.id,
     props.issues.filter(issue => (
       props.groupBy === 'project'
-        ? (issue.projectId || '__unassigned__') === column.id
+        ? (issue.projectId || UNASSIGNED) === column.id
         : (issue.status || 'backlog') === column.id
     )),
   ]),
@@ -377,7 +393,7 @@ function moveByKeyboard(event, issue, columnId, offset) {
 
 function moveToColumn(issue, columnId) {
   if (props.groupBy === 'project') {
-    const projectId = columnId === '__unassigned__' ? '' : columnId
+    const projectId = columnId === UNASSIGNED ? '' : columnId
     if ((issue.projectId || '') !== projectId) emit('move', { issue, projectId })
   } else if (issue.status !== columnId) {
     emit('move', { issue, status: columnId })
@@ -423,44 +439,35 @@ function patchDue(issue, value) {
 function projectLabel(issue) {
   if (!issue.projectId) return ''
   const project = byId.value.get(issue.projectId)
-  return project?.slug || project?.properties?.slug || project?.title || ''
+  return project?.title || project?.slug || project?.properties?.slug || issue.projectId
 }
 
-function actorFor(id) {
-  return props.actors?.[id] || null
+function assignee(issue) {
+  return assigneeDisplay(issue, { byId: byId.value, selfId: props.selfId })
 }
 
-function actorDisplay(actor) {
-  if (!actor) return ''
-  if (actor.id === 'local-human' || actor.label === 'You' || actor.initials === 'ME') return 'you'
-  if (actor.kind === 'external' || actor.id === 'external' || actor.initials === 'EX') {
-    return 'external'
-  }
-  return actor.initials || actor.label || ''
+function due(issue) {
+  return dueInfo(issue.dueDate)
 }
 
-function overdue(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && value < new Date().toISOString().slice(0, 10)
-}
-
-function dueSoon(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || overdue(value)) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const due = new Date(`${value}T00:00:00`)
-  const days = (due.getTime() - today.getTime()) / 86_400_000
-  return days >= 0 && days <= 7
+function dueAccessibleLabel(issue) {
+  const info = due(issue)
+  const title = issue.title || 'issue'
+  return info.state === 'none'
+    ? `Due date for ${title}. No date set`
+    : `Due date for ${title}. ${info.label}`
 }
 
 function rowLabel(issue, column) {
+  const owner = assignee(issue)
+  const reason = waitingReason(issue)
   return [
     issue.title || 'Untitled issue',
     `${human(issue.priority || 'normal')} priority`,
     `in ${column.label}`,
-    issue.dueDate ? `due ${issue.dueDate}` : 'no due date',
-    overdue(issue.dueDate) ? 'overdue' : '',
-    issue.waitingFor ? 'waiting' : '',
+    due(issue).label || 'no due date',
+    reason ? `waiting for ${reason}` : '',
+    owner ? (owner.self ? 'assigned to you' : `assigned to ${owner.name}`) : '',
     'P cycles priority, D sets due date, arrows move',
   ].filter(Boolean).join('. ')
 }
@@ -480,25 +487,28 @@ function human(value) {
   background: var(--color-surface);
 }
 
+/* Columns share the width when there is room and scroll when there is not. */
 .work-board-track {
   display: flex;
+  width: max-content;
+  min-width: 100%;
   height: 100%;
-  min-width: max-content;
-  gap: 1px;
-  background: var(--color-rule);
 }
 
 .board-column {
   display: flex;
-  width: 340px;
+  min-width: 280px;
+  max-width: 460px;
   height: 100%;
+  flex: 1 1 280px;
   flex-direction: column;
   overflow: hidden;
+  border-right: 1px solid var(--color-rule);
   background: var(--color-surface);
 }
 
 .board-column-collapsed {
-  width: 42px;
+  min-width: 42px;
   flex: 0 0 42px;
 }
 
@@ -510,7 +520,7 @@ function human(value) {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
+  padding: 12px 0;
   background: var(--color-chrome-high);
   color: var(--color-ink-3);
 }
@@ -529,8 +539,8 @@ function human(value) {
   overflow: hidden;
   max-height: calc(100% - 28px);
   color: var(--color-ink-2);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
   writing-mode: vertical-rl;
@@ -548,21 +558,22 @@ function human(value) {
 
 .board-column-header {
   display: grid;
-  min-height: 34px;
+  min-height: 38px;
   flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) auto 26px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   border-bottom: 1px solid var(--color-rule);
-  padding: 0 5px 0 9px;
+  padding: 0 6px 0 12px;
   background: var(--color-chrome-high);
 }
 
 .board-column-name {
   overflow: hidden;
-  color: var(--color-ink-2);
-  font-size: 11px;
-  font-weight: 650;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -601,17 +612,21 @@ function human(value) {
   overflow-y: auto;
 }
 
+/* One row: priority slot, title (up to two lines), then a fixed-order meta
+   line — project · due · waiting for · assignee. */
 .board-row {
   position: relative;
   display: grid;
   width: 100%;
-  height: 41px;
-  min-height: 41px;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: 22px 19px;
-  align-items: center;
+  min-height: 50px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: start;
+  column-gap: 4px;
+  row-gap: 3px;
   border-bottom: 1px solid var(--color-rule-light);
   background: var(--color-surface);
+  padding: 8px 10px 8px 6px;
   color: var(--color-ink);
   text-align: left;
 }
@@ -621,7 +636,7 @@ function human(value) {
 }
 
 .board-row:hover .board-row-title,
-.board-row:hover .meta-author {
+.board-row:hover .meta-assignee {
   color: var(--color-ink);
 }
 
@@ -646,108 +661,149 @@ function human(value) {
   content: '';
 }
 
-.board-priority {
-  align-self: center;
-  margin-left: 5px;
+.board-row .board-priority {
+  width: 24px;
+  height: 20px;
+  grid-row: 1;
+  grid-column: 1;
+  justify-content: center;
+  padding: 0;
   color: var(--color-ink-2);
 }
 
-.board-priority.priority-urgent {
+.board-row .board-priority.priority-urgent {
   color: var(--color-rem);
 }
 
-.board-priority.priority-normal {
-  color: var(--color-ink-3);
+.board-row .board-priority.priority-high {
+  color: var(--color-ink);
 }
 
-.board-priority.priority-low {
+.board-row .board-priority.priority-normal,
+.board-row .board-priority.priority-low {
   color: var(--color-ink-4);
 }
 
 .board-row-title {
+  display: -webkit-box;
   overflow: hidden;
-  align-self: center;
-  padding-right: 8px;
+  grid-row: 1;
+  grid-column: 2;
+  padding-right: 4px;
   color: var(--color-ink);
-  font-size: 12px;
-  font-weight: 620;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .board-row-meta {
   display: flex;
   min-width: 0;
-  grid-column: 1 / -1;
+  grid-row: 2;
+  grid-column: 2;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   overflow: hidden;
-  padding: 0 8px 0 9px;
   color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 14px;
+  line-height: 16px;
   white-space: nowrap;
 }
 
-.meta-status {
+.board-row-meta .meta-status {
+  height: 18px;
   flex: 0 0 auto;
-  color: var(--color-ink-3);
+  padding: 0 3px;
+  margin-left: -3px;
+  color: var(--color-ink-2);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 560;
 }
 
 .meta-project {
   overflow: hidden;
-  max-width: 96px;
+  max-width: 150px;
   flex: 0 1 auto;
+  color: var(--color-ink-2);
+  font-weight: 560;
+  text-overflow: ellipsis;
+}
+
+.meta-waiting {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
   color: var(--color-ink-3);
   text-overflow: ellipsis;
 }
 
-.meta-overdue {
-  flex: 0 0 auto;
-  color: var(--color-rem);
-}
-
-.meta-due:not(.overdue):not(.soon) {
-  color: var(--color-ink-4);
-}
-
-.meta-waiting {
-  flex: 0 0 auto;
+.meta-key {
   color: var(--color-ink-2);
-}
-
-:deep(.graph-date-row) {
-  flex: 0 0 auto;
-}
-
-:deep(.graph-date-row.overdue) {
-  color: var(--color-rem);
   font-weight: 650;
 }
 
-:deep(.graph-date-row.soon) {
+.meta-assignee {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-ink-2);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.meta-assignee-self {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.board-row-meta :deep(.graph-date-row) {
+  display: inline-flex;
+  height: 18px;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 3px;
+  margin-left: -3px;
+  color: var(--color-ink-4);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-row-meta :deep(.graph-date-row.due-later) {
+  color: var(--color-ink-3);
+}
+
+.board-row-meta :deep(.graph-date-row.due-soon) {
   color: var(--color-ink-2);
 }
 
-.meta-author {
-  margin-left: auto;
-  color: var(--color-ink-3);
+.board-row-meta :deep(.graph-date-row.due-today) {
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.board-row-meta :deep(.graph-date-row.due-overdue) {
+  color: var(--color-rem);
   font-weight: 650;
 }
 
 .board-empty-column {
   display: flex;
   width: 100%;
-  min-height: 41px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 5px;
   border-bottom: 1px solid var(--color-rule-light);
   color: var(--color-ink-4);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .board-empty-column:hover,
@@ -775,7 +831,7 @@ function human(value) {
   max-width: 390px;
   margin-top: 5px;
   color: var(--color-ink-3);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -789,7 +845,7 @@ function human(value) {
   background: var(--color-accent);
   padding: 0 10px;
   color: var(--color-accent-ink, white);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
 }
 

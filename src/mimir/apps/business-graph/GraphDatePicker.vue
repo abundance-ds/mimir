@@ -7,7 +7,11 @@
     :variant="variant"
     @update:model-value="emit('update:modelValue', $event)"
     @change="emit('change', $event)"
-  />
+  >
+    <template v-if="$slots.trigger" #trigger="slotProps">
+      <slot name="trigger" v-bind="slotProps" />
+    </template>
+  </DatePicker>
 </template>
 
 <script setup>
