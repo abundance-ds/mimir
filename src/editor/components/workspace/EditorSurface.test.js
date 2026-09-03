@@ -91,7 +91,7 @@ describe('EditorSurface feature extensions', () => {
     const surface = wrapper.get('.editor-wrap').element
 
     expect(surface.style.getPropertyValue('--editor-size')).toBe('20px')
-    expect(surface.style.getPropertyValue('--editor-line-height')).toBe('27px')
+    expect(surface.style.getPropertyValue('--editor-line-height')).toBe('29px')
     expect(surface.style.getPropertyValue('--editor-font-weight')).toBe('450')
     expect(surface.style.getPropertyValue('--font-mono')).toContain('"Commit Mono"')
 

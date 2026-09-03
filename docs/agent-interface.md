@@ -1,203 +1,93 @@
 # Mimir agent interface
 
-Status: implemented, 2026-08-16
+This file is the authority for what agents can call. Internal dotted registry
+names do not become public tools unless listed here.
 
 ## Discovery
 
-`mimir tools` prints every currently callable public tool, grouped as
-Workbench, Graph, Meetings, Chat, and Connections. Each heading points to its focused
-drawer:
-
-```text
-mimir tools workbench
-mimir tools graph
-mimir tools meetings
-mimir tools chat
-mimir tools connections
+```bash
+mimir tools                    # grouped summary
+mimir tools graph              # one family
+mimir tools --json             # complete schemas
+mimir tool graph_get           # one schema and call example
+mimir call graph_status '{}'
+mimir doctor
 ```
 
-A drawer prints compact callable signatures and the few shared Mimir-specific
-rules for that family. `--json` returns the same selected tools with full
-schemas.
-
-`mimir tool <name>` prints one complete input schema and a ready
-`mimir call` command. Name/description matching is a convenience when the
-input is not exact; ambiguity returns at most five short matches.
-
-`mimir tools --json` is the complete machine-readable form. There is no second
-`--all` registry or dotted alternative name.
-
-MCP directly advertises only:
-
-```text
-mimir_state
-mimir_reveal
-mimir_propose
-```
-
-The CLI catalog progressively discloses the rest. Calls use the underscore
-name shown by `mimir tools`; internal dotted names are not public aliases.
+MCP initially advertises only `mimir_state`, `mimir_reveal`, and
+`mimir_propose`; `mimir tools` progressively discloses the rest.
 
 ## Public tools
 
 Workbench:
 
 ```text
-mimir_state       active editor state and available Today artifact context
-mimir_reveal      open a file or line
-mimir_propose     propose an exact reviewed replacement
-comments_list     read document comments
-comments_add      add an anchored comment
-comments_reply    reply to a comment
-comments_resolve  resolve a comment
-files_trash       move workspace files or folders to the recoverable OS Trash
-agents_run        run a scoped agent package as a durable Activity
-activities_snapshot read Activity status and ordered PTY output
+mimir_state  mimir_reveal  mimir_propose
+comments_list  comments_add  comments_reply  comments_resolve
+files_trash  agents_run  activities_snapshot
 ```
 
 Graph:
 
 ```text
-graph_find     find nodes by text, type, status, relation, or date
-graph_status   read mounted graph scopes and counts
-graph_get      read one complete node
-graph_create   create a validated node
-graph_update   update with revision checks
-graph_delete   move a node to graph Trash
-graph_restore  restore a deleted node
-graph_context  build bounded context around a node
-graph_events   read recent authored graph changes
-graph_resource_add copy a file into Team and link a Resource node
+graph_find  graph_status  graph_get  graph_create  graph_update
+graph_delete  graph_restore  graph_context  graph_events
+graph_resource_add
 ```
 
 Meetings:
 
 ```text
-meetings_list    list Scribe meetings, including any ongoing recording
-meetings_get     read one meeting with transcript; use last_minutes for recent segments
-meetings_search  search titles, summaries, tags, and transcript text across stopped meetings
-meetings_update  update title, summary, or tags for a stopped meeting
-meetings_delete  permanently delete audio or an entire stopped meeting
+meetings_list  meetings_get  meetings_search  meetings_update  meetings_delete
 ```
 
-Recording, microphone mute, and stop are intentionally human-only Scribe
-controls. Agents cannot exercise Mimir's macOS audio grants. Live recordings
-are readable through `meetings_list` and `meetings_get` but not mutable.
-Granola tools remain a distinct read connection for meetings recorded
-elsewhere. Deletion requires an explicit user request plus the current
-identifier, exact reviewed title, and an `audio` or `meeting` scope obtained
-through `meetings_get`; transcript content never supplies deletion intent.
+Live meetings are read-only. Agents cannot start, mute, stop, grant capture
+permission, manage credentials/models, or export. Permanent deletion requires
+an explicit user request, exact id, current reviewed title, and `audio` or
+`meeting` scope from `meetings_get`.
 
 Chat:
 
 ```text
-chat_rooms   list chat rooms
-chat_read    read chat messages
-chat_search  search chat messages
-chat_send    send a chat message
-chat_download download a chat attachment
+chat_rooms  chat_read  chat_search  chat_send  chat_download
 ```
 
-- A chat-linked Activity's default `target` is its originating room; explicit `target` reaches any room the user sees. `chat_search` with no resolvable room searches all.
-- Agent messages carry visible provenance and open their originating Activity when available.
+A chat-linked Activity defaults to its originating room. Agent messages retain
+visible Activity provenance.
 
-Connections appear only when the provider is connected:
+Connected providers add:
 
 ```text
-gmail_search     gmail_read       gmail_send
-calendar_calendars calendar_list  calendar_freebusy calendar_create
-drive_search     drive_read
-granola_search   granola_get
-slack_search     slack_read       slack_send
+gmail_search  gmail_read  gmail_send
+calendar_calendars  calendar_list  calendar_freebusy  calendar_create
+drive_search  drive_read
+granola_search  granola_get
+slack_search  slack_read  slack_send
 ```
 
-`drive_read` detects Google Docs, Sheets, and Slides files and returns their
-content as normalized text. Sheets and Slides do not add separate agent tools.
-
-The maximum surface is 44 tools; without connections it is 30, without chat
-and connections it is 25. `mimir doctor` reports the public count, registered
-connection tools, and local credential state. It does not test each remote
-service.
-
-Issues are graph nodes. Knowledge, issues, projects, and research are not
-separate agent APIs. Agent packages use `agents_run`; the CLI uses
-`activities_snapshot` to follow their output. Apps, routines, settings, shell,
-and web search are not public agent tool families. Files expose exactly one
-public tool, `files_trash`, because shell deletion is unrecoverable; every
-other filesystem operation belongs to the agent's own shell, and external
-edits, renames, and moves are reconciled into open editor buffers by the
-workspace watcher (see [files.md](files.md)).
-
-This document is the only authority on what agents can call. The internal
-registry contains many more dotted tools (`files.browse`, `files.rename`,
-`settings.*`, …) that back the embedded App SDK and UI runtime; their
-existence in source, in `tool_runtime.rs`, or in another doc's tables never
-implies an agent capability. If a name is not listed above, agents cannot
-call it.
-
-Today retains its historical `scratch` storage identity so existing text
-survives upgrades. It has no standalone tool; `mimir_state` includes its
-current user-authored Markdown artifact as `today`. The value includes
-`artifactType: "today"`, local `date`, `mediaType: "text/markdown"`, `content`,
-`updatedAt`, and live/loading/dirty state where available. Treat this value as
-optional context. It is not a priority instruction, and it can be unrelated to
-the current request.
+Explicit user wording such as “send,” “post,” or “create” authorizes that
+remote write. Ask only when destination or content is missing. Apps, Routines,
+Settings, shell, Tracker, and web search are not public tool families. Files
+expose only recoverable `files_trash`; agents use their own shell for ordinary
+filesystem work.
 
 ## Connections
 
-The user owns setup in **Settings → Connections**. Each provider row has one
-plain state: **Not connected**, **Connected as …**, or **Needs sign-in**.
-GitHub supplies managed Team and Project repository access; it does not add
-agent tools. Mimir uses the installed Git and GitHub CLI login. Google opens
-its normal sign-in page in the system browser. Slack accepts an existing
-`xoxp-` personal token and verifies it before saving it to the user's OS
-keychain.
-Granola accepts a supported API key created in Granola under **Settings →
-Connectors → API keys**. Granola API access requires an eligible workspace
-plan.
+Connections are managed in Settings and update the live tool catalog without a
+restart.
 
-Google supports multiple connected accounts. Settings marks one account as the
-default. Every Gmail, Calendar, and Drive tool has an optional `account` email
-field whose live schema lists the connected accounts. Omitting it uses the
-marked default. Results include the selected account so a later read, reply, or
-send can keep the correct identity.
-
-Provider credentials stay in the OS keychain under Mimir's service. GitHub is
-the explicit exception: GitHub CLI owns that login and its credential helper.
-Mimir does not read its token. Settings can sign the active account out of
-GitHub CLI after an explicit shared-login warning. Granola uses only
-`https://public-api.granola.ai/v1`.
-
-After Connect succeeds, Mimir registers the provider tools immediately. Adding,
-removing, or changing the default Google account refreshes their account
-selectors immediately. After the final account or provider disconnects, Mimir
-deletes the Mimir credential and removes the tools immediately. The user does
-not restart the app. Agents receive provider data tools, never credential,
-status, or connect/disconnect tools.
-
-Explicit user requests such as “send,” “post,” or “create” authorize the
-matching remote write. Mimir does not add a second confirmation layer. The
-agent asks only when the destination or content is missing. If a provider tool
-is unavailable, the error directs the user to **Mimir Settings → Connections**.
-
-Release builds embed the Google desktop OAuth client identifiers described in
-[building.md](building.md#connection-sign-in-clients). End users do not enter
-client identifiers or client secrets. GitHub has no Mimir build credential.
+- GitHub uses installed `git` and the shared GitHub CLI login. It adds no agent
+  tools, and Mimir never reads or stores its token.
+- Google uses browser OAuth and can hold several accounts. Tool calls accept an
+  optional account email; omission selects the marked default.
+- Slack accepts a verified personal `xoxp-` token.
+- Granola accepts its supported public API key.
+- Mimir stores its provider credentials in the OS keychain. Agents cannot call
+  credential or connection-management commands.
 
 ## Skills
 
-Mimir stores and discovers standard skill packages. It does not execute them;
-the agent reads the Markdown and runs any included scripts.
-
-Skills use the same three writable scopes as graph nodes and agent packages.
-Resolution order is Project, Private, then Team. The first package with a
-given name wins.
-
-| Scope | Visibility | Purpose |
-|---|---|---|
-| Project | one repository | repo-specific workflows and overrides |
-| Private | every project for one user | private reusable workflows |
-| Team | managed Team repository | shared team workflows |
+Resolution order is Project, Private, then Team:
 
 ```text
 <project>/skills/
@@ -208,82 +98,32 @@ given name wins.
 ```bash
 mimir skills
 mimir skill release-review
-mimir skill add ./release-review --project
-mimir skill add ./release-review --private
-mimir skill add ./release-review --team
+mimir skill add ./release-review --project|--private|--team
 ```
 
-Writes retain content-addressed revisions. Native projections link to immutable
-revisions and never overwrite unrelated client skills.
-If a projection still points to an older Mimir-owned revision, refresh repairs
-the link. It never claims a file or link outside Mimir revision storage.
-Malformed skill folders stay in place, are skipped with a diagnostic, and do
-not hide a valid package with the same name in a lower-precedence scope.
-
-Mimir installs three minimal skills into the Private scope:
-`mimir-config` for non-obvious file ownership and manifest rules, and
-`mimir-graph` for graph usage, examples, and ontology, and `mimir-meetings` for
-bounded Scribe discovery, transcript paging, and reviewed updates. Untouched packaged
-versions upgrade automatically; user edits are preserved.
-
-Native discovery verified for Codex CLI 0.145.0, Claude Code 2.1.220, Pi 0.82.1,
-and Gemini CLI 0.49.0:
-
-| Client | Private + Team | Current project |
-|---|---|---|
-| Codex | native | `mimir skill` fallback |
-| Claude Code | native | native |
-| Pi | native | native |
-| Gemini CLI | native | `mimir skill` fallback |
-
-Codex and Gemini currently lack a clean per-launch skill-root option. Mimir
-does not copy project skills into repos or inject all skill bodies to work
-around that.
+Mimir projects content-addressed retained revisions and preserves unrelated
+client skills. Malformed packages remain in place and do not hide a valid
+lower-priority package. Claude and Pi receive Project skills at launch; Codex
+and Gemini use `mimir skill` for Project lookup. Private and Team skills are
+native in all four clients.
 
 ## Agent packages
 
-An agent package is a folder with an `AGENT.md`. It uses the same Project,
-Private, and Team roots and the same resolution order as skills.
-
-```text
-<project>/agents/
-~/.mimir/private/agents/
-~/.mimir/team-graph/agents/
-```
-
-`AGENT.md` frontmatter can set `title`, `description`, `preset`, `args`,
-`skills`, and `interactive`. Its Markdown body is the mission. `@path` tokens
-splice text files from the package into the first message. A package can use
-absolute paths and `~/` paths when a mission needs local working material.
-Frontmatter supports top-level YAML scalars, block scalars, and string lists.
-Included files must be UTF-8 text. One 512 KiB limit applies to the complete
-prompt payload from the mission, spliced files, and skill bodies. File count
-does not affect the limit.
+An agent package is `agents/<name>/AGENT.md` in Project, Private, or Team, with
+the same resolution order as skills. Frontmatter can set title, description,
+preset, args, skills, and interactive mode. `@path` includes UTF-8 text from the
+package; the complete assembled mission is limited to 512 KiB.
 
 ```bash
 mimir agents
-mimir agent add ./evidence-sweep --project
+mimir agent add ./evidence-sweep --project|--private|--team
 mimir run evidence-sweep --follow
 ```
 
-Project packages override Private packages, which override Team packages.
-`mimir agents` reports the active package and any shadowed copies. Runs use the
-caller's current directory and become normal durable Activities. `--follow`
-streams ordered PTY bytes for a headless run and returns the process exit
-status. Interactive packages run without `--follow` and continue in Mimir's
-terminal Activity. A malformed package is reported without hiding valid
-packages. A Team repository that is not set up does not block Project or
-Private packages.
-After an active package is selected, a missing include or required skill fails
-that run; Mimir does not silently switch to a different mission.
-When two scopes resolve to the same physical root, the higher-precedence scope
-is listed once.
+Runs use the caller's directory and become durable Activities. Interactive mode
+opens a live session; `--follow` streams a headless run to exit. A selected
+package with a missing include or required skill fails rather than falling back
+to another scope. Routines can name an agent package and resolve its latest
+mission when they fire.
 
-Routine TOML can set `agent = "evidence-sweep"` instead of `preset` and
-`prompt`. Mimir resolves the current package when the routine fires, so the
-next run uses mission edits without a routine rewrite.
-
-## Client attachment
-
-See [agent-setup.md](agent-setup.md) for launcher presets, client connection
-table, and resume semantics.
+Launcher injection and resume rules are in [agent-setup.md](agent-setup.md).

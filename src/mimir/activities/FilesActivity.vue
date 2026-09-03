@@ -731,7 +731,7 @@ const props = defineProps({
   active: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace'])
+const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace', 'diagnostic'])
 const FILE_SORT_OPTIONS = Object.freeze([
   { id: 'name', label: 'Name' },
   { id: 'kind', label: 'Kind' },
@@ -762,9 +762,7 @@ const deleteConfirmRef = ref(null)
 const gitChanges = ref([])
 const managedGitStatus = ref(null)
 const managedGit = computed(() => Boolean(managedGitStatus.value?.managed))
-const projectHasGit = computed(() => (
-  Boolean(managedGitStatus.value) && managedGitStatus.value.state !== 'notRepository'
-))
+const projectHasGit = computed(() => gitReview.repositoryState === 'ready')
 const fileHistoryEntry = ref(null)
 const excludedGitPaths = computed(() => new Map(
   (managedGitStatus.value?.excluded || []).map(entry => [normalizeRelative(entry.path), entry.reason]),

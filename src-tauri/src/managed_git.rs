@@ -19,7 +19,7 @@ use std::{
     process::{Command, Output},
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -29,6 +29,7 @@ const TEAM_DIRECTORY: &str = "team-graph";
 const TEAM_MANIFEST: &str = "mimir-team.toml";
 const SYNC_MESSAGE: &str = "Mimir sync";
 const UNPUBLISHED_CONFIG: &str = "mimir.unpublished";
+const UNPUBLISHED_BRANCH_CONFIG: &str = "mimir.unpublishedBranch";
 const IDLE_BATCH_SECONDS: u64 = 5 * 60;
 const MAX_BATCH_SECONDS: u64 = 30 * 60;
 const FETCH_SECONDS: u64 = 5 * 60;
@@ -76,6 +77,7 @@ impl Track {
 #[derive(Default)]
 pub struct ManagedGitRuntime {
     tracks: Mutex<HashMap<PathBuf, Track>>,
+    repository_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
     installed: AtomicBool,
     tick_running: AtomicBool,
 }
@@ -101,6 +103,13 @@ pub struct ManagedExcludedFile {
     reason: &'static str,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamResourceFile {
+    path: String,
+    size: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubConnectionStatus {
@@ -111,6 +120,22 @@ pub struct GithubConnectionStatus {
 }
 
 impl ManagedGitRuntime {
+    fn repository_lock(&self, root: &Path) -> Arc<Mutex<()>> {
+        let root = canonical_or_original(root.to_path_buf());
+        self.repository_locks
+            .lock()
+            .unwrap_or_else(|value| value.into_inner())
+            .entry(root)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    fn with_repository_lock<T>(&self, root: &Path, operation: impl FnOnce() -> T) -> T {
+        let lock = self.repository_lock(root);
+        let _guard = lock.lock().unwrap_or_else(|value| value.into_inner());
+        operation()
+    }
+
     pub fn install(&self, app: &AppHandle) {
         if self.installed.swap(true, Ordering::SeqCst) {
             return;
@@ -221,6 +246,10 @@ impl ManagedGitRuntime {
     }
 
     fn tick_repository(&self, app: &AppHandle, root: &Path, kind: RepositoryKind) {
+        self.with_repository_lock(root, || self.tick_repository_locked(app, root, kind));
+    }
+
+    fn tick_repository_locked(&self, app: &AppHandle, root: &Path, kind: RepositoryKind) {
         let now = SystemTime::now();
         let Ok(repo) = Repository::open(root) else {
             return;
@@ -266,6 +295,10 @@ impl ManagedGitRuntime {
     }
 
     fn sync_on_activation(&self, app: &AppHandle, root: &Path, kind: RepositoryKind) {
+        self.with_repository_lock(root, || self.sync_on_activation_locked(app, root, kind));
+    }
+
+    fn sync_on_activation_locked(&self, app: &AppHandle, root: &Path, kind: RepositoryKind) {
         let now = SystemTime::now();
         let result = Repository::open(root)
             .map_err(|error| format!("Could not open managed repository: {error}"))
@@ -320,15 +353,13 @@ impl ManagedGitRuntime {
                 track.error = None;
             }
             Err(error) => {
-                if track.error.as_deref() != Some(&error) {
-                    let _ = app.emit(
-                        SYNC_ERROR_EVENT,
-                        serde_json::json!({
-                            "root": root.to_string_lossy(),
-                            "message": error,
-                        }),
-                    );
-                }
+                let _ = app.emit(
+                    SYNC_ERROR_EVENT,
+                    serde_json::json!({
+                        "root": root.to_string_lossy(),
+                        "message": error,
+                    }),
+                );
                 track.error = Some(error);
             }
         }
@@ -343,12 +374,37 @@ impl ManagedGitRuntime {
             .map(|(path, track)| (path.clone(), track.kind))
             .collect::<Vec<_>>();
         for (root, kind) in roots {
-            if let Err(error) = commit_pending(&root, kind) {
+            let result = self.with_repository_lock(&root, || commit_pending(&root, kind));
+            if let Err(error) = result {
                 log::warn!(
                     "Could not close managed Git batch for {}: {error}",
                     root.display()
                 );
             }
+        }
+    }
+
+    fn emit_recorded_errors(&self, app: &AppHandle) {
+        let errors = self
+            .tracks
+            .lock()
+            .unwrap_or_else(|value| value.into_inner())
+            .iter()
+            .filter_map(|(root, track)| {
+                track
+                    .error
+                    .as_ref()
+                    .map(|message| (root.clone(), message.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (root, message) in errors {
+            let _ = app.emit(
+                SYNC_ERROR_EVENT,
+                serde_json::json!({
+                    "root": root.to_string_lossy(),
+                    "message": message,
+                }),
+            );
         }
     }
 }
@@ -446,8 +502,17 @@ fn team_scope_root_at(root: &Path) -> Option<PathBuf> {
 }
 
 #[tauri::command]
-pub fn team_resource_import(source: String) -> Result<String, String> {
-    import_team_resource(&source)
+pub fn team_resource_import(
+    runtime: tauri::State<'_, ManagedGitRuntime>,
+    source: String,
+) -> Result<String, String> {
+    let root = team_root()?;
+    runtime.with_repository_lock(&root, || import_team_resource_at(&root, &source))
+}
+
+#[tauri::command]
+pub fn team_resource_list() -> Result<Vec<TeamResourceFile>, String> {
+    list_team_resources_at(&team_root()?)
 }
 
 pub(crate) fn import_team_resource(source: &str) -> Result<String, String> {
@@ -483,6 +548,50 @@ fn import_team_resource_at(root: &Path, source: &str) -> Result<String, String> 
         "resources/{}",
         destination.file_name().unwrap().to_string_lossy()
     ))
+}
+
+fn list_team_resources_at(root: &Path) -> Result<Vec<TeamResourceFile>, String> {
+    if !is_valid_team_repository(root) {
+        return Err("Set up Team before viewing shared resources.".into());
+    }
+    let resources = root.join("resources");
+    let mut directories = vec![resources.clone()];
+    let mut files = Vec::new();
+    while let Some(directory) = directories.pop() {
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| format!("Could not read Team resources: {error}"))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("Could not read Team resources: {error}"))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("Could not inspect a Team resource: {error}"))?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                directories.push(path);
+                continue;
+            }
+            if !file_type.is_file() || entry.file_name() == ".gitkeep" {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| "A Team resource is outside the Team repository.".to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push(TeamResourceFile {
+                path: relative,
+                size: entry
+                    .metadata()
+                    .map_err(|error| format!("Could not inspect a Team resource: {error}"))?
+                    .len(),
+            });
+        }
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(files)
 }
 
 fn available_resource_path(resources: &Path, file_name: &str) -> PathBuf {
@@ -529,8 +638,10 @@ pub async fn team_repository_setup(
 ) -> Result<ManagedRepositoryStatus, String> {
     validate_github_remote_url(remote_url.trim())?;
     let root = team_root()?;
+    let lock = runtime.repository_lock(&root);
     let worker_root = root.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock().unwrap_or_else(|value| value.into_inner());
         setup_team_repository(&worker_root, remote_url.trim(), team_name.as_deref(), true)
     })
     .await
@@ -545,8 +656,10 @@ pub async fn team_repository_move(
 ) -> Result<ManagedRepositoryStatus, String> {
     validate_github_remote_url(remote_url.trim())?;
     let root = team_root()?;
+    let lock = runtime.repository_lock(&root);
     let worker_root = root.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock().unwrap_or_else(|value| value.into_inner());
         move_team_repository(&worker_root, remote_url.trim(), true)
     })
     .await
@@ -560,8 +673,10 @@ pub async fn team_repository_sync(
 ) -> Result<ManagedRepositoryStatus, String> {
     let root = team_root()?;
     validate_team_repository(&root, true)?;
+    let lock = runtime.repository_lock(&root);
     let worker_root = root.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock().unwrap_or_else(|value| value.into_inner());
         sync_repository(&worker_root, RepositoryKind::Team)
     })
     .await
@@ -600,43 +715,45 @@ pub fn managed_project_set_enabled(
     initialize: Option<bool>,
 ) -> Result<ManagedRepositoryStatus, String> {
     let root = canonical_or_original(PathBuf::from(&workspace));
-    if enabled && Repository::open(&root).is_err() {
-        if initialize.unwrap_or(false) {
-            Repository::init(&root)
-                .map_err(|error| format!("Could not initialize Project history: {error}"))?;
-            ensure_project_ignore(&root)?;
-        } else {
-            return Err("This Project folder is not a Git repository.".into());
+    runtime.with_repository_lock(&root, || {
+        if enabled && Repository::open(&root).is_err() {
+            if initialize.unwrap_or(false) {
+                Repository::init(&root)
+                    .map_err(|error| format!("Could not initialize Project history: {error}"))?;
+                ensure_project_ignore(&root)?;
+            } else {
+                return Err("This Project folder is not a Git repository.".into());
+            }
         }
-    }
-    if enabled && !initialize.unwrap_or(false) {
-        let repo = Repository::open(&root)
-            .map_err(|_| "This Project folder is not a Git repository.".to_string())?;
-        let remote = repo
-            .find_remote("origin")
-            .ok()
-            .and_then(|remote| remote.url().ok().map(str::to_string))
-            .ok_or_else(|| "Connect this Project to a GitHub repository first.".to_string())?;
-        validate_github_remote_url(&remote)?;
-    }
-    if enabled {
-        runtime.status(&root, RepositoryKind::Project)
-    } else {
-        runtime.unregister(&root);
-        Ok(ManagedRepositoryStatus {
-            remote_url: Repository::open(&root)
+        if enabled && !initialize.unwrap_or(false) {
+            let repo = Repository::open(&root)
+                .map_err(|_| "This Project folder is not a Git repository.".to_string())?;
+            let remote = repo
+                .find_remote("origin")
                 .ok()
-                .and_then(|repo| remote_url(&repo)),
-            ..unmanaged_status(
-                root.clone(),
-                if Repository::open(&root).is_ok() {
-                    "manual"
-                } else {
-                    "notRepository"
-                },
-            )
-        })
-    }
+                .and_then(|remote| remote.url().ok().map(str::to_string))
+                .ok_or_else(|| "Connect this Project to a GitHub repository first.".to_string())?;
+            validate_github_remote_url(&remote)?;
+        }
+        if enabled {
+            runtime.status(&root, RepositoryKind::Project)
+        } else {
+            runtime.unregister(&root);
+            Ok(ManagedRepositoryStatus {
+                remote_url: Repository::open(&root)
+                    .ok()
+                    .and_then(|repo| remote_url(&repo)),
+                ..unmanaged_status(
+                    root.clone(),
+                    if Repository::open(&root).is_ok() {
+                        "manual"
+                    } else {
+                        "notRepository"
+                    },
+                )
+            })
+        }
+    })
 }
 
 fn ensure_project_ignore(root: &Path) -> Result<(), String> {
@@ -659,8 +776,10 @@ pub async fn managed_project_set_remote(
 ) -> Result<ManagedRepositoryStatus, String> {
     let root = canonical_or_original(PathBuf::from(&workspace));
     validate_github_remote_url(remote_url.trim())?;
+    let lock = runtime.repository_lock(&root);
     let worker_root = root.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock().unwrap_or_else(|value| value.into_inner());
         set_project_remote(&worker_root, remote_url.trim(), true)
     })
     .await
@@ -740,8 +859,10 @@ pub async fn managed_project_sync(
 ) -> Result<ManagedRepositoryStatus, String> {
     let root = canonical_or_original(PathBuf::from(workspace));
     runtime.register(root.clone(), RepositoryKind::Project);
+    let lock = runtime.repository_lock(&root);
     let worker_root = root.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock.lock().unwrap_or_else(|value| value.into_inner());
         sync_repository(&worker_root, RepositoryKind::Project)
     })
     .await
@@ -764,6 +885,10 @@ pub async fn managed_repositories_sync(
         .map(|(path, track)| (path.clone(), track.kind))
         .collect::<Vec<_>>();
     if runtime.tick_running.swap(true, Ordering::SeqCst) {
+        // A startup tick can report an error just before the renderer installs
+        // its listener. Repeat only that in-flight result; an idle runtime
+        // retries first so a recovered connection never shows a stale error.
+        runtime.emit_recorded_errors(&app);
         return Ok(());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -1089,16 +1214,8 @@ fn scan_changes(repo: &Repository, kind: RepositoryKind) -> Result<ChangeScan, S
         let Ok(raw_path) = entry.path() else { continue };
         let path = PathBuf::from(raw_path);
         let absolute = workdir.join(&path);
-        if kind == RepositoryKind::Project && absolute.is_file() {
-            let metadata = fs::metadata(&absolute)
-                .map_err(|error| format!("Could not inspect {}: {error}", absolute.display()))?;
-            let reason = if metadata.len() > PROJECT_MAX_BYTES {
-                Some("large")
-            } else if is_binary_file(&absolute)? {
-                Some("binary")
-            } else {
-                None
-            };
+        if kind == RepositoryKind::Project {
+            let reason = project_exclusion_reason(repo, &path, &absolute)?;
             if let Some(reason) = reason {
                 excluded.push(ManagedExcludedFile {
                     path: raw_path.to_string(),
@@ -1131,6 +1248,35 @@ fn scan_changes(repo: &Repository, kind: RepositoryKind) -> Result<ChangeScan, S
     })
 }
 
+fn project_exclusion_reason(
+    repo: &Repository,
+    path: &Path,
+    absolute: &Path,
+) -> Result<Option<&'static str>, String> {
+    if absolute.is_file() {
+        let metadata = fs::metadata(absolute)
+            .map_err(|error| format!("Could not inspect {}: {error}", absolute.display()))?;
+        if metadata.len() > PROJECT_MAX_BYTES {
+            return Ok(Some("large"));
+        }
+        return is_binary_file(absolute).map(|binary| binary.then_some("binary"));
+    }
+    let blob = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_tree().ok())
+        .and_then(|tree| tree.get_path(path).ok().map(|entry| entry.id()))
+        .and_then(|oid| repo.find_blob(oid).ok());
+    let Some(blob) = blob else { return Ok(None) };
+    if blob.size() as u64 > PROJECT_MAX_BYTES {
+        Ok(Some("large"))
+    } else if is_binary_bytes(blob.content()) {
+        Ok(Some("binary"))
+    } else {
+        Ok(None)
+    }
+}
+
 fn is_binary_file(path: &Path) -> Result<bool, String> {
     use std::io::Read;
     let mut file = fs::File::open(path)
@@ -1138,15 +1284,20 @@ fn is_binary_file(path: &Path) -> Result<bool, String> {
     let mut sample = vec![0; 8192];
     let length = file.read(&mut sample).map_err(|error| error.to_string())?;
     sample.truncate(length);
-    Ok(sample.contains(&0) || std::str::from_utf8(&sample).is_err())
+    Ok(is_binary_bytes(&sample))
+}
+
+fn is_binary_bytes(bytes: &[u8]) -> bool {
+    bytes.contains(&0) || std::str::from_utf8(bytes).is_err()
 }
 
 fn commit_pending(root: &Path, kind: RepositoryKind) -> Result<Option<Oid>, String> {
     let repo = Repository::open(root)
         .map_err(|error| format!("Could not open managed repository: {error}"))?;
+    let current_unpublished = current_unpublished_oid(&repo)?;
     let scan = scan_changes(&repo, kind)?;
     if scan.eligible.is_empty() {
-        return Ok(unpublished_oid(&repo));
+        return Ok(current_unpublished);
     }
     let mut index = repo.index().map_err(|error| error.to_string())?;
     if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
@@ -1163,7 +1314,7 @@ fn commit_pending(root: &Path, kind: RepositoryKind) -> Result<Option<Oid>, Stri
     let tree_id = index.write_tree().map_err(|error| error.to_string())?;
     let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
     let signature = repository_signature(&repo)?;
-    let existing_unpublished = unpublished_oid(&repo)
+    let existing_unpublished = current_unpublished
         .and_then(|oid| repo.find_commit(oid).ok())
         .filter(|commit| repo.head().ok().and_then(|head| head.target()) == Some(commit.id()));
     let oid = if let Some(previous) = existing_unpublished {
@@ -1189,9 +1340,7 @@ fn commit_pending(root: &Path, kind: RepositoryKind) -> Result<Option<Oid>, Stri
         )
     }
     .map_err(|error| format!("Could not save the managed change batch: {error}"))?;
-    repo.config()
-        .and_then(|mut config| config.set_str(UNPUBLISHED_CONFIG, &oid.to_string()))
-        .map_err(|error| format!("Could not mark the unpublished batch: {error}"))?;
+    mark_unpublished(&repo, oid)?;
     prune_recovery_refs(&repo);
     Ok(Some(oid))
 }
@@ -1257,9 +1406,45 @@ fn unpublished_oid(repo: &Repository) -> Option<Oid> {
         .ok()
 }
 
+fn current_unpublished_oid(repo: &Repository) -> Result<Option<Oid>, String> {
+    let Some(oid) = unpublished_oid(repo) else {
+        return Ok(None);
+    };
+    let current = current_branch(repo)?;
+    let configured = repo
+        .config()
+        .ok()
+        .and_then(|config| config.get_string(UNPUBLISHED_BRANCH_CONFIG).ok());
+    if let Some(branch) = configured {
+        if branch != current {
+            return Err(format!(
+                "The unpublished Mimir batch belongs to branch {branch}. Switch back to {branch} before automatic sync."
+            ));
+        }
+    } else if repo.head().ok().and_then(|head| head.target()) != Some(oid) {
+        return Err(
+            "The unpublished Mimir batch belongs to another branch. Return to that branch before automatic sync."
+                .into(),
+        );
+    }
+    Ok(Some(oid))
+}
+
+fn mark_unpublished(repo: &Repository, oid: Oid) -> Result<(), String> {
+    let branch = current_branch(repo)?;
+    let mut config = repo
+        .config()
+        .map_err(|error| format!("Could not open the managed Git configuration: {error}"))?;
+    config
+        .set_str(UNPUBLISHED_BRANCH_CONFIG, &branch)
+        .and_then(|_| config.set_str(UNPUBLISHED_CONFIG, &oid.to_string()))
+        .map_err(|error| format!("Could not mark the unpublished batch: {error}"))
+}
+
 fn clear_unpublished(repo: &Repository) {
     if let Ok(mut config) = repo.config() {
         let _ = config.remove(UNPUBLISHED_CONFIG);
+        let _ = config.remove(UNPUBLISHED_BRANCH_CONFIG);
     }
 }
 
@@ -1303,6 +1488,7 @@ fn integrate_origin(repo: &Repository, kind: RepositoryKind) -> Result<(), Strin
     if repo.state() != RepositoryState::Clean {
         return Err("The managed repository has an unfinished Git operation.".into());
     }
+    let current_unpublished = current_unpublished_oid(repo)?;
     let scan = scan_changes(repo, kind)?;
     // A normal text edit is still inside its active batch. Fetching is safe,
     // but integration waits until commit_pending has captured that batch.
@@ -1316,15 +1502,18 @@ fn integrate_origin(repo: &Repository, kind: RepositoryKind) -> Result<(), Strin
         .collect::<BTreeSet<_>>();
     let branch = current_branch(repo)?;
     let remote_ref = format!("refs/remotes/origin/{branch}");
+    let local_oid = match repo.head().ok().and_then(|head| head.target()) {
+        Some(oid) => oid,
+        None => return Ok(()),
+    };
     let Ok(remote_reference) = repo.find_reference(&remote_ref) else {
+        if current_unpublished.is_none() {
+            mark_unpublished(repo, local_oid)?;
+        }
         return Ok(());
     };
     let Some(remote_oid) = remote_reference.target() else {
         return Ok(());
-    };
-    let local_oid = match repo.head().ok().and_then(|head| head.target()) {
-        Some(oid) => oid,
-        None => return Ok(()),
     };
     if local_oid == remote_oid {
         return Ok(());
@@ -1333,6 +1522,9 @@ fn integrate_origin(repo: &Repository, kind: RepositoryKind) -> Result<(), Strin
         .graph_descendant_of(local_oid, remote_oid)
         .map_err(|error| error.to_string())?
     {
+        if current_unpublished.is_none() {
+            mark_unpublished(repo, local_oid)?;
+        }
         return Ok(());
     }
     if repo
@@ -1345,7 +1537,7 @@ fn integrate_origin(repo: &Repository, kind: RepositoryKind) -> Result<(), Strin
         clear_unpublished(repo);
         return Ok(());
     }
-    if unpublished_oid(repo).is_none() {
+    if current_unpublished.is_none() {
         return Err(
             "The managed branch diverged outside Mimir. Open its folder to recover it.".into(),
         );
@@ -1446,9 +1638,7 @@ fn merge_last_edit_wins(
         .map_err(|error| format!("Could not apply the managed merge: {error}"))?;
     repo.set_head(&reference_name)
         .map_err(|error| format!("Could not apply the managed merge: {error}"))?;
-    repo.config()
-        .and_then(|mut config| config.set_str(UNPUBLISHED_CONFIG, &oid.to_string()))
-        .map_err(|error| error.to_string())?;
+    mark_unpublished(repo, oid)?;
     Ok(())
 }
 
@@ -1551,10 +1741,25 @@ fn replace_index_path_from_commit(
 }
 
 fn push_unpublished(repo: &Repository) -> Result<(), String> {
-    let Some(_oid) = unpublished_oid(repo) else {
+    let Some(oid) = current_unpublished_oid(repo)? else {
         return Ok(());
     };
     let branch = current_branch(repo)?;
+    let head = repo
+        .head()
+        .ok()
+        .and_then(|head| head.target())
+        .ok_or_else(|| "The managed branch has no commit to publish.".to_string())?;
+    if head != oid
+        && !repo
+            .graph_descendant_of(head, oid)
+            .map_err(|error| error.to_string())?
+    {
+        return Err(
+            "The managed branch changed after Mimir saved its unpublished batch. Return to that batch before automatic sync."
+                .into(),
+        );
+    }
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let root = repo
         .workdir()
@@ -1789,10 +1994,7 @@ mod tests {
                 &[&parent],
             )
             .unwrap();
-        repo.config()
-            .unwrap()
-            .set_str(UNPUBLISHED_CONFIG, &oid.to_string())
-            .unwrap();
+        mark_unpublished(repo, oid).unwrap();
         oid
     }
 
@@ -2093,6 +2295,39 @@ mod tests {
     }
 
     #[test]
+    fn team_resource_list_returns_nested_files_and_skips_markers() {
+        let directory = tempfile::tempdir().unwrap();
+        let team = directory.path().join("team-graph");
+        fs::create_dir_all(team.join("graph")).unwrap();
+        fs::create_dir_all(team.join("resources/branding")).unwrap();
+        fs::write(
+            team.join(TEAM_MANIFEST),
+            "version = 1\nname = \"Test Team\"\n",
+        )
+        .unwrap();
+        fs::write(team.join("resources/.gitkeep"), "").unwrap();
+        fs::write(team.join("resources/data.csv"), "a,b").unwrap();
+        fs::write(team.join("resources/branding/logo.svg"), "logo").unwrap();
+        let repo = Repository::init(&team).unwrap();
+        repo.remote("origin", "https://github.com/example/team-graph.git")
+            .unwrap();
+
+        assert_eq!(
+            list_team_resources_at(&team).unwrap(),
+            vec![
+                TeamResourceFile {
+                    path: "resources/branding/logo.svg".into(),
+                    size: 4,
+                },
+                TeamResourceFile {
+                    path: "resources/data.csv".into(),
+                    size: 3,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn team_scope_root_is_the_repository_not_its_graph_directory() {
         let directory = tempfile::tempdir().unwrap();
         let team = directory.path().join("team-graph");
@@ -2136,6 +2371,51 @@ mod tests {
             .unwrap();
         assert_eq!(binary.content(), b"old\0binary");
         assert_eq!(notes.content(), b"managed text");
+    }
+
+    #[test]
+    fn project_commit_does_not_publish_deletion_of_an_excluded_binary() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = Repository::init(directory.path()).unwrap();
+        let initial = commit(&repo, "model.bin", b"old\0binary", "initial");
+        fs::remove_file(directory.path().join("model.bin")).unwrap();
+
+        let scan = scan_changes(&repo, RepositoryKind::Project).unwrap();
+        assert!(scan.eligible.is_empty());
+        assert_eq!(scan.excluded[0].reason, "binary");
+        assert_eq!(
+            commit_pending(directory.path(), RepositoryKind::Project).unwrap(),
+            None
+        );
+        assert_eq!(repo.head().unwrap().target(), Some(initial));
+        assert_eq!(head_file(&repo, "model.bin"), b"old\0binary");
+    }
+
+    #[test]
+    fn project_commit_does_not_publish_deletion_of_an_excluded_large_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = Repository::init(directory.path()).unwrap();
+        let path = directory.path().join("large.csv");
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(PROJECT_MAX_BYTES + 1)
+            .unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("large.csv")).unwrap();
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let signature = Signature::now("Test", "test@example.com").unwrap();
+        let initial = repo
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        fs::remove_file(&path).unwrap();
+
+        let scan = scan_changes(&repo, RepositoryKind::Project).unwrap();
+        assert!(scan.eligible.is_empty());
+        assert_eq!(scan.excluded[0].reason, "large");
+        commit_pending(directory.path(), RepositoryKind::Project).unwrap();
+        assert_eq!(repo.head().unwrap().target(), Some(initial));
     }
 
     #[test]
@@ -2262,6 +2542,59 @@ mod tests {
                 .count()
                 >= 1
         );
+    }
+
+    #[test]
+    fn unpublished_batch_is_bound_to_its_branch() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = Repository::init(directory.path()).unwrap();
+        let initial = commit(&repo, "notes.md", b"initial", "initial");
+        let branch = current_branch(&repo).unwrap();
+        fs::write(directory.path().join("notes.md"), "draft").unwrap();
+        commit_pending(directory.path(), RepositoryKind::Project).unwrap();
+        let initial_commit = repo.find_commit(initial).unwrap();
+        repo.branch("other", &initial_commit, false).unwrap();
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(CheckoutBuilder::new().force()))
+            .unwrap();
+
+        let error = current_unpublished_oid(&repo).unwrap_err();
+        assert!(error.contains(&format!("belongs to branch {branch}")));
+        assert!(unpublished_oid(&repo).is_some());
+    }
+
+    #[test]
+    fn sync_publishes_a_manual_local_commit_without_a_marker() {
+        let directory = tempfile::tempdir().unwrap();
+        let remote_path = remote_fixture(directory.path());
+        let local_path = directory.path().join("local");
+        let local = clone_repository(&remote_path, &local_path);
+        commit(&local, "manual.md", b"manual", "manual change");
+        assert!(unpublished_oid(&local).is_none());
+
+        sync_repository(&local_path, RepositoryKind::Team).unwrap();
+
+        let remote = Repository::open_bare(&remote_path).unwrap();
+        assert_eq!(head_file(&remote, "manual.md"), b"manual");
+        assert!(unpublished_oid(&local).is_none());
+    }
+
+    #[test]
+    fn repository_operations_share_one_lock_per_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let runtime = ManagedGitRuntime::default();
+        let first = runtime.repository_lock(directory.path());
+        let same = runtime.repository_lock(&directory.path().join("."));
+        let independent = runtime.repository_lock(other.path());
+
+        assert!(Arc::ptr_eq(&first, &same));
+        assert!(!Arc::ptr_eq(&first, &independent));
+        let guard = first.lock().unwrap();
+        assert!(same.try_lock().is_err());
+        assert!(independent.try_lock().is_ok());
+        drop(guard);
+        assert!(same.try_lock().is_ok());
     }
 
     #[test]

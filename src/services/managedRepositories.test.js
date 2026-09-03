@@ -39,7 +39,7 @@ describe('managed repositories service', () => {
     expect(invoke).not.toHaveBeenCalled()
   })
 
-  it('fetches on focus and surfaces only native sync errors', async () => {
+  it('installs the error listener before the initial sync and syncs again online', async () => {
     window.__TAURI_INTERNALS__ = {}
     const stopListener = vi.fn()
     let errorHandler
@@ -52,9 +52,13 @@ describe('managed repositories service', () => {
     const stop = installManagedSyncLifecycle({ onError })
     await Promise.resolve()
 
-    window.dispatchEvent(new Event('focus'))
-    await Promise.resolve()
-    expect(invoke).toHaveBeenCalledWith('managed_repositories_sync')
+    expect(listen).toHaveBeenCalledWith('mimir://managed-git-error', expect.any(Function))
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenLastCalledWith('managed_repositories_sync')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    window.dispatchEvent(new Event('online'))
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2))
 
     errorHandler({ payload: { message: 'Reconnect GitHub.', root: '/team' } })
     expect(onError).toHaveBeenCalledWith(

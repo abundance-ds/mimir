@@ -131,7 +131,7 @@
               type="button"
               title="Dismiss diagnostic"
               class="pointer-events-auto grid size-6 shrink-0 place-items-center hover:bg-chrome focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              @click="diagnostic = ''"
+              @click="dismissDiagnostic"
             >
               <IconX :size="13" :stroke-width="1.8" />
             </button>
@@ -283,6 +283,7 @@ const quickOpen = ref(false)
 const quickOpenInitialView = ref('root')
 const quickOpenPreferredTargetId = ref('')
 const diagnostic = ref('')
+const pendingManagedSyncDiagnostic = ref('')
 const workspaceSetupOpen = ref(false)
 const workspaceSetupPath = ref('')
 const workspaceSetupProjects = ref([])
@@ -818,7 +819,7 @@ watch(
 onMounted(async () => {
   stopManagedSyncLifecycle = installManagedSyncLifecycle({
     onError(message) {
-      if (!diagnostic.value) diagnostic.value = `Automatic sync needs attention: ${message}`
+      showManagedSyncDiagnostic(message)
     },
   })
   document.addEventListener('keydown', onKeydown, true)
@@ -1507,6 +1508,30 @@ async function launchExternalAppActivity(app, plan, activity) {
 function showDiagnostic(message) {
   diagnostic.value = String(message || '')
 }
+
+function showManagedSyncDiagnostic(message) {
+  const value = `Automatic sync needs attention: ${String(message || '').trim()}`
+  if (diagnostic.value) {
+    if (diagnostic.value !== value) pendingManagedSyncDiagnostic.value = value
+    return
+  }
+  diagnostic.value = value
+}
+
+function dismissDiagnostic() {
+  if (pendingManagedSyncDiagnostic.value) {
+    diagnostic.value = pendingManagedSyncDiagnostic.value
+    pendingManagedSyncDiagnostic.value = ''
+    return
+  }
+  diagnostic.value = ''
+}
+
+watch(diagnostic, (value) => {
+  if (value || !pendingManagedSyncDiagnostic.value) return
+  diagnostic.value = pendingManagedSyncDiagnostic.value
+  pendingManagedSyncDiagnostic.value = ''
+})
 
 function recordActivitySurfaceError(payload) {
   if (!payload?.activityId || !payload.error) return

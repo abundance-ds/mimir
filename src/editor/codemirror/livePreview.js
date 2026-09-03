@@ -522,7 +522,8 @@ function navigateIntoTable(view, direction, isEnabled) {
 
 const livePreviewTheme = EditorView.baseTheme({
   '.cm-lp-bold': {
-    fontWeight: 'bold',
+    fontWeight: '700',
+    color: 'var(--ink-strong)',
   },
   '.cm-lp-italic': {
     fontStyle: 'italic',

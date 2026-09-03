@@ -68,19 +68,22 @@ export function installManagedSyncLifecycle({ onError = null } = {}) {
   let running = false
   let disposed = false
   let stopErrorListener = () => {}
-  void listen('mimir://managed-git-error', ({ payload }) => {
-    const message = String(payload?.message || '').trim()
-    if (message && typeof onError === 'function') onError(message, payload)
-  }).then((stop) => {
-    if (disposed) stop()
-    else stopErrorListener = stop
-  }).catch(() => {})
   const sync = async () => {
     if (running) return
     running = true
     try { await syncManagedRepositories() } catch { /* the native runtime reports actionable errors */ }
     finally { running = false }
   }
+  void listen('mimir://managed-git-error', ({ payload }) => {
+    const message = String(payload?.message || '').trim()
+    if (message && typeof onError === 'function') onError(message, payload)
+  }).then((stop) => {
+    if (disposed) stop()
+    else {
+      stopErrorListener = stop
+      void sync()
+    }
+  }).catch(() => {})
   const activated = () => {
     if (!document.hidden) void sync()
   }

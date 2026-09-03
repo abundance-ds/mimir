@@ -65,7 +65,9 @@ export function useGraphInspector(props, emit) {
   const historyLoading = ref(false)
   const historyError = ref('')
   const historyEntries = ref([])
+  const fileHistoryAvailable = ref(false)
   const resourceError = ref('')
+  const teamResourceFiles = ref([])
   const connectionRelation = ref('')
   const connectionTarget = ref('')
   const attendeeToAdd = ref('')
@@ -74,6 +76,8 @@ export function useGraphInspector(props, emit) {
   let editVersion = 0
   let currentNodeId = ''
   let pendingAction = null
+  let historyAvailabilityRequest = 0
+  let teamResourceRequest = 0
   
   const draft = reactive({
     title: '',
@@ -228,6 +232,23 @@ export function useGraphInspector(props, emit) {
   const canAddTeamResource = computed(() => (
     props.node?.provenance?.scopeId === 'team:main'
   ))
+  const canRecoverTeamResource = computed(() => (
+    canAddTeamResource.value && props.node?.kind === 'resource'
+  ))
+  const linkedTeamResourcePaths = computed(() => {
+    const linked = new Set()
+    for (const candidate of props.nodes) {
+      if (candidate.provenance?.scopeId !== 'team:main') continue
+      const values = candidate.id === props.node?.id
+        ? resourcePathsFromDraft(draft.files)
+        : resourcePathsFromProperties(candidate.properties?.files)
+      for (const path of values) linked.add(normalizeResourcePath(path))
+    }
+    return linked
+  })
+  const unlinkedResourceItems = computed(() => teamResourceFiles.value.filter(resource => (
+    !linkedTeamResourcePaths.value.has(normalizeResourcePath(resource.path))
+  )))
   const attentionLabel = computed(() => {
     if (draft.snoozeUntil) return `Snoozed until ${readableDate(draft.snoozeUntil)}`
     if (isOverdue(draft.dueDate)) return 'Overdue'
@@ -258,6 +279,20 @@ export function useGraphInspector(props, emit) {
     (node) => {
       if (!node) return
       if (node.id !== currentNodeId || !dirty.value) resetDraft(node)
+    },
+    { immediate: true },
+  )
+
+  watch(
+    () => [
+      props.node?.id,
+      props.node?.kind,
+      props.node?.provenance?.scopeId,
+      props.node?.provenance?.sourcePath,
+    ],
+    () => {
+      void refreshHistoryAvailability()
+      void loadTeamResources()
     },
     { immediate: true },
   )
@@ -512,6 +547,7 @@ export function useGraphInspector(props, emit) {
 
   async function toggleHistory() {
     moreOpen.value = false
+    if (!fileHistoryAvailable.value) return
     historyOpen.value = !historyOpen.value
     if (!historyOpen.value || historyEntries.value.length || historyLoading.value) return
     historyLoading.value = true
@@ -574,6 +610,45 @@ export function useGraphInspector(props, emit) {
     } catch (cause) {
       resourceError.value = cause instanceof Error ? cause.message : String(cause)
     }
+  }
+
+  async function refreshHistoryAvailability() {
+    const request = ++historyAvailabilityRequest
+    const path = String(props.node?.provenance?.sourcePath || '').trim()
+    fileHistoryAvailable.value = false
+    if (!path) return
+    try {
+      const available = await invoke('git_file_history_available', { path })
+      if (request === historyAvailabilityRequest) fileHistoryAvailable.value = Boolean(available)
+    } catch {
+      if (request === historyAvailabilityRequest) fileHistoryAvailable.value = false
+    }
+  }
+
+  async function loadTeamResources() {
+    const request = ++teamResourceRequest
+    teamResourceFiles.value = []
+    if (!canRecoverTeamResource.value) return
+    try {
+      const files = await invoke('team_resource_list')
+      if (request === teamResourceRequest) {
+        teamResourceFiles.value = Array.isArray(files) ? files : []
+      }
+    } catch (cause) {
+      if (request === teamResourceRequest) {
+        resourceError.value = cause instanceof Error ? cause.message : String(cause)
+      }
+    }
+  }
+
+  async function attachTeamResource(resource) {
+    const path = normalizeResourcePath(resource?.path)
+    const alreadyLinked = resourcePathsFromDraft(draft.files)
+      .some(value => normalizeResourcePath(value) === path)
+    if (!path || alreadyLinked) return
+    draft.files = [draft.files.trim(), path].filter(Boolean).join('\n')
+    changed()
+    await nextTick(() => grow(filesInput.value))
   }
   
   function onKeydown(event) {
@@ -643,6 +718,7 @@ export function useGraphInspector(props, emit) {
       historyLoading,
       historyError,
       historyEntries,
+      fileHistoryAvailable,
       resourceError,
       connectionRelation,
       connectionTarget,
@@ -665,6 +741,8 @@ export function useGraphInspector(props, emit) {
       deliverableItems,
       resourceItems,
       canAddTeamResource,
+      canRecoverTeamResource,
+      unlinkedResourceItems,
       attentionLabel,
       saveStateLabel,
       saveStateClass,
@@ -695,6 +773,7 @@ export function useGraphInspector(props, emit) {
       toggleHistory,
       openHistoryVersion,
       addResourceFile,
+      attachTeamResource,
       readableDate,
       readableDateTime,
       readableDuration,
@@ -713,4 +792,21 @@ export function useGraphInspector(props, emit) {
     context,
     exposed: { requestClose, requestBack, commitThen, focusEntry, updateDraft },
   }
+}
+
+function resourcePathsFromDraft(value) {
+  return String(value || '')
+    .split('\n')
+    .map(line => line.split('|')[0].trim())
+    .filter(Boolean)
+}
+
+function resourcePathsFromProperties(values) {
+  return (Array.isArray(values) ? values : [])
+    .map(value => typeof value === 'string' ? value : value?.path)
+    .filter(Boolean)
+}
+
+function normalizeResourcePath(value) {
+  return String(value || '').trim().replaceAll('\\', '/').replace(/^\.\//, '')
 }

@@ -35,10 +35,10 @@ const VALID_TAURI_COMMANDS = new Set([
   'workspace_project_file_resolve',
   // git
   'git_status', 'git_changes', 'git_file_diff', 'git_stage_file', 'git_unstage_file',
-  'git_file_history', 'git_file_version', 'git_restore_file_version',
+  'git_file_history_available', 'git_file_history', 'git_file_version', 'git_restore_file_version',
   // managed Git and GitHub
   'team_repository_status', 'team_repository_setup', 'team_repository_move', 'team_repository_sync',
-  'team_resource_import', 'managed_project_status', 'managed_project_set_enabled',
+  'team_resource_import', 'team_resource_list', 'managed_project_status', 'managed_project_set_enabled',
   'managed_project_set_remote', 'managed_project_sync', 'managed_repositories_sync', 'github_connection_status',
   'github_connect', 'github_disconnect',
   // IPC / window coordination (top-level)

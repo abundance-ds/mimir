@@ -2,7 +2,7 @@
    used by codemirror/core.js so the CM6 theme stays portable. */
 :root {
   --ink: var(--color-ink);
-  --ink-strong: var(--color-ink);
+  --ink-strong: color-mix(in srgb, var(--color-ink) 65%, var(--syntax-keyword));
   --editor-heading-1: var(--syntax-keyword);
   --editor-paper: var(--color-surface);
   --accent: var(--color-accent);
@@ -21,7 +21,7 @@
   --syntax-number: #e65100;
   --syntax-tag: #1a6fb5;
   --editor-size: 14px;
-  --editor-line-height: 18.9px;
+  --editor-line-height: 20.3px;
   --editor-font-weight: 450;
 }
 

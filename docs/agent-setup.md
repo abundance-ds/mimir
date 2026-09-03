@@ -1,124 +1,38 @@
 # Agent setup
 
 Mimir detects Codex, Claude, Pi, and Gemini from the login-shell `PATH`.
-Installed, enabled presets appear as launchers; unavailable clients keep their
-diagnostic in Settings > CLI tools.
-
-## Presets
-
-Presets live in `~/.mimir/launchers.json`:
-
-```json
-{
-  "version": 1,
-  "presets": [
-    {
-      "id": "codex",
-      "title": "Codex",
-      "kind": "agent",
-      "agentId": "codex",
-      "enabled": true,
-      "args": [],
-      "env": {},
-      "cwd": { "mode": "workspace" }
-    }
-  ]
-}
-```
-
-`agentId` is `codex`, `claude`, `pi`, or `gemini`. An optional `binary`
-overrides detection. Terminal presets use the platform shell unless `binary` is
-set.
-
-`cwd` is `workspace`, `home`, or an absolute `custom` path. Every `args` value
-is one argv entry; no shell command is reconstructed. `env` is merged into the
-child environment.
-
-Existing version-1 files are preserved rather than rewritten when new built-in
-agents appear. Add Gemini once in Settings if an older file does not contain
-its preset.
+Presets live in `~/.mimir/launchers.json` and preserve exact argv, environment,
+and `workspace`, `home`, or custom working-directory policy.
 
 ## Connection
 
-Every launched Activity receives:
-
-- an activity-scoped `MIMIR_MCP_URL`;
-- `MIMIR_ACTIVITY_ID` and `MIMIR_AGENT_ID`;
-- `~/.mimir/bin` on `PATH`.
-
-Mimir adds one product-owned connection unless the preset already supplies it:
+Every Activity receives its scoped MCP URL, Activity and agent ids, and
+`~/.mimir/bin` on `PATH`. Mimir adds one product-owned connection while
+preserving unrelated client configuration:
 
 | Client | Connection |
 |---|---|
-| Codex | `mcp_servers.mimir_workbench.url` one-run override |
-| Claude Code | additional inline `mimir_workbench` HTTP definition |
-| Pi | `~/.mimir/pi/mimir-tools.ts` extension |
-| Gemini CLI | owned `mimir_workbench` stdio-proxy settings entry |
+| Codex | one-run `mcp_servers.mimir_workbench.url` override |
+| Claude | inline `mimir_workbench` HTTP definition |
+| Pi | installed Mimir extension |
+| Gemini | owned `mimir_workbench` stdio-proxy setting |
 
-Unrelated client configuration is preserved. The Gemini entry reads the
-launch's environment variable, so settings never store an activity ID. A
-collision with an unrelated entry using the same product-owned name is an
-error, not an overwrite.
+A conflicting unrelated entry with the same owned name is an error. Resume
+uses the exact recorded provider session and launch policy; it never uses an
+implicit “latest” session.
 
-Pi performs the MCP handshake, dynamically registers the lean tool set, and
-adds the one-line tool-discovery instruction once. `/mimir-refresh`
-rediscovers the currently exposed set. Activity titles come from Mimir's
-provider-neutral local first-prompt path.
+## Skills and packages
 
-Continuations retain the Activity's recorded launch policy, including model,
-permission, and tool flags, while refreshing the launcher executable and
-activity-scoped MCP provenance. They pass the exact recorded provider session
-id; Mimir never uses latest/last/implicit continue for History resume. Routine
-launches also receive scoped provenance.
+Project, Private, then Team is the resolution order for skills and agent
+packages. Mimir projects retained immutable skill revisions without taking over
+unrelated client files. Codex and Gemini need `mimir skill` for Project skills;
+Claude and Pi receive Project skills at launch.
 
-## Skills
+`mimir run <name>` resolves `agents/<name>/AGENT.md`, launches it through the
+same Activity path, and supports either interactive mode or headless follow.
+Routines can reference the package name directly.
 
-Before launch, Mimir resolves Project, Private, and Team skills into retained
-read-only revisions. Project wins over Private; Private wins over Team.
-
-- Codex and Gemini discover Private/Team links in `~/.agents/skills`;
-- Claude receives a generated `.claude/skills` snapshot through `--add-dir`;
-- Pi receives shared links plus repeated `--skill <SKILL.md>` project paths.
-
-Codex and Gemini currently have no clean per-launch project-skill root.
-Project skills use `mimir skill <query>` there; Mimir does not modify the repo
-or replace the client's home directory.
-
-See [Agent interface](agent-interface.md) for scope and compatibility
-decisions.
-
-## Agent packages
-
-`mimir run <name>` resolves `agents/<name>/AGENT.md` in Project, Private, then
-Team order. The package selects a preset, prompt, skills, and exact extra argv.
-The run becomes a durable Activity through the same native launch path as a
-routine. Use `--interactive` for a live session in Mimir. Use `--follow` to
-stream a headless run until it exits. The two flags are mutually exclusive.
-
-Routines can select an agent package instead of storing a separate preset and
-prompt. See [Routines](routines.md) for the TOML contract.
-
-## Resolution boundary
-
-Opening/reloading CLI Settings refreshes detection. Ordinary launches reuse the
-cached result. Terminal presets and presets with an exact custom binary do not
-run unrelated client probes.
-
-`launcher_resolve` validates the preset, chooses command/cwd, prepares skills,
-and returns exact argv/env. `activityRuntime` then applies run or resume
-identity before spawn.
-
-Files that must agree:
-
-- `src-tauri/src/launchers.rs`
-- `src/stores/activityRuntime.js`
-- `src/services/launchers.js`
-- `bin/mimir.mjs`
-- `bin/mimir-skills.mjs`
-- `bin/pi-mimir-extension.ts`
-- `src-tauri/src/mimir_cli.rs`
-
-## CLI
-
-See [agent-interface.md](agent-interface.md) for the full CLI discovery
-surface and tool catalog.
+Native ownership is `launchers.rs`, `agent_packages.rs`, and `mimir_cli.rs`.
+Renderer ownership is the launcher service/store and Activity runtime. Public
+CLI discovery, tools, skills, and package formats are in
+[agent-interface.md](agent-interface.md).

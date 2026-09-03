@@ -137,6 +137,11 @@ pub async fn git_unstage_file(
 /// Lists committed versions of one file. This is also used by graph nodes,
 /// whose source path lives inside the managed Team checkout.
 #[tauri::command]
+pub fn git_file_history_available(path: String) -> bool {
+    open_history_path(Path::new(&path)).is_ok()
+}
+
+#[tauri::command]
 pub async fn git_file_history(
     path: String,
     limit: Option<usize>,
@@ -964,6 +969,24 @@ mod tests {
         git_restore_file_version_blocking(&path, &first).unwrap();
         assert_eq!(std::fs::read_to_string(path).unwrap(), "first");
         assert!(!repo.statuses(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn file_history_availability_discovers_nested_repositories() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = Repository::init(root.path()).unwrap();
+        commit_file(&repo, "nested/resource.md", "first");
+        let outside = tempfile::NamedTempFile::new().unwrap();
+
+        assert!(git_file_history_available(
+            root.path()
+                .join("nested/resource.md")
+                .to_string_lossy()
+                .into_owned()
+        ));
+        assert!(!git_file_history_available(
+            outside.path().to_string_lossy().into_owned()
+        ));
     }
 
     #[cfg(unix)]

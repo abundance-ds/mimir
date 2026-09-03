@@ -351,6 +351,7 @@ describe('FilesActivity', () => {
 
   it('offers the proven row actions from a native right-click gesture', async () => {
     const wrapper = render()
+    await flushPromises()
     await wrapper.get('[data-file-row="/w/new.md"]').trigger('contextmenu', {
       clientX: 22,
       clientY: 31,
@@ -365,7 +366,7 @@ describe('FilesActivity', () => {
     expect(menu.text()).toContain('Reveal in Finder')
     expect(menu.text()).toContain('Copy path')
     expect(menu.text()).toContain('Move to Trash')
-    expect(menu.text()).not.toContain('History')
+    expect(menu.text()).toContain('History')
   })
 
   it('opens a Git-backed text file version from its History drill-in', async () => {
@@ -447,6 +448,7 @@ describe('FilesActivity', () => {
     const menu = wrapper.get('[data-files-context-menu]')
     wrapper.get('[data-file-action="open"]').element.focus()
 
+    await menu.trigger('keydown', { key: 'ArrowDown' })
     await menu.trigger('keydown', { key: 'ArrowDown' })
     await menu.trigger('keydown', { key: 'ArrowDown' })
     await menu.trigger('keydown', { key: 'ArrowDown' })
@@ -828,6 +830,13 @@ describe('FilesActivity', () => {
     expect(wrapper.find('[data-files-search]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('class=Repository')
     expect(wrapper.text()).not.toContain('Changes could not be loaded')
+
+    await wrapper.get('[data-files-mode="project"]').trigger('click')
+    await wrapper.get('[data-file-row="/w/new.md"]').trigger('contextmenu', {
+      clientX: 22,
+      clientY: 31,
+    })
+    expect(wrapper.get('[data-files-context-menu]').text()).not.toContain('History')
   })
 
   function seedLargeTree(count = 400) {

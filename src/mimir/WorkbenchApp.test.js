@@ -2,6 +2,7 @@ import { nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const editorOpen = vi.hoisted(() => vi.fn())
@@ -238,6 +239,7 @@ describe('WorkbenchApp', () => {
     toolRuntimeStop.mockResolvedValue()
     storage.clear()
     vi.stubGlobal('localStorage', localStorageMock)
+    delete window.__TAURI_INTERNALS__
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       writable: true,
@@ -397,6 +399,27 @@ describe('WorkbenchApp', () => {
     )
     expect(review).toBeTruthy()
     expect(review.querySelector('svg').getAttribute('viewBox')).toBe('0 0 256 260')
+  })
+
+  it('shows a sync error after the current diagnostic is dismissed', async () => {
+    let syncErrorHandler
+    vi.mocked(listen).mockImplementation(async (event, handler) => {
+      if (event === 'mimir://managed-git-error') syncErrorHandler = handler
+      return vi.fn()
+    })
+    window.__TAURI_INTERNALS__ = {}
+    const wrapper = await render()
+
+    wrapper.findComponent({ name: 'FilesActivity' }).vm.$emit('diagnostic', 'Current issue')
+    await nextTick()
+    syncErrorHandler({ payload: { message: 'Reconnect GitHub.', root: '/team' } })
+    await nextTick()
+
+    expect(wrapper.get('[data-workbench-diagnostic]').text()).toContain('Current issue')
+    await wrapper.get('[data-workbench-diagnostic] button').trigger('click')
+    await nextTick()
+    expect(wrapper.get('[data-workbench-diagnostic]').text())
+      .toContain('Automatic sync needs attention: Reconnect GitHub.')
   })
 
   it('focuses a new CLI Activity launched from the plus menu', async () => {

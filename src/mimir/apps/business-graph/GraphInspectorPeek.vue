@@ -86,6 +86,7 @@
         Record decision
       </button>
       <button
+        v-if="fileHistoryAvailable"
         type="button"
         data-inspector-file-history
         data-graph-control="peek-file-history"
@@ -608,6 +609,7 @@ const {
   historyLoading,
   historyError,
   historyEntries,
+  fileHistoryAvailable,
   connectionRelation,
   connectionTarget,
   attendeeToAdd,

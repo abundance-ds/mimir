@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import GraphInspector from './GraphInspector.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
@@ -62,6 +62,10 @@ const baseProps = {
 }
 
 describe('GraphInspector', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset()
+  })
+
   it('opens highlighted note links while keeping the note editor enabled', async () => {
     const wrapper = mount(GraphInspector, {
       props: {
@@ -416,18 +420,21 @@ describe('GraphInspector', () => {
   })
 
   it('opens a saved graph version through the Editor history diff', async () => {
-    vi.mocked(invoke).mockResolvedValueOnce([{
-      hash: 'abcdef123456',
-      shortHash: 'abcdef12',
-      message: 'Mimir sync',
-      authoredAt: '2026-08-15T14:45:00Z',
-      author: 'Mimir',
-      binary: false,
-      size: 120,
-    }])
+    vi.mocked(invoke)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce([{
+        hash: 'abcdef123456',
+        shortHash: 'abcdef12',
+        message: 'Mimir sync',
+        authoredAt: '2026-08-15T14:45:00Z',
+        author: 'Mimir',
+        binary: false,
+        size: 120,
+      }])
     const wrapper = mount(GraphInspector, {
       props: { ...baseProps, mode: 'peek' },
     })
+    await flushPromises()
 
     await wrapper.get('[data-graph-control="peek-more"]').trigger('click')
     await wrapper.get('[data-inspector-file-history]').trigger('click')
@@ -450,6 +457,44 @@ describe('GraphInspector', () => {
         },
       },
     ]])
+  })
+
+  it('offers orphan Team files only on a Team Resource object', async () => {
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === 'git_file_history_available') return Promise.resolve(false)
+      if (command === 'team_resource_list') {
+        return Promise.resolve([
+          { path: 'resources/linked.csv', size: 12 },
+          { path: 'resources/orphan.html', size: 42 },
+        ])
+      }
+      return undefined
+    })
+    const resource = {
+      id: 'resource-proposal-template',
+      kind: 'resource',
+      title: 'Proposal template',
+      relations: [],
+      properties: { files: [{ path: 'resources/linked.csv', label: 'Data' }] },
+      provenance: {
+        scopeId: 'team:main',
+        sourceRevision: 'resource-revision-1',
+        sourcePath: '/team/graph/proposal-template.md',
+      },
+    }
+    const wrapper = mount(GraphInspector, {
+      props: {
+        ...baseProps,
+        mode: 'focus',
+        node: resource,
+        nodes: [resource],
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-unlinked-resource="resources/linked.csv"]').exists()).toBe(false)
+    await wrapper.get('[data-unlinked-resource="resources/orphan.html"]').trigger('click')
+    expect(wrapper.get('[data-inspector-files]').element.value).toContain('resources/orphan.html')
   })
 
   it('puts every issue property and syntax-aware Markdown editing in Focus', async () => {
@@ -643,6 +688,10 @@ describe('GraphInspector', () => {
       },
     })
     await flushPromises()
+
+    await wrapper.get('[data-graph-control="focus-more"]').trigger('click')
+    expect(wrapper.find('[data-inspector-file-history]').exists()).toBe(false)
+    await wrapper.get('[data-graph-control="focus-more"]').trigger('click')
 
     expect(wrapper.get('[data-inspector-connection-relation]').text()).toContain('Related to')
     await wrapper.get('[data-inspector-connection-target]').trigger('click')

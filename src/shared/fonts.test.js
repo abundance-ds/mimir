@@ -42,7 +42,7 @@ describe('fonts', () => {
   })
 
   it('builds one typography scale for editor and diff surfaces', () => {
-    expect(EDITOR_LINE_HEIGHT_RATIO).toBe(1.35)
+    expect(EDITOR_LINE_HEIGHT_RATIO).toBe(1.45)
     expect(editorTypographyVars({
       fontSize: 14,
       zoom: 1.25,
@@ -50,7 +50,7 @@ describe('fonts', () => {
       dark: false,
     })).toEqual({
       '--editor-size': '17.5px',
-      '--editor-line-height': '23.625px',
+      '--editor-line-height': '25.375px',
       '--editor-font-weight': String(EDITOR_LIGHT_FONT_WEIGHT),
       '--font-mono': COMMIT_MONO_FONT_STACK,
     })

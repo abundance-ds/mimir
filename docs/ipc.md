@@ -1,125 +1,40 @@
-# IPC and event topology
+# IPC and events
 
-Command signatures are canonical in `src-tauri/src/lib.rs::generate_handler!`.
+Tauri command signatures are canonical in
+`src-tauri/src/lib.rs::generate_handler!`. Renderer calls normally go through
+`src/services/`; JavaScript camelCase arguments map to Rust snake_case fields.
 
-## Boundary rules
+## Rules
 
-- Renderer invokes belong behind `src/services/` unless the call is tightly
-  local to an editor component.
-- Rust command arguments serialize from JavaScript camelCase into Rust
-  snake_case. Service wrappers own the translation and response normalization.
-- Tauri events are notifications, not durable queues. State that must not be
-  lost is stored natively ([persistence.md](persistence.md)) and drained/snapshotted after the listener exists.
-- Install listeners before starting producers. Remove them only after the
-  producer has stopped or the owning window/provider has disconnected.
-- Every request/response relay carries a stable request or correlation id.
-  Cancellation must remove both execution ownership and the pending response.
+- Add or remove every command in both `generate_handler!` and the test allowlist
+  in `src/test/setup.js`.
+- Events are notifications, not durable queues. Install the listener before the
+  producer, then read or drain native authority.
+- Remove listeners only after the producer or owning lease stops.
+- Request/response relays use stable correlation ids. Cancellation removes
+  execution ownership and the pending response.
 
-`src/test/setup.js` contains the frontend Tauri-command allowlist. Adding or
-removing a command requires updating both that set and
-`src-tauri/src/lib.rs::generate_handler!`; otherwise happy-dom tests can either
-reject a real command or conceal a removed one.
+## Non-obvious event contracts
 
-## Stable event paths
+| Event | Contract |
+|---|---|
+| `mimir://activity-event` | Listen before `activity_list`; native sequence is authoritative |
+| `mimir://routines-changed` | Invalidate or update the catalog; native reload remains recovery |
+| `mimir://tracker-changed` | Revision notification; SQLite remains authority |
+| `mimir://open-files-pending` | Payload is empty; drain the native path queue after listening |
+| `mimir://tool-relay-request` / `cancel` | Correlation id owns timeout, abort, and response |
+| `mimir://tools-list-changed` | Revision only; clients fetch a new catalog |
+| `mimir://managed-git-error` | Listen before activation sync; current native error can be re-emitted |
+| `mimir://settings-changed` | Other windows flush local state before reload |
+| `mimir://quit-requested` | Native exit remains blocked until the Editor confirms |
 
-| Event | Publisher | Consumer | Non-obvious contract |
-|---|---|---|---|
-| `mimir://activity-event` | `activity_commands.rs` sink | `activityRuntime.js` | ordered native upsert/status/exit projection; listener precedes initial `activity_list` |
-| `mimir://routines-changed` | `routine_runtime.rs` sink | `services/routines.js` | notification payload may update catalog/run state; explicit catalog load remains recovery path |
-| `mimir://tracker-changed` | `tracker/runtime.rs` | `services/tracker.js`, Tracker store | revision + current status projection; listener precedes initial `tracker_status`; SQLite remains durable authority |
-| `mimir://tracker-open` | Tracker menu-bar item | Workbench Tracker store | reveal the enabled singleton Tracker Activity after showing/focusing `main` |
-| `mimir://open-files-pending` | `file_open.rs` | `useFileOpen.js` | payload is empty; consumer drains the native queue with `take_pending_files` |
-| `mimir://tool-relay-request` | Rust UI/app provider | core renderer or app relay | request id owns timeout/cancel/response |
-| `mimir://tool-relay-cancel` | Rust provider | same relay | abort before deleting pending entry; late response is ignored |
-| `mimir://tools-list-changed` | registry revision observer | dynamic clients | revision notification only; clients fetch a new snapshot |
-| `mimir://proposals-changed` | proposal coordinator | Editor | pending proposal list used for display/reconciliation |
-| `mimir://proposals-state` | proposal coordinator | other proposal consumers | complete state snapshot, unlike the pending-only event |
-| `mimir://proposal-apply` | proposal coordinator | owning Editor window | delegated apply; Editor must answer through `proposal_respond` |
-| `mimir://proposal-result` | proposal coordinator | main Editor | terminal lifecycle result; failed/conflict/stale stays reviewable |
-| `mimir://file-updated` | native proposal or renderer comment tools | Editor | refresh open clean content without replacing unsaved ownership |
-| `mimir://workspace-files-changed` | native file-index watcher | Files store and Editor | debounced metadata delta; Editor reads only matching open clean text paths |
-| `mimir://settings-changed` | `settings_changed` command | other windows | notification excludes caller; receiver flushes its local snapshot before reload; see [settings.md](settings.md) |
-| `mimir://theme-changed` | settings store | terminal/app observers | renderer event used for live theme projection, not persistence |
-| `mimir://quit-requested` | Rust `ExitRequested` handler | Editor | begins guarded asynchronous Quit; native exit remains prevented |
+Proposal events are centrally coordinated in Rust. An open or dirty matching
+Editor receives delegated apply; otherwise Rust applies to disk after conflict
+checks. A review closes only after `proposal_respond` succeeds. Pending
+proposals persist by id and survive restart.
 
-AI streaming events are correlation-scoped rather than stable names:
-`ai-stream-chunk-<id>`, `ai-stream-done-<id>`, and
-`ai-stream-error-<id>`. `src/services/ai/bridgeFetch.js` must attach all three
-listeners before invoking `ai_proxy_stream`.
+AI stream event names include their correlation id. App tool relays also carry
+`(appId, instanceId)` so a replaced frame cannot retain tool ownership.
 
-## MCP/core tool relay
-
-The path for a renderer-backed MCP call is:
-
-```text
-HTTP tools/call
-  -> ToolRegistry schema validation and canonical lookup
-  -> UiToolProvider pending call + timeout
-  -> mimir://tool-relay-request
-  -> src/services/toolRuntime.js
-  -> editor/store/native service handler
-  -> tool_relay_response
-  -> provider resolves pending id
-  -> ToolRegistry result normalization
-  -> MCP structuredContent + text
-```
-
-`createToolRuntime.start` subscribes to request and cancel before acquiring a
-tool-server client lease. `stop` releases the native lease while listeners are
-still present, then aborts remaining renderer work. Reversing either order
-creates an accepted-call race.
-
-App providers use the same Rust relay but a separate renderer implementation
-in `src/services/appsCatalog.js` and frame protocol in
-`src/mimir/apps/EmbeddedAppHost.vue`. Provider identity is
-`(appId, instanceId)`; a replacement instance unregisters stale ownership
-before reconciling its definitions.
-
-## File-open queue
-
-Startup arguments, file associations, Finder open events, and second-instance
-arguments all append normalized absolute paths to
-`PendingFilePaths`. The native event contains no path by design:
-
-1. renderer installs `mimir://open-files-pending`;
-2. renderer calls `take_pending_files`;
-3. any later producer appends and emits another notification.
-
-Putting paths only in the event payload reintroduces the listen/drain race.
-See `src-tauri/src/file_open.rs`, `src/editor/composables/useFileOpen.js`, and
-`useFileOpen.test.js`.
-
-## Proposal coordination
-
-`proposal_create` stores the proposal centrally after the initiating renderer
-has opened its diff. Undecided proposals persist to `~/.mimir/proposals.json`
-on every store mutation and reload at startup, so an application restart keeps
-a review the user has not answered; the Editor re-offers them through
-`get_proposals_for_path` when their file becomes active. The renderer
-reconciles the `mimir://proposals-changed` payload by proposal id — a review
-leaves the Editor only when its id leaves the global pending set. Editors
-periodically register their path/dirty/active snapshot through
-`proposal_register_editor`. On apply, Rust selects an owner:
-
-- a matching dirty/open Editor receives `mimir://proposal-apply`;
-- otherwise Rust applies against disk after its conflict checks;
-- an unavailable delegated window becomes `failed`;
-- Editor responses map `applied`, `rejected`, `not-found`, and `conflict` into
-  central terminal states.
-
-Never dismiss a diff before `proposal_respond` succeeds. See
-`src/editor/composables/useProposalBridge.js`, `useDiffReview.js`, and the
-proposal coordinator in `src-tauri/src/lib.rs`.
-
-## Change map
-
-| Change | Files that must agree | Tests |
-|---|---|---|
-| Add/remove Tauri command | defining Rust module, `lib.rs`, service wrapper, `src/test/setup.js` | wrapper/component test plus Rust command logic |
-| Add event | publisher, consumer setup and cleanup, test mock/listener assertions | nearest service/composable test |
-| Change tool relay payload | `tool_bridge.rs`, `tool_runtime.rs`, `services/toolRuntime.js` or `appsCatalog.js` | Rust bridge/runtime and JS runtime tests |
-| Change proposal status | Rust coordinator, diff/proposal composables, stores | `useProposalBridge.test.js`, `useDiffReview.test.js`, Rust tests |
-| Change file-open behavior | `file_open.rs`, `useFileOpen.js` | Rust and composable tests |
-
-See [runtime-architecture.md](runtime-architecture.md), [mcp.md](mcp.md), and
-[apps-system.md](apps-system.md).
+See [runtime-architecture.md](runtime-architecture.md) for startup and shutdown
+order and [mcp.md](mcp.md) for the network tool boundary.

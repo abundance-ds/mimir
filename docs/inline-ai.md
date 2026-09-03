@@ -1,64 +1,25 @@
 # Inline AI
 
-Mimir has two native model interactions inside the Editor: the Cmd/Ctrl+K inline
-agent and `++` ghost completion.
+Mimir has two Editor interactions: Cmd/Ctrl+K rewrite and `++` ghost completion.
 
-## Cmd/Ctrl+K inline agent
+## Inline rewrite
 
-Cmd/Ctrl+K works with selected text or an empty selection at the cursor. The
-toolbar slot becomes a compact instruction surface with model selection,
-streaming status, response text, retry/cancel, and follow-up.
+Cmd/Ctrl+K sends escaped context around the current selection or cursor through
+the Rust-authenticated provider bridge. The agent can answer, inspect approved
+context, or call `suggest_edit`. An edit always opens the normal full-document
+diff for explicit accept or reject. Reject returns to refinement; Escape
+cancels or closes; Cmd/Ctrl+Enter accepts a pending edit.
 
-The prompt contains escaped context before and after the selection. The agent
-can read the attached document, search the workspace, answer directly, or call
-`suggest_edit`.
-
-An edit follows this path:
-
-```text
-instruction
-  -> AI SDK ToolLoopAgent through the Rust provider bridge
-  -> suggest_edit replacement
-  -> full-document Editor diff
-  -> explicit Accept or Reject
-```
-
-Accept applies the selected-range replacement and closes the inline surface.
-Reject closes the diff but keeps the surface open for refinement. Escape
-cancels a live request or closes the interaction. Cmd/Ctrl+Enter accepts a
-pending edit. The diff and proposal lifecycle are in
-[editor-system.md](editor-system.md).
-
-Primary files:
-
-- `src/editor/components/workspace/InlineAI.vue`
-- `src/services/ai/inlineTransport.js`
-- `src/editor/components/workspace/inlineAIKeys.js`
-- `src/editor/App.vue`
-- `src/stores/diff.js`
+Primary ownership is `InlineAI.vue`, `inlineTransport.js`, the Editor diff
+store, and the native AI bridge.
 
 ## Ghost completion
 
-Typing `++` within the configured interval removes the trigger and requests
-contextual completions. While active:
+Typing `++` inside the configured interval requests a small suggestion set.
+Tab, Enter, or Right Arrow accepts; Alt+Right accepts one word; Up/Down changes
+alternative; Escape, another edit, or pointer movement cancels. Non-auth
+failures can use local suggestions; authentication errors remain visible.
 
-- Tab, Enter, or Right Arrow accepts the current completion
-- Alt+Right accepts the next word
-- Up/Down cycles alternatives
-- Escape cancels
-- another edit or pointer action dismisses the completion
-
-The service asks for a small JSON suggestion list and falls back to local
-suggestions for non-auth failures. Authentication errors render inline.
-
-Primary files:
-
-- `src/editor/codemirror/ghost.js`
-- `src/services/ai/ghost.js`
-- `src/services/ai/client.js`
-- `src-tauri/src/ai.rs`
-
-## Models and keys
-
-See [ai-system.md](ai-system.md) for registry, credentials, providers, and
-transport.
+Primary ownership is the CodeMirror ghost extension, `services/ai/ghost.js`,
+and native generation. Models, credentials, and transport are in
+[ai-system.md](ai-system.md).

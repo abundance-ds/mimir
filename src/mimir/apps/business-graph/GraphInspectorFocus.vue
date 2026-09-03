@@ -95,6 +95,7 @@
         Record decision
       </button>
       <button
+        v-if="fileHistoryAvailable"
         type="button"
         data-inspector-file-history
         data-graph-control="focus-file-history"
@@ -628,6 +629,30 @@
         </button>
         <small v-if="resourceError" role="alert" class="text-rem">{{ resourceError }}</small>
       </label>
+      <div
+        v-if="canRecoverTeamResource && unlinkedResourceItems.length"
+        data-inspector-unlinked-resources
+        class="focus-unlinked-resources"
+      >
+        <span>Unlinked Team files</span>
+        <small>Attach a file that is already in Team resources.</small>
+        <button
+          v-for="resource in unlinkedResourceItems"
+          :key="resource.path"
+          type="button"
+          :data-unlinked-resource="resource.path"
+          :data-graph-control="`focus-unlinked-${resource.path}`"
+          class="object-link-row"
+          @click="attachTeamResource(resource)"
+        >
+          <span class="file-mark">{{ fileExtension(resource.path) }}</span>
+          <span>
+            <strong>{{ fileName(resource.path) }}</strong>
+            <small>{{ resource.path }}</small>
+          </span>
+          <IconPaperclip :size="14" />
+        </button>
+      </div>
     </section>
 
     <section
@@ -770,6 +795,7 @@ const {
   historyLoading,
   historyError,
   historyEntries,
+  fileHistoryAvailable,
   resourceError,
   connectionRelation,
   connectionTarget,
@@ -792,6 +818,8 @@ const {
   deliverableItems,
   resourceItems,
   canAddTeamResource,
+  canRecoverTeamResource,
+  unlinkedResourceItems,
   attentionLabel,
   saveStateLabel,
   saveStateClass,
@@ -822,6 +850,7 @@ const {
   toggleHistory,
   openHistoryVersion,
   addResourceFile,
+  attachTeamResource,
   readableDate,
   readableDateTime,
   readableDuration,

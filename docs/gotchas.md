@@ -1,697 +1,110 @@
 # Gotchas
 
-Non-obvious constraints that are still current in Mimir 0.2.0.
-Known defects: [issues.md](issues.md).
-
-## Terminal
-
-### WebGL fallback lifecycle
-
-The WebGL renderer is loaded after `terminal.open()`. If WebGL setup fails or
-its context is lost, the addon disposes itself and xterm's built-in DOM renderer
-keeps the session usable. Do not treat context loss as a terminal error.
-
-### Unicode 11 addon requires `allowProposedApi`
-
-The Unicode 11 addon supplies correct emoji/wide-character cell widths and
-requires `allowProposedApi: true`. Without it xterm throws at load and the
-surface shows an attach error instead of a terminal.
-
-### Terminal checkpoints follow xterm completion, not delivery
-
-`Terminal.write()` parses asynchronously. Do not advance the applied sequence
-when code calls `write`; advance it only in xterm's completion callback. Output
-and resize events must stay in one queue. Restore the checkpoint at its recorded
-columns and rows before applying later resize events. Fit may propose dimensions,
-but only the ordered native resize event may resize the xterm model.
-
-The first visit creates the run's only xterm model. Hidden surfaces keep that
-model subscribed and stop only layout/theme observers. Do not add a hidden
-headless terminal or rebuild the model on selection. The native renderer lease
-and checkpoint revision protect WebView reload/HMR races.
-
-The xterm core, serializer, and Unicode addon are exact-version dependencies.
-A checkpoint is a versioned Mimir format even though its payload is a VT stream.
-Change those versions together with checkpoint compatibility tests.
-
-### Resume attachment must be serialized
-
-Open xterm before checkpoint or event replay. A resumed Activity can publish a
-new `runId` while its surface performs the initial attach. Serialize both paths
-and compare the requested run with the run that is already attached before any
-reset. Native respawn has already invalidated the old checkpoint lease, so a
-run switch releases that lease without trying to save it.
-
-### Font readiness and pixel snap
-
-Terminal initialization selects the native system monospace stack and waits for
-the document font set before xterm measures cells. Do not open xterm while
-another face can still change layout. `scheduleFit` snaps the WebGL screen onto
-the device pixel grid; without it fractional pane-split offsets soften every
-glyph. The transform must be cleared before measuring so the offset never
-compounds.
-
-### zsh spawn-size `%` artifact
-
-The shell prints its first prompt before the terminal surface mounts. zsh pads
-its partial-line mark to the PTY width: spawning wider than the eventual pane
-strands a wrapped `%` line at the top of scrollback. Undershoot is corrected
-invisibly by the first fit resize. `src/services/activities.js` remembers the
-last pane-fitted size for spawn/respawn — do not reintroduce a generous
-hardcoded default.
-
-## CSS and input
-
-### Keep the button reset in `@layer base`
-
-The `button` reset in `src/shared/styles/base.css` must remain inside
-`@layer base`; an unlayered reset outranks Tailwind v4 utilities.
-
-### Preserve CodeMirror focus on toolbar actions
-
-Toolbar `mousedown` normally moves focus and collapses the editor selection.
-Formatting controls use `@mousedown.prevent`; keep that behavior when adding
-editor actions.
-
-### WebKit never focuses buttons on click
-
-WKWebView (unlike Chromium and jsdom) leaves `document.activeElement` on
-`<body>` after a `<button>` click, so focus-owner logic must not rely on
-`document.activeElement` after mouse interaction. The workbench keyboard
-router remembers the pane on capture-phase `pointerdown` and falls back to
-that remembered owner when the live focus owner is `none`. Any new
-focus-dependent feature needs the same fallback — the quirk is invisible in
-browser dev and in tests, where clicks do focus buttons.
-
-### A container key handler must exempt fields inside it
-
-The Files tree keeps its keyboard grammar on the list container
-(`FilesActivity.vue::onListKeydown`), but the inline name field for new files
-and renames is a row of that same tree. A container handler that calls
-`preventDefault()` on `Enter` also cancels the field's implicit form submit, so
-the name is never confirmed and the focused row opens instead. `onListKeydown`
-returns early for events from an editable target, and the field commits on its
-own `Enter` (except during IME composition). Any new field inside a
-key-handling container needs the same exemption.
-
-### Focus loss is not always a decision
-
-The same field commits when focus moves away, but a field only sees "focus
-left". `FileTreeRow.vue::commitOnBlur` accepts the blur only while the document
-holds focus and the field is still connected and visible, so an application
-switch or a hidden Activity surface cannot silently create or rename a file.
-Draft state lives in the panel, not in the field, so the field returns with the
-text it had.
-
-## Activities and launchers
-
-### Commands are exact argv, never shell strings
-
-`src-tauri/src/launchers.rs` and `ActivityLaunchSpec` preserve every argument
-boundary. Do not join preset arguments for a shell or add quoting. App process
-launches and Routine prompts follow the same rule.
-
-Settings presents those boundaries as one familiar CLI-flags field.
-`launcherFlags.js` is the deliberate parsing/formatting boundary: quoted and
-escaped input becomes an argv array before save. Do not move parsing into the
-native spawn path or execute the field through a shell.
-
-### Keep Codex's injected MCP name product-owned
-
-Codex config overrides merge with existing tables. Mimir therefore owns the
-product-specific `mcp_servers.mimir_workbench` identity. Do not replace it with
-the generic name `mimir` or reuse it for another transport.
-
-### Durable does not mean a process survives relaunch
-
-Durable Activity metadata, terminal checkpoint, and bounded event tail survive.
-PTY and child handles do not. A record restored after Mimir exits becomes
-interrupted and can start a new continuation where its CLI supports one.
-
-### Archive and clear require an ended Activity
-
-The supervisor rejects restore for all ephemeral records, archive for ephemeral
-non-terminal records, and archive/clear for live records. Explicit archive or
-Close promotes a plain terminal from ephemeral to durable before it enters
-History. Keep those rules in the native owner; hiding a menu item is not
-enforcement.
-
-### `updatedAt` is a live stamp, not a stable sort key
-
-The supervisor rewrites `updated_at` on each status change and each 2 seconds of
-persisted PTY output (`OUTPUT_RECORD_PERSIST_INTERVAL_MS`). A Sidebar sort that uses
-it makes busy rows change places while the user reads them. Manual order gives
-each Activity a saved position when it first appears
-(`WorkbenchApp.vue`), and unsaved rows fall back to `createdAt`
-(`activityOrdering.js`).
-
-Session restoration is the deliberate exception. App interruption, respawn,
-startup output, and startup status signals retain the previous stamp until the
-first submitted user turn reaches the resumed PTY. Keep this hold native so a
-restart cannot persist a false conversation time.
-
-### Routine `timezone = "local"` resolves TZ, then UTC
-
-`parse_timezone` in `src-tauri/src/routines.rs` maps `local` (or empty) to the
-`TZ` environment variable and falls back to UTC when `TZ` is unset — the
-normal case for a macOS GUI launch. `local` is therefore usually UTC, not the
-system timezone; write an explicit IANA name for local-time schedules.
-
-See also [Terminal](#terminal) for spawn-size, WebGL fallback, pixel snap, and
-Unicode 11 constraints.
-
-## MCP and apps
-
-### Install renderer listeners before starting MCP
-
-Core tools relay from Rust to the renderer. `src/services/toolRuntime.js`
-subscribes to request and cancellation events before `tool_server_start`.
-Reversing the order creates a race where an early call has no handler.
-Shutdown keeps those listeners installed until `tool_server_stop` has closed
-the native accept loop, then aborts remaining calls and removes listeners.
-Every renderer mount owns a client lease. Vite HMR may briefly overlap old and
-new mounts, so releasing the old lease must not stop the server while the new
-lease is active.
-
-### The loopback MCP endpoint is deliberately stateless
-
-Do not add an `mcp-session-id` header without also implementing and validating
-the complete session lifecycle. The current direct launcher clients do not
-need sessions. The server negotiates only its explicitly supported stable
-protocol versions instead of echoing arbitrary client input.
-
-### Public and internal names are separate
-
-Canonical dotted names such as `files.read` identify capabilities inside
-Mimir. The public MCP projection accepts only the underscore names in
-`AGENT_TOOLS`; it does not expose dotted names, historical aliases, or
-canonical metadata.
-
-### Dynamic app providers are instance-scoped
-
-App tools belong to `(appId, instanceId)`. Unmount must unregister the provider,
-remove listeners, and resolve or cancel pending calls. Otherwise a stale iframe
-can keep owning a live tool alias.
-
-### Local app HTML must use the `app://` host path
-
-The catalog resolves local entries from disk, but
-`src/services/appsCatalog.js` converts an embedded local URL to `app://` so the
-native protocol can validate the path and inject the SDK/theme. Loading the raw
-file URL skips that contract.
-
-## Business graph
-
-### Managed Git fetches must not close an active batch
-
-The managed Git timer closes a batch after five quiet minutes or thirty
-minutes of continuous editing. Startup, focus, reconnect, and periodic fetches
-are independent: they can integrate incoming work when the worktree permits,
-but they must not commit a young local batch. Project commits must rebuild the
-index from `HEAD` before adding eligible paths, or a previously staged binary
-or oversized file can bypass the automatic-sync exclusions.
-
-A changed binary or oversized Project file must not block unrelated incoming
-work. Integrate with a safe checkout and retain the excluded file. If the
-remote changed that same path, stop before moving `HEAD` and report the file;
-never use a forced checkout to resolve it.
-
-### An issue's project and assignee may be plain labels
-
-Issue Markdown predates project and person nodes, so `project:` and `assignee:`
-frontmatter often hold a human label (`project: "fde"`) rather than a graph id.
-The parser only derives a `part_of` relation from a `project-` prefixed id; the
-label otherwise survives as `legacyProject`/`legacyAssignee`. The inspector must
-mirror that rule and promote a value to a relation only when it resolves to a
-node of the expected kind or the source already carried that edge — a
-synthesized edge to a label points at nothing and makes every other field of the
-node unsavable.
-
-### Relation validation only covers edges an edit introduces
-
-`graph.nodes` holds the selected scopes only, so an edge stored on a node can
-legitimately point outside them. Validate what the patch adds, never what the
-source already had.
-
-### A rejected save must release the inspector
-
-The inspector commits its dirty draft before navigating, so close, back,
-section, view, scope, and refresh all route through the same commit. If a
-rejected save leaves the draft dirty and the queued navigation pending, every
-one of those exits retries the same failing write and the surface cannot be
-left. A failed save clears the queued action and lets the next explicit exit
-through.
-
-## Scribe
-
-### Keychain success requires endpoint-bound read-back
-
-The hosted transcription key field must not clear merely because an IPC call
-was issued. Native storage writes the endpoint-bound payload and reads it back
-before returning success. Settings owns the visible saved/replace/remove state
-and retains entered text on failure.
-
-Keep the `keyring` dependency's `apple-native` Cargo feature enabled. Without
-it, the crate selects an in-memory mock on macOS: writes appear successful but
-disappear before read-back and never reach Keychain.
-
-### Summary defaults and per-run recipes are different scopes
-
-`summaryTemplate`, `summaryPrompt`, and `summaryPreset` are global defaults.
-Review seeds a per-run draft from them; editing that draft must not update
-global settings. `meetings_run_summary` freezes the exact format, prompt, and
-launcher preset into a new retry-generation job. The native safety/output
-envelope remains fixed around the editable instructions. Custom follow-up is a
-separate interactive Activity, not a summary template or graph shortcut.
-When a built-in default changes, migrate the exact old built-in text during
-configuration load. Otherwise the saved text still wins and silently defeats
-the new recipe. Never migrate a different user-written prompt.
-
-### Meeting notes are evidence, not instructions
-
-Preparation and live notes can contain useful facts, actions, scratch words,
-or text the user planned to say. Materialize them as a controlled input beside
-the transcript and tell the summary agent to use them with judgment. Treat
-both inputs as untrusted data. The agent must not reproduce a notes appendix;
-native code appends the exact user text once after it validates the summary.
-An empty notes snapshot is valid controlled input. Its publisher and reader
-must allow a zero-byte regular file, while transcript and generated-output
-paths must continue to reject empty artifacts.
-
-### Meeting follow-up paths use one strict allowlist
-
-The automatic summary Activity receives controlled transcript, notes, and
-output paths. `routine_runtime.rs` must allow all three environment keys. If a
-new controlled input is added in `meetings/jobs.rs`, update the validator and
-its exact-launch test in the same change. Otherwise the Activity fails before
-the summarizer starts with an invalid environment key or value.
-
-### A user-written meeting title wins
-
-Persist whether the title came from the user. Automatic summary output can
-fill an untouched title, but it must not overwrite a title entered before or
-during the meeting. Do not infer authorship from the title text.
-
-### Graph filing copies the brief, not the transcript
-
-Scribe and Business Graph are separate app owners. File one existing `meeting`
-node with the Scribe meeting id as its stable source link. Keep the full
-transcript in Scribe and load it by exact id when the user follows the link.
-Project can be `None`; do not block automatic summary or inbox entry on missing
-metadata.
-
-### Classify staged audio before accepting terminal text
-
-A terminal transcript is not sufficient at restart until native recovery has
-classified every staged audio row. A successfully promoted tail means the
-terminal text is stale and must be repaired under the original capture
-generation. Do not move terminal reconciliation ahead of
-`finish_audio_recovery` or derive crash duration from the relaunch clock. The
-full authority order is owned by [meetings.md](meetings.md).
-
-### A collecting repair is an audio-retention hold
-
-The `collecting` repair row survives independent job exhaustion and prevents
-both retention and explicit source-audio deletion. Job state alone is not
-enough to decide that audio is disposable. In the opposite direction, a retry
-must prove committed source audio exists before starting a model or custom
-provider; otherwise it could replace a valid transcript with an empty repair.
-
-### Complete lifecycle and the default hook as one outbox transaction
-
-Do not transition to `Completed` and enqueue the default title/summary job in
-separate writes. The combined store operation is the crash boundary. Stop also
-uses the narrow hook-configuration projection: reading the broader platform
-projection would unnecessarily touch custom-STT credential authority.
-
-## Editor
-
-### Comment tags need four protection layers
-
-Pseudo-XML hiding depends on replacement decorations, atomic ranges,
-`changeFilter`, and boundary key handlers. Removing one makes hidden tag syntax
-editable or creates destructive cursor behavior.
-
-Every deliberate tag mutation must include
-`commentMutation.of(true)` so the change filter allows it.
-
-### Comment collapse is presentation state
-
-Minimize/expand state belongs to the CodeMirror widget draft map. Only comment
-text, replies, and `status` belong in the Markdown pseudo-XML.
-
-### Proposed edits must complete their Rust lifecycle
-
-The Editor diff is presentation; the native proposal coordinator is lifecycle
-authority. Proposal-backed accept/reject paths must report their outcome before
-dismissing the review. If reporting fails, leave the diff open with a visible
-retryable error.
-
-### Snapshot diff content before awaiting `proposal_respond`
-
-The proposals-changed broadcast follows `proposal_respond` and can reach the
-renderer before the invoke resolves. The listener deactivates the diff store,
-which resets its content to `''`. Accept/reject must capture the content to
-apply before the await; a post-await store read once replaced the whole
-document with an empty string.
-
-### Diff comment concealment must admit merge user events
-
-`commentConcealment()` protects hidden tag ranges with its own change filter,
-not the editor's. Merge chunk actions and history replay dispatch without the
-`commentMutation` annotation; the filter passes their `accept`, `revert`,
-`undo`, and `redo` user events. Reusing the editor's `commentChangeFilter` in
-a diff pane silently suppresses chunk resolution inside commented text.
-
-### Git index actions must match the reviewed snapshot and scope
-
-Git review is not proposal review. Keep `gitReview.js` state and its virtual
-tab separate from `diff.js` and the proposal coordinator. Stage and unstage
-must verify the native snapshot before they write the index. Stage must not run
-while the matching Editor buffer has unsaved text.
-
-An All diff is not enough when the same file has staged and unstaged changes.
-It can hide how the index differs from both HEAD and the working file. Require
-the Unstaged scope for Stage and the Staged scope for Unstage. These actions
-change only the index. Do not add Restore or hunk mutation without a separate
-working-file safety contract.
-
-Ask agent must resolve the exact selected launcher. Put the prepared review
-text on the PTY input path as `seedInput`, with no carriage return or newline.
-Passing it as a launcher argument submits work before the user can add a
-specific question.
-
-### Visible Editor tab indexes are projection indexes
-
-The embedded tab strip contains the active project's tabs plus global files
-and drafts. Its indexes are not indexes into `openFiles`; translate through
-each visible tab's `fileIndex`. Flush CodeMirror before changing the project
-projection. Bind a single-file diff to the file id, not only the project or
-path, or an accept action can change the wrong buffer. The full contract is in
-[editor-system.md](editor-system.md).
-
-### Ghost positions become stale on any edit
-
-A ghost completion is tied to one document offset. The extension cancels an
-active request or suggestion when another edit or pointer action changes that
-context. Preserve the request serial checks around async completion.
-
-The `++` trigger must not consume identifier-adjacent increment/C++ syntax or
-fire without a completion provider. Alt+Right partial acceptance must be
-checked before whole-suggestion ArrowRight acceptance, and Enter dismisses the
-ghost while remaining available to CodeMirror.
-
-### Auto is a policy, not a model id
-
-Inline AI keeps `aiInlineModel = "auto"` stored and resolves the first
-configured entry from `defaults.rewrite` for each request. Do not replace Auto
-with the first menu row or send the literal `auto` when no provider is
-configured.
-
-## Persistence and settings
-
-### Provider connections do not import another product's state
-
-Connection discovery reads only credentials that Mimir created in its own
-keychain service. Do not add fallback keychain services, data directories,
-desktop-app token files, or hidden migration probes. Granola access must stay
-on its documented public REST API. Connect and Disconnect must update the
-canonical tool registry in the same running app.
-
-Managed GitHub sync is the one explicit exception. It calls the installed
-`git` and `gh` commands and uses the active GitHub CLI login. Do not copy or
-store the GitHub token in Mimir.
-
-### Tracker enabled and armed are not synonyms
-
-Disabled is the privacy boundary: no sampling, permission request, AI,
-notification, launch-at-login, or Tracker menu-bar item. Armed is a collection
-state inside an enabled Tracker. Pausing must write an `OFF` transition without
-hiding the instrument or disabling login launch. Do not implement either state
-as a renderer-only visibility toggle.
-
-The explicit off-to-on transition may issue the native Accessibility prompt
-when window titles are enabled. An already-approved Mimir identity produces no
-repeat macOS prompt. Keep this native and lazy; never request it during ordinary
-disabled startup.
-
-The legacy Argus app and Tracker must never collect simultaneously. Argus
-import refuses while Tracker is enabled or the exact legacy executable is
-running; keep source files untouched and perform the complete import in one
-transaction.
-
-Turning window-title collection off must also remove the Accessibility
-dependency. App/bundle identity therefore comes from native `NSWorkspace`;
-window titles come from the native Accessibility API. Browser domains are a
-different opt-in Automation boundary and only normalized hosts may persist.
-
-### Use atomic writers for runtime state
-
-Launcher config, durable Activities, Routine state, app data, AI model
-configuration, session state, settings, and editor document writes use helpers
-in `src-tauri/src/persistence.rs`. Keep temporary files beside the target so
-rename is atomic on the same filesystem. Ordinary document replacement
-preserves an existing file's permissions.
-
-Loaders that quarantine corrupt JSON preserve the original bytes under a
-diagnostic filename before regenerating defaults.
-
-Editor session writes are serialized so a slow older snapshot cannot overwrite
-a newer close flush. Dirty named files include recovery content; a deliberate
-Don't Save writes only the disk path and omits discarded untitled drafts.
-Compare discarded files by stable path/draft identity because Pinia may expose
-reactive proxies rather than the raw confirmation object.
-
-Dock/system Quit is asynchronous: native `ExitRequested` emits
-`mimir://quit-requested`, the Editor completes dirty-document and session guards,
-and only then invokes `app_quit_confirmed`. Never allow the first exit request
-to bypass renderer confirmation.
-
-### Interface zoom must stay a capture-phase chord
-
-`workbenchZoom` is Tauri webview zoom, not CSS scaling; it needs the
-`core:webview:allow-set-webview-zoom` capability. WorkbenchApp handles
-Cmd+Plus/Minus/0 in its capture-phase keydown before the quick-open and modal
-guards and stops propagation, so the chords work everywhere and never reach
-xterm or CodeMirror. The standalone editor window (`?view=editor`) does not
-mount WorkbenchApp and binds the same chords in `useKeyboardShortcuts`; that
-duplicate binding is required, not accidental. The chords match only the
-platform-primary modifier so Ctrl+- keeps reaching macOS terminal readline.
-
-### Settings writes go through `settings.set`
-
-`src/stores/settings.js` deliberately persists only explicit `set(key, value)`
-calls. Direct assignments update reactive state but do not schedule the
-debounced disk write.
-
-### API key plaintext fallback is debug-only
-
-Production key writes use the OS keychain. Repository `.env` and
-`~/.mimir/keys.env` are read only by debug builds; do not make them the release
-storage path. Its atomic writer enforces owner-only permissions on Unix before
-secret bytes are written.
-
-### Localhost AI hosts work only in debug builds
-
-`validate_url_host` in `src-tauri/src/ai_transport.rs` accepts
-`localhost`/`127.0.0.1` only under `cfg(debug_assertions)`. A release build
-rejects the identical provider URL, so a local model endpoint that works in
-development fails after packaging.
-
-### Scribe local and custom routes are different trust classes
-
-“Local” means the managed in-process Whisper runtime and never a localhost
-URL. A custom Scribe endpoint must be public HTTPS in debug and release; Mimir
-upgrades it to WSS, DNS-validates and pins it, and releases its Keychain secret
-only for that exact configured endpoint. Do not reuse `ai_transport.rs` or add
-a localhost exception.
-
-The OpenAI Realtime route is selected by the `/v1/realtime` path plus a
-`gpt-*` model. It uses OpenAI's JSON event contract over two channel-specific
-WebSockets and no `mimir.stt.v1` subprotocol. Keep the user-facing and
-credential-bound endpoint canonical; the native OpenAI connector alone adds
-the wire-only `intent=transcription` query selector. Other advanced hosted
-URLs still use Mimir's versioned provider-neutral contract. Do not send the
-proprietary start/audio frames to OpenAI or treat arbitrary URLs as
-OpenAI-compatible.
-
-### Scribe permissions belong to the application bundle
-
-macOS TCC attributes a decision to the responsible application. The macOS
-`bun tauri dev` wrapper must keep launching the executable through its
-generated `rs.shoulde.mimir` app bundle. Running the executable inside the
-bundle is not sufficient when the launching terminal remains the responsible
-process. The debug bootstrap must use its guarded, same-PID responsibility
-handoff before Tauri creates threads; the same PID keeps Cargo's restart
-supervision intact. Treat a missing guard as a failed handoff even when
-`NSBundle` reports the Mimir bundle ID. A bare `cargo run` can observe a
-terminal or development host's permission; never project that as Mimir
-permission. System-audio process taps expose no public request or preflight
-API and can return zero-filled buffers without showing a dialog. Use the
-native TCC request only after a deliberate Record or settings action, and use
-its preflight entry point for the displayed state. Keep System Settings as the
-denied-state repair action. Use the bounded known-playback check to verify the
-signal path. The check must retain no samples and must identify
-development-host results. A development rebuild can change the code hash and
-cause one new TCC prompt; do not reuse the stale grant optimistically.
-
-### Scribe startup must not scale with meeting history
-
-The owner-only `~/.mimir`, meetings, and model roots are the startup access
-boundary. Repair targeted authority files when opened, but never recursively
-stat/chmod every audio chunk or model artifact at launch. Transcript pages are
-secondary hydration and cannot hold the Record action unavailable.
-
-The raw library rows intentionally contain no transcript text. Live and Review
-surfaces must use the store's selected-meeting projection, which overlays the
-bounded transcript page. Rendering a raw `meetings[]` row makes durable words
-appear to vanish even though SQLite remains correct.
-
-### Scribe mute is not pause
-
-Microphone mute writes aligned silence while system capture and the canonical
-clock continue. Do not introduce a paused lifecycle or remove muted frames:
-that makes microphone/system timestamps and reconnect replay disagree.
-
-Normal Stop can observe bounded callback skew between otherwise healthy Core
-Audio sources. Pad that scheduling tail without opening a transcript gap; a
-source divergence beyond the audited tolerance is still missing-audio evidence
-and must remain an explicit gap.
-
-### Capture and transcription must never share backpressure
-
-The native audio callback may only write into the bounded realtime ring.
-Durable one-second chunks are the handoff to local/custom STT. Do not await
-inference, sockets, renderer events, or SQLite from the callback, and do not
-let an STT failure stop or discard already captured audio.
-
-STT must enumerate committed chunk rows from SQLite, then revalidate the
-canonical path, metadata, length, digest, and no-follow open before disclosure.
-Never rediscover audio by walking a meeting directory. Recovery also stays
-bound to the exact route and model persisted from Start consent; current global
-settings are not authority for older audio.
-
-### Scribe events are invalidations, not transcript authority
-
-The renderer installs both meeting listeners and then reads a snapshot.
-Destroyed windows can miss events while native recording continues. Keep
-events small and revisioned; correctness belongs to SQLite plus snapshot/page
-reads, not event replay.
-
-Dock/system Quit has a native windowless guard for the same reason. If native
-meeting state cannot be inspected, restore the window and fail closed instead
-of allowing process exit.
-
-### Scribe library search never depends on the renderer snapshot
-
-The UI snapshot is deliberately capped. Agent search uses the private SQLite
-indexes for full reviewed titles, summaries, tags, and terminal transcript
-text, then loads only the bounded matching meetings. Keep the three-character
-trigram minimum: falling back to substring-scanning arbitrary 4 MiB summaries
-would hold the serialized meeting runtime for unbounded time. Content-file
-fingerprints repair interrupted index synchronization without rereading every
-summary on every launch.
-
-### Scribe repair output is private until one terminal reconciliation
-
-Never key transcription repair to `transcript_revision`; live or partial repair
-output changes that value and can mint competing jobs after a crash. The
-capture `runId` is the stable generation. Repair replays verified committed
-audio from sequence zero into private staging, emits no renderer transcript
-events, and atomically replaces the STT projection only after every staged
-segment is final. Preserve capture-owned gaps and revision history. If a
-terminal transcript is already authoritative, complete lifecycle or job
-redelivery locally and do not resolve credentials, load a model, reconnect a
-provider, or read audio again.
-
-### Silence is a valid terminal transcript
-
-A provider that drains with zero final segments and zero unresolved partials
-represents a silent or too-short meeting, not a repair loop. Commit an empty
-terminal revision and complete the meeting without starting title, summary, or
-graph work. Unresolved partials still fail closed.
-
-### Stop-time agents consume hostile transcript text
-
-Meeting speech can contain instructions, paths, JSON, or shell syntax. Hook
-launches must preserve exact argv, keep owned paths below the meeting root,
-reject symlinks, bound reads/output, and validate the complete output schema.
-Never interpolate transcript content into a command line or directly mutate
-the knowledge graph.
-
-## Files and platform
-
-### Cancel superseded content searches
-
-Workspace content searches have native tokens. Starting a new query must cancel
-the previous token and ignore late reports, including reports from a refreshed
-index generation.
-
-### File-open events are queue notifications
-
-Startup arguments, Finder/file-association events, and second-instance
-arguments append absolute decoded paths to one native queue. The renderer
-installs `mimir://open-files-pending` before draining `take_pending_files`; do not
-send paths only as an event payload or reintroduce the listen/drain race.
-
-### `PhysicalPosition` on a drag-drop event is not physical
-
-Tauri types the webview drag-drop position as `PhysicalPosition`, but
-`tauri-runtime-wry` passes wry's raw platform coordinates through unconverted,
-and wry uses each platform's own units: AppKit points on macOS and GTK widget
-coordinates on Linux (both logical), `ScreenToClient` device pixels on Windows.
-Dividing by `devicePixelRatio` therefore slides every macOS drop up and to the
-left by the display scale, which lands it on a different row — or a different
-pane — with no error. `useFileDrop.js` scales per platform and measures the
-window against the viewport so interface zoom is included; re-check
-`dropCoordinatesArePhysical()` when wry is upgraded.
-
-### HTML5 drag and drop is dead inside the webview
-
-The same Tauri drag-drop interception that delivers OS file drops (above)
-swallows the webview's native DnD, so `draggable` elements never receive
-`drop`. Disabling the interception would trade away folder drops from outside.
-Any in-app drag — Sidebar reorder, Files tree moves, Work board cards — must
-be pointer-event driven (`usePointerReorder.js`, `useFileTreeDrag.js`,
-`useBoardDrag.js`); do not reach for HTML5 DnD when adding a new one. Component
-tests must drive pointer events too: jsdom dispatches `dragstart`/`drop`
-happily, so an HTML5 handler passes its test and does nothing in the app.
-
-### External move recognition is identity-based and best-effort
-
-The workspace watcher pairs an external `mv` by (device, inode) across a
-structural rescan (`file_index.rs::paired_moves`) so open buffers and file
-favorites follow the file. That pairing needs the previous in-memory snapshot
-and an identity unique on both sides: it never fires for copy-then-delete,
-cross-volume moves, directories (not indexed), or on Windows. It is also
-debounced, so a save racing an external move can still land on the old path in
-that window. UI and registry-tool mutations therefore keep their synchronous
-reconciliation (`useFileMutations.js`, `toolRuntime.js`) — do not move them
-onto the watcher path, and do not weaken the uniqueness rule to catch more
-moves: a wrong pair silently rebinds an open buffer to the wrong file.
-
-### Guard platform-only window APIs
-
-macOS titlebar, traffic-light, and native spellcheck APIs require
-`#[cfg(target_os = "macos")]`. Linux CI compiles the Rust app, so unguarded
-platform calls break verification. Never retain a raw native-window pointer
-across an async delay; a closed window makes it invalid.
-
-### Keep automatic Activity titles on the shared input path
-
-Do not parse provider output or add one title hook per CLI. All supported
-agents already send user input through `TerminalActivity`. The prompt tracker
-must observe that successful write without changing its bytes, must keep the
-raw prompt in memory only until submit, and must sanitize the bounded title
-before persistence. Native `titleSource` arbitration is authoritative; a
-renderer race must never replace a manual title. `xterm.onData` also carries
-terminal-generated replies. Strip complete and split OSC/DCS/APC control
-strings before they reach the prompt buffer, and retain incomplete CSI, SS3,
-and C1 sequences until their final byte. Color replies such as OSC 10 and 11
-are protocol data, not user text.
-
-### Keep product identity synchronized
-
-Version must match in `package.json`, `src-tauri/Cargo.toml`, and
-`src-tauri/tauri.conf.json`. The package/crate name is `mimir`; the
-desktop product name is `Mimir`.
+Only current, non-obvious constraints belong here. Known defects belong in
+[issues.md](issues.md).
+
+## Terminal and Activities
+
+- Load WebGL after `terminal.open()`; context loss falls back to the DOM
+  renderer and is not a terminal failure.
+- Unicode 11 requires xterm `allowProposedApi: true`.
+- Advance terminal sequence only from the asynchronous `Terminal.write()`
+  callback. Output and resize events share one ordered queue.
+- Open xterm before replay and serialize initial attachment with resumed
+  `runId` changes.
+- Wait for fonts before measurement and keep the pixel-snap transform around
+  WebGL. Spawn with the last fitted PTY size to avoid zsh's stray `%` line.
+- Commands are exact argv arrays, never shell strings.
+- Durable Activities retain records and terminal state, not live processes.
+- Live Activities cannot be archived or cleared. Do not enforce this only in UI.
+- `updatedAt` changes during output and is not a stable Sidebar sort key.
+- `timezone = "local"` normally becomes UTC in a macOS GUI process; store an
+  explicit IANA zone for local schedules.
+
+## UI and input
+
+- Keep the global button reset inside `@layer base`.
+- Editor toolbar actions use `mousedown.prevent` to retain selection.
+- WKWebView does not focus buttons on click. Focus routing must retain the last
+  pane from capture-phase pointer input.
+- Container keyboard handlers must ignore editable descendants and IME input.
+- Do not commit inline edits on blur when the window lost focus or the field
+  became hidden.
+- Interface zoom is native webview zoom and uses capture-phase shortcuts.
+- Tauri intercepts OS file drops, so in-app drag interactions use pointer
+  events, not HTML5 drag-and-drop.
+
+## IPC, tools, and settings
+
+- Install renderer listeners before starting a native producer, then read its
+  authoritative snapshot. Events are notifications, not durable state.
+- Keep Codex's injected connection name `mimir_workbench`.
+- Public agent tools are the explicit underscore-name allowlist. Internal
+  dotted registry names are not public tools.
+- App tool ownership is `(appId, instanceId)` and ends on unmount.
+- Embedded local apps must use the validated `app://` route, not a file URL.
+- Settings persist only through `settings.set`; direct assignment is reactive
+  but not durable.
+- Runtime state uses `persistence.rs` atomic writers. Corrupt JSON is preserved
+  before defaults replace it, and asynchronous snapshots must be serialized.
+- Native Quit waits for the renderer's dirty-document and session guards.
+- Release credentials use Keychain. Plaintext `.env` and `keys.env` fallbacks
+  are debug-only.
+- Connections do not import another product's credentials. Managed Git is the
+  exception: it uses installed `git` and the active GitHub CLI login.
+
+## Graph and Git
+
+- Managed Git fetches do not close a young local batch.
+- Project auto-commit exclusions apply to tracked deletions by inspecting the
+  `HEAD` blob, not only current worktree bytes.
+- An excluded local binary or oversized file survives an unrelated incoming
+  change. If the remote changed that path too, stop before moving `HEAD`.
+- Unpublished markers are branch-bound. All mutating Git work shares one lock
+  per repository.
+- Sync errors are durable. Install the listener before activation sync and
+  queue the error behind any diagnostic already visible.
+- Legacy issue Project and assignee values can be labels, not node ids.
+- Validate only relations introduced by an edit; existing edges can point
+  outside mounted scopes.
+- A rejected Graph save must clear queued navigation so the inspector remains
+  escapable.
+
+## Editor and files
+
+- Hidden comment tags require decorations, atomic ranges, a change filter, and
+  boundary key handlers. Deliberate tag mutations carry `commentMutation`.
+- Capture diff content before awaiting `proposal_respond`; its event can clear
+  the renderer store before the invoke resolves.
+- Git stage and unstage verify the reviewed snapshot and never act on an
+  unsaved matching Editor buffer.
+- Visible Editor tab indexes are projections; translate through stable file ids.
+- Ghost completion offsets become invalid after any edit or pointer move.
+- Cancel superseded native content searches and ignore late generations.
+- File-open events append to a native queue; listen before draining it.
+- Tauri's macOS drop coordinates are already logical. Do not divide them by
+  device pixel ratio without rechecking wry behavior.
+- External move pairing by filesystem identity is conservative and best effort;
+  direct UI mutations still need synchronous Editor reconciliation.
+
+## Scribe and platform
+
+- Microphone mute writes aligned silence; it is not pause.
+- Capture callbacks only feed the realtime ring. Transcription consumes
+  committed chunks and cannot backpressure capture.
+- Scribe events invalidate snapshots; SQLite remains authority.
+- Recovery keeps the transcription route and model recorded at Start.
+- Repair is keyed by capture `runId`, stages output privately, and replaces the
+  transcript only after a complete terminal pass.
+- A silent terminal transcript is valid and does not start summary work.
+- A user-written meeting title always wins over an automatic title.
+- Meeting notes and transcripts are untrusted data, never commands.
+- The summary lifecycle and default follow-up job commit in one transaction.
+- An unresolved repair holds source audio even after job exhaustion.
+- Local Scribe means in-process Whisper. Custom endpoints are public HTTPS and
+  use endpoint-bound Keychain credentials.
+- Scribe permission state belongs to the responsible Mimir app bundle. A bare
+  terminal launch is not release evidence.
+- Startup must not walk all historical audio or model files.
+- Platform-only window and capture APIs require compile-time guards.
+- Product version must match `package.json`, Cargo, and Tauri configuration.

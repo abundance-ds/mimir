@@ -2,7 +2,7 @@ export const SYSTEM_SANS_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe
 export const SYSTEM_MONO_FONT_STACK = 'ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace'
 export const COMMIT_MONO_FONT_STACK = '"Commit Mono", ' + SYSTEM_MONO_FONT_STACK
 
-export const EDITOR_LINE_HEIGHT_RATIO = 1.35
+export const EDITOR_LINE_HEIGHT_RATIO = 1.45
 export const EDITOR_LIGHT_FONT_WEIGHT = 450
 export const EDITOR_DARK_FONT_WEIGHT = 400
 

@@ -371,13 +371,10 @@ pub fn workspace_project_file_resolve(
     fallback_workspace: Option<String>,
 ) -> Result<Option<String>, String> {
     if scope_id.as_deref() == Some("team:main") {
-        if let Some(team_root) = crate::managed_git::team_scope_root()? {
-            let relative = normalized_relative_path(&relative_path)?;
-            let candidate = team_root.join(relative);
-            if candidate.exists() {
-                return Ok(Some(candidate.to_string_lossy().into_owned()));
-            }
-        }
+        return team_file_resolve_at(
+            crate::managed_git::team_scope_root()?.as_deref(),
+            &relative_path,
+        );
     }
     workspace_project_file_resolve_at(
         &registry_path()?,
@@ -385,6 +382,31 @@ pub fn workspace_project_file_resolve(
         &relative_path,
         fallback_workspace.as_deref(),
     )
+}
+
+fn team_file_resolve_at(
+    team_root: Option<&Path>,
+    relative_path: &str,
+) -> Result<Option<String>, String> {
+    let relative = normalized_relative_path(relative_path)?;
+    let Some(root) = team_root else {
+        return Ok(None);
+    };
+    let candidate = root.join(relative);
+    if !candidate.exists() {
+        return Ok(None);
+    }
+    let canonical_root = fs::canonicalize(root)
+        .map_err(|error| format!("Could not resolve the Team location: {error}"))?;
+    let canonical_candidate = fs::canonicalize(&candidate)
+        .map_err(|error| format!("Could not resolve the Team file: {error}"))?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err(format!(
+            "Path escapes the Team location: {}",
+            relative_path.trim()
+        ));
+    }
+    Ok(Some(canonical_candidate.to_string_lossy().into_owned()))
 }
 
 fn normalized_relative_path(value: &str) -> Result<&Path, String> {
@@ -668,6 +690,29 @@ mod tests {
             workspace_project_file_resolve_at(&registry, None, "missing.md", None).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn team_file_resolve_never_falls_through_to_a_project_file() {
+        let root = tempdir().unwrap();
+        let team = root.path().join("team");
+        let project = root.path().join("project");
+        fs::create_dir_all(team.join("resources")).unwrap();
+        fs::create_dir_all(project.join("resources")).unwrap();
+        fs::write(project.join("resources/template.html"), "project").unwrap();
+
+        assert_eq!(
+            team_file_resolve_at(Some(&team), "resources/template.html").unwrap(),
+            None
+        );
+        assert!(workspace_project_file_resolve_at(
+            &root.path().join("workspaces.json"),
+            None,
+            "resources/template.html",
+            Some(project.to_str().unwrap()),
+        )
+        .unwrap()
+        .is_some());
     }
 
     #[test]
