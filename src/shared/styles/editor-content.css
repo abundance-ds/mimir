@@ -3,6 +3,7 @@
 :root {
   --ink: var(--color-ink);
   --ink-strong: color-mix(in srgb, var(--color-ink) 65%, var(--syntax-keyword));
+  --ink-emphasis: color-mix(in srgb, var(--color-ink) 80%, var(--syntax-keyword));
   --editor-heading-1: var(--syntax-keyword);
   --editor-paper: var(--color-surface);
   --accent: var(--color-accent);

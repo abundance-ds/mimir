@@ -157,7 +157,7 @@ export const editorHighlightStyle = HighlightStyle.define([
   { tag: t.heading2, fontWeight: '650', fontSize: '1.15em', color: 'var(--color-ink)' },
   { tag: t.heading3, fontWeight: '560', fontSize: '1.05em', color: 'var(--color-ink-3)' },
   { tag: [t.strong], fontWeight: '700', color: 'var(--ink-strong)' },
-  { tag: [t.emphasis], fontStyle: 'italic' },
+  { tag: [t.emphasis], fontStyle: 'italic', color: 'var(--ink-emphasis)' },
   { tag: [t.monospace], fontFamily: 'var(--font-mono)', backgroundColor: 'var(--inline-code-bg)', color: 'var(--code)' },
   { tag: [t.link], color: 'var(--color-accent)', textDecoration: 'underline', textUnderlineOffset: '3px' },
   { tag: [t.quote], color: 'var(--quote)', fontStyle: 'italic' },

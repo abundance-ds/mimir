@@ -527,6 +527,7 @@ const livePreviewTheme = EditorView.baseTheme({
   },
   '.cm-lp-italic': {
     fontStyle: 'italic',
+    color: 'var(--ink-emphasis)',
   },
   '.cm-lp-strike': {
     textDecoration: 'line-through',
