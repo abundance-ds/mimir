@@ -157,7 +157,7 @@ describe('TrackerApp', () => {
     const wrapper = mountTracker()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Classifying · Ghostty')
+    expect(wrapper.get('[data-tracker-app]').attributes('data-tracker-mode')).toBe('armed')
     wrapper.unmount()
   })
 

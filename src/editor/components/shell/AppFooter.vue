@@ -1,5 +1,5 @@
 <template>
-  <div class="app-footer h-[26px] shrink-0 grid grid-cols-[minmax(0,1fr)_auto] items-center px-[28px] bg-chrome font-mono text-[10px] text-ink-3 tracking-[0.4px] whitespace-nowrap overflow-visible">
+  <div data-editor-footer class="app-footer pane-footer grid grid-cols-[minmax(0,1fr)_auto] items-center px-[28px] tracking-[0.4px] overflow-visible">
     <!-- Left: stats -->
     <div class="footer-stats flex items-center justify-self-start relative min-w-0">
       <div class="relative flex items-center hover:bg-chrome-mid rounded" @click.stop="statsOpen = !statsOpen">

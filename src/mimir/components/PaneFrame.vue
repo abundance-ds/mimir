@@ -8,7 +8,7 @@
     >
       <header
         :data-pane-header="pane"
-        class="drag-region flex h-11 shrink-0 items-center gap-2 border-b border-rule bg-chrome-mid pr-2 text-ink"
+        class="pane-header drag-region gap-2 pr-2 text-ink"
         :class="workbench.paneLayout.sidebar.state === 'rail' ? 'pl-6' : 'pl-2'"
         data-tauri-drag-region="deep"
       >
@@ -18,7 +18,7 @@
             type="button"
             data-pane-action="restore-sidebar"
             title="Restore sidebar"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink"
+            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
             @click="restoreSidebar"
           >
             <IconLayoutSidebarLeftExpand :size="15" :stroke-width="1.8" />
@@ -27,7 +27,7 @@
             type="button"
             data-pane-action="previous"
             title="Previous activity"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink disabled:opacity-30"
+            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-30"
             :disabled="!workbench.canGoPreviousActivity"
             @click="workbench.previousActivity()"
           >
@@ -37,7 +37,7 @@
             type="button"
             data-pane-action="next"
             title="Next activity"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink disabled:opacity-30"
+            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-30"
             :disabled="!workbench.canGoNextActivity"
             @click="workbench.nextActivity()"
           >
@@ -47,8 +47,8 @@
 
         <div class="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
           <div class="truncate text-[12px] font-semibold leading-none">{{ title }}</div>
-          <div v-if="meta" class="truncate font-mono text-[9px] uppercase tracking-[0.08em] text-ink-4">
-            {{ meta }}
+          <div v-if="metaLine" class="truncate font-mono text-[9px] uppercase tracking-[0.08em] text-ink-4">
+            {{ metaLine }}
           </div>
         </div>
 
@@ -56,6 +56,7 @@
           :data-pane-actions="pane"
           class="no-drag flex shrink-0 items-center"
         >
+          <span ref="actionsHost" class="contents" />
           <slot name="actions" />
         </div>
 
@@ -63,8 +64,8 @@
           type="button"
           data-pane-action="expand"
           :title="activityExpanded ? 'Restore split' : 'Expand Activity'"
-          class="no-drag grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink"
-          :class="{ 'bg-chrome text-ink': activityExpanded }"
+          class="no-drag grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
+          :class="{ 'bg-chrome-mid text-ink': activityExpanded }"
           @click="workbench.setActivityExpanded(!activityExpanded)"
         >
           <IconArrowsMinimize v-if="activityExpanded" :size="15" :stroke-width="1.8" />
@@ -76,7 +77,7 @@
           data-pane-action="collapse"
           :data-collapse-direction="pane === 'activity' ? 'left' : 'right'"
           :title="`Collapse ${title}`"
-          class="no-drag grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink"
+          class="no-drag grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
           @click="collapsePane"
         >
           <IconArrowBarToLeft v-if="pane === 'activity'" :size="15" :stroke-width="1.8" />
@@ -103,6 +104,7 @@ import {
   IconLayoutSidebarLeftExpand,
 } from '@tabler/icons-vue'
 import { useWorkbenchStore } from '../../stores/workbench.js'
+import { providePaneChrome } from '../composables/usePaneChrome.js'
 
 const props = defineProps({
   pane: {
@@ -115,6 +117,8 @@ const props = defineProps({
 })
 
 const workbench = useWorkbenchStore()
+const { actionsHost, meta: contributedMeta } = providePaneChrome()
+const metaLine = computed(() => contributedMeta.value || props.meta)
 const collapsed = computed(() => workbench.paneLayout[props.pane].state === 'rail')
 const activityExpanded = computed(
   () => workbench.paneLayout.activity.state === 'expanded'

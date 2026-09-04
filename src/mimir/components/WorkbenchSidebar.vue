@@ -7,7 +7,7 @@
   >
     <div
       data-sidebar-header
-      class="drag-region flex h-11 shrink-0 items-center justify-end border-b border-rule px-2"
+      class="pane-header drag-region justify-end px-2"
       data-tauri-drag-region="deep"
     >
       <button
@@ -37,13 +37,6 @@
     />
 
     <nav class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-1" aria-label="Tools, chats, and activity history">
-      <div
-        class="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.14em] text-ink-3"
-        :class="{ invisible: collapsed }"
-        :aria-hidden="collapsed"
-      >
-        Tools
-      </div>
       <SidebarRow
         v-for="tool in tools"
         :key="`tool:${tool.id}`"
@@ -506,14 +499,14 @@
 
     <footer
       data-sidebar-footer
-      class="shrink-0 border-t border-rule-light px-3 py-2"
+      class="h-8 shrink-0 border-t border-rule-light"
     >
       <button
         type="button"
         data-sidebar-settings
         title="Settings"
         aria-label="Settings"
-        class="group flex h-8 w-full items-center text-left text-[12px] text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class="group flex h-full w-full items-center px-3 text-left text-[12px] text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
         @click="$emit('settings')"
       >
         <span class="grid size-7 shrink-0 place-items-center text-ink-3 group-hover:text-ink">

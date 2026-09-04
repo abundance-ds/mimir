@@ -25,6 +25,17 @@ describe('TabStrip', () => {
     expect(tabs[1].text()).toContain('notes.md')
   })
 
+  it('keeps file tabs visible and bottom-aligned in the full editor header', () => {
+    const w = mountStrip({ activeTab: 0 })
+    const tablist = w.get('[role="tablist"]')
+    const scrollRegion = w.get('.tab-scroll')
+
+    expect(tablist.classes()).toEqual(expect.arrayContaining(['h-full', 'items-end']))
+    expect(scrollRegion.classes()).toEqual(expect.arrayContaining(['h-full', 'items-end']))
+    expect(fileTabs(w)[0].classes()).toContain('tab-active')
+    expect(fileTabs(w)[0].attributes('aria-label')).toBe('doc.md')
+  })
+
   it('keeps the identifying end of a long tab name separate from its flexible start', () => {
     const name = 'datei mit ein paar charts und nummer 1.md'
     const w = mountStrip({ tabs: [{ id: 'long-tab', name, dirty: false }] })
@@ -150,6 +161,8 @@ describe('TabStrip', () => {
     const w = mountStrip()
     const plusBtn = w.find('button[aria-label="New tab"]')
     expect(plusBtn.exists()).toBe(true)
+    expect(plusBtn.classes()).toContain('h-[28px]')
+    expect(plusBtn.classes()).not.toContain('my-auto')
     await plusBtn.trigger('click')
     expect(w.emitted('add-tab')).toBeTruthy()
   })

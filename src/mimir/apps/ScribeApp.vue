@@ -5,7 +5,7 @@
     class="flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
   >
     <template v-if="meetings.activeMeeting">
-      <header data-scribe-ledger class="scribe-transport" role="status" :title="captureStatus">
+      <header data-scribe-ledger class="scribe-transport pane-bar" role="status" :title="captureStatus">
         <span class="size-2 shrink-0 rounded-full bg-rem" aria-hidden="true" />
         <span data-scribe-recording-label class="font-mono text-[11px] tabular-nums">
           {{ meetings.recording ? 'Recording' : 'Finalizing' }} {{ formattedElapsed }}
@@ -128,7 +128,7 @@
     </template>
 
     <template v-else-if="detailMeeting">
-      <header data-scribe-detail-header class="scribe-bar">
+      <header data-scribe-detail-header class="scribe-bar pane-bar">
         <button type="button" class="scribe-quiet-button" title="Meetings" @click="closeDetail">
           <IconChevronLeft :size="14" />
           <span class="scribe-responsive-label">Meetings</span>
@@ -1798,18 +1798,8 @@ function safeFailureDetail(value) {
 <style scoped>
 .scribe-bar,
 .scribe-transport {
-  display: flex;
-  min-height: 40px;
-  flex-shrink: 0;
-  align-items: center;
   gap: 6px;
-  border-bottom: 1px solid var(--color-rule);
-  padding: 0 12px;
-}
-
-.scribe-transport {
-  min-height: 42px;
-  background: var(--color-chrome);
+  padding-inline: 12px;
 }
 
 .scribe-save-state {

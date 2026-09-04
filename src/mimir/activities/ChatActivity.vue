@@ -578,9 +578,10 @@
 
         <form
           data-chat-composer
-          class="shrink-0 border-t border-rule bg-chrome-high px-3 pb-1 pt-2"
+          class="pane-footer-input"
           @submit.prevent="submitMessage"
         >
+          <div class="px-3 pt-2 pb-1">
           <div
             class="overflow-hidden rounded-[3px] border border-rule bg-surface transition-colors focus-within:border-accent"
             :class="{ 'bg-chrome': !chat.connected }"
@@ -671,6 +672,7 @@
             <span class="ml-auto shrink-0 font-mono text-[9px] text-ink-4">
               Enter to send · Shift+Enter for a new line
             </span>
+          </div>
           </div>
         </form>
       </template>

@@ -4,6 +4,7 @@
 @import "./editor-content.css";
 @import "./themes.css";
 @import "./diff.css";
+@import "./pane-chrome.css";
 
 @theme {
   --color-ink:         #1a1a18;

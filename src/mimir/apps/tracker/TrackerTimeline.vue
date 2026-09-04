@@ -1,6 +1,6 @@
 <template>
   <section data-tracker-timeline class="border-b border-rule bg-surface">
-    <header class="flex h-8 items-center border-b border-rule-light px-3">
+    <header class="flex h-7 items-center border-b border-rule-light px-3">
       <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">
         Exact timeline
       </h2>

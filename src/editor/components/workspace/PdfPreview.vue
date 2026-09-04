@@ -1,6 +1,6 @@
 <template>
   <section class="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-chrome-high text-ink">
-    <header class="flex h-10 shrink-0 items-center gap-1 border-b border-rule bg-chrome-high px-2">
+    <header data-pdf-toolbar class="pane-bar gap-1">
       <button
         type="button"
         title="Previous page"

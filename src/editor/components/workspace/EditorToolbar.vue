@@ -2,7 +2,7 @@
   <div
     ref="toolbarRef"
     data-editor-toolbar
-    class="editor-toolbar h-[30px] shrink-0 border-b border-rule-light flex items-center gap-1.5 px-[14px] whitespace-nowrap overflow-hidden"
+    class="editor-toolbar pane-bar gap-1.5 whitespace-nowrap overflow-hidden"
   >
     <div class="flex shrink-0 gap-0.5 items-center">
       <button class="toolbar-btn" title="Heading 1" :class="isActive('heading-1')" @mousedown.prevent @click="emit('format', 'heading-1')">H1</button>
@@ -145,7 +145,6 @@ watch(
 
 <style scoped>
 .editor-toolbar {
-  background: var(--color-chrome-mid);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;

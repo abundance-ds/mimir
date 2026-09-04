@@ -6,7 +6,7 @@
     <section
       v-if="showRollover"
       data-today-rollover
-      class="shrink-0 border-b border-rule bg-chrome-low px-4 py-3"
+      class="shrink-0 border-b border-rule bg-chrome-high px-4 py-3"
     >
       <div class="flex items-center gap-3">
         <IconHistory :size="15" :stroke-width="1.6" class="shrink-0 text-ink-3" />
@@ -118,7 +118,7 @@
 
     <footer
       data-today-statusbar
-      class="flex h-7 shrink-0 items-center border-t border-rule bg-chrome-high px-2"
+      class="pane-footer px-2"
     >
       <nav
         data-today-date-nav

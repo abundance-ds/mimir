@@ -6,7 +6,7 @@
     :aria-busy="loading"
     @keydown.esc.prevent.stop="$emit('close')"
   >
-    <header class="flex h-10 shrink-0 items-center gap-2 border-b border-rule bg-chrome-high px-2">
+    <header data-file-history-toolbar class="pane-bar gap-2">
       <button
         ref="backButton"
         type="button"

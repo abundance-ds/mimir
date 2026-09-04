@@ -193,7 +193,6 @@ describe('RoutinesActivity', () => {
     expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('Review recent changes')
     expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('30 9 * * 1-5')
     expect(wrapper.get('[data-routine-detail="morning"]').text()).toContain('Run Once')
-    expect(wrapper.get('[data-routines-summary]').text()).toContain('1 armed')
   })
 
   it('shows manual, paused, running, unavailable, and failed runtime states', async () => {
@@ -220,7 +219,6 @@ describe('RoutinesActivity', () => {
     expect(wrapper.get('[data-routine-run="missing"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-routine-row="sweep"]').text()).toContain('Manual')
     expect(wrapper.get('[data-routine-run="sweep"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('[data-routines-summary]').text()).toContain('1 manual')
     await wrapper.get('[data-routine-select="sweep"]').trigger('click')
     expect(wrapper.get('[data-routine-detail="sweep"]').text()).toContain('Manual — runs on demand')
     expect(wrapper.get('[data-routine-detail="sweep"]').text()).toContain('Launcher default')

@@ -111,7 +111,7 @@ describe('WorkbenchSidebar', () => {
     vi.useRealTimers()
   })
 
-  it('renders Tools, one flat Chats list, and live Activities without launcher rows', () => {
+  it('renders tool rows without a redundant group label, one flat Chats list, and live Activities', () => {
     const wrapper = render()
     const rows = wrapper.findAll('[data-sidebar-row]').map((row) => row.attributes('data-sidebar-row'))
 
@@ -124,7 +124,7 @@ describe('WorkbenchSidebar', () => {
       'activity:terminal:two',
     ])
     expect(wrapper.text()).toContain('mimir')
-    expect(wrapper.text()).toContain('Tools')
+    expect(wrapper.text()).not.toContain('Tools')
     expect(wrapper.text()).not.toContain('New activity')
     expect(wrapper.get('[data-activity-working="agent:one"]').exists()).toBe(true)
     expect(wrapper.find('[data-activity-working="terminal:two"]').exists()).toBe(false)

@@ -1,11 +1,8 @@
 <template>
   <section data-tracker-classifications class="flex min-h-0 flex-1 flex-col bg-surface">
-    <header class="flex min-h-10 flex-wrap items-center gap-2 border-b border-rule px-3 py-1.5">
-      <div>
-        <h2 class="text-[11px] font-semibold text-ink">Classification rules</h2>
-        <p class="text-[9px] text-ink-4">Pending apps appear immediately; manual rules always win and repair prior blocks.</p>
-      </div>
-      <label class="ml-auto flex h-7 min-w-[160px] max-w-[280px] flex-1 items-center border border-rule bg-surface px-2 focus-within:border-accent">
+    <header class="flex h-7 items-center gap-2 border-b border-rule-light px-3">
+      <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Classification rules</h2>
+      <label class="ml-auto flex h-6 min-w-[160px] max-w-[280px] flex-1 items-center border border-rule bg-surface px-2 focus-within:border-accent">
         <IconSearch :size="11" class="text-ink-4" />
         <input
           v-model="query"

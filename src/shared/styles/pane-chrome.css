@@ -1,0 +1,73 @@
+/*
+ * Pane chrome: the five bar kinds a pane may show. Heights are fixed and
+ * include the one-pixel rule. Backgrounds use the shell chrome stack only;
+ * `surface` is never a bar. See docs/design-system.md, "Pane chrome".
+ */
+@layer components {
+  .pane-header {
+    display: flex;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    border-bottom: 1px solid var(--color-rule);
+    background: var(--color-chrome);
+  }
+
+  .pane-bar {
+    display: flex;
+    height: 36px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--color-rule);
+    background: var(--color-chrome-high);
+    padding: 0 12px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .pane-subbar {
+    display: flex;
+    height: 28px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--color-rule-light);
+    background: var(--color-chrome-high);
+    padding: 0 12px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .pane-footer {
+    display: flex;
+    height: 26px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid var(--color-rule);
+    background: var(--color-chrome);
+    padding: 0 10px;
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .pane-footer-input {
+    flex: 0 0 auto;
+    min-height: 36px;
+    border-top: 1px solid var(--color-rule);
+    background: var(--color-chrome-high);
+  }
+
+  .dialog-header {
+    display: flex;
+    height: 36px;
+    flex: 0 0 auto;
+    align-items: center;
+    border-bottom: 1px solid var(--color-rule);
+    background: var(--color-chrome-high);
+    padding: 0 16px;
+  }
+}

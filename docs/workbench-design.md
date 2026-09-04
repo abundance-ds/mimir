@@ -16,6 +16,10 @@ must never replace or disturb the mounted Editor document and review state.
   desktop widths survive compact responsive layouts.
 - Pane controls live in the pane header. Restore and collapse remain available
   from adjacent expanded panes so every state is recoverable.
+- Activities and apps lift their status line and primary actions into the
+  pane header through `usePaneChrome` instead of drawing a second header.
+  Bar heights and layers are fixed in [design-system.md](design-system.md),
+  "Pane chrome".
 
 ## Sidebar and Activities
 

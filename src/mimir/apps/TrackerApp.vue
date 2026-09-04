@@ -6,102 +6,92 @@
     class="tracker-app flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
     tabindex="-1"
   >
-    <header class="shrink-0 border-b border-rule bg-chrome-high">
-      <div class="flex min-h-10 items-center gap-2 px-3">
-        <div class="flex min-w-0 items-center gap-2">
-          <span class="status-mark size-2 shrink-0 border border-rule" :class="`status-${tracker.mode}`" />
-          <div class="min-w-0">
-            <h1 class="truncate text-[11px] font-semibold">Tracker</h1>
-            <p class="truncate font-mono text-[9px] text-ink-4">{{ statusLine }}</p>
-          </div>
-        </div>
-
-        <div v-if="tracker.enabled" class="ml-auto flex items-center">
-          <button
-            type="button"
-            data-tracker-pause
-            class="h-7 border border-rule px-2 text-[9px] font-semibold text-ink-2 hover:border-accent/50 hover:bg-accent-soft"
-            @click="toggleArmed"
-          >
-            {{ tracker.armed ? 'Pause' : 'Resume' }}
-          </button>
-          <button
-            v-if="tracker.mode !== 'break'"
-            type="button"
-            data-tracker-start-break
-            class="-ml-px h-7 border border-rule px-2 text-[9px] font-semibold text-ink-2 hover:border-accent/50 hover:bg-accent-soft"
-            @click="startBreak(20)"
-          >
-            Break 20m
-          </button>
-          <button
-            v-else
-            type="button"
-            data-tracker-end-break
-            class="-ml-px h-7 border border-accent/40 bg-accent-soft px-2 text-[9px] font-semibold text-accent hover:bg-chrome-mid"
-            @click="endBreak"
-          >
-            End break · {{ duration(tracker.status.breakRemainingSeconds || 0) }}
-          </button>
-          <button
-            type="button"
-            title="Refresh tracker data"
-            aria-label="Refresh tracker data"
-            :disabled="loading"
-            class="ml-1 grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
-            @click="refreshAll"
-          >
-            <IconRefresh :size="13" :class="{ 'motion-safe:animate-spin': loading }" />
-          </button>
-        </div>
+    <Teleport :to="actionsHost" :disabled="!actionsHost">
+      <div v-if="tracker.enabled" :class="actionsHost ? 'contents' : 'pane-bar'">
+        <button
+          type="button"
+          data-tracker-pause
+          class="no-drag h-7 border border-rule px-2 text-[9px] font-semibold text-ink-2 hover:bg-chrome-mid hover:text-ink"
+          @click="toggleArmed"
+        >
+          {{ tracker.armed ? 'Pause' : 'Resume' }}
+        </button>
+        <button
+          v-if="tracker.mode !== 'break'"
+          type="button"
+          data-tracker-start-break
+          class="no-drag -ml-px h-7 border border-rule px-2 text-[9px] font-semibold text-ink-2 hover:bg-chrome-mid hover:text-ink"
+          @click="startBreak(20)"
+        >
+          Break 20m
+        </button>
+        <button
+          v-else
+          type="button"
+          data-tracker-end-break
+          class="no-drag -ml-px h-7 border border-accent/40 bg-accent-soft px-2 text-[9px] font-semibold text-accent hover:bg-chrome-mid hover:text-ink"
+          @click="endBreak"
+        >
+          End break · {{ duration(tracker.status.breakRemainingSeconds || 0) }}
+        </button>
+        <button
+          type="button"
+          title="Refresh tracker data"
+          aria-label="Refresh tracker data"
+          :disabled="loading"
+          class="no-drag grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
+          @click="refreshAll"
+        >
+          <IconRefresh :size="13" :class="{ 'motion-safe:animate-spin': loading }" />
+        </button>
       </div>
+    </Teleport>
 
-      <div v-if="tracker.enabled" class="flex min-h-9 flex-wrap items-center border-t border-rule-light">
-        <nav class="flex self-stretch" aria-label="Tracker range">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            type="button"
-            :data-tracker-tab="tab.id"
-            :aria-current="selectedTab === tab.id ? 'page' : undefined"
-            class="min-w-[52px] border-r border-rule-light px-3 font-mono text-[9px] font-semibold text-ink-3 hover:bg-chrome-mid hover:text-ink"
-            :class="{ 'bg-surface text-accent': selectedTab === tab.id }"
-            @click="selectTab(tab.id)"
-          >
-            {{ tab.label }}
-          </button>
-        </nav>
+    <div v-if="tracker.enabled" data-tracker-rangebar class="pane-bar">
+      <nav class="flex" aria-label="Tracker range">
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          type="button"
+          :data-tracker-tab="tab.id"
+          :aria-current="selectedTab === tab.id ? 'page' : undefined"
+          class="px-3 font-mono text-[10px] font-semibold text-ink-3 hover:bg-chrome-mid hover:text-ink"
+          :class="{ 'bg-surface text-accent': selectedTab === tab.id }"
+          @click="selectTab(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
 
-        <div v-if="selectedTab !== 'classifications'" class="ml-auto flex h-7 items-center pr-2">
-          <button
-            v-if="selectedTab !== 'all'"
-            type="button"
-            aria-label="Previous range"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
-            @click="moveRange(-1)"
-          >
-            <IconChevronLeft :size="13" />
-          </button>
-          <button
-            type="button"
-            data-tracker-range-label
-            class="h-7 min-w-[120px] px-2 text-center font-mono text-[9px] text-ink-2 hover:bg-chrome-mid"
-            @click="goToday"
-          >
-            {{ rangeTitle }}
-          </button>
-          <button
-            v-if="selectedTab !== 'all'"
-            type="button"
-            aria-label="Next range"
-            class="grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
-            @click="moveRange(1)"
-          >
-            <IconChevronRight :size="13" />
-          </button>
-        </div>
+      <div v-if="selectedTab !== 'classifications'" class="ml-auto flex items-center">
+        <button
+          v-if="selectedTab !== 'all'"
+          type="button"
+          aria-label="Previous range"
+          class="grid size-6 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
+          @click="moveRange(-1)"
+        >
+          <IconChevronLeft :size="13" />
+        </button>
+        <button
+          type="button"
+          data-tracker-range-label
+          class="h-6 truncate px-2 text-center font-mono text-[9px] text-ink-2 hover:bg-chrome-mid"
+          @click="goToday"
+        >
+          {{ rangeTitle }}
+        </button>
+        <button
+          v-if="selectedTab !== 'all'"
+          type="button"
+          aria-label="Next range"
+          class="grid size-6 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink"
+          @click="moveRange(1)"
+        >
+          <IconChevronRight :size="13" />
+        </button>
       </div>
-    </header>
+    </div>
 
     <div
       v-if="tracker.error || error"
@@ -212,7 +202,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Teleport, computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
   IconChevronLeft,
@@ -228,6 +218,7 @@ import TrackerLog from './tracker/TrackerLog.vue'
 import TrackerOverview from './tracker/TrackerOverview.vue'
 import TrackerTimeline from './tracker/TrackerTimeline.vue'
 import { moveRangeAnchor, reportRange } from './tracker/trackerDateRange.js'
+import { usePaneChrome } from '../composables/usePaneChrome.js'
 
 const props = defineProps({
   active: { type: Boolean, default: false },
@@ -278,6 +269,10 @@ const statusLine = computed(() => {
   return current
     ? `${current.activity} · ${current.domain || current.appName || current.subcategory || 'system'}`
     : 'Armed · waiting for first observation'
+})
+const { actionsHost } = usePaneChrome({
+  active: () => props.active,
+  meta: statusLine,
 })
 
 watch(
@@ -532,11 +527,6 @@ function message(cause) {
 
 <style scoped>
 .tracker-app { container: tracker / inline-size; }
-.status-disabled { background: var(--color-ink-4); }
-.status-needs-access, .status-error { background: var(--color-rem); }
-.status-paused, .status-unsupported { background: var(--color-rule); }
-.status-armed { background: var(--color-add); }
-.status-break { background: var(--color-accent); }
 
 @container tracker (min-width: 520px) {
   .tracker-inspector {

@@ -8,7 +8,7 @@
     :class="embedded ? 'min-h-full' : 'h-full overflow-y-auto'"
     @keydown.esc="close"
   >
-    <header v-if="!embedded" class="flex h-10 items-center border-b border-rule px-4">
+    <header v-if="!embedded" data-scribe-settings-header class="pane-bar">
       <h2 id="scribe-settings-title" class="flex-1 text-[11px] font-semibold">
         Scribe settings
       </h2>

@@ -4,61 +4,45 @@
     class="routines-surface flex h-full min-h-0 flex-col bg-chrome-high text-ink"
     @keydown="onSurfaceKeydown"
   >
-    <header class="flex min-h-11 shrink-0 items-center gap-2 border-b border-rule px-3">
-      <div class="grid size-7 shrink-0 place-items-center border border-rule bg-surface text-ink-2">
-        <IconCalendarClock :size="14" :stroke-width="1.65" />
+    <Teleport :to="actionsHost" :disabled="!actionsHost">
+      <div :class="actionsHost ? 'contents' : 'pane-bar'">
+        <button
+          type="button"
+          data-routines-new
+          title="New routine (⌘N)"
+          class="no-drag inline-flex h-7 items-center gap-1.5 px-2 text-[10px] font-semibold text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          @click="openCreate"
+        >
+          <IconPlus :size="12" :stroke-width="1.9" />
+          <span>New</span>
+        </button>
+        <button
+          type="button"
+          data-routines-reveal
+          title="Reveal routine definitions folder"
+          aria-label="Reveal routine definitions folder"
+          class="no-drag grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          @click="revealDirectory"
+        >
+          <IconFolderOpen :size="13" :stroke-width="1.7" />
+        </button>
+        <button
+          type="button"
+          data-routines-reload
+          title="Reload routine definitions (⌘R)"
+          aria-label="Reload routine definitions"
+          :disabled="routines.loading || routines.reloading"
+          class="no-drag grid size-7 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+          @click="reload"
+        >
+          <IconRefresh
+            :size="13"
+            :stroke-width="1.7"
+            :class="{ 'motion-safe:animate-spin': routines.loading || routines.reloading }"
+          />
+        </button>
       </div>
-      <div class="min-w-0 flex-1">
-        <div class="flex items-baseline gap-2">
-          <p class="text-[11px] font-semibold">Routines</p>
-          <p
-            v-if="routines.loaded"
-            data-routines-summary
-            class="font-mono text-[8px] uppercase tracking-[0.1em] text-ink-3"
-          >
-            {{ summaryText }}
-          </p>
-        </div>
-        <p class="truncate font-mono text-[8px] tracking-[0.03em] text-ink-3" :title="routines.directory">
-          {{ routines.directory || '~/.mimir/routines' }}
-        </p>
-      </div>
-      <button
-        type="button"
-        data-routines-new
-        title="New routine (⌘N)"
-        class="flex h-7 items-center gap-1.5 border border-rule bg-surface px-2 text-[9px] font-semibold hover:border-accent/50 hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-        @click="openCreate"
-      >
-        <IconPlus :size="12" :stroke-width="1.9" />
-        New
-      </button>
-      <button
-        type="button"
-        data-routines-reveal
-        title="Reveal routine definitions folder"
-        aria-label="Reveal routine definitions folder"
-        class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-        @click="revealDirectory"
-      >
-        <IconFolderOpen :size="13" :stroke-width="1.7" />
-      </button>
-      <button
-        type="button"
-        data-routines-reload
-        title="Reload routine definitions (⌘R)"
-        aria-label="Reload routine definitions"
-        :disabled="routines.loading || routines.reloading"
-        class="grid size-7 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
-        @click="reload"
-      >
-        <IconRefresh
-          :size="13"
-          :stroke-width="1.7"
-          :class="{ 'motion-safe:animate-spin': routines.loading || routines.reloading }"
-        />
-      </button>
-    </header>
+    </Teleport>
 
     <div v-if="routines.loading && !routines.loaded" class="grid min-h-0 flex-1 place-items-center">
       <div class="text-center">
@@ -345,12 +329,12 @@
       </details>
     </div>
 
-    <footer v-if="routines.loaded" class="flex min-h-9 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3">
-      <p class="min-w-0 flex-1 truncate font-mono text-[8px] text-ink-3" :title="routines.statePath">
-        {{ footerText }}
-      </p>
-      <p v-if="notice" data-routine-notice class="shrink-0 text-[9px] text-accent">{{ notice }}</p>
-      <p v-else class="shrink-0 font-mono text-[8px] tabular-nums text-ink-3">rev {{ routines.revision }}</p>
+    <footer v-if="routines.loaded" data-routines-footer class="pane-footer px-3">
+      <span class="min-w-0 flex-1 truncate" :title="routines.directory">
+        {{ routines.directory || '~/.mimir/routines' }}
+      </span>
+      <span v-if="notice" data-routine-notice class="shrink-0 text-accent">{{ notice }}</span>
+      <span v-else class="shrink-0 tabular-nums">rev {{ routines.revision }}</span>
     </footer>
 
     <div
@@ -418,7 +402,7 @@
         class="flex max-h-full w-full max-w-xl flex-col border border-rule bg-surface"
         @keydown="onDialogKeydown"
       >
-        <header class="flex h-10 shrink-0 items-center border-b border-rule bg-chrome-high px-4">
+        <header class="dialog-header">
           <h2 :id="dialogHeadingId" class="text-[12px] font-semibold">{{ dialogTitle }}</h2>
         </header>
         <form data-routine-form class="min-h-0 space-y-4 overflow-y-auto p-4" @submit.prevent="submitDialog">
@@ -850,7 +834,7 @@
         class="w-full max-w-sm border border-rule bg-surface"
         @keydown="onTrashDialogKeydown"
       >
-        <header class="flex h-10 items-center border-b border-rule bg-chrome-high px-4">
+        <header class="dialog-header">
           <h2 class="text-[12px] font-semibold">Move {{ trashTarget.title }} to Trash?</h2>
         </header>
         <div class="space-y-3 p-4">
@@ -883,7 +867,6 @@ import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'v
 import { invoke } from '@tauri-apps/api/core'
 import {
   IconAlertTriangle,
-  IconCalendarClock,
   IconCalendarPlus,
   IconDots,
   IconFolderOpen,
@@ -893,6 +876,7 @@ import {
   IconRefresh,
 } from '@tabler/icons-vue'
 import { useRoutinesStore } from '../../stores/routines.js'
+import { usePaneChrome } from '../composables/usePaneChrome.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import {
   FREQUENCIES,
@@ -982,15 +966,16 @@ const trashError = ref('')
 const trashBusy = ref(false)
 
 const dialogHeadingId = 'routine-dialog-title'
-const footerText = computed(() => (
-  routines.statePath ? `planner · ${routines.statePath}` : 'Local scheduler · definitions stay on disk'
-))
 const summaryText = computed(() => {
   const parts = []
   if (routines.enabledCount) parts.push(`${routines.enabledCount} armed`)
   if (routines.manualCount) parts.push(`${routines.manualCount} manual`)
   if (routines.runningCount) parts.push(`${routines.runningCount} running`)
   return parts.join(' · ') || 'none armed'
+})
+const { actionsHost } = usePaneChrome({
+  active: () => props.active,
+  meta: summaryText,
 })
 const contextStyle = computed(() => ({
   left: `${contextPosition.value.x}px`,

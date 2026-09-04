@@ -1,7 +1,7 @@
 <template>
   <section data-embedded-app class="relative flex h-full min-h-0 flex-col bg-surface text-ink">
-    <header class="flex h-9 shrink-0 items-center gap-2 border-b border-rule bg-chrome-high px-2">
-      <div class="flex min-w-0 flex-1 items-center gap-2 px-1">
+    <header data-embedded-app-toolbar class="pane-bar gap-2">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
         <span
           class="size-1.5 shrink-0 rounded-full"
           :class="frameReady ? 'bg-add' : error ? 'bg-rem' : 'bg-rule'"

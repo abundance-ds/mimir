@@ -14,7 +14,7 @@
 
     <section class="tracker-shape grid border-b border-rule">
       <div class="tracker-shape-days border-b border-rule">
-        <header class="flex h-8 items-center border-b border-rule-light px-3">
+        <header class="flex h-7 items-center border-b border-rule-light px-3">
           <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Day shape</h2>
           <span class="ml-auto font-mono text-[9px] text-ink-4">{{ report.days.length }} day{{ report.days.length === 1 ? '' : 's' }}</span>
         </header>
@@ -41,7 +41,7 @@
       </div>
 
       <div>
-        <header class="flex h-8 items-center border-b border-rule-light px-3">
+        <header class="flex h-7 items-center border-b border-rule-light px-3">
           <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Composition</h2>
         </header>
         <div class="divide-y divide-rule-light">
@@ -60,13 +60,13 @@
 
     <section class="tracker-rankings grid border-b border-rule">
       <div class="tracker-rankings-apps border-b border-rule">
-        <header class="flex h-8 items-center border-b border-rule-light px-3">
+        <header class="flex h-7 items-center border-b border-rule-light px-3">
           <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Top applications</h2>
         </header>
         <RankedList :items="report.topApps" empty="No application evidence yet." />
       </div>
       <div>
-        <header class="flex h-8 items-center border-b border-rule-light px-3">
+        <header class="flex h-7 items-center border-b border-rule-light px-3">
           <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Work types</h2>
         </header>
         <RankedList :items="report.subcategories" empty="No classified work types yet." />
@@ -74,7 +74,7 @@
     </section>
 
     <section>
-      <header class="flex h-8 items-center border-b border-rule-light px-3">
+      <header class="flex h-7 items-center border-b border-rule-light px-3">
         <h2 class="font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-ink-2">Weekly rhythm</h2>
         <span class="ml-auto font-mono text-[9px] text-ink-4">Mon–Sun · local hour</span>
       </header>

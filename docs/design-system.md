@@ -61,6 +61,15 @@ readable contrast.
   fields opt back into selection.
 - Use live/status roles for asynchronous feedback.
 
+## Pane chrome
+
+Bars are sized by row, not by role, so neighbouring panes line up. The
+classes live in `src/shared/styles/pane-chrome.css`, the inventory in
+`src/mimir/paneChromeInventory.js`, and `PaneChrome.test.js` fails when a
+listed bar sizes or colours itself. [chrome-ui.md](chrome-ui.md) owns the
+full map: every bar, band, canvas, footer, and overlay, its layer, and the
+rules that relate them.
+
 ## Graph and rows
 
 - Projection rows use hairlines, full-width hover, and stable geometry.

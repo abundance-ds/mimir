@@ -4,7 +4,7 @@
         ref="stripEl"
         role="tablist"
         aria-label="Open editor tabs"
-        class="relative flex items-end flex-1 min-w-0 gap-0 whitespace-nowrap mt-auto"
+        class="relative flex h-full min-w-0 flex-1 items-end gap-0 whitespace-nowrap"
         :style="dragState.active ? { '--drag-tab-w': dragTabWidth + 'px' } : {}"
     >
         <TransitionGroup
@@ -13,7 +13,7 @@
             @before-leave="onTabBeforeLeave"
             @wheel="onTabWheel"
             tag="div"
-            class="tab-scroll flex-1 min-w-0 flex items-end gap-0 overflow-x-auto overflow-y-hidden"
+            class="tab-scroll flex h-full min-w-0 flex-1 items-end gap-0 overflow-x-auto overflow-y-hidden"
         >
             <div
                 v-for="(tab, i) in tabs"
@@ -27,7 +27,7 @@
                 :style="{ '--tab-ideal-width': `${tabIdealWidth(tab.name)}px` }"
             >
               <button
-                class="file-tab w-full h-full flex items-center gap-1 pl-2 pr-7 rounded-t-[5px] select-none whitespace-nowrap overflow-hidden font-mono text-[11.5px] relative"
+                class="file-tab relative flex h-full w-full select-none items-center gap-1 overflow-hidden whitespace-nowrap rounded-t-[3px] pl-2 pr-7 font-mono text-[11.5px]"
                 :class="[
                     activeTab === i ? 'tab-active' : 'tab-inactive',
                     ['review', 'git-review'].includes(tab.type) ? 'tab-review' : '',
@@ -78,12 +78,12 @@
 
             <button
                 key="__add__"
-                class="shrink-0 no-drag w-4.5 h-4.5 flex items-center justify-center rounded-sm font-mono text-[20px] leading-none text-ink-3 hover:text-ink-2 ml-3 my-auto"
+                class="no-drag ml-2 flex h-[28px] w-7 shrink-0 items-center justify-center rounded-sm text-ink-3 hover:bg-chrome-mid hover:text-ink"
                 aria-label="New tab"
                 title="New tab"
                 @click="$emit('add-tab')"
             >
-                <IconPlus></IconPlus>
+                <IconPlus :size="14" :stroke-width="1.8" />
             </button>
         </TransitionGroup>
     </div>
@@ -613,6 +613,8 @@ onUnmounted(() => {
 
 .file-tab {
     min-width: 0;
+    border: 1px solid transparent;
+    border-bottom: 0;
 }
 
 .file-tab:focus-visible {
@@ -682,13 +684,13 @@ onUnmounted(() => {
 }
 
 .tab-close:hover {
-    background: var(--color-chrome-high);
+    background: var(--color-chrome-mid);
     color: var(--color-ink);
 }
 
 /* Tab states */
 .tab-inactive {
-    color: var(--color-ink-3);
+    color: var(--color-ink-2);
     background: transparent;
 }
 
@@ -699,8 +701,9 @@ onUnmounted(() => {
 
 .tab-active {
     color: var(--color-ink);
+    border-color: var(--color-rule);
+    background: var(--color-chrome-high);
     font-weight: 600;
-    background: var(--color-surface);
 }
 
 /* Drag states */

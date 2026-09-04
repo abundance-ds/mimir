@@ -6,7 +6,7 @@
     aria-label="Files"
     @keydown.capture="onCommandKeydown"
   >
-    <header class="flex h-10 shrink-0 items-end border-b border-rule bg-chrome-high px-2">
+    <header data-files-toolbar class="pane-bar items-end">
       <nav class="flex h-full min-w-0 flex-1 items-end" aria-label="Files view">
         <button
           v-for="option in views"
@@ -46,7 +46,7 @@
         data-files-new-file
         title="New file (⌘N)"
         aria-label="New file"
-        class="mb-1.5 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+        class="mb-1 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
         @click="promptNew('file')"
       >
         <IconFilePlus :size="14" :stroke-width="1.75" />
@@ -56,7 +56,7 @@
         data-files-new-folder
         title="New folder (⇧⌘N)"
         aria-label="New folder"
-        class="mb-1.5 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+        class="mb-1 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
         @click="promptNew('folder')"
       >
         <IconFolderPlus :size="14" :stroke-width="1.75" />
@@ -67,7 +67,7 @@
         title="Refresh workspace (⌘R)"
         aria-label="Refresh workspace"
         :disabled="refreshing"
-        class="mb-1.5 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
+        class="mb-1 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent disabled:opacity-40"
         @click="refresh"
       >
         <IconRefresh
@@ -150,8 +150,9 @@
     <div
       v-if="gitOnly && viewMode !== 'changes'"
       data-files-active-filter
+      data-files-ledger-status
       role="status"
-      class="flex h-7 shrink-0 items-center gap-2 border-y border-rule-light bg-chrome-high px-3 font-mono text-[9px] text-ink-3"
+      class="pane-subbar gap-2 font-mono text-[10px] text-ink-3"
     >
       <span class="font-semibold text-accent">Git changes</span>
       <span>{{ gitChanges.length }}</span>
@@ -168,9 +169,10 @@
     <div
       v-if="files.workspacePath && !contentMode && viewMode !== 'changes'"
       data-files-ledger-header
+      data-files-ledger-columns
       role="group"
       aria-label="Sort files"
-      class="files-ledger-grid grid h-7 min-w-[248px] shrink-0 items-center border-b border-rule-light bg-chrome-high px-0 font-mono text-[9px] text-ink-4"
+      class="files-ledger-grid pane-subbar grid min-w-[248px] items-center font-mono text-[10px] text-ink-4"
     >
       <div class="flex h-full min-w-0 items-center">
         <FileSortHeader
@@ -448,7 +450,8 @@
 
     <footer
       v-if="files.workspacePath"
-      class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[9px] text-ink-4"
+      data-files-footer
+      class="pane-footer gap-3 px-3"
     >
       <span>{{ footerCount }}</span>
       <span
@@ -606,7 +609,7 @@
         class="w-full max-w-sm border border-rule bg-surface shadow-xl"
         @keydown="onDeleteDialogKeydown"
       >
-        <header class="flex h-10 items-center border-b border-rule bg-chrome-high px-4">
+        <header class="dialog-header">
           <h2 class="text-[12px] font-semibold">
             {{ deleteEntries.length === 1 ? `Move ${deleteEntries[0].name} to Trash?` : `Move ${deleteEntries.length} items to Trash?` }}
           </h2>

@@ -8,7 +8,7 @@
   >
     <span
       v-if="!quiet"
-      class="flex h-11 w-full shrink-0 items-center justify-center border-b border-rule-light"
+      class="flex h-10 w-full shrink-0 items-center justify-center border-b border-rule-light"
       aria-hidden="true"
     >
       <IconArrowBarRight v-if="pane === 'activity'" :size="15" :stroke-width="1.9" />

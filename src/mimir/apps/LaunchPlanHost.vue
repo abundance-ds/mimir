@@ -3,7 +3,7 @@
     data-launch-plan-host
     class="flex h-full min-h-0 flex-col bg-chrome-high text-ink"
   >
-    <header class="flex h-10 shrink-0 items-center gap-2 border-b border-rule px-3">
+    <header data-launch-plan-header class="pane-bar gap-2">
       <component :is="modeIcon" :size="14" :stroke-width="1.7" class="text-ink-3" />
       <span class="text-[11px] font-semibold">{{ app.title }}</span>
       <span class="font-mono text-[8px] uppercase tracking-[0.12em] text-ink-4">
@@ -69,7 +69,7 @@
       </div>
     </div>
 
-    <footer class="flex h-8 shrink-0 items-center border-t border-rule px-3 font-mono text-[8px] text-ink-4">
+    <footer data-launch-plan-footer class="pane-footer px-3">
       <span>{{ app.id }}</span>
       <span class="ml-auto">{{ activity.workspacePath || 'app directory' }}</span>
     </footer>
