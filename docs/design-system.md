@@ -18,6 +18,14 @@ must explain the interface without decorative copy or motion.
 - Editor bold and italic pair weight or slant with ink tinted by the theme
   syntax colour (`--ink-strong`, `--ink-emphasis`); the accent stays reserved
   for links.
+- Each theme defines `--editor-heading` and five `--syntax-*` colours in
+  `themes.css`. Derived palettes keep OKLCH lightness within 0.05 and chroma
+  within 0.09 to 0.12 for light themes; canonical dark ports keep their own
+  values. Every one of these colours reaches 5:1 against `surface`
+  (`themes.test.js`). Markdown markers use `ink-4`; the heading colour is
+  the only hue on heading marks. Judge changes in
+  `harness/editor-themes.html`, which mounts the real editor on one sample
+  document across all eight themes.
 - Workbench surfaces are square with one-pixel rules. Shadows and rounded
   corners are reserved for functional overlays.
 - Raw ids, revisions, counters, and technical state do not belong in normal UI.
@@ -60,6 +68,18 @@ readable contrast.
 - Graph property controls are borderless at rest and gain a quiet hover wash
   and focus ring. Visible labels explain editable values.
 - Graph notes are unframed document text. Dialog fields can remain boxed.
+- Work rows: Board cards are 66 px `chrome-high` plates on a `chrome`
+  column with a 1 px `rule-light` edge, a 2 px radius, and a 4 px gap; hover
+  is `chrome-mid`. This stack is raised in every theme; `surface` is not,
+  because it is the darkest layer in dracula, zenith, and synthwave. The
+  cards are the one rounded workbench surface. Slots are fixed: title 13 px/600 on
+  one line with the owner at its right, project beneath, then the due date
+  and waiting reason at 11 px, and the priority control at the bottom right.
+  List rows are one 12 px line in aligned columns. Due dates are words
+  relative to today; overdue pairs `rem` with the word. Column and group
+  headers are 12 px/700 ink on `chrome-high` over a `rule`.
+- Priority glyphs: urgent is an exclamation in `rem`, high is full bars in
+  ink, normal and low stay quiet in `ink-4`. No state is color-only.
 - Do not add colored edge bars, gradients, meter decoration, suggestion chips,
   personas, chat-like AI surfaces, or hover transforms.
 
