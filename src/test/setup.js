@@ -83,7 +83,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'meetings_open_system_audio_settings',
   'meetings_check_audio',
   'meetings_microphone_devices', 'meetings_audio_test_start', 'meetings_audio_test_stop',
-  'meetings_dismiss_candidate',
+  'meetings_dismiss_candidate', 'meetings_take_record_requests',
   'meetings_issue_start_consent',
   'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
   'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_run_summary', 'meetings_follow_up_context', 'meetings_retranscribe', 'meetings_delete',
@@ -105,6 +105,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // file indexing and content search
   'file_index_open', 'file_index_files', 'file_index_filter', 'file_index_refresh',
   'file_index_begin_search', 'file_index_cancel_search', 'file_index_search',
+  'open_html_in_browser',
   'workspace_file_list_directory', 'workspace_file_inspect', 'workspace_file_create', 'workspace_file_rename',
   'workspace_file_move', 'workspace_file_duplicate', 'workspace_file_import', 'workspace_file_trash',
   'workspace_file_open_native', 'workspace_file_reveal',

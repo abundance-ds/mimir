@@ -13,6 +13,9 @@
       :activeTab="displayActiveTab"
       :arrivedTabIndex="arrivedTabIndex"
       :hideSidebar="hideSidebar"
+      :can-open-in-browser="canOpenInBrowser"
+      :browser-opening="browserOpening"
+      :browser-open-error="browserOpenError"
       @new-file="createBlankFile"
       @open-file="onOpenDialog"
       @save="onSave"
@@ -27,6 +30,7 @@
       @discard-tab="requestDiscardTab"
       @add-tab="openNewTabPage"
       @reorder-tab="onReorderTab"
+      @open-in-browser="onOpenInBrowser"
     />
 
     <div class="editor-body flex-1 flex min-h-0 bg-chrome">
@@ -302,7 +306,7 @@ import { useDocumentBridge } from './composables/useDocumentBridge.js'
 import { isTauriRuntime, platformKind } from '../shared/platform.js'
 import { relativeTime } from '../shared/time.js'
 import { basename, parentPath } from '../shared/utils/path.js'
-import { readFile } from '../services/fileSystem.js'
+import { openHtmlInBrowser, readFile } from '../services/fileSystem.js'
 import { trashWorkspaceEntries } from '../services/workspaceFileOperations.js'
 import { absoluteWorkspacePath } from '../services/gitChanges.js'
 import { createWindowCloseGuard } from './windowCloseGuard.js'
@@ -366,6 +370,7 @@ const emit = defineEmits([
   'newRequest',
   'quickOpenRequest',
   'reviewGitWithAgent',
+  'diagnostic',
 ])
 const editorShellRef = ref(null)
 
@@ -411,6 +416,8 @@ const editorSurfaceRef = ref(null)
 const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
+const browserOpening = ref(false)
+const browserOpenError = ref('')
 watch(() => props.workspacePath, (path, previous) => {
   if (path === previous) return
   inlineAIState.value = null
@@ -450,6 +457,24 @@ function isMarkdownPath(path) {
   if (!path) return true
   return /\.(?:md|markdown|mdown|mkd)$/i.test(String(path))
 }
+
+function isHtmlPath(path) {
+  return /\.html?$/i.test(String(path || ''))
+}
+
+const canOpenInBrowser = computed(() => (
+  currentFile.value?.kind === 'text'
+  && Boolean(currentFile.value?.path)
+  && isHtmlPath(currentFile.value.path)
+  && !isNewTabPage.value
+  && !isResourcePreview.value
+  && !visibleDiffActive.value
+  && !gitReviewVisible.value
+))
+
+watch(() => currentFile.value?.path, () => {
+  browserOpenError.value = ''
+})
 
 function discardModeForFile(file) {
   if (!file || file.newTab || file.kind !== 'text' || file.reviews?.length) return ''
@@ -1090,6 +1115,28 @@ async function onSaveAs() {
   try {
     await saveCurrentFile({ source: 'manual', mode: 'saveAs' })
   } catch { /* save state is already reflected in the footer */ }
+}
+
+async function onOpenInBrowser() {
+  const file = currentFile.value
+  if (!file?.path || !isHtmlPath(file.path) || browserOpening.value) return
+
+  browserOpening.value = true
+  browserOpenError.value = ''
+  try {
+    flushEditorContent({ bridge: 'flush' })
+    if (file.dirty) {
+      const saved = await saveCurrentFile({ source: 'manual', file })
+      if (!saved) throw new Error('Save the file before opening it in the browser.')
+    }
+    await openHtmlInBrowser(file.path)
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause || 'Unknown error')
+    browserOpenError.value = detail
+    emit('diagnostic', `${basename(file.path)} could not open in the browser: ${detail}`)
+  } finally {
+    browserOpening.value = false
+  }
 }
 
 function openSettings(section = 'appearance') {

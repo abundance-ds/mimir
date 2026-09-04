@@ -2,8 +2,8 @@
     <div
         ref="headerRef"
         data-tauri-drag-region="deep"
-        class="relative z-40 shrink-0 flex items-center gap-0 px-[14px] bg-chrome whitespace-nowrap overflow-visible drag-region border-b border-rule-light"
-        :class="embedded ? 'h-11' : 'h-10'"
+        data-editor-header
+        class="pane-header relative z-40 gap-0 px-[14px] whitespace-nowrap overflow-visible drag-region"
         @keydown.esc="closeMenu"
     >
         <!-- Left: traffic-light spacer -->
@@ -281,6 +281,22 @@
             class="flex-1 self-stretch"
         ></div>
 
+        <button
+            v-if="canOpenInBrowser"
+            type="button"
+            data-editor-action="open-in-browser"
+            class="sidebar-toggle no-drag mr-1"
+            :class="{ 'has-error': browserOpenError }"
+            :title="browserOpenError || 'Open in browser'"
+            aria-label="Open in browser"
+            :aria-busy="browserOpening"
+            :disabled="browserOpening"
+            @click="emit('open-in-browser')"
+        >
+            <IconExternalLink :size="15" :stroke-width="1.8" />
+        </button>
+        <span v-if="browserOpenError" class="sr-only" role="alert">{{ browserOpenError }}</span>
+
         <!-- Standalone editor sidebar toggle. Workbench pane controls live outside the editor. -->
         <button
             v-if="embedded"
@@ -328,6 +344,7 @@ import {
     IconClipboard,
     IconCopy,
     IconDeviceFloppy,
+    IconExternalLink,
     IconFileDownload,
     IconFilePlus,
     IconFileText,
@@ -350,6 +367,9 @@ const props = defineProps({
     activeTab: { type: Number, default: 0 },
     arrivedTabIndex: { type: Number, default: -1 },
     hideSidebar: { type: Boolean, default: false },
+    canOpenInBrowser: { type: Boolean, default: false },
+    browserOpening: { type: Boolean, default: false },
+    browserOpenError: { type: String, default: '' },
 });
 const emit = defineEmits([
     "new-file",
@@ -366,6 +386,7 @@ const emit = defineEmits([
     "discard-tab",
     "add-tab",
     "reorder-tab",
+    "open-in-browser",
 ]);
 
 const headerRef = ref(null);
@@ -664,10 +685,24 @@ onUnmounted(() => {
         border-color 140ms ease;
 }
 
-.sidebar-toggle:hover {
+.sidebar-toggle:hover:not(:disabled) {
     color: var(--color-ink);
     background: var(--color-chrome-mid);
     border-color: var(--color-rule-light);
+}
+
+.sidebar-toggle:focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
+}
+
+.sidebar-toggle:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+.sidebar-toggle.has-error {
+    color: var(--color-rem);
 }
 
 .sidebar-toggle.is-open {

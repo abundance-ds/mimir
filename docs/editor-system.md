@@ -15,6 +15,9 @@ and cleanup. `src/stores/files.js` owns open files and save state.
   standalone Editor shows all tabs.
 - External changes replace only clean buffers. Missing dirty files recover as
   drafts; missing clean files disappear.
+- Named `.html` and `.htm` tabs show an **Open in browser** action in the Editor
+  header. The action saves dirty content before it opens the file with the
+  operating system's default browser.
 - Session hydration completes before fallback draft creation, persistence,
   native listeners, file-open draining, and Quit guards.
 - Save, rename, move, and Trash must settle pending Editor writes before paths

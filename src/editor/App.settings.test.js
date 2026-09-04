@@ -3,8 +3,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { readFile, loadSession, saveSession } = vi.hoisted(() => ({
+const { readFile, saveFile, openHtmlInBrowser, loadSession, saveSession } = vi.hoisted(() => ({
   readFile: vi.fn(),
+  saveFile: vi.fn(),
+  openHtmlInBrowser: vi.fn(),
   loadSession: vi.fn(),
   saveSession: vi.fn(),
 }))
@@ -15,7 +17,7 @@ const nativeMenu = vi.hoisted(() => ({
   install: vi.fn(async () => true),
 }))
 
-vi.mock('../services/fileSystem.js', () => ({ readFile }))
+vi.mock('../services/fileSystem.js', () => ({ readFile, saveFile, openHtmlInBrowser }))
 vi.mock('../services/workspaceFileOperations.js', () => ({
   trashWorkspaceEntries: workspaceOperations.trash,
 }))
@@ -66,6 +68,8 @@ describe('Editor Settings bridge', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     readFile.mockReset().mockResolvedValue('id = "ledger"')
+    saveFile.mockReset().mockResolvedValue()
+    openHtmlInBrowser.mockReset().mockResolvedValue()
     loadSession.mockReset().mockResolvedValue(null)
     saveSession.mockReset().mockResolvedValue()
     nativeMenu.install.mockClear()
@@ -275,6 +279,55 @@ describe('Editor Settings bridge', () => {
     files.currentFile.path = '/work/notes.md'
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-editor-toolbar]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('saves a dirty HTML tab before opening it in the browser', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const HtmlEditorSurfaceStub = defineComponent({
+      props: { content: { type: String, default: '' } },
+      setup(props, { expose }) {
+        expose({
+          getContent: () => props.content,
+          getCursor: () => null,
+          hasFocus: () => false,
+          scrollToPos: vi.fn(),
+        })
+        return () => null
+      },
+    })
+    const wrapper = mount(App, {
+      props: { embedded: true, workspacePath: '/work', workspacePaths: ['/work'] },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppFooter: true,
+          SettingsDialog: SettingsDialogStub,
+          EditorSurface: HtmlEditorSurfaceStub,
+          InlineAI: true,
+          DiffBar: true,
+          DiffView: true,
+          BatchDiffView: true,
+          NewTabPage: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    const files = useFileStore(pinia)
+    await files.openFile('/work/index.html', '<p>Before</p>', { workspacePath: '/work' })
+    files.updateContent('<p>After</p>')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.get('[data-editor-action="open-in-browser"]').trigger('click')
+    await flushPromises()
+
+    expect(saveFile).toHaveBeenCalledWith('/work/index.html', '<p>After</p>')
+    expect(openHtmlInBrowser).toHaveBeenCalledWith('/work/index.html')
+    expect(saveFile.mock.invocationCallOrder[0])
+      .toBeLessThan(openHtmlInBrowser.mock.invocationCallOrder[0])
     wrapper.unmount()
   })
 

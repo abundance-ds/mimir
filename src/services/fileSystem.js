@@ -62,6 +62,13 @@ export async function readFile(path) {
   return result.content
 }
 
+export async function openHtmlInBrowser(path) {
+  if (!isTauri()) {
+    throw new Error('Open in browser is available in the desktop app.')
+  }
+  return invoke('open_html_in_browser', { path })
+}
+
 export async function readBinaryFile(path) {
   if (!isTauri()) return new Uint8Array()
   const result = await invoke('read_binary_file', { path })

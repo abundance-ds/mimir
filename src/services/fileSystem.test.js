@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { openFileDialog, readBinaryFile } from './fileSystem.js'
+import { openFileDialog, openHtmlInBrowser, readBinaryFile } from './fileSystem.js'
 
 describe('openFileDialog', () => {
   beforeEach(() => {
@@ -66,5 +66,27 @@ describe('readBinaryFile', () => {
     await expect(readBinaryFile('/w/report.pdf')).resolves.toEqual(
       new Uint8Array([37, 80, 68, 70]),
     )
+  })
+})
+
+describe('openHtmlInBrowser', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    })
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it('uses the HTML-only native command', async () => {
+    await openHtmlInBrowser('/w/index.html')
+
+    expect(invoke).toHaveBeenCalledWith('open_html_in_browser', {
+      path: '/w/index.html',
+    })
   })
 })

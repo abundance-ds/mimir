@@ -22,10 +22,10 @@ describe('embedded editor header', () => {
     })
   }
 
-  it('matches the 44px workbench header and owns left-rail restores', async () => {
+  it('matches the 40px workbench header and owns left-rail restores', async () => {
     const wrapper = render()
     const workbench = useWorkbenchStore()
-    expect(wrapper.classes()).toContain('h-11')
+    expect(wrapper.classes()).toContain('pane-header')
     expect(wrapper.find('[data-header-drag-spacer]').exists()).toBe(false)
     expect(wrapper.get('[data-editor-tabs-region]').classes()).toContain('flex-1')
 
@@ -69,6 +69,19 @@ describe('embedded editor header', () => {
     })
 
     expect(wrapper.get('[data-header-drag-spacer]').exists()).toBe(true)
+  })
+
+  it('shows and emits the HTML browser action only when enabled', async () => {
+    const wrapper = render()
+    expect(wrapper.find('[data-editor-action="open-in-browser"]').exists()).toBe(false)
+
+    await wrapper.setProps({ canOpenInBrowser: true })
+    const action = wrapper.get('[data-editor-action="open-in-browser"]')
+    expect(action.attributes('title')).toBe('Open in browser')
+    expect(action.attributes('aria-label')).toBe('Open in browser')
+
+    await action.trigger('click')
+    expect(wrapper.emitted('open-in-browser')).toHaveLength(1)
   })
 
   it('forwards the tab discard action to the Editor owner', async () => {

@@ -79,6 +79,32 @@ pub fn open_files_in_editor(app: tauri::AppHandle, paths: Vec<String>) {
     do_open_files_in_editor(&app, paths);
 }
 
+fn resolve_html_path(path: &str) -> Result<PathBuf, String> {
+    let target = PathBuf::from(path)
+        .canonicalize()
+        .map_err(|error| format!("Could not open {path}: {error}"))?;
+    if !target.is_file() {
+        return Err(format!("Could not open {path}: the path is not a file"));
+    }
+
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "htm" | "html") {
+        return Err("Only HTML files can open in the browser.".into());
+    }
+    Ok(target)
+}
+
+#[tauri::command]
+pub fn open_html_in_browser(path: String) -> Result<(), String> {
+    let target = resolve_html_path(&path)?;
+    tauri_plugin_opener::open_path(&target, None::<&str>)
+        .map_err(|error| format!("Could not open {}: {error}", target.display()))
+}
+
 pub fn do_open_files_in_editor(app: &tauri::AppHandle, paths: Vec<String>) {
     if paths.is_empty() {
         return;
@@ -185,5 +211,29 @@ mod tests {
 
         assert_eq!(pending.take(), vec!["/one.md", "/two.md", "/three.txt"]);
         assert!(pending.take().is_empty());
+    }
+
+    #[test]
+    fn accepts_existing_html_files_case_insensitively() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("Preview.HTML");
+        std::fs::write(&file, "<!doctype html>").unwrap();
+
+        assert_eq!(
+            resolve_html_path(file.to_str().unwrap()).unwrap(),
+            file.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_non_html_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("notes.md");
+        std::fs::write(&file, "# Notes").unwrap();
+
+        assert_eq!(
+            resolve_html_path(file.to_str().unwrap()).unwrap_err(),
+            "Only HTML files can open in the browser."
+        );
     }
 }
