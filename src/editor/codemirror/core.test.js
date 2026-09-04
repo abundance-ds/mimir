@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { StreamLanguage } from '@codemirror/language'
+import { StreamLanguage, syntaxHighlighting, ensureSyntaxTree, forceParsing, syntaxTree } from '@codemirror/language'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { Strikethrough } from '@lezer/markdown'
+import { tags as t, styleTags } from '@lezer/highlight'
 import {
   computeStats,
   createEditor,
@@ -9,6 +12,7 @@ import {
   editorInputAttributesExtension,
   languageExtensionForPath,
   lineIndicatorExtensions,
+  codeLanguageForInfo,
   wrapCompartment,
   lineIndicatorCompartment,
 } from './core.js'
@@ -245,5 +249,170 @@ describe('createEditor', () => {
     enabled = false
     view.contentDOM.dispatchEvent(modK())
     expect(onSelectionCommand).not.toHaveBeenCalled()
+  })
+})
+
+describe('styleTags remap', () => {
+  // Verify that the markdown extension remaps HeaderMark and CodeText.
+  function mountMd(doc) {
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = createEditor({ parent, doc, path: '/test.md' })
+    ensureSyntaxTree(view.state, view.state.doc.length, 1000)
+    view.dispatch({ changes: [] })
+    views.push(view)
+    return view
+  }
+
+  it('gives HeaderMark the class for t.special(t.heading), not t.processingInstruction', () => {
+    const view = mountMd('# Hello')
+    const specialHeadingClass = editorHighlightStyle.style([t.special(t.heading)])
+    const processingClass = editorHighlightStyle.style([t.processingInstruction])
+    expect(specialHeadingClass).toBeTruthy()
+    expect(processingClass).toBeTruthy()
+    // The # span should carry the special heading class
+    const spans = [...view.contentDOM.querySelectorAll('span')]
+    const hashSpan = spans.find(s => s.textContent.trim() === '#')
+    expect(hashSpan).toBeTruthy()
+    expect(hashSpan.className).toContain(specialHeadingClass)
+    expect(hashSpan.className).not.toContain(processingClass)
+  })
+
+  it('gives fenced CodeText the class for t.special(t.monospace), not plain t.monospace', () => {
+    const view = mountMd('```\nhello\n```')
+    const specialMonoClass = editorHighlightStyle.style([t.special(t.monospace)])
+    const plainMonoClass = editorHighlightStyle.style([t.monospace])
+    expect(specialMonoClass).toBeTruthy()
+    expect(plainMonoClass).toBeTruthy()
+    expect(specialMonoClass).not.toBe(plainMonoClass)
+    // The "hello" text should have the special mono class
+    const spans = [...view.contentDOM.querySelectorAll('span')]
+    const codeSpan = spans.find(s => s.textContent === 'hello')
+    expect(codeSpan).toBeTruthy()
+    expect(codeSpan.className).toContain(specialMonoClass)
+    expect(codeSpan.className).not.toContain(plainMonoClass)
+  })
+
+  it('gives a bare URL the link class', () => {
+    const view = mountMd('See https://example.com/docs now')
+    const linkClass = editorHighlightStyle.style([t.link])
+    expect(linkClass).toBeTruthy()
+    const spans = [...view.contentDOM.querySelectorAll('span')]
+    const urlSpan = spans.find(s => s.textContent === 'https://example.com/docs')
+    expect(urlSpan).toBeTruthy()
+    expect(urlSpan.className).toContain(linkClass)
+  })
+})
+
+describe('codeLanguageForInfo', () => {
+  it('resolves common JS aliases to a javascript Language', () => {
+    for (const info of ['js', 'javascript', 'mjs', 'cjs']) {
+      const lang = codeLanguageForInfo(info)
+      expect(lang, info).toBeTruthy()
+      expect(lang.name).toBe('javascript')
+    }
+  })
+
+  it('resolves typescript aliases', () => {
+    expect(codeLanguageForInfo('ts').name).toBe('typescript')
+    expect(codeLanguageForInfo('typescript').name).toBe('typescript')
+  })
+
+  it('resolves tsx with jsx', () => {
+    const lang = codeLanguageForInfo('tsx')
+    expect(lang).toBeTruthy()
+    expect(lang.name).toBe('typescript')
+  })
+
+  it('resolves other known languages', () => {
+    expect(codeLanguageForInfo('json').name).toBe('json')
+    expect(codeLanguageForInfo('css').name).toBe('css')
+    expect(codeLanguageForInfo('html').name).toBe('html')
+    expect(codeLanguageForInfo('python').name).toBe('python')
+    expect(codeLanguageForInfo('py').name).toBe('python')
+    expect(codeLanguageForInfo('sql').name).toBe('sql')
+    expect(codeLanguageForInfo('yaml').name).toBe('yaml')
+    expect(codeLanguageForInfo('yml').name).toBe('yaml')
+    expect(codeLanguageForInfo('xml').name).toBe('xml')
+    expect(codeLanguageForInfo('rust').name).toBe('rust')
+    expect(codeLanguageForInfo('rs').name).toBe('rust')
+  })
+
+  it('resolves legacy stream modes (shell, r, toml, dockerfile)', () => {
+    for (const info of ['sh', 'bash', 'zsh', 'shell']) {
+      expect(codeLanguageForInfo(info), info).toBeInstanceOf(StreamLanguage)
+    }
+    expect(codeLanguageForInfo('r')).toBeInstanceOf(StreamLanguage)
+    expect(codeLanguageForInfo('toml')).toBeInstanceOf(StreamLanguage)
+    expect(codeLanguageForInfo('dockerfile')).toBeInstanceOf(StreamLanguage)
+  })
+
+  it('returns null for unknown or empty info strings', () => {
+    expect(codeLanguageForInfo('foo')).toBeNull()
+    expect(codeLanguageForInfo('')).toBeNull()
+    expect(codeLanguageForInfo(null)).toBeNull()
+  })
+
+  it('uses only the first word of the info string', () => {
+    expect(codeLanguageForInfo('js some-meta').name).toBe('javascript')
+  })
+
+  it('produces nested language nodes in a fenced block', () => {
+    const doc = '```js\nconst a = 1\n```'
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = createEditor({ parent, doc, path: '/test.md' })
+    forceParsing(view, view.state.doc.length, 5000)
+    views.push(view)
+
+    // Nested languages are overlays; use resolveInner to find them.
+    const tree = syntaxTree(view.state)
+    const inner = tree.resolveInner(doc.indexOf('const') + 1, 1)
+    // Walk up to find a VariableDeclaration
+    let found = false
+    let node = inner
+    while (node) {
+      if (node.name === 'VariableDeclaration') { found = true; break }
+      node = node.parent
+    }
+    expect(found).toBe(true)
+  })
+
+  it('parses an unknown fence info without error and has no nested language node', () => {
+    const doc = '```foo\nconst a = 1\n```'
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = createEditor({ parent, doc, path: '/test.md' })
+    forceParsing(view, view.state.doc.length, 5000)
+    views.push(view)
+
+    const tree = syntaxTree(view.state)
+    const inner = tree.resolveInner(doc.indexOf('const') + 1, 1)
+    let found = false
+    let node = inner
+    while (node) {
+      if (node.name === 'VariableDeclaration') { found = true; break }
+      node = node.parent
+    }
+    expect(found).toBe(false)
+  })
+
+  it('handles an empty info string fence without error', () => {
+    const doc = '```\nconst a = 1\n```'
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = createEditor({ parent, doc, path: '/test.md' })
+    forceParsing(view, view.state.doc.length, 5000)
+    views.push(view)
+
+    const tree = syntaxTree(view.state)
+    const inner = tree.resolveInner(doc.indexOf('const') + 1, 1)
+    let found = false
+    let node = inner
+    while (node) {
+      if (node.name === 'VariableDeclaration') { found = true; break }
+      node = node.parent
+    }
+    expect(found).toBe(false)
   })
 })

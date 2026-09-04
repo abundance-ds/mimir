@@ -18,10 +18,11 @@ import { r } from '@codemirror/legacy-modes/mode/r'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
-import { tags as t } from '@lezer/highlight'
+import { tags as t, styleTags } from '@lezer/highlight'
 import { Strikethrough } from '@lezer/markdown'
 import { detectActiveFormats } from './formatting.js'
 import { markdownListKeymap } from './markdownLists.js'
+import { markdownCodeBlocks } from './markdownCodeBlocks.js'
 
 export const editorTheme = EditorView.theme({
   '&': {
@@ -161,6 +162,14 @@ export const editorHighlightStyle = HighlightStyle.define([
   { tag: [t.monospace], fontFamily: 'var(--font-mono)', backgroundColor: 'var(--inline-code-bg)', color: 'var(--code)' },
   { tag: [t.link], color: 'var(--color-accent)', textDecoration: 'underline', textUnderlineOffset: '3px' },
   { tag: [t.quote], color: 'var(--quote)', fontStyle: 'italic' },
+  { tag: [t.heading4, t.heading5, t.heading6], fontWeight: '600', fontSize: '1em', color: 'var(--color-ink-2)' },
+  { tag: t.heading, fontWeight: '600' },
+  { tag: t.special(t.heading), color: 'var(--editor-heading-1)' },
+  { tag: t.strikethrough, textDecoration: 'line-through', color: 'var(--color-ink-3)' },
+  { tag: t.labelName, color: 'var(--color-ink-3)' },
+  { tag: t.contentSeparator, color: 'var(--color-ink-4)' },
+  { tag: t.processingInstruction, color: 'var(--editor-marker)' },
+  { tag: t.special(t.monospace), color: 'var(--color-ink-2)', fontFamily: 'var(--font-mono)' },
   { tag: [t.keyword, t.atom], color: 'var(--syntax-keyword)' },
   { tag: [t.propertyName], color: 'var(--syntax-property)' },
   { tag: [t.string], color: 'var(--syntax-string)' },
@@ -204,14 +213,69 @@ export function editorInputAttributesExtension(spellcheck = false) {
   })
 }
 
-const markdownExtension = markdown({ base: markdownLanguage, extensions: [Strikethrough] })
+// Remap Markdown node tags: HeaderMark gets the heading colour, CodeText
+// drops the inline-code background, TaskMarker loses the keyword colour, and
+// a URL reads as a link. Context rules such as "Link/URL" cannot be used
+// here: ruleNodeProp.combine keeps the parser's context-free rule ahead of
+// any deeper remap, so only same-depth overrides take effect.
+const markdownStyleRemap = {
+  props: [styleTags({
+    HeaderMark: t.special(t.heading),
+    CodeText: t.special(t.monospace),
+    TaskMarker: t.processingInstruction,
+    URL: t.link,
+  })],
+}
 
-export function languageExtensionForPath(path = '') {
-  const filename = String(path || '').split('/').pop() || ''
-  const lower = filename.toLowerCase()
-  const ext = lower.includes('.') ? lower.split('.').pop() : lower
+// Map a fence info string to a Language instance, or null.
+const infoAliases = {
+  js: 'javascript', javascript: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx',
+  ts: 'typescript', typescript: 'typescript', tsx: 'tsx',
+  json: 'json', css: 'css', html: 'html',
+  py: 'python', python: 'python',
+  sql: 'sql', yaml: 'yaml', yml: 'yaml', xml: 'xml',
+  rs: 'rust', rust: 'rust', r: 'r',
+  sh: 'shell', bash: 'shell', zsh: 'shell', shell: 'shell',
+  toml: 'toml', dockerfile: 'docker', docker: 'docker',
+}
 
-  if (['md', 'markdown', 'mdown', 'mkd'].includes(ext)) return markdownExtension
+function languageForAlias(alias) {
+  switch (alias) {
+    case 'javascript': return javascript().language
+    case 'jsx': return javascript({ jsx: true }).language
+    case 'typescript': return javascript({ typescript: true }).language
+    case 'tsx': return javascript({ typescript: true, jsx: true }).language
+    case 'json': return json().language
+    case 'css': return css().language
+    case 'html': return html().language
+    case 'python': return python().language
+    case 'sql': return sql().language
+    case 'yaml': return yaml().language
+    case 'xml': return xml().language
+    case 'rust': return rust().language
+    case 'r': return StreamLanguage.define(r)
+    case 'shell': return StreamLanguage.define(shell)
+    case 'toml': return StreamLanguage.define(toml)
+    case 'docker': return StreamLanguage.define(dockerFile)
+    default: return null
+  }
+}
+
+export function codeLanguageForInfo(info) {
+  const word = (info || '').split(/\s/)[0].toLowerCase()
+  if (!word) return null
+  const alias = infoAliases[word]
+  if (!alias) return null
+  return languageForAlias(alias)
+}
+
+const markdownExtension = markdown({
+  base: markdownLanguage,
+  extensions: [Strikethrough, markdownStyleRemap],
+  codeLanguages: codeLanguageForInfo,
+})
+
+function languageForExt(ext, lower) {
   if (['js', 'mjs', 'cjs'].includes(ext)) return javascript()
   if (['jsx'].includes(ext)) return javascript({ jsx: true })
   if (['ts', 'mts', 'cts'].includes(ext)) return javascript({ typescript: true })
@@ -228,7 +292,16 @@ export function languageExtensionForPath(path = '') {
   if (['sh', 'bash', 'zsh', 'fish', 'env'].includes(ext) || lower === 'makefile') return StreamLanguage.define(shell)
   if (['toml'].includes(ext)) return StreamLanguage.define(toml)
   if (lower === 'dockerfile' || ext === 'dockerfile') return StreamLanguage.define(dockerFile)
-  return []
+  return null
+}
+
+export function languageExtensionForPath(path = '') {
+  const filename = String(path || '').split('/').pop() || ''
+  const lower = filename.toLowerCase()
+  const ext = lower.includes('.') ? lower.split('.').pop() : lower
+
+  if (['md', 'markdown', 'mdown', 'mkd'].includes(ext)) return markdownExtension
+  return languageForExt(ext, lower) ?? []
 }
 
 export function createEditor({ parent, doc, path = '', extensions = [], onChange, onCursor, onStats, onSelectionCommand, onActiveFormats, isSelectionRewriteEnabled = () => true, initialSettings }) {
@@ -312,6 +385,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
       // Inert outside markdown: the command declines when the cursor is not in
       // a markdown context, so Enter falls through to the default keymap.
       markdownListKeymap,
+      markdownCodeBlocks(),
       updateListener,
       ...extensions,
     ],

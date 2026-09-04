@@ -411,7 +411,7 @@ function buildDecorations(view, isEnabled, getFilePath) {
     },
   })
 
-  decos.sort((a, b) => a.from - b.from || a.startSide - b.startSide)
+  decos.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide)
 
   const builder = new RangeSetBuilder()
   for (const d of decos) {
@@ -458,7 +458,7 @@ function buildTableDecorations(state, isEnabled) {
     },
   })
 
-  decos.sort((a, b) => a.from - b.from || a.startSide - b.startSide)
+  decos.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide)
 
   const builder = new RangeSetBuilder()
   for (const d of decos) {
@@ -543,18 +543,17 @@ const livePreviewTheme = EditorView.baseTheme({
     textDecorationThickness: '2px',
   },
   '.cm-lp-heading-mark': {
-    color: 'var(--syntax-keyword)',
+    color: 'var(--editor-heading-1)',
     fontSize: '1em',
     fontWeight: '700',
   },
   '.cm-lp-heading-mark > span': {
-    color: 'var(--syntax-keyword)',
+    color: 'var(--editor-heading-1)',
     fontWeight: '700',
   },
   '.cm-lp-blockquote-line': {
-    borderLeft: '3px solid var(--color-accent)',
+    borderLeft: '2px solid var(--color-rule)',
     paddingLeft: '8px',
-    opacity: '0.9',
   },
   '.cm-lp-hr': {
     border: 'none',

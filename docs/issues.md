@@ -53,6 +53,10 @@ task scope.
   needs the explicit shell command-boundary contract in
   [activities.md](activities.md#plain-terminal-status).
 
+- Live Preview hides only the outer marks of nested emphasis. `***bold
+  italic***` keeps its inner `**` because the Emphasis and StrongEmphasis
+  handlers in `livePreview.js` stop at the outer node.
+
 - Editor comment navigation is available only while the formatting toolbar is
   enabled. Add reusable keyboard or menu commands before treating comment
   navigation as independent of toolbar visibility.

@@ -4,7 +4,9 @@
   --ink: var(--color-ink);
   --ink-strong: color-mix(in srgb, var(--color-ink) 65%, var(--syntax-keyword));
   --ink-emphasis: color-mix(in srgb, var(--color-ink) 80%, var(--syntax-keyword));
-  --editor-heading-1: var(--syntax-keyword);
+  --editor-heading-1: var(--editor-heading);
+  --editor-marker: var(--color-ink-4);
+  --code-block-bg: color-mix(in srgb, var(--color-ink) 4%, var(--color-surface));
   --editor-paper: var(--color-surface);
   --accent: var(--color-accent);
   --muted: var(--color-ink-3);
@@ -16,11 +18,12 @@
   --line-strong: var(--color-rule);
   --panel: var(--color-chrome-mid);
   --shadow-low: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --syntax-keyword: #7c4dff;
-  --syntax-property: #6e56cf;
-  --syntax-string: #2e7d32;
-  --syntax-number: #e65100;
-  --syntax-tag: #1a6fb5;
+  --editor-heading: #554077;
+  --syntax-keyword: #654a8f;
+  --syntax-property: #3e5a8d;
+  --syntax-string: #326935;
+  --syntax-number: #8c541f;
+  --syntax-tag: #186286;
   --editor-size: 14px;
   --editor-line-height: 20.3px;
   --editor-font-weight: 450;

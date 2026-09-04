@@ -38,7 +38,31 @@ function contrastRatio(first, second) {
   return (light + 0.05) / (dark + 0.05)
 }
 
+const SYNTAX_TOKENS = ['editor-heading', 'syntax-keyword', 'syntax-property', 'syntax-string', 'syntax-number', 'syntax-tag']
+
+const syntaxTokensByTheme = Object.fromEntries(
+  [...themesSource.matchAll(/:root\[data-theme="([^"]+)"\]\s*\{([^}]*)\}/g)]
+    .map(([, name, block]) => [name, Object.fromEntries(
+      [...block.matchAll(/--(editor-heading|syntax-[a-z]+):\s*(#[\da-f]{6})/gi)]
+        .map(([, token, value]) => [token, value]),
+    )]),
+)
+
 describe('theme text contrast', () => {
+  it('keeps editor syntax colours legible on the editor paper', () => {
+    for (const [theme, tokens] of Object.entries(themeTokens)) {
+      for (const token of SYNTAX_TOKENS) {
+        const value = syntaxTokensByTheme[theme]?.[token]
+        expect(value, `${theme} defines ${token}`).toMatch(/^#[\da-f]{6}$/i)
+        expect(
+          contrastRatio(value, tokens.surface),
+          `${theme} ${token} against surface`,
+        ).toBeGreaterThanOrEqual(5)
+      }
+    }
+  })
+
+
   it('keeps quiet metadata readable against every theme surface', () => {
     expect(Object.keys(themeTokens)).toEqual([
       'parchment',

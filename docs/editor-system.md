@@ -23,7 +23,10 @@ and cleanup. `src/stores/files.js` owns open files and save state.
 ## CodeMirror surface
 
 `src/editor/codemirror/` owns formatting, live Markdown preview, comments, and
-ghost completion. The file store is the durable renderer state; CodeMirror is
+ghost completion. `editorHighlightStyle` in `core.js` covers every Markdown
+scope: markers take the quiet marker ink, heading marks take the theme heading
+colour, fenced code takes the nested language for its info string and a
+full-width wash from `markdownCodeBlocks.js`. The file store is the durable renderer state; CodeMirror is
 the active document projection. Toolbar pointer actions preserve focus and
 selection.
 

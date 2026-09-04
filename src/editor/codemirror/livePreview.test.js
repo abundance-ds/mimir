@@ -55,6 +55,16 @@ describe('livePreview', () => {
       view.destroy()
     })
 
+    it('places a blockquote line decoration before its hidden quote mark', () => {
+      // Regression: sorting by the Range's missing startSide left the quote
+      // mark ahead of the line decoration, and RangeSetBuilder threw, which
+      // disabled Live Preview for the whole document.
+      const decos = getDecos('Intro\n\n> A quote with **bold** inside.\n')
+      const line = decos.find(d => d.class === 'cm-lp-blockquote-line')
+      expect(line).toBeTruthy()
+      expect(decos.find(d => d.from === line.from).class).toBe('cm-lp-blockquote-line')
+    })
+
     it('keeps heading marker colour when Live Preview is disabled', () => {
       const view = makeView('## Heading')
       const decos = _buildDecorations(view, () => false, null)
@@ -291,7 +301,7 @@ describe('livePreview', () => {
     it('keeps the accent on the nested marker span', () => {
       const parent = document.createElement('div')
       document.body.appendChild(parent)
-      document.documentElement.style.setProperty('--syntax-keyword', 'rgb(18, 52, 86)')
+      document.documentElement.style.setProperty('--editor-heading-1', 'rgb(18, 52, 86)')
       document.documentElement.style.setProperty('--color-ink', 'rgb(220, 220, 220)')
 
       const state = EditorState.create({
@@ -311,7 +321,7 @@ describe('livePreview', () => {
       expect(getComputedStyle(heading).color).toBe('rgb(220, 220, 220)')
       view.destroy()
       parent.remove()
-      document.documentElement.style.removeProperty('--syntax-keyword')
+      document.documentElement.style.removeProperty('--editor-heading-1')
       document.documentElement.style.removeProperty('--color-ink')
     })
   })
