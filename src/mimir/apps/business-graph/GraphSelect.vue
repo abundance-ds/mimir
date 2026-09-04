@@ -151,7 +151,7 @@ const props = defineProps({
   variant: {
     type: String,
     default: 'field',
-    validator: value => ['toolbar', 'field', 'card', 'quiet', 'property', 'row'].includes(value),
+    validator: value => ['bar', 'toolbar', 'field', 'card', 'quiet', 'property', 'row'].includes(value),
   },
   menuMinWidth: { type: Number, default: 148 },
   chevron: { type: Boolean, default: true },
@@ -405,12 +405,21 @@ let graphSelectCounter = 0
   opacity: 0.45;
 }
 
-.graph-select-toolbar {
-  height: 30px;
+.graph-select-bar {
+  height: 28px;
   padding: 0 9px;
   border-color: var(--color-rule-light);
   background: var(--color-surface);
   font-size: 11px;
+  font-weight: 600;
+}
+
+.graph-select-toolbar {
+  height: 24px;
+  padding: 0 9px;
+  border-color: var(--color-rule-light);
+  background: var(--color-surface);
+  font-size: 10.5px;
 }
 
 .graph-select-field {

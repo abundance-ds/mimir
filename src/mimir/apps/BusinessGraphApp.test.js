@@ -219,12 +219,13 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-board-card="issue-1"]').text()).toContain('Extract evidence')
     expect(wrapper.findAll('[data-graph-section]').map(tab => tab.text())).toEqual([
       'Work',
+      'All',
+      'Changes',
       'Projects',
       'Knowledge',
       'Journal',
-      'All',
-      'Changes',
     ])
+    expect(wrapper.find('[data-graph-section-picker]').exists()).toBe(false)
 
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
     await flushPromises()
@@ -937,10 +938,13 @@ describe('BusinessGraphApp', () => {
     const viewbarGroups = wrapper.get('.graph-viewbar').element.children
     expect([...viewbarGroups].map(group => group.className)).toEqual([
       'graph-views',
-      'graph-project-view',
-      'graph-project-view',
-      'graph-work-controls',
+      'graph-filters-root',
     ])
+    const filtersTrigger = wrapper.get('[data-graph-filters-trigger]')
+    expect(filtersTrigger.attributes('aria-expanded')).toBe('false')
+    await filtersTrigger.trigger('click')
+    expect(filtersTrigger.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-graph-filters-popover]').isVisible()).toBe(true)
     const projectReset = wrapper.get('[data-graph-control="board-project-filter-clear"]')
     expect(projectReset.attributes('disabled')).toBeDefined()
     expect(projectReset.attributes('aria-label')).toBe('All projects are shown')
@@ -954,6 +958,8 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-board-project-filter]').classes()).toContain('graph-project-view-active')
     expect(wrapper.get('[data-board-project-filter]').attributes('aria-label'))
       .toBe('Project view: Project Alpha')
+    expect(wrapper.get('[data-graph-filter-chip="project"]').text())
+      .toContain('Project: Project Alpha')
     expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
       .toEqual(['issue-1'])
     await projectReset.trigger('click')
@@ -981,7 +987,9 @@ describe('BusinessGraphApp', () => {
     const columnsReset = wrapper.get('[data-graph-control="board-columns-expand-all"]')
     expect(columnsReset.attributes('disabled')).toBeDefined()
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
-    document.querySelector('[data-graph-control="board-column-plan"]').click()
+    const planColumn = document.querySelector('[data-graph-control="board-column-plan"]')
+    planColumn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    planColumn.click()
     await flushPromises()
     expect(columnsReset.attributes('disabled')).toBeUndefined()
     expect(columnsReset.attributes('aria-label')).toContain('Plan')
@@ -1141,7 +1149,7 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('dismisses custom scope and column menus when the user clicks elsewhere', async () => {
+  it('dismisses custom scope, filter, and column menus when the user clicks elsewhere', async () => {
     const wrapper = render()
     await flushPromises()
     const outside = document.createElement('button')
@@ -1153,6 +1161,14 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(wrapper.find('[data-graph-scope-menu]').exists()).toBe(false)
 
+    const filtersTrigger = wrapper.get('[data-graph-filters-trigger]')
+    await filtersTrigger.trigger('click')
+    expect(wrapper.get('[data-graph-filters-popover]').isVisible()).toBe(true)
+    outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    await flushPromises()
+    expect(wrapper.get('[data-graph-filters-popover]').isVisible()).toBe(false)
+
+    await filtersTrigger.trigger('click')
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
     await flushPromises()
     expect(document.querySelector('[data-board-columns-menu]')).not.toBeNull()
@@ -1162,7 +1178,7 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('navigates scope and column menus with arrows and restores their triggers', async () => {
+  it('navigates scope, filter, and column menus with the keyboard and restores their triggers', async () => {
     const wrapper = render()
     await flushPromises()
 
@@ -1183,6 +1199,12 @@ describe('BusinessGraphApp', () => {
     }))
     await flushPromises()
     expect(document.activeElement).toBe(scopeTrigger.element)
+
+    const filtersTrigger = wrapper.get('[data-graph-filters-trigger]')
+    filtersTrigger.element.focus()
+    await filtersTrigger.trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[data-board-project-filter]').element)
 
     const columnsTrigger = wrapper.get('[data-board-columns-trigger]')
     columnsTrigger.element.focus()

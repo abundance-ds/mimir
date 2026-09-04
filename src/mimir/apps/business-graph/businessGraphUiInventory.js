@@ -95,6 +95,7 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'confirm-submit',
   ],
   filters: [
+    'filters-trigger',
     'board-project-filter-clear',
     'board-assignee-filter-clear',
     'board-priority-filter-clear',

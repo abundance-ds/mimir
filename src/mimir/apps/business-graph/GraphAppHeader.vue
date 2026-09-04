@@ -1,15 +1,8 @@
 <template>
-  <header class="graph-topbar">
-    <div class="graph-brand" aria-label="Business graph">
-      <span class="graph-mark" aria-hidden="true">
-        <IconTopologyStar3 :size="16" :stroke-width="1.8" />
-      </span>
-      <span class="graph-brand-name">Business graph</span>
-    </div>
-
+  <header data-graph-topbar class="graph-topbar pane-bar">
     <nav class="graph-sections" aria-label="Business graph sections">
       <button
-        v-for="item in sections"
+        v-for="item in orderedSections"
         :key="item.id"
         type="button"
         :data-graph-section="item.id"
@@ -22,7 +15,6 @@
         <span>{{ item.label }}</span>
       </button>
     </nav>
-
     <div class="graph-search">
       <IconSearch :size="14" aria-hidden="true" />
       <input
@@ -153,7 +145,6 @@ import {
   IconPlus,
   IconRefresh,
   IconSearch,
-  IconTopologyStar3,
   IconX,
 } from '@tabler/icons-vue'
 
@@ -183,6 +174,16 @@ defineEmits([
   'refresh',
   'create',
 ])
+
+const sectionPriority = Object.freeze(['work', 'all', 'now'])
+const orderedSections = computed(() => [...props.sections].sort((left, right) => {
+  const leftIndex = sectionPriority.indexOf(left.id)
+  const rightIndex = sectionPriority.indexOf(right.id)
+  if (leftIndex === -1 && rightIndex === -1) return 0
+  if (leftIndex === -1) return 1
+  if (rightIndex === -1) return -1
+  return leftIndex - rightIndex
+}))
 
 const searchInput = ref(null)
 const scopeRoot = ref(null)
@@ -268,17 +269,10 @@ defineExpose({ closeMenus, focusSearch })
 .graph-topbar {
   display: grid;
   z-index: 20;
-  grid-template-columns: auto minmax(310px, 1fr) minmax(190px, 320px) auto;
-  min-height: 40px;
-  flex: 0 0 auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 320px) auto;
   gap: 10px;
-  border-bottom: 1px solid var(--color-rule);
-  background: color-mix(in srgb, var(--graph-raised) 97%, transparent);
-  padding: 4px 10px;
 }
 
-.graph-brand,
 .graph-sections,
 .graph-actions,
 .graph-search,
@@ -287,16 +281,13 @@ defineExpose({ closeMenus, focusSearch })
   align-items: center;
 }
 
-.graph-brand { min-width: 0; gap: 9px; }
-.graph-mark { display: grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; color: var(--color-accent); }
-.graph-brand-name { color: var(--color-ink); font-size: 13px; font-weight: 680; letter-spacing: -0.015em; white-space: nowrap; }
 .graph-sections { min-width: 0; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .graph-sections::-webkit-scrollbar { display: none; }
 .graph-section { display: inline-flex; min-height: 26px; flex: 0 0 auto; align-items: center; border-radius: 3px; padding: 0 7px; color: var(--color-ink-3); font-size: 10.5px; font-weight: 540; transition: background-color 120ms ease, color 120ms ease; }
 .graph-section:hover { background: var(--graph-hover); color: var(--color-ink); }
 .graph-section-active { background: transparent; color: var(--color-ink); font-weight: 700; }
 
-.graph-search { position: relative; height: 30px; min-width: 0; gap: 7px; border: 1px solid var(--color-rule-light); border-radius: 5px; background: var(--graph-canvas); padding: 0 7px 0 9px; color: var(--color-ink-4); transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease; }
+.graph-search { position: relative; height: 28px; min-width: 0; gap: 7px; border: 1px solid var(--color-rule-light); border-radius: 5px; background: var(--graph-canvas); padding: 0 7px 0 9px; color: var(--color-ink-4); transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease; }
 .graph-search:focus-within { border-color: color-mix(in srgb, var(--color-accent) 62%, var(--color-rule)); background: var(--graph-raised); box-shadow: 0 0 0 2px var(--graph-focus); }
 .graph-search input { width: 100%; min-width: 0; border: 0; outline: 0; appearance: none; background: transparent; color: var(--color-ink); font-size: 11px; }
 .graph-search input::-webkit-search-cancel-button { display: none; }
@@ -307,12 +298,12 @@ defineExpose({ closeMenus, focusSearch })
 .graph-search-clear { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border-radius: 4px; color: var(--color-ink-4); }
 .graph-search-clear:hover { background: var(--graph-hover); color: var(--color-ink); }
 .graph-actions { gap: 5px; }
-.graph-icon-button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 5px; color: var(--color-ink-3); }
+.graph-icon-button { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 5px; color: var(--color-ink-3); }
 .graph-icon-button:hover { background: var(--graph-hover); color: var(--color-ink); }
 .graph-icon-button:disabled { cursor: default; opacity: 0.42; }
-.graph-primary-button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 6px; border-radius: 5px; background: var(--color-accent); padding: 0 11px; color: var(--color-accent-ink, white); font-size: 11px; font-weight: 650; }
+.graph-primary-button { display: inline-flex; min-height: 28px; align-items: center; justify-content: center; gap: 6px; border-radius: 5px; background: var(--color-accent); padding: 0 11px; color: var(--color-accent-ink, white); font-size: 11px; font-weight: 650; }
 .graph-primary-button:hover { background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink)); }
-.graph-scope-trigger { height: 30px; gap: 7px; border-radius: 5px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
+.graph-scope-trigger { height: 28px; gap: 7px; border-radius: 5px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
 .graph-scope-trigger:hover { background: var(--graph-hover); color: var(--color-ink); }
 .graph-section:focus-visible, .graph-icon-button:focus-visible, .graph-primary-button:focus-visible, .graph-scope-trigger:focus-visible, .graph-search-clear:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: 1px; }
 
@@ -326,18 +317,15 @@ defineExpose({ closeMenus, focusSearch })
 
 @keyframes graph-pulse { to { opacity: 0.35; transform: scale(0.8); } }
 @container business-graph (max-width: 1050px) {
-  .graph-topbar { grid-template-columns: auto minmax(180px, 1fr) auto; }
-  .graph-search { grid-column: 2; grid-row: 1; }
-  .graph-sections { grid-column: 1 / -1; grid-row: 2; margin: -3px -4px 0; }
-  .graph-actions { grid-column: 3; grid-row: 1; }
+  .graph-topbar { grid-template-columns: minmax(140px, 1fr) minmax(150px, 240px) auto; }
 }
 @container business-graph (max-width: 680px) {
-  .graph-topbar { grid-template-columns: auto minmax(120px, 1fr) auto; gap: 7px; padding-inline: 8px; }
-  .graph-brand-name { display: none; }
+  .graph-topbar { grid-template-columns: minmax(140px, 1fr) minmax(96px, 180px) auto; gap: 7px; }
+  .graph-search kbd { display: none; }
+  .graph-primary-button { width: 28px; padding: 0; }
+  .graph-primary-button span { display: none; }
 }
 @container business-graph (max-width: 419px) {
-  .graph-primary-button { width: 32px; padding: 0; }
-  .graph-primary-button span { display: none; }
   .graph-section { padding-inline: 8px; }
 }
 </style>

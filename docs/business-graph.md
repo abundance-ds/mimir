@@ -86,6 +86,9 @@ same nodes. Peek and Focus edit one revision-aware draft; navigation commits
 that draft first. Graph search filters the active projection. The dispatch bar
 supports lookup, deterministic commands, and agent work with a bounded,
 source-aware context pack. Raw ids and source revisions stay out of normal UI.
+Projection navigation never collapses into a selector. Work, All, and Changes
+come first as direct buttons; Projects, Knowledge, and Journal remain available
+after them.
 
 Work rows share one grammar (`business-graph/workRow.js`) across Board, List,
 and Attention. A Board card has a fixed height and fixed slots: title with

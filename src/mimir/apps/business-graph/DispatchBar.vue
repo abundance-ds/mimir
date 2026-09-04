@@ -2,7 +2,7 @@
   <footer
     ref="shell"
     data-graph-dispatch
-    class="dispatch-bar"
+    class="dispatch-bar pane-footer-input"
     :class="{ 'dispatch-bar-focused': focused }"
   >
     <div
@@ -316,13 +316,11 @@ defineExpose({ focusInput })
 .dispatch-bar {
   position: relative;
   flex: 0 0 auto;
-  border-top: 1px solid var(--color-rule);
-  background: var(--color-surface);
 }
 
 .dispatch-line {
   display: flex;
-  min-height: 34px;
+  height: 35px;
   align-items: center;
   gap: 8px;
   padding: 0 10px;
@@ -387,7 +385,7 @@ defineExpose({ focusInput })
   position: absolute;
   z-index: 80;
   right: 0;
-  bottom: 34px;
+  bottom: 100%;
   left: 0;
   border-top: 1px solid var(--color-rule);
   background: var(--color-surface);

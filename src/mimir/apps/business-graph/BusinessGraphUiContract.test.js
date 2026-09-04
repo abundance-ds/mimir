@@ -83,6 +83,13 @@ describe('Business Graph UI contract', () => {
     expect(viewActive).not.toMatch(/border|box-shadow/)
   })
 
+  it('keeps graph projections as direct navigation at every width', () => {
+    expect(headerSource).toContain("Object.freeze(['work', 'all', 'now'])")
+    expect(headerSource).toContain('v-for="item in orderedSections"')
+    expect(headerSource).not.toContain('data-graph-section-picker')
+    expect(headerSource).not.toContain('.graph-section-picker')
+  })
+
   it('identifies every native interactive element for audit and automation', () => {
     const tags = source.match(/<(?:button|input|textarea|summary)\b.*?>/gms) || []
     const markers = [
