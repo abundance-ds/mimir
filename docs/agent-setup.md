@@ -28,6 +28,11 @@ packages. Mimir projects retained immutable skill revisions without taking over
 unrelated client files. Codex and Gemini need `mimir skill` for Project skills;
 Claude and Pi receive Project skills at launch.
 
+Mimir installs four packaged skills into the Private scope from `skills/`:
+`mimir` (overview, used when no more specific skill fits), `mimir-config`,
+`mimir-graph`, and `mimir-meetings`. A test keeps the overview's tool list equal
+to the public tool allowlist.
+
 `mimir run <name>` resolves `agents/<name>/AGENT.md`, launches it through the
 same Activity path, and supports either interactive mode or headless follow.
 Routines can reference the package name directly.

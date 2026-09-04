@@ -17,6 +17,7 @@ const MIMIR_CONFIG_SKILL: &str = include_str!("../../skills/mimir-config/SKILL.m
 const MIMIR_GRAPH_SKILL: &str = include_str!("../../skills/mimir-graph/SKILL.md");
 const MIMIR_GRAPH_REFERENCE: &str = include_str!("../../skills/mimir-graph/references/graph.md");
 const MIMIR_MEETINGS_SKILL: &str = include_str!("../../skills/mimir-meetings/SKILL.md");
+const MIMIR_OVERVIEW_SKILL: &str = include_str!("../../skills/mimir/SKILL.md");
 const MIMIR_CLI_MODULES: &[(&str, &str)] = &[
     ("mimir-skills.mjs", MIMIR_SKILLS_SOURCE),
     ("mimir-agents.mjs", MIMIR_AGENTS_SOURCE),
@@ -123,6 +124,13 @@ fn install_builtin_skills_at(home: &Path) -> Result<(), String> {
             .join(".builtin-sources")
             .join("mimir-meetings.json"),
         MIMIR_MEETINGS_SKILL.as_bytes(),
+        &[],
+    )?;
+
+    install_managed_builtin_skill(
+        &private_skills.join("mimir").join("SKILL.md"),
+        &skills_root.join(".builtin-sources").join("mimir.json"),
+        MIMIR_OVERVIEW_SKILL.as_bytes(),
         &[],
     )
 }
@@ -242,9 +250,26 @@ mod tests {
             ("mimir-graph", MIMIR_GRAPH_SKILL, 25),
             ("mimir-meetings", MIMIR_MEETINGS_SKILL, 70),
             ("mimir-graph reference", MIMIR_GRAPH_REFERENCE, 450),
+            ("mimir", MIMIR_OVERVIEW_SKILL, 460),
         ] {
             let words = word_count(source);
             assert!(words <= limit, "{name} has {words} words; limit is {limit}");
+        }
+    }
+
+    #[test]
+    fn overview_skill_lists_every_public_tool() {
+        for spec in crate::tool_runtime::AGENT_TOOLS.iter() {
+            // Granola is scheduled for removal and is intentionally absent
+            // from the overview skill.
+            if spec.connection == Some("granola") {
+                continue;
+            }
+            assert!(
+                MIMIR_OVERVIEW_SKILL.contains(spec.public_name),
+                "overview skill does not list {}",
+                spec.public_name
+            );
         }
     }
 
@@ -318,7 +343,9 @@ mod tests {
         let meetings = home
             .path()
             .join(".mimir/private/skills/mimir-meetings/SKILL.md");
+        let overview = home.path().join(".mimir/private/skills/mimir/SKILL.md");
         assert_eq!(fs::read_to_string(config).unwrap(), MIMIR_CONFIG_SKILL);
+        assert_eq!(fs::read_to_string(overview).unwrap(), MIMIR_OVERVIEW_SKILL);
         assert_eq!(fs::read_to_string(graph).unwrap(), MIMIR_GRAPH_SKILL);
         assert_eq!(
             fs::read_to_string(reference).unwrap(),
@@ -372,6 +399,10 @@ mod tests {
         assert!(MIMIR_MEETINGS_SKILL.contains("meetings_get"));
         assert!(MIMIR_MEETINGS_SKILL.contains("last_minutes"));
         assert!(MIMIR_MEETINGS_SKILL.contains("delete requires explicit user request"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("name: mimir\n"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("Skill `mimir-graph`"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("Skill `mimir-meetings`"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("Skill `mimir-config`"));
         for kind in crate::business_graph::ENTITY_KINDS {
             assert!(MIMIR_GRAPH_REFERENCE.contains(kind));
         }
