@@ -4,6 +4,7 @@
       ref="listbox"
       data-graph-entity-list
       class="entity-list"
+      :class="{ 'entity-list-work': work }"
       tabindex="0"
       role="listbox"
       aria-label="Graph items"
@@ -12,60 +13,114 @@
       @keydown.up.prevent="move(-1)"
       @keydown.enter.prevent="openSelected"
     >
-      <button
-        v-for="(node, index) in nodes"
-        :id="`graph-list-option-${node.id}`"
-        :key="node.id"
-        type="button"
-        :data-graph-node="node.id"
-        :data-graph-control="`list-open-${node.id}`"
-        role="option"
-        tabindex="-1"
-        :aria-selected="index === selection"
-        class="entity-row"
-        :class="{ 'entity-row-selected': index === selection }"
-        @mouseenter="selectIndex(index)"
-        @mousedown.prevent="focusRow(index)"
-        @click="openAt(index)"
-      >
-        <span class="entity-content">
-          <span class="entity-line-1">
-            <span class="entity-kind">{{ human(node.kind) }}</span>
-            <component
-              :is="priorityIcon(node.priority)"
-              v-if="node.kind === 'issue'"
-              :size="14"
-              :stroke-width="2.1"
-              class="entity-priority"
+      <template v-for="group in groups" :key="group.id">
+        <div
+          v-if="group.label"
+          class="entity-group"
+          role="presentation"
+          :data-graph-group="group.id"
+        >
+          <span class="entity-group-name">{{ group.label }}</span>
+          <span class="entity-group-count">{{ group.items.length }}</span>
+        </div>
+
+        <button
+          v-for="node in group.items"
+          :id="`graph-list-option-${node.id}`"
+          :key="node.id"
+          type="button"
+          :data-graph-node="node.id"
+          :data-graph-control="`list-open-${node.id}`"
+          role="option"
+          tabindex="-1"
+          :aria-selected="indexOf(node.id) === selection"
+          :aria-label="work ? workRowLabel(node) : undefined"
+          class="entity-row"
+          :class="{
+            'entity-row-selected': indexOf(node.id) === selection,
+            'entity-row-work': work,
+            'entity-row-no-project': work && hideProject,
+          }"
+          @mouseenter="selectIndex(indexOf(node.id))"
+          @mousedown.prevent="focusRow(indexOf(node.id))"
+          @click="openAt(indexOf(node.id))"
+        >
+          <template v-if="work">
+            <span
+              class="work-priority"
               :class="`priority-${node.priority || 'normal'}`"
               aria-hidden="true"
-            />
-            <strong>{{ node.title || node.id }}</strong>
-          </span>
-          <span class="entity-line-2">
-            <template v-if="node.kind === 'issue'">
-              <span class="entity-status" :class="stateClass(node.status)">
-                {{ human(node.status || 'backlog') }}
+            >
+              <component
+                :is="priorityIcon(node.priority)"
+                :size="14"
+                :stroke-width="node.priority === 'urgent' ? 2.6 : 2.2"
+              />
+            </span>
+            <span class="work-title">
+              <span class="work-title-text">{{ node.title || 'Untitled issue' }}</span>
+              <span v-if="waitingReason(node)" class="work-waiting">
+                <span class="work-key">waiting for</span> {{ waitingReason(node) }}
               </span>
-              <span v-if="projectLabel(node)" class="entity-project">{{ projectLabel(node) }}</span>
-              <span v-if="node.dueDate" class="entity-due" :class="{ overdue: overdue(node.dueDate) }">
-                {{ shortDate(node.dueDate) }}
-              </span>
-              <span v-if="overdue(node.dueDate)" class="entity-overdue">overdue</span>
-              <span v-if="node.waitingFor" class="entity-waiting">waiting</span>
-              <span v-if="actorDisplay(node)" class="entity-author" :title="actorLabel(node)">
-                {{ actorDisplay(node) }}
-              </span>
-            </template>
-            <template v-else>
-              <span v-if="node.summary" class="entity-summary">{{ node.summary }}</span>
-              <span class="entity-updated">{{ shortDate(node.updatedAt) }}</span>
-            </template>
-          </span>
-        </span>
-      </button>
+            </span>
+            <span v-if="!hideProject" class="work-project" :title="projectLabel(node)">
+              {{ projectLabel(node) }}
+            </span>
+            <span
+              class="work-assignee"
+              :class="{ 'work-assignee-self': assignee(node)?.self }"
+              :title="assignee(node) ? (assignee(node).self ? 'Assigned to you' : `Assigned to ${assignee(node).name}`) : undefined"
+            >
+              {{ assignee(node)?.label || '' }}
+            </span>
+            <span class="work-due" :class="`due-${due(node).state}`">{{ due(node).label }}</span>
+          </template>
 
-      <div v-if="!nodes.length" class="entity-empty">
+          <span v-else class="entity-content">
+            <span class="entity-line-1">
+              <span class="entity-kind">{{ human(node.kind) }}</span>
+              <component
+                :is="priorityIcon(node.priority)"
+                v-if="node.kind === 'issue'"
+                :size="14"
+                :stroke-width="2.1"
+                class="entity-priority"
+                :class="`priority-${node.priority || 'normal'}`"
+                aria-hidden="true"
+              />
+              <strong>{{ node.title || node.id }}</strong>
+            </span>
+            <span class="entity-line-2">
+              <template v-if="node.kind === 'issue'">
+                <span class="entity-status" :class="stateClass(node.status)">
+                  {{ human(node.status || 'backlog') }}
+                </span>
+                <span v-if="projectLabel(node)" class="entity-project">{{ projectLabel(node) }}</span>
+                <span v-if="due(node).label" class="entity-due" :class="`due-${due(node).state}`">
+                  {{ due(node).label }}
+                </span>
+                <span v-if="waitingReason(node)" class="entity-waiting">
+                  waiting for {{ waitingReason(node) }}
+                </span>
+                <span
+                  v-if="assignee(node)"
+                  class="entity-author"
+                  :class="{ 'entity-author-self': assignee(node).self }"
+                  :title="assignee(node).name"
+                >
+                  {{ assignee(node).label }}
+                </span>
+              </template>
+              <template v-else>
+                <span v-if="node.summary" class="entity-summary">{{ node.summary }}</span>
+                <span class="entity-updated">{{ shortDate(node.updatedAt) }}</span>
+              </template>
+            </span>
+          </span>
+        </button>
+      </template>
+
+      <div v-if="!rows.length" class="entity-empty">
         <h2>{{ emptyTitle }}</h2>
         <p>{{ emptyCopy }}</p>
         <button
@@ -83,16 +138,34 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import {
-  IconAntennaBars2,
   IconAntennaBars3,
-  IconAntennaBars4,
+  IconAntennaBars5,
+  IconArrowNarrowDown,
   IconExclamationMark,
 } from '@tabler/icons-vue'
+import {
+  assigneeDisplay,
+  dueInfo,
+  groupWorkRows,
+  waitingReason,
+} from './workRow.js'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
+  /** Nodes used to resolve projects and people; defaults to `nodes`. */
+  lookup: { type: Array, default: () => [] },
+  projects: { type: Array, default: () => [] },
   scopes: { type: Array, default: () => [] },
-  actors: { type: Object, default: () => ({}) },
+  /** `work` renders one aligned issue row per line; `generic` keeps kind + summary rows. */
+  mode: {
+    type: String,
+    default: 'generic',
+    validator: value => ['generic', 'work'].includes(value),
+  },
+  /** Work grouping: `status`, `project`, `attention`, or empty for a flat list. */
+  groupBy: { type: String, default: '' },
+  selfId: { type: String, default: '' },
+  hideProject: { type: Boolean, default: false },
   emptyTitle: { type: String, default: 'Nothing here yet' },
   emptyCopy: { type: String, default: 'Create an item or choose another scope.' },
 })
@@ -101,11 +174,22 @@ const emit = defineEmits(['open', 'create'])
 const listbox = ref(null)
 const selection = ref(0)
 const selectedId = ref('')
-const selectedNode = computed(() => props.nodes[selection.value] || null)
-const byId = computed(() => new Map(props.nodes.map(node => [node.id, node])))
+const work = computed(() => props.mode === 'work')
+const groups = computed(() => {
+  if (work.value && props.groupBy) {
+    return groupWorkRows(props.nodes, { groupBy: props.groupBy, projects: props.projects })
+  }
+  return [{ id: 'all', label: '', items: props.nodes }]
+})
+const rows = computed(() => groups.value.flatMap(group => group.items))
+const rowIndex = computed(() => new Map(rows.value.map((node, index) => [node.id, index])))
+const selectedNode = computed(() => rows.value[selection.value] || null)
+const byId = computed(() => new Map(
+  (props.lookup.length ? props.lookup : props.nodes).map(node => [node.id, node]),
+))
 
 watch(
-  () => props.nodes.map(node => node.id),
+  () => rows.value.map(node => node.id),
   ids => {
     const preservedIndex = ids.indexOf(selectedId.value)
     const index = preservedIndex >= 0
@@ -117,9 +201,13 @@ watch(
   { immediate: true },
 )
 
+function indexOf(id) {
+  return rowIndex.value.get(id) ?? -1
+}
+
 function move(delta) {
-  if (!props.nodes.length) return
-  const next = Math.max(0, Math.min(props.nodes.length - 1, selection.value + delta))
+  if (!rows.value.length) return
+  const next = Math.max(0, Math.min(rows.value.length - 1, selection.value + delta))
   if (next === selection.value) return
   selectIndex(next, { reveal: true })
 }
@@ -130,13 +218,13 @@ function openSelected() {
 }
 
 function focusEdge(edge = 'first') {
-  if (!props.nodes.length) return
-  selectIndex(edge === 'last' ? props.nodes.length - 1 : 0, { reveal: true })
+  if (!rows.value.length) return
+  selectIndex(edge === 'last' ? rows.value.length - 1 : 0, { reveal: true })
   listbox.value?.focus()
 }
 
 function focusNode(id) {
-  const index = props.nodes.findIndex(node => node.id === id)
+  const index = indexOf(id)
   if (index < 0) return false
   selectIndex(index, { reveal: true })
   listbox.value?.focus()
@@ -144,14 +232,14 @@ function focusNode(id) {
 }
 
 function selectIndex(index, { reveal = false } = {}) {
-  if (!props.nodes.length) {
+  if (!rows.value.length) {
     selection.value = 0
     selectedId.value = ''
     return
   }
-  const next = Math.max(0, Math.min(props.nodes.length - 1, index))
+  const next = Math.max(0, Math.min(rows.value.length - 1, index))
   selection.value = next
-  selectedId.value = props.nodes[next]?.id || ''
+  selectedId.value = rows.value[next]?.id || ''
   if (reveal) revealSelection()
 }
 
@@ -162,7 +250,7 @@ function focusRow(index) {
 
 function openAt(index) {
   selectIndex(index)
-  const node = props.nodes[index]
+  const node = rows.value[index]
   if (node) emit('open', node.id)
 }
 
@@ -176,35 +264,38 @@ function revealSelection() {
 function priorityIcon(priority = 'normal') {
   return {
     urgent: IconExclamationMark,
-    high: IconAntennaBars4,
+    high: IconAntennaBars5,
     normal: IconAntennaBars3,
-    low: IconAntennaBars2,
+    low: IconArrowNarrowDown,
   }[priority] || IconAntennaBars3
 }
 
 function projectLabel(node) {
   if (!node.projectId) return ''
   const project = byId.value.get(node.projectId)
-  return project?.slug || project?.properties?.slug || project?.title || ''
+  return project?.title || project?.slug || project?.properties?.slug || node.projectId
 }
 
-function actorDisplay(node) {
-  const actor = props.actors?.[node.id]
-  if (!actor) return ''
-  if (actor.id === 'local-human' || actor.label === 'You' || actor.initials === 'ME') return 'you'
-  if (actor.kind === 'external' || actor.id === 'external' || actor.initials === 'EX') {
-    return 'external'
-  }
-  return actor.initials || actor.label || ''
+function assignee(node) {
+  return assigneeDisplay(node, { byId: byId.value, selfId: props.selfId })
 }
 
-function actorLabel(node) {
-  return props.actors?.[node.id]?.label || ''
+function due(node) {
+  return dueInfo(node.dueDate)
 }
 
-function overdue(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && value < new Date().toISOString().slice(0, 10)
+function workRowLabel(node) {
+  const owner = assignee(node)
+  const reason = waitingReason(node)
+  return [
+    node.title || 'Untitled issue',
+    `${human(node.priority || 'normal')} priority`,
+    human(node.status || 'backlog'),
+    projectLabel(node),
+    due(node).label,
+    reason ? `waiting for ${reason}` : '',
+    owner ? (owner.self ? 'assigned to you' : `assigned to ${owner.name}`) : '',
+  ].filter(Boolean).join('. ')
 }
 
 function shortDate(value) {
@@ -245,6 +336,34 @@ defineExpose({ focusEdge, focusNode })
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 
+/* Group headers stay visible while their rows scroll beneath them. */
+.entity-group {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-rule);
+  background: var(--color-chrome-mid);
+  padding: 0 14px;
+}
+
+.entity-group-name {
+  color: var(--color-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.entity-group-count {
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .entity-row {
   display: flex;
   width: 100%;
@@ -271,6 +390,107 @@ defineExpose({ focusEdge, focusNode })
 
 .entity-row-selected:hover {
   background: color-mix(in srgb, var(--color-accent-soft) 78%, var(--color-chrome-mid));
+}
+
+/* Work rows: one line, aligned columns — priority · title · project · owner · due. */
+.entity-row-work {
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(0, 150px) 36px 96px;
+  align-items: center;
+  column-gap: 10px;
+  padding: 0 14px 0 10px;
+  color: var(--color-ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.entity-row-no-project {
+  grid-template-columns: 22px minmax(0, 1fr) 36px 96px;
+}
+
+.work-priority {
+  display: grid;
+  place-items: center;
+  color: var(--color-ink-4);
+}
+
+.work-priority.priority-high {
+  color: var(--color-ink);
+}
+
+.work-priority.priority-urgent {
+  color: var(--color-rem);
+}
+
+.work-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.work-title-text {
+  overflow: hidden;
+  flex: 0 1 auto;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.work-waiting {
+  overflow: hidden;
+  flex: 0 1 auto;
+  color: var(--color-ink-2);
+  font-weight: 560;
+  text-overflow: ellipsis;
+}
+
+.work-key {
+  color: var(--color-ink-3);
+  font-weight: 500;
+}
+
+.work-project {
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-weight: 560;
+  text-overflow: ellipsis;
+}
+
+.work-assignee {
+  color: var(--color-ink-2);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.work-assignee-self {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.work-due {
+  overflow: hidden;
+  color: var(--color-ink-3);
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.work-due.due-soon {
+  color: var(--color-ink-2);
+}
+
+.work-due.due-today {
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.work-due.due-overdue {
+  color: var(--color-rem);
+  font-weight: 650;
 }
 
 .entity-kind {
@@ -314,19 +534,15 @@ defineExpose({ focusEdge, focusNode })
 
 .entity-priority {
   flex: 0 0 auto;
-  color: var(--color-ink-2);
+  color: var(--color-ink-4);
+}
+
+.entity-priority.priority-high {
+  color: var(--color-ink);
 }
 
 .entity-priority.priority-urgent {
   color: var(--color-rem);
-}
-
-.entity-priority.priority-normal {
-  color: var(--color-ink-3);
-}
-
-.entity-priority.priority-low {
-  color: var(--color-ink-4);
 }
 
 .entity-line-2 {
@@ -336,8 +552,7 @@ defineExpose({ focusEdge, focusNode })
   gap: 8px;
   overflow: hidden;
   color: var(--color-ink-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   line-height: 15px;
   white-space: nowrap;
@@ -356,33 +571,50 @@ defineExpose({ focusEdge, focusNode })
 .entity-project {
   flex: 0 1 auto;
   overflow: hidden;
-  max-width: 110px;
+  max-width: 130px;
+  color: var(--color-ink-2);
   text-overflow: ellipsis;
 }
 
 .entity-due {
   flex: 0 0 auto;
+  color: var(--color-ink-3);
+}
+
+.entity-due.due-soon {
   color: var(--color-ink-2);
 }
 
-.entity-due.overdue,
-.entity-overdue {
+.entity-due.due-today,
+.entity-due.due-overdue {
+  font-weight: 650;
+}
+
+.entity-due.due-today {
+  color: var(--color-ink);
+}
+
+.entity-due.due-overdue {
   color: var(--color-rem);
 }
 
-.entity-overdue {
-  flex: 0 0 auto;
-}
-
 .entity-waiting {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  overflow: hidden;
   color: var(--color-ink-2);
+  text-overflow: ellipsis;
 }
 
 .entity-author {
   margin-left: auto;
-  color: var(--color-ink-3);
+  color: var(--color-ink-2);
   font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.entity-author-self {
+  color: var(--color-ink);
+  font-weight: 700;
 }
 
 .entity-summary {
@@ -396,6 +628,8 @@ defineExpose({ focusEdge, focusNode })
   margin-left: auto;
   flex: 0 0 auto;
   color: var(--color-ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .entity-empty {
@@ -438,9 +672,17 @@ defineExpose({ focusEdge, focusNode })
   background: var(--color-chrome-mid);
 }
 
-@container business-graph (max-width: 520px) {
+@container business-graph (max-width: 560px) {
   .entity-row {
     padding-inline: 10px;
+  }
+
+  .entity-row-work {
+    grid-template-columns: 22px minmax(0, 1fr) 36px 96px;
+  }
+
+  .entity-row-work .work-project {
+    display: none;
   }
 }
 </style>

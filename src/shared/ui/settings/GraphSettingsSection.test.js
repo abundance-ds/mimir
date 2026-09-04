@@ -73,6 +73,40 @@ describe('graph settings', () => {
     expect(wrapper.find('[data-graph-team-root]').exists()).toBe(false)
   })
 
+  it('lets the reader choose which Person they are', async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'scope_inventory') return []
+      if (command === 'team_repository_status') {
+        return { managed: false, root: '/home/me/.mimir/team-graph', state: 'notConfigured' }
+      }
+      if (command === 'github_connection_status') return { connected: false }
+      if (command === 'graph_query') {
+        return { items: [
+          { id: 'person-zoe', kind: 'person', title: 'Zoe Lang', properties: { teamMember: true, status: 'active' } },
+          { id: 'person-anna', kind: 'person', title: 'Anna Berg', properties: { teamMember: true, status: 'active' } },
+          { id: 'person-old', kind: 'person', title: 'Old Hand', properties: { teamMember: true, status: 'former' } },
+          { id: 'person-client', kind: 'person', title: 'Client Contact', properties: {} },
+        ] }
+      }
+      return null
+    })
+    const wrapper = mount(GraphSettingsSection)
+    await flushPromises()
+
+    expect(wrapper.get('[data-graph-self-section]').text()).toContain('You')
+    expect(wrapper.get('[data-graph-self-person]').text()).toContain('Not set')
+    await wrapper.get('[data-graph-self-person]').trigger('click')
+    await flushPromises()
+    const options = [...document.querySelectorAll('[data-graph-select-option]')]
+    expect(options.map(option => option.dataset.graphSelectOption))
+      .toEqual(['', 'person-anna', 'person-zoe'])
+    options[1].click()
+    await flushPromises()
+
+    expect(useSettingsStore().businessGraphSelfPersonId).toBe('person-anna')
+    expect(wrapper.get('[data-graph-self-person]').text()).toContain('Anna Berg')
+  })
+
   it('edits the rare workspace link in Graph settings', async () => {
     const settings = useSettingsStore()
     settings.set('mimirWorkspaceFolder', '/work')

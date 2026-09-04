@@ -84,31 +84,19 @@
             @click="selectOrOpen($event, issue, column.id, index)"
             @keydown="onRowKeydown($event, issue, column.id, index)"
           >
-            <GraphSelect
-              :model-value="issue.priority || 'normal'"
-              :options="priorities"
-              variant="row"
-              class="board-priority"
-              :class="`priority-${issue.priority || 'normal'}`"
-              :chevron="false"
-              :data-card-priority="issue.id"
-              :data-graph-control="`card-priority-${issue.id}`"
-              :aria-label="`${human(issue.priority || 'normal')} priority for ${issue.title || 'issue'}`"
-              :menu-min-width="132"
-              @click.stop
-              @update:model-value="setPriority(issue, $event)"
+            <span class="board-row-title" :title="issue.title || 'Untitled issue'">
+              {{ issue.title || 'Untitled issue' }}
+            </span>
+            <span
+              v-if="assignee(issue)"
+              class="board-row-owner"
+              :class="{ 'board-row-owner-self': assignee(issue).self }"
+              :title="assignee(issue).self ? 'Assigned to you' : `Assigned to ${assignee(issue).name}`"
             >
-              <template #trigger>
-                <component
-                  :is="priorityIcons[issue.priority || 'normal']"
-                  :size="15"
-                  :stroke-width="issue.priority === 'urgent' ? 2.6 : 2.2"
-                />
-              </template>
-            </GraphSelect>
-            <span class="board-row-title">{{ issue.title || 'Untitled issue' }}</span>
+              {{ assignee(issue).label }}
+            </span>
 
-            <span class="board-row-meta">
+            <span class="board-row-context">
               <GraphSelect
                 v-if="groupBy === 'project'"
                 :model-value="issue.status || 'backlog'"
@@ -129,6 +117,9 @@
               >
                 {{ projectLabel(issue) }}
               </span>
+            </span>
+
+            <span class="board-row-meta">
               <GraphDatePicker
                 :model-value="issue.dueDate || ''"
                 :data-card-due="issue.id"
@@ -152,15 +143,30 @@
               >
                 <span class="meta-key">waiting for</span> {{ waitingReason(issue) }}
               </span>
-              <span
-                v-if="assignee(issue)"
-                class="meta-assignee"
-                :class="{ 'meta-assignee-self': assignee(issue).self }"
-                :title="assignee(issue).self ? 'Assigned to you' : `Assigned to ${assignee(issue).name}`"
-              >
-                {{ assignee(issue).label }}
-              </span>
             </span>
+
+            <GraphSelect
+              :model-value="issue.priority || 'normal'"
+              :options="priorities"
+              variant="row"
+              class="board-priority"
+              :class="`priority-${issue.priority || 'normal'}`"
+              :chevron="false"
+              :data-card-priority="issue.id"
+              :data-graph-control="`card-priority-${issue.id}`"
+              :aria-label="`${human(issue.priority || 'normal')} priority for ${issue.title || 'issue'}`"
+              :menu-min-width="132"
+              @click.stop
+              @update:model-value="setPriority(issue, $event)"
+            >
+              <template #trigger>
+                <component
+                  :is="priorityIcons[issue.priority || 'normal']"
+                  :size="17"
+                  :stroke-width="issue.priority === 'urgent' ? 2.5 : 2.1"
+                />
+              </template>
+            </GraphSelect>
           </article>
 
           <button
@@ -484,7 +490,7 @@ function human(value) {
   flex: 1 1 auto;
   overflow-x: auto;
   overflow-y: hidden;
-  background: var(--color-surface);
+  background: var(--color-chrome);
 }
 
 /* Columns share the width when there is room and scroll when there is not. */
@@ -504,7 +510,7 @@ function human(value) {
   flex-direction: column;
   overflow: hidden;
   border-right: 1px solid var(--color-rule);
-  background: var(--color-surface);
+  background: var(--color-chrome);
 }
 
 .board-column-collapsed {
@@ -548,7 +554,7 @@ function human(value) {
 }
 
 .board-column-target {
-  background: color-mix(in srgb, var(--color-accent-soft) 32%, var(--color-surface));
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-chrome));
 }
 
 .board-column-target .board-column-collapsed-control {
@@ -607,45 +613,58 @@ function human(value) {
 }
 
 .board-column-body {
+  display: flex;
   min-height: 0;
   flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
   overflow-y: auto;
+  padding: 6px 6px 14px;
 }
 
-/* One row: priority slot, title (up to two lines), then a fixed-order meta
-   line — project · due · waiting for · assignee. */
+/* One fixed-height card. Left column: title, project, due date (+ waiting
+   reason). Right column: owner at the top, priority at the bottom. Every
+   fact keeps its place whatever the other values are.
+   Material: the column is `chrome`, the card `chrome-high`, hover
+   `chrome-mid`. This is the only stack that is raised in every theme;
+   `surface` is lighter than chrome in light themes but darker in dracula,
+   zenith, and synthwave. */
 .board-row {
   position: relative;
   display: grid;
   width: 100%;
-  min-height: 50px;
-  grid-template-columns: 26px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  align-items: start;
-  column-gap: 4px;
-  row-gap: 3px;
-  border-bottom: 1px solid var(--color-rule-light);
-  background: var(--color-surface);
-  padding: 8px 10px 8px 6px;
+  height: 66px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 18px 16px 16px;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 1px;
+  border: 1px solid var(--color-rule-light);
+  border-radius: 2px;
+  background: var(--color-chrome-high);
+  padding: 6px 9px 6px 10px;
   color: var(--color-ink);
   text-align: left;
 }
 
 .board-row:hover {
+  border-color: var(--color-rule);
   background: var(--color-chrome-mid);
 }
 
 .board-row:hover .board-row-title,
-.board-row:hover .meta-assignee {
+.board-row:hover .board-row-owner {
   color: var(--color-ink);
 }
 
 .board-row-selected {
-  background: var(--color-accent-soft);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-rule));
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-chrome-high));
 }
 
 .board-row-selected:hover {
-  background: color-mix(in srgb, var(--color-accent-soft) 78%, var(--color-chrome-mid));
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-chrome-high));
 }
 
 .board-row-dragging {
@@ -655,58 +674,47 @@ function human(value) {
 .board-row-drop-before::before {
   position: absolute;
   z-index: 2;
-  inset: -1px 0 auto;
+  inset: -4px 0 auto;
   height: 2px;
   background: var(--color-accent);
   content: '';
 }
 
-.board-row .board-priority {
-  width: 24px;
-  height: 20px;
-  grid-row: 1;
-  grid-column: 1;
-  justify-content: center;
-  padding: 0;
-  color: var(--color-ink-2);
-}
-
-.board-row .board-priority.priority-urgent {
-  color: var(--color-rem);
-}
-
-.board-row .board-priority.priority-high {
-  color: var(--color-ink);
-}
-
-.board-row .board-priority.priority-normal,
-.board-row .board-priority.priority-low {
-  color: var(--color-ink-4);
-}
-
 .board-row-title {
-  display: -webkit-box;
   overflow: hidden;
   grid-row: 1;
-  grid-column: 2;
-  padding-right: 4px;
+  grid-column: 1;
   color: var(--color-ink);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.005em;
   line-height: 18px;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.board-row-owner {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+}
+
+.board-row-owner-self {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.board-row-context,
 .board-row-meta {
   display: flex;
   min-width: 0;
-  grid-row: 2;
-  grid-column: 2;
+  grid-column: 1;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   overflow: hidden;
   color: var(--color-ink-3);
   font-size: 11px;
@@ -715,8 +723,16 @@ function human(value) {
   white-space: nowrap;
 }
 
-.board-row-meta .meta-status {
-  height: 18px;
+.board-row-context {
+  grid-row: 2;
+}
+
+.board-row-meta {
+  grid-row: 3;
+}
+
+.board-row-context .meta-status {
+  height: 16px;
   flex: 0 0 auto;
   padding: 0 3px;
   margin-left: -3px;
@@ -728,42 +744,30 @@ function human(value) {
 
 .meta-project {
   overflow: hidden;
-  max-width: 150px;
   flex: 0 1 auto;
   color: var(--color-ink-2);
   font-weight: 560;
   text-overflow: ellipsis;
 }
 
+/* The waiting reason is the only slot that truncates. */
 .meta-waiting {
   min-width: 0;
   flex: 0 1 auto;
   overflow: hidden;
-  color: var(--color-ink-3);
+  color: var(--color-ink-2);
+  font-weight: 560;
   text-overflow: ellipsis;
 }
 
 .meta-key {
-  color: var(--color-ink-2);
-  font-weight: 650;
-}
-
-.meta-assignee {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--color-ink-2);
-  font-weight: 650;
-  letter-spacing: 0.02em;
-}
-
-.meta-assignee-self {
-  color: var(--color-ink);
-  font-weight: 700;
+  color: var(--color-ink-3);
+  font-weight: 500;
 }
 
 .board-row-meta :deep(.graph-date-row) {
   display: inline-flex;
-  height: 18px;
+  height: 16px;
   min-width: 0;
   flex: 0 0 auto;
   align-items: center;
@@ -794,20 +798,47 @@ function human(value) {
   font-weight: 650;
 }
 
+.board-row .board-priority {
+  width: 22px;
+  height: 18px;
+  grid-row: 3;
+  grid-column: 2;
+  justify-self: end;
+  justify-content: center;
+  margin-right: -3px;
+  padding: 0;
+  color: var(--color-ink-2);
+}
+
+.board-row .board-priority.priority-urgent {
+  color: var(--color-rem);
+}
+
+.board-row .board-priority.priority-high {
+  color: var(--color-ink);
+}
+
+.board-row .board-priority.priority-normal,
+.board-row .board-priority.priority-low {
+  color: var(--color-ink-4);
+}
+
 .board-empty-column {
   display: flex;
   width: 100%;
-  min-height: 44px;
+  min-height: 40px;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border-bottom: 1px solid var(--color-rule-light);
+  border: 1px dashed var(--color-rule);
+  border-radius: 2px;
   color: var(--color-ink-4);
   font-size: 11px;
 }
 
 .board-empty-column:hover,
 .board-empty-column:focus-visible {
+  border-style: solid;
   background: var(--color-chrome-mid);
   color: var(--color-ink-2);
 }

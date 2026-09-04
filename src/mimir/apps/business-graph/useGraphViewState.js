@@ -1,15 +1,9 @@
 import { computed, ref, watch } from 'vue'
 import { BUSINESS_SECTIONS } from '../../../stores/businessGraph.js'
 import { waitingOnHuman } from './predicates.js'
+import { UNASSIGNED, WORK_STATUSES, initials, needsAttention } from './workRow.js'
 
-export const BOARD_STATUSES = Object.freeze([
-  { id: 'backlog', label: 'Backlog' },
-  { id: 'plan', label: 'Plan' },
-  { id: 'in-progress', label: 'In progress' },
-  { id: 'waiting', label: 'Waiting' },
-  { id: 'review', label: 'Review' },
-  { id: 'done', label: 'Done' },
-])
+export const BOARD_STATUSES = WORK_STATUSES
 
 export const BOARD_GROUP_OPTIONS = Object.freeze([
   { value: 'status', label: 'By status' },
@@ -72,6 +66,7 @@ const VIEWS_BY_SECTION = Object.freeze({
 export function useGraphViewState({ graph, settings }) {
   const projectFilter = ref('')
   const priorityFilter = ref('')
+  const assigneeFilter = ref('')
   const boardGroup = ref('status')
   const boardSort = ref('rank')
   const allKindFilter = ref('')
@@ -82,9 +77,22 @@ export function useGraphViewState({ graph, settings }) {
   const currentSection = computed(() => sections.find(item => item.id === graph.section))
   const viewOptions = computed(() => VIEWS_BY_SECTION[graph.section] || VIEWS_BY_SECTION.all)
   const projectFilterOptions = computed(() => buildProjectOptions(graph, projectFilter.value))
+  const selfPersonId = computed(() => String(settings.businessGraphSelfPersonId || '').trim())
+  const assigneeFilterOptions = computed(() => (
+    buildAssigneeOptions(graph, assigneeFilter.value, selfPersonId.value)
+  ))
+  /** One project scopes the view, so rows need not repeat it. */
+  const projectScoped = computed(() => (
+    Boolean(projectFilter.value) && projectFilter.value !== UNASSIGNED
+  ))
+  /** Attention groups by reason; Board and List share the group control. */
+  const listGroupBy = computed(() => (
+    graph.view === 'attention' ? 'attention' : boardGroup.value
+  ))
   const projectionNodes = computed(() => filterProjection(graph, {
     project: projectFilter.value,
     priority: priorityFilter.value,
+    assignee: assigneeFilter.value,
     kind: allKindFilter.value,
   }))
   const boardIssues = computed(() => (
@@ -110,7 +118,16 @@ export function useGraphViewState({ graph, settings }) {
     () => settings.settingsReady,
     ready => {
       if (!ready || hydrated) return
-      hydrateViewState({ graph, settings, projectFilter, priorityFilter, boardGroup, boardSort, collapsedBoardStatuses })
+      hydrateViewState({
+        graph,
+        settings,
+        projectFilter,
+        priorityFilter,
+        assigneeFilter,
+        boardGroup,
+        boardSort,
+        collapsedBoardStatuses,
+      })
       hydrated = true
     },
     { immediate: true },
@@ -124,6 +141,7 @@ export function useGraphViewState({ graph, settings }) {
       boardGroup,
       boardSort,
       priorityFilter,
+      assigneeFilter,
       collapsedBoardStatuses,
     ],
     () => {
@@ -136,6 +154,7 @@ export function useGraphViewState({ graph, settings }) {
           groupBy: boardGroup.value,
           sortBy: boardSort.value,
           priority: priorityFilter.value,
+          assignee: assigneeFilter.value,
           collapsedStatuses: [...collapsedBoardStatuses.value],
         },
       })
@@ -163,6 +182,8 @@ export function useGraphViewState({ graph, settings }) {
   return {
     allKindFilter,
     allKindOptions: ALL_KIND_OPTIONS,
+    assigneeFilter,
+    assigneeFilterOptions,
     boardGroup,
     boardGroupOptions: BOARD_GROUP_OPTIONS,
     boardIssues,
@@ -175,19 +196,31 @@ export function useGraphViewState({ graph, settings }) {
     emptyTitle,
     expandAllBoardStatuses,
     expandBoardStatus,
+    listGroupBy,
     priorityFilter,
     priorityFilterOptions: PRIORITY_FILTER_OPTIONS,
     projectFilter,
     projectFilterOptions,
     projectionNodes,
+    projectScoped,
     sections,
+    selfPersonId,
     toggleBoardStatusCollapse,
     viewOptions,
     waitingOnYouIssues,
   }
 }
 
-function hydrateViewState({ graph, settings, projectFilter, priorityFilter, boardGroup, boardSort, collapsedBoardStatuses }) {
+function hydrateViewState({
+  graph,
+  settings,
+  projectFilter,
+  priorityFilter,
+  assigneeFilter,
+  boardGroup,
+  boardSort,
+  collapsedBoardStatuses,
+}) {
   const saved = settings.businessGraphViewState || {}
   const savedViews = saved.sectionViews && typeof saved.sectionViews === 'object'
     ? saved.sectionViews
@@ -211,6 +244,7 @@ function hydrateViewState({ graph, settings, projectFilter, priorityFilter, boar
   if (typeof work.project === 'string') projectFilter.value = work.project
   if (['rank', 'priority', 'due', 'updated', 'title'].includes(work.sortBy)) boardSort.value = work.sortBy
   if (['', 'urgent', 'high', 'normal', 'low'].includes(work.priority)) priorityFilter.value = work.priority
+  if (typeof work.assignee === 'string') assigneeFilter.value = work.assignee
 
   const knownStatuses = new Set(BOARD_STATUSES.map(status => status.id))
   if (Array.isArray(work.collapsedStatuses)) {
@@ -260,7 +294,9 @@ function filterProjection(graph, filters) {
     if (filters.project === '__unassigned__') items = items.filter(item => !item.projectId)
     else if (filters.project) items = items.filter(item => item.projectId === filters.project)
     if (filters.priority) items = items.filter(item => item.priority === filters.priority)
-    if (graph.view === 'attention') items = items.filter(needsAttention)
+    if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)
+    else if (filters.assignee) items = items.filter(item => item.assigneeId === filters.assignee)
+    if (graph.view === 'attention') items = items.filter(issue => needsAttention(issue))
   }
   if (graph.section === 'all' && filters.kind) {
     items = items.filter(item => matchesAllKind(item, filters.kind))
@@ -300,13 +336,44 @@ function issueSort(mode) {
   }
 }
 
-function needsAttention(issue) {
-  if (issue.status === 'waiting' || issue.waitingFor) return true
-  if (issue.priority === 'urgent' && !['done', 'cancelled'].includes(issue.status)) return true
-  const today = new Date().toISOString().slice(0, 10)
-  return Boolean(issue.dueDate)
-    && issue.dueDate < today
-    && !['done', 'cancelled'].includes(issue.status)
+/**
+ * Owner filter options: You (when configured), active team members, and
+ * Unassigned. A selected person outside that list stays selectable so the
+ * filter never hides silently.
+ */
+function buildAssigneeOptions(graph, selected, selfId) {
+  const byId = new Map(graph.people.map(person => [person.id, person]))
+  const team = graph.people
+    .filter(person => person.teamMember && person.status === 'active')
+    .sort((left, right) => personLabel(left).localeCompare(personLabel(right)))
+  const options = []
+  const self = selfId ? byId.get(selfId) : null
+  if (self) options.push({ value: self.id, label: 'You', hint: personLabel(self) })
+  for (const person of team) {
+    if (person.id === selfId) continue
+    options.push({
+      value: person.id,
+      label: personLabel(person),
+      hint: initials(personLabel(person)),
+    })
+  }
+  if (selected && selected !== UNASSIGNED && !options.some(option => option.value === selected)) {
+    const known = byId.get(selected)
+    options.push({
+      value: selected,
+      label: known ? personLabel(known) : selected,
+      hint: known ? 'Not an active team member' : 'Unavailable person',
+    })
+  }
+  return [
+    { value: '', label: 'Anyone', separatorAfter: true },
+    ...options,
+    { value: UNASSIGNED, label: 'Unassigned' },
+  ]
+}
+
+function personLabel(person) {
+  return person?.title || person?.id || 'Unnamed person'
 }
 
 function projectLabel(project) {

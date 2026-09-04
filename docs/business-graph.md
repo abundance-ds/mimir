@@ -87,6 +87,29 @@ that draft first. Graph search filters the active projection. The dispatch bar
 supports lookup, deterministic commands, and agent work with a bounded,
 source-aware context pack. Raw ids and source revisions stay out of normal UI.
 
+Work rows share one grammar (`business-graph/workRow.js`) across Board, List,
+and Attention. A Board card has a fixed height and fixed slots: title with
+the owner at its right, the project beneath, then the due date with the
+waiting reason after it, and the priority control at the bottom right. Only
+the title and the waiting reason truncate. Due dates are words relative
+to today (`due today`, `due tomorrow`, `due 3d`, `due 22 Sep`, `4d overdue`);
+a missing date is a quiet calendar control. The waiting slot reads
+`waiting for <reason>`, and `me`, `human`, or `owner` reads as `you`. The
+owner slot shows the assignee's initials, or `you` for the configured person;
+the last editor stays in Changes. Board columns share the width and scroll
+when there is no room. Cards are `chrome-high` plates with a 2 px radius
+and a 4 px gap on a `chrome` column. The List is single-line
+rows under sticky group headers and follows the Board grouping (status or
+project). Attention groups open issues by reason, in order: Overdue,
+Waiting, Urgent, Due this week. Project and Owner selectors sit beside the
+view tabs because they scope the visible work; each has a one-click reset,
+and a scoped project drops the project slot from rows. The Owner list offers
+You, active team members, and Unassigned.
+
+Settings > Graph > You selects the reader's Person node
+(`businessGraphSelfPersonId`). It drives the `you` token and the Owner
+list's You entry; without it, rows show initials for every assignee.
+
 Public Graph commands are defined only in [agent-interface.md](agent-interface.md).
 Native ownership is under `src-tauri/src/business_graph/`; renderer ownership
 is the Graph service, store, and components under

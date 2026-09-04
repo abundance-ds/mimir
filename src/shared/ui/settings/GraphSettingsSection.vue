@@ -161,6 +161,34 @@
     <p v-if="notice" role="status" class="mt-3 text-[10px] text-add">{{ notice }}</p>
     <p v-if="error" role="alert" class="mt-3 text-[10px] text-rem">{{ error }}</p>
 
+    <div class="workspace-settings" data-graph-self-section>
+      <div>
+        <h2 class="section-title mb-0">You</h2>
+        <p class="mt-1 text-[10px] leading-relaxed text-ink-3">
+          Work assigned to this person shows as yours. The Owner filter in Work offers You.
+        </p>
+      </div>
+
+      <div class="workspace-setting-rows">
+        <label class="workspace-setting-row">
+          <span>
+            <strong>Person</strong>
+            <small>An active team member in the graph.</small>
+          </span>
+          <GraphSelect
+            :model-value="selfPersonId"
+            data-graph-self-person
+            variant="field"
+            aria-label="You in the graph"
+            :options="selfOptions"
+            :searchable="selfOptions.length > 8"
+            search-placeholder="Find a person"
+            @update:model-value="setSelfPerson"
+          />
+        </label>
+      </div>
+    </div>
+
     <div v-if="currentWorkspace" class="workspace-settings">
       <div>
         <h2 class="section-title mb-0">Current workspace</h2>
@@ -366,6 +394,7 @@ const workspaceScope = ref('team')
 const projectGitStatus = ref(null)
 const newProjectTitle = ref('')
 const projects = ref([])
+const people = ref([])
 const workspaceSaving = ref(false)
 const workspaceNotice = ref('')
 const workspaceError = ref('')
@@ -384,6 +413,23 @@ const workspaceScopeOptions = Object.freeze([
   { value: 'team', label: 'Team' },
   { value: 'workspace', label: 'Workspace' },
 ])
+const selfPersonId = computed(() => String(settings.businessGraphSelfPersonId || '').trim())
+const selfOptions = computed(() => {
+  const team = people.value
+    .filter(person => person.properties?.teamMember && person.properties?.status === 'active')
+    .sort((left, right) => personLabel(left).localeCompare(personLabel(right)))
+    .map(person => ({ value: person.id, label: personLabel(person) }))
+  const current = selfPersonId.value
+  if (current && !team.some(option => option.value === current)) {
+    const known = people.value.find(person => person.id === current)
+    team.push({
+      value: current,
+      label: known ? personLabel(known) : current,
+      hint: known ? 'Not an active team member' : 'Unavailable person',
+    })
+  }
+  return [{ value: '', label: 'Not set', separatorAfter: team.length > 0 }, ...team]
+})
 const workspaceDirty = computed(() => (
   workspaceProject.value === NEW_PROJECT
   || workspaceProject.value !== String(workspaceConfig.value?.project || '')
@@ -669,9 +715,27 @@ function repositoryLabel(value) {
   return match?.[1] || remote.replace(/\/+$/, '')
 }
 
+async function loadPeople() {
+  try {
+    const result = await queryGraph({ kinds: ['person'], limit: 500 })
+    people.value = Array.isArray(result?.items) ? result.items : []
+  } catch {
+    people.value = []
+  }
+}
+
+function setSelfPerson(value) {
+  settings.set('businessGraphSelfPersonId', String(value || ''))
+}
+
+function personLabel(person) {
+  return String(person?.title || person?.id || 'Unnamed person')
+}
+
 onMounted(() => {
   void loadTeamSetup()
   void refreshInventory()
+  void loadPeople()
 })
 </script>
 

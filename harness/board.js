@@ -19,6 +19,12 @@ const projects = [
   { id: 'project-atlas', kind: 'project', title: 'Atlas', properties: { slug: 'atlas' } },
   { id: 'project-ember', kind: 'project', title: 'Ember', properties: { slug: 'ember' } },
 ]
+const people = [
+  { id: 'person-waq', kind: 'person', title: 'Waq Rahman', teamMember: true, status: 'active' },
+  { id: 'person-anna', kind: 'person', title: 'Anna Berg', teamMember: true, status: 'active' },
+  { id: 'person-tom', kind: 'person', title: 'Tom Okafor', teamMember: true, status: 'active' },
+]
+const selfId = params.get('self') === '0' ? '' : 'person-waq'
 const titles = {
   backlog: [
     'Draft comparator landscape', 'Scope RWE extraction template', 'Collect payer objections',
@@ -58,17 +64,12 @@ for (const status of statuses) {
       priority: priorities[n % priorities.length],
       dueDate: due,
       projectId: n % 3 === 0 ? 'project-ember' : 'project-atlas',
-      waitingFor: status === 'waiting' ? (index % 2 ? 'Client confirmation' : 'Internal review') : '',
+      assigneeId: n % 5 === 0 ? '' : people[n % people.length].id,
+      waitingFor: status === 'waiting' ? (index % 2 ? 'Client confirmation' : 'you') : '',
       rank: n * 1000,
     })
   }
 }
-const actors = Object.fromEntries(issues.map((issue, index) => [
-  issue.id,
-  index % 4 === 0
-    ? { kind: 'agent', label: 'Codex', initials: 'CX' }
-    : { kind: 'human', label: 'Waq R', initials: 'WA' },
-]))
 
 const groupBy = ref(params.get('group') || 'status')
 const app = createApp({
@@ -77,17 +78,20 @@ const app = createApp({
     return () => [
       params.get('list') === '1'
         ? h(EntityList, {
-            nodes: [...issues.slice(0, 10), ...projects.map(p => ({ ...p, summary: 'Global value evidence strategy', updatedAt: new Date().toISOString() }))],
-            actors,
+            nodes: issues,
+            lookup: [...projects, ...people, ...issues],
+            projects,
+            mode: 'work',
+            groupBy: params.get('group') || 'status',
+            selfId,
             style: 'flex: 1 1 auto; min-height: 0;',
           })
         : h(WorkBoard, {
             issues,
-            nodes: [...projects, ...issues],
+            nodes: [...projects, ...people, ...issues],
             projects,
-            actors,
             groupBy: groupBy.value,
-            visibleStatuses: statuses,
+            selfId,
             style: 'flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;',
           }),
     ]

@@ -46,15 +46,45 @@
       </button>
     </div>
 
+    <div v-if="section === 'work'" class="graph-project-view">
+      <GraphSelect
+        :model-value="assigneeFilter"
+        data-board-assignee-filter
+        data-graph-control="board-assignee"
+        class="graph-project-view-select w-[132px]"
+        :class="{ 'graph-project-view-active': assigneeFilter }"
+        variant="toolbar"
+        :aria-label="ownerViewAccessibleLabel"
+        :title="ownerViewAccessibleLabel"
+        :options="assigneeOptions"
+        :searchable="assigneeOptions.length > 8"
+        search-placeholder="Find a person"
+        :menu-min-width="196"
+        @update:model-value="$emit('update:assigneeFilter', $event)"
+      />
+      <button
+        type="button"
+        data-graph-control="board-assignee-filter-clear"
+        class="graph-filter-reset graph-project-view-reset"
+        :class="{ 'graph-filter-reset-active': assigneeFilter }"
+        :disabled="!assigneeFilter"
+        :title="assigneeFilter ? 'Show work for anyone' : undefined"
+        :aria-label="assigneeFilter ? 'Show work for anyone' : 'Work for anyone is shown'"
+        @click="$emit('update:assigneeFilter', '')"
+      >
+        <IconX :size="12" />
+      </button>
+    </div>
+
     <div v-if="section === 'work'" class="graph-work-controls">
       <GraphSelect
-        v-if="view === 'board'"
+        v-if="view !== 'attention'"
         :model-value="groupBy"
         data-board-group
         data-graph-control="board-group"
         class="w-[104px]"
         variant="toolbar"
-        aria-label="Group board"
+        aria-label="Group work"
         :options="groupOptions"
         @update:model-value="$emit('update:groupBy', $event)"
       />
@@ -198,6 +228,8 @@ const props = defineProps({
   viewOptions: { type: Array, default: () => [] },
   projectFilter: { type: String, default: '' },
   projectOptions: { type: Array, default: () => [] },
+  assigneeFilter: { type: String, default: '' },
+  assigneeOptions: { type: Array, default: () => [] },
   groupBy: { type: String, default: 'status' },
   groupOptions: { type: Array, default: () => [] },
   sortBy: { type: String, default: 'rank' },
@@ -213,6 +245,7 @@ const props = defineProps({
 defineEmits([
   'setView',
   'update:projectFilter',
+  'update:assigneeFilter',
   'update:groupBy',
   'update:sortBy',
   'update:priorityFilter',
@@ -233,6 +266,10 @@ const collapsedLabels = computed(() => {
 const projectViewAccessibleLabel = computed(() => {
   const selected = props.projectOptions.find(option => option.value === props.projectFilter)
   return `Project view: ${selected?.label || 'All projects'}`
+})
+const ownerViewAccessibleLabel = computed(() => {
+  const selected = props.assigneeOptions.find(option => option.value === props.assigneeFilter)
+  return `Owner view: ${selected?.label || 'Anyone'}`
 })
 
 async function toggleColumnsMenu() {

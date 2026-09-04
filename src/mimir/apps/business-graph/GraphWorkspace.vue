@@ -37,6 +37,8 @@
           :view-options="viewOptions"
           :project-filter="projectFilter"
           :project-options="projectFilterOptions"
+          :assignee-filter="assigneeFilter"
+          :assignee-options="assigneeFilterOptions"
           :group-by="boardGroup"
           :group-options="boardGroupOptions"
           :sort-by="boardSort"
@@ -49,6 +51,7 @@
           :kind-options="allKindOptions"
           @set-view="$emit('setView', $event)"
           @update:project-filter="$emit('update:projectFilter', $event)"
+          @update:assignee-filter="$emit('update:assigneeFilter', $event)"
           @update:group-by="$emit('update:boardGroup', $event)"
           @update:sort-by="$emit('update:boardSort', $event)"
           @update:priority-filter="$emit('update:priorityFilter', $event)"
@@ -65,8 +68,12 @@
           v-else-if="graph.searchQuery"
           ref="entityList"
           :nodes="projectionNodes"
+          :lookup="graph.nodes"
+          :projects="graph.projects"
           :scopes="graph.scopes"
-          :actors="graph.latestActors"
+          :mode="graph.section === 'work' ? 'work' : 'generic'"
+          :self-id="selfPersonId"
+          :hide-project="projectScoped"
           :empty-title="emptyTitle"
           :empty-copy="emptyCopy"
           @open="$emit('openNode', $event)"
@@ -110,9 +117,10 @@
           :issues="boardIssues"
           :nodes="graph.nodes"
           :projects="graph.projects"
-          :actors="graph.latestActors"
           :group-by="boardGroup"
           :collapsed-statuses="collapsedBoardStatuses"
+          :self-id="selfPersonId"
+          :hide-project="projectScoped"
           @open="$emit('openNode', $event)"
           @move="$emit('moveIssue', $event)"
           @patch="$emit('patchIssue', $event)"
@@ -140,9 +148,14 @@
         <EntityList
           v-else
           ref="entityList"
-          :nodes="projectionNodes"
+          :nodes="graph.section === 'work' ? boardIssues : projectionNodes"
+          :lookup="graph.nodes"
+          :projects="graph.projects"
           :scopes="graph.scopes"
-          :actors="graph.latestActors"
+          :mode="graph.section === 'work' ? 'work' : 'generic'"
+          :group-by="graph.section === 'work' ? listGroupBy : ''"
+          :self-id="selfPersonId"
+          :hide-project="projectScoped"
           :empty-title="emptyTitle"
           :empty-copy="emptyCopy"
           @open="$emit('openNode', $event)"
@@ -199,6 +212,11 @@ defineProps({
   viewOptions: { type: Array, default: () => [] },
   projectFilter: { type: String, default: '' },
   projectFilterOptions: { type: Array, default: () => [] },
+  assigneeFilter: { type: String, default: '' },
+  assigneeFilterOptions: { type: Array, default: () => [] },
+  selfPersonId: { type: String, default: '' },
+  projectScoped: { type: Boolean, default: false },
+  listGroupBy: { type: String, default: 'status' },
   boardGroup: { type: String, default: 'status' },
   boardGroupOptions: { type: Array, default: () => [] },
   boardSort: { type: String, default: 'rank' },
@@ -232,8 +250,8 @@ const emit = defineEmits([
   'navigateObjectHistory', 'openActivity', 'openCreate', 'openFile', 'openMeeting',
   'openNode', 'openRelatedCreate', 'openRelatedNode', 'openSummary', 'openUrl',
   'patchIssue', 'reorderIssue', 'returnToPeek', 'saveMeetingGraphDraft', 'saveNode',
-  'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:boardGroup',
-  'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
+  'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:assigneeFilter',
+  'update:boardGroup', 'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
 ])
 
 const graph = useBusinessGraphStore()

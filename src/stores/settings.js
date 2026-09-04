@@ -51,9 +51,11 @@ const DEFAULTS = {
       groupBy: 'status',
       sortBy: 'priority',
       priority: '',
+      assignee: '',
       collapsedStatuses: [],
     },
   },
+  businessGraphSelfPersonId: '',
   recentWorkspaceFolders: [],
   workbenchLayout: {
     sidebar: { state: 'expanded', width: 240 },

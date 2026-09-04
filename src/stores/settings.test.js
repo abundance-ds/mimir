@@ -59,9 +59,11 @@ describe('settings store', () => {
         groupBy: 'status',
         sortBy: 'priority',
         priority: '',
+        assignee: '',
         collapsedStatuses: [],
       },
     })
+    expect(store.businessGraphSelfPersonId).toBe('')
     expect(store.recentWorkspaceFolders).toEqual([])
     expect(store.workbenchFileFavorites).toEqual({})
     expect(store.workbenchFileSort).toEqual({})

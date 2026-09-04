@@ -6,6 +6,7 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'retry',
     'choose-workspace',
     'board-project',
+    'board-assignee',
     'board-group',
     'board-sort',
     'board-priority',
@@ -95,6 +96,7 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   ],
   filters: [
     'board-project-filter-clear',
+    'board-assignee-filter-clear',
     'board-priority-filter-clear',
     'board-columns-expand-all',
     'all-kind',

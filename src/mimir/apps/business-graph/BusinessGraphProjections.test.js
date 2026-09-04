@@ -67,6 +67,53 @@ describe('business graph projections', () => {
     wrapper.unmount()
   })
 
+  it('renders Work rows in aligned groups and walks the keyboard across groups', async () => {
+    const wrapper = mount(EntityList, {
+      props: {
+        mode: 'work',
+        groupBy: 'status',
+        selfId: 'person-a',
+        nodes: [
+          { id: 'b', kind: 'issue', title: 'Beta', status: 'plan', projectId: 'project-x', assigneeId: 'person-a' },
+          { id: 'a', kind: 'issue', title: 'Alpha', status: 'backlog', priority: 'urgent', waitingFor: 'me' },
+          { id: 'c', kind: 'issue', title: 'Gamma', status: 'plan', dueDate: '2000-01-01', assigneeId: 'person-b' },
+        ],
+        lookup: [
+          { id: 'project-x', kind: 'project', title: 'Project X' },
+          { id: 'person-a', kind: 'person', title: 'Anna Berg' },
+          { id: 'person-b', kind: 'person', title: 'Tom Okafor' },
+        ],
+        projects: [{ id: 'project-x', kind: 'project', title: 'Project X' }],
+      },
+    })
+    expect(wrapper.findAll('[data-graph-group]').map(group => group.attributes('data-graph-group')))
+      .toEqual(['backlog', 'plan'])
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['a', 'b', 'c'])
+    expect(wrapper.find('.entity-kind').exists()).toBe(false)
+    expect(wrapper.get('#graph-list-option-b .work-project').text()).toBe('Project X')
+    expect(wrapper.get('#graph-list-option-b .work-assignee').text()).toBe('you')
+    expect(wrapper.get('#graph-list-option-c .work-assignee').text()).toBe('TO')
+    expect(wrapper.get('#graph-list-option-a .work-waiting').text()).toBe('waiting for you')
+    expect(wrapper.get('#graph-list-option-c .work-due').classes()).toContain('due-overdue')
+    expect(wrapper.get('#graph-list-option-c').attributes('aria-label')).toContain('assigned to Tom Okafor')
+
+    const listbox = wrapper.get('[data-graph-entity-list]')
+    expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-a')
+    await listbox.trigger('keydown', { key: 'ArrowDown' })
+    expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-b')
+    await listbox.trigger('keydown', { key: 'ArrowDown' })
+    expect(listbox.attributes('aria-activedescendant')).toBe('graph-list-option-c')
+
+    await wrapper.setProps({ hideProject: true })
+    expect(wrapper.find('.work-project').exists()).toBe(false)
+    await wrapper.setProps({ groupBy: 'attention' })
+    expect(wrapper.findAll('[data-graph-group]').map(group => group.attributes('data-graph-group')))
+      .toEqual(['overdue', 'waiting'])
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['c', 'a'])
+  })
+
   it('summarizes evidence and decisions on the project dashboard', () => {
     const project = {
       id: 'project-atlas',

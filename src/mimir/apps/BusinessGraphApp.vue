@@ -50,6 +50,11 @@
       :view-options="viewOptions"
       :project-filter="projectFilter"
       :project-filter-options="projectFilterOptions"
+      :assignee-filter="assigneeFilter"
+      :assignee-filter-options="assigneeFilterOptions"
+      :self-person-id="selfPersonId"
+      :project-scoped="projectScoped"
+      :list-group-by="listGroupBy"
       :board-group="boardGroup"
       :board-group-options="boardGroupOptions"
       :board-sort="boardSort"
@@ -76,6 +81,7 @@
       :related-activities="relatedActivities"
       @set-view="setView"
       @update:project-filter="projectFilter = $event"
+      @update:assignee-filter="assigneeFilter = $event"
       @update:board-group="boardGroup = $event"
       @update:board-sort="boardSort = $event"
       @update:priority-filter="priorityFilter = $event"
@@ -213,6 +219,8 @@ useGraphLifecycle({
 const {
   allKindFilter,
   allKindOptions,
+  assigneeFilter,
+  assigneeFilterOptions,
   boardGroup,
   boardGroupOptions,
   boardIssues,
@@ -225,12 +233,15 @@ const {
   emptyTitle,
   expandAllBoardStatuses,
   expandBoardStatus,
+  listGroupBy,
   priorityFilter,
   priorityFilterOptions,
   projectFilter,
   projectFilterOptions,
   projectionNodes,
+  projectScoped,
   sections,
+  selfPersonId,
   toggleBoardStatusCollapse,
   viewOptions,
   waitingOnYouIssues,

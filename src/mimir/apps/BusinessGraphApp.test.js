@@ -323,6 +323,7 @@ describe('BusinessGraphApp', () => {
       groupBy: 'status',
       sortBy: 'updated',
       priority: 'high',
+      assignee: '',
       collapsedStatuses: ['backlog'],
     })
     await settings.flush()
@@ -341,6 +342,86 @@ describe('BusinessGraphApp', () => {
     expect(restored.get('[data-board-column="backlog"]')
       .attributes('data-board-column-collapsed')).toBe('true')
     restored.unmount()
+  })
+
+  it('filters work by owner and marks the configured person as you', async () => {
+    summaries.push(
+      { id: 'person-anna', kind: 'person', title: 'Anna Berg', teamMember: true, status: 'active', scopeId: 'team:main', sourceRevision: 'anna-rev' },
+      { id: 'person-paul', kind: 'person', title: 'Paul Priorb', teamMember: true, status: 'active', scopeId: 'team:main', sourceRevision: 'paul-rev' },
+      { id: 'person-old', kind: 'person', title: 'Former Member', teamMember: true, status: 'former', scopeId: 'team:main', sourceRevision: 'old-rev' },
+    )
+    summaries[0].assigneeId = 'person-anna'
+    summaries[2].assigneeId = 'person-paul'
+    const settings = useSettingsStore()
+    await settings.load()
+    settings.set('businessGraphSelfPersonId', 'person-paul')
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.get('[data-board-card="issue-1"] .board-row-owner').text()).toBe('AB')
+    expect(wrapper.get('[data-board-card="issue-legacy"] .board-row-owner').text()).toBe('you')
+    expect(wrapper.get('[data-board-card="issue-legacy"]').attributes('aria-label'))
+      .toContain('assigned to you')
+    expect(wrapper.text()).not.toContain('set date')
+
+    const ownerReset = wrapper.get('[data-graph-control="board-assignee-filter-clear"]')
+    expect(ownerReset.attributes('disabled')).toBeDefined()
+    expect(ownerReset.attributes('aria-label')).toBe('Work for anyone is shown')
+    await wrapper.get('[data-board-assignee-filter]').trigger('click')
+    await flushPromises()
+    const options = [...document.querySelectorAll('[data-graph-select-option]')]
+    expect(options.map(option => option.dataset.graphSelectOption))
+      .toEqual(['', 'person-paul', 'person-anna', '__unassigned__'])
+    expect(options[1].textContent).toContain('You')
+    options[1].click()
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
+      .toEqual(['issue-legacy'])
+    expect(wrapper.get('[data-board-assignee-filter]').text()).toContain('You')
+    expect(wrapper.get('[data-board-assignee-filter]').classes()).toContain('graph-project-view-active')
+    expect(wrapper.get('[data-board-assignee-filter]').attributes('aria-label')).toBe('Owner view: You')
+    expect(ownerReset.attributes('aria-label')).toBe('Show work for anyone')
+    expect(settings.businessGraphViewState.work.assignee).toBe('person-paul')
+
+    await ownerReset.trigger('click')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
+    expect(settings.businessGraphViewState.work.assignee).toBe('')
+    await wrapper.get('[data-board-assignee-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="__unassigned__"]').click()
+    await flushPromises()
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('No work matches this view')
+    wrapper.unmount()
+  })
+
+  it('groups the Work list by the board grouping and Attention by reason', async () => {
+    summaries[0].dueDate = '2020-01-01'
+    summaries[2].waitingFor = 'Anna'
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    const groups = () => wrapper.findAll('[data-graph-group]').map(group => group.attributes('data-graph-group'))
+    expect(groups()).toEqual(['plan', 'review'])
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['issue-1', 'issue-legacy'])
+    expect(wrapper.find('.entity-kind').exists()).toBe(false)
+    expect(wrapper.get('[data-graph-node="issue-1"] .work-project').text()).toBe('Project Alpha')
+    expect(wrapper.get('[data-graph-node="issue-1"] .work-due').text()).toMatch(/^\d+d overdue$/)
+    expect(wrapper.get('[data-graph-node="issue-legacy"] .work-waiting').text()).toBe('waiting for Anna')
+
+    await wrapper.get('[data-board-group]').trigger('click')
+    document.querySelector('[data-graph-select-option="project"]').click()
+    await flushPromises()
+    expect(groups()).toEqual(['project-alpha', '__unassigned__'])
+
+    await wrapper.get('[data-graph-view="attention"]').trigger('click')
+    expect(wrapper.find('[data-board-group]').exists()).toBe(false)
+    expect(groups()).toEqual(['overdue', 'waiting'])
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['issue-1', 'issue-legacy'])
+    wrapper.unmount()
   })
 
   it('keeps the Project view across Work views and section navigation', async () => {
@@ -856,6 +937,7 @@ describe('BusinessGraphApp', () => {
     const viewbarGroups = wrapper.get('.graph-viewbar').element.children
     expect([...viewbarGroups].map(group => group.className)).toEqual([
       'graph-views',
+      'graph-project-view',
       'graph-project-view',
       'graph-work-controls',
     ])
