@@ -188,7 +188,6 @@ export const spellcheckCompartment = new Compartment()
 export const lineIndicatorCompartment = new Compartment()
 export const languageCompartment = new Compartment()
 export const darkModeCompartment = new Compartment()
-export const historyCompartment = new Compartment()
 
 export function lineIndicatorExtensions(showLineNumbers = false) {
   return showLineNumbers
@@ -305,7 +304,7 @@ export function languageExtensionForPath(path = '') {
   return languageForExt(ext, lower) ?? []
 }
 
-export function createEditor({ parent, doc, path = '', extensions = [], onChange, onCursor, onStats, onSelectionCommand, onActiveFormats, isSelectionRewriteEnabled = () => true, initialSettings }) {
+export function createEditorState({ doc, path = '', extensions = [], onChange, onCursor, onStats, onSelectionCommand, onActiveFormats, isSelectionRewriteEnabled = () => true, initialSettings }) {
   const updateListener = EditorView.updateListener.of((update) => {
     if (update.docChanged) {
       onChange?.(update)
@@ -361,7 +360,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
       wrapCompartment.of(showWordWrap ? EditorView.lineWrapping : []),
       spellcheckCompartment.of(editorInputAttributesExtension(showSpellcheck)),
       lineIndicatorCompartment.of(lineIndicatorExtensions(showLineNumbers)),
-      historyCompartment.of(history()),
+      history(),
       drawSelection(),
       dropCursor(),
       indentOnInput(),
@@ -392,7 +391,11 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
     ],
   })
 
-  return new EditorView({ state, parent })
+  return state
+}
+
+export function createEditor({ parent, ...stateOptions }) {
+  return new EditorView({ state: createEditorState(stateOptions), parent })
 }
 
 export function computeStats(state) {

@@ -105,6 +105,7 @@
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :file-id="currentFile?.id ?? ''"
+            :open-file-ids="openFileIds"
             :zoomLevel="state.zoomLevel"
             :maxWidth="editorContentMaxWidth"
             :showBorder="false"
@@ -415,6 +416,7 @@ watch(() => props.workspacePath, (path, previous) => {
   inlineAIState.value = null
   selectionText.value = ''
 })
+const openFileIds = computed(() => openFiles.value.map(file => file.id))
 const isNewTabPage = computed(() => currentFile.value?.newTab === true)
 const isResourcePreview = computed(() => ['pdf', 'external'].includes(currentFile.value?.kind))
 const editorToolbarVisible = computed(() => (

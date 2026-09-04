@@ -22,11 +22,11 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue'
-import { Compartment, Transaction } from '@codemirror/state'
+import { Compartment } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { history, undo, redo, selectAll } from '@codemirror/commands'
+import { undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
-import { createEditor, darkModeCompartment, editorInputAttributesExtension, historyCompartment, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
+import { createEditor, createEditorState, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { editorTypographyVars } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
@@ -36,6 +36,7 @@ const props = defineProps({
   content: { type: String, default: '' },
   path: { type: String, default: '' },
   fileId: { type: [String, Number], default: '' },
+  openFileIds: { type: Array, default: () => [] },
   zoomLevel: { type: Number, default: 100 },
   maxWidth: { type: String, default: '' },
   showBorder: { type: Boolean, default: false },
@@ -61,8 +62,9 @@ const cmHost = ref(null)
 const view = shallowRef(null)
 let applyingExternalContent = false
 let typographyMeasureGeneration = 0
-let lastContentFileId = props.fileId
+let activeFileId = props.fileId
 const featureCompartment = new Compartment()
+const fileStates = new Map()
 
 const ctxMenu = reactive({ show: false, x: 0, y: 0, hasSelection: false })
 function onContextMenu(e) {
@@ -235,11 +237,10 @@ function onCMSelectionCommand(sel) {
   emit('selection-change', `${chars} chars · ${words} words`)
 }
 
-onMounted(() => {
-  view.value = createEditor({
-    parent: cmHost.value,
-    doc: props.content,
-    path: props.path,
+function stateOptionsFor(doc, path) {
+  return {
+    doc,
+    path,
     extensions: [featureCompartment.of(props.extensions)],
     onChange: onCMChange,
     onCursor: onCMCursor,
@@ -252,6 +253,104 @@ onMounted(() => {
       lineNumbers: settings.editorLineNumbers,
       isDark: settings.isDarkTheme,
     },
+  }
+}
+
+function currentSettingsEffects() {
+  return [
+    wrapCompartment.reconfigure(settings.editorWordWrap ? EditorView.lineWrapping : []),
+    spellcheckCompartment.reconfigure(editorInputAttributesExtension(settings.editorSpellCheck)),
+    lineIndicatorCompartment.reconfigure(lineIndicatorExtensions(settings.editorLineNumbers)),
+    darkModeCompartment.reconfigure(settings.isDarkTheme ? EditorView.darkTheme.of(true) : []),
+    featureCompartment.reconfigure(props.extensions),
+  ]
+}
+
+function syncDerivedViewState() {
+  const state = view.value.state
+  const selection = state.selection.main
+  const line = state.doc.lineAt(selection.head)
+  onCMCursor({
+    line: line.number,
+    column: selection.head - line.from + 1,
+    offset: selection.head,
+    hasSelection: selection.from !== selection.to,
+  })
+  emit('active-formats', fmt.detectActiveFormats(state))
+}
+
+function applyBackgroundContent(newContent) {
+  const currentContent = view.value.state.doc.toString()
+  if (newContent === currentContent) return
+  applyingExternalContent = true
+  try {
+    let prefixLen = 0
+    const minLen = Math.min(currentContent.length, newContent.length)
+    while (prefixLen < minLen && currentContent[prefixLen] === newContent[prefixLen]) prefixLen++
+
+    let suffixLen = 0
+    const maxSuffix = minLen - prefixLen
+    while (suffixLen < maxSuffix &&
+           currentContent[currentContent.length - 1 - suffixLen] === newContent[newContent.length - 1 - suffixLen]) {
+      suffixLen++
+    }
+
+    const from = prefixLen
+    const to = currentContent.length - suffixLen
+    const insert = newContent.slice(prefixLen, newContent.length - suffixLen)
+
+    if (from !== to || insert.length > 0) {
+      view.value.dispatch({ changes: { from, to, insert } })
+    }
+  } finally {
+    applyingExternalContent = false
+  }
+}
+
+function languageEffect(path) {
+  return languageCompartment.reconfigure(languageExtensionForPath(path))
+}
+
+function switchFile(fileId, content, path, previousContent, previousPath) {
+  fileStates.set(activeFileId, {
+    state: view.value.state,
+    scrollTop: view.value.scrollDOM.scrollTop,
+    storeContent: previousContent,
+    path: previousPath,
+  })
+  activeFileId = fileId
+
+  const cached = fileStates.get(fileId)
+  if (cached) {
+    view.value.setState(cached.state)
+    view.value.dispatch({
+      effects: cached.path === path
+        ? currentSettingsEffects()
+        : [...currentSettingsEffects(), languageEffect(path)],
+    })
+    view.value.scrollDOM.scrollTop = cached.scrollTop
+    syncDerivedViewState()
+    if (content !== cached.storeContent) applyBackgroundContent(content)
+    return
+  }
+
+  const state = createEditorState(stateOptionsFor(content, path))
+  fileStates.set(fileId, { state, scrollTop: 0, storeContent: content, path })
+  view.value.setState(state)
+  view.value.scrollDOM.scrollTop = 0
+  syncDerivedViewState()
+}
+
+onMounted(() => {
+  view.value = createEditor({
+    parent: cmHost.value,
+    ...stateOptionsFor(props.content, props.path),
+  })
+  fileStates.set(activeFileId, {
+    state: view.value.state,
+    scrollTop: 0,
+    storeContent: props.content,
+    path: props.path,
   })
   void remeasureTypography()
 })
@@ -287,13 +386,6 @@ watch(() => settings.editorLineNumbers, (on) => {
   })
 })
 
-watch(() => props.path, (path) => {
-  if (!view.value) return
-  view.value.dispatch({
-    effects: languageCompartment.reconfigure(languageExtensionForPath(path)),
-  })
-})
-
 watch(() => settings.isDarkTheme, (dark) => {
   if (!view.value) return
   view.value.dispatch({
@@ -317,41 +409,23 @@ watch(() => props.extensions, (extensions) => {
   })
 })
 
-// Watch for external content changes: tab switches, disk reloads, proposal
-// apply. These are programmatic replacements, never a user edit, so they
-// must never become an undo step. A tab switch additionally starts a new
-// undo history: the previous file's edits must not be reachable — mapped
-// onto the wrong document — by undoing from the newly active file.
-watch([() => props.fileId, () => props.content], ([fileId, newContent]) => {
-  if (!view.value) return
-  const fileChanged = fileId !== lastContentFileId
-  lastContentFileId = fileId
-  const currentContent = view.value.state.doc.toString()
-  if (newContent === currentContent && !fileChanged) return
-  applyingExternalContent = true
-  try {
-    let prefixLen = 0
-    const minLen = Math.min(currentContent.length, newContent.length)
-    while (prefixLen < minLen && currentContent[prefixLen] === newContent[prefixLen]) prefixLen++
-
-    let suffixLen = 0
-    const maxSuffix = minLen - prefixLen
-    while (suffixLen < maxSuffix &&
-           currentContent[currentContent.length - 1 - suffixLen] === newContent[newContent.length - 1 - suffixLen]) {
-      suffixLen++
+watch(
+  [() => props.fileId, () => props.content, () => props.path],
+  ([fileId, content, path], [, previousContent, previousPath]) => {
+    if (!view.value) return
+    if (fileId !== activeFileId) {
+      switchFile(fileId, content, path, previousContent, previousPath)
+      return
     }
+    if (path !== previousPath) view.value.dispatch({ effects: languageEffect(path) })
+    applyBackgroundContent(content)
+  },
+)
 
-    const from = prefixLen
-    const to = currentContent.length - suffixLen
-    const insert = newContent.slice(prefixLen, newContent.length - suffixLen)
-
-    const spec = { annotations: Transaction.addToHistory.of(false) }
-    if (from !== to || insert.length > 0) spec.changes = { from, to, insert }
-    if (fileChanged) spec.effects = historyCompartment.reconfigure(history())
-
-    if (spec.changes || spec.effects) view.value.dispatch(spec)
-  } finally {
-    applyingExternalContent = false
+watch(() => props.openFileIds, (ids) => {
+  const keep = new Set(ids)
+  for (const id of fileStates.keys()) {
+    if (id !== activeFileId && !keep.has(id)) fileStates.delete(id)
   }
 })
 </script>

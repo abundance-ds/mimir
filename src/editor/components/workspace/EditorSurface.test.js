@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { undo } from '@codemirror/commands'
+import { language } from '@codemirror/language'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
@@ -169,6 +170,122 @@ describe('EditorSurface feature extensions', () => {
 
     undo(view)
     expect(view.state.doc.toString()).toBe('file two')
+
+    wrapper.unmount()
+  })
+
+  it('keeps each open file its own undo history and scroll position across switches', async () => {
+    const wrapper = mount(EditorSurface, {
+      props: {
+        content: 'file one',
+        path: '/work/one.md',
+        fileId: 1,
+        openFileIds: [1, 2],
+      },
+      global: { plugins: [createPinia()] },
+    })
+    const view = wrapper.vm.getView()
+
+    view.dispatch({ changes: { from: 0, to: 0, insert: 'EDIT ' } })
+    expect(view.state.doc.toString()).toBe('EDIT file one')
+    view.scrollDOM.scrollTop = 42
+
+    await wrapper.setProps({ content: 'file two', path: '/work/two.md', fileId: 2 })
+    view.dispatch({ changes: { from: 0, to: 0, insert: 'OTHER ' } })
+    expect(view.state.doc.toString()).toBe('OTHER file two')
+
+    await wrapper.setProps({ content: 'EDIT file one', path: '/work/one.md', fileId: 1 })
+    expect(view.state.doc.toString()).toBe('EDIT file one')
+    expect(view.scrollDOM.scrollTop).toBe(42)
+
+    undo(view)
+    expect(view.state.doc.toString()).toBe('file one')
+
+    await wrapper.setProps({ content: 'OTHER file two', path: '/work/two.md', fileId: 2 })
+    expect(view.state.doc.toString()).toBe('OTHER file two')
+    undo(view)
+    expect(view.state.doc.toString()).toBe('file two')
+
+    wrapper.unmount()
+  })
+
+  it('keeps unflushed edits when the store did not change while the file was in the background', async () => {
+    const wrapper = mount(EditorSurface, {
+      props: { content: 'file one', path: '/work/one.md', fileId: 1, openFileIds: [1, 2] },
+      global: { plugins: [createPinia()] },
+    })
+    const view = wrapper.vm.getView()
+
+    view.dispatch({ changes: { from: 0, to: 0, insert: 'EDIT ' } })
+    await wrapper.setProps({ content: 'file two', path: '/work/two.md', fileId: 2 })
+    await wrapper.setProps({ content: 'file one', path: '/work/one.md', fileId: 1 })
+
+    expect(view.state.doc.toString()).toBe('EDIT file one')
+    undo(view)
+    expect(view.state.doc.toString()).toBe('file one')
+
+    wrapper.unmount()
+  })
+
+  it('applies a store change that happened while the file was in the background', async () => {
+    const wrapper = mount(EditorSurface, {
+      props: { content: 'file one', path: '/work/one.md', fileId: 1, openFileIds: [1, 2] },
+      global: { plugins: [createPinia()] },
+    })
+    const view = wrapper.vm.getView()
+
+    await wrapper.setProps({ content: 'file two', path: '/work/two.md', fileId: 2 })
+    await wrapper.setProps({ content: 'file one reloaded', path: '/work/one.md', fileId: 1 })
+
+    expect(view.state.doc.toString()).toBe('file one reloaded')
+
+    wrapper.unmount()
+  })
+
+  it('keeps the language mode bound to each file across switches and renames', async () => {
+    const wrapper = mount(EditorSurface, {
+      props: { content: '# one', path: '/work/one.md', fileId: 1, openFileIds: [1, 2] },
+      global: { plugins: [createPinia()] },
+    })
+    const view = wrapper.vm.getView()
+    const mode = () => view.state.facet(language)?.name
+
+    expect(mode()).toBe('markdown')
+    await wrapper.setProps({ content: 'const x = 1', path: '/work/two.js', fileId: 2 })
+    expect(mode()).toBe('javascript')
+    await wrapper.setProps({ content: '# one', path: '/work/one.md', fileId: 1 })
+    expect(mode()).toBe('markdown')
+
+    await wrapper.setProps({ path: '/work/one.py' })
+    expect(mode()).toBe('python')
+    await wrapper.setProps({ content: 'const x = 1', path: '/work/two.js', fileId: 2 })
+    await wrapper.setProps({ content: '# one', path: '/work/one.py', fileId: 1 })
+    expect(mode()).toBe('python')
+
+    wrapper.unmount()
+  })
+
+  it('forgets a file once it is no longer open', async () => {
+    const wrapper = mount(EditorSurface, {
+      props: {
+        content: 'file one',
+        path: '/work/one.md',
+        fileId: 1,
+        openFileIds: [1, 2],
+      },
+      global: { plugins: [createPinia()] },
+    })
+    const view = wrapper.vm.getView()
+
+    view.dispatch({ changes: { from: 0, to: 0, insert: 'EDIT ' } })
+    await wrapper.setProps({ content: 'file two', path: '/work/two.md', fileId: 2 })
+
+    await wrapper.setProps({ openFileIds: [2] })
+    await wrapper.setProps({ content: 'file one', path: '/work/one.md', fileId: 1 })
+
+    expect(view.state.doc.toString()).toBe('file one')
+    undo(view)
+    expect(view.state.doc.toString()).toBe('file one')
 
     wrapper.unmount()
   })

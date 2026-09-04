@@ -1297,9 +1297,6 @@ function collapseEmptyEditor() {
   workbench.setPaneState('editor', 'rail')
 }
 
-// A manual "expand panel" click restores the pane's visibility, but never
-// implies a file: without this, an empty embedded Editor surfaces a
-// CodeMirror buffer with no backing tab, so typed text has nowhere to save.
 function onPaneRestore(pane) {
   if (pane === 'editor' && !editorFiles.currentFile) {
     editorRef.value?.mimirNewFile?.()
