@@ -680,6 +680,29 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
   })
 
+  it('opens a fresh file when the Editor rail is restored with no open files', async () => {
+    const wrapper = await render()
+    useWorkbenchStore().setPaneState('editor', 'rail')
+    await nextTick()
+
+    await wrapper.get('[data-pane-restore="editor"]').trigger('click')
+    await nextTick()
+
+    expect(editorNew).toHaveBeenCalledOnce()
+  })
+
+  it('does not force a new file when the Editor rail is restored with a file already open', async () => {
+    const wrapper = await render()
+    useFileStore().newFile()
+    useWorkbenchStore().setPaneState('editor', 'rail')
+    await nextTick()
+
+    await wrapper.get('[data-pane-restore="editor"]').trigger('click')
+    await nextTick()
+
+    expect(editorNew).not.toHaveBeenCalled()
+  })
+
   it('boots narrow focus mode into Editor before restored tabs are available', async () => {
     window.innerWidth = 700
 

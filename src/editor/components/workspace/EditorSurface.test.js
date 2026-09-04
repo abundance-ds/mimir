@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view'
+import { undo } from '@codemirror/commands'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
@@ -146,6 +147,29 @@ describe('EditorSurface feature extensions', () => {
     expect(wrapper.find('.cm-lineNumbers').exists()).toBe(false)
     expect(wrapper.find('.cm-activeLine').exists()).toBe(true)
     expect(wrapper.find('.cm-activeLineGutter').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not let undo after a tab switch reach into the previous file', async () => {
+    const wrapper = mount(EditorSurface, {
+      props: {
+        content: 'file one',
+        path: '/work/one.md',
+        fileId: 1,
+      },
+      global: { plugins: [createPinia()] },
+    })
+    const view = wrapper.vm.getView()
+
+    view.dispatch({ changes: { from: 0, to: 0, insert: 'EDIT ' } })
+    expect(view.state.doc.toString()).toBe('EDIT file one')
+
+    await wrapper.setProps({ content: 'file two', path: '/work/two.md', fileId: 2 })
+    expect(view.state.doc.toString()).toBe('file two')
+
+    undo(view)
+    expect(view.state.doc.toString()).toBe('file two')
+
     wrapper.unmount()
   })
 })

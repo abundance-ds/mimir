@@ -22,11 +22,11 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue'
-import { Compartment } from '@codemirror/state'
+import { Compartment, Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { undo, redo, selectAll } from '@codemirror/commands'
+import { history, undo, redo, selectAll } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
-import { createEditor, darkModeCompartment, editorInputAttributesExtension, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
+import { createEditor, darkModeCompartment, editorInputAttributesExtension, historyCompartment, languageCompartment, languageExtensionForPath, lineIndicatorCompartment, lineIndicatorExtensions, wrapCompartment, spellcheckCompartment } from '../../codemirror/core.js'
 import { useSettingsStore } from '../../../stores/settings.js'
 import { editorTypographyVars } from '../../../shared/fonts.js'
 import * as fmt from '../../codemirror/formatting.js'
@@ -35,6 +35,7 @@ import EditorContextMenu from './EditorContextMenu.vue'
 const props = defineProps({
   content: { type: String, default: '' },
   path: { type: String, default: '' },
+  fileId: { type: [String, Number], default: '' },
   zoomLevel: { type: Number, default: 100 },
   maxWidth: { type: String, default: '' },
   showBorder: { type: Boolean, default: false },
@@ -60,6 +61,7 @@ const cmHost = ref(null)
 const view = shallowRef(null)
 let applyingExternalContent = false
 let typographyMeasureGeneration = 0
+let lastContentFileId = props.fileId
 const featureCompartment = new Compartment()
 
 const ctxMenu = reactive({ show: false, x: 0, y: 0, hasSelection: false })
@@ -315,11 +317,17 @@ watch(() => props.extensions, (extensions) => {
   })
 })
 
-// Watch for external content changes (tab switches)
-watch(() => props.content, (newContent) => {
+// Watch for external content changes: tab switches, disk reloads, proposal
+// apply. These are programmatic replacements, never a user edit, so they
+// must never become an undo step. A tab switch additionally starts a new
+// undo history: the previous file's edits must not be reachable — mapped
+// onto the wrong document — by undoing from the newly active file.
+watch([() => props.fileId, () => props.content], ([fileId, newContent]) => {
   if (!view.value) return
+  const fileChanged = fileId !== lastContentFileId
+  lastContentFileId = fileId
   const currentContent = view.value.state.doc.toString()
-  if (newContent === currentContent) return
+  if (newContent === currentContent && !fileChanged) return
   applyingExternalContent = true
   try {
     let prefixLen = 0
@@ -337,9 +345,11 @@ watch(() => props.content, (newContent) => {
     const to = currentContent.length - suffixLen
     const insert = newContent.slice(prefixLen, newContent.length - suffixLen)
 
-    if (from !== to || insert.length > 0) {
-      view.value.dispatch({ changes: { from, to, insert } })
-    }
+    const spec = { annotations: Transaction.addToHistory.of(false) }
+    if (from !== to || insert.length > 0) spec.changes = { from, to, insert }
+    if (fileChanged) spec.effects = historyCompartment.reconfigure(history())
+
+    if (spec.changes || spec.effects) view.value.dispatch(spec)
   } finally {
     applyingExternalContent = false
   }

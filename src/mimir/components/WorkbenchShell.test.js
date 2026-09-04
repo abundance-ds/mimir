@@ -110,6 +110,17 @@ describe('WorkbenchShell', () => {
     expect(store.paneLayout.activity.state).toBe('expanded')
   })
 
+  it('emits restore with the pane name so a caller can repopulate an emptied pane', async () => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+
+    store.setPaneState('editor', 'rail')
+    await wrapper.vm.$nextTick()
+    await wrapper.get('[data-pane-restore="editor"]').trigger('click')
+
+    expect(wrapper.emitted('restore')).toEqual([['editor']])
+  })
+
   it('keeps an Activity host mounted while its pane is railed', async () => {
     const wrapper = render()
     const store = useWorkbenchStore()

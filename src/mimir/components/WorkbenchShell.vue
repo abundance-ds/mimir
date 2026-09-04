@@ -127,7 +127,7 @@ const props = defineProps({
   viewportWidth: { type: Number, default: 1280 },
 })
 
-const emit = defineEmits(['resizeStart'])
+const emit = defineEmits(['resizeStart', 'restore'])
 const workbench = useWorkbenchStore()
 const layout = workbench.paneLayout
 
@@ -179,6 +179,7 @@ function startResize(pane, event) {
 
 async function restorePane(pane) {
   workbench.setPaneState(pane, 'expanded')
+  emit('restore', pane)
   await nextTick()
   const target = pane === 'activity'
     ? document.querySelector('[data-pane-header="activity"] button:not(:disabled)')

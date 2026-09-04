@@ -188,6 +188,7 @@ export const spellcheckCompartment = new Compartment()
 export const lineIndicatorCompartment = new Compartment()
 export const languageCompartment = new Compartment()
 export const darkModeCompartment = new Compartment()
+export const historyCompartment = new Compartment()
 
 export function lineIndicatorExtensions(showLineNumbers = false) {
   return showLineNumbers
@@ -360,7 +361,7 @@ export function createEditor({ parent, doc, path = '', extensions = [], onChange
       wrapCompartment.of(showWordWrap ? EditorView.lineWrapping : []),
       spellcheckCompartment.of(editorInputAttributesExtension(showSpellcheck)),
       lineIndicatorCompartment.of(lineIndicatorExtensions(showLineNumbers)),
-      history(),
+      historyCompartment.of(history()),
       drawSelection(),
       dropCursor(),
       indentOnInput(),

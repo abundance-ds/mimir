@@ -104,6 +104,7 @@
             v-show="!gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
+            :file-id="currentFile?.id ?? ''"
             :zoomLevel="state.zoomLevel"
             :maxWidth="editorContentMaxWidth"
             :showBorder="false"
