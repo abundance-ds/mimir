@@ -5,9 +5,11 @@ Hosted live audio-to-transcript and interrupted-recording recovery still need
 signed end-to-end evidence.
 
 Scribe is a local-first meeting recorder. The user starts recording; detection
-can only suggest it. Microphone and system audio remain separate durable
-16 kHz mono tracks. Transcription follows committed audio and never blocks the
-capture callback.
+can only suggest it. On macOS, a detection notification offers **RECORD**. That
+explicit action activates Mimir and uses the normal permission, consent, and
+candidate-validation path. A stale suggestion cannot start capture. Microphone
+and system audio remain separate durable 16 kHz mono tracks. Transcription
+follows committed audio and never blocks the capture callback.
 
 ## Product contract
 

@@ -933,7 +933,7 @@ fn notify_file_updated(app: tauri::AppHandle, path: String, content: String) -> 
     Ok(())
 }
 
-fn create_main_window<M: Manager<tauri::Wry>>(
+pub(crate) fn create_main_window<M: Manager<tauri::Wry>>(
     manager: &M,
     visible: bool,
 ) -> tauri::Result<tauri::WebviewWindow> {
@@ -1265,6 +1265,7 @@ pub fn run() {
             meetings::commands::meetings_audio_test_start,
             meetings::commands::meetings_audio_test_stop,
             meetings::commands::meetings_dismiss_candidate,
+            meetings::commands::meetings_take_record_requests,
             meetings::commands::meetings_prepare,
             meetings::commands::meetings_issue_start_consent,
             meetings::commands::meetings_start,
@@ -1334,6 +1335,7 @@ pub fn run() {
             tracker::runtime::tracker_context_update,
             file_open::take_pending_files,
             file_open::open_files_in_editor,
+            file_open::open_html_in_browser,
             file_index_commands::file_index_open,
             file_index_commands::file_index_files,
             file_index_commands::file_index_filter,

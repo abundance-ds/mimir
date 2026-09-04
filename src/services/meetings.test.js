@@ -7,6 +7,7 @@ import {
   dismissMeetingCandidate,
   fileMeetingToGraph,
   issueMeetingStartConsent,
+  listenToMeetingRecordRequests,
   listenToMeetingAudioTestEvents,
   listenToMeetingEvents,
   loadMeetingMicrophones,
@@ -27,6 +28,7 @@ import {
   startMeetingAudioTest,
   stopMeetingAudioTest,
   startMeeting,
+  takeMeetingRecordRequests,
   updateMeeting,
   updateMeetingsConfig,
 } from './meetings.js'
@@ -422,6 +424,28 @@ describe('meetings service', () => {
     expect(invoke).toHaveBeenCalledWith('meetings_dismiss_candidate', {
       candidateId: 'candidate-zoom',
     })
+  })
+
+  it('drains and listens for native notification record requests', async () => {
+    vi.mocked(invoke).mockResolvedValue([
+      { candidate_id: 'candidate-zoom', app_name: 'Zoom' },
+      { candidateId: '', appName: 'Invalid' },
+    ])
+    await expect(takeMeetingRecordRequests()).resolves.toEqual([
+      { candidateId: 'candidate-zoom', appName: 'Zoom' },
+    ])
+    expect(invoke).toHaveBeenCalledWith('meetings_take_record_requests')
+
+    const pending = vi.fn()
+    let handler
+    vi.mocked(listen).mockImplementationOnce(async (event, callback) => {
+      expect(event).toBe('mimir://meeting-record-requested')
+      handler = callback
+      return vi.fn()
+    })
+    await listenToMeetingRecordRequests(pending)
+    handler({ payload: null })
+    expect(pending).toHaveBeenCalledTimes(1)
   })
 
   it('rejects unsupported routing and KG decisions before IPC', async () => {

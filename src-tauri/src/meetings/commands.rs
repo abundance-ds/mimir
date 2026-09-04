@@ -25,6 +25,7 @@ use tauri::Emitter;
 use uuid::Uuid;
 
 pub const MEETING_PLATFORM_CHANGED_EVENT: &str = "mimir://meeting-platform-changed";
+pub const MEETING_RECORD_REQUESTED_EVENT: &str = "mimir://meeting-record-requested";
 const TRANSCRIPT_EVENT_INTERVAL: Duration = Duration::from_millis(100);
 const MAIN_WINDOW_LABEL: &str = "main";
 const START_CONSENT_TTL: Duration = Duration::from_secs(45);
@@ -1013,6 +1014,15 @@ pub async fn meetings_dismiss_candidate(
             .map_err(|error| error.to_string())
     })
     .await
+}
+
+#[tauri::command]
+pub fn meetings_take_record_requests(
+    window: tauri::WebviewWindow,
+    engine: tauri::State<'_, NativeMeetingEngine>,
+) -> Result<Vec<super::native::MeetingRecordRequest>, String> {
+    require_main_window(window.label())?;
+    Ok(engine.take_record_requests())
 }
 
 #[tauri::command]

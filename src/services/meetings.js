@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 export const MEETING_EVENT = 'mimir://meeting-event'
 export const MEETING_PLATFORM_CHANGED_EVENT = 'mimir://meeting-platform-changed'
 export const MEETING_AUDIO_TEST_EVENT = 'mimir://meeting-audio-test'
+export const MEETING_RECORD_REQUESTED_EVENT = 'mimir://meeting-record-requested'
 export const TRANSCRIPT_PAGE_SIZE = 250
 const MAX_MEETING_TAGS = 64
 const MAX_MEETING_TAG_CHARS = 80
@@ -149,6 +150,20 @@ export async function dismissMeetingCandidate(candidateId) {
   return normalizeMeetingSnapshot(await invoke('meetings_dismiss_candidate', {
     candidateId: requiredId(candidateId, 'meeting candidate'),
   }))
+}
+
+export async function takeMeetingRecordRequests() {
+  const requests = await invoke('meetings_take_record_requests')
+  return (Array.isArray(requests) ? requests : [])
+    .map(normalizeMeetingRecordRequest)
+    .filter(request => request.candidateId)
+}
+
+export async function listenToMeetingRecordRequests(onPending) {
+  if (typeof onPending !== 'function') {
+    throw new Error('A meeting record-request handler is required.')
+  }
+  return listen(MEETING_RECORD_REQUESTED_EVENT, () => onPending())
 }
 
 export async function issueMeetingStartConsent(disclosure = {}) {
@@ -593,6 +608,14 @@ function normalizeCandidate(value) {
     confidence: Number.isFinite(Number(candidate.confidence))
       ? Number(candidate.confidence)
       : 0,
+  }
+}
+
+function normalizeMeetingRecordRequest(value) {
+  const request = object(value)
+  return {
+    candidateId: String(request.candidateId ?? request.candidate_id ?? '').trim(),
+    appName: String(request.appName ?? request.app_name ?? 'Meeting app').trim() || 'Meeting app',
   }
 }
 

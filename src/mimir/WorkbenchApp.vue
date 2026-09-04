@@ -154,6 +154,7 @@
         @empty="collapseEmptyEditor"
         @navigate-editor="onEditorNavigate"
         @review-git-with-agent="startGitReviewWithAgent"
+        @diagnostic="showDiagnostic"
       />
     </template>
   </WorkbenchShell>
@@ -210,6 +211,10 @@ import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
 import { callAppAction, loadAppData, openAppWindow } from '../services/appsCatalog.js'
+import {
+  listenToMeetingRecordRequests,
+  takeMeetingRecordRequests,
+} from '../services/meetings.js'
 import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
 import { localDateKey, parseTodayStorage } from './apps/todayModel.js'
 import FilesActivity from './activities/FilesActivity.vue'
@@ -247,6 +252,11 @@ const optionalSurfaces = {
   chat: ChatActivity,
 }
 let stopManagedSyncLifecycle = () => {}
+let stopMeetingRecordRequests = () => {}
+let workbenchReady = false
+let recordRequestDrain = Promise.resolve()
+let processingMeetingRecordRequests = false
+const pendingMeetingRecordRequests = []
 
 // Both surfaces are code-split, and an async component renders nothing while
 // its chunk loads — first open of a terminal or an app would otherwise show an
@@ -831,6 +841,16 @@ onMounted(async () => {
   window.addEventListener('resize', syncResponsiveLayout)
   window.__mimir_activityPaste = pasteToActiveTerminal
   prefetchOptionalSurfaces()
+  try {
+    stopMeetingRecordRequests = await listenToMeetingRecordRequests(() => {
+      void drainMeetingRecordRequests()
+    })
+    await drainMeetingRecordRequests()
+  } catch (cause) {
+    if (!diagnostic.value) {
+      diagnostic.value = `Scribe notification actions are unavailable: ${errorMessage(cause)}`
+    }
+  }
   await Promise.all([
     workspaceBootstrap.start(),
     meetings.initialize().catch((cause) => {
@@ -850,9 +870,14 @@ onMounted(async () => {
   if (!tracker.enabled && activeActivity.value?.source?.appId === 'tracker') {
     openCoreActivity('files')
   }
+  workbenchReady = true
+  void processMeetingRecordRequests()
 })
 
 onUnmounted(() => {
+  workbenchReady = false
+  stopMeetingRecordRequests()
+  stopMeetingRecordRequests = () => {}
   stopManagedSyncLifecycle()
   finishWorkspaceSetup(null)
   persistWorkbench()
@@ -876,6 +901,48 @@ onUnmounted(() => {
   }
   activitySurfaces.clear()
 })
+
+function drainMeetingRecordRequests() {
+  recordRequestDrain = recordRequestDrain
+    .then(async () => {
+      const requests = await takeMeetingRecordRequests()
+      for (const request of requests) {
+        if (!pendingMeetingRecordRequests.some(
+          pending => pending.candidateId === request.candidateId,
+        )) {
+          pendingMeetingRecordRequests.push(request)
+        }
+      }
+      void processMeetingRecordRequests()
+    })
+    .catch((cause) => {
+      diagnostic.value = `Scribe could not read the notification action: ${errorMessage(cause)}`
+    })
+  return recordRequestDrain
+}
+
+async function processMeetingRecordRequests() {
+  if (!workbenchReady || processingMeetingRecordRequests) return
+  processingMeetingRecordRequests = true
+  try {
+    while (workbenchReady && pendingMeetingRecordRequests.length) {
+      const request = pendingMeetingRecordRequests.shift()
+      try {
+        await meetings.refresh()
+        await onLaunch('app:scribe')
+        await meetings.start({
+          title: `${request.appName} meeting`,
+          candidateId: request.candidateId,
+          workspacePath: workspaceFiles.workspacePath || null,
+        })
+      } catch (cause) {
+        diagnostic.value = `Scribe could not start from the notification: ${errorMessage(cause)}`
+      }
+    }
+  } finally {
+    processingMeetingRecordRequests = false
+  }
+}
 
 async function onLaunch(id) {
   if (id === 'core:files') return openCoreActivity('files')
