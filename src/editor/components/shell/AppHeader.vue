@@ -281,21 +281,27 @@
             class="flex-1 self-stretch"
         ></div>
 
-        <button
+        <div
             v-if="canOpenInBrowser"
-            type="button"
-            data-editor-action="open-in-browser"
-            class="sidebar-toggle no-drag mr-1"
-            :class="{ 'has-error': browserOpenError }"
-            :title="browserOpenError || 'Open in browser'"
-            aria-label="Open in browser"
-            :aria-busy="browserOpening"
-            :disabled="browserOpening"
-            @click="emit('open-in-browser')"
+            data-editor-browser-cluster
+            class="no-drag flex shrink-0 items-center"
+            :class="embedded ? 'mr-1 border-r border-rule pr-1' : ''"
         >
-            <IconExternalLink :size="15" :stroke-width="1.8" />
-        </button>
-        <span v-if="browserOpenError" class="sr-only" role="alert">{{ browserOpenError }}</span>
+            <button
+                type="button"
+                data-editor-action="open-in-browser"
+                class="sidebar-toggle"
+                :class="{ 'has-error': browserOpenError }"
+                :title="browserOpenError || 'Open in browser'"
+                aria-label="Open in browser"
+                :aria-busy="browserOpening"
+                :disabled="browserOpening"
+                @click="emit('open-in-browser')"
+            >
+                <IconExternalLink :size="15" :stroke-width="1.8" />
+            </button>
+            <span v-if="browserOpenError" class="sr-only" role="alert">{{ browserOpenError }}</span>
+        </div>
 
         <!-- Standalone editor sidebar toggle. Workbench pane controls live outside the editor. -->
         <button

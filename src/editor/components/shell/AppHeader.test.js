@@ -77,8 +77,11 @@ describe('embedded editor header', () => {
 
     await wrapper.setProps({ canOpenInBrowser: true })
     const action = wrapper.get('[data-editor-action="open-in-browser"]')
+    const cluster = wrapper.get('[data-editor-browser-cluster]')
     expect(action.attributes('title')).toBe('Open in browser')
     expect(action.attributes('aria-label')).toBe('Open in browser')
+    expect(cluster.classes()).toEqual(expect.arrayContaining(['border-r', 'border-rule']))
+    expect(cluster.element.nextElementSibling?.getAttribute('data-editor-action')).toBe('expand')
 
     await action.trigger('click')
     expect(wrapper.emitted('open-in-browser')).toHaveLength(1)
