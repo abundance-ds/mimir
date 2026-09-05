@@ -6,7 +6,7 @@
     </div>
 
     <div class="about-links">
-      <a href="https://shoulde.rs" target="_blank" rel="noopener">shoulde.rs</a>
+      <a href="https://abundanceds.com" target="_blank" rel="noopener">abundanceds.com</a>
     </div>
 
     <section class="agent-instructions" aria-labelledby="agent-instructions-title">

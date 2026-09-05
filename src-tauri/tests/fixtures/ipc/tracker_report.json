@@ -11,7 +11,7 @@
   "longestWorkStreakSeconds": 5400,
   "topApps": [
     {
-      "key": "rs.shoulde.mimir",
+      "key": "com.abundanceds.mimir",
       "label": "Mimir",
       "seconds": 7200,
       "activity": "Work"

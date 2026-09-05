@@ -2,13 +2,14 @@
 
 This record covers a locally built, Developer ID-signed, installed test bundle.
 It is not a notarized distribution artifact and is not release-candidate
-evidence.
+evidence. It predates the company-domain migration and does not prove the
+current application identity.
 
 ## Environment and identity
 
 - Host: macOS 15.7.1 (24G231), arm64.
 - Installed application: `/Applications/Mimir.app`.
-- Bundle identifier: `rs.shoulde.mimir`.
+- Bundle identifier: retired pre-migration identity.
 - Signing authority: Developer ID Application, team `7WJ3GS2MUC`.
 - Hardened runtime: enabled.
 - Application binary SHA-256:
@@ -29,8 +30,8 @@ Observed behavior:
 - The persistent state changed to **Saved in Keychain · ready to use** and
   exposed **Replace key** and **Remove key**.
 - A metadata-only `security find-generic-password` query found the native
-  `rs.shoulde.mimir` / `meetings.custom-stt` entry; its secret was never read by
-  the verification procedure.
+  pre-migration service entry for `meetings.custom-stt`; its secret was never
+  read by the verification procedure.
 - Leaving and reopening Scribe settings retained the saved state and controls.
 - Remove returned **API key removed from Keychain** and the metadata query again
   reported no entry.

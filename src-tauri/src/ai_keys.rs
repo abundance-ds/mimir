@@ -7,7 +7,7 @@ use serde::Serialize;
 #[cfg(debug_assertions)]
 use std::{collections::HashMap, fs, path::PathBuf};
 
-const KEYRING_SERVICE: &str = "rs.shoulde.mimir";
+const KEYRING_SERVICE: &str = "com.abundanceds.mimir";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

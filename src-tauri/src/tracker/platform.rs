@@ -164,8 +164,8 @@ fn sample_impl(config: &TrackerConfig, mimir_context: Option<&str>) -> Result<Ob
     } else {
         None
     };
-    let is_mimir =
-        bundle_id.as_deref() == Some("rs.shoulde.mimir") || app_name.eq_ignore_ascii_case("Mimir");
+    let is_mimir = bundle_id.as_deref() == Some("com.abundanceds.mimir")
+        || app_name.eq_ignore_ascii_case("Mimir");
 
     Ok(Observation {
         observed_at_ms: chrono::Utc::now().timestamp_millis(),

@@ -277,10 +277,10 @@ mod tests {
                 activity: ActivityCategory::Work,
                 subcategory: Some("Coding"),
                 app_name: Some("Mimir"),
-                bundle_id: Some("rs.shoulde.mimir"),
+                bundle_id: Some("com.abundanceds.mimir"),
                 domain: None,
                 window_title: None,
-                classification_key: Some("rs.shoulde.mimir"),
+                classification_key: Some("com.abundanceds.mimir"),
                 source: "test",
                 off_reason: None,
             })

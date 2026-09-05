@@ -145,8 +145,8 @@ fn mimir_and_ignored_apps_never_become_candidates() {
         .observe(
             0,
             vec![
-                app(std::process::id() as i32, "rs.shoulde.mimir", "Mimir"),
-                app(31, "rs.shoulde.mimir", "Mimir"),
+                app(std::process::id() as i32, "com.abundanceds.mimir", "Mimir"),
+                app(31, "com.abundanceds.mimir", "Mimir"),
                 app(32, "com.apple.VoiceMemos", "Voice Memos"),
                 app(33, "us.zoom.xos", "zoom.us"),
             ],

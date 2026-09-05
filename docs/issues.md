@@ -34,14 +34,15 @@ task scope.
   Editor and Workbench, and restore focused UI tests. Do not put Today, Scribe,
   Business graph, or Tracker in that manager.
 
-- Scribe is not ready. The signed installed `rs.shoulde.mimir` application has
-  passed first-run TCC registration, known-playback microphone/system signal,
-  dual-channel local live transcription, Stop, and fast historical-library
-  reads on the reference Mac. A real endpoint-bound Keychain credential has
-  completed OpenAI transcription-session creation, but live audio-to-durable
-  transcript and interrupted-recording recovery still require signed
-  end-to-end records. Automated contracts are necessary evidence, not a
-  substitute for those provider/recovery paths.
+- Scribe is not ready. The retired application identity passed first-run TCC
+  registration, known-playback microphone/system signal, dual-channel local
+  live transcription, Stop, and fast historical-library reads on the reference
+  Mac. The current `com.abundanceds.mimir` identity needs the same signed
+  installed-app smoke. A real endpoint-bound Keychain credential completed
+  OpenAI transcription-session creation, but live audio-to-durable transcript
+  and interrupted-recording recovery still require signed end-to-end records.
+  Automated contracts are necessary evidence, not a substitute for those
+  provider/recovery paths.
 
 - Business graph: final desktop screenshot critique (narrow/default/wide,
   railed/expanded, reduced-motion states) is a manual runtime release check —

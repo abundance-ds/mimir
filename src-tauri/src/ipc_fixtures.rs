@@ -821,10 +821,10 @@ fn tracker_block() -> TrackerActivityBlock {
         activity: ActivityCategory::Work,
         subcategory: Some("Development".into()),
         app_name: Some("Mimir".into()),
-        bundle_id: Some("rs.shoulde.mimir".into()),
+        bundle_id: Some("com.abundanceds.mimir".into()),
         domain: None,
         window_title: Some("Tracker runtime — mimir".into()),
-        classification_key: Some("rs.shoulde.mimir".into()),
+        classification_key: Some("com.abundanceds.mimir".into()),
         source: "collector".into(),
         off_reason: None,
     }
@@ -882,7 +882,7 @@ fn tracker_report() -> TrackerReport {
         work_leisure_ratio: Some(12.0),
         longest_work_streak_seconds: 5_400,
         top_apps: vec![DurationBucket {
-            key: "rs.shoulde.mimir".into(),
+            key: "com.abundanceds.mimir".into(),
             label: "Mimir".into(),
             seconds: 7_200,
             activity: Some(ActivityCategory::Work),

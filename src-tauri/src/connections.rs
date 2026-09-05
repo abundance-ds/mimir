@@ -29,7 +29,7 @@ use status::{
     slack_status,
 };
 
-pub(crate) const MIMIR_KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
+pub(crate) const MIMIR_KEYCHAIN_SERVICE: &str = "com.abundanceds.mimir";
 const DEFAULT_ACCOUNT: &str = "default";
 const GOOGLE_ACCOUNTS_KEY: &str = "google:accounts";
 const GOOGLE_SCOPES: &str = "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.freebusy https://www.googleapis.com/auth/drive.readonly";

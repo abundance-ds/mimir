@@ -17,7 +17,7 @@ const forbidden = [
   ['previous repository name', new RegExp(`${escapedPrior}-panel`, 'i')],
   ['previous data directory', new RegExp(`\\.${escapedPrior}(?=$|[/\\\\'"\\s])`, 'i')],
   ['previous environment prefix', new RegExp(`${escapedPrior.toUpperCase()}_`)],
-  ['previous bundle/keychain namespace', new RegExp(`(?:rs\\.shoulde|com)\\.${escapedPrior}(?:\\.|\\b)`, 'i')],
+  ['previous bundle/keychain namespace', new RegExp(`(?:com\\.abundanceds|com)\\.${escapedPrior}(?:\\.|\\b)`, 'i')],
 ]
 const forbiddenObfuscation = [
   ['fragmented previous identity in Rust concat', /concat!\(\s*["']m["']\s*,\s*["']i["']\s*,\s*["']m["']/i],
@@ -49,8 +49,8 @@ if (packageJson.bin?.mimir !== 'bin/mimir.mjs') {
   failures.push('package.json must expose bin/mimir.mjs as the "mimir" CLI')
 }
 if (tauriConfig.productName !== 'Mimir') failures.push('Tauri productName must be "Mimir"')
-if (tauriConfig.identifier !== 'rs.shoulde.mimir') {
-  failures.push('Tauri identifier must be "rs.shoulde.mimir"')
+if (tauriConfig.identifier !== 'com.abundanceds.mimir') {
+  failures.push('Tauri identifier must be "com.abundanceds.mimir"')
 }
 if (!/^\s*name\s*=\s*"mimir"\s*$/m.test(cargoToml)) {
   failures.push('Cargo package/lib name must be "mimir"')

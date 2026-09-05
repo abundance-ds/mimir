@@ -44,10 +44,10 @@
     "activity": "Work",
     "subcategory": "Development",
     "appName": "Mimir",
-    "bundleId": "rs.shoulde.mimir",
+    "bundleId": "com.abundanceds.mimir",
     "domain": null,
     "windowTitle": "Tracker runtime — mimir",
-    "classificationKey": "rs.shoulde.mimir",
+    "classificationKey": "com.abundanceds.mimir",
     "source": "collector",
     "offReason": null
   },

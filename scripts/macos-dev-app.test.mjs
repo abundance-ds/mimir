@@ -90,7 +90,7 @@ test('the development app has the Mimir identity and audio purpose strings', {
       execFileSync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plistPath], {
         encoding: 'utf8',
       }).trim(),
-      'rs.shoulde.mimir',
+      'com.abundanceds.mimir',
     )
     const plist = readFileSync(plistPath, 'utf8')
     assert.match(plist, /NSMicrophoneUsageDescription/u)

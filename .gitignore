@@ -35,7 +35,6 @@ ANCHORING/
 .internal/
 .design-ideas/
 .claude/
-.shoulders.json
 plan-*.md
 !docs/plan-ai-*.md
 TODO.md

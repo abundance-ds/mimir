@@ -10,7 +10,7 @@
 
 use mimir_meeting_detect::PermissionState;
 
-pub const MIMIR_BUNDLE_IDENTIFIER: &str = "rs.shoulde.mimir";
+pub const MIMIR_BUNDLE_IDENTIFIER: &str = "com.abundanceds.mimir";
 #[cfg(target_os = "macos")]
 const DEVELOPMENT_RESPONSIBILITY_GUARD: &str = "MIMIR_TCC_RESPONSIBILITY_DISCLAIMED";
 
@@ -226,7 +226,7 @@ mod tests {
             assert!(identity
                 .require_installed_mimir()
                 .unwrap_err()
-                .contains("Open the installed Mimir application (rs.shoulde.mimir)"));
+                .contains("Open the installed Mimir application (com.abundanceds.mimir)"));
         }
 
         let installed =

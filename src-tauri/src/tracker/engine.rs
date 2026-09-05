@@ -305,7 +305,7 @@ fn classification_for_observation(
     store: &TrackerStore,
     observation: &Observation,
 ) -> Result<(ActivityCategory, Option<String>, &'static str), String> {
-    let is_mimir = observation.bundle_id.as_deref() == Some("rs.shoulde.mimir")
+    let is_mimir = observation.bundle_id.as_deref() == Some("com.abundanceds.mimir")
         || observation.app_name.eq_ignore_ascii_case("Mimir");
     if is_mimir {
         let subcategory = match observation.mimir_context.as_deref() {
@@ -423,7 +423,7 @@ mod tests {
     fn mimir_context_is_classified_without_ai() {
         let (_directory, store, mut engine, config) = harness();
         let mut value = observation(1_000, 0, "Mimir");
-        value.bundle_id = Some("rs.shoulde.mimir".into());
+        value.bundle_id = Some("com.abundanceds.mimir".into());
         value.mimir_context = Some("editor".into());
         engine.observe(&store, &config, value).unwrap();
         let block = store.current_block().unwrap().unwrap();

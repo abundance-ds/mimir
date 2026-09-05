@@ -24,7 +24,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const DEFAULT_SELF_BUNDLE_ID: &str = "rs.shoulde.mimir";
+const DEFAULT_SELF_BUNDLE_ID: &str = "com.abundanceds.mimir";
 const DEFAULT_SELF_APP_NAME: &str = "mimir";
 const MIN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_POLL_INTERVAL: Duration = Duration::from_secs(30);
