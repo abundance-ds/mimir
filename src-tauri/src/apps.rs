@@ -159,7 +159,7 @@ pub fn builtin_apps() -> Vec<InstalledApp> {
         InstalledApp {
             definition: AppDefinition {
                 id: "business-graph".into(),
-                title: "Business graph".into(),
+                title: "Graph".into(),
                 description:
                     "Run work, projects, relationships, and durable knowledge from one graph."
                         .into(),
@@ -1375,10 +1375,13 @@ entry = "index.html"
             today.definition.tools.is_empty(),
             "Today belongs in mimir_state, not a standalone tool"
         );
-        assert!(catalog
+        let graph = catalog
             .apps
             .iter()
-            .any(|app| app.definition.id == "business-graph" && app.builtin));
+            .find(|app| app.definition.id == "business-graph")
+            .unwrap();
+        assert!(graph.builtin);
+        assert_eq!(graph.definition.title, "Graph");
         let scribe = catalog
             .apps
             .iter()
