@@ -5,7 +5,7 @@ import { ghostExtension } from './ghost.js'
 
 const views = []
 
-function createView(doc, getSuggestions) {
+function createView(doc, getSuggestions, extensions = ghostExtension({ getSuggestions })) {
   const parent = document.createElement('div')
   document.body.append(parent)
   const view = new EditorView({
@@ -13,7 +13,7 @@ function createView(doc, getSuggestions) {
     state: EditorState.create({
       doc,
       selection: { anchor: doc.length },
-      extensions: ghostExtension({ getSuggestions }),
+      extensions,
     }),
   })
   views.push(view)
@@ -123,5 +123,33 @@ describe('ghost completion', () => {
       expect(view.dom.querySelector('.ghost-error-line')?.textContent)
         .toContain('Configure an API key.')
     })
+  })
+
+  it('ignores the old request and keeps working after an editor state switch', async () => {
+    let resolveOldRequest
+    const getSuggestions = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveOldRequest = resolve
+      }))
+      .mockResolvedValueOnce(['new file suggestion'])
+    const extensions = ghostExtension({ getSuggestions })
+    const view = createView('', getSuggestions, extensions)
+
+    key(view, '+')
+    view.dispatch({ changes: { from: 0, insert: '+' }, selection: { anchor: 1 } })
+    key(view, '+')
+    expect(view.dom.querySelector('.ghost-loading')).toBeTruthy()
+
+    view.setState(EditorState.create({
+      doc: 'new file\n',
+      selection: { anchor: 9 },
+      extensions,
+    }))
+    resolveOldRequest(['old file suggestion'])
+    await Promise.resolve()
+    expect(view.dom.querySelector('.ghost-text')).toBeNull()
+
+    await triggerGhost(view)
+    expect(view.dom.querySelector('.ghost-text')?.textContent).toBe('new file suggestion')
   })
 })

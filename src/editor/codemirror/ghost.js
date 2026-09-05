@@ -175,14 +175,12 @@ export function ghostExtension(options = {}) {
   let lastPlusAt = 0
   let lastPlusPos = -1
   let requestSerial = 0
-  let disposed = false
   const getSuggestions = options.getSuggestions
   const onStateChange = options.onStateChange
 
   return [
     ViewPlugin.fromClass(class {
       destroy() {
-        disposed = true
         requestSerial++
       }
     }),
@@ -272,7 +270,7 @@ export function ghostExtension(options = {}) {
             const after = view.state.sliceDoc(suggestionPos, Math.min(view.state.doc.length, suggestionPos + 1000))
             Promise.resolve(getSuggestions({ before, after, pos: suggestionPos }))
               .then((result) => {
-                if (disposed || requestId !== requestSerial) return
+                if (requestId !== requestSerial) return
                 const current = view.state.field(ghostField)
                 if (!current.active || current.pos !== suggestionPos) return
                 if (result && typeof result === 'object' && !Array.isArray(result) && result.error) {
@@ -288,7 +286,7 @@ export function ghostExtension(options = {}) {
                 })
               })
               .catch(() => {
-                if (disposed || requestId !== requestSerial) return
+                if (requestId !== requestSerial) return
                 const current = view.state.field(ghostField)
                 if (!current.active || current.pos !== suggestionPos) return
                 view.dispatch({ effects: clearGhost.of(null) })
