@@ -503,10 +503,10 @@ function human(value) {
 
 .board-column {
   display: flex;
-  min-width: 280px;
-  max-width: 460px;
+  min-width: 264px;
+  max-width: 440px;
   height: 100%;
-  flex: 1 1 280px;
+  flex: 1 1 264px;
   flex-direction: column;
   overflow: hidden;
   border-right: 1px solid var(--color-rule);
