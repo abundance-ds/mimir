@@ -79,7 +79,7 @@ for (const resource of [
 
 assertCompleteInventory(sbom, lockfile, bunLock, policy)
 const lockDigest = sha256(`${lockfile}\0${bunLock}\0${policySource}`)
-if (sbom.documentNamespace !== `https://rs.shoulde.mimir/sbom/${lockDigest}`) {
+if (sbom.documentNamespace !== `https://com.abundanceds.mimir/sbom/${lockDigest}`) {
   throw new Error('SPDX SBOM is stale for the current lockfiles or license policy')
 }
 if (!sbom.annotations?.some(annotation => (

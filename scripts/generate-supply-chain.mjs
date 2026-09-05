@@ -47,7 +47,7 @@ const document = {
   dataLicense: 'CC0-1.0',
   SPDXID: 'SPDXRef-DOCUMENT',
   name: 'Mimir complete locked dependency inventory',
-  documentNamespace: `https://rs.shoulde.mimir/sbom/${lockDigest}`,
+  documentNamespace: `https://com.abundanceds.mimir/sbom/${lockDigest}`,
   creationInfo: {
     created,
     creators: ['Tool: scripts/generate-supply-chain.mjs'],

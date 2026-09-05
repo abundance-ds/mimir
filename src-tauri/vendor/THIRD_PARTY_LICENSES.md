@@ -5,7 +5,7 @@ Generated from `src-tauri/Cargo.lock`, `bun.lock`, and the reviewed
 Regenerate it together with `SBOM.spdx.json` using
 `bun run supply-chain:generate`.
 
-Inventory: 696 Cargo packages, 319 npm packages, and 4 reviewed embedded/downloadable assets.
+Inventory: 700 Cargo packages, 320 npm packages, and 4 reviewed embedded/downloadable assets.
 
 A license expression is accepted only when the policy contains a permitted
 choice. Unknown identifiers and expressions with no permitted choice fail the
@@ -248,6 +248,8 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:ioctl-rs@0.1.6 | MIT | https://crates.io/api/v1/crates/ioctl-rs/0.1.6/download | f7970510895cee30b3e9128319f2cefd4bde883a39f38baa279567ba3a7eb97d |
 | cargo:ipnet@2.12.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/ipnet/2.12.0/download | d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2 |
 | cargo:irc-proto@1.1.0 | MPL-2.0 | https://crates.io/api/v1/crates/irc-proto/1.1.0/download | 259640031f2f3e6d9fa632c7b314ba1eb5d1f88b3583bd2dd2e8f17155a19b5b |
+| cargo:is-docker@0.2.0 | MIT | https://crates.io/api/v1/crates/is-docker/0.2.0/download | 928bae27f42bc99b60d9ac7334e3a21d10ad8f1835a4e12ec3ec0464765ed1b3 |
+| cargo:is-wsl@0.4.0 | MIT | https://crates.io/api/v1/crates/is-wsl/0.4.0/download | 173609498df190136aa7dea1a91db051746d339e18476eed5ca40521f02d7aa5 |
 | cargo:itertools@0.13.0 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/itertools/0.13.0/download | 413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186 |
 | cargo:itoa@1.0.18 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/itoa/1.0.18/download | 8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682 |
 | cargo:javascriptcore-rs-sys@1.1.1 | MIT | https://crates.io/api/v1/crates/javascriptcore-rs-sys/1.1.1/download | af1be78d14ffa4b75b66df31840478fef72b51f8c2465d4ca7c194da9f7a5124 |
@@ -340,6 +342,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:objc2@0.6.4 | MIT | https://crates.io/api/v1/crates/objc2/0.6.4/download | 3a12a8ed07aefc768292f076dc3ac8c48f3781c8f2d5851dd3d98950e8c5a89f |
 | cargo:oid-registry@0.8.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/oid-registry/0.8.1/download | 12f40cff3dde1b6087cc5d5f5d4d65712f34016a03ed60e9c08dcc392736b5b7 |
 | cargo:once_cell@1.21.4 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/once_cell/1.21.4/download | 9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50 |
+| cargo:open@5.4.2 | MIT | https://crates.io/api/v1/crates/open/5.4.2/download | ade3be4664bc1ef537ce133015f04c176b737815c2ba9fd60edf212d6e90dd55 |
 | cargo:openssl-probe@0.1.6 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/openssl-probe/0.1.6/download | d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e |
 | cargo:openssl-probe@0.2.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/openssl-probe/0.2.1/download | 7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe |
 | cargo:openssl-src@300.6.0+3.6.2 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/openssl-src/300.6.0%2B3.6.2/download | a8e8cbfd3a4a8c8f089147fd7aaa33cf8c7450c4d09f8f80698a0cf093abeff4 |
@@ -504,6 +507,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:tauri-plugin-dialog@2.7.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-dialog/2.7.1/download | 65981abb771e74e571a38196c3baa11c459379164791eba0e67abc1a5fac9884 |
 | cargo:tauri-plugin-fs@2.5.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-fs/2.5.1/download | b7ecc274121aca0c036a2b42d1cbe83d368d348f54e0bb8a735c2b1548e8f371 |
 | cargo:tauri-plugin-notification@2.3.3 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-notification/2.3.3/download | 01fc2c5ff41105bd1f7242d8201fdf3efd70749b82fa013a17f2126357d194cc |
+| cargo:tauri-plugin-opener@2.5.4 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.4/download | 17e1bea14edce6b793a04e2417e3fd924b9bc4faae83cdee7d714156cceeed29 |
 | cargo:tauri-plugin-process@2.3.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-process/2.3.1/download | d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a |
 | cargo:tauri-plugin-single-instance@2.4.2 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-single-instance/2.4.2/download | 5c8f29386f5e9fdc699182388a33ee80a56de436d91b67459e86afef426282af |
 | cargo:tauri-plugin-updater@2.10.1 | Apache-2.0 OR MIT | https://crates.io/api/v1/crates/tauri-plugin-updater/2.10.1/download | 806d9dac662c2e4594ff03c647a552f2c9bd544e7d0f683ec58f872f952ce4af |
@@ -865,6 +869,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | npm:@tauri-apps/cli@2.11.1 | Apache-2.0 OR MIT | https://registry.npmjs.org/@tauri-apps/cli/-/cli-2.11.1.tgz | ae911b689fc7ccd6fa7f0b2abb0a006eadbdfd5b788000e14b8db703c7dd9302f879d274c199a807c6abecee893c32fcdf831428e0a6febac9edcf6801a11a61 |
 | npm:@tauri-apps/plugin-dialog@2.7.1 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-dialog/-/plugin-dialog-2.7.1.tgz | 38ad5405762dfa88dc9b1324b73ceeca89d8205b5af02980012a57f8203e0d318adb82a51e385823ac7688e27f4e3645e0deff0022b5a059843a3218f4887339 |
 | npm:@tauri-apps/plugin-notification@2.3.3 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.3.3.tgz | 670f991f5f1125be351b836b7c7808ba87c98b29aeb2a37eabc7c6508215eefc821fee6c4a7e5ca2a46ffcc581f6a113b14b3deef994d38e6aececac78257742 |
+| npm:@tauri-apps/plugin-opener@2.5.4 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-opener/-/plugin-opener-2.5.4.tgz | d479cf91bf809a03b6f4705ace6e2e3cb281fabef3cdc4c15b57747f2629d6e3fe8f0b69a2234318a30ccf3e7c485a78f67388af1744dda509b53e7b95f3bd09 |
 | npm:@tauri-apps/plugin-process@2.3.1 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-process/-/plugin-process-2.3.1.tgz | 9c26b87c655a0cbfc1f5a8b4dd5c8f3a37c01d11d2073e6fe85fce6ec07bdebfdd0373071e166d95d68330873457fa67530f5e873af68841be5e4484c82d0924 |
 | npm:@tauri-apps/plugin-updater@2.10.1 | MIT OR Apache-2.0 | https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.10.1.tgz | 34560c83eb563993c977313f3e9163daa7eac005b0352de45eb6f5b66d609c127d998cd9e160d1af0cbcb9dcd6a009df1821cbb9e3cd2d8d565423479e1dde44 |
 | npm:@types/chai@5.2.3 | MIT | https://registry.npmjs.org/@types/chai/-/chai-5.2.3.tgz | 330e79f28780f5f15bbfae7fcb8987b570ecf5b3e714c6402ff8f174f154a4e1c72175fdd667201076d2e4b6a1afea7064547c03b19095e456788e9c1850b650 |
