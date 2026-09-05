@@ -42,7 +42,7 @@ async function main() {
 
   const release = JSON.parse(execFileSync('gh', [
     'release', 'view', tag,
-    '--repo', 'shoulders-ai/mimir',
+    '--repo', 'abundance-ds/mimir',
     '--json', 'assets,isDraft,tagName,url',
   ], { encoding: 'utf8' }))
   if (release.isDraft) throw new Error(`${tag} is still a draft`)
@@ -52,14 +52,14 @@ async function main() {
     throw new Error(`release assets do not match the ${tag} contract: ${[...names].join(', ')}`)
   }
 
-  const feedUrl = 'https://github.com/shoulders-ai/mimir/releases/latest/download/latest.json'
+  const feedUrl = 'https://github.com/abundance-ds/mimir/releases/latest/download/latest.json'
   const feedResponse = await fetch(feedUrl, { redirect: 'follow' })
   if (!feedResponse.ok) throw new Error(`public updater feed returned HTTP ${feedResponse.status}`)
   const feed = await feedResponse.json()
   if (feed.version !== version) {
     throw new Error(`public updater feed has ${feed.version}; expected ${version}`)
   }
-  const updaterUrl = `https://github.com/shoulders-ai/mimir/releases/download/${tag}/Mimir_${version}_aarch64.app.tar.gz`
+  const updaterUrl = `https://github.com/abundance-ds/mimir/releases/download/${tag}/Mimir_${version}_aarch64.app.tar.gz`
   const platform = feed.platforms?.['darwin-aarch64']
   if (!platform?.signature || platform.url !== updaterUrl) {
     throw new Error('public updater feed does not identify the signed macOS arm64 archive')

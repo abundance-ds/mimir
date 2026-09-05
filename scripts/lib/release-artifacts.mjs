@@ -290,7 +290,7 @@ export function buildUpdaterFeed({
   productName,
   version,
   signature,
-  repository = 'shoulders-ai/mimir',
+  repository = 'abundance-ds/mimir',
 }) {
   if (!signature) throw new Error('updater signature is empty')
   return {

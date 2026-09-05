@@ -23,13 +23,13 @@ if (git(['rev-parse', 'HEAD']) !== git(['rev-parse', 'origin/main'])) {
 }
 
 const repository = JSON.parse(run('gh', [
-  'repo', 'view', 'shoulders-ai/mimir', '--json', 'visibility',
+  'repo', 'view', 'abundance-ds/mimir', '--json', 'visibility',
 ]))
 if (repository.visibility !== 'PUBLIC') {
-  throw new Error('shoulders-ai/mimir must be public so installed apps can read the update feed')
+  throw new Error('abundance-ds/mimir must be public so installed apps can read the update feed')
 }
 const releaseSecrets = new Set(JSON.parse(run('gh', [
-  'secret', 'list', '--repo', 'shoulders-ai/mimir', '--json', 'name',
+  'secret', 'list', '--repo', 'abundance-ds/mimir', '--json', 'name',
 ])).map(secret => secret.name))
 for (const secret of [
   'APPLE_CERTIFICATE',
@@ -64,7 +64,7 @@ if (compareVersions(nextVersion, packageJson.version) <= 0) {
 const tag = `v${nextVersion}`
 if (git(['tag', '--list', tag])) throw new Error(`Git tag ${tag} already exists`)
 try {
-  run('gh', ['release', 'view', tag, '--repo', 'shoulders-ai/mimir'])
+  run('gh', ['release', 'view', tag, '--repo', 'abundance-ds/mimir'])
   throw new Error(`GitHub Release ${tag} already exists`)
 } catch (error) {
   if (!String(error.message).includes('release not found')) throw error

@@ -188,6 +188,6 @@ test('static updater feed binds the release version, signature, and public asset
   assert.equal(feed.platforms['darwin-aarch64'].signature, 'signature')
   assert.equal(
     feed.platforms['darwin-aarch64'].url,
-    'https://github.com/shoulders-ai/mimir/releases/download/v0.2.0/Mimir_0.2.0_aarch64.app.tar.gz',
+    'https://github.com/abundance-ds/mimir/releases/download/v0.2.0/Mimir_0.2.0_aarch64.app.tar.gz',
   )
 })
