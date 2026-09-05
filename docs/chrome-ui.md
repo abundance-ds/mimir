@@ -82,7 +82,7 @@ Heights include the rule. Layer is the background token.
 |---|---|---|---|
 | Editor toolbar | `editor/components/workspace/EditorToolbar.vue` | Format buttons 22 px, 12 px inset | 30 px, `chrome-mid`, `rule-light` |
 | Files view tabs | `FilesActivity.vue` | Project, Changes, Recent, Favorites with 2 px accent underline; three 28 px icon buttons | 40 px |
-| Graph top bar | `business-graph/GraphAppHeader.vue` | Direct section tabs 26 px at every width, with Work, All, and Changes first; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
+| Graph top bar | `business-graph/GraphAppHeader.vue` | Direct Work and Graph tabs 26 px at every width; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
 | Tracker range | `TrackerApp.vue` | Range tabs, previous, range label, next | 36 px wrapping strip under a 40 px identity header |
 | Scribe transport | `ScribeApp.vue` | Recording dot, timer, status, save state, Mute, Stop 28 px | 42 px `chrome` |
 | Scribe detail bar | `ScribeApp.vue` | Back, save state, Continue, menu | 40 px |
@@ -192,7 +192,7 @@ counted as a row.
 The 2026-09-04 repair made these changes:
 
 1. The full top band uses `chrome` with a `rule` below it.
-2. Graph row 2 keeps section navigation, search, scope, refresh, and New.
+2. Graph row 2 keeps Work and Graph navigation, search, scope, refresh, and New.
    Row 3 keeps the views and one Filters button. The popover owns project,
    owner, group, sort, priority, and column controls. Active filters appear
    as named, clearable chips. The row does not scroll sideways.
@@ -204,7 +204,7 @@ The 2026-09-04 repair made these changes:
    and status footer keep their 28 px document margin.
 8. Sidebar, Activity, and Editor use the same `pane-header` class. Editor file
    tabs fill that band, align to its bottom edge, and use a raised active plate.
-9. Graph section navigation stays direct at every width. Work, All, and Changes
-   are first; less-used projections remain available after them.
+9. Work and Graph navigation stays direct at every width. List, Timeline,
+   Meetings, and Changes remain views within Graph.
 10. The Sidebar has no redundant Tools heading in either expanded or rail
     state. The first tool row follows the normal 4 px navigation inset.

@@ -2,7 +2,7 @@
   <header data-graph-topbar class="graph-topbar pane-bar">
     <nav class="graph-sections" aria-label="Business graph sections">
       <button
-        v-for="item in orderedSections"
+        v-for="item in sections"
         :key="item.id"
         type="button"
         :data-graph-section="item.id"
@@ -175,16 +175,6 @@ defineEmits([
   'create',
 ])
 
-const sectionPriority = Object.freeze(['work', 'all', 'now'])
-const orderedSections = computed(() => [...props.sections].sort((left, right) => {
-  const leftIndex = sectionPriority.indexOf(left.id)
-  const rightIndex = sectionPriority.indexOf(right.id)
-  if (leftIndex === -1 && rightIndex === -1) return 0
-  if (leftIndex === -1) return 1
-  if (rightIndex === -1) return -1
-  return leftIndex - rightIndex
-}))
-
 const searchInput = ref(null)
 const scopeRoot = ref(null)
 const scopeTrigger = ref(null)
@@ -301,7 +291,7 @@ defineExpose({ closeMenus, focusSearch })
 .graph-icon-button { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 5px; color: var(--color-ink-3); }
 .graph-icon-button:hover { background: var(--graph-hover); color: var(--color-ink); }
 .graph-icon-button:disabled { cursor: default; opacity: 0.42; }
-.graph-primary-button { display: inline-flex; min-height: 28px; align-items: center; justify-content: center; gap: 6px; border-radius: 5px; background: var(--color-accent); padding: 0 11px; color: var(--color-accent-ink, white); font-size: 11px; font-weight: 650; }
+.graph-primary-button { display: inline-flex; min-height: 28px; align-items: center; justify-content: center; gap: 5px; border-radius: 5px; background: var(--color-accent); padding: 0 9px; color: var(--color-accent-ink, white); font-size: 11px; font-weight: 650; }
 .graph-primary-button:hover { background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink)); }
 .graph-scope-trigger { height: 28px; gap: 7px; border-radius: 5px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
 .graph-scope-trigger:hover { background: var(--graph-hover); color: var(--color-ink); }

@@ -20,19 +20,7 @@ import { cachedWorkspaceConfig } from '../services/workspaceConfig.js'
 
 export const BUSINESS_SECTIONS = Object.freeze([
   { id: 'work', label: 'Work', kinds: ['issue'] },
-  { id: 'projects', label: 'Projects', kinds: ['project'] },
-  {
-    id: 'knowledge',
-    label: 'Knowledge',
-    kinds: [
-      'note', 'resource', 'meeting', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
-      'model', 'endpoint', 'publication', 'submission', 'research-question',
-      'method', 'client-request',
-    ],
-  },
-  { id: 'journal', label: 'Journal', kinds: ['journal'] },
-  { id: 'all', label: 'All', kinds: [] },
-  { id: 'now', label: 'Changes', kinds: [] },
+  { id: 'all', label: 'Graph', kinds: [] },
 ])
 
 const EVENT_PAGE_SIZE = 50
@@ -55,12 +43,8 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const section = ref('work')
   const view = ref('board')
   const sectionViews = ref({
-    now: 'stream',
-    work: 'board',
-    projects: 'portfolio',
-    knowledge: 'list',
-    journal: 'list',
     all: 'list',
+    work: 'board',
   })
   const searchQuery = ref('')
   const searchResults = ref([])

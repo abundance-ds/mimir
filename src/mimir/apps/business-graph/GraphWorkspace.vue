@@ -80,7 +80,7 @@
           @create="$emit('openCreate')"
         />
         <NowView
-          v-else-if="graph.section === 'now'"
+          v-else-if="graph.section === 'all' && graph.view === 'changes'"
           :events="graph.events"
           :waiting="waitingOnYouIssues"
           :nodes="graph.nodes"
@@ -96,7 +96,7 @@
           @summarise="$emit('openSummary')"
         />
         <MeetingInbox
-          v-else-if="graph.section === 'knowledge' && graph.view === 'meetings'"
+          v-else-if="graph.section === 'all' && graph.view === 'meetings'"
           :meetings="pendingMeetings"
           :projects="graph.projects"
           :people="graph.people"
@@ -129,15 +129,6 @@
           @reorder="$emit('reorderIssue', $event)"
           @create="$emit('createFromBoard', $event)"
           @expand-column="$emit('expandBoardStatus', $event)"
-        />
-        <PortfolioView
-          v-else-if="graph.section === 'projects' && graph.view === 'portfolio'"
-          :projects="projectionNodes"
-          :issues="graph.issues"
-          :nodes="graph.nodes"
-          :scopes="graph.scopes"
-          @open="$emit('openNode', $event)"
-          @create="$emit('openCreate', 'project')"
         />
         <TimelineView
           v-else-if="graph.view === 'timeline'"
@@ -202,7 +193,6 @@ import GraphInspector from './GraphInspector.vue'
 import GraphViewbar from './GraphViewbar.vue'
 import MeetingInbox from './MeetingInbox.vue'
 import NowView from './NowView.vue'
-import PortfolioView from './PortfolioView.vue'
 import TimelineView from './TimelineView.vue'
 import WorkBoard from './WorkBoard.vue'
 

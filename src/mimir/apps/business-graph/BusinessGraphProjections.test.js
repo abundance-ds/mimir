@@ -2,7 +2,6 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import EntityList from './EntityList.vue'
 import NowView from './NowView.vue'
-import PortfolioView from './PortfolioView.vue'
 
 describe('business graph projections', () => {
   it('exposes list selection through the listbox accessibility contract', async () => {
@@ -107,46 +106,6 @@ describe('business graph projections', () => {
 
     await wrapper.setProps({ hideProject: true })
     expect(wrapper.find('.work-project').exists()).toBe(false)
-    await wrapper.setProps({ groupBy: 'attention' })
-    expect(wrapper.findAll('[data-graph-group]').map(group => group.attributes('data-graph-group')))
-      .toEqual(['overdue', 'waiting'])
-    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
-      .toEqual(['c', 'a'])
-  })
-
-  it('summarizes evidence and decisions on the project dashboard', () => {
-    const project = {
-      id: 'project-atlas',
-      kind: 'project',
-      title: 'Atlas',
-      relations: [],
-      scopeId: 'project:test',
-    }
-    const wrapper = mount(PortfolioView, {
-      props: {
-        projects: [project],
-        issues: [],
-        scopes: [{ id: 'project:test', kind: 'project' }],
-        nodes: [
-          project,
-          {
-            id: 'study-1',
-            kind: 'study',
-            title: 'Pivotal study',
-            relations: [{ relation: 'related_to', target: 'project-atlas' }],
-          },
-          {
-            id: 'decision-1',
-            kind: 'decision',
-            title: 'Use matched cohort',
-            relations: [{ relation: 'part_of', target: 'project-atlas' }],
-          },
-        ],
-      },
-    })
-
-    expect(wrapper.get('[data-project-card="project-atlas"]').text()).toContain('1 evidence')
-    expect(wrapper.get('[data-project-card="project-atlas"]').text()).toContain('1 decision')
   })
 
   it('expands change snippets in place and pages through history', async () => {

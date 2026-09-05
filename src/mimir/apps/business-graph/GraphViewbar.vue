@@ -1,5 +1,5 @@
 <template>
-  <div v-if="section !== 'now'" data-graph-viewbar class="graph-viewbar pane-subbar">
+  <div data-graph-viewbar class="graph-viewbar pane-subbar">
     <nav class="graph-views" :aria-label="`${sectionLabel} views`">
       <button
         v-for="option in viewOptions"
@@ -33,7 +33,11 @@
       </button>
     </div>
 
-    <div v-if="section === 'work' || section === 'all'" ref="filtersRoot" class="graph-filters-root">
+    <div
+      v-if="section === 'work' || (section === 'all' && ['list', 'timeline'].includes(view))"
+      ref="filtersRoot"
+      class="graph-filters-root"
+    >
       <button
         ref="filtersTrigger"
         type="button"
@@ -125,7 +129,7 @@
             </div>
           </div>
 
-          <div v-if="view !== 'attention'" class="graph-filter-row">
+          <div class="graph-filter-row">
             <span>Group</span>
             <GraphSelect
               :model-value="groupBy"
@@ -346,7 +350,7 @@ const ownerViewAccessibleLabel = computed(() => {
 })
 const activeFilters = computed(() => {
   if (props.section === 'all') {
-    return props.kindFilter
+    return ['list', 'timeline'].includes(props.view) && props.kindFilter
       ? [{ id: 'kind', label: `Kind: ${optionLabel(props.kindOptions, props.kindFilter)}` }]
       : []
   }

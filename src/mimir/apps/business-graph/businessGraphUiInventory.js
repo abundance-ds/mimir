@@ -16,7 +16,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
   emptyStates: [
     'board-empty-create',
     'list-empty-create',
-    'portfolio-empty-create',
     'timeline-empty-create',
   ],
   create: [
@@ -135,7 +134,6 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
   'card-status-',
   'card-due-',
   'list-open-',
-  'portfolio-open-',
   'timeline-open-',
   'relationship-',
   'peek-activity-',
@@ -177,7 +175,6 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphWorkspace.vue',
   'MeetingInbox.vue',
   'NowView.vue',
-  'PortfolioView.vue',
   'ProjectStanding.vue',
   'TimelineView.vue',
   'WorkBoard.vue',

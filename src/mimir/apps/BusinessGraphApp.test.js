@@ -219,11 +219,7 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-board-card="issue-1"]').text()).toContain('Extract evidence')
     expect(wrapper.findAll('[data-graph-section]').map(tab => tab.text())).toEqual([
       'Work',
-      'All',
-      'Changes',
-      'Projects',
-      'Knowledge',
-      'Journal',
+      'Graph',
     ])
     expect(wrapper.find('[data-graph-section-picker]').exists()).toBe(false)
 
@@ -252,6 +248,48 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-inspector-history-forward]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
+    wrapper.unmount()
+  })
+
+  it('keeps List, Timeline, Meetings, and Changes inside Graph', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    expect(wrapper.findAll('[data-graph-view]').map(tab => tab.text())).toEqual([
+      'List',
+      'Timeline',
+      'Meetings',
+      'Changes',
+    ])
+
+    await wrapper.get('[data-graph-view="changes"]').trigger('click')
+    expect(wrapper.get('[data-graph-now]').exists()).toBe(true)
+    expect(wrapper.find('[data-graph-filters-trigger]').exists()).toBe(false)
+
+    await wrapper.get('[data-graph-section="work"]').trigger('click')
+    expect(wrapper.findAll('[data-graph-view]').map(tab => tab.text())).toEqual(['Board', 'List'])
+    wrapper.unmount()
+  })
+
+  it('migrates a saved Project projection to the Graph kind filter', async () => {
+    const settings = useSettingsStore()
+    await settings.load()
+    settings.set('businessGraphViewState', {
+      section: 'projects',
+      sectionViews: { projects: 'portfolio' },
+      work: {},
+    })
+
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.get('[data-graph-section="all"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-graph-view="list"]').attributes('aria-pressed')).toBe('true')
+    await wrapper.get('[data-graph-filters-trigger]').trigger('click')
+    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Projects')
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
+      .toEqual(['project-alpha'])
     wrapper.unmount()
   })
 
@@ -396,12 +434,13 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('groups the Work list by the board grouping and Attention by reason', async () => {
+  it('groups the Work list by the board grouping', async () => {
     summaries[0].dueDate = '2020-01-01'
     summaries[2].waitingFor = 'Anna'
     const wrapper = render()
     await flushPromises()
 
+    expect(wrapper.find('[data-graph-view="attention"]').exists()).toBe(false)
     await wrapper.get('[data-graph-view="list"]').trigger('click')
     const groups = () => wrapper.findAll('[data-graph-group]').map(group => group.attributes('data-graph-group'))
     expect(groups()).toEqual(['plan', 'review'])
@@ -417,15 +456,10 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(groups()).toEqual(['project-alpha', '__unassigned__'])
 
-    await wrapper.get('[data-graph-view="attention"]').trigger('click')
-    expect(wrapper.find('[data-board-group]').exists()).toBe(false)
-    expect(groups()).toEqual(['overdue', 'waiting'])
-    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
-      .toEqual(['issue-1', 'issue-legacy'])
     wrapper.unmount()
   })
 
-  it('keeps the Project view across Work views and section navigation', async () => {
+  it('keeps the Project filter across Work views and primary navigation', async () => {
     const wrapper = render()
     await flushPromises()
 
@@ -435,7 +469,7 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
       .toEqual(['issue-1'])
 
-    await wrapper.get('[data-graph-section="projects"]').trigger('click')
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
     await wrapper.get('[data-graph-section="work"]').trigger('click')
 
     expect(wrapper.get('[data-board-project-filter]').text()).toContain('Project Alpha')
@@ -470,7 +504,7 @@ describe('BusinessGraphApp', () => {
     const refreshMeetings = vi.spyOn(meetings, 'refresh').mockResolvedValue(true)
     const refreshGraph = vi.spyOn(graph, 'refresh').mockResolvedValue(true)
 
-    await wrapper.get('[data-graph-section="knowledge"]').trigger('click')
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
     await wrapper.get('[data-graph-view="meetings"]').trigger('click')
     await wrapper.get('[data-meeting-inbox-row="meeting-ready"]').trigger('click')
     await wrapper.get('[data-meeting-file]').trigger('click')
@@ -915,6 +949,7 @@ describe('BusinessGraphApp', () => {
 
     expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Projects')
     expect(kindReset.attributes('disabled')).toBeUndefined()
+    expect(useSettingsStore().businessGraphViewState.graph.kind).toBe('project')
     expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node'))).toEqual([
       'project-alpha',
     ])
@@ -924,6 +959,7 @@ describe('BusinessGraphApp', () => {
     await kindReset.trigger('click')
     expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
     expect(kindReset.attributes('disabled')).toBeDefined()
+    expect(useSettingsStore().businessGraphViewState.graph.kind).toBe('')
     expect(wrapper.findAll('[data-graph-node]')).toHaveLength(2)
 
     await wrapper.get('[data-graph-control="clear-search"]').trigger('click')
@@ -1384,11 +1420,11 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('moves from project dashboard context to a correctly related decision', async () => {
+  it('moves from project context to a correctly related decision', async () => {
     const wrapper = render()
     await flushPromises()
-    await wrapper.get('[data-graph-section="projects"]').trigger('click')
-    await wrapper.get('[data-project-card="project-alpha"]').trigger('click')
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    await wrapper.get('[data-graph-node="project-alpha"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-inspector-focus]').trigger('click')
     await wrapper.get('[data-graph-control="focus-more"]').trigger('click')

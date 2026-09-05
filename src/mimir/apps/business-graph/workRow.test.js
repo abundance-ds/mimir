@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   assigneeDisplay,
-  attentionGroup,
   dueInfo,
   groupWorkRows,
   initials,
@@ -47,16 +46,7 @@ describe('work row grammar', () => {
     expect(waitingReason({ waitingFor: 'Owner' })).toBe('you')
   })
 
-  it('assigns one Attention group per open issue in priority order', () => {
-    expect(attentionGroup({ status: 'done', dueDate: '2026-09-01' }, now)).toBe('')
-    expect(attentionGroup({ status: 'waiting', dueDate: '2026-09-01' }, now)).toBe('overdue')
-    expect(attentionGroup({ status: 'plan', waitingFor: 'Anna', priority: 'urgent' }, now)).toBe('waiting')
-    expect(attentionGroup({ status: 'plan', priority: 'urgent', dueDate: '2026-09-05' }, now)).toBe('urgent')
-    expect(attentionGroup({ status: 'plan', dueDate: '2026-09-09' }, now)).toBe('due-soon')
-    expect(attentionGroup({ status: 'plan', dueDate: '2026-10-09' }, now)).toBe('')
-  })
-
-  it('groups rows by status, project, or attention and drops empty groups', () => {
+  it('groups rows by status or project and drops empty groups', () => {
     const projects = [{ id: 'project-atlas', title: 'Atlas' }]
     const issues = [
       { id: 'a', status: 'plan', projectId: 'project-atlas', dueDate: '2026-09-01' },
@@ -67,7 +57,5 @@ describe('work row grammar', () => {
       .toEqual([['Backlog', ['c']], ['Plan', ['a']], ['In progress', ['b']]])
     expect(groupWorkRows(issues, { groupBy: 'project', projects }).map(group => [group.label, group.items.map(item => item.id)]))
       .toEqual([['Atlas', ['a']], ['No project', ['b', 'c']]])
-    expect(groupWorkRows(issues, { groupBy: 'attention', now }).map(group => [group.label, group.items.map(item => item.id)]))
-      .toEqual([['Overdue', ['a']], ['Urgent', ['c']]])
   })
 })

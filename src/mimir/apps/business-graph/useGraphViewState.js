@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { BUSINESS_SECTIONS } from '../../../stores/businessGraph.js'
 import { waitingOnHuman } from './predicates.js'
-import { UNASSIGNED, WORK_STATUSES, initials, needsAttention } from './workRow.js'
+import { UNASSIGNED, WORK_STATUSES, initials } from './workRow.js'
 
 export const BOARD_STATUSES = WORK_STATUSES
 
@@ -32,34 +32,21 @@ export const ALL_KIND_OPTIONS = Object.freeze([
   { value: 'project', label: 'Projects' },
   { value: 'person', label: 'People' },
   { value: 'company', label: 'Companies' },
-  { value: 'decision', label: 'Decisions' },
+  { value: 'meeting', label: 'Meetings' },
+  { value: 'journal', label: 'Journal' },
   { value: 'knowledge', label: 'Knowledge' },
 ])
 
 const VIEWS_BY_SECTION = Object.freeze({
-  now: [{ id: 'stream', label: 'Stream' }],
-  work: [
-    { id: 'board', label: 'Board' },
-    { id: 'list', label: 'List' },
-    { id: 'attention', label: 'Attention' },
-  ],
-  projects: [
-    { id: 'portfolio', label: 'Portfolio' },
-    { id: 'list', label: 'List' },
-    { id: 'timeline', label: 'Timeline' },
-  ],
-  knowledge: [
-    { id: 'meetings', label: 'Meetings' },
-    { id: 'list', label: 'List' },
-    { id: 'timeline', label: 'Timeline' },
-  ],
-  journal: [
-    { id: 'list', label: 'List' },
-    { id: 'timeline', label: 'Timeline' },
-  ],
   all: [
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
+    { id: 'meetings', label: 'Meetings' },
+    { id: 'changes', label: 'Changes' },
+  ],
+  work: [
+    { id: 'board', label: 'Board' },
+    { id: 'list', label: 'List' },
   ],
 })
 
@@ -85,10 +72,8 @@ export function useGraphViewState({ graph, settings }) {
   const projectScoped = computed(() => (
     Boolean(projectFilter.value) && projectFilter.value !== UNASSIGNED
   ))
-  /** Attention groups by reason; Board and List share the group control. */
-  const listGroupBy = computed(() => (
-    graph.view === 'attention' ? 'attention' : boardGroup.value
-  ))
+  /** Board and List share the group control. */
+  const listGroupBy = computed(() => boardGroup.value)
   const projectionNodes = computed(() => filterProjection(graph, {
     project: projectFilter.value,
     priority: priorityFilter.value,
@@ -103,8 +88,6 @@ export function useGraphViewState({ graph, settings }) {
     if (graph.searchQuery) return 'No matching graph items'
     return {
       work: 'No work in these scopes',
-      projects: 'No projects yet',
-      knowledge: 'No knowledge yet',
       all: 'The graph is empty',
     }[graph.section] || 'Nothing here yet'
   })
@@ -126,6 +109,7 @@ export function useGraphViewState({ graph, settings }) {
         assigneeFilter,
         boardGroup,
         boardSort,
+        allKindFilter,
         collapsedBoardStatuses,
       })
       hydrated = true
@@ -140,6 +124,7 @@ export function useGraphViewState({ graph, settings }) {
       projectFilter,
       boardGroup,
       boardSort,
+      allKindFilter,
       priorityFilter,
       assigneeFilter,
       collapsedBoardStatuses,
@@ -149,6 +134,7 @@ export function useGraphViewState({ graph, settings }) {
       settings.set('businessGraphViewState', {
         section: graph.section,
         sectionViews: { ...graph.sectionViews },
+        graph: { kind: allKindFilter.value },
         work: {
           project: projectFilter.value,
           groupBy: boardGroup.value,
@@ -219,25 +205,41 @@ function hydrateViewState({
   assigneeFilter,
   boardGroup,
   boardSort,
+  allKindFilter,
   collapsedBoardStatuses,
 }) {
   const saved = settings.businessGraphViewState || {}
   const savedViews = saved.sectionViews && typeof saved.sectionViews === 'object'
     ? saved.sectionViews
     : {}
-  graph.sectionViews = {
-    ...graph.sectionViews,
-    ...Object.fromEntries(
-      Object.entries(savedViews).filter(([section, view]) => (
-        VIEWS_BY_SECTION[section]?.some(option => option.id === view)
-      )),
-    ),
+  const legacySection = ['projects', 'knowledge', 'journal', 'now'].includes(saved.section)
+    ? saved.section
+    : ''
+  const validViews = Object.fromEntries(
+    Object.entries(savedViews).filter(([section, view]) => (
+      VIEWS_BY_SECTION[section]?.some(option => option.id === view)
+    )),
+  )
+  graph.sectionViews = { ...graph.sectionViews, ...validViews }
+  if (legacySection) {
+    const legacyView = savedViews[legacySection]
+    graph.sectionViews.all = legacySection === 'now'
+      ? 'changes'
+      : (VIEWS_BY_SECTION.all.some(option => option.id === legacyView) ? legacyView : 'list')
   }
   const savedSection = BUSINESS_SECTIONS.some(item => item.id === saved.section)
     ? saved.section
-    : 'work'
+    : (legacySection ? 'all' : 'work')
   graph.section = savedSection
   graph.view = graph.sectionViews[savedSection]
+
+  const savedGraph = saved.graph || {}
+  if (ALL_KIND_OPTIONS.some(option => option.value === savedGraph.kind)) {
+    allKindFilter.value = savedGraph.kind
+  }
+  else if (legacySection === 'projects') allKindFilter.value = 'project'
+  else if (legacySection === 'knowledge') allKindFilter.value = 'knowledge'
+  else if (legacySection === 'journal') allKindFilter.value = 'journal'
 
   const work = saved.work || {}
   if (['status', 'project'].includes(work.groupBy)) boardGroup.value = work.groupBy
@@ -296,7 +298,6 @@ function filterProjection(graph, filters) {
     if (filters.priority) items = items.filter(item => item.priority === filters.priority)
     if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)
     else if (filters.assignee) items = items.filter(item => item.assigneeId === filters.assignee)
-    if (graph.view === 'attention') items = items.filter(issue => needsAttention(issue))
   }
   if (graph.section === 'all' && filters.kind) {
     items = items.filter(item => matchesAllKind(item, filters.kind))
@@ -306,8 +307,11 @@ function filterProjection(graph, filters) {
 
 function matchesAllKind(item, filter) {
   if (filter === 'knowledge') {
-    const definition = BUSINESS_SECTIONS.find(section => section.id === 'knowledge')
-    return definition?.kinds?.includes(item.kind)
+    return [
+      'note', 'resource', 'decision', 'record', 'study', 'evidence', 'dataset', 'analysis',
+      'model', 'endpoint', 'publication', 'submission', 'research-question', 'method',
+      'client-request',
+    ].includes(item.kind)
   }
   return item.kind === filter
 }

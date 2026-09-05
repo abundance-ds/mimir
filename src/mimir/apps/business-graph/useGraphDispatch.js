@@ -129,17 +129,17 @@ export function useGraphDispatch({
     const arg = rest.join(' ')
     const name = command.toLowerCase()
     if (!name || name === 'help') {
-      pushEcho('ok', '/board [attention] · /open <id> · /section <name> · /find <terms> · /clear')
+      pushEcho('ok', '/board · /open <id> · /section <name> · /find <terms> · /clear')
       return
     }
     if (name === 'board') {
-      if (arg && arg.toLowerCase() !== 'attention') {
-        pushEcho('error', `/board: unknown filter "${arg}" (try attention)`)
+      if (arg) {
+        pushEcho('error', `/board: unexpected argument "${arg}"`)
         return
       }
       setSection('work')
-      setView(arg ? 'attention' : 'board')
-      pushEcho('ok', arg ? '/board attention — needs-attention view' : '/board — work board')
+      setView('board')
+      pushEcho('ok', '/board — work board')
       return
     }
     if (name === 'open') {

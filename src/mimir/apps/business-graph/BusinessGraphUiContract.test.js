@@ -16,7 +16,6 @@ const componentSource = BUSINESS_GRAPH_SURFACES
   .join('\n')
 const source = `${appSource}\n${componentSource}`
 const workBoardSource = readFileSync(join(graphDirectory, 'WorkBoard.vue'), 'utf8')
-const portfolioSource = readFileSync(join(graphDirectory, 'PortfolioView.vue'), 'utf8')
 const headerSource = readFileSync(join(graphDirectory, 'GraphAppHeader.vue'), 'utf8')
 const viewbarSource = readFileSync(join(graphDirectory, 'GraphViewbar.vue'), 'utf8')
 
@@ -63,8 +62,6 @@ describe('Business Graph UI contract', () => {
     expect(source).not.toMatch(
       /:hover[^{]*\{[^}]*(?:box-shadow|transform|filter):/s,
     )
-    expect(source).not.toContain('portfolio-grid')
-    expect(source).not.toContain('project-card:hover')
     expect(appSource).not.toContain('Visible knowledge')
     expect(appSource).not.toContain('graph-menu-help')
     expect(appSource).not.toContain('graph-scope-dots')
@@ -75,8 +72,6 @@ describe('Business Graph UI contract', () => {
     expect(workBoardSource).toContain(':options="priorities"')
     expect(workBoardSource).toContain('data-card-status')
     expect(workBoardSource).not.toMatch(/priorityGlyph|statusCode|meta-flag/)
-    expect(portfolioSource).toContain('class="portfolio-table"')
-    expect(portfolioSource).not.toContain('project-progress')
     const sectionActive = headerSource.match(/\.graph-section-active\s*\{[^}]*\}/s)?.[0] || ''
     const viewActive = viewbarSource.match(/\.graph-view-active\s*\{[^}]*\}/s)?.[0] || ''
     expect(sectionActive).not.toMatch(/border|box-shadow/)
@@ -84,8 +79,8 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps graph projections as direct navigation at every width', () => {
-    expect(headerSource).toContain("Object.freeze(['work', 'all', 'now'])")
-    expect(headerSource).toContain('v-for="item in orderedSections"')
+    expect(headerSource).toContain('v-for="item in sections"')
+    expect(headerSource).not.toContain('orderedSections')
     expect(headerSource).not.toContain('data-graph-section-picker')
     expect(headerSource).not.toContain('.graph-section-picker')
   })
@@ -109,7 +104,6 @@ describe('Business Graph UI contract', () => {
       'data-standing-',
       'data-now-',
       'data-graph-event',
-      'data-project-card',
       'data-company-card',
       'data-timeline-node',
       'v-bind="$attrs"',
@@ -120,7 +114,7 @@ describe('Business Graph UI contract', () => {
   })
 
   it('keeps all redesigned surfaces in the audit set', () => {
-    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(26)
+    expect(BUSINESS_GRAPH_SURFACES).toHaveLength(25)
     expect(BUSINESS_GRAPH_SURFACES).toContain('../../../shared/ui/DatePicker.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphConfirmDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphAppHeader.vue')

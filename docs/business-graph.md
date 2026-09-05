@@ -81,17 +81,17 @@ preserved.
 
 ## Product surface
 
-Work, Projects, Knowledge, Journal, All, and Changes are projections of the
-same nodes. Peek and Focus edit one revision-aware draft; navigation commits
-that draft first. Graph search filters the active projection. The dispatch bar
-supports lookup, deterministic commands, and agent work with a bounded,
-source-aware context pack. Raw ids and source revisions stay out of normal UI.
-Projection navigation never collapses into a selector. Work, All, and Changes
-come first as direct buttons; Projects, Knowledge, and Journal remain available
-after them.
+Work and Graph are the two primary projections. Work is the default issue
+projection with Board and List views. Graph is the complete node surface; its
+List and Timeline views can filter by kind, while Meetings handles Scribe intake
+and Changes shows the event stream. Peek and Focus edit one revision-aware draft;
+navigation commits that draft first. Graph search filters the active projection.
+The dispatch bar supports lookup, deterministic commands, and agent work with a
+bounded, source-aware context pack. Raw ids and source revisions stay out of
+normal UI. Projection navigation stays direct at every width.
 
-Work rows share one grammar (`business-graph/workRow.js`) across Board, List,
-and Attention. A Board card has a fixed height and fixed slots: title with
+Work rows share one grammar (`business-graph/workRow.js`) across Board and
+List. A Board card has a fixed height and fixed slots: title with
 the owner at its right, the project beneath, then the due date with the
 waiting reason after it, and the priority control at the bottom right. Only
 the title and the waiting reason truncate. Due dates are words relative
@@ -103,11 +103,10 @@ the last editor stays in Changes. Board columns share the width and scroll
 when there is no room. Cards are `chrome-high` plates with a 2 px radius
 and a 4 px gap on a `chrome` column. The List is single-line
 rows under sticky group headers and follows the Board grouping (status or
-project). Attention groups open issues by reason, in order: Overdue,
-Waiting, Urgent, Due this week. Project and Owner selectors sit beside the
-view tabs because they scope the visible work; each has a one-click reset,
-and a scoped project drops the project slot from rows. The Owner list offers
-You, active team members, and Unassigned.
+project). Project and Owner filters live in the Filters popover because they
+scope the visible work. Each active filter appears as a clearable chip, and a
+scoped project drops the project slot from rows. The Owner list offers You,
+active team members, and Unassigned.
 
 Settings > Graph > You selects the reader's Person node
 (`businessGraphSelfPersonId`). It drives the `you` token and the Owner

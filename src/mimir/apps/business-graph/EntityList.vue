@@ -162,7 +162,7 @@ const props = defineProps({
     default: 'generic',
     validator: value => ['generic', 'work'].includes(value),
   },
-  /** Work grouping: `status`, `project`, `attention`, or empty for a flat list. */
+  /** Work grouping: `status`, `project`, or empty for a flat list. */
   groupBy: { type: String, default: '' },
   selfId: { type: String, default: '' },
   hideProject: { type: Boolean, default: false },

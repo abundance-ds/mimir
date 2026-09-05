@@ -1,12 +1,10 @@
-// Shared row grammar for the Work projections (Board, List, Attention):
-// status order, relative due-date words, assignee initials, waiting reasons,
-// and the Attention grouping. The Board and List render the same facts in the
-// same words so a reader learns one vocabulary.
+// Shared row grammar for the Work projections (Board and List): status order,
+// relative due-date words, assignee initials, and waiting reasons. Both views
+// render the same facts in the same words so a reader learns one vocabulary.
 
 const DAY_MS = 86_400_000
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const CLOSED_STATUSES = new Set(['done', 'cancelled'])
 
 export const WORK_STATUSES = Object.freeze([
   { id: 'backlog', label: 'Backlog' },
@@ -18,13 +16,6 @@ export const WORK_STATUSES = Object.freeze([
 ])
 
 export const UNASSIGNED = '__unassigned__'
-
-export const ATTENTION_GROUPS = Object.freeze([
-  { id: 'overdue', label: 'Overdue' },
-  { id: 'waiting', label: 'Waiting' },
-  { id: 'urgent', label: 'Urgent' },
-  { id: 'due-soon', label: 'Due this week' },
-])
 
 /**
  * Describe a due date relative to today.
@@ -48,10 +39,6 @@ export function dueInfo(value, now = new Date()) {
 
 export function isOverdue(value, now = new Date()) {
   return dueInfo(value, now).state === 'overdue'
-}
-
-export function isClosed(issue) {
-  return CLOSED_STATUSES.has(issue?.status || 'backlog')
 }
 
 /** Two-letter initials from a display name: first and last word, or the first two letters. */
@@ -83,28 +70,13 @@ export function waitingReason(issue) {
   return ['you', 'me', 'human', 'owner'].includes(reason.toLowerCase()) ? 'you' : reason
 }
 
-/** The Attention group an open issue belongs to, or an empty string. */
-export function attentionGroup(issue, now = new Date()) {
-  if (!issue || isClosed(issue)) return ''
-  const due = dueInfo(issue.dueDate, now)
-  if (due.state === 'overdue') return 'overdue'
-  if (issue.status === 'waiting' || waitingReason(issue)) return 'waiting'
-  if (issue.priority === 'urgent') return 'urgent'
-  if (due.state === 'today' || due.state === 'soon') return 'due-soon'
-  return ''
-}
-
-export function needsAttention(issue, now = new Date()) {
-  return Boolean(attentionGroup(issue, now))
-}
-
 /**
  * Group rows for the Work list. Returns groups in display order; empty
  * groups are omitted. Row order inside a group follows the input order.
  * @param {Array} issues
- * @param {{ groupBy: 'status'|'project'|'attention', projects?: Array, now?: Date }} options
+ * @param {{ groupBy: 'status'|'project', projects?: Array }} options
  */
-export function groupWorkRows(issues, { groupBy = 'status', projects = [], now = new Date() } = {}) {
+export function groupWorkRows(issues, { groupBy = 'status', projects = [] } = {}) {
   let definitions
   let keyFor
   if (groupBy === 'project') {
@@ -117,9 +89,6 @@ export function groupWorkRows(issues, { groupBy = 'status', projects = [], now =
     ]
     const known = new Set(definitions.map(group => group.id))
     keyFor = issue => (known.has(issue.projectId) ? issue.projectId : UNASSIGNED)
-  } else if (groupBy === 'attention') {
-    definitions = ATTENTION_GROUPS
-    keyFor = issue => attentionGroup(issue, now)
   } else {
     definitions = WORK_STATUSES
     const known = new Set(definitions.map(group => group.id))

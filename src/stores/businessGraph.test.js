@@ -217,8 +217,8 @@ describe('business graph store', () => {
   it('navigates object history in both directions and restores projection origin', async () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
-    store.section = 'projects'
-    store.view = 'portfolio'
+    store.section = 'all'
+    store.view = 'list'
 
     await store.openNode('project-alpha')
     store.section = 'work'
@@ -230,8 +230,8 @@ describe('business graph store', () => {
 
     await store.navigateHistory(-1)
     expect(store.selectedNode.id).toBe('project-alpha')
-    expect(store.section).toBe('projects')
-    expect(store.view).toBe('portfolio')
+    expect(store.section).toBe('all')
+    expect(store.view).toBe('list')
     expect(store.historyBack).toBeNull()
     expect(store.historyForward.id).toBe('issue-1')
 

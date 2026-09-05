@@ -353,8 +353,6 @@ function reportBulkFailures(action, failures, diagnostic) {
 function defaultKind(section) {
   return {
     work: 'issue',
-    projects: 'project',
-    knowledge: 'note',
     all: 'note',
   }[section]
 }

@@ -84,11 +84,10 @@ export function useGraphNavigation({
       return
     }
     const candidates = [...(root.value?.querySelectorAll(
-      '[data-board-card], [data-project-card], [data-timeline-node], [data-graph-node]',
+      '[data-board-card], [data-timeline-node], [data-graph-node]',
     ) || [])]
     const nodeTarget = candidates.find(candidate => (
       candidate.dataset.boardCard === nodeId
-      || candidate.dataset.projectCard === nodeId
       || candidate.dataset.timelineNode === nodeId
       || candidate.dataset.graphNode === nodeId
     ))
