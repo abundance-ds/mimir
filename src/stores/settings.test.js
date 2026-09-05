@@ -49,11 +49,10 @@ describe('settings store', () => {
     expect(store.businessGraphViewState).toEqual({
       section: 'work',
       sectionViews: {
-        work: 'board',
-        projects: 'portfolio',
-        knowledge: 'list',
         all: 'list',
+        work: 'board',
       },
+      graph: { kind: '' },
       work: {
         project: '',
         groupBy: 'status',
@@ -186,16 +185,19 @@ describe('settings store', () => {
   it('clones persisted business graph view state instead of retaining caller references', () => {
     const store = useSettingsStore()
     const state = {
-      section: 'projects',
-      sectionViews: { projects: 'graph' },
+      section: 'all',
+      sectionViews: { all: 'timeline' },
+      graph: { kind: 'project' },
       work: { collapsedStatuses: ['plan'] },
     }
 
     store.set('businessGraphViewState', state)
-    state.sectionViews.projects = 'list'
+    state.sectionViews.all = 'list'
+    state.graph.kind = 'journal'
     state.work.collapsedStatuses.push('done')
 
-    expect(store.businessGraphViewState.sectionViews.projects).toBe('graph')
+    expect(store.businessGraphViewState.sectionViews.all).toBe('timeline')
+    expect(store.businessGraphViewState.graph.kind).toBe('project')
     expect(store.businessGraphViewState.work.collapsedStatuses).toEqual(['plan'])
   })
 

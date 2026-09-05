@@ -41,11 +41,10 @@ const DEFAULTS = {
   businessGraphViewState: {
     section: 'work',
     sectionViews: {
-      work: 'board',
-      projects: 'portfolio',
-      knowledge: 'list',
       all: 'list',
+      work: 'board',
     },
+    graph: { kind: '' },
     work: {
       project: '',
       groupBy: 'status',
