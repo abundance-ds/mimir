@@ -5,10 +5,13 @@ import {
   CONNECTION_RELEASE_KEYS,
   WINDOWS_RELEASE_KEYS,
   loadReleaseEnv,
+  loadLocalUpdaterCredentials,
   parseEnv,
   requireReleaseKeys,
   requireUpdaterKeys,
   stripPersonalSlackTokens,
+  updaterBuildEnv,
+  updaterSignerEnv,
   windowsSigningConfig,
 } from './release-env.mjs'
 
@@ -86,4 +89,21 @@ test('updater signing accepts a secret value or a local key path and requires a 
     () => requireUpdaterKeys({ TAURI_SIGNING_PRIVATE_KEY: 'private' }),
     /TAURI_SIGNING_PRIVATE_KEY_PASSWORD/,
   )
+})
+
+test('uses one updater key argument for each Tauri signing interface', () => {
+  const env = {
+    TAURI_SIGNING_PRIVATE_KEY_PATH: '/private/updater.key',
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'password',
+  }
+
+  loadLocalUpdaterCredentials(env)
+
+  assert.equal(env.TAURI_SIGNING_PRIVATE_KEY, undefined)
+  assert.equal(env.TAURI_SIGNING_PRIVATE_KEY_PATH, '/private/updater.key')
+  assert.deepEqual(updaterBuildEnv(env), {
+    TAURI_SIGNING_PRIVATE_KEY: '/private/updater.key',
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'password',
+  })
+  assert.deepEqual(updaterSignerEnv(env), env)
 })

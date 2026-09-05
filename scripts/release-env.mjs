@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const DEFAULT_ENV_PATH = resolve(REPOSITORY_ROOT, '.env')
 export const DEFAULT_UPDATER_KEY_PATH = resolve(homedir(), '.config/mimir/release/updater.key')
-export const UPDATER_KEYCHAIN_SERVICE = 'rs.shoulde.mimir.updater-signing'
+export const UPDATER_KEYCHAIN_SERVICE = 'com.abundanceds.mimir.updater-signing'
 
 function parseValue(raw) {
   const value = raw.trim()
@@ -105,6 +105,21 @@ export function loadLocalUpdaterCredentials(env) {
     }
   }
   return env
+}
+
+export function updaterBuildEnv(env) {
+  const buildEnv = { ...env }
+  buildEnv.TAURI_SIGNING_PRIVATE_KEY ||= buildEnv.TAURI_SIGNING_PRIVATE_KEY_PATH
+  delete buildEnv.TAURI_SIGNING_PRIVATE_KEY_PATH
+  return buildEnv
+}
+
+export function updaterSignerEnv(env) {
+  const signerEnv = { ...env }
+  if (signerEnv.TAURI_SIGNING_PRIVATE_KEY_PATH) {
+    delete signerEnv.TAURI_SIGNING_PRIVATE_KEY
+  }
+  return signerEnv
 }
 
 export function requireUpdaterKeys(env) {

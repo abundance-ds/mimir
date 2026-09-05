@@ -18,6 +18,8 @@ import {
   requireReleaseKeys,
   requireUpdaterKeys,
   stripPersonalSlackTokens,
+  updaterBuildEnv,
+  updaterSignerEnv,
 } from './release-env.mjs'
 import { configureMacDevCommand } from './prepare-macos-dev-app.mjs'
 
@@ -121,7 +123,7 @@ async function main() {
   if (isMacBuild && !requestedDmg()) {
     throw new Error('signed macOS releases must include the exact versioned DMG artifact')
   }
-  const tauriEnv = { ...env }
+  const tauriEnv = isMacBuild ? updaterBuildEnv(env) : { ...env }
   if (isMacBuild) {
     const identity = gitSourceIdentity(REPOSITORY_ROOT)
     assertCleanReleaseSource(identity)
@@ -145,7 +147,7 @@ async function main() {
   await run(process.execPath, [cli, ...args], { env: tauriEnv })
   if (isMacBuild) {
     await notarizeMacRelease(macRelease.layout)
-    await createMacUpdater(macRelease.layout, tauriEnv)
+    await createMacUpdater(macRelease.layout, updaterSignerEnv(env))
     const after = gitSourceIdentity(REPOSITORY_ROOT)
     assertUnchangedReleaseSource(macRelease.identity, after)
     const manifest = stageRelease({
