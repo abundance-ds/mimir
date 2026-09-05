@@ -12,7 +12,7 @@ WorkingDirectory=/var/lib/mimir-chat
 ExecStart=/usr/bin/python3 /opt/mimir-chat/current/file_service.py \
     --data-dir /var/lib/mimir-chat/files \
     --database /var/lib/mimir-chat/files.sqlite3 \
-    --public-base-url https://chat.shoulde.rs/files
+    --public-base-url https://chat.abundanceds.com/files
 Restart=on-failure
 RestartSec=2s
 NoNewPrivileges=true

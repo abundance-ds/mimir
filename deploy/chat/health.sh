@@ -26,7 +26,7 @@ auth_response="$(
 	exit 1
 }
 
-[[ "$(curl -fsS --max-time 5 https://chat.shoulde.rs/healthz)" == "ok" ]] || {
+[[ "$(curl -fsS --max-time 5 https://chat.abundanceds.com/healthz)" == "ok" ]] || {
 	echo "public chat health endpoint failed" >&2
 	exit 1
 }
@@ -41,18 +41,18 @@ admin_health="$(curl -fsS --max-time 5 http://127.0.0.1:8070/healthz)"
 	exit 1
 }
 status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
-	https://chat.shoulde.rs/files/health-auth-boundary)"
+	https://chat.abundanceds.com/files/health-auth-boundary)"
 [[ "$status" == "401" ]] || {
 	echo "attachment authentication boundary returned HTTP $status, expected 401" >&2
 	exit 1
 }
-admin_page="$(curl -fsS --max-time 5 https://chat.shoulde.rs/admin/)"
+admin_page="$(curl -fsS --max-time 5 https://chat.abundanceds.com/admin/)"
 [[ "$admin_page" == *"Mimir Chat administration"* ]] || {
 	echo "public administration page failed" >&2
 	exit 1
 }
 admin_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
-	https://chat.shoulde.rs/admin/api/state)"
+	https://chat.abundanceds.com/admin/api/state)"
 [[ "$admin_status" == "401" ]] || {
 	echo "administration authentication boundary returned HTTP $admin_status, expected 401" >&2
 	exit 1

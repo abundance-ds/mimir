@@ -20,8 +20,8 @@ import uuid
 from websockets.sync.client import connect
 
 
-ENDPOINT = "wss://chat.shoulde.rs/webirc"
-ORIGIN = "https://chat.shoulde.rs"
+ENDPOINT = "wss://chat.abundanceds.com/webirc"
+ORIGIN = "https://chat.abundanceds.com"
 ACCOUNT = "waqr"
 CHANNEL = "#mimir-protocol"
 CAPABILITIES = (
@@ -216,7 +216,7 @@ def main() -> None:
         checks.append("typing")
 
         session.send(
-            f"@+shoulde.rs/edit={message_id} "
+            f"@+abundanceds.com/edit={message_id} "
             f"PRIVMSG {CHANNEL} :{marker}-edited",
         )
         edit_id = event_id(session, "PRIVMSG", f"{marker}-edited")
@@ -224,11 +224,11 @@ def main() -> None:
         checks.append("edit-event")
 
         session.send(
-            "@+shoulde.rs/file=protocol-test;"
-            "+shoulde.rs/file-name=protocol.txt;"
-            "+shoulde.rs/file-size=7;"
-            "+shoulde.rs/file-type=text/plain;"
-            "+shoulde.rs/file-sha256="
+            "@+abundanceds.com/file=protocol-test;"
+            "+abundanceds.com/file-name=protocol.txt;"
+            "+abundanceds.com/file-size=7;"
+            "+abundanceds.com/file-type=text/plain;"
+            "+abundanceds.com/file-sha256="
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
             f"PRIVMSG {CHANNEL} :{marker}-attachment",
         )
@@ -245,8 +245,8 @@ def main() -> None:
             "+draft/react=👍",
             "+draft/unreact=👍",
             f"+reply={message_id}",
-            "+shoulde.rs/file=protocol-test",
-            "+shoulde.rs/file-sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "+abundanceds.com/file=protocol-test",
+            "+abundanceds.com/file-sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ):
             if expected not in replay_text:
                 raise RuntimeError(f"history did not preserve {expected}")

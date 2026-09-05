@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 
 export const DEFAULT_CHAT_CONFIG = Object.freeze({
   enabled: true,
-  endpoint: 'wss://chat.shoulde.rs/webirc',
+  endpoint: 'wss://chat.abundanceds.com/webirc',
   account: 'waqr',
   displayName: 'Waqr',
 })

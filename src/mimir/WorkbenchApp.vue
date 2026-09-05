@@ -1070,7 +1070,7 @@ async function startChatAgent(presetId) {
       retention: 'durable',
       source: {
         type: 'chat-agent',
-        chatServerId: 'chat.shoulde.rs',
+        chatServerId: 'chat.abundanceds.com',
         chatTarget: target,
       },
       beforeSpawn: record => chat.linkActivity(record.id, target, agentLabel),

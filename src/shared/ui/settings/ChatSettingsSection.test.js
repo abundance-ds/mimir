@@ -15,7 +15,7 @@ describe('ChatSettingsSection', () => {
       if (command === 'chat_set_enabled') {
         return Promise.resolve({
           state: 'disconnected',
-          endpoint: 'wss://chat.shoulde.rs/webirc',
+          endpoint: 'wss://chat.abundanceds.com/webirc',
           account: 'waqr',
           relayReady: false,
           diagnostic: null,
@@ -30,7 +30,7 @@ describe('ChatSettingsSection', () => {
     chat.initialized = true
     chat.config = {
       enabled: true,
-      endpoint: 'wss://chat.shoulde.rs/webirc',
+      endpoint: 'wss://chat.abundanceds.com/webirc',
       account: 'waqr',
       displayName: 'Waqr',
     }

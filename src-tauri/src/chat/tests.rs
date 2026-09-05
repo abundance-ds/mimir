@@ -128,7 +128,7 @@ fn client_only_tag_values_are_escaped_before_transport() {
     );
     assert_eq!(
         prefix,
-        r"@+reply=reply\\id;+shoulde.rs/agent=codex;+shoulde.rs/activity=agent:one\:\sworkspace\nnext "
+        r"@+reply=reply\\id;+abundanceds.com/agent=codex;+abundanceds.com/activity=agent:one\:\sworkspace\nnext "
     );
 }
 
@@ -146,7 +146,7 @@ fn agent_messages_use_relay_when_ready_and_visible_fallback_otherwise() {
     assert_eq!(
         relay,
         vec![
-            "@+shoulde.rs/agent=codex;+shoulde.rs/activity=agent:one \
+            "@+abundanceds.com/agent=codex;+abundanceds.com/activity=agent:one \
                  RELAYMSG #general waqr/codex :done"
         ]
     );
@@ -229,7 +229,7 @@ fn synced_message_events_materialize_for_people_and_agents() {
 
     let edit = IrcMessage::from_str(
         "@msgid=e1;time=2026-01-01T00:00:01.000Z;account=anna;\
-             +shoulde.rs/edit=m1 :anna!~u@example PRIVMSG #general :edited",
+             +abundanceds.com/edit=m1 :anna!~u@example PRIVMSG #general :edited",
     )
     .unwrap();
     ingest_message(&runtime, &config, &edit, "#general", "edited", false).unwrap();
@@ -268,22 +268,25 @@ fn mentions_require_an_account_word_and_reactions_stay_small() {
 #[test]
 fn attachment_tags_become_canonical_authenticated_file_metadata() {
     let parsed = IrcMessage::from_str(
-            "@msgid=m1;+shoulde.rs/file=file-one;\
-             +shoulde.rs/file-name=launch.pdf;+shoulde.rs/file-size=42;\
-             +shoulde.rs/file-type=application/pdf;\
-             +shoulde.rs/file-sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            "@msgid=m1;+abundanceds.com/file=file-one;\
+             +abundanceds.com/file-name=launch.pdf;+abundanceds.com/file-size=42;\
+             +abundanceds.com/file-type=application/pdf;\
+             +abundanceds.com/file-sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
              :anna!~u@example PRIVMSG #general :📎 launch.pdf",
         )
         .unwrap();
     let attachments = attachment_from_tags(&ChatConfig::default(), &parsed);
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0].name, "launch.pdf");
-    assert_eq!(attachments[0].url, "https://chat.shoulde.rs/files/file-one",);
+    assert_eq!(
+        attachments[0].url,
+        "https://chat.abundanceds.com/files/file-one",
+    );
     assert_eq!(
             attachment_message_line("#general", &attachments[0]),
-            "@+shoulde.rs/file=file-one;+shoulde.rs/file-name=launch.pdf;\
-             +shoulde.rs/file-size=42;+shoulde.rs/file-type=application/pdf;\
-             +shoulde.rs/file-sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            "@+abundanceds.com/file=file-one;+abundanceds.com/file-name=launch.pdf;\
+             +abundanceds.com/file-size=42;+abundanceds.com/file-type=application/pdf;\
+             +abundanceds.com/file-sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
              PRIVMSG #general :📎 launch.pdf",
         );
 }

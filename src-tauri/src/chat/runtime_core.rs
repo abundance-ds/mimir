@@ -282,7 +282,7 @@ impl ChatRuntime {
             );
         }
         self.queue_lines(vec![format!(
-            "@+shoulde.rs/edit={} PRIVMSG {target} :{text}",
+            "@+abundanceds.com/edit={} PRIVMSG {target} :{text}",
             irc_tag_value(&message_id),
         )])
     }

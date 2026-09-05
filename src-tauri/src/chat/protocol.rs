@@ -26,12 +26,18 @@ pub(super) fn human_lines(target: &str, text: &str, reply_to: Option<&str>) -> V
 
 pub(super) fn attachment_message_line(target: &str, attachment: &ChatAttachment) -> String {
     let tags = [
-        format!("+shoulde.rs/file={}", irc_tag_value(&attachment.id)),
-        format!("+shoulde.rs/file-name={}", irc_tag_value(&attachment.name),),
-        format!("+shoulde.rs/file-size={}", attachment.size),
-        format!("+shoulde.rs/file-type={}", irc_tag_value(&attachment.mime),),
+        format!("+abundanceds.com/file={}", irc_tag_value(&attachment.id)),
         format!(
-            "+shoulde.rs/file-sha256={}",
+            "+abundanceds.com/file-name={}",
+            irc_tag_value(&attachment.name),
+        ),
+        format!("+abundanceds.com/file-size={}", attachment.size),
+        format!(
+            "+abundanceds.com/file-type={}",
+            irc_tag_value(&attachment.mime),
+        ),
+        format!(
+            "+abundanceds.com/file-sha256={}",
             irc_tag_value(&attachment.sha256),
         ),
     ]
@@ -158,11 +164,14 @@ pub(super) fn tags_prefix(
         tags.push(format!("+reply={}", irc_tag_value(reply_to)));
     }
     if let Some(agent_label) = agent_label {
-        tags.push(format!("+shoulde.rs/agent={}", irc_tag_value(agent_label)));
+        tags.push(format!(
+            "+abundanceds.com/agent={}",
+            irc_tag_value(agent_label)
+        ));
     }
     if let Some(activity_id) = activity_id {
         tags.push(format!(
-            "+shoulde.rs/activity={}",
+            "+abundanceds.com/activity={}",
             irc_tag_value(activity_id)
         ));
     }

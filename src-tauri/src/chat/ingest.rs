@@ -42,8 +42,8 @@ pub(super) fn ingest_message(
     let agent_label = sender_nick
         .split_once('/')
         .map(|(_, label)| label.to_string())
-        .or_else(|| tag(raw, "+shoulde.rs/agent"));
-    let activity_id = tag(raw, "+shoulde.rs/activity");
+        .or_else(|| tag(raw, "+abundanceds.com/agent"));
+    let activity_id = tag(raw, "+abundanceds.com/activity");
     let id = tag(raw, "msgid")
         .unwrap_or_else(|| synthetic_message_id(&target, &server_time, &sender_nick, body));
     let body = agent_label
@@ -51,7 +51,7 @@ pub(super) fn ingest_message(
         .and_then(|label| body.strip_prefix(&format!("[{label}] ")))
         .unwrap_or(body)
         .to_string();
-    if let Some(reference_id) = tag(raw, "+shoulde.rs/edit") {
+    if let Some(reference_id) = tag(raw, "+abundanceds.com/edit") {
         let reference_id = validate_message_id(&reference_id)?;
         if let Some(message) = runtime.inner.database.record_message_event(
             &id,
@@ -212,22 +212,22 @@ pub(super) fn actor_is_own(
 }
 
 pub(super) fn attachment_from_tags(config: &ChatConfig, raw: &IrcMessage) -> Vec<ChatAttachment> {
-    let Some(id) = tag(raw, "+shoulde.rs/file") else {
+    let Some(id) = tag(raw, "+abundanceds.com/file") else {
         return Vec::new();
     };
-    let Some(name) = tag(raw, "+shoulde.rs/file-name") else {
+    let Some(name) = tag(raw, "+abundanceds.com/file-name") else {
         return Vec::new();
     };
-    let Some(mime) = tag(raw, "+shoulde.rs/file-type") else {
+    let Some(mime) = tag(raw, "+abundanceds.com/file-type") else {
         return Vec::new();
     };
-    let Some(size) = tag(raw, "+shoulde.rs/file-size")
+    let Some(size) = tag(raw, "+abundanceds.com/file-size")
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|size| *size > 0 && *size <= 25 * 1024 * 1024)
     else {
         return Vec::new();
     };
-    let Some(sha256) = tag(raw, "+shoulde.rs/file-sha256").filter(|value| {
+    let Some(sha256) = tag(raw, "+abundanceds.com/file-sha256").filter(|value| {
         value.len() == 64 && value.chars().all(|character| character.is_ascii_hexdigit())
     }) else {
         return Vec::new();

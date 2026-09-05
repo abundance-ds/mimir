@@ -42,8 +42,8 @@ def main() -> None:
         )
 
     text = args.source.read_text(encoding="utf-8")
-    text = replace_once(text, r"(?m)^    name: ErgoTest$", "    name: Shoulders", "network name")
-    text = replace_once(text, r"(?m)^    name: ergo\.test$", "    name: chat.shoulde.rs", "server name")
+    text = replace_once(text, r"(?m)^    name: ErgoTest$", "    name: Abundance Decision Systems", "network name")
+    text = replace_once(text, r"(?m)^    name: ergo\.test$", "    name: chat.abundanceds.com", "server name")
     text = replace_once(
         text,
         r"(?ms)^    # addresses to listen on\n    listeners:\n.*?^    # sets the permissions for Unix listen sockets\.",
@@ -61,7 +61,7 @@ def main() -> None:
         r"(?ms)^    websockets:\n.*?^    # casemapping controls",
         """    websockets:
         allowed-origins:
-            - "https://chat.shoulde.rs"
+            - "https://chat.abundanceds.com"
 
     # casemapping controls""",
         "websocket origin",

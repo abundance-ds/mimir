@@ -71,7 +71,7 @@ use db::ChatDatabase;
 
 const CHAT_EVENT: &str = "mimir://chat-event";
 #[cfg(all(target_os = "macos", not(debug_assertions)))]
-const KEYCHAIN_SERVICE: &str = "rs.shoulde.mimir";
+const KEYCHAIN_SERVICE: &str = "com.abundanceds.mimir";
 const MAX_MESSAGE_BYTES: usize = 4_000;
 const IRC_CHUNK_BYTES: usize = 350;
 const REQUESTED_CAPABILITIES: &str =

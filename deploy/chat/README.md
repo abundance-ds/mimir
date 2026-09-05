@@ -11,10 +11,10 @@ locations, and deploy commands are machine-local in `.internal/deployment.md`
 Ergo 2.19.0 behind the host's existing Caddy:
 
 ```text
-https://chat.shoulde.rs/healthz    Caddy health response
-wss://chat.shoulde.rs/webirc       public TLS WebSocket
-https://chat.shoulde.rs/files      authenticated attachment API
-https://chat.shoulde.rs/admin/     token-gated administration UI
+https://chat.abundanceds.com/healthz    Caddy health response
+wss://chat.abundanceds.com/webirc       public TLS WebSocket
+https://chat.abundanceds.com/files      authenticated attachment API
+https://chat.abundanceds.com/admin/     token-gated administration UI
 127.0.0.1:8067                     Ergo WebSocket listener
 127.0.0.1:16667                    local bootstrap/operations listener
 127.0.0.1:8069                     attachment service
@@ -69,7 +69,7 @@ installs bootstrap by authenticating as the owner.
 - `admin_token.mjs` -- create/export gitignored local token; server stores only SHA-256 digest
 - `manage_user.py` -- installs as `mimir-chat-user`; owner-authenticated teammate add/remove
 - `configure_caddy.py` -- exact additive file-route upgrade on existing Caddy block
-- `Caddyfile` -- additive `chat.shoulde.rs` site block
+- `Caddyfile` -- additive `chat.abundanceds.com` site block
 - `health.sh` -- chat units, loopback listeners, public edge, attachment auth, disk headroom; 5-min systemd timer
 - `backup.sh` -- short offline checksummed nightly snapshot; 14-day default retention
 - `restore.sh` -- verify checksums/paths/release/SQLite integrity; `--confirm` restores with automatic rollback on health failure

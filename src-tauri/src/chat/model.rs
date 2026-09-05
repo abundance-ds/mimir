@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_CHAT_ENDPOINT: &str = "wss://chat.shoulde.rs/webirc";
+pub const DEFAULT_CHAT_ENDPOINT: &str = "wss://chat.abundanceds.com/webirc";
 pub const DEFAULT_CHAT_ACCOUNT: &str = "waqr";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

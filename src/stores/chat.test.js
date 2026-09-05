@@ -29,13 +29,13 @@ describe('chat store', () => {
     vi.clearAllMocks()
     api.chatStatus.mockResolvedValue({
       state: 'connected',
-      endpoint: 'wss://chat.shoulde.rs/webirc',
+      endpoint: 'wss://chat.abundanceds.com/webirc',
       account: 'waqr',
       relayReady: true,
       diagnostic: null,
     })
     api.chatConfig.mockResolvedValue({
-      endpoint: 'wss://chat.shoulde.rs/webirc',
+      endpoint: 'wss://chat.abundanceds.com/webirc',
       account: 'waqr',
       displayName: 'Waqr',
     })
@@ -65,7 +65,7 @@ describe('chat store', () => {
     api.searchChat.mockResolvedValue([])
     api.setChatEnabled.mockResolvedValue({
       state: 'disconnected',
-      endpoint: 'wss://chat.shoulde.rs/webirc',
+      endpoint: 'wss://chat.abundanceds.com/webirc',
       account: 'waqr',
       relayReady: false,
       diagnostic: null,

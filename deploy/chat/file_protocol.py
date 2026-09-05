@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
-BASE_URL = "https://chat.shoulde.rs/files"
+BASE_URL = "https://chat.abundanceds.com/files"
 ACCOUNT = "waqr"
 
 

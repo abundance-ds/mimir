@@ -1,4 +1,4 @@
-chat.shoulde.rs {
+chat.abundanceds.com {
 	handle /healthz {
 		respond "ok" 200
 	}

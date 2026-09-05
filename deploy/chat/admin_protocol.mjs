@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
 function parseArgs(argv) {
-  const options = { base: 'https://chat.shoulde.rs/admin/' }
+  const options = { base: 'https://chat.abundanceds.com/admin/' }
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index]
     const value = argv[index + 1]

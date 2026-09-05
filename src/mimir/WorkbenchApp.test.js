@@ -486,7 +486,7 @@ describe('WorkbenchApp', () => {
     const chat = useChatStore()
     chat.status = {
       state: 'connected',
-      endpoint: 'wss://chat.shoulde.rs/webirc',
+      endpoint: 'wss://chat.abundanceds.com/webirc',
       account: 'waqr',
       relayReady: true,
       diagnostic: null,

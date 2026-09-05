@@ -12,7 +12,7 @@ function connectedChat() {
   chat.initialized = true
   chat.status = {
     state: 'connected',
-    endpoint: 'wss://chat.shoulde.rs/webirc',
+    endpoint: 'wss://chat.abundanceds.com/webirc',
     account: 'waqr',
     relayReady: true,
     diagnostic: null,
@@ -291,7 +291,7 @@ describe('ChatActivity', () => {
       mime: 'image/png',
       size: 2048,
       sha256: 'a'.repeat(64),
-      url: 'https://chat.shoulde.rs/files/file-one',
+      url: 'https://chat.abundanceds.com/files/file-one',
       localPath: '/tmp/launch.png',
     }]
     vi.mocked(invoke).mockImplementation(async (command) => {

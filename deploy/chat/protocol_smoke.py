@@ -17,8 +17,8 @@ from websockets.sync.client import connect
 def verify_auth_boundary() -> None:
     transcript: list[str] = []
     with connect(
-        "wss://chat.shoulde.rs/webirc",
-        origin="https://chat.shoulde.rs",
+        "wss://chat.abundanceds.com/webirc",
+        origin="https://chat.abundanceds.com",
         open_timeout=5,
     ) as socket:
         socket.send("NICK mimir-unauthenticated\r\n")
@@ -49,8 +49,8 @@ def main() -> None:
 
     verify_auth_boundary()
     socket = connect(
-        "wss://chat.shoulde.rs/webirc",
-        origin="https://chat.shoulde.rs",
+        "wss://chat.abundanceds.com/webirc",
+        origin="https://chat.abundanceds.com",
         open_timeout=5,
     )
     checks = {
