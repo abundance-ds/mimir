@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "Mimir complete locked dependency inventory",
-  "documentNamespace": "https://com.abundanceds.mimir/sbom/9c25db2a2c47c5791ff10c1c4ed2e2d7b9d2a169ebd1b6fbd3e4f54887fd761e",
+  "documentNamespace": "https://com.abundanceds.mimir/sbom/883f8832d56dd2e1b3e2375b3fdaa94dca122c698fd109fdf6279879c538b689",
   "creationInfo": {
     "created": "2026-09-04T17:04:44Z",
     "creators": [
@@ -31606,9 +31606,9 @@
     },
     {
       "name": "nanoid",
-      "SPDXID": "SPDXRef-Package-4fd9c6c72e557aba690b9237",
-      "versionInfo": "3.3.17",
-      "downloadLocation": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.17.tgz",
+      "SPDXID": "SPDXRef-Package-f1f7e9b95d53e9e28ba337da",
+      "versionInfo": "3.3.18",
+      "downloadLocation": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.18.tgz",
       "filesAnalyzed": false,
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
@@ -31616,14 +31616,14 @@
       "checksums": [
         {
           "algorithm": "SHA512",
-          "checksumValue": "c502dfd00dc738c9601ead27db8eff2d1b80398981edd5c9fc3bc0c46bec4818a3e395ed052990c9cbbe17c3836c7c27b3f5f21596a0c8bd7e27439f7f0d44d2"
+          "checksumValue": "0d38383096c631691f8ba55915d36ddbf71a31b432e0ebbe3a9fe1250bc611672755fa00d5003ec7344a033c3d8c3ebe19538e798aff98872e0d276e83a17afb"
         }
       ],
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:npm/nanoid@3.3.17"
+          "referenceLocator": "pkg:npm/nanoid@3.3.18"
         }
       ],
       "annotations": [
@@ -31631,7 +31631,7 @@
           "annotationDate": "2026-09-04T17:04:44Z",
           "annotationType": "OTHER",
           "annotator": "Tool: scripts/generate-supply-chain.mjs",
-          "comment": "mimir-component-id:npm:nanoid@3.3.17"
+          "comment": "mimir-component-id:npm:nanoid@3.3.18"
         },
         {
           "annotationDate": "2026-09-04T17:04:44Z",
@@ -38491,7 +38491,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-Package-4fd9c6c72e557aba690b9237"
+      "relatedSpdxElement": "SPDXRef-Package-f1f7e9b95d53e9e28ba337da"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -38774,7 +38774,7 @@
       "annotationDate": "2026-09-04T17:04:44Z",
       "annotationType": "OTHER",
       "annotator": "Tool: scripts/generate-supply-chain.mjs",
-      "comment": "mimir-lock-digest:sha256:9c25db2a2c47c5791ff10c1c4ed2e2d7b9d2a169ebd1b6fbd3e4f54887fd761e"
+      "comment": "mimir-lock-digest:sha256:883f8832d56dd2e1b3e2375b3fdaa94dca122c698fd109fdf6279879c538b689"
     }
   ]
 }
