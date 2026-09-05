@@ -85,6 +85,12 @@ pub trait MeetingCapturePort: Send + Sync {
 
     fn start(&self, request: &CaptureStart) -> Result<(), String>;
 
+    /// Signal the owned worker without waiting for teardown or transcription.
+    /// The later `stop` call still joins the worker and returns its report.
+    fn signal_stop(&self, _request: &CaptureStop) -> Result<(), String> {
+        Ok(())
+    }
+
     fn stop(&self, request: &CaptureStop) -> Result<CaptureStopResult, String>;
 
     fn set_microphone_muted(

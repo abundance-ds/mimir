@@ -165,11 +165,15 @@ impl MeetingRuntime {
             &self.inner.clock.now(),
         )?;
         if deletion.stage == MeetingDeletionStage::WaitingForJobs {
-            return Err(MeetingStoreError::DeletionBlocked {
-                meeting_id: meeting_id.into(),
-                running_jobs: deletion.running_jobs,
-            }
-            .into());
+            // The tombstone is the user-visible deletion boundary. It already
+            // hides the meeting, rejects new work, and cancels pending jobs.
+            // A running Activity keeps only its process lease until it exits;
+            // physical cleanup resumes from finish_job or launch recovery.
+            return self.publish_unlocked(
+                "meeting-deletion-pending",
+                Some(meeting_id.into()),
+                None,
+            );
         }
         self.inner
             .platform

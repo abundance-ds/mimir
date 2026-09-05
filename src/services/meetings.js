@@ -209,6 +209,12 @@ export async function stopMeeting(meetingId) {
   }))
 }
 
+export async function signalMeetingStop(meetingId) {
+  await invoke('meetings_signal_stop', {
+    meetingId: requiredId(meetingId, 'meeting'),
+  })
+}
+
 export async function setMeetingMicMuted(meetingId, muted) {
   return normalizeMeetingSnapshot(await invoke('meetings_set_mic_muted', {
     meetingId: requiredId(meetingId, 'meeting'),

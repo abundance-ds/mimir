@@ -85,7 +85,7 @@ const VALID_TAURI_COMMANDS = new Set([
   'meetings_microphone_devices', 'meetings_audio_test_start', 'meetings_audio_test_stop',
   'meetings_dismiss_candidate', 'meetings_take_record_requests',
   'meetings_issue_start_consent',
-  'meetings_start', 'meetings_stop', 'meetings_set_mic_muted',
+  'meetings_start', 'meetings_signal_stop', 'meetings_stop', 'meetings_set_mic_muted',
   'meetings_update', 'meetings_decide_kg', 'meetings_retry_job', 'meetings_run_summary', 'meetings_follow_up_context', 'meetings_retranscribe', 'meetings_delete',
   'meetings_export', 'meetings_file_to_graph', 'meetings_update_config', 'meetings_set_api_key',
   'meetings_clear_api_key', 'meetings_install_model', 'meetings_delete_model',

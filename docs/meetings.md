@@ -8,8 +8,11 @@ Scribe is a local-first meeting recorder. The user starts recording; detection
 can only suggest it. On macOS, a detection notification offers **RECORD**. That
 explicit action activates Mimir and uses the normal permission, consent, and
 candidate-validation path. A stale suggestion cannot start capture. Microphone
-and system audio remain separate durable 16 kHz mono tracks. Transcription
-follows committed audio and never blocks the capture callback.
+use by another app is the detection signal, so a call with its microphone off
+is not visible to Scribe. Detection polls while enabled and does not require a
+routine app restart. Microphone and system audio remain separate durable 16 kHz
+mono tracks. Transcription follows committed audio and never blocks the capture
+callback.
 
 ## Product contract
 
@@ -18,8 +21,10 @@ follows committed audio and never blocks the capture callback.
 - Mute writes aligned microphone silence; there is no pause state.
 - Transcription uses the managed local Whisper model or one explicit hosted
   endpoint. There is no hidden provider fallback.
-- Stop drains capture and produces one terminal transcript. Failed or partial
-  transcripts remain recoverable; silence completes without invented content.
+- Stop ends capture at once and leaves the recording surface. Transcript tail
+  processing continues in the background and produces one terminal transcript.
+  Failed or partial transcripts remain recoverable; silence completes without
+  invented content.
 - A user-written title cannot be replaced by automatic work.
 - Preparation notes, Project, People, and scope stay editable before, during,
   and after capture.
@@ -62,6 +67,9 @@ honest `Interrupted` and `Failed` exits.
   command or treated as authority for deletion or Graph mutation.
 - Summary format, prompt, and agent are frozen into each job. Failures remain
   retryable and do not turn a completed recording into a capture failure.
+- Permanent deletion is visible at the durable tombstone boundary. The meeting
+  disappears at once. An already running follow-up can release its process
+  lease in the background before private file and database cleanup completes.
 
 ## Agent and data boundaries
 
@@ -79,7 +87,7 @@ repair or running job.
 ## Platform and release
 
 Capture and local inference support macOS arm64 14.2 or later. Permission state
-must belong to the responsible `rs.shoulde.mimir` app bundle; a terminal-hosted
+must belong to the responsible `com.abundanceds.mimir` app bundle; a terminal-hosted
 grant is not release evidence. Release requires signed installed-app checks for
 permissions, both real audio channels, Stop, transcription routes, crash
 recovery, and deletion/retention.

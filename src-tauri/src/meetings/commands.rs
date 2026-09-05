@@ -1125,6 +1125,20 @@ pub async fn meetings_start(
 }
 
 #[tauri::command]
+pub async fn meetings_signal_stop(
+    runtime: tauri::State<'_, MeetingRuntime>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let runtime = runtime.inner().clone();
+    run_blocking("meeting stop signal", move || {
+        runtime
+            .signal_stop(&meeting_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn meetings_stop(
     runtime: tauri::State<'_, MeetingRuntime>,
     meeting_id: String,

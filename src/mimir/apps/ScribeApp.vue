@@ -1064,9 +1064,9 @@ async function prepare() {
 async function stop() {
   actionError.value = ''
   try {
-    await flushNotes()
-    await meetings.stop()
-    liveAnnouncement.value = 'Recording stopped. Finalizing transcript.'
+    const stopping = meetings.stop()
+    liveAnnouncement.value = 'Recording stopped. Finalizing transcript in the background.'
+    await Promise.all([flushNotes(), stopping])
   } catch (error) {
     actionError.value = message(error)
   }

@@ -221,17 +221,14 @@ fn mtg_153_running_activity_only_releases_deletion_wait_and_cannot_recreate_cont
         .unwrap()
         .unwrap();
 
-    let error = fixture
+    let deleted = fixture
         .runtime
         .delete(&meeting_id, MeetingDeleteMode::All)
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        MeetingRuntimeError::Store(MeetingStoreError::DeletionBlocked {
-            running_jobs: 1,
-            ..
-        })
-    ));
+        .unwrap();
+    assert!(deleted
+        .meetings
+        .iter()
+        .all(|meeting| meeting.id != meeting_id));
     assert!(fixture
         .runtime
         .update_meeting(
@@ -453,4 +450,3 @@ fn native_capture_failure_sink_does_not_keep_runtime_alive() {
     assert!(weak_inner.upgrade().is_none());
     sink.capture_failed("ended-meeting", "ended-run", "late worker completion");
 }
-

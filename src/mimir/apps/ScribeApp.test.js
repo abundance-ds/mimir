@@ -17,6 +17,7 @@ import {
   retranscribeMeeting,
   runMeetingSummary,
   searchMeetingLibrary,
+  signalMeetingStop,
   retryMeetingJob,
   showMeetingFiles,
   startMeeting,
@@ -67,6 +68,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   retranscribeMeeting: vi.fn(),
   runMeetingSummary: vi.fn(),
   searchMeetingLibrary: vi.fn(),
+  signalMeetingStop: vi.fn(),
   retryMeetingJob: vi.fn(),
   showMeetingFiles: vi.fn(),
   setMeetingMicMuted: vi.fn(),
@@ -187,6 +189,7 @@ describe('ScribeApp', () => {
     })
     vi.mocked(runMeetingSummary).mockReset().mockResolvedValue(snapshot())
     vi.mocked(searchMeetingLibrary).mockReset().mockResolvedValue([])
+    vi.mocked(signalMeetingStop).mockReset().mockResolvedValue()
     launchPreset.mockReset().mockResolvedValue({ id: 'agent:follow-up' })
     loadGraphCatalog.mockReset().mockResolvedValue({ scopes: [], projects: [], people: [] })
     createGraphEntity.mockReset()

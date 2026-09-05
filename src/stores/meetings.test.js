@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
+  deleteMeeting,
   dismissMeetingCandidate,
   issueMeetingStartConsent,
   listenToMeetingAudioTestEvents,
@@ -15,6 +16,7 @@ import {
   startMeetingAudioTest,
   runMeetingSummary,
   searchMeetingLibrary,
+  signalMeetingStop,
   startMeeting,
   stopMeeting,
   updateMeeting,
@@ -45,6 +47,7 @@ vi.mock('../services/meetings.js', async importOriginal => ({
   stopMeetingAudioTest: vi.fn(),
   runMeetingSummary: vi.fn(),
   searchMeetingLibrary: vi.fn(),
+  signalMeetingStop: vi.fn(),
   retryMeetingJob: vi.fn(),
   setMeetingMicMuted: vi.fn(),
   setMeetingsApiKey: vi.fn(),
@@ -117,8 +120,10 @@ describe('meetings store', () => {
     vi.mocked(requestMeetingSystemAudioPermission).mockReset()
       .mockResolvedValue(emptySnapshot)
     vi.mocked(searchMeetingLibrary).mockReset().mockResolvedValue([])
+    vi.mocked(signalMeetingStop).mockReset().mockResolvedValue()
     vi.mocked(runMeetingSummary).mockReset()
     vi.mocked(dismissMeetingCandidate).mockReset()
+    vi.mocked(deleteMeeting).mockReset()
     vi.mocked(issueMeetingStartConsent).mockReset().mockResolvedValue({
       token: 'native-secret',
       requestId: 'scribe-start-native',
@@ -193,6 +198,9 @@ describe('meetings store', () => {
         meetings: [{ ...active, ...patch }],
       }
     })
+    vi.mocked(signalMeetingStop).mockImplementation(async () => {
+      order.push('signal-stop')
+    })
     vi.mocked(stopMeeting).mockImplementation(async () => {
       order.push('stop')
       return {
@@ -220,7 +228,7 @@ describe('meetings store', () => {
 
     await store.stop()
 
-    expect(order).toEqual(['update:Final question.', 'stop'])
+    expect(order).toEqual(['signal-stop', 'update:Final question.', 'stop'])
     expect(updateMeeting).toHaveBeenCalledWith('live', {
       notes: 'Final question.',
       title: 'Client planning',
@@ -670,7 +678,7 @@ describe('meetings store', () => {
     expect(store.candidates).toEqual([])
   })
 
-  it('keeps a finalizing meeting selected after Stop', async () => {
+  it('leaves the recording surface as soon as Stop is requested', async () => {
     const store = useMeetingsStore()
     store.applySnapshot({
       ...emptySnapshot,
@@ -687,14 +695,24 @@ describe('meetings store', () => {
         channels: [],
       }],
     })
-    vi.mocked(stopMeeting).mockResolvedValue({
+    let finishStop
+    vi.mocked(stopMeeting).mockImplementation(() => new Promise(resolve => {
+      finishStop = resolve
+    }))
+    const stopping = store.stop()
+    await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
+
+    expect(store.activeMeeting).toBeNull()
+    expect(store.selectedMeeting.lifecycle).toBe('finalizing')
+    expect(store.pending.stop).toBe(true)
+
+    finishStop({
       ...emptySnapshot,
       revision: 3,
-      activeMeetingId: 'm1',
       meetings: [{
         id: 'm1',
         title: 'Planning',
-        lifecycle: 'finalizing',
+        lifecycle: 'ready',
         durationMs: 1200,
         segments: [],
         jobs: [],
@@ -702,9 +720,33 @@ describe('meetings store', () => {
         channels: [],
       }],
     })
-    await store.stop()
-    expect(store.selectedMeeting.lifecycle).toBe('finalizing')
-    expect(store.stopping).toBe(true)
+    await stopping
+    expect(store.selectedMeeting.lifecycle).toBe('ready')
+  })
+
+  it('hides a meeting while native deletion waits for cleanup', async () => {
+    const meeting = {
+      id: 'm1', title: 'Planning', lifecycle: 'ready', durationMs: 1200,
+      segments: [], jobs: [], gaps: [], channels: [],
+    }
+    const store = useMeetingsStore()
+    store.applySnapshot({
+      ...emptySnapshot,
+      revision: 2,
+      meetings: [meeting],
+    })
+    let finishDelete
+    vi.mocked(deleteMeeting).mockImplementation(() => new Promise(resolve => {
+      finishDelete = resolve
+    }))
+
+    const deleting = store.remove('m1')
+    expect(store.meetings).toEqual([])
+    expect(store.pending['delete:m1']).toBe(true)
+
+    finishDelete({ ...emptySnapshot, revision: 3 })
+    await deleting
+    expect(store.meetings).toEqual([])
   })
 
   it('keeps a bounded page for a one-hundred-thousand-segment transcript', async () => {

@@ -1269,6 +1269,7 @@ pub fn run() {
             meetings::commands::meetings_prepare,
             meetings::commands::meetings_issue_start_consent,
             meetings::commands::meetings_start,
+            meetings::commands::meetings_signal_stop,
             meetings::commands::meetings_stop,
             meetings::commands::meetings_set_mic_muted,
             meetings::commands::meetings_update,

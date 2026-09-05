@@ -1,6 +1,27 @@
 use super::*;
 
 impl MeetingRuntime {
+    pub fn signal_stop(&self, meeting_id: &str) -> Result<(), MeetingRuntimeError> {
+        let _operation = self.operation()?;
+        let Some(active) = self.active()?.clone() else {
+            // The full Stop command is idempotent. Its early signal follows
+            // the same rule so a fast native completion is not an error.
+            return Ok(());
+        };
+        if active.meeting_id != meeting_id {
+            return Err(MeetingRuntimeError::NotActiveMeeting {
+                meeting_id: meeting_id.into(),
+            });
+        }
+        self.inner
+            .capture
+            .signal_stop(&CaptureStop {
+                meeting_id: meeting_id.into(),
+                run_id: active.run_id,
+            })
+            .map_err(|message| port_error("meeting capture stop signal", message))
+    }
+
     pub fn stop(&self, meeting_id: &str) -> Result<MeetingSnapshot, MeetingRuntimeError> {
         let _operation = self.operation()?;
         // Drop the guard before the idempotent branch re-enters snapshot

@@ -25,6 +25,7 @@ import {
   runMeetingSummary,
   searchMeetingLibrary,
   showMeetingFiles,
+  signalMeetingStop,
   startMeetingAudioTest,
   stopMeetingAudioTest,
   startMeeting,
@@ -141,6 +142,16 @@ describe('meetings service', () => {
     })
     await stopMeetingAudioTest('test-1')
     expect(invoke).toHaveBeenLastCalledWith('meetings_audio_test_stop', { testId: 'test-1' })
+  })
+
+  it('signals native capture before the full Stop drain', async () => {
+    vi.mocked(invoke).mockResolvedValue()
+
+    await signalMeetingStop('meeting-live-01')
+
+    expect(invoke).toHaveBeenCalledWith('meetings_signal_stop', {
+      meetingId: 'meeting-live-01',
+    })
   })
 
   it('normalizes bounded reviewed tags and validates tag updates before IPC', async () => {

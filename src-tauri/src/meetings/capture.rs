@@ -517,6 +517,17 @@ impl MeetingCapturePort for NativeMeetingCapture {
         Ok(())
     }
 
+    fn signal_stop(&self, request: &CaptureStop) -> Result<(), String> {
+        let sessions = self.sessions()?;
+        let session = sessions
+            .get(&request.meeting_id)
+            .ok_or_else(|| format!("meeting '{}' has no audio worker", request.meeting_id))?;
+        // A disconnected receiver means that the worker already ended. The
+        // joining stop path owns the durable outcome in both cases.
+        let _ = session.stop.send(true);
+        Ok(())
+    }
+
     fn stop(&self, request: &CaptureStop) -> Result<CaptureStopResult, String> {
         let session = self
             .sessions()?

@@ -64,6 +64,31 @@ fn real_time_batches_reject_stale_runs_and_are_idempotent() {
 }
 
 #[test]
+fn stop_signal_reaches_capture_before_the_full_drain() {
+    let fixture = make_fixture();
+    let started = fixture
+        .runtime
+        .start(start_request(&fixture.runtime, "early-stop-signal"))
+        .unwrap();
+    let meeting_id = started.active_meeting_id.unwrap();
+    let run_id = fixture.capture.starts.lock().unwrap()[0].run_id.clone();
+
+    fixture.runtime.signal_stop(&meeting_id).unwrap();
+
+    assert_eq!(
+        fixture.capture.stop_signals.lock().unwrap().as_slice(),
+        [CaptureStop {
+            meeting_id: meeting_id.clone(),
+            run_id,
+        }]
+    );
+    assert!(fixture.capture.stops.lock().unwrap().is_empty());
+
+    fixture.runtime.stop(&meeting_id).unwrap();
+    assert_eq!(fixture.capture.stops.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn stop_finalizes_transcript_then_summary_then_offers_and_queues_kg() {
     let fixture = make_fixture();
     let started = fixture
@@ -600,4 +625,3 @@ fn stop_accepts_a_terminal_marker_after_the_provider_durably_drains_its_tail() {
         "The acknowledged provider tail is durable."
     );
 }
-

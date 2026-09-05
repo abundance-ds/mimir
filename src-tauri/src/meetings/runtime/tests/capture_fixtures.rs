@@ -9,6 +9,7 @@ const LEASE_END: &str = "2026-07-30T10:05:00.000Z";
 #[derive(Default)]
 struct FakeCapture {
     starts: Mutex<Vec<CaptureStart>>,
+    stop_signals: Mutex<Vec<CaptureStop>>,
     stops: Mutex<Vec<CaptureStop>>,
     mute_changes: Mutex<Vec<(String, String, bool)>>,
     recoveries: Mutex<Vec<RecoveryReport>>,
@@ -26,6 +27,11 @@ impl MeetingCapturePort for FakeCapture {
             return Err(error);
         }
         self.starts.lock().unwrap().push(request.clone());
+        Ok(())
+    }
+
+    fn signal_stop(&self, request: &CaptureStop) -> Result<(), String> {
+        self.stop_signals.lock().unwrap().push(request.clone());
         Ok(())
     }
 
@@ -167,4 +173,3 @@ impl MeetingCapturePort for EndedWorkerCapture {
         Ok(())
     }
 }
-
