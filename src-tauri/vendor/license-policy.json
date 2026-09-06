@@ -35,7 +35,7 @@
     "SSPL-"
   ],
   "firstParty": [
-    "cargo:mimir@0.3.1"
+    "cargo:mimir@0.3.2"
   ],
   "overrides": {},
   "vendorComponents": [
