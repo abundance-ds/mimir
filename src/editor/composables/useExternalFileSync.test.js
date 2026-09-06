@@ -152,4 +152,16 @@ describe('external file sync', () => {
     expect(onReloaded).not.toHaveBeenCalled()
     sync.dispose()
   })
+
+  it('invalidates matching binary previews without reading them as text', async () => {
+    await files.openFile('/work/photo.png', '', { kind: 'external' })
+    await files.openFile('/work/report.pdf', '', { kind: 'pdf' })
+    await files.openFile('/work/other.jpg', '', { kind: 'external' })
+    const sync = createSync()
+    await sync.refreshChangedPaths({ paths: ['/work/photo.png', '/work/report.pdf'] })
+    expect(files.openFiles.map(file => file.previewRevision || 0)).toEqual([1, 1, 0])
+    expect(readFile).not.toHaveBeenCalled()
+    expect(onReloaded).not.toHaveBeenCalled()
+    sync.dispose()
+  })
 })

@@ -151,6 +151,13 @@ describe('Editor lifecycle controllers', () => {
     await commands.mimirReveal({ path: '/w/a.md', line: 2, column: 3 })
     expect(fileManager.setActiveTab).toHaveBeenCalledWith(0)
     expect(editorSurfaceRef.value.scrollToPos).toHaveBeenLastCalledWith(8)
+
+    files.value.push({ id: 'svg', path: '/w/logo.svg', kind: 'text', content: '<svg/>', previewView: { scale: 2 } })
+    await commands.mimirReveal({ path: '/w/logo.svg' })
+    expect(currentFile.value.previewView.sourceMode).toBeUndefined()
+    await commands.mimirReveal({ path: '/w/logo.svg', line: 2, column: 3 })
+    expect(currentFile.value.previewView).toEqual({ scale: 2, sourceMode: true })
+    expect(editorSurfaceRef.value.scrollToPos).toHaveBeenLastCalledWith(8)
   })
 
   it('hydrates once, creates the fallback inside the transaction, and owns persistence', async () => {

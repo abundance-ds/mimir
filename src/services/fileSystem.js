@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { fallbackOpenEntry } from '../shared/utils/filePreview.js'
+import { inspectWorkspaceEntry } from './workspaceFileOperations.js'
 
 const isTauri = () => !!window.__TAURI_INTERNALS__
 
@@ -25,13 +27,18 @@ export async function openFileDialog(defaultPath) {
     ...(defaultPath ? { defaultPath } : {}),
     filters: [
       { name: 'Code and Text', extensions: CODE_TEXT_EXTENSIONS },
+      { name: 'Images and PDF', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'pdf'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   })
   if (!selected) return null
   const path = typeof selected === 'string' ? selected : selected.path
-  const result = await invoke('read_text_file', { path })
-  return { path: result.path, content: result.content }
+  let meta
+  try { meta = await inspectWorkspaceEntry(path) } catch { /* Outside the workspace. */ }
+  meta ||= fallbackOpenEntry(path)
+  const kind = meta.openBehavior
+  const content = kind === 'text' ? await readFile(path) : ''
+  return { path, content, kind, meta }
 }
 
 export async function saveFileDialog(defaultPath) {
@@ -69,9 +76,9 @@ export async function openHtmlInBrowser(path) {
   return invoke('open_html_in_browser', { path })
 }
 
-export async function readBinaryFile(path) {
+export async function readBinaryFile(path, { maxBytes } = {}) {
   if (!isTauri()) return new Uint8Array()
-  const result = await invoke('read_binary_file', { path })
+  const result = await invoke('read_binary_file', { path, ...(maxBytes == null ? {} : { maxBytes }) })
   if (result instanceof ArrayBuffer) return new Uint8Array(result)
   if (ArrayBuffer.isView(result)) {
     return new Uint8Array(result.buffer, result.byteOffset, result.byteLength)
@@ -86,4 +93,8 @@ function decodeBase64(value) {
   const bytes = new Uint8Array(decoded.length)
   for (let index = 0; index < decoded.length; index++) bytes[index] = decoded.charCodeAt(index)
   return bytes
+}
+
+export function openPreviewInDefaultApp(path) {
+  return invoke('open_preview_in_default_app', { path })
 }

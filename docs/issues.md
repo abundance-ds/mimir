@@ -5,6 +5,8 @@ task scope.
 
 ## Open
 
+- Image preview: verify physical pinch, default-app opening, and return-focus refresh in the installed macOS app.
+
 - Review the local Git and GitHub CLI dependency after real Team onboarding.
   Keep it while it reuses existing small-team setup with no Mimir-owned token.
   Reconsider GitHub device login only if installing or signing in to `gh`

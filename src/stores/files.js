@@ -286,6 +286,8 @@ export const useFileStore = defineStore('files', () => {
       replacement.newTab = false
       replacement.kind = kind
       replacement.preview = preview
+      replacement.previewView = null
+      replacement.previewRevision = 0
       replacement.meta = meta
       replacement.workspacePath = owningWorkspacePath(path, [
         workspacePath,
@@ -533,7 +535,7 @@ export const useFileStore = defineStore('files', () => {
 
   // Save As
   async function saveAs(file = currentFile.value) {
-    if (!file) return false
+    if (!file || file.kind !== 'text') return false
     const defaultPath = file.path
       || (workspaceScope.value ? `${workspaceScope.value}/untitled.md` : 'untitled.md')
     const path = await saveFileDialog(defaultPath)
@@ -549,7 +551,7 @@ export const useFileStore = defineStore('files', () => {
   async function openDialog() {
     const result = await openFileDialog(workspaceScope.value || undefined)
     if (!result) return
-    await openFile(result.path, result.content)
+    await openFile(result.path, result.content, { kind: result.kind, meta: result.meta })
   }
 
   function moveTab(from, to) {

@@ -83,7 +83,7 @@
           @navigate-comment="commentPresentation.navigateComment"
           @discard-file="requestDiscardFile(currentFile)"
         />
-        <div class="editor-panes flex-1 flex min-h-0 overflow-hidden">
+        <div class="editor-panes flex-1 flex min-h-0 overflow-hidden" :class="{ 'flex-col': isSvgFile }">
           <GitDiffView v-if="gitReviewVisible" />
           <BatchDiffView
             v-else-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
@@ -96,8 +96,14 @@
             @accept="onDiffChunksResolved"
           />
           <FilePreviewPage
-            v-if="isResourcePreview && !visibleDiffActive && !gitReviewVisible"
+            v-if="(isResourcePreview || isSvgFile) && !visibleDiffActive && !gitReviewVisible"
+            :key="`${currentFile.id}:${currentFile.path}`"
             :file="currentFile"
+            :source-mode="svgSourceMode"
+            :prepare-open="preparePreviewOpen"
+            @source-mode="setSvgSourceMode"
+            @refresh="externalFileSync.refreshChangedPaths({ paths: [currentFile.path] })"
+            @view-change="currentFile.previewView = { ...currentFile.previewView, ...$event }"
           />
           <NewTabPage
             v-else-if="isNewTabPage && !visibleDiffActive && !gitReviewVisible"
@@ -351,6 +357,7 @@ import DiffView from './components/workspace/DiffView.vue'
 import BatchDiffView from './components/workspace/BatchDiffView.vue'
 import NewTabPage from './components/workspace/NewTabPage.vue'
 import FilePreviewPage from './components/workspace/FilePreviewPage.vue'
+import { isSvgPath } from '../shared/utils/filePreview.js'
 import GitDiffView from './components/workspace/GitDiffView.vue'
 import GitReviewBar from './components/workspace/GitReviewBar.vue'
 import PendingProposalBar from './components/workspace/PendingProposalBar.vue'
@@ -425,7 +432,25 @@ watch(() => props.workspacePath, (path, previous) => {
 })
 const openFileIds = computed(() => openFiles.value.map(file => file.id))
 const isNewTabPage = computed(() => currentFile.value?.newTab === true)
-const isResourcePreview = computed(() => ['pdf', 'external'].includes(currentFile.value?.kind))
+const isSvgFile = computed(() => currentFile.value?.kind === 'text' && isSvgPath(currentFile.value?.path))
+const svgSourceMode = computed(() => isSvgFile.value && currentFile.value?.previewView?.sourceMode === true)
+const isResourcePreview = computed(() => (
+  ['pdf', 'external'].includes(currentFile.value?.kind) || (isSvgFile.value && !svgSourceMode.value)
+))
+
+function setSvgSourceMode(sourceMode) {
+  flushEditorContent({ bridge: 'flush' })
+  currentFile.value.previewView = { ...currentFile.value.previewView, sourceMode }
+  if (sourceMode) void nextTick(restoreEditorFocus)
+}
+
+async function preparePreviewOpen(file) {
+  if (file.kind !== 'text') return
+  flushEditorContent({ bridge: 'flush' })
+  if (file.dirty && !await saveCurrentFile({ source: 'manual', file })) {
+    throw new Error('Save the file before opening it in the default app.')
+  }
+}
 const editorToolbarVisible = computed(() => (
   editorSettings.editorToolbarMode !== 'none'
   && !isNewTabPage.value
@@ -939,7 +964,11 @@ function prepareWorkspaceSwitch() {
 }
 
 function restoreEditorFocus() {
-  void nextTick(() => editorSurfaceRef.value?.focus?.())
+  void nextTick(() => {
+    if (isResourcePreview.value && !visibleDiffActive.value && !gitReviewVisible.value) {
+      editorShellRef.value?.querySelector('.image-viewport, [data-pdf-preview-viewport]')?.focus({ preventScroll: true })
+    } else editorSurfaceRef.value?.focus?.()
+  })
 }
 
 function selectEditorTab(index) {
@@ -1092,8 +1121,7 @@ async function onOpenDialog() {
 async function onOpenRecent(path) {
   flushEditorContent({ bridge: 'flush' })
   try {
-    const content = await readFile(path)
-    await fileManager.openFile(path, content)
+    await mimirOpen(path)
   } catch {
     fileManager.removeRecentFile(path)
   }

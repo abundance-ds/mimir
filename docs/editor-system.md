@@ -22,6 +22,11 @@ and cleanup. `src/stores/files.js` owns open files and save state.
   native listeners, file-open draining, and Quit guards.
 - Save, rename, move, and Trash must settle pending Editor writes before paths
   or ownership change.
+- SVG previews use the current buffer; source-location requests select Source.
+- External SVG opening saves pending edits first.
+- Preview refresh follows workspace changes and window focus; dirty SVG buffers win.
+- Image view state is tab-local; binary tabs do not persist across restarts.
+- Image reads stop at 64 MiB; the 100-million-pixel check runs after decoding.
 
 ## CodeMirror surface
 

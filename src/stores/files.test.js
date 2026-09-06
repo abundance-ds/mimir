@@ -160,10 +160,10 @@ describe('files store', () => {
     expect(store.visibleRecentFiles).toEqual(['/beta/preview.md', '/beta/b.md'])
   })
 
-  it('keeps PDF and external resource tabs read-only and out of the save pipeline', async () => {
+  it.each(['pdf', 'external'])('keeps %s resource tabs read-only and out of the save pipeline', async kind => {
     const store = useFileStore()
-    await store.openFile('/tmp/report.pdf', '', {
-      kind: 'pdf',
+    await store.openFile(`/tmp/report.${kind === 'pdf' ? 'pdf' : 'png'}`, '', {
+      kind,
       preview: true,
       meta: { size: 2048 },
     })
@@ -172,13 +172,15 @@ describe('files store', () => {
     store.markDirty()
 
     expect(store.currentFile).toMatchObject({
-      kind: 'pdf',
+      kind,
       content: '',
       dirty: false,
       preview: true,
       meta: { size: 2048 },
     })
     await expect(store.save()).resolves.toBe(false)
+    await expect(store.saveAs()).resolves.toBe(false)
+    expect(saveFileDialog).not.toHaveBeenCalled()
     expect(saveFile).not.toHaveBeenCalled()
   })
 

@@ -1,5 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   destroyDocument: vi.fn(),
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   getDocument: mocks.getDocument,
   GlobalWorkerOptions: {},
+  TextLayer: null,
 }))
 
 vi.mock('../../../services/fileSystem.js', () => ({
@@ -19,6 +20,8 @@ vi.mock('../../../services/fileSystem.js', () => ({
 }))
 
 import PdfPreview from './PdfPreview.vue'
+
+enableAutoUnmount(afterEach)
 
 describe('PdfPreview', () => {
   beforeEach(() => {
@@ -71,4 +74,23 @@ describe('PdfPreview', () => {
     expect(canvases[1].attributes('aria-label')).toBe('PDF page 2 of 2')
     expect(wrapper.findAll('.pdf-text-layer')).toHaveLength(2)
   })
+  it('does not discard a new render when an old render fails after refresh', async () => {
+    let failOldRender
+    mocks.render.mockReturnValueOnce({
+      cancel: vi.fn(), promise: new Promise((_, reject) => { failOldRender = reject }),
+    })
+    const wrapper = mount(PdfPreview, { props: { path: '/w/report.pdf' } })
+    await flushPromises()
+    await wrapper.setProps({ revision: 1 })
+    await flushPromises()
+    const rendered = mocks.render.mock.calls.length
+    failOldRender(new Error('Previous document was closed'))
+    await flushPromises()
+    await wrapper.get('[data-pdf-preview-viewport]').trigger('scroll')
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    await flushPromises()
+    expect(mocks.render).toHaveBeenCalledTimes(rendered)
+    wrapper.unmount()
+  })
+
 })

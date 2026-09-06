@@ -467,4 +467,83 @@ describe('Editor Settings bridge', () => {
     expect(diff.active).toBe(true)
     wrapper.unmount()
   })
+
+  it('keeps SVG source and dirty state when switching preview modes, and saves before native open', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const SourceEditor = defineComponent({
+      props: ['content'],
+      setup(props, { expose }) {
+        expose({ getContent: () => props.content, getCursor: () => null, hasFocus: () => false, focus: vi.fn() })
+        return () => null
+      },
+    })
+    const wrapper = mount(App, {
+      props: { embedded: true },
+      global: { plugins: [pinia], stubs: {
+        AppHeader: true, AppFooter: true, SettingsDialog: SettingsDialogStub,
+        EditorSurface: SourceEditor, FilePreviewPage: true, InlineAI: true,
+        DiffBar: true, DiffView: true, BatchDiffView: true, NewTabPage: true,
+        Teleport: true, Transition: false,
+      } },
+    })
+    await flushPromises()
+    const files = useFileStore(pinia)
+    await files.openFile('/outside/logo.svg', '<svg/>')
+    await wrapper.vm.$nextTick()
+    const preview = () => wrapper.findComponent({ name: 'FilePreviewPage' })
+    expect(preview().exists()).toBe(true)
+    expect(preview().props('sourceMode')).toBe(false)
+    preview().vm.$emit('sourceMode', true)
+    await wrapper.vm.$nextTick()
+    expect(preview().props('sourceMode')).toBe(true)
+    files.updateContent('<svg><circle r="5"/></svg>')
+    await wrapper.vm.$nextTick()
+    preview().vm.$emit('sourceMode', false)
+    await wrapper.vm.$nextTick()
+    expect(files.currentFile.content).toBe('<svg><circle r="5"/></svg>')
+    expect(files.currentFile.dirty).toBe(true)
+    await preview().props('prepareOpen')(files.currentFile)
+    expect(saveFile).toHaveBeenCalledWith('/outside/logo.svg', '<svg><circle r="5"/></svg>')
+    expect(files.currentFile.dirty).toBe(false)
+    wrapper.unmount()
+  })
+  it('focuses the visible SVG preview and switches to source for a line request', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const focusSource = vi.fn()
+    const SourceEditor = defineComponent({
+      props: ['content'],
+      setup(props, { expose }) {
+        expose({ getContent: () => props.content, getCursor: () => null, hasFocus: () => false, focus: focusSource, scrollToPos: vi.fn() })
+        return () => null
+      },
+    })
+    const Preview = defineComponent({
+      name: 'FilePreviewPage',
+      props: ['file', 'sourceMode', 'prepareOpen'],
+      template: '<div class="image-viewport" tabindex="0"/>',
+    })
+    const wrapper = mount(App, {
+      props: { embedded: true }, attachTo: document.body,
+      global: { plugins: [pinia], stubs: {
+        AppHeader: true, AppFooter: true, SettingsDialog: SettingsDialogStub,
+        EditorSurface: SourceEditor, FilePreviewPage: Preview, InlineAI: true,
+        DiffBar: true, DiffView: true, BatchDiffView: true, NewTabPage: true,
+        Teleport: true, Transition: false,
+      } },
+    })
+    await flushPromises()
+    await useFileStore(pinia).openFile('/outside/logo.svg', '<svg/>')
+    await wrapper.vm.mimirReveal({ path: '/outside/logo.svg' })
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('.image-viewport').element)
+    focusSource.mockClear()
+    await wrapper.vm.mimirReveal({ path: '/outside/logo.svg', line: 1 })
+    await flushPromises()
+    expect(wrapper.findComponent(Preview).props('sourceMode')).toBe(true)
+    expect(focusSource).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
 })

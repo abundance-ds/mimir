@@ -1,7 +1,19 @@
 <template>
+  <ImagePreview
+    v-if="imageMimeType(file.path)"
+    :file="file"
+    :source-mode="sourceMode"
+    :action-error="actionError"
+    :opening="opening"
+    @open-native="openNative"
+    @source-mode="$emit('sourceMode', $event)"
+    @view-change="$emit('viewChange', $event)"
+  />
   <PdfPreview
-    v-if="file?.kind === 'pdf'"
+    v-else-if="file?.kind === 'pdf'"
     :path="file.path"
+    :revision="file.previewRevision || 0"
+    :action-error="actionError"
     @open-native="openNative"
   />
 
@@ -66,13 +78,16 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   IconExternalLink,
   IconFileUnknown,
   IconFolderSymlink,
 } from '@tabler/icons-vue'
 import PdfPreview from './PdfPreview.vue'
+import ImagePreview from './ImagePreview.vue'
+import { imageMimeType } from '../../../shared/utils/filePreview.js'
+import { openPreviewInDefaultApp } from '../../../services/fileSystem.js'
 import {
   openWorkspaceEntryNative,
   revealWorkspaceEntry,
@@ -81,9 +96,16 @@ import { basename } from '../../../shared/utils/path.js'
 
 const props = defineProps({
   file: { type: Object, required: true },
+  sourceMode: Boolean,
+  prepareOpen: { type: Function, default: async () => {} },
 })
 
+const emit = defineEmits(['sourceMode', 'viewChange', 'refresh'])
+const refreshOnFocus = () => emit('refresh')
+onMounted(() => window.addEventListener('focus', refreshOnFocus))
+onUnmounted(() => window.removeEventListener('focus', refreshOnFocus))
 const actionError = ref('')
+const opening = ref(false)
 const name = computed(() => basename(props.file?.path))
 const extension = computed(() => name.value.split('.').at(-1)?.toUpperCase() || 'FILE')
 const fileType = computed(() => props.file?.kind === 'pdf' ? 'PDF document' : `${extension.value} file`)
@@ -94,7 +116,16 @@ const modifiedLabel = computed(() => {
 })
 
 async function openNative() {
-  await run(() => openWorkspaceEntryNative(props.file.path), 'The default application could not open this file.')
+  if (opening.value) return
+  const file = props.file
+  const path = file.path
+  const open = imageMimeType(path) || file.kind === 'pdf' ? openPreviewInDefaultApp : openWorkspaceEntryNative
+  opening.value = true
+  await run(async () => {
+    await props.prepareOpen(file)
+    await open(path)
+  }, 'The default application could not open this file.')
+  opening.value = false
 }
 
 async function reveal() {

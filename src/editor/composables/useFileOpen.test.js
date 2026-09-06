@@ -180,4 +180,13 @@ describe('useFileOpen', () => {
     await vi.waitFor(() => expect(onError).toHaveBeenCalled())
     expect(onError.mock.calls[0][0].message).toBe('window unavailable')
   })
+
+  it('opens native image and PDF requests without reading them as text', async () => {
+    pendingQueue.push('/outside/photo.jpg', '/outside/report.pdf', '/outside/logo.svg')
+    const { wrapper } = mountComposable(() => useFileOpen())
+    await vi.waitFor(() => expect(filesStore.openFiles).toHaveLength(3))
+    expect(filesStore.openFiles.map(file => file.kind)).toEqual(['external', 'pdf', 'text'])
+    expect(invoke.mock.calls.filter(([command]) => command === 'read_text_file').map(([, args]) => args.path)).toEqual(['/outside/logo.svg'])
+    wrapper.unmount()
+  })
 })

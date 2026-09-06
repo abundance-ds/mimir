@@ -175,8 +175,8 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn read_binary_file(path: String) -> Result<tauri::ipc::Response, String> {
-    let bytes = std::fs::read(&path).map_err(|e| format!("Could not read {}: {}", path, e))?;
+fn read_binary_file(path: String, max_bytes: Option<u64>) -> Result<tauri::ipc::Response, String> {
+    let bytes = file_open::read_binary_bytes(&path, max_bytes)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1337,6 +1337,7 @@ pub fn run() {
             file_open::take_pending_files,
             file_open::open_files_in_editor,
             file_open::open_html_in_browser,
+            file_open::open_preview_in_default_app,
             file_index_commands::file_index_open,
             file_index_commands::file_index_files,
             file_index_commands::file_index_filter,

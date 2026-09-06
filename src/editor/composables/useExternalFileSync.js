@@ -58,7 +58,12 @@ export function useExternalFileSync({
 
     const refreshes = []
     for (const file of fileManager.openFiles) {
-      if (!isCleanTextFile(file) || !changed.has(normalizePath(file.path))) continue
+      if (!changed.has(normalizePath(file.path))) continue
+      if (file.kind !== 'text') {
+        file.previewRevision = (file.previewRevision || 0) + 1
+        continue
+      }
+      if (!isCleanTextFile(file)) continue
       const path = file.path
       const version = nextRefreshVersion(path)
       refreshes.push(

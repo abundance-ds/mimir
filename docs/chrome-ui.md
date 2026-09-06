@@ -88,6 +88,7 @@ Heights include the rule. Layer is the background token.
 | Scribe detail bar | `ScribeApp.vue` | Back, save state, Continue, menu | 40 px |
 | Scribe settings header | `scribe/ScribeSettings.vue` | Title | 40 px |
 | PDF preview | `editor/components/workspace/PdfPreview.vue` | Page controls | 40 px |
+| Image preview | `editor/components/workspace/ImagePreview.vue` | SVG view, Fit, actual size, zoom, native open | |
 | File history | `FileHistoryPanel.vue` | Title, close | 40 px |
 | Embedded app host | `EmbeddedAppHost.vue` | App name, controls | 36 px |
 | Launch plan host | `LaunchPlanHost.vue` | Title | 40 px, no layer |

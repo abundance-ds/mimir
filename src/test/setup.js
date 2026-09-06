@@ -105,7 +105,7 @@ const VALID_TAURI_COMMANDS = new Set([
   // file indexing and content search
   'file_index_open', 'file_index_files', 'file_index_filter', 'file_index_refresh',
   'file_index_begin_search', 'file_index_cancel_search', 'file_index_search',
-  'open_html_in_browser',
+  'open_html_in_browser', 'open_preview_in_default_app',
   'workspace_file_list_directory', 'workspace_file_inspect', 'workspace_file_create', 'workspace_file_rename',
   'workspace_file_move', 'workspace_file_duplicate', 'workspace_file_import', 'workspace_file_trash',
   'workspace_file_open_native', 'workspace_file_reveal',

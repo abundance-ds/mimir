@@ -1,4 +1,5 @@
 use std::{
+    io::Read,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -101,6 +102,59 @@ fn resolve_html_path(path: &str) -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn open_html_in_browser(path: String) -> Result<(), String> {
     let target = resolve_html_path(&path)?;
+    tauri_plugin_opener::open_path(&target, None::<&str>)
+        .map_err(|error| format!("Could not open {}: {error}", target.display()))
+}
+
+pub(crate) fn read_binary_bytes(path: &str, max_bytes: Option<u64>) -> Result<Vec<u8>, String> {
+    let Some(limit) = max_bytes else {
+        return std::fs::read(path).map_err(|error| format!("Could not read {path}: {error}"));
+    };
+    let too_large =
+        || "This image is too large to preview. Open it in the default app.".to_string();
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("Could not read {path}: {error}"))?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("The preview path is not a file.".into());
+    }
+    if metadata.len() > limit {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read {path}: {error}"))?;
+    if bytes.len() as u64 > limit {
+        return Err(too_large());
+    }
+    Ok(bytes)
+}
+
+fn resolve_preview_path(path: &str) -> Result<PathBuf, String> {
+    let target = PathBuf::from(path)
+        .canonicalize()
+        .map_err(|error| format!("Could not open {path}: {error}"))?;
+    if !target.is_file() {
+        return Err("The preview path is not a file.".into());
+    }
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "pdf" | "jpg" | "jpeg" | "png" | "webp" | "gif" | "svg"
+    ) {
+        return Err("Only images and PDF files can open from a preview.".into());
+    }
+    Ok(target)
+}
+
+#[tauri::command]
+pub fn open_preview_in_default_app(path: String) -> Result<(), String> {
+    let target = resolve_preview_path(&path)?;
     tauri_plugin_opener::open_path(&target, None::<&str>)
         .map_err(|error| format!("Could not open {}: {error}", target.display()))
 }
@@ -235,5 +289,50 @@ mod tests {
             resolve_html_path(file.to_str().unwrap()).unwrap_err(),
             "Only HTML files can open in the browser."
         );
+    }
+    #[test]
+    fn preview_paths_accept_images_and_pdfs_outside_the_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        for name in [
+            "photo.JPG",
+            "photo.jpeg",
+            "photo.png",
+            "photo.webp",
+            "photo.gif",
+            "logo.svg",
+            "report.pdf",
+        ] {
+            let file = directory.path().join(name);
+            std::fs::write(&file, "sample").unwrap();
+            assert_eq!(
+                resolve_preview_path(file.to_str().unwrap()).unwrap(),
+                file.canonicalize().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn preview_paths_reject_missing_files_directories_and_other_types() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(resolve_preview_path(directory.path().to_str().unwrap()).is_err());
+        assert!(
+            resolve_preview_path(directory.path().join("missing.png").to_str().unwrap()).is_err()
+        );
+        let file = directory.path().join("script.sh");
+        std::fs::write(&file, "echo sample").unwrap();
+        assert!(resolve_preview_path(file.to_str().unwrap()).is_err());
+    }
+    #[test]
+    fn bounded_binary_reads_accept_the_limit_and_reject_larger_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("photo.png");
+        std::fs::write(&file, [1, 2, 3]).unwrap();
+        let path = file.to_str().unwrap();
+        assert_eq!(read_binary_bytes(path, Some(3)).unwrap(), vec![1, 2, 3]);
+        assert!(read_binary_bytes(path, Some(2))
+            .unwrap_err()
+            .contains("too large"));
+        assert_eq!(read_binary_bytes(path, None).unwrap(), vec![1, 2, 3]);
+        assert!(read_binary_bytes(directory.path().to_str().unwrap(), Some(3)).is_err());
     }
 }

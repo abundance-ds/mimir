@@ -1,4 +1,5 @@
 import { nextTick } from 'vue'
+import { fallbackOpenEntry, isSvgPath } from '../../shared/utils/filePreview.js'
 import { readFile } from '../../services/fileSystem.js'
 import { inspectWorkspaceEntry } from '../../services/workspaceFileOperations.js'
 import { basename } from '../../shared/utils/path.js'
@@ -228,6 +229,11 @@ export function useEditorCommandApi({
         await mimirOpen(path)
       }
     }
+    const file = currentFile.value
+    if (file?.kind === 'text' && isSvgPath(file.path)
+      && [line, column, offset].some(Number.isFinite)) {
+      file.previewView = { ...file.previewView, sourceMode: true }
+    }
     await nextTick()
     const view = editorSurfaceRef.value?.getView?.()
     let position = Number.isFinite(offset) ? offset : 0
@@ -289,25 +295,3 @@ export function useEditorCommandApi({
     mimirTabs,
   }
 }
-
-function fallbackOpenEntry(path) {
-  const name = basename(path)
-  const extension = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
-  const openBehavior = extension === 'pdf'
-    ? 'pdf'
-    : FALLBACK_EXTERNAL_EXTENSIONS.has(extension) ? 'external' : 'text'
-  return {
-    path,
-    name,
-    isDirectory: false,
-    textReadable: openBehavior === 'text',
-    openBehavior,
-  }
-}
-
-const FALLBACK_EXTERNAL_EXTENSIONS = new Set([
-  '7z', 'avi', 'bmp', 'db', 'dll', 'dylib', 'eot', 'exe', 'gif', 'gz', 'ico',
-  'jar', 'jpeg', 'jpg', 'mkv', 'mov', 'mp3', 'mp4', 'otf', 'png', 'rar', 'so',
-  'sqlite', 'sqlite3', 'tar', 'tiff', 'ttf', 'wav', 'wasm', 'webp', 'woff',
-  'woff2', 'zip',
-])

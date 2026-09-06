@@ -73,8 +73,10 @@
       </button>
     </header>
 
+    <p v-if="actionError" role="alert" class="border-b border-rule px-3 py-2 text-[11px] text-rem">{{ actionError }}</p>
     <div
       ref="scroller"
+      data-pdf-preview-viewport
       tabindex="0"
       class="min-h-0 flex-1 overflow-auto bg-chrome p-6 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       @scroll="onScroll"
@@ -139,6 +141,8 @@ import { readBinaryFile } from '../../../services/fileSystem.js'
 
 const props = defineProps({
   path: { type: String, required: true },
+  revision: { type: Number, default: 0 },
+  actionError: { type: String, default: '' },
 })
 
 defineEmits(['openNative'])
@@ -166,10 +170,13 @@ let resizeObserver = null
 let resizeTimer = 0
 let scrollQueued = false
 let suppressScrollSync = false
+let refreshScroll = 0
 const pageEls = new Map()
 const rendered = new Map()
 
-watch(() => props.path, load, { immediate: true })
+watch(() => [props.path, props.revision], (next, previous) => {
+  void load(Boolean(previous && next[0] === previous[0]))
+}, { immediate: true })
 
 watch(scale, async (next, prev) => {
   if (!pdfDocument || !prev || next === prev) return
@@ -189,7 +196,11 @@ onMounted(() => {
   resizeObserver.observe(scroller.value)
 })
 
-async function load() {
+async function load(preserveView = false) {
+  const previousScroll = preserveView
+    ? loading.value ? refreshScroll : scroller.value?.scrollTop || 0
+    : 0
+  refreshScroll = previousScroll
   const current = ++generation
   loading.value = true
   error.value = ''
@@ -197,10 +208,12 @@ async function load() {
   pageCount.value = 0
   pages.value = []
   clearRendered()
-  await documentTask?.destroy?.()
+  const previousTask = documentTask
   documentTask = null
   pdfDocument = null
   try {
+    await previousTask?.destroy?.()
+    if (current !== generation) return
     const [lib, bytes] = await Promise.all([
       import('pdfjs-dist/legacy/build/pdf.mjs'),
       readBinaryFile(props.path),
@@ -208,9 +221,11 @@ async function load() {
     if (current !== generation) return
     pdfLib = lib
     lib.GlobalWorkerOptions.workerSrc = workerUrl
-    documentTask = lib.getDocument({ data: bytes })
-    pdfDocument = await documentTask.promise
+    const task = lib.getDocument({ data: bytes })
+    documentTask = task
+    const document = await task.promise
     if (current !== generation) return
+    pdfDocument = document
     pageCount.value = pdfDocument.numPages
     const first = await pdfDocument.getPage(1)
     if (current !== generation) return
@@ -225,7 +240,8 @@ async function load() {
     await nextTick()
     if (current !== generation) return
     measureFit()
-    if (scroller.value) scroller.value.scrollTop = 0
+    if (scroller.value) scroller.value.scrollTop = previousScroll
+    pageNumber.value = currentPageFromScroll()
     renderVisible()
   } catch (cause) {
     if (current !== generation) return
@@ -348,7 +364,7 @@ async function renderPage(index) {
     renderTextLayer(entry, page, host, viewport)
     await entry.task.promise
   } catch (cause) {
-    if (cause?.name !== 'RenderingCancelledException') rendered.delete(index)
+    if (cause?.name !== 'RenderingCancelledException' && rendered.get(index) === entry) evict(index)
   }
 }
 

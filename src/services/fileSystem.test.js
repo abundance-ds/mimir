@@ -36,6 +36,21 @@ describe('openFileDialog', () => {
       defaultPath: expect.anything(),
     }))
   })
+  it.each(['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf'])('opens %s outside the workspace without a UTF-8 read', async extension => {
+    open.mockResolvedValueOnce(`/outside/photo.${extension}`)
+    invoke.mockRejectedValueOnce(new Error('Outside workspace'))
+    const result = await openFileDialog()
+    expect(result).toMatchObject({ path: `/outside/photo.${extension}`, content: '', kind: extension === 'pdf' ? 'pdf' : 'external' })
+    expect(invoke).not.toHaveBeenCalledWith('read_text_file', expect.anything())
+  })
+
+  it('keeps SVG source available for editing', async () => {
+    open.mockResolvedValueOnce('/outside/logo.svg')
+    invoke.mockRejectedValueOnce(new Error('Outside workspace'))
+    invoke.mockResolvedValueOnce({ path: '/outside/logo.svg', content: '<svg/>' })
+    expect(await openFileDialog()).toMatchObject({ kind: 'text', content: '<svg/>' })
+  })
+
 })
 
 describe('readBinaryFile', () => {
@@ -58,6 +73,12 @@ describe('readBinaryFile', () => {
       new Uint8Array([37, 80, 68, 70]),
     )
     expect(invoke).toHaveBeenCalledWith('read_binary_file', { path: '/w/report.pdf' })
+  })
+
+  it('passes the image byte limit to the native reader', async () => {
+    invoke.mockResolvedValueOnce(new Uint8Array([1]).buffer)
+    await readBinaryFile('/w/photo.png', { maxBytes: 64 * 1024 * 1024 })
+    expect(invoke).toHaveBeenCalledWith('read_binary_file', { path: '/w/photo.png', maxBytes: 64 * 1024 * 1024 })
   })
 
   it('accepts legacy base64 responses during upgrades', async () => {

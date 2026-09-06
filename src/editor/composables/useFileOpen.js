@@ -1,6 +1,8 @@
 import { onUnmounted } from 'vue'
 import { useFileStore } from '../../stores/files.js'
 import { readFile } from '../../services/fileSystem.js'
+import { inspectWorkspaceEntry } from '../../services/workspaceFileOperations.js'
+import { fallbackOpenEntry } from '../../shared/utils/filePreview.js'
 
 const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
 
@@ -21,9 +23,13 @@ export function useFileOpen({
     for (const path of paths || []) {
       if (disposed) return
       try {
-        const content = await readFile(path)
+        let meta
+        try { meta = await inspectWorkspaceEntry(path) } catch { /* Outside the workspace. */ }
+        meta ||= fallbackOpenEntry(path)
+        const kind = meta.openBehavior
+        const content = kind === 'text' ? await readFile(path) : ''
         if (disposed) return
-        await fileStore.openFile(path, content)
+        await fileStore.openFile(path, content, { kind, meta })
         if (disposed) return
         onOpened(path)
       } catch (error) {

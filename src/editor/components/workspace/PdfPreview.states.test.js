@@ -146,4 +146,28 @@ describe('PdfPreview states and controls', () => {
     wrapper.unmount()
     expect(mocks.destroyDocument).toHaveBeenCalled()
   })
+  it('reloads a changed PDF without losing its zoom or scroll position', async () => {
+    const wrapper = mountPreview()
+    await flushPromises()
+    await wrapper.get('[aria-label="Zoom in"]').trigger('click')
+    await flushPromises()
+    const viewport = wrapper.get('[tabindex="0"]').element
+    viewport.scrollTop = 320
+    await wrapper.setProps({ revision: 1 })
+    await flushPromises()
+    expect(mocks.readBinaryFile).toHaveBeenCalledTimes(2)
+    expect(mocks.destroyDocument).toHaveBeenCalledTimes(1)
+    expect(viewport.scrollTop).toBe(320)
+    expect(wrapper.get('[title="Fit page width"]').text()).toBe('110%')
+    wrapper.unmount()
+  })
+
+  it('keeps native-open errors visible above the PDF', async () => {
+    const wrapper = mountPreview()
+    await wrapper.setProps({ actionError: 'No application is registered.' })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('No application is registered.')
+    wrapper.unmount()
+  })
+
 })
