@@ -1,8 +1,8 @@
 <template>
   <div ref="board" data-graph-work-board class="work-board">
-    <div v-if="!issues.length && !searchQuery" class="board-empty">
+    <div v-if="!boardColumns.length || (!issues.length && !searchQuery && !(groupBy === 'project' && showEmptyProjects))" class="board-empty">
       <h2>No work matches this view</h2>
-      <p>Create work, broaden the project, owner, or priority filter, or include another scope.</p>
+      <p>{{ emptyCopy }}</p>
       <button
         type="button"
         data-graph-control="board-empty-create"
@@ -221,17 +221,20 @@ import {
 
 const props = defineProps({
   issues: { type: Array, default: () => [] },
-  /** Keep the No project column stable while search filters visible cards. */
+  /** Apply task filters but not search, so project columns stay in place. */
   unfilteredIssues: { type: Array, default: null },
+  showEmptyProjects: { type: Boolean, default: false },
   nodes: { type: Array, default: () => [] },
   projects: { type: Array, default: () => [] },
   groupBy: { type: String, default: 'status' },
+  statuses: { type: Array, default: () => WORK_STATUSES },
   collapsedStatuses: { type: Array, default: () => [] },
   /** Person id the reader is; that assignee renders as "you". */
   selfId: { type: String, default: '' },
   /** Hide the project token when one project already scopes the board. */
   hideProject: { type: Boolean, default: false },
   searchQuery: { type: String, default: '' },
+  emptyCopy: { type: String, default: 'Create work, broaden the project, owner, or priority filter, or include another scope.' },
 })
 
 const emit = defineEmits([
@@ -264,9 +267,8 @@ defineExpose({
   },
 })
 
-const statuses = WORK_STATUSES
 const statusOptions = Object.freeze(
-  statuses.map(status => ({ value: status.id, label: status.label })),
+  WORK_STATUSES.map(status => ({ value: status.id, label: status.label })),
 )
 const priorities = Object.freeze([
   { value: 'urgent', label: 'Urgent', icon: IconExclamationMark },
@@ -282,19 +284,19 @@ const priorityIcons = Object.freeze({
 })
 const priorityOrder = ['low', 'normal', 'high', 'urgent']
 const projectIds = computed(() => new Set(props.projects.map(project => project.id)))
-const hasNoProject = computed(() => (props.unfilteredIssues || props.issues)
-  .some(issue => workProjectId(issue, projectIds.value) === UNASSIGNED))
+const occupiedProjects = computed(() => new Set((props.unfilteredIssues || props.issues)
+  .map(issue => workProjectId(issue, projectIds.value))))
 const boardColumns = computed(() => {
   if (props.groupBy === 'project') {
     return [
-      ...props.projects.map(project => ({
+      ...props.projects.filter(project => props.showEmptyProjects || occupiedProjects.value.has(project.id)).map(project => ({
         id: project.id,
         label: project.title || project.properties?.slug || project.slug || 'Untitled project',
       })),
-      ...(hasNoProject.value ? [{ id: UNASSIGNED, label: 'No project' }] : []),
+      ...(occupiedProjects.value.has(UNASSIGNED) ? [{ id: UNASSIGNED, label: 'No project' }] : []),
     ]
   }
-  return statuses
+  return props.statuses
 })
 const grouped = computed(() => Object.fromEntries(
   boardColumns.value.map(column => [

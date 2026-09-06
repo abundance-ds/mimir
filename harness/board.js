@@ -23,6 +23,7 @@ const iso = offset => {
 const projects = [
   { id: 'project-atlas', kind: 'project', title: 'Atlas', properties: { slug: 'atlas' } },
   { id: 'project-ember', kind: 'project', title: 'Ember', properties: { slug: 'ember' } },
+  { id: 'project-retired', kind: 'project', title: 'Retired project' },
 ]
 const people = [
   { id: 'person-waq', kind: 'person', title: 'Waq Rahman', teamMember: true, status: 'active' },
@@ -48,6 +49,7 @@ const titles = {
   ],
   review: ['QC extraction sheet', 'Internal readout deck'],
   done: ['Kickoff notes filed', 'Feasibility count'],
+  cancelled: ['Retired comparator analysis'],
 }
 const priorities = ['urgent', 'high', 'normal', 'low', 'normal', 'high']
 const statuses = Object.keys(titles)
@@ -93,7 +95,11 @@ const app = createApp({
       priorityFilter: state.priorityFilter.value, priorityOptions: state.priorityFilterOptions,
       groupBy: state.boardGroup.value, groupOptions: state.boardGroupOptions,
       sortBy: state.boardSort.value, sortOptions: state.boardSortOptions,
-      statuses: state.boardStatuses, collapsedStatuses: state.collapsedBoardStatuses.value,
+      statuses: state.boardStatuses.value, collapsedStatuses: state.collapsedBoardStatuses.value,
+      showClosedIssues: state.showClosedIssues.value,
+      showEmptyProjects: state.showEmptyProjects.value,
+      'onUpdate:showEmptyProjects': value => { state.showEmptyProjects.value = value },
+      'onUpdate:showClosedIssues': value => { state.showClosedIssues.value = value },
       onSetView: value => { graph.view = value },
       'onUpdate:projectFilter': value => { state.projectFilter.value = value },
       'onUpdate:assigneeFilter': value => { state.assigneeFilter.value = value },
@@ -123,7 +129,9 @@ const app = createApp({
           })
         : h(WorkBoard, {
             issues: state.boardIssues.value,
-            unfilteredIssues: issues,
+            unfilteredIssues: state.unsearchedWorkIssues.value,
+            showEmptyProjects: state.showEmptyProjects.value,
+            statuses: state.boardStatuses.value,
             searchQuery: graph.searchQuery,
             nodes: [...projects, ...people, ...issues],
             projects,

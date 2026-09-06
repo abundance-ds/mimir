@@ -1,5 +1,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { graphErrorMessage } from './graphErrors.js'
+import { isClosedIssue, workProjectId } from './workRow.js'
 
 export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall, restoreGraphFocus }) {
   const createOpen = ref(false)
@@ -16,6 +17,50 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
   const deleting = ref(false)
   const deleteError = ref('')
   const undoError = ref('')
+  const closedIssueUndo = ref(null)
+  const closedIssueUndoError = ref('')
+  const undoingClosedIssues = ref(false)
+
+  function offerClosedUndo(entries) {
+    if (!entries.length) return
+    closedIssueUndo.value = { entries }
+    closedIssueUndoError.value = ''
+  }
+
+  function dismissClosedIssueUndo() {
+    if (undoingClosedIssues.value) return
+    closedIssueUndo.value = null
+    closedIssueUndoError.value = ''
+  }
+
+  async function undoClosedIssues() {
+    if (!closedIssueUndo.value || undoingClosedIssues.value) return
+    const request = closedIssueUndo.value
+    undoingClosedIssues.value = true
+    closedIssueUndoError.value = ''
+    const failed = []
+    const failures = []
+    try {
+      for (const entry of request.entries) {
+        try {
+          // Use the revision returned by closing, never the latest revision:
+          // Undo must not overwrite an edit made since the issue was closed.
+          await graph.update(entry.patch)
+          echoToolCall('issues.move', { id: entry.patch.id, status: entry.status || 'backlog' })
+        } catch (cause) {
+          failed.push(entry)
+          failures.push(`${entry.title}: ${graphErrorMessage(cause)}`)
+        }
+      }
+      if (closedIssueUndo.value === request) {
+        closedIssueUndo.value = failed.length ? { entries: failed } : null
+        closedIssueUndoError.value = failures.join('; ')
+      }
+      if (failures.length) diagnostic(`Could not undo: ${failures.join('; ')}`)
+    } finally {
+      undoingClosedIssues.value = false
+    }
+  }
 
   const deleteTitle = computed(() => (
     `Move “${deleteRequest.value?.title || deleteRequest.value?.id || 'this object'}” to Trash?`
@@ -97,7 +142,9 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
     saveError.value = ''
     try {
       validateIssueEntityRelations(graph, patch)
+      const before = graph.nodes.find(node => node.id === patch.id)
       const updated = await graph.update(patch)
+      offerClosedUndo(closedUndoEntries(before, updated, patch))
       const currentScopeId = updated.provenance?.scopeId || updated.scopeId || ''
       const targetScopeId = String(options.targetScopeId || '').trim()
       if (targetScopeId && targetScopeId !== currentScopeId) {
@@ -165,7 +212,8 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
   async function moveIssue({ issue, status, projectId = null }) {
     try {
       const patch = issueMovePatch(issue, status, projectId)
-      await graph.update(patch)
+      const updated = await graph.update(patch)
+      offerClosedUndo(closedUndoEntries(issue, updated, patch))
       if (status !== undefined) echoToolCall('issues.move', { id: issue.id, status })
       else echoToolCall('issues.update', { id: issue.id, project: projectId || '' })
     } catch (cause) {
@@ -175,12 +223,14 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
 
   async function patchIssue({ issue, setProperties = {}, removeProperties = [] }) {
     try {
-      await graph.update({
+      const patch = {
         id: issue.id,
         expectedRevision: issue.sourceRevision,
         setProperties,
         removeProperties,
-      })
+      }
+      const updated = await graph.update(patch)
+      offerClosedUndo(closedUndoEntries(issue, updated, patch))
       const { rank, ...visible } = setProperties
       if (Object.keys(visible).length) echoToolCall('issues.update', { id: issue.id, ...visible })
       else if (removeProperties.length) echoToolCall('graph.update', { id: issue.id, removeProperties })
@@ -191,45 +241,57 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
 
   async function bulkPatchIssues({ issues, setProperties = {}, removeProperties = [] }) {
     const failures = []
+    const undoEntries = []
     for (const issue of issues) {
       try {
-        await graph.update({
+        const patch = {
           id: issue.id,
           expectedRevision: issue.sourceRevision,
           setProperties,
           removeProperties,
-        })
+        }
+        const updated = await graph.update(patch)
+        undoEntries.push(...closedUndoEntries(issue, updated, patch))
+        if (setProperties.status !== undefined) echoToolCall('issues.move', { id: issue.id, status: setProperties.status })
       } catch (cause) {
         failures.push(`${issue.title || issue.id}: ${graphErrorMessage(cause)}`)
       }
     }
     reportBulkFailures('Bulk update', failures, diagnostic)
+    offerClosedUndo(undoEntries)
   }
 
   async function bulkMoveIssues({ issues, columnId, groupBy }) {
+    if (groupBy !== 'project') {
+      await bulkPatchIssues({ issues, setProperties: { status: columnId } })
+      return
+    }
     for (const issue of issues) {
-      await moveIssue(groupBy === 'project'
-        ? { issue, projectId: columnId === '__unassigned__' ? '' : columnId }
-        : { issue, status: columnId })
+      await moveIssue({ issue, projectId: columnId === '__unassigned__' ? '' : columnId })
     }
   }
 
   async function reorderIssue({ issue, columnId, beforeId, groupBy }) {
+    const projectIds = groupBy === 'project'
+      ? new Set(graph.projects.map(project => project.id))
+      : null
+    const columnFor = candidate => groupBy === 'project'
+      ? workProjectId(candidate, projectIds)
+      : (candidate.status || 'backlog')
+    const changesColumn = columnFor(issue) !== columnId
     const target = boardIssues.value.filter(candidate => (
-      candidate.id !== issue.id
-      && (groupBy === 'project'
-        ? (candidate.projectId || '__unassigned__') === columnId
-        : (candidate.status || 'backlog') === columnId)
+      candidate.id !== issue.id && columnFor(candidate) === columnId
     ))
     const beforeIndex = beforeId ? target.findIndex(candidate => candidate.id === beforeId) : -1
     target.splice(beforeIndex >= 0 ? beforeIndex : target.length, 0, issue)
 
     const failures = []
     for (const [index, candidate] of target.entries()) {
-      const patch = reorderPatch(candidate, issue.id, columnId, groupBy, index)
+      const patch = reorderPatch(candidate, issue.id, columnId, groupBy, index, changesColumn)
       try {
-        await graph.update(patch)
-        if (candidate.id === issue.id) {
+        const updated = await graph.update(patch)
+        if (candidate.id === issue.id && changesColumn) {
+          offerClosedUndo(closedUndoEntries(issue, updated, patch))
           echoToolCall(
             groupBy === 'project' ? 'issues.update' : 'issues.move',
             groupBy === 'project'
@@ -280,7 +342,30 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
     saving,
     undoDelete,
     undoError,
+    closedIssueUndo,
+    closedIssueUndoError,
+    undoingClosedIssues,
+    undoClosedIssues,
+    dismissClosedIssueUndo,
   }
+}
+
+function closedUndoEntries(issue, updated, patch) {
+  if (issue?.kind !== 'issue' || isClosedIssue(issue)
+    || !isClosedIssue({ status: patch.setProperties?.status })) return []
+  const revision = updated.provenance?.sourceRevision || updated.sourceRevision
+  if (!revision) return []
+  const setProperties = {}
+  const removeProperties = []
+  for (const key of ['status', ...(patch.setProperties.rank !== undefined ? ['rank'] : [])]) {
+    if (issue[key] === undefined || issue[key] === null || issue[key] === '') removeProperties.push(key)
+    else setProperties[key] = issue[key]
+  }
+  return [{
+    title: issue.title || 'Issue',
+    status: issue.status,
+    patch: { id: issue.id, expectedRevision: revision, setProperties, removeProperties },
+  }]
 }
 
 function uniqueRelations(relations) {
@@ -324,13 +409,15 @@ function issueMovePatch(issue, status, projectId) {
   return patch
 }
 
-function reorderPatch(candidate, movedId, columnId, groupBy, index) {
+function reorderPatch(candidate, movedId, columnId, groupBy, index, changesColumn) {
   const patch = {
     id: candidate.id,
     expectedRevision: candidate.sourceRevision,
     setProperties: { rank: (index + 1) * 1000 },
   }
-  if (candidate.id !== movedId) return patch
+  // A reorder within a column changes rank only. In particular, do not erase
+  // unresolved project references just because they render under No project.
+  if (candidate.id !== movedId || !changesColumn) return patch
   if (groupBy !== 'project') {
     patch.setProperties.status = columnId
     return patch

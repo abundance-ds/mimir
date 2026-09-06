@@ -37,6 +37,11 @@
       :has-workspace="Boolean(workspacePath)"
       :last-deletion="graph.lastDeletion"
       :undo-error="undoError"
+      :closed-issue-undo="closedIssueUndo"
+      :closed-issue-undo-error="closedIssueUndoError"
+      :undoing-closed-issues="undoingClosedIssues"
+      @undo-closed-issues="undoClosedIssues"
+      @dismiss-closed-issue-undo="dismissClosedIssueUndo"
       @retry="refresh"
       @choose-workspace="$emit('chooseWorkspace')"
       @undo="undoDelete"
@@ -76,6 +81,9 @@
       :filing-meeting-id="filingMeetingId"
       :filing-error="filingError"
       :board-issues="boardIssues"
+      :unsearched-work-issues="unsearchedWorkIssues"
+      :show-closed-issues="showClosedIssues"
+      :show-empty-projects="showEmptyProjects"
       :save-error="saveError"
       :saving="saving"
       :related-activities="relatedActivities"
@@ -84,6 +92,8 @@
       @update:assignee-filter="assigneeFilter = $event"
       @update:board-group="boardGroup = $event"
       @update:board-sort="boardSort = $event"
+      @update:show-closed-issues="showClosedIssues = $event"
+      @update:show-empty-projects="showEmptyProjects = $event"
       @update:priority-filter="priorityFilter = $event"
       @update:all-kind-filter="allKindFilter = $event"
       @toggle-board-status-collapse="toggleBoardStatusCollapse"
@@ -224,6 +234,9 @@ const {
   boardGroup,
   boardGroupOptions,
   boardIssues,
+  unsearchedWorkIssues,
+  showClosedIssues,
+  showEmptyProjects,
   boardSort,
   boardSortOptions,
   boardStatuses,
@@ -365,6 +378,11 @@ const {
   saving,
   undoDelete,
   undoError,
+  closedIssueUndo,
+  closedIssueUndoError,
+  undoingClosedIssues,
+  undoClosedIssues,
+  dismissClosedIssueUndo,
 } = useGraphMutations({
   graph,
   boardIssues,

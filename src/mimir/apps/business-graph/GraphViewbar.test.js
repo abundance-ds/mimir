@@ -96,6 +96,22 @@ describe('responsive Graph view controls', () => {
     expect(wrapper.get('[data-graph-control="board-assignee-filter-clear"]').isVisible()).toBe(true)
   })
 
+  it('offers empty projects only on a project Board without adding a task filter', async () => {
+    await wrapper.setProps({ projectFilter: '' })
+    const selector = '[data-graph-control="work-show-empty-projects"]'
+    expect(wrapper.find(selector).exists()).toBe(false)
+    await wrapper.setProps({ groupBy: 'project' })
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+    await wrapper.get(selector).trigger('click')
+    expect(wrapper.emitted('update:showEmptyProjects')).toEqual([[true]])
+    await wrapper.setProps({ showEmptyProjects: true })
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('.graph-filter-count').exists()).toBe(false)
+    await wrapper.setProps({ view: 'list' })
+    expect(wrapper.find(selector).exists()).toBe(false)
+  })
+
   it('keeps layout settings together and excludes collapsed columns from task filters', async () => {
     await wrapper.setProps({ projectFilter: '', collapsedStatuses: ['done'] })
     expect(wrapper.find('[data-graph-filter-chip="columns"]').exists()).toBe(false)

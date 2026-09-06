@@ -52,6 +52,8 @@ const DEFAULTS = {
       priority: '',
       assignee: '',
       collapsedStatuses: [],
+      showClosedIssues: false,
+      showEmptyProjects: false,
     },
   },
   businessGraphSelfPersonId: '',

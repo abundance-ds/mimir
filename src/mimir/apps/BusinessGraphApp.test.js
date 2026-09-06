@@ -388,6 +388,7 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-board-group]').trigger('click')
     document.querySelector('[data-graph-select-option="project"]').click()
     await flushPromises()
+    await wrapper.get('[data-graph-control="work-show-empty-projects"]').trigger('click')
     await wrapper.get('[data-board-sort]').trigger('click')
     document.querySelector('[data-graph-select-option="updated"]').click()
     await flushPromises()
@@ -400,6 +401,8 @@ describe('BusinessGraphApp', () => {
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
     document.querySelector('[data-graph-control="board-column-backlog"]').click()
     await flushPromises()
+    await wrapper.get('[data-graph-control="work-show-closed"]').trigger('click')
+    await flushPromises()
 
     expect(settings.businessGraphViewState.work).toEqual({
       project: 'project-alpha',
@@ -408,6 +411,8 @@ describe('BusinessGraphApp', () => {
       priority: 'high',
       assignee: '',
       collapsedStatuses: ['backlog'],
+      showClosedIssues: true,
+      showEmptyProjects: true,
     })
     await settings.flush()
     wrapper.unmount()
@@ -421,6 +426,8 @@ describe('BusinessGraphApp', () => {
 
     expect(restored.get('[data-board-project-filter]').text()).toContain('Project Alpha')
     expect(restored.get('[data-board-sort]').text()).toContain('Updated')
+    expect(restored.get('[data-graph-control="work-show-closed"]').attributes('aria-checked')).toBe('true')
+    expect(restored.findComponent({ name: 'WorkBoard' }).props('showEmptyProjects')).toBe(true)
     expect(restored.get('[data-board-priority-filter]').text()).toContain('High')
     expect(restored.get('[data-board-column="backlog"]')
       .attributes('data-board-column-collapsed')).toBe('true')
@@ -969,6 +976,171 @@ describe('BusinessGraphApp', () => {
     await input.trigger('keydown', { key: 'Escape' })
     expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
     expect(document.activeElement).toBe(input.element)
+    wrapper.unmount()
+  })
+
+  it('shares closed issue visibility across grouping, Board, List, and search without filtering Graph', async () => {
+    summaries.push(
+      { ...summaries[0], id: 'done', title: 'Closed evidence', status: 'done' },
+      { ...summaries[0], id: 'cancelled', title: 'Cancelled evidence', status: 'cancelled' },
+    )
+    const wrapper = render()
+    await flushPromises()
+    const graph = useBusinessGraphStore()
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
+    expect(wrapper.get('[data-board-column="done"]').findAll('[data-board-card]')).toHaveLength(0)
+    expect(wrapper.find('[data-board-column="cancelled"]').exists()).toBe(false)
+
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
+    await wrapper.get('[data-board-group]').trigger('click')
+    document.querySelector('[data-graph-select-option="project"]').click()
+    await flushPromises()
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
+    await wrapper.get('[data-graph-search]').setValue('evidence')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(1)
+    await wrapper.get('[data-graph-control="work-show-closed"]').trigger('click')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(3)
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    expect(wrapper.findAll('[data-graph-node]')).toHaveLength(3)
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
+    await wrapper.get('[data-board-group]').trigger('click')
+    document.querySelector('[data-graph-select-option="status"]').click()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'EntityList' }).text()).toContain('Cancelled')
+    await wrapper.get('[data-graph-view="board"]').trigger('click')
+    expect(wrapper.get('[data-board-column="cancelled"] [data-board-card]').attributes('data-board-card')).toBe('cancelled')
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
+    await wrapper.get('[data-graph-control="work-show-closed"]').trigger('click')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(1)
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    expect(wrapper.findAll('[data-graph-node]')).toHaveLength(1)
+    graph.clearSearch()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-graph-node]')).toHaveLength(5)
+    wrapper.unmount()
+  })
+
+  it('hides an issue dropped in Done and restores it with revision-safe Undo', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const column = wrapper.get('[data-board-column="done"]').element
+    document.elementFromPoint = vi.fn(() => column)
+    await wrapper.get('[data-board-card="issue-1"]')
+      .trigger('pointerdown', { button: 0, clientX: 0, clientY: 0 })
+    document.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 200, clientY: 200 }))
+    document.dispatchEvent(new Event('pointerup'))
+    await flushPromises()
+    expect(wrapper.find('[data-board-card="issue-1"]').exists()).toBe(false)
+    expect(wrapper.get('[data-graph-close-undo]').text()).toContain('Closed “Extract evidence”')
+    await wrapper.get('[data-graph-control="undo-close-issues"]').trigger('click')
+    await flushPromises()
+    expect(updateGraphNode).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: 'issue-1', expectedRevision: 'next-rev', setProperties: { status: 'plan' }, removeProperties: ['rank'],
+    }))
+    expect(wrapper.get('[data-board-column="plan"] [data-board-card]').attributes('data-board-card')).toBe('issue-1')
+    expect(wrapper.find('[data-graph-close-undo]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('places project drops around orphaned cards and preserves orphan references during a reorder', async () => {
+    summaries[0].rank = 1000
+    summaries[0].assigneeId = 'owner'
+    summaries[0].relations = [
+      { relation: 'part_of', target: 'project-alpha', legacy: false },
+      { relation: 'assigned_to', target: 'owner', legacy: false },
+    ]
+    summaries[2].rank = 500
+    const records = new Map(summaries.map(summary => {
+      const node = full(summary.id)
+      node.properties.rank = summary.rank
+      if (summary.relations) node.relations = summary.relations
+      return [node.id, node]
+    }))
+    let revision = 0
+    vi.mocked(updateGraphNode).mockImplementation(async patch => {
+      const current = records.get(patch.id)
+      expect(patch.expectedRevision).toBe(current.provenance.sourceRevision)
+      const properties = { ...current.properties, ...patch.setProperties }
+      for (const key of patch.removeProperties || []) delete properties[key]
+      const updated = {
+        ...current, properties, relations: patch.relations ?? current.relations,
+        provenance: { ...current.provenance, sourceRevision: `drag-revision-${++revision}` },
+      }
+      records.set(patch.id, updated)
+      return updated
+    })
+    const wrapper = render()
+    await flushPromises()
+    try {
+      await wrapper.get('[data-graph-display-trigger]').trigger('click')
+      await wrapper.get('[data-board-group]').trigger('click')
+      document.querySelector('[data-graph-select-option="project"]').click()
+      await flushPromises()
+      await wrapper.get('[data-board-sort]').trigger('click')
+      document.querySelector('[data-graph-select-option="rank"]').click()
+      await flushPromises()
+      const noProject = wrapper.get('[data-board-column="__unassigned__"]')
+      const order = () => noProject.findAll('[data-board-card]').map(card => card.attributes('data-board-card'))
+      async function dropBefore(movedId, beforeId) {
+        const before = wrapper.get(`[data-board-card="${beforeId}"]`).element
+        before.getBoundingClientRect = () => ({ top: 100, height: 84 })
+        document.elementFromPoint = vi.fn(() => before)
+        await wrapper.get(`[data-board-card="${movedId}"]`).trigger('pointerdown', { button: 0, clientX: 0, clientY: 0 })
+        document.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 200, clientY: 110 }))
+        document.dispatchEvent(new Event('pointerup'))
+        await flushPromises()
+      }
+
+      await dropBefore('issue-1', 'issue-legacy')
+      expect(order()).toEqual(['issue-1', 'issue-legacy'])
+      expect(wrapper.find('[data-board-column="project-alpha"]').exists()).toBe(false)
+      expect(records.get('issue-1').properties.legacyProject).toBeUndefined()
+      expect(records.get('issue-1').properties.status).toBe('plan')
+      expect(records.get('issue-1').relations).toEqual([{ relation: 'assigned_to', target: 'owner', legacy: false }])
+
+      vi.mocked(updateGraphNode).mockClear()
+      await dropBefore('issue-legacy', 'issue-1')
+      expect(order()).toEqual(['issue-legacy', 'issue-1'])
+      expect(records.get('issue-legacy').properties.legacyProject).toBe('fde')
+      for (const [patch] of updateGraphNode.mock.calls) {
+        expect(Object.keys(patch).sort()).toEqual(['expectedRevision', 'id', 'setProperties'])
+        expect(Object.keys(patch.setProperties)).toEqual(['rank'])
+      }
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('hides empty project columns after task filters while keeping search columns and project choices stable', async () => {
+    summaries.push({ id: 'idle', kind: 'project', title: 'Idle project', scopeId: 'team:main' })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
+    await wrapper.get('[data-board-group]').trigger('click')
+    document.querySelector('[data-graph-select-option="project"]').click()
+    await flushPromises()
+    const columns = () => wrapper.findAll('[data-board-column]').map(el => el.attributes('data-board-column'))
+    expect(columns()).toEqual(['project-alpha', '__unassigned__'])
+    const originalColumns = wrapper.findAll('[data-board-column]').map(el => el.element)
+    await wrapper.get('[data-graph-search]').setValue('absent')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-board-column]').map(el => el.element)).toEqual(originalColumns)
+    await wrapper.get('[data-graph-search]').setValue('')
+    await wrapper.get('[data-graph-filters-trigger]').trigger('click')
+    await wrapper.get('[data-board-priority-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="high"]').click()
+    await flushPromises()
+    expect(columns()).toEqual(['project-alpha'])
+    await wrapper.get('[data-board-project-filter]').trigger('click')
+    expect(document.querySelector('[data-graph-select-option="idle"]')).not.toBeNull()
+    document.querySelector('[data-graph-select-option=""]').click()
+    await flushPromises()
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
+    await wrapper.get('[data-graph-control="work-show-empty-projects"]').trigger('click')
+    expect(columns()).toEqual(['project-alpha', 'idle'])
+    await wrapper.get('[data-graph-control="work-show-empty-projects"]').trigger('click')
+    expect(columns()).toEqual(['project-alpha'])
     wrapper.unmount()
   })
 

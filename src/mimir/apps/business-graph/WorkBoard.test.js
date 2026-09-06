@@ -119,6 +119,35 @@ describe('WorkBoard rows', () => {
     wrapper.unmount()
   })
 
+  it('hides empty projects, keeps search columns stable, and reveals empty drop targets on request', async () => {
+    const idle = { id: 'idle', kind: 'project', title: 'Idle project' }
+    const wrapper = render({ issues: [issues[0]], unfilteredIssues: [issues[0]], projects: [project, idle], groupBy: 'project' })
+    expect(wrapper.find('[data-board-column="idle"]').exists()).toBe(false)
+    const column = wrapper.get('[data-board-column="project-x"]').element
+    await wrapper.setProps({ issues: [], searchQuery: 'absent' })
+    expect(wrapper.get('[data-board-column="project-x"]').element).toBe(column)
+    expect(wrapper.get('.board-no-matches').text()).toBe('No matches')
+    await wrapper.setProps({ showEmptyProjects: true })
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(2)
+    expect(wrapper.find('[data-board-column="__unassigned__"]').exists()).toBe(false)
+    await wrapper.setProps({ issues: [], unfilteredIssues: [], searchQuery: '' })
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(2)
+    expect(wrapper.get('[data-board-column="idle"] .board-column-count').text()).toBe('0')
+    await wrapper.setProps({ showEmptyProjects: false })
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(0)
+    expect(wrapper.find('[data-graph-control="board-empty-create"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not hide status drop targets with the empty-project setting', async () => {
+    const wrapper = render()
+    const columns = wrapper.findAll('[data-board-column]').map(el => el.element)
+    expect(wrapper.get('[data-board-column="done"]').findAll('[data-board-card]')).toHaveLength(0)
+    await wrapper.setProps({ showEmptyProjects: true })
+    expect(wrapper.findAll('[data-board-column]').map(el => el.element)).toEqual(columns)
+    wrapper.unmount()
+  })
+
   it('keeps a task without a status in Backlog', () => {
     const wrapper = render({ issues: [{ id: 'missing-status', kind: 'issue', title: 'New task' }] })
     expect(wrapper.get('[data-board-column="backlog"] [data-board-card]').attributes('data-board-card'))

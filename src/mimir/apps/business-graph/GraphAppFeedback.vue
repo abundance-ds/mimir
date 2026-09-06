@@ -19,31 +19,54 @@
     </button>
   </div>
 
-  <div v-if="lastDeletion" data-graph-undo role="status" class="graph-toast">
-    <span>
-      {{
-        undoError
-          ? `Could not restore “${lastDeletion.title}”: ${undoError}`
-          : `Moved “${lastDeletion.title}” to Trash`
-      }}
-    </span>
-    <button type="button" data-graph-control="undo-delete" @click="$emit('undo')">
-      {{ undoError ? 'Retry' : 'Undo' }}
-    </button>
+  <div v-if="lastDeletion || closedIssueUndo" class="graph-toasts">
+    <div v-if="closedIssueUndo" data-graph-close-undo role="status" class="graph-toast">
+      <span>{{ closedIssueUndoError ? `Could not undo: ${closedIssueUndoError}` : closedIssueUndo.entries.length === 1
+        ? `Closed “${closedIssueUndo.entries[0].title}”`
+        : `Closed ${closedIssueUndo.entries.length} issues` }}</span>
+      <button
+        type="button"
+        data-graph-control="undo-close-issues"
+        :disabled="undoingClosedIssues"
+        @click="$emit('undoClosedIssues')"
+      >{{ undoingClosedIssues ? 'Restoring…' : closedIssueUndoError ? 'Retry' : 'Undo' }}</button>
+      <button
+        type="button"
+        data-graph-control="dismiss-close-undo"
+        aria-label="Dismiss closed issue notification"
+        :disabled="undoingClosedIssues"
+        @click="$emit('dismissClosedIssueUndo')"
+      ><IconX :size="14" /></button>
+    </div>
+    <div v-if="lastDeletion" data-graph-undo role="status" class="graph-toast">
+      <span>
+        {{
+          undoError
+            ? `Could not restore “${lastDeletion.title}”: ${undoError}`
+            : `Moved “${lastDeletion.title}” to Trash`
+        }}
+      </span>
+      <button type="button" data-graph-control="undo-delete" @click="$emit('undo')">
+        {{ undoError ? 'Retry' : 'Undo' }}
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { IconAlertTriangle, IconFolderOpen } from '@tabler/icons-vue'
+import { IconAlertTriangle, IconFolderOpen, IconX } from '@tabler/icons-vue'
 
 defineProps({
   error: { type: String, default: '' },
   hasWorkspace: { type: Boolean, default: false },
   lastDeletion: { type: Object, default: null },
   undoError: { type: String, default: '' },
+  closedIssueUndo: { type: Object, default: null },
+  closedIssueUndoError: { type: String, default: '' },
+  undoingClosedIssues: { type: Boolean, default: false },
 })
 
-defineEmits(['chooseWorkspace', 'retry', 'undo'])
+defineEmits(['chooseWorkspace', 'retry', 'undo', 'undoClosedIssues', 'dismissClosedIssueUndo'])
 </script>
 
 <style scoped>
@@ -132,13 +155,20 @@ defineEmits(['chooseWorkspace', 'retry', 'undo'])
   outline-offset: 1px;
 }
 
-.graph-toast {
+.graph-toasts {
   position: absolute;
   z-index: 110;
   bottom: 36px;
   left: 50%;
-  display: flex;
+  display: grid;
+  gap: 6px;
   max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+}
+
+.graph-toast {
+  display: flex;
+  min-width: 0;
   min-height: 42px;
   align-items: center;
   gap: 14px;
@@ -148,7 +178,6 @@ defineEmits(['chooseWorkspace', 'retry', 'undo'])
   color: var(--color-surface);
   font-size: 11px;
   box-shadow: var(--graph-shadow);
-  transform: translateX(-50%);
 }
 
 .graph-toast span {
@@ -158,10 +187,13 @@ defineEmits(['chooseWorkspace', 'retry', 'undo'])
 }
 
 .graph-toast button {
-  color: white;
+  flex-shrink: 0;
+  color: inherit;
   font-weight: 700;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, white 40%, transparent);
   text-underline-offset: 3px;
 }
+.graph-toast button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.graph-toast button:disabled { opacity: 0.5; }
 </style>

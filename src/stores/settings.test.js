@@ -60,6 +60,8 @@ describe('settings store', () => {
         priority: '',
         assignee: '',
         collapsedStatuses: [],
+        showClosedIssues: false,
+        showEmptyProjects: false,
       },
     })
     expect(store.businessGraphSelfPersonId).toBe('')

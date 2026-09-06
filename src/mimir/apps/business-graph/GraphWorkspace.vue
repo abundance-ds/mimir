@@ -42,6 +42,8 @@
           :group-by="boardGroup"
           :group-options="boardGroupOptions"
           :sort-by="boardSort"
+          :show-closed-issues="showClosedIssues"
+          :show-empty-projects="showEmptyProjects"
           :sort-options="boardSortOptions"
           :priority-filter="priorityFilter"
           :priority-options="priorityFilterOptions"
@@ -54,6 +56,8 @@
           @update:assignee-filter="$emit('update:assigneeFilter', $event)"
           @update:group-by="$emit('update:boardGroup', $event)"
           @update:sort-by="$emit('update:boardSort', $event)"
+          @update:show-closed-issues="$emit('update:showClosedIssues', $event)"
+          @update:show-empty-projects="$emit('update:showEmptyProjects', $event)"
           @update:priority-filter="$emit('update:priorityFilter', $event)"
           @update:kind-filter="$emit('update:allKindFilter', $event)"
           @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
@@ -116,8 +120,11 @@
           v-else-if="graph.section === 'work' && graph.view === 'board'"
           ref="workBoard"
           :search-query="graph.searchQuery.trim()"
+          :empty-copy="emptyCopy"
           :issues="boardIssues"
-          :unfiltered-issues="graph.issues"
+          :unfiltered-issues="unsearchedWorkIssues"
+          :show-empty-projects="showEmptyProjects"
+          :statuses="boardStatuses"
           :nodes="graph.nodes"
           :projects="graph.projects"
           :group-by="boardGroup"
@@ -231,6 +238,9 @@ defineProps({
   filingMeetingId: { type: String, default: '' },
   filingError: { type: String, default: '' },
   boardIssues: { type: Array, default: () => [] },
+  unsearchedWorkIssues: { type: Array, default: () => [] },
+  showClosedIssues: { type: Boolean, default: false },
+  showEmptyProjects: { type: Boolean, default: false },
   saveError: { type: String, default: '' },
   saving: { type: Boolean, default: false },
   relatedActivities: { type: Array, default: () => [] },
@@ -245,6 +255,8 @@ const emit = defineEmits([
   'patchIssue', 'reorderIssue', 'returnToPeek', 'saveMeetingGraphDraft', 'saveNode',
   'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:assigneeFilter',
   'update:boardGroup', 'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
+  'update:showClosedIssues',
+  'update:showEmptyProjects',
 ])
 
 const graph = useBusinessGraphStore()

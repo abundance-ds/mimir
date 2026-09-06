@@ -12,6 +12,10 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'board-priority',
     'board-columns',
     'undo-delete',
+    'undo-close-issues',
+    'dismiss-close-undo',
+    'work-show-closed',
+    'work-show-empty-projects',
   ],
   emptyStates: [
     'board-empty-create',

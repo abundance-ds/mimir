@@ -13,7 +13,12 @@ export const WORK_STATUSES = Object.freeze([
   { id: 'waiting', label: 'Waiting' },
   { id: 'review', label: 'Review' },
   { id: 'done', label: 'Done' },
+  { id: 'cancelled', label: 'Cancelled' },
 ])
+
+export function isClosedIssue(issue) {
+  return issue.status === 'done' || issue.status === 'cancelled'
+}
 
 export const UNASSIGNED = '__unassigned__'
 

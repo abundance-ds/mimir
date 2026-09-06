@@ -333,6 +333,19 @@
             </div>
           </Teleport>
         </div>
+        <GraphCheckbox
+          :model-value="showClosedIssues"
+          data-graph-control="work-show-closed"
+          class="graph-display-checkbox"
+          @update:model-value="$emit('update:showClosedIssues', $event)"
+        >Show closed issues</GraphCheckbox>
+        <GraphCheckbox
+          v-if="view === 'board' && groupBy === 'project'"
+          :model-value="showEmptyProjects"
+          data-graph-control="work-show-empty-projects"
+          class="graph-display-checkbox"
+          @update:model-value="$emit('update:showEmptyProjects', $event)"
+        >Show empty projects</GraphCheckbox>
       </div>
     </div>
   </div>
@@ -342,6 +355,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IconCheck, IconChevronDown, IconFilter, IconUser, IconX } from '@tabler/icons-vue'
 import GraphSelect from './GraphSelect.vue'
+import GraphCheckbox from './GraphCheckbox.vue'
 
 const props = defineProps({
   section: { type: String, required: true },
@@ -355,6 +369,8 @@ const props = defineProps({
   groupBy: { type: String, default: 'status' },
   groupOptions: { type: Array, default: () => [] },
   sortBy: { type: String, default: 'rank' },
+  showClosedIssues: { type: Boolean, default: false },
+  showEmptyProjects: { type: Boolean, default: false },
   sortOptions: { type: Array, default: () => [] },
   priorityFilter: { type: String, default: '' },
   priorityOptions: { type: Array, default: () => [] },
@@ -370,6 +386,8 @@ const emit = defineEmits([
   'update:assigneeFilter',
   'update:groupBy',
   'update:sortBy',
+  'update:showClosedIssues',
+  'update:showEmptyProjects',
   'update:priorityFilter',
   'update:kindFilter',
   'toggleStatus',
@@ -412,6 +430,9 @@ const ownerViewAccessibleLabel = computed(() => {
 const displaySummary = computed(() => [
   optionLabel(props.groupOptions, props.groupBy),
   optionLabel(props.sortOptions, props.sortBy),
+  props.showClosedIssues ? 'Closed issues shown' : 'Closed issues hidden',
+  props.view === 'board' && props.groupBy === 'project'
+    ? (props.showEmptyProjects ? 'Empty projects shown' : 'Empty projects hidden') : '',
   props.view === 'board' && props.groupBy === 'status' && collapsedLabels.value.length
     ? `${collapsedLabels.value.length} columns collapsed` : '',
 ].filter(Boolean).join('. '))
@@ -648,6 +669,7 @@ defineExpose({ closeMenus })
 .graph-filters-popover { right: 12px; }
 .graph-filter-row { display: grid; min-height: 36px; grid-template-columns: 70px minmax(0, 1fr); align-items: center; gap: 8px; border-bottom: 1px solid var(--color-rule-light); padding: 4px 5px; }
 .graph-filter-row:last-child { border-bottom: 0; }
+.graph-display-popover .graph-display-checkbox { display: flex; width: 100%; margin-top: 4px; }
 .graph-filter-row > span { color: var(--color-ink-3); font-size: 10px; }
 .graph-filter-control { display: flex; min-width: 0; align-items: center; gap: 4px; }
 :deep(.graph-project-view-active) { border-color: color-mix(in srgb, var(--color-accent) 72%, var(--color-rule)); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 680; }

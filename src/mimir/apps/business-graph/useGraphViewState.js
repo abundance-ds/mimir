@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { BUSINESS_SECTIONS } from '../../../stores/businessGraph.js'
 import { waitingOnHuman } from './predicates.js'
-import { UNASSIGNED, WORK_STATUSES, initials, workProjectId } from './workRow.js'
+import { UNASSIGNED, WORK_STATUSES, initials, isClosedIssue, workProjectId } from './workRow.js'
 
 export const BOARD_STATUSES = WORK_STATUSES
 
@@ -58,6 +58,22 @@ export function useGraphViewState({ graph, settings }) {
   const boardSort = ref('rank')
   const allKindFilter = ref('')
   const collapsedBoardStatuses = ref([])
+  const showClosedIssues = ref(false)
+  const showEmptyProjects = ref(false)
+  const workFilters = computed(() => ({
+    project: projectFilter.value,
+    priority: priorityFilter.value,
+    assignee: assigneeFilter.value,
+    showClosed: showClosedIssues.value,
+  }))
+  // Keep Done as a drop target. Cancelled has a column when closed work is shown.
+  const boardStatuses = computed(() => BOARD_STATUSES.filter(status => (
+    showClosedIssues.value || status.id !== 'cancelled'
+  )))
+  // Columns follow task filters, but search only filters cards within them.
+  const unsearchedWorkIssues = computed(() => filterWorkIssues(
+    graph.issues, graph.projects, workFilters.value,
+  ))
   let hydrated = false
 
   const sections = BUSINESS_SECTIONS
@@ -75,9 +91,7 @@ export function useGraphViewState({ graph, settings }) {
   /** Board and List share the group control. */
   const listGroupBy = computed(() => boardGroup.value)
   const projectionNodes = computed(() => filterProjection(graph, {
-    project: projectFilter.value,
-    priority: priorityFilter.value,
-    assignee: assigneeFilter.value,
+    ...workFilters.value,
     kind: allKindFilter.value,
   }))
   const boardIssues = computed(() => (
@@ -85,17 +99,23 @@ export function useGraphViewState({ graph, settings }) {
   ))
   const waitingOnYouIssues = computed(() => graph.issues.filter(waitingOnHuman))
   const emptyTitle = computed(() => {
+    if (graph.section === 'work') return 'No work matches this view'
     if (graph.searchQuery) return 'No matching graph items'
     return {
       work: 'No work in these scopes',
       all: 'The graph is empty',
     }[graph.section] || 'Nothing here yet'
   })
-  const emptyCopy = computed(() => (
-    graph.searchQuery
+  const emptyCopy = computed(() => {
+    if (graph.section === 'work') {
+      return showClosedIssues.value
+        ? 'Clear search or filters, include another scope, or create an issue.'
+        : 'Clear search or filters, or enable Show closed issues in Display.'
+    }
+    return graph.searchQuery
       ? 'Try broader terms or include another physical scope.'
       : 'Create the first item or include another physical scope.'
-  ))
+  })
 
   // Restore old project filters as No project only after the graph is loaded.
   watch([() => graph.loading, () => graph.projects, projectFilter], () => {
@@ -118,6 +138,8 @@ export function useGraphViewState({ graph, settings }) {
         boardGroup,
         boardSort,
         collapsedBoardStatuses,
+        showClosedIssues,
+        showEmptyProjects,
       })
       hydrated = true
     },
@@ -135,6 +157,8 @@ export function useGraphViewState({ graph, settings }) {
       priorityFilter,
       assigneeFilter,
       collapsedBoardStatuses,
+      showClosedIssues,
+      showEmptyProjects,
     ],
     () => {
       if (!hydrated) return
@@ -149,6 +173,8 @@ export function useGraphViewState({ graph, settings }) {
           priority: priorityFilter.value,
           assignee: assigneeFilter.value,
           collapsedStatuses: [...collapsedBoardStatuses.value],
+          showClosedIssues: showClosedIssues.value,
+          showEmptyProjects: showEmptyProjects.value,
         },
       })
     },
@@ -182,7 +208,10 @@ export function useGraphViewState({ graph, settings }) {
     boardIssues,
     boardSort,
     boardSortOptions: BOARD_SORT_OPTIONS,
-    boardStatuses: BOARD_STATUSES,
+    boardStatuses,
+    showClosedIssues,
+    showEmptyProjects,
+    unsearchedWorkIssues,
     collapsedBoardStatuses,
     currentSection,
     emptyCopy,
@@ -213,6 +242,8 @@ function hydrateViewState({
   boardGroup,
   boardSort,
   collapsedBoardStatuses,
+  showClosedIssues,
+  showEmptyProjects,
 }) {
   const saved = settings.businessGraphViewState || {}
   const savedViews = saved.sectionViews && typeof saved.sectionViews === 'object'
@@ -240,6 +271,8 @@ function hydrateViewState({
   graph.view = graph.sectionViews[savedSection]
 
   const work = saved.work || {}
+  showClosedIssues.value = work.showClosedIssues === true
+  showEmptyProjects.value = work.showEmptyProjects === true
   if (['status', 'project'].includes(work.groupBy)) boardGroup.value = work.groupBy
   if (typeof work.project === 'string') projectFilter.value = work.project
   if (['rank', 'priority', 'due', 'updated', 'title'].includes(work.sortBy)) boardSort.value = work.sortBy
@@ -275,17 +308,23 @@ function buildProjectOptions(graph) {
 function filterProjection(graph, filters) {
   let items = graph.visibleNodes
   if (graph.section === 'work') {
-    if (filters.project) {
-      const projectIds = new Set(graph.projects.map(project => project.id))
-      items = items.filter(item => workProjectId(item, projectIds) === filters.project)
-    }
-    if (filters.priority) items = items.filter(item => item.priority === filters.priority)
-    if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)
-    else if (filters.assignee) items = items.filter(item => item.assigneeId === filters.assignee)
+    items = filterWorkIssues(items, graph.projects, filters)
   }
   if (graph.section === 'all' && filters.kind) {
     items = items.filter(item => matchesAllKind(item, filters.kind))
   }
+  return items
+}
+
+function filterWorkIssues(items, projects, filters) {
+  if (!filters.showClosed) items = items.filter(item => !isClosedIssue(item))
+  if (filters.project) {
+    const projectIds = new Set(projects.map(project => project.id))
+    items = items.filter(item => workProjectId(item, projectIds) === filters.project)
+  }
+  if (filters.priority) items = items.filter(item => item.priority === filters.priority)
+  if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)
+  else if (filters.assignee) items = items.filter(item => item.assigneeId === filters.assignee)
   return items
 }
 

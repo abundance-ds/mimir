@@ -116,9 +116,22 @@ Selected values have adjacent clear actions. In narrow panes, these controls
 move into Filter, with named, clearable active-filter chips. The available pane
 width determines the layout, including when Peek is open. The smallest panes
 show the active filter count; open Filter to read or clear each selected value.
-Display stays separate at the right and contains Group by, Sort, and Columns.
+Display stays separate at the right and contains Group by, Sort, Columns, and
+Show closed issues. Work hides Done and Cancelled issues by default. This setting
+applies to both groupings, Board, List, and Work search, and persists across
+restarts. Graph is not affected. Done stays on the status Board as a drop target;
+Cancelled has its own column when closed issues are shown. Closing issues from
+the UI offers Undo for the last action, including bulk status changes. Undo
+restores the prior status (and rank after a drag) only at the saved revision;
+it does not overwrite later edits. Failed restores remain available to retry.
 Columns appears only on a status-grouped Board; collapsed columns do not count
-as task filters. A
+as task filters. A project-grouped Board hides empty project columns by default.
+Display offers Show empty projects for that Board only and saves the choice
+across restarts. Column visibility follows the project, owner, priority, and
+closed-issue filters, but ignores search so typing does not move columns.
+All projects remain available in project selectors, including hidden projects.
+Showing empty projects provides empty columns for creating or moving work;
+it does not add empty groups to List or change status columns. A
 scoped project drops the project slot from rows. The Owner list offers You,
 active team members, and Unassigned.
 
@@ -126,7 +139,13 @@ Work treats missing project assignments, old labels, and references without a
 matching loaded Project as No project. Board grouping, List grouping, and the
 Project filter share this rule; stored references are preserved. Old project
 labels do not get their own columns or filter options. The No project column
-appears only when needed and remains in place while search filters its cards.
+appears only when needed by issues that match the task filters, even with Show
+empty projects enabled. It remains in place while search filters its cards.
+Drag ordering uses the same project-resolution rule as column grouping. With
+Manual order selected, a drag within a column changes rank only and preserves
+stored project references. A drag from a project into No project clears the
+moved issue's project assignment and places it at the drop position. Status,
+owner, and other relations stay unchanged; other cards receive rank changes only.
 Missing status continues to use Backlog.
 
 Settings > Graph > You selects the reader's Person node
