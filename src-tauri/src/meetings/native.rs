@@ -6,6 +6,8 @@
 //! seams; application setup receives one owned lifecycle handle whose drop
 //! cooperatively stops every background worker started here.
 
+#[cfg(target_os = "macos")]
+use super::commands::MEETING_RECORD_REQUESTED_EVENT;
 #[cfg(any(test, target_os = "macos"))]
 use super::platform::MeetingEnvironmentProjection;
 #[cfg(not(target_os = "macos"))]
@@ -15,9 +17,7 @@ use super::runtime::{MeetingCandidate, MeetingPermissions};
 use super::{
     audio_test::MeetingAudioTestManager,
     capture::NativeMeetingCapture,
-    commands::{
-        TauriMeetingEventSink, TauriMeetingPlatformChangeSink, MEETING_RECORD_REQUESTED_EVENT,
-    },
+    commands::{TauriMeetingEventSink, TauriMeetingPlatformChangeSink},
     local_whisper::ManagedWhisperTranscriber,
     platform::{
         builtin_model_catalog, MeetingEnvironmentProbe, MeetingPlatformChangeSink,
@@ -75,6 +75,7 @@ pub struct MeetingRecordRequest {
 struct MeetingRecordRequestQueue(Mutex<VecDeque<MeetingRecordRequest>>);
 
 impl MeetingRecordRequestQueue {
+    #[cfg(any(test, target_os = "macos"))]
     fn enqueue(&self, request: MeetingRecordRequest) {
         let Ok(mut pending) = self.0.lock() else {
             log::warn!("Scribe notification-record queue was poisoned");

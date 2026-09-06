@@ -11,12 +11,12 @@ fn openai_audio_is_resampled_and_keeps_capture_channels_separate() {
     assert_eq!(microphone.len(), 3 * size_of::<i16>());
     assert_eq!(system.len(), 3 * size_of::<i16>());
     assert!(microphone
-        .chunks_exact(2)
-        .map(|sample| i16::from_le_bytes(sample.try_into().unwrap()))
+        .as_chunks::<2>().0.iter()
+        .map(|sample| i16::from_le_bytes(*sample))
         .all(|sample| sample > 0));
     assert!(system
-        .chunks_exact(2)
-        .map(|sample| i16::from_le_bytes(sample.try_into().unwrap()))
+        .as_chunks::<2>().0.iter()
+        .map(|sample| i16::from_le_bytes(*sample))
         .all(|sample| sample < 0));
 }
 

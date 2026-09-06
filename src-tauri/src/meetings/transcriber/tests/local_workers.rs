@@ -345,8 +345,8 @@ fn durable_channels_are_interleaved_only_at_the_provider_boundary() {
     let chunks = source.paired_chunks_from(0).unwrap();
     let values = chunks[0]
         .bytes
-        .chunks_exact(4)
-        .map(|sample| f32::from_le_bytes(sample.try_into().unwrap()))
+        .as_chunks::<4>().0.iter()
+        .map(|sample| f32::from_le_bytes(*sample))
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1.0, 3.0, 2.0, 4.0]);
     assert_eq!(chunks[0].sequence, 0);

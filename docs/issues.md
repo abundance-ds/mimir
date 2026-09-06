@@ -5,7 +5,7 @@ task scope.
 
 ## Open
 
-- Release 0.3.1: signed installed-app checks for launch/relaunch, file save,
+- Release 0.3.2: signed installed-app checks for launch/relaunch, file save,
   one terminal Activity, and permission prompts have no new runtime record.
   The Scribe and managed Git evidence gaps below also remain open.
 

@@ -806,7 +806,7 @@ fn split_stereo_f32le(bytes: &[u8]) -> Result<(Vec<f32>, Vec<f32>), String> {
     let frames = bytes.len() / BYTES_PER_FRAME;
     let mut microphone = Vec::with_capacity(frames);
     let mut system = Vec::with_capacity(frames);
-    for frame in bytes.chunks_exact(BYTES_PER_FRAME) {
+    for frame in bytes.as_chunks::<BYTES_PER_FRAME>().0.iter() {
         let left = f32::from_le_bytes(
             frame[..size_of::<f32>()]
                 .try_into()
@@ -854,7 +854,7 @@ fn contains_speech(samples: &[f32], detector: &mut VoiceActivityDetector) -> boo
     let mut active_frames = 0_usize;
     let mut consecutive_frames = 0_usize;
     let mut longest_run = 0_usize;
-    for frame in samples.chunks_exact(VAD_FRAME_SAMPLES) {
+    for frame in samples.as_chunks::<VAD_FRAME_SAMPLES>().0.iter() {
         let frame_rms = signal_rms(frame);
         let score = detector.predict_f32(frame);
         if frame_rms >= VAD_MIN_FRAME_RMS && score >= VAD_SCORE_THRESHOLD {
@@ -1190,7 +1190,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1, 2, 3, 4]
         );
-        for pair in sink.batches.chunks_exact(2) {
+        for pair in sink.batches.as_chunks::<2>().0.iter() {
             assert_eq!(pair[0].segments[0].revision, 0);
             assert_eq!(pair[0].segments[0].state, SegmentState::Partial);
             assert_eq!(pair[1].segments[0].revision, 1);
@@ -1559,7 +1559,9 @@ mod tests {
             return Err("WAV PCM data must contain complete 16-bit samples".into());
         }
         Ok(data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|sample| i16::from_le_bytes([sample[0], sample[1]]) as f32 / 32_768.0)
             .collect())
     }

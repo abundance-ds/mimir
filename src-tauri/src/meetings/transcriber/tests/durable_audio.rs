@@ -42,8 +42,8 @@ fn a_shorter_channel_is_padded_without_mutating_its_durable_file() {
     let source = PersistedAudioSource::authoritative(store, temporary.path(), "meeting-1").unwrap();
     let values = source.paired_chunks_from(0).unwrap()[0]
         .bytes
-        .chunks_exact(4)
-        .map(|sample| f32::from_le_bytes(sample.try_into().unwrap()))
+        .as_chunks::<4>().0.iter()
+        .map(|sample| f32::from_le_bytes(*sample))
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1.0, 3.0, 2.0, 0.0]);
     assert_eq!(
@@ -75,8 +75,8 @@ fn an_unpaired_chunk_is_not_disclosed_to_the_provider() {
     let final_chunk = source.final_chunks_from(0).unwrap().pop().unwrap();
     let values = final_chunk
         .bytes
-        .chunks_exact(4)
-        .map(|sample| f32::from_le_bytes(sample.try_into().unwrap()))
+        .as_chunks::<4>().0.iter()
+        .map(|sample| f32::from_le_bytes(*sample))
         .collect::<Vec<_>>();
     assert_eq!(values, vec![1.0, 0.0]);
 }
@@ -193,8 +193,8 @@ fn unregistered_staged_and_corrupt_files_are_silence_not_stt_input() {
         .flat_map(|chunk| {
             chunk
                 .bytes
-                .chunks_exact(BYTES_PER_SAMPLE)
-                .map(|sample| f32::from_le_bytes(sample.try_into().unwrap()))
+                .as_chunks::<BYTES_PER_SAMPLE>().0.iter()
+                .map(|sample| f32::from_le_bytes(*sample))
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
