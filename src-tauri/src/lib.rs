@@ -947,6 +947,9 @@ pub(crate) fn create_main_window<M: Manager<tauri::Wry>>(
 
     #[cfg(target_os = "macos")]
     let builder = builder
+        // xterm owns live terminal state in this WebView. Keep parsing PTY
+        // output while the window is covered or minimized (macOS 14+).
+        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
         .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition::new(

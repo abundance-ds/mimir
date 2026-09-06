@@ -56,6 +56,9 @@ task scope.
   needs the explicit shell command-boundary contract in
   [activities.md](activities.md#plain-terminal-status).
 
+- Terminal: verify no replay after >5 minutes minimized in a rebuilt macOS app;
+  mocked tests cannot prove WebKit scheduling or GPU frames.
+
 - Live Preview hides only the outer marks of nested emphasis. `***bold
   italic***` keeps its inner `**` because the Emphasis and StrongEmphasis
   handlers in `livePreview.js` stop at the outer node.

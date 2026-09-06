@@ -36,10 +36,13 @@ workspace first. Activities do not add missing folders to the project switcher.
 - PTY bytes remain binary. Output and resize share one ordered sequence.
 - xterm is the terminal state engine. One mounted run owns one xterm model,
   which keeps consuming output while hidden.
+- Keep macOS background throttling disabled; batch output without crossing
+  resize events, and reveal only after catch-up.
 - A versioned checkpoint plus a bounded event tail lives in
   `~/.mimir/activities/activities.sqlite3`.
 - Checkpoint writes use run, revision, durable-sequence, and renderer-lease
   checks so a stale WebView cannot trim newer output.
+- Never checkpoint a failed terminal model; clear its queued events before resume.
 - Restored live processes become `interrupted`; Mimir never claims that an old
   PTY survived application exit.
 - Install the Activity listener before the initial native list and terminal
@@ -55,3 +58,5 @@ Native ownership is `src-tauri/src/activities/` and `activity_commands.rs`.
 Renderer ownership is the Activity stores, Workbench lifecycle composables,
 Sidebar, and Activity surfaces. Launcher and continuation details are in
 [agent-setup.md](agent-setup.md).
+
+Cmd+Up/Down scroll; Cmd+Left/Right send Ctrl-A/E; Cmd+Delete sends Ctrl-E,U; Shift+Enter sends Ctrl-J.

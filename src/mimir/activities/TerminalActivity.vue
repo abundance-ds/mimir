@@ -49,6 +49,8 @@
         ref="surface"
         data-terminal-surface
         :data-renderer="renderer"
+        :data-catching-up="catchingUp"
+        :style="{ opacity: loading || catchingUp ? 0 : 1 }"
         tabindex="-1"
         role="application"
         :aria-label="`${activity.title} ${mode} session`"
@@ -147,6 +149,7 @@ const status = ref(props.activity.status || 'starting')
 const hasExited = ref(Boolean(props.activity.session?.exit))
 const live = ref(status.value !== 'interrupted' && !hasExited.value)
 const loading = ref(true)
+const catchingUp = ref(false)
 const error = ref('')
 const dismissedActivityError = ref('')
 const renderer = ref('dom')
@@ -157,6 +160,7 @@ const UNICODE_VERSION = '11'
 const CHECKPOINT_QUIET_MS = 750
 const CHECKPOINT_MAX_MS = 30_000
 const CHECKPOINT_OUTPUT_BYTES = 512 * 1024
+const OUTPUT_BATCH_BYTES = 256 * 1024
 
 const activityId = computed(() => props.activity.id)
 const mode = computed(() => props.activity.kind === 'agent' ? 'agent' : 'terminal')
@@ -197,6 +201,10 @@ let queuedSequence = 0
 let pendingEvents = []
 let inputQueue = Promise.resolve()
 let terminalEventQueue = Promise.resolve()
+let queuedTerminalEvents = []
+let drainingTerminalEvents = false
+let terminalOutputFailed = false
+let revealFrame = 0
 let terminalAttachmentQueue = Promise.resolve()
 let resizeFrame = 0
 let lastSize = { cols: 0, rows: 0 }
@@ -273,6 +281,8 @@ async function initialize() {
       return
     }
     unlistenEvents = stopListening
+    window.addEventListener('focus', showCurrentTerminal)
+    document.addEventListener('visibilitychange', showCurrentTerminal)
     await serializeTerminalAttachment(() => attachTerminalRun())
     initialAttachComplete = true
     await reconcileAttachedTerminalRun(props.activity.session?.runId)
@@ -294,6 +304,7 @@ async function initialize() {
       })
     }
   } catch (cause) {
+    terminalOutputFailed = true
     initialAttachComplete = true
     loading.value = false
     exposeSurfaceError(cause, 'Could not attach to this Activity.')
@@ -367,11 +378,32 @@ function reconcileAttachedTerminalRun(expectedRunId) {
 
 function activateSurface() {
   if (disposed) return
+  showCurrentTerminal()
   installResizeObserver()
   installThemeObserver()
   nextTick().then(() => {
     scheduleFit()
     if (activityPaneOwnsFocus()) terminal?.focus()
+  })
+}
+
+function showCurrentTerminal() {
+  if (disposed || !props.active || document.hidden || !terminal) return
+  if (appliedSequence >= queuedSequence && !catchingUp.value) return
+  catchingUp.value = true
+  if (revealFrame) cancelAnimationFrame(revealFrame)
+  revealFrame = 0
+  // A write can yield across several frames. Reveal only after the model has
+  // consumed all queued output and xterm has had a frame to draw that state.
+  void terminalEventQueue.then(() => {
+    if (disposed || revealFrame) return
+    terminal.refresh(0, terminal.rows - 1)
+    revealFrame = requestAnimationFrame(() => {
+      revealFrame = 0
+      if (disposed) return
+      if (drainingTerminalEvents) showCurrentTerminal()
+      else catchingUp.value = false
+    })
   })
 }
 
@@ -415,29 +447,61 @@ function applyEvent(event) {
 }
 
 function queueTerminalEvent(event) {
+  if (terminalOutputFailed) return terminalEventQueue
   const sequence = Number(event?.sequence || 0)
   if (!sequence || sequence <= queuedSequence) return terminalEventQueue
   queuedSequence = sequence
+  queuedTerminalEvents.push(event)
+  if (drainingTerminalEvents) return terminalEventQueue
+  drainingTerminalEvents = true
   terminalEventQueue = terminalEventQueue.then(async () => {
-    if (event.type === 'resize') {
-      const cols = Number(event.cols || 0)
-      const rows = Number(event.rows || 0)
-      if (cols > 0 && rows > 0 && (terminal.cols !== cols || terminal.rows !== rows)) {
-        terminal.resize(cols, rows)
+    try {
+      while (queuedTerminalEvents.length) {
+        const next = queuedTerminalEvents.shift()
+        let throughSequence = Number(next.sequence)
+        if (next.type === 'resize') {
+          const cols = Number(next.cols || 0)
+          const rows = Number(next.rows || 0)
+          if (cols > 0 && rows > 0 && (terminal.cols !== cols || terminal.rows !== rows)) {
+            terminal.resize(cols, rows)
+          }
+        } else {
+          // One timer per event turns a background backlog into a visible replay.
+          // Combine raw bytes, with a bounded write and a strict resize barrier.
+          const chunks = [terminalBytes(next.bytes)]
+          let length = chunks[0].byteLength
+          while (queuedTerminalEvents[0]?.type === 'output') {
+            const chunk = terminalBytes(queuedTerminalEvents[0].bytes)
+            if (length + chunk.byteLength > OUTPUT_BATCH_BYTES) break
+            throughSequence = Number(queuedTerminalEvents.shift().sequence)
+            chunks.push(chunk)
+            length += chunk.byteLength
+          }
+          const bytes = new Uint8Array(length)
+          let offset = 0
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset)
+            offset += chunk.byteLength
+          }
+          if (bytes.byteLength) {
+            await terminalWrite(bytes)
+            outputBytesSinceCheckpoint += bytes.byteLength
+          }
+        }
+        // Advance only after the write callback: checkpoints must describe
+        // parsed state, never data that is still waiting inside xterm.
+        appliedSequence = throughSequence
+        scheduleCheckpoint()
       }
-    } else {
-      const bytes = terminalBytes(event.bytes)
-      if (bytes.byteLength) {
-        await terminalWrite(bytes)
-        outputBytesSinceCheckpoint += bytes.byteLength
-      }
+    } catch (cause) {
+      // A rejected write or resize can leave a partial model. Do not save it
+      // or advance across the missing event; native retains the recovery tail.
+      terminalOutputFailed = true
+      queuedTerminalEvents = []
+      exposeSurfaceError(cause, 'Could not apply terminal output.')
+    } finally {
+      drainingTerminalEvents = false
     }
-    // Terminal.write parses asynchronously. This watermark moves only from
-    // its completion callback, after the model contains the event.
-    appliedSequence = sequence
-    scheduleCheckpoint()
-  }).catch((cause) => {
-    exposeSurfaceError(cause, 'Could not apply terminal output.')
   })
   return terminalEventQueue
 }
@@ -448,7 +512,7 @@ function terminalWrite(value) {
 }
 
 function scheduleCheckpoint() {
-  if (!serializeAddon || appliedSequence <= checkpointThroughSequence) return
+  if (terminalOutputFailed || !serializeAddon || appliedSequence <= checkpointThroughSequence) return
   if (checkpointTimer) clearTimeout(checkpointTimer)
   const elapsed = performance.now() - lastCheckpointAt
   const immediate = outputBytesSinceCheckpoint >= CHECKPOINT_OUTPUT_BYTES
@@ -460,12 +524,13 @@ function scheduleCheckpoint() {
 }
 
 async function persistCheckpoint(force = false) {
-  if (!serializeAddon || !runId || !leaseGeneration) return null
+  if (terminalOutputFailed || !serializeAddon || !runId || !leaseGeneration) return null
   if (checkpointInFlight) {
     checkpointAgain = checkpointAgain || force || appliedSequence > checkpointThroughSequence
     return checkpointInFlight
   }
   await terminalEventQueue
+  if (terminalOutputFailed) return null
   // Another caller can start while both calls wait for xterm to finish its
   // asynchronous write. Re-check here so only one request uses this revision.
   if (checkpointInFlight) {
@@ -580,10 +645,29 @@ function capturePromptInput(input) {
   titleProposalInFlight = pending
 }
 
-// Shift+Enter inserts a line break instead of submitting. LF (Ctrl+J) is the
-// newline binding Claude and Codex document, and shells treat a lone LF
-// exactly like Enter, so plain terminal sessions lose nothing.
 function handleCustomKey(event) {
+  if (event.isComposing) return true
+  if (event.metaKey && !event.shiftKey && !event.ctrlKey && !event.altKey) {
+    const input = {
+      ArrowLeft: '\u0001',
+      ArrowRight: '\u0005',
+      // Move to the end first so Ctrl-U clears the complete current line.
+      Backspace: '\u0005\u0015',
+      Delete: '\u0005\u0015',
+    }[event.key]
+    const scroll = event.key === 'ArrowUp' || event.key === 'ArrowDown'
+    if (input || scroll) {
+      event.preventDefault?.()
+      event.stopPropagation?.()
+      if (event.type === 'keydown') {
+        if (event.key === 'ArrowUp') terminal.scrollToTop()
+        else if (event.key === 'ArrowDown') terminal.scrollToBottom()
+        else enqueueInput(terminalBytes(input), { type: 'feed', value: input })
+      }
+      return false
+    }
+  }
+  // Shift+Enter sends LF (Ctrl-J), the multiline binding used by CLI agents.
   if (
     event.key !== 'Enter'
     || !event.shiftKey
@@ -746,6 +830,7 @@ watch(
     try {
       await reconcileAttachedTerminalRun(nextRunId)
     } catch (cause) {
+      terminalOutputFailed = true
       exposeSurfaceError(cause, 'Could not attach to the resumed Activity.')
     }
     loading.value = false
@@ -761,6 +846,8 @@ async function resetForTerminalRun() {
   checkpointAgain = false
   await terminalEventQueue
   terminalEventQueue = Promise.resolve()
+  queuedTerminalEvents = []
+  terminalOutputFailed = false
 
   const previousRunId = runId
   const previousLeaseGeneration = leaseGeneration
@@ -844,6 +931,10 @@ onBeforeUnmount(() => {
   checkpointTimer = 0
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
   resizeFrame = 0
+  if (revealFrame) cancelAnimationFrame(revealFrame)
+  revealFrame = 0
+  window.removeEventListener('focus', showCurrentTerminal)
+  document.removeEventListener('visibilitychange', showCurrentTerminal)
   deactivateSurface()
   unlistenEvents?.()
   unlistenEvents = null

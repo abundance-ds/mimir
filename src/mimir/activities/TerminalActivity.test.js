@@ -46,6 +46,9 @@ vi.mock('@xterm/xterm', () => ({
         this.rows = rows
       })
       this.focus = vi.fn()
+      this.refresh = vi.fn()
+      this.scrollToTop = vi.fn()
+      this.scrollToBottom = vi.fn()
       this.reset = vi.fn()
       this.dispose = vi.fn()
       this.dataDisposable = { dispose: vi.fn() }
@@ -338,7 +341,7 @@ describe('TerminalActivity', () => {
 
     expect(order).toEqual(['listen', 'attach'])
     const terminal = xterm.terminals[0]
-    expect(writtenBytes(terminal)).toEqual([[0xf0, 0x9f], [0x99, 0x82]])
+    expect(writtenBytes(terminal)).toEqual([[0xf0, 0x9f, 0x99, 0x82]])
     expect(terminal.open.mock.invocationCallOrder[0])
       .toBeLessThan(terminal.write.mock.invocationCallOrder[0])
     expect(wrapper.emitted('ready')[0][0]).toMatchObject({ activityId: 'agent:one' })
@@ -500,12 +503,11 @@ describe('TerminalActivity', () => {
     await initialize(wrapper)
 
     expect(writtenBytes(xterm.terminals[0])).toEqual([
-      [0xf0, 0x9f],
-      [0x99, 0x82],
+      [0xf0, 0x9f, 0x99, 0x82],
       [3],
     ])
     api.callback({ type: 'output', activityId: 'agent:one', sequence: 2, bytes: [2] })
-    expect(xterm.terminals[0].write).toHaveBeenCalledTimes(3)
+    expect(xterm.terminals[0].write).toHaveBeenCalledTimes(2)
   })
 
   it('advances checkpoint progress only after xterm finishes each asynchronous write', async () => {
@@ -828,6 +830,229 @@ describe('TerminalActivity', () => {
     expect(terminal.customKeyHandler(key({ isComposing: true }))).toBe(true)
     await flushPromises()
     expect(api.write).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['terminal', 'agent'])('handles Command navigation and line deletion for %s', async (kind) => {
+    const wrapper = await initialize(render({ activity: { ...agent, kind } }))
+    const terminal = xterm.terminals[0]
+    const press = (key, overrides = {}) => {
+      const event = new KeyboardEvent('keydown', {
+        key, metaKey: true, cancelable: true, ...overrides,
+      })
+      expect(terminal.customKeyHandler(event)).toBe(false)
+      expect(event.defaultPrevented).toBe(true)
+      expect(terminal.customKeyHandler(new KeyboardEvent('keyup', {
+        key, metaKey: true, ...overrides,
+      }))).toBe(false)
+    }
+
+    press('ArrowUp')
+    press('ArrowDown')
+    expect(terminal.scrollToTop).toHaveBeenCalledOnce()
+    expect(terminal.scrollToBottom).toHaveBeenCalledOnce()
+    expect(api.write).not.toHaveBeenCalled()
+    press('ArrowLeft')
+    press('ArrowRight')
+    press('Backspace')
+    press('Delete')
+    await flushPromises()
+    expect(api.write.mock.calls.map(([, bytes]) => Array.from(bytes))).toEqual([
+      [1], [5], [5, 21], [5, 21],
+    ])
+    expect(wrapper.emitted('activity-input')).toBeUndefined()
+    wrapper.unmount()
+    await flushPromises()
+  })
+
+  it('retains other shortcuts and composition, and blocks line edits during restore', async () => {
+    const wrapper = await initialize(render({ restoring: true }))
+    const terminal = xterm.terminals[0]
+    for (const overrides of [
+      { shiftKey: true }, { altKey: true }, { ctrlKey: true },
+      { isComposing: true }, { metaKey: false }, { key: 'c' },
+    ]) {
+      const event = new KeyboardEvent('keydown', {
+        key: 'ArrowLeft', metaKey: true, cancelable: true, ...overrides,
+      })
+      expect(terminal.customKeyHandler(event)).toBe(true)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    terminal.customKeyHandler(new KeyboardEvent('keydown', { key: 'Backspace', metaKey: true }))
+    terminal.customKeyHandler(new KeyboardEvent('keydown', { key: 'ArrowUp', metaKey: true }))
+    await flushPromises()
+    expect(api.write).not.toHaveBeenCalled()
+    expect(terminal.scrollToTop).toHaveBeenCalledOnce()
+    wrapper.unmount()
+    await flushPromises()
+  })
+
+  it('keeps deleted input out of the first-prompt title', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    terminal.dataCallback('Discard this line')
+    terminal.customKeyHandler(new KeyboardEvent('keydown', { key: 'ArrowLeft', metaKey: true }))
+    terminal.customKeyHandler(new KeyboardEvent('keydown', { key: 'Backspace', metaKey: true }))
+    terminal.dataCallback('Fix terminal shortcuts\r')
+    await flushPromises()
+    expect(api.proposeTitle).toHaveBeenCalledWith('agent:one', 'Fix terminal shortcuts')
+    wrapper.unmount()
+    await flushPromises()
+  })
+
+  it('batches a backlog without crossing resize or advancing a checkpoint before parsing', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    terminal.write.mockClear()
+    terminal.resize.mockClear()
+    xterm.deferWrites = true
+    const output = (sequence, bytes) => api.callback({
+      type: 'output', activityId: agent.id, sequence, bytes,
+    })
+    output(3, [0xf0, 0x9f])
+    output(4, [0x99, 0x82])
+    api.callback({ type: 'resize', activityId: agent.id, sequence: 5, cols: 80, rows: 24 })
+    output(6, [65])
+    output(7, [66])
+    // Duplicate delivery must not add bytes to the batch.
+    output(7, [66])
+    await flushPromises()
+    expect(writtenBytes(terminal)).toEqual([[0xf0, 0x9f, 0x99, 0x82]])
+    expect(terminal.resize).not.toHaveBeenCalled()
+    api.callback({ type: 'exit', activityId: agent.id, exit: { reason: 'completed' } })
+    expect(api.checkpoint).not.toHaveBeenCalled()
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    expect(terminal.resize).toHaveBeenCalledWith(80, 24)
+    expect(writtenBytes(terminal)).toEqual([[0xf0, 0x9f, 0x99, 0x82], [65, 66]])
+    expect(api.checkpoint).not.toHaveBeenCalled()
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    expect(api.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ throughSequence: 7 }))
+    wrapper.unmount()
+    await flushPromises()
+  })
+
+  it('bounds each combined write while keeping every byte', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    terminal.write.mockClear()
+    for (let index = 0; index < 5; index += 1) {
+      api.callback({
+        type: 'output', activityId: agent.id, sequence: index + 3,
+        bytes: new Uint8Array(128 * 1024).fill(65 + index),
+      })
+    }
+    await flushPromises()
+    const writes = terminal.write.mock.calls.map(([bytes]) => bytes)
+    expect(writes.map(bytes => bytes.length)).toEqual([256 * 1024, 256 * 1024, 128 * 1024])
+    expect(writes.map(bytes => [bytes[0], bytes.at(-1)])).toEqual([[65, 66], [67, 68], [69, 69]])
+    wrapper.unmount()
+    await flushPromises()
+  })
+
+  it('does not save or advance past a failed terminal write', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    terminal.write.mockClear()
+    terminal.write.mockImplementationOnce(() => { throw new Error('Terminal write failed') })
+    api.callback({ type: 'output', activityId: agent.id, sequence: 3, bytes: [65] })
+    api.callback({ type: 'resize', activityId: agent.id, sequence: 4, cols: 90, rows: 25 })
+    // Exit requests a checkpoint before the pending write has failed.
+    api.callback({ type: 'exit', activityId: agent.id, exit: { reason: 'completed' } })
+    await flushPromises()
+    expect(wrapper.get('[data-terminal-error]').text()).toBe('Terminal write failed')
+    api.callback({ type: 'output', activityId: agent.id, sequence: 5, bytes: [66] })
+    api.callback({ type: 'exit', activityId: agent.id, exit: { reason: 'completed' } })
+    await flushPromises()
+    wrapper.unmount()
+    await flushPromises()
+    expect(terminal.write).toHaveBeenCalledOnce()
+    expect(terminal.resize).not.toHaveBeenCalledWith(90, 25)
+    expect(api.checkpoint).not.toHaveBeenCalled()
+    expect(api.release).toHaveBeenCalledOnce()
+  })
+
+  it('does not replace a checkpoint when its restoration fails', async () => {
+    api.attach.mockResolvedValueOnce(snapshot({
+      checkpoint: { formatVersion: 999, throughSequence: 2, data: 'unreadable' },
+      baseSequence: 2,
+      events: [],
+    }))
+    const wrapper = await initialize()
+    expect(wrapper.get('[data-terminal-error]').text()).toContain('Unsupported terminal checkpoint')
+    wrapper.unmount()
+    await flushPromises()
+    expect(api.checkpoint).not.toHaveBeenCalled()
+    expect(api.release).toHaveBeenCalledOnce()
+  })
+
+  it('disposes a terminal while a catch-up write and reveal are pending', async () => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    xterm.deferWrites = true
+    api.callback({ type: 'output', activityId: agent.id, sequence: 3, bytes: [65] })
+    await flushPromises()
+    window.dispatchEvent(new Event('focus'))
+    await nextTick()
+    expect(wrapper.get('[data-terminal-surface]').element.style.opacity).toBe('0')
+    wrapper.unmount()
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    flushRaf()
+    expect(terminal.refresh).not.toHaveBeenCalled()
+    expect(terminal.dispose).toHaveBeenCalledOnce()
+    expect(api.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ throughSequence: 3 }))
+  })
+
+  it('starts a resumed run without the failed run output queue', async () => {
+    const wrapper = await initialize(render({ activity: { ...agent, session: { runId: 'run-1' } } }))
+    const terminal = xterm.terminals[0]
+    terminal.write.mockImplementationOnce(() => { throw new Error('Terminal write failed') })
+    api.callback({ type: 'output', activityId: agent.id, sequence: 3, bytes: [65] })
+    api.callback({ type: 'resize', activityId: agent.id, sequence: 4, cols: 90, rows: 25 })
+    await flushPromises()
+    api.attach.mockResolvedValueOnce(snapshot({
+      runId: 'run-2', events: [{ type: 'output', sequence: 1, bytes: [67] }], lastSequence: 1,
+    }))
+    await wrapper.setProps({ activity: { ...agent, session: { runId: 'run-2' } } })
+    await flushPromises()
+    expect(terminal.resize).not.toHaveBeenCalledWith(90, 25)
+    expect(writtenBytes(terminal).at(-1)).toEqual([67])
+    expect(wrapper.find('[data-terminal-error]').exists()).toBe(false)
+    wrapper.unmount()
+    await flushPromises()
+    expect(api.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-2', throughSequence: 1 }))
+  })
+
+  it.each(['focus', 'visibility', 'activity'])('conceals old frames on return through %s', async (route) => {
+    const wrapper = await initialize()
+    const terminal = xterm.terminals[0]
+    xterm.deferWrites = true
+    if (route === 'activity') await wrapper.setProps({ active: false })
+    api.callback({ type: 'output', activityId: agent.id, sequence: 3, bytes: [65] })
+    await flushPromises()
+    if (route === 'focus') window.dispatchEvent(new Event('focus'))
+    else if (route === 'visibility') document.dispatchEvent(new Event('visibilitychange'))
+    else await wrapper.setProps({ active: true })
+    await nextTick()
+    expect(wrapper.get('[data-terminal-surface]').element.style.opacity).toBe('0')
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    expect(terminal.refresh).toHaveBeenCalledWith(0, terminal.rows - 1)
+    // More output before the reveal frame must keep the surface concealed.
+    api.callback({ type: 'output', activityId: agent.id, sequence: 4, bytes: [66] })
+    await flushPromises()
+    flushRaf()
+    await nextTick()
+    expect(wrapper.get('[data-terminal-surface]').element.style.opacity).toBe('0')
+    xterm.pendingWriteCallbacks.shift()()
+    await flushPromises()
+    flushRaf()
+    await nextTick()
+    expect(wrapper.get('[data-terminal-surface]').element.style.opacity).toBe('1')
+    expect(api.attach).toHaveBeenCalledOnce()
+    wrapper.unmount()
+    await flushPromises()
   })
 
   it('keeps interrupt and restart as explicit actions', async () => {
