@@ -208,19 +208,19 @@ metadata:
     })
   })
 
-  it('matches the packaged graph skill for knowledge tasks', async () => {
+  it('matches the packaged graph skill by its current name', async () => {
     const options = {
       home,
       cwd: path.resolve('.'),
       nativeRoot,
     }
 
-    const found = await findSkill('knowledge', options)
+    const found = await findSkill('mimir-graph', options)
 
     expect(found).toMatchObject({
       skill: {
         name: 'mimir-graph',
-        description: 'Use the Mimir knowledge graph, Team resources, scopes, and history.',
+        description: 'Use Mimir Graph records, Journal, resources, scopes, and history. Excludes TODAY / scratchpad.',
       },
     })
     await expect(fs.readFile(

@@ -5,6 +5,10 @@ task scope.
 
 ## Open
 
+- Release 0.3.0: signed installed-app checks for launch/relaunch, file save,
+  one terminal Activity, and permission prompts have no new runtime record.
+  The Scribe and managed Git evidence gaps below also remain open.
+
 - Image preview: verify physical pinch, default-app opening, and return-focus refresh in the installed macOS app.
 
 - Review the local Git and GitHub CLI dependency after real Team onboarding.
