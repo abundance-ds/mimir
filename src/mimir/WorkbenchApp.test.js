@@ -343,6 +343,7 @@ describe('WorkbenchApp', () => {
 
   afterEach(() => {
     for (const wrapper of wrappers) wrapper.unmount()
+    vi.useRealTimers()
   })
 
   async function render({ workspace = '' } = {}) {
@@ -420,6 +421,35 @@ describe('WorkbenchApp', () => {
     await nextTick()
     expect(wrapper.get('[data-workbench-diagnostic]').text())
       .toContain('Automatic sync needs attention: Reconnect GitHub.')
+  })
+
+  it('gives replacement and queued diagnostics a full 25 seconds', async () => {
+    let syncErrorHandler
+    vi.mocked(listen).mockImplementation(async (event, handler) => {
+      if (event === 'mimir://managed-git-error') syncErrorHandler = handler
+      return vi.fn()
+    })
+    window.__TAURI_INTERNALS__ = {}
+    const wrapper = await render()
+    vi.useFakeTimers()
+    const files = wrapper.findComponent({ name: 'FilesActivity' })
+
+    files.vm.$emit('diagnostic', 'File not found')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(20_000)
+    files.vm.$emit('diagnostic', 'Another file not found')
+    await nextTick()
+    syncErrorHandler({ payload: { message: 'Reconnect GitHub.', root: '/team' } })
+    await nextTick()
+
+    await vi.advanceTimersByTimeAsync(24_999)
+    expect(wrapper.get('[data-workbench-diagnostic]').text()).toContain('Another file not found')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(wrapper.get('[data-workbench-diagnostic]').text()).toContain('Reconnect GitHub.')
+    await vi.advanceTimersByTimeAsync(24_999)
+    expect(wrapper.find('[data-workbench-diagnostic]').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(wrapper.find('[data-workbench-diagnostic]').exists()).toBe(false)
   })
 
   it('focuses a new CLI Activity launched from the plus menu', async () => {

@@ -205,11 +205,14 @@ import {
   IconChevronRight,
   IconHistory,
 } from '@tabler/icons-vue'
+import { storeToRefs } from 'pinia'
+import { useTodayStore } from '../../stores/today.js'
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder } from '@codemirror/view'
 import {
   defaultKeymap,
   history,
+  isolateHistory,
   historyKeymap,
   indentWithTab,
   selectAll as selectAllCommand,
@@ -221,20 +224,15 @@ import { Strikethrough } from '@lezer/markdown'
 import { livePreviewExtension } from '../../editor/codemirror/livePreview.js'
 import { taskCheckboxExtension } from '../../editor/codemirror/taskCheckboxes.js'
 import { markdownListKeymap } from '../../editor/codemirror/markdownLists.js'
-import { loadAppData, saveAppData } from '../../services/appsCatalog.js'
 import DatePicker from '../../shared/ui/DatePicker.vue'
 import {
   appendMarkdownBelow,
   carrySource,
-  localDateKey,
-  parseTodayStorage,
-  serializeTodayStorage,
   shiftDateKey,
   stripCheckedTasks,
   uncheckedTaskBlocks,
 } from './todayModel.js'
 import {
-  archiveTodayEntry,
   loadTodayEntry,
   loadTodayMonthDates,
 } from './todayJournal.js'
@@ -246,43 +244,29 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['diagnostic'])
+const today = useTodayStore()
+const {
+  text, documentDate, updatedAt, previous, archiveQueue, tomorrow,
+  loading, saving, dirty, todayDirty, tomorrowDirty, savedOnce, savedDate,
+  error, errorAction, journalIssue, archiving,
+} = storeToRefs(today)
+const { markDirty, saveNow, flushSave, settlePrevious } = today
 const editorHost = ref(null)
-const text = ref('')
-const documentDate = ref(localDateKey())
 const viewDate = ref(documentDate.value)
-const todayKey = ref(documentDate.value)
-const updatedAt = ref(null)
-const previous = ref(null)
-const archiveQueue = ref([])
-const tomorrow = ref(null)
-const loading = ref(true)
 const historyLoading = ref(false)
-const saving = ref(false)
-const dirty = ref(false)
-const todayDirty = ref(false)
-const tomorrowDirty = ref(false)
-const savedOnce = ref(false)
-const savedDate = ref('')
-const error = ref('')
-const errorAction = ref('')
-const journalIssue = ref('')
 const notice = ref('')
 const carryReview = ref(false)
 const carrySelection = ref(new Set())
-const archiving = ref(false)
 const calendarDatesByMonth = ref(new Map())
 const calendarMonthsLoading = new Set()
-let saveTimer = null
-let savedTimer = null
 let noticeTimer = null
-let activeSave = null
 let historyRequest = 0
-let editRevision = 0
 let disposed = false
 let editorView = null
 let applyingExternalText = false
 const readOnlyCompartment = new Compartment()
 const contextCompartment = new Compartment()
+const historyCompartment = new Compartment()
 
 const carryCandidates = computed(() => (
   previous.value?.carryPending
@@ -392,30 +376,42 @@ watch(() => props.active, async (active) => {
 }, { immediate: true })
 
 async function restore() {
-  loading.value = true
   try {
-    const raw = await loadAppData(props.app.id, 'scratch')
+    await today.restore()
     if (disposed) return
-    const saved = parseTodayStorage(raw, todayKey.value)
-    documentDate.value = saved.date
-    viewDate.value = saved.date
-    text.value = saved.text
-    updatedAt.value = saved.updatedAt
-    previous.value = saved.previous
-    archiveQueue.value = saved.archiveQueue
-    tomorrow.value = saved.tomorrow
+    viewDate.value = documentDate.value
     prepareCarrySelection()
     syncEditorText(text.value)
     await ensureCurrentDay()
   } catch (cause) {
     reportError(`Today could not be restored: ${errorMessage(cause)}`, 'restore')
   } finally {
-    loading.value = false
     updateEditorContext()
     if (props.active) await nextTick(() => editorView?.focus())
     void archivePendingEntries()
   }
 }
+
+const detachEditor = today.attachEditor(({ date, from, insert }) => {
+  if (!editorView || viewDate.value !== date) return
+  applyingExternalText = true
+  try {
+    editorView.dispatch({ changes: { from, insert }, annotations: isolateHistory.of('full') })
+  } finally {
+    applyingExternalText = false
+  }
+})
+
+watch(documentDate, () => {
+  viewDate.value = documentDate.value
+  cancelHistoryLoad()
+  carryReview.value = false
+  prepareCarrySelection()
+  syncEditorText(text.value)
+  updateEditorContext()
+})
+
+watch(error, value => { if (value) emit('diagnostic', value) })
 
 function createMarkdownEditor() {
   if (!editorHost.value || editorView) return
@@ -425,7 +421,7 @@ function createMarkdownEditor() {
       EditorView.lineWrapping,
       contextCompartment.of(editorContextExtensions()),
       readOnlyCompartment.of(readOnlyExtensions(true)),
-      history(),
+      historyCompartment.of(history()),
       drawSelection(),
       markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
       markdownListKeymap,
@@ -510,28 +506,29 @@ function updateEditorContext() {
   if (!editorView) return
   editorView.dispatch({
     effects: [
-      readOnlyCompartment.reconfigure(readOnlyExtensions(loading.value || !isEditableDate.value)),
+      readOnlyCompartment.reconfigure(readOnlyExtensions(loading.value || errorAction.value === 'restore' || !isEditableDate.value)),
       contextCompartment.reconfigure(editorContextExtensions()),
     ],
   })
 }
 
 function syncEditorText(value) {
-  if (!editorView || editorView.state.doc.toString() === value) return
+  if (!editorView) return
   applyingExternalText = true
-  editorView.dispatch({
-    changes: {
-      from: 0,
-      to: editorView.state.doc.length,
-      insert: value,
-    },
-  })
-  applyingExternalText = false
+  try {
+    // Date navigation is not an edit. Discard the previous document's undo stack.
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: value },
+      effects: historyCompartment.reconfigure([]),
+    })
+    editorView.dispatch({ effects: historyCompartment.reconfigure(history()) })
+  } finally {
+    applyingExternalText = false
+  }
 }
 
 async function handleActivation() {
   if (!props.active || loading.value) return
-  todayKey.value = localDateKey()
   await ensureCurrentDay()
   void archivePendingEntries()
 }
@@ -541,67 +538,7 @@ function handleVisibilityChange() {
 }
 
 async function ensureCurrentDay() {
-  todayKey.value = localDateKey()
-  if (documentDate.value >= todayKey.value) return
-
-  const oldDate = documentDate.value
-  const oldText = text.value
-  const scheduled = tomorrow.value
-  if (previous.value?.archivePending && previous.value.text.trim()) {
-    archiveQueue.value = mergeArchiveQueue(archiveQueue.value, previous.value)
-  }
-
-  const missedTomorrow = scheduled?.date < todayKey.value ? scheduled : null
-  if (missedTomorrow?.text.trim()) {
-    archiveQueue.value = mergeArchiveQueue(archiveQueue.value, missedTomorrow)
-  }
-
-  const carrySources = []
-  if (previous.value?.carryPending) {
-    const sourceText = carrySource(previous.value)
-    if (uncheckedTaskBlocks(sourceText).length) {
-      carrySources.push({
-        dates: previous.value.carryDates || [previous.value.date],
-        text: sourceText,
-      })
-    }
-  }
-  if (uncheckedTaskBlocks(oldText).length) {
-    carrySources.push({ dates: [oldDate], text: oldText })
-  }
-  if (missedTomorrow && uncheckedTaskBlocks(missedTomorrow.text).length) {
-    carrySources.push({ dates: [missedTomorrow.date], text: missedTomorrow.text })
-  }
-  const carryText = carrySources.map(source => source.text).join('\n\n')
-  const carryDates = carrySources.flatMap(source => source.dates)
-  const candidates = uncheckedTaskBlocks(carryText)
-  previous.value = {
-    date: oldDate,
-    text: oldText,
-    carryText,
-    carryDates: [...new Set(carryDates)].sort(),
-    archivePending: Boolean(oldText.trim()),
-    carryPending: candidates.length > 0,
-  }
-  documentDate.value = todayKey.value
-  viewDate.value = todayKey.value
-  cancelHistoryLoad()
-  const promotedTomorrow = scheduled?.date === todayKey.value ? scheduled : null
-  text.value = promotedTomorrow?.text || ''
-  updatedAt.value = promotedTomorrow?.updatedAt || null
-  todayDirty.value = true
-  tomorrow.value = scheduled?.date > todayKey.value ? scheduled : null
-  carryReview.value = false
-  prepareCarrySelection()
-  settlePrevious()
-  syncEditorText(text.value)
-  updateEditorContext()
-  markDirty({ schedule: false })
-  await flushSave()
-
-  if (!candidates.length && (oldText.trim() || missedTomorrow?.text.trim())) {
-    showNotice(`${formatDayReference(oldDate)} was filed in your Personal Journal.`)
-  }
+  await today.ensureCurrentDay()
 }
 
 async function navigateDate(offset) {
@@ -751,40 +688,10 @@ function prepareCarrySelection() {
 }
 
 async function archivePendingEntries() {
-  if (archiving.value) return
-  const entries = pendingArchiveEntries()
-  if (!entries.length) {
-    journalIssue.value = ''
-    return
-  }
-
-  archiving.value = true
-  let changed = false
-  let archivedDate = ''
-  try {
-    for (const entry of entries) {
-      await archiveTodayEntry(entry)
-      markCalendarDate(entry.date, true)
-      archivedDate = entry.date
-      archiveQueue.value = archiveQueue.value.filter(item => item.date !== entry.date)
-      if (previous.value?.date === entry.date) {
-        previous.value = { ...previous.value, archivePending: false }
-      }
-      changed = true
-    }
-    journalIssue.value = ''
-    if (archivedDate && !showRollover.value) {
-      showNotice(`${formatDayReference(archivedDate)} was filed in your Personal Journal.`)
-    }
-  } catch (cause) {
-    journalIssue.value = `Journal archive is waiting: ${errorMessage(cause)}`
-  } finally {
-    archiving.value = false
-    if (changed) {
-      settlePrevious()
-      markDirty({ schedule: false })
-      void flushSave()
-    }
+  const dates = await today.archivePendingEntries()
+  for (const date of dates) markCalendarDate(date, true)
+  if (dates.length && !showRollover.value) {
+    showNotice(`${formatDayReference(dates.at(-1))} was filed in your Personal Journal.`)
   }
 }
 
@@ -833,104 +740,9 @@ function markCalendarDate(date, present) {
   calendarDatesByMonth.value = next
 }
 
-function pendingArchiveEntries() {
-  const entries = [...archiveQueue.value]
-  if (previous.value?.archivePending && previous.value.text.trim()) {
-    entries.push({ date: previous.value.date, text: previous.value.text })
-  }
-  return [...new Map(entries.map(entry => [entry.date, entry])).values()]
-    .sort((left, right) => left.date.localeCompare(right.date))
-}
-
 function pendingEntry(date) {
   if (previous.value?.date === date) return previous.value
   return archiveQueue.value.find(entry => entry.date === date) || null
-}
-
-function mergeArchiveQueue(queue, entry) {
-  const entries = new Map(queue.map(item => [item.date, item]))
-  const existing = entries.get(entry.date)
-  entries.set(entry.date, {
-    date: entry.date,
-    text: existing ? appendMarkdownBelow(existing.text, entry.text) : entry.text,
-  })
-  return [...entries.values()].sort((left, right) => left.date.localeCompare(right.date))
-}
-
-function settlePrevious() {
-  if (previous.value && !previous.value.archivePending && !previous.value.carryPending) {
-    previous.value = null
-  }
-}
-
-function markDirty({ schedule = true } = {}) {
-  editRevision += 1
-  dirty.value = true
-  savedOnce.value = false
-  if (errorAction.value === 'save') {
-    error.value = ''
-    errorAction.value = ''
-  }
-  clearTimeout(saveTimer)
-  if (schedule && !disposed) saveTimer = setTimeout(() => void persist(), 350)
-}
-
-function saveNow() {
-  clearTimeout(saveTimer)
-  return flushSave()
-}
-
-async function flushSave() {
-  clearTimeout(saveTimer)
-  while (dirty.value) {
-    const saved = await persist()
-    if (!saved) return false
-  }
-  return true
-}
-
-function persist() {
-  if (activeSave) return activeSave
-  if (!dirty.value) return Promise.resolve(true)
-
-  const revision = editRevision
-  const savedAt = new Date().toISOString()
-  const savedViewDate = isEditableDate.value ? viewDate.value : ''
-  const todaySavedAt = todayDirty.value ? savedAt : updatedAt.value
-  const raw = serializeTodayStorage({
-    date: documentDate.value,
-    text: text.value,
-    updatedAt: todaySavedAt,
-    previous: previous.value,
-    archiveQueue: archiveQueue.value,
-    tomorrow: tomorrow.value,
-  })
-  saving.value = true
-  activeSave = (async () => {
-    try {
-      await saveAppData(props.app.id, 'scratch', raw)
-      error.value = ''
-      errorAction.value = ''
-      if (editRevision === revision) {
-        updatedAt.value = todaySavedAt
-        todayDirty.value = false
-        tomorrowDirty.value = false
-        dirty.value = false
-        savedOnce.value = true
-        savedDate.value = savedViewDate
-        clearTimeout(savedTimer)
-        savedTimer = setTimeout(() => { savedOnce.value = false }, 1_500)
-      }
-      return true
-    } catch (cause) {
-      reportError(`Today could not be saved: ${errorMessage(cause)}`, 'save')
-      return false
-    } finally {
-      saving.value = false
-      activeSave = null
-    }
-  })()
-  return activeSave
 }
 
 function showNotice(message) {
@@ -1005,8 +817,7 @@ defineExpose({
 
 onUnmounted(() => {
   disposed = true
-  clearTimeout(saveTimer)
-  clearTimeout(savedTimer)
+  detachEditor()
   clearTimeout(noticeTimer)
   window.removeEventListener('focus', handleActivation)
   document.removeEventListener('visibilitychange', handleVisibilityChange)

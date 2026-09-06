@@ -127,7 +127,7 @@
             role="status"
           >
             <IconAlertTriangle :size="14" :stroke-width="1.7" class="mt-px shrink-0" />
-            <span class="pointer-events-auto min-w-0 flex-1">{{ diagnostic }}</span>
+            <span class="pointer-events-auto min-w-0 flex-1 select-text cursor-text">{{ diagnostic }}</span>
             <button
               type="button"
               title="Dismiss diagnostic"
@@ -210,13 +210,13 @@ import { useTrackerStore } from '../stores/tracker.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
 import { useWorkspaceFilesStore } from '../stores/workspaceFiles.js'
 import { createToolRuntime } from '../services/toolRuntime.js'
-import { callAppAction, loadAppData, openAppWindow } from '../services/appsCatalog.js'
+import { callAppAction, openAppWindow } from '../services/appsCatalog.js'
 import {
   listenToMeetingRecordRequests,
   takeMeetingRecordRequests,
 } from '../services/meetings.js'
 import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
-import { localDateKey, parseTodayStorage } from './apps/todayModel.js'
+import { useTodayStore } from '../stores/today.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
 import ChatActivity from './activities/ChatActivity.vue'
@@ -303,46 +303,15 @@ const workspaceSetupError = ref('')
 let workspaceSetupResolver = null
 const activitySurfaces = new Map()
 
+const today = useTodayStore()
 const toolRuntime = createToolRuntime({
   getEditor: () => editorRef.value,
   getWorkspacePath: () => workspaceFiles.workspacePath || null,
   awaitWorkspaceWrites: paths => editorFiles.waitForWorkspacePaths(paths),
   moveWorkspacePath: (from, to) => editorFiles.moveWorkspacePath(from, to),
   reconcileWorkspaceTrash: paths => editorFiles.handleWorkspaceTrash(paths),
-  getToday: async () => {
-    for (const [id, surface] of activitySurfaces) {
-      const activity = activities.byId(id)
-      if (activity?.source?.appId !== 'scratch') continue
-      const live = surface.todayState?.()
-      if (live && !live.loading) return live
-    }
-    try {
-      const raw = await loadAppData('scratch', 'scratch')
-      const saved = parseTodayStorage(raw, localDateKey())
-      return {
-        artifactType: 'today',
-        date: saved.date,
-        mediaType: 'text/markdown',
-        content: saved.text,
-        updatedAt: saved.updatedAt,
-        loading: false,
-        dirty: false,
-        live: false,
-      }
-    } catch {
-      return {
-        artifactType: 'today',
-        date: localDateKey(),
-        mediaType: 'text/markdown',
-        content: '',
-        updatedAt: null,
-        loading: false,
-        dirty: false,
-        live: false,
-        unavailable: true,
-      }
-    }
-  },
+  getToday: () => today.read().catch(() => ({ artifactType: 'today', unavailable: true })),
+  appendToday: (text, options) => today.append(text, options),
   settings,
   listActivities: () => activities.activities,
   stopActivity: async (id) => {
@@ -1605,6 +1574,12 @@ watch(diagnostic, (value) => {
   if (value || !pendingManagedSyncDiagnostic.value) return
   diagnostic.value = pendingManagedSyncDiagnostic.value
   pendingManagedSyncDiagnostic.value = ''
+})
+
+watch(diagnostic, (value, _previous, onCleanup) => {
+  if (!value) return
+  const timer = setTimeout(dismissDiagnostic, 25_000)
+  onCleanup(() => clearTimeout(timer))
 })
 
 function recordActivitySurfaceError(payload) {

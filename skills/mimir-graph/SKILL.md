@@ -1,6 +1,6 @@
 ---
 name: mimir-graph
-description: Use the Mimir knowledge graph, Team resources, scopes, and history.
+description: Use Mimir Graph records, Journal, resources, scopes, and history. Excludes TODAY / scratchpad.
 ---
 
 Read [graph.md](references/graph.md) before using the graph.

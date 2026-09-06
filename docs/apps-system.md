@@ -56,8 +56,13 @@ Markdown day note with one optional Tomorrow draft.
 - Failed Graph filing remains in a local retry queue and never blocks editing.
 - Unchecked task blocks can carry to the new day; completed work and normal
   prose remain in Journal.
-- Past days are read-only. Tomorrow is editable. There is no Today-specific
-  public tool.
+- Past days are read-only. Tomorrow is editable.
+- `src/stores/today.js` owns live state, date changes, and serialized saves for
+  both the UI and agent tools. Autosave drains edits made during a pending write.
+  Appends preserve unsaved edits and use one Undo
+  step when today's editor is displayed. Date navigation resets Undo.
+  Closed-surface writes need no UI launch.
+- Agent tool contract: [agent-interface.md](agent-interface.md).
 
 Native catalog and protocol ownership is `src-tauri/src/apps.rs`. Renderer
 ownership is the app catalog, Activity host, embedded/launch-plan hosts, and

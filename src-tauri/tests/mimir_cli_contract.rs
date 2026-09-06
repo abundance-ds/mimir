@@ -184,10 +184,14 @@ struct TestServer {
 
 impl TestServer {
     async fn boot() -> Self {
+        Self::boot_with_registry(test_registry()).await
+    }
+
+    async fn boot_with_registry(registry: ToolRegistry) -> Self {
         // Contract tests must never touch or prompt for the developer's real
         // OS keychain now that production macOS builds use the native backend.
         keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
-        let (shutdown_tx, task, port) = start_server(test_registry(), 0, TEST_TOKEN.into())
+        let (shutdown_tx, task, port) = start_server(registry, 0, TEST_TOKEN.into())
             .await
             .expect("tool server boots on an ephemeral port");
         Self {
@@ -421,6 +425,56 @@ async fn mimir_cli_discovers_and_calls_tools_over_the_wire() {
         stderr_of(&missing),
     );
 
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn cli_discovers_and_calls_today_append() {
+    let registry = test_registry();
+    register_core_tool(
+        &registry,
+        "today.append",
+        "today_append",
+        "Append Markdown to today's scratchpad; return the saved addition.",
+        json!({
+            "type": "object",
+            "properties": { "text": { "type": "string", "minLength": 1 } },
+            "required": ["text"],
+            "additionalProperties": false
+        }),
+        ToolSource::Ui,
+        |_context: ToolCallContext, input: Value| async move {
+            assert_eq!(input, json!({ "text": "- [ ] test" }));
+            Ok(ToolResult::new(
+                json!({ "date": "2026-09-06", "updatedAt": "2026-09-06T10:00:00Z", "contextBefore": "Draft", "appended": "\n\n- [ ] test" }),
+            ))
+        },
+    )
+    .unwrap();
+    let server = TestServer::boot_with_registry(registry).await;
+    let Some(listing) = run_mimir(&server.mcp_url(), &["tools", "workbench"]).await else {
+        server.shutdown().await;
+        return;
+    };
+    assert_success(&listing, "discover today_append");
+    assert!(stdout_of(&listing).contains("today_append"));
+    let schema = run_mimir(&server.mcp_url(), &["tool", "today_append"])
+        .await
+        .unwrap();
+    assert_success(&schema, "inspect today_append");
+    assert!(stdout_of(&schema).contains("text"));
+    let call = run_mimir(
+        &server.mcp_url(),
+        &["call", "today_append", r#"{"text":"- [ ] test"}"#],
+    )
+    .await
+    .unwrap();
+    assert_success(&call, "call today_append");
+    let receipt: Value = serde_json::from_str(stdout_of(&call).trim()).unwrap();
+    assert_eq!(
+        receipt,
+        json!({ "date": "2026-09-06", "updatedAt": "2026-09-06T10:00:00Z", "contextBefore": "Draft", "appended": "\n\n- [ ] test" })
+    );
     server.shutdown().await;
 }
 

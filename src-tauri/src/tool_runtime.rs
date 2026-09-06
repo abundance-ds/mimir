@@ -40,7 +40,7 @@ pub(crate) struct AgentToolSpec {
     pub connection: Option<&'static str>,
 }
 
-pub(crate) const AGENT_TOOLS: [AgentToolSpec; 44] = [
+pub(crate) const AGENT_TOOLS: [AgentToolSpec; 45] = [
     AgentToolSpec {
         canonical_name: "editor.state",
         public_name: "mimir_state",
@@ -48,6 +48,15 @@ pub(crate) const AGENT_TOOLS: [AgentToolSpec; 44] = [
         group: "workbench",
         effect: "read",
         direct: true,
+        connection: None,
+    },
+    AgentToolSpec {
+        canonical_name: "today.append",
+        public_name: "today_append",
+        description: "Append Markdown to today's scratchpad; return the saved addition.",
+        group: "workbench",
+        effect: "write",
+        direct: false,
         connection: None,
     },
     AgentToolSpec {
@@ -1153,6 +1162,15 @@ fn core_tool_definitions() -> Vec<DynamicToolDefinition> {
             json!({ "path": { "type": "string", "minLength": 1 } }),
             &["path"],
         ),
+        definition(
+            "today.append",
+            "today_append",
+            "Append Markdown to today's scratchpad; return the saved addition.",
+            object_schema(
+                json!({ "text": { "type": "string", "minLength": 1, "maxLength": 50000, "pattern": "\\S" } }),
+                &["text"],
+            ),
+        ),
         editor_definition(
             "editor.state",
             "editor_state",
@@ -1573,7 +1591,7 @@ mod tests {
 
     #[test]
     fn agent_catalog_is_small_unique_and_progressively_disclosed() {
-        assert_eq!(AGENT_TOOLS.len(), 44);
+        assert_eq!(AGENT_TOOLS.len(), 45);
 
         let canonical_names: HashSet<_> =
             AGENT_TOOLS.iter().map(|spec| spec.canonical_name).collect();
@@ -1764,6 +1782,54 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(registry.list().len(), core_tool_definitions().len());
+    }
+
+    #[tokio::test]
+    async fn today_append_validates_input_before_dispatch() {
+        let definition = core_tool_definitions()
+            .into_iter()
+            .find(|tool| tool.canonical_name == "today.append")
+            .unwrap();
+        let registry = ToolRegistry::new();
+        registry
+            .register(ToolRegistration::new(
+                ToolDescriptor::new(
+                    definition.canonical_name,
+                    definition.mcp_alias,
+                    definition.description,
+                    definition.input_schema,
+                    ToolOwner::Core,
+                    ToolSource::Ui,
+                ),
+                |_context: ToolCallContext, input: Value| async move { Ok(ToolResult::new(input)) },
+            ))
+            .unwrap();
+        for input in [
+            json!({}),
+            json!({ "text": "" }),
+            json!({ "text": "   \n" }),
+            json!({ "text": "x".repeat(50001) }),
+            json!({ "text": "ok", "date": "2026-09-05" }),
+        ] {
+            let error = registry
+                .call("today.append", ToolCallContext::default(), input)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, ToolErrorCode::InvalidInput);
+        }
+        let result = registry
+            .call(
+                "today.append",
+                ToolCallContext::default(),
+                json!({ "text": "- [ ] test" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.value, json!({ "text": "- [ ] test" }));
+        let spec = agent_tool_by_public_name("today_append").unwrap();
+        assert_eq!(spec.canonical_name, "today.append");
+        assert_eq!(spec.group, "workbench");
+        assert!(!spec.direct);
     }
 
     #[test]

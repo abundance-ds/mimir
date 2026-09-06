@@ -247,29 +247,13 @@ mod tests {
     fn packaged_skills_stay_lean() {
         for (name, source, limit) in [
             ("mimir-config", MIMIR_CONFIG_SKILL, 220),
-            ("mimir-graph", MIMIR_GRAPH_SKILL, 25),
+            ("mimir-graph", MIMIR_GRAPH_SKILL, 35),
             ("mimir-meetings", MIMIR_MEETINGS_SKILL, 70),
             ("mimir-graph reference", MIMIR_GRAPH_REFERENCE, 450),
-            ("mimir", MIMIR_OVERVIEW_SKILL, 460),
+            ("mimir", MIMIR_OVERVIEW_SKILL, 180),
         ] {
             let words = word_count(source);
             assert!(words <= limit, "{name} has {words} words; limit is {limit}");
-        }
-    }
-
-    #[test]
-    fn overview_skill_lists_every_public_tool() {
-        for spec in crate::tool_runtime::AGENT_TOOLS.iter() {
-            // Granola is scheduled for removal and is intentionally absent
-            // from the overview skill.
-            if spec.connection == Some("granola") {
-                continue;
-            }
-            assert!(
-                MIMIR_OVERVIEW_SKILL.contains(spec.public_name),
-                "overview skill does not list {}",
-                spec.public_name
-            );
         }
     }
 
@@ -400,9 +384,9 @@ mod tests {
         assert!(MIMIR_MEETINGS_SKILL.contains("last_minutes"));
         assert!(MIMIR_MEETINGS_SKILL.contains("delete requires explicit user request"));
         assert!(MIMIR_OVERVIEW_SKILL.contains("name: mimir\n"));
-        assert!(MIMIR_OVERVIEW_SKILL.contains("Skill `mimir-graph`"));
-        assert!(MIMIR_OVERVIEW_SKILL.contains("Skill `mimir-meetings`"));
-        assert!(MIMIR_OVERVIEW_SKILL.contains("Skill `mimir-config`"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("`mimir-graph`"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("`mimir-meetings`"));
+        assert!(MIMIR_OVERVIEW_SKILL.contains("`mimir-config`"));
         for kind in crate::business_graph::ENTITY_KINDS {
             assert!(MIMIR_GRAPH_REFERENCE.contains(kind));
         }

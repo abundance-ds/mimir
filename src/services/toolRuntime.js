@@ -105,6 +105,9 @@ export async function executeToolRequest(request, options = {}) {
   }
 
   switch (tool) {
+    case 'today.append':
+      if (!options.appendToday) throw unavailableError('Today is not attached.')
+      return options.appendToday(input.text, { signal: options.signal })
     case 'activities.list':
       return options.listActivities
         ? options.listActivities()

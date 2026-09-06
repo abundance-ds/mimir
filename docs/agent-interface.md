@@ -22,10 +22,18 @@ MCP initially advertises only `mimir_state`, `mimir_reveal`, and
 Workbench:
 
 ```text
-mimir_state  mimir_reveal  mimir_propose
+mimir_state  today_append  mimir_reveal  mimir_propose
 comments_list  comments_add  comments_reply  comments_resolve
 files_trash  agents_run  activities_snapshot
 ```
+
+`today_append {text}` appends Markdown to the current local day's scratchpad
+and saves it. Returns `{date, updatedAt, contextBefore, appended}`.
+`contextBefore` contains up to two preceding lines, without trailing blank lines;
+`appended` is the exact inserted text, including the separator.
+The receipt confirms the saved change.
+Read the full scratchpad with `mimir_state.today`.
+After a timeout or save error, read before retrying: the append may have applied.
 
 Graph:
 

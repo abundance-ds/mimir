@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { undo } from '@codemirror/commands'
+import { useTodayStore } from '../../stores/today.js'
 import { syntaxTree } from '@codemirror/language'
 import { loadAppData, saveAppData } from '../../services/appsCatalog.js'
 import {
@@ -127,6 +129,75 @@ describe('TodayApp', () => {
       live: true,
     })
     expect(saveAppData).not.toHaveBeenCalled()
+  })
+
+  it('appends to unsaved content as an isolated Undo step', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await setEditorText(wrapper, 'User draft')
+    await useTodayStore().append('- [ ] test')
+    expect(view(wrapper).state.doc.toString()).toBe('User draft\n\n- [ ] test')
+    expect(JSON.parse(saveAppData.mock.lastCall[2]).text).toBe('User draft\n\n- [ ] test')
+    undo(view(wrapper))
+    expect(view(wrapper).state.doc.toString()).toBe('User draft')
+    expect(useTodayStore().text).toBe('User draft')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(JSON.parse(saveAppData.mock.lastCall[2]).text).toBe('User draft')
+    wrapper.unmount()
+  })
+
+  it('appends to today while tomorrow is displayed without changing the draft', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-today-date-nav] button:last-child').trigger('click')
+    await flushPromises()
+    await setEditorText(wrapper, 'Tomorrow draft')
+    await useTodayStore().append('Today addition')
+    expect(view(wrapper).state.doc.toString()).toBe('Tomorrow draft')
+    expect(useTodayStore().tomorrow.text).toBe('Tomorrow draft')
+    expect(useTodayStore().text).toBe('Ship the focused review flow\n\nToday addition')
+    wrapper.unmount()
+  })
+
+  it('does not undo text from another date into the current draft', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await setEditorText(wrapper, 'Today only')
+    await wrapper.get('[aria-label="View next day"]').trigger('click')
+    await flushPromises()
+    await setEditorText(wrapper, 'Tomorrow only')
+    undo(view(wrapper))
+    expect(view(wrapper).state.doc.toString()).toBe('')
+    expect(undo(view(wrapper))).toBe(false)
+    expect(useTodayStore().text).toBe('Today only')
+    wrapper.unmount()
+  })
+
+  it('appends after midnight to the new day and isolates Undo', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await setEditorText(wrapper, '- [ ] Yesterday')
+    vi.setSystemTime(new Date(2026, 7, 16, 0, 1))
+    await useTodayStore().append('- [ ] New day')
+    expect(wrapper.get('[data-today-date-nav] time').attributes('datetime')).toBe('2026-08-16')
+    expect(view(wrapper).state.doc.toString()).toBe('- [ ] New day')
+    undo(view(wrapper))
+    expect(view(wrapper).state.doc.toString()).toBe('')
+    expect(useTodayStore().previous.text).toBe('- [ ] Yesterday')
+    wrapper.unmount()
+  })
+
+  it('shows closed-surface appends when mounted again', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await setEditorText(wrapper, 'Retained')
+    wrapper.unmount()
+    await useTodayStore().append('Closed addition')
+    const reopened = render()
+    await flushPromises()
+    expect(view(reopened).state.doc.toString()).toBe('Retained\n\nClosed addition')
+    expect(loadAppData).toHaveBeenCalledTimes(1)
+    reopened.unmount()
   })
 
   it('debounces version 3 durable autosave', async () => {

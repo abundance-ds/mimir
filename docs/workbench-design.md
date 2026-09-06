@@ -51,5 +51,11 @@ Cmd/Ctrl+P opens one grouped launcher near the window top.
   when it closes.
 
 Workbench teardown snapshots layout and Activity order before Settings flush.
+
+Workbench diagnostic toasts close after 25 seconds. Each new message starts
+a new timer. A queued sync error gets its own 25 seconds when it appears.
+The message text supports selection and copying. The close button can dismiss
+the message at any time.
+
 Visual rules are in [design-system.md](design-system.md); Activity projection is
 in [activities.md](activities.md).

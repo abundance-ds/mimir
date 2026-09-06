@@ -116,6 +116,17 @@ describe('canonical renderer tool runtime', () => {
     expect(getToday).toHaveBeenCalledTimes(1)
   })
 
+  it('routes Today append without an Editor or an app launch', async () => {
+    const receipt = { date: '2026-09-06', updatedAt: '2026-09-06T10:00:00Z', contextBefore: 'Draft', appended: '\n\n- [ ] test' }
+    const appendToday = vi.fn().mockResolvedValue(receipt)
+    const signal = new AbortController().signal
+    await expect(executeToolRequest({ tool: 'today.append', input: { text: '- [ ] test' } }, {
+      appendToday, signal,
+    })).resolves.toEqual(receipt)
+    expect(appendToday).toHaveBeenCalledWith('- [ ] test', { signal })
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it('routes resolve, reopen, and delete through the active editor comment model', async () => {
     const editor = {
       mimirCommentAction: vi.fn(() => ({ ok: true })),
