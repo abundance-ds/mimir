@@ -99,7 +99,8 @@ Use `minor`, `major`, or an exact version when needed. The command requires:
 - unused tag and GitHub Release
 - passing frontend, docs, command, and build checks
 
-It updates versions and `Cargo.lock`, commits, creates an annotated tag, and
+It updates versions, `Cargo.lock`, and the software inventory, checks the
+packaged inventory, commits, creates an annotated tag, and
 pushes commit and tag together. The tag workflow verifies Ubuntu, builds and
 signs macOS, uploads the exact stage, publishes one complete GitHub Release,
 and verifies public updater assets.

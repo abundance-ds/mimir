@@ -70,6 +70,17 @@ try {
   if (!String(error.message).includes('release not found')) throw error
 }
 
+const policyPath = resolve(REPOSITORY_ROOT, 'src-tauri/vendor/license-policy.json')
+const policy = JSON.parse(readFileSync(policyPath, 'utf8'))
+const firstPartyId = `cargo:mimir@${packageJson.version}`
+if (!policy.firstParty.includes(firstPartyId)) {
+  throw new Error(`license policy must include ${firstPartyId} before a release bump`)
+}
+policy.firstParty = policy.firstParty.map(id => (
+  id === firstPartyId ? `cargo:mimir@${nextVersion}` : id
+))
+writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`)
+
 packageJson.version = nextVersion
 tauriJson.version = nextVersion
 writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
@@ -85,6 +96,8 @@ run('cargo', [
   '--format-version', '1',
 ], { stdio: 'ignore' })
 run('bun', ['install', '--frozen-lockfile'])
+run('bun', ['run', 'supply-chain:generate'])
+run('bun', ['run', 'check:meetings'])
 run('bun', ['run', 'docs:check'])
 run('bun', ['run', 'check:identity'])
 run('bun', ['run', 'check:commands'])
@@ -96,6 +109,9 @@ run('git', ['add',
   'src-tauri/Cargo.toml',
   'src-tauri/Cargo.lock',
   'src-tauri/tauri.conf.json',
+  'src-tauri/vendor/license-policy.json',
+  'src-tauri/vendor/SBOM.spdx.json',
+  'src-tauri/vendor/THIRD_PARTY_LICENSES.md',
 ])
 run('git', ['commit', '-m', `release: prepare ${tag}`])
 run('git', ['tag', '-a', tag, '-m', `Mimir ${nextVersion}`])
