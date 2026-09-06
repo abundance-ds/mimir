@@ -77,12 +77,13 @@ rules that relate them.
 - Graph property controls are borderless at rest and gain a quiet hover wash
   and focus ring. Visible labels explain editable values.
 - Graph notes are unframed document text. Dialog fields can remain boxed.
-- Work rows: Board cards are 66 px `chrome-high` plates on a `chrome`
+- Work rows: Board cards are 84 px `chrome-high` plates on a `chrome`
   column with a 1 px `rule-light` edge, a 2 px radius, and a 4 px gap; hover
   is `chrome-mid`. This stack is raised in every theme; `surface` is not,
   because it is the darkest layer in dracula, zenith, and synthwave. The
   cards are the one rounded workbench surface. Slots are fixed: title 13 px/600 on
-  one line with the owner at its right, project beneath, then the due date
+  up to two lines in a fixed 36 px slot, with the owner at its top right,
+  project beneath, then the due date
   and waiting reason at 11 px, and the priority control at the bottom right.
   List rows are one 12 px line in aligned columns. Due dates are words
   relative to today; overdue pairs `rem` with the word. Column and group

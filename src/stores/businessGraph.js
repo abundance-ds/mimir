@@ -17,6 +17,7 @@ import {
 } from '../services/businessGraph.js'
 import { defaultGraphWriteScope } from './businessGraphScopes.js'
 import { cachedWorkspaceConfig } from '../services/workspaceConfig.js'
+import { filterWork, workSearchIndex } from './businessGraphWorkSearch.js'
 
 export const BUSINESS_SECTIONS = Object.freeze([
   { id: 'work', label: 'Work', kinds: ['issue'] },
@@ -68,7 +69,11 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const selectedScopes = computed(() => (
     scopes.value.filter(scope => activeScopeIds.value.includes(scope.id))
   ))
+  const workIndex = computed(() => workSearchIndex(nodes.value))
   const visibleNodes = computed(() => {
+    if (section.value === 'work') {
+      return filterWork(issues.value, workIndex.value, searchQuery.value)
+    }
     const definition = BUSINESS_SECTIONS.find(item => item.id === section.value)
     const kinds = new Set(definition?.kinds || [])
     const items = searchQuery.value.trim() ? searchResults.value : nodes.value
@@ -240,7 +245,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     const query = String(value || '')
     searchQuery.value = query
     const generation = ++searchGeneration
-    if (!query.trim()) {
+    if (!query.trim() || section.value === 'work') {
       searchResults.value = []
       searching.value = false
       return
@@ -434,6 +439,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     sectionViews.value[section.value] = view.value
     section.value = next
     view.value = sectionViews.value[next] || 'list'
+    if (searchQuery.value.trim()) void search(searchQuery.value)
   }
 
   function setView(next) {

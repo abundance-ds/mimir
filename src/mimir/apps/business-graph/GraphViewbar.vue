@@ -1,5 +1,5 @@
 <template>
-  <div data-graph-viewbar class="graph-viewbar pane-subbar">
+  <div ref="viewbarRoot" data-graph-viewbar class="graph-viewbar pane-subbar" :class="{ 'graph-viewbar-inline': inlineControls }">
     <nav class="graph-views" :aria-label="`${sectionLabel} views`">
       <button
         v-for="option in viewOptions"
@@ -16,7 +16,7 @@
       </button>
     </nav>
 
-    <div v-if="activeFilters.length" class="graph-active-filters" aria-label="Active filters">
+    <div v-if="activeFilters.length && !inlineControls && !compactFilters" class="graph-active-filters" aria-label="Active filters">
       <button
         v-for="filter in activeFilters"
         :key="filter.id"
@@ -39,34 +39,38 @@
       class="graph-filters-root"
     >
       <button
+        v-show="!inlineControls"
         ref="filtersTrigger"
         type="button"
         data-graph-filters-trigger
         data-graph-control="filters-trigger"
         class="graph-filters-trigger"
         :class="{ 'graph-filter-active': activeFilters.length }"
+        :title="activeFilters.length ? activeFilters.map(filter => filter.label).join('; ') : (section === 'work' ? 'Filter tasks' : 'Filter graph items')"
         aria-haspopup="dialog"
         :aria-expanded="filtersMenu"
         @click="toggleFiltersMenu"
         @keydown.down.prevent="openFiltersMenu"
       >
         <IconFilter :size="13" />
-        <span>Filters</span>
+        <span>Filter</span>
         <span v-if="activeFilters.length" class="graph-filter-count">{{ activeFilters.length }}</span>
       </button>
 
       <div
-        v-show="filtersMenu"
+        v-show="filtersMenu || inlineControls"
+        :key="inlineControls ? 'inline' : 'popover'"
         ref="filtersMenuRoot"
         data-graph-filters-popover
-        role="dialog"
-        aria-label="Graph filters"
+        :role="inlineControls ? 'group' : 'dialog'"
+        :aria-label="section === 'work' ? 'Task filters' : 'Graph filters'"
         class="graph-filters-popover"
+        :style="{ maxWidth: availableWidth ? `${availableWidth}px` : undefined }"
         @keydown="onFiltersMenuKeydown"
       >
         <template v-if="section === 'work'">
           <div class="graph-filter-row">
-            <span>Project</span>
+            <span v-if="!inlineControls">Project</span>
             <div class="graph-filter-control">
               <GraphSelect
                 :model-value="projectFilter"
@@ -82,7 +86,11 @@
                 search-placeholder="Find a project"
                 :menu-min-width="196"
                 @update:model-value="$emit('update:projectFilter', $event)"
-              />
+              >
+                <template #trigger="{ option }">
+                  {{ inlineControls && !projectFilter ? 'Project' : option?.label }}
+                </template>
+              </GraphSelect>
               <button
                 type="button"
                 data-graph-control="board-project-filter-clear"
@@ -98,14 +106,15 @@
           </div>
 
           <div class="graph-filter-row">
-            <span>Owner</span>
+            <span v-if="!inlineControls">Owner</span>
             <div class="graph-filter-control">
               <GraphSelect
                 :model-value="assigneeFilter"
                 data-board-assignee-filter
                 data-graph-control="board-assignee"
                 class="min-w-0 flex-1"
-                :class="{ 'graph-project-view-active': assigneeFilter }"
+                :class="{ 'graph-project-view-active': assigneeFilter, 'graph-owner-empty': inlineControls && !assigneeFilter }"
+                :chevron="!inlineControls || Boolean(assigneeFilter)"
                 variant="bar"
                 :aria-label="ownerViewAccessibleLabel"
                 :title="ownerViewAccessibleLabel"
@@ -114,7 +123,12 @@
                 search-placeholder="Find a person"
                 :menu-min-width="196"
                 @update:model-value="$emit('update:assigneeFilter', $event)"
-              />
+              >
+                <template #trigger="{ option }">
+                  <IconUser v-if="inlineControls && !assigneeFilter" :size="14" aria-hidden="true" />
+                  <template v-else>{{ option?.label }}</template>
+                </template>
+              </GraphSelect>
               <button
                 type="button"
                 data-graph-control="board-assignee-filter-clear"
@@ -130,35 +144,7 @@
           </div>
 
           <div class="graph-filter-row">
-            <span>Group</span>
-            <GraphSelect
-              :model-value="groupBy"
-              data-board-group
-              data-graph-control="board-group"
-              class="min-w-0"
-              variant="bar"
-              aria-label="Group work"
-              :options="groupOptions"
-              @update:model-value="$emit('update:groupBy', $event)"
-            />
-          </div>
-
-          <div class="graph-filter-row">
-            <span>Sort</span>
-            <GraphSelect
-              :model-value="sortBy"
-              data-board-sort
-              data-graph-control="board-sort"
-              class="min-w-0"
-              variant="bar"
-              aria-label="Sort issues"
-              :options="sortOptions"
-              @update:model-value="$emit('update:sortBy', $event)"
-            />
-          </div>
-
-          <div class="graph-filter-row">
-            <span>Priority</span>
+            <span v-if="!inlineControls">Priority</span>
             <div class="graph-filter-control">
               <GraphSelect
                 :model-value="priorityFilter"
@@ -168,9 +154,16 @@
                 :class="{ 'graph-filter-active': priorityFilter }"
                 variant="bar"
                 aria-label="Filter issues by priority"
+                :title="priorityFilter ? `Priority: ${human(priorityFilter)}` : 'Filter by priority'"
+                :menu-min-width="160"
                 :options="priorityOptions"
                 @update:model-value="$emit('update:priorityFilter', $event)"
-              />
+              >
+                <template #trigger="{ option }">
+                  <span v-if="inlineControls && !priorityFilter" class="graph-filter-label"><IconFilter :size="12" aria-hidden="true" />Filter</span>
+                  <template v-else>{{ option?.label }}</template>
+                </template>
+              </GraphSelect>
               <button
                 type="button"
                 data-graph-control="board-priority-filter-clear"
@@ -185,75 +178,6 @@
             </div>
           </div>
 
-          <div
-            v-if="view === 'board' && groupBy === 'status'"
-            ref="columnsRoot"
-            class="graph-filter-row"
-            data-board-columns-root
-          >
-            <span>Columns</span>
-            <div class="graph-filter-control">
-              <button
-                ref="columnsTrigger"
-                type="button"
-                data-board-columns-trigger
-                data-graph-control="board-columns"
-                class="graph-columns-trigger"
-                :class="{ 'graph-filter-active': collapsedLabels.length }"
-                aria-haspopup="menu"
-                :aria-expanded="columnsMenu"
-                @click="toggleColumnsMenu"
-                @keydown.down.prevent="openColumnsMenu('first')"
-                @keydown.up.prevent="openColumnsMenu('last')"
-              >
-                <span>{{ collapsedLabels.length ? `${collapsedLabels.length} collapsed` : 'All shown' }}</span>
-                <IconChevronDown :size="11" />
-              </button>
-              <button
-                type="button"
-                data-graph-control="board-columns-expand-all"
-                class="graph-filter-reset"
-                :disabled="!collapsedLabels.length"
-                :title="collapsedLabels.length ? 'Expand all board columns' : undefined"
-                :aria-label="collapsedLabels.length ? `Expand all board columns. Collapsed: ${collapsedLabels.join(', ')}` : 'All board columns are expanded'"
-                @click="$emit('expandAll')"
-              >
-                <IconX :size="12" />
-              </button>
-            </div>
-            <Teleport to="body">
-              <div
-                v-if="columnsMenu"
-                ref="columnsMenuRoot"
-                data-board-columns-menu
-                data-modal-portal
-                role="menu"
-                aria-label="Collapsed board columns"
-                class="graph-columns-menu"
-                :style="columnsMenuStyle"
-                @keydown="onColumnsMenuKeydown"
-              >
-                <p>Collapse columns</p>
-                <button
-                  v-for="status in statuses"
-                  :key="status.id"
-                  type="button"
-                  role="menuitemcheckbox"
-                  :aria-checked="collapsedStatuses.includes(status.id)"
-                  :data-graph-control="`board-column-${status.id}`"
-                  @click="$emit('toggleStatus', status.id)"
-                >
-                  <span
-                    class="graph-checkbox"
-                    :class="{ 'graph-checkbox-checked': collapsedStatuses.includes(status.id) }"
-                  >
-                    <IconCheck v-if="collapsedStatuses.includes(status.id)" :size="11" />
-                  </span>
-                  {{ status.label }}
-                </button>
-              </div>
-            </Teleport>
-          </div>
         </template>
 
         <div v-else class="graph-filter-row">
@@ -285,12 +209,138 @@
         </div>
       </div>
     </div>
+    <div v-if="section === 'work'" ref="displayRoot" class="graph-display-root">
+      <button
+        ref="displayTrigger"
+        type="button"
+        data-graph-display-trigger
+        data-graph-control="display-trigger"
+        class="graph-display-trigger"
+        aria-haspopup="dialog"
+        :aria-expanded="displayMenu"
+        :title="displaySummary"
+        @click="toggleDisplayMenu"
+        @keydown.down.prevent="openDisplayMenu"
+      >
+        Display
+        <IconChevronDown :size="11" />
+      </button>
+      <div
+        v-show="displayMenu"
+        :key="String(displayMenu)"
+        ref="displayMenuRoot"
+        data-graph-display-popover
+        class="graph-display-popover"
+        :style="{ maxWidth: availableWidth ? `${availableWidth}px` : undefined }"
+        role="dialog"
+        aria-label="Display settings"
+        @keydown.esc="onDisplayEscape"
+      >
+        <div class="graph-filter-row">
+          <span>Group by</span>
+          <GraphSelect
+            :model-value="groupBy"
+            data-board-group
+            data-graph-control="board-group"
+            class="min-w-0"
+            variant="bar"
+            aria-label="Group work"
+            :options="groupOptions"
+            @update:model-value="$emit('update:groupBy', $event)"
+          />
+        </div>
+
+        <div class="graph-filter-row">
+          <span>Sort</span>
+          <GraphSelect
+            :model-value="sortBy"
+            data-board-sort
+            data-graph-control="board-sort"
+            class="min-w-0"
+            variant="bar"
+            aria-label="Sort issues"
+            :options="sortOptions"
+            @update:model-value="$emit('update:sortBy', $event)"
+          />
+        </div>
+
+        <div
+          v-if="view === 'board' && groupBy === 'status'"
+          ref="columnsRoot"
+          class="graph-filter-row"
+          data-board-columns-root
+        >
+          <span>Columns</span>
+          <div class="graph-filter-control">
+            <button
+              ref="columnsTrigger"
+              type="button"
+              data-board-columns-trigger
+              data-graph-control="board-columns"
+              class="graph-columns-trigger"
+              :class="{ 'graph-filter-active': collapsedLabels.length }"
+              aria-haspopup="menu"
+              :aria-expanded="columnsMenu"
+              @click="toggleColumnsMenu"
+              @keydown.down.prevent="openColumnsMenu('first')"
+              @keydown.up.prevent="openColumnsMenu('last')"
+            >
+              <span>{{ collapsedLabels.length ? `${collapsedLabels.length} collapsed` : 'All shown' }}</span>
+              <IconChevronDown :size="11" />
+            </button>
+            <button
+              type="button"
+              data-graph-control="board-columns-expand-all"
+              class="graph-filter-reset"
+              :disabled="!collapsedLabels.length"
+              :title="collapsedLabels.length ? 'Expand all board columns' : undefined"
+              :aria-label="collapsedLabels.length ? `Expand all board columns. Collapsed: ${collapsedLabels.join(', ')}` : 'All board columns are expanded'"
+              @click="$emit('expandAll')"
+            >
+              <IconX :size="12" />
+            </button>
+          </div>
+          <Teleport to="body">
+            <div
+              v-if="columnsMenu"
+              ref="columnsMenuRoot"
+              data-board-columns-menu
+              data-modal-portal
+              role="menu"
+              aria-label="Collapsed board columns"
+              class="graph-columns-menu"
+              :style="columnsMenuStyle"
+              @keydown="onColumnsMenuKeydown"
+            >
+              <p>Collapse columns</p>
+              <button
+                v-for="status in statuses"
+                :key="status.id"
+                type="button"
+                role="menuitemcheckbox"
+                :aria-checked="collapsedStatuses.includes(status.id)"
+                :data-graph-control="`board-column-${status.id}`"
+                @click="$emit('toggleStatus', status.id)"
+              >
+                <span
+                  class="graph-checkbox"
+                  :class="{ 'graph-checkbox-checked': collapsedStatuses.includes(status.id) }"
+                >
+                  <IconCheck v-if="collapsedStatuses.includes(status.id)" :size="11" />
+                </span>
+                {{ status.label }}
+              </button>
+            </div>
+          </Teleport>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { IconCheck, IconChevronDown, IconFilter, IconX } from '@tabler/icons-vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { IconCheck, IconChevronDown, IconFilter, IconUser, IconX } from '@tabler/icons-vue'
 import GraphSelect from './GraphSelect.vue'
 
 const props = defineProps({
@@ -327,9 +377,20 @@ const emit = defineEmits([
 ])
 
 const filtersRoot = ref(null)
+const viewbarRoot = ref(null)
+const availableWidth = ref(0)
+// Budget for bounded selectors, view tabs, clear buttons, and pane insets.
+// Observe this pane, not the window: Peek can consume half the graph width.
+const inlineControls = computed(() => availableWidth.value >= 520)
+const compactFilters = computed(() => availableWidth.value > 0 && availableWidth.value < 420)
+let resizeObserver
 const filtersTrigger = ref(null)
 const filtersMenuRoot = ref(null)
 const filtersMenu = ref(false)
+const displayRoot = ref(null)
+const displayTrigger = ref(null)
+const displayMenuRoot = ref(null)
+const displayMenu = ref(false)
 const columnsRoot = ref(null)
 const columnsTrigger = ref(null)
 const columnsMenuRoot = ref(null)
@@ -348,6 +409,12 @@ const ownerViewAccessibleLabel = computed(() => {
   const selected = props.assigneeOptions.find(option => option.value === props.assigneeFilter)
   return `Owner view: ${selected?.label || 'Anyone'}`
 })
+const displaySummary = computed(() => [
+  optionLabel(props.groupOptions, props.groupBy),
+  optionLabel(props.sortOptions, props.sortBy),
+  props.view === 'board' && props.groupBy === 'status' && collapsedLabels.value.length
+    ? `${collapsedLabels.value.length} columns collapsed` : '',
+].filter(Boolean).join('. '))
 const activeFilters = computed(() => {
   if (props.section === 'all') {
     return ['list', 'timeline'].includes(props.view) && props.kindFilter
@@ -368,10 +435,6 @@ const activeFilters = computed(() => {
       id: 'priority',
       label: `Priority: ${optionLabel(props.priorityOptions, props.priorityFilter)}`,
     },
-    collapsedLabels.value.length && {
-      id: 'columns',
-      label: `Columns: ${collapsedLabels.value.join(', ')}`,
-    },
   ].filter(Boolean)
 })
 
@@ -381,6 +444,7 @@ async function toggleFiltersMenu() {
 }
 
 async function openFiltersMenu({ focus = true } = {}) {
+  closeDisplayMenu()
   filtersMenu.value = true
   await nextTick()
   if (focus) focusable(filtersMenuRoot.value)[0]?.focus()
@@ -389,16 +453,41 @@ async function openFiltersMenu({ focus = true } = {}) {
 function closeFiltersMenu({ restoreFocus = false } = {}) {
   const wasOpen = filtersMenu.value
   filtersMenu.value = false
-  closeColumnsMenu()
   if (wasOpen && restoreFocus) void nextTick(() => filtersTrigger.value?.focus())
   return wasOpen
 }
 
 function onFiltersMenuKeydown(event) {
-  if (event.key !== 'Escape') return
+  if (event.key !== 'Escape' || inlineControls.value) return
   event.preventDefault()
   event.stopPropagation()
   closeFiltersMenu({ restoreFocus: true })
+}
+
+async function toggleDisplayMenu() {
+  if (displayMenu.value) return closeDisplayMenu()
+  await openDisplayMenu({ focus: false })
+}
+
+async function openDisplayMenu({ focus = true } = {}) {
+  closeFiltersMenu()
+  displayMenu.value = true
+  await nextTick()
+  if (focus) focusable(displayMenuRoot.value)[0]?.focus()
+}
+
+function closeDisplayMenu({ restoreFocus = false } = {}) {
+  const wasOpen = displayMenu.value
+  displayMenu.value = false
+  closeColumnsMenu()
+  if (wasOpen && restoreFocus) void nextTick(() => displayTrigger.value?.focus())
+  return wasOpen
+}
+
+function onDisplayEscape(event) {
+  event.preventDefault()
+  event.stopPropagation()
+  closeDisplayMenu({ restoreFocus: true })
 }
 
 async function toggleColumnsMenu() {
@@ -428,6 +517,7 @@ function closeColumnsMenu({ restoreFocus = false } = {}) {
 
 function closeMenus({ restoreFocus = false } = {}) {
   if (columnsMenu.value) return closeColumnsMenu({ restoreFocus })
+  if (displayMenu.value) return closeDisplayMenu({ restoreFocus })
   return closeFiltersMenu({ restoreFocus })
 }
 
@@ -471,13 +561,13 @@ function onDocumentPointerDown(event) {
   if (filtersMenu.value && !filtersRoot.value?.contains(target) && !filtersMenuRoot.value?.contains(target)) {
     closeFiltersMenu()
   }
+  if (displayMenu.value && !displayRoot.value?.contains(target)) closeDisplayMenu()
 }
 
 function clearActiveFilter(id) {
   if (id === 'project') emit('update:projectFilter', '')
   else if (id === 'owner') emit('update:assigneeFilter', '')
   else if (id === 'priority') emit('update:priorityFilter', '')
-  else if (id === 'columns') emit('expandAll')
   else if (id === 'kind') emit('update:kindFilter', '')
 }
 
@@ -497,10 +587,36 @@ function human(value) {
   return String(value || '').replaceAll('-', ' ')
 }
 
-onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown))
-onUnmounted(() => {
+watch(inlineControls, async () => {
+  const focusedControl = filtersMenuRoot.value?.contains(document.activeElement)
+    ? document.activeElement?.getAttribute('data-graph-control')
+    : filtersMenuRoot.value?.querySelector('[aria-expanded="true"]')?.getAttribute('data-graph-control')
+  const triggerFocused = document.activeElement === filtersTrigger.value
   closeFiltersMenu()
-  closeColumnsMenu()
+  await nextTick()
+  if (focusedControl && inlineControls.value) {
+    filtersMenuRoot.value?.querySelector(`[data-graph-control="${focusedControl}"]`)?.focus()
+  } else if (focusedControl) filtersTrigger.value?.focus()
+  else if (triggerFocused && inlineControls.value) focusable(filtersMenuRoot.value)[0]?.focus()
+})
+watch(() => [props.section, props.view], () => {
+  closeFiltersMenu()
+  closeDisplayMenu()
+})
+watch(() => props.groupBy, () => closeColumnsMenu())
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown)
+  if (typeof ResizeObserver === 'undefined') return
+  resizeObserver = new ResizeObserver(entries => {
+    availableWidth.value = entries[0]?.contentRect.width || 0
+  })
+  resizeObserver.observe(viewbarRoot.value)
+})
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+  closeFiltersMenu()
+  closeDisplayMenu()
   document.removeEventListener('pointerdown', onDocumentPointerDown)
 })
 
@@ -508,29 +624,33 @@ defineExpose({ closeMenus })
 </script>
 
 <style scoped>
-.graph-viewbar { min-width: 0; gap: 8px; }
+.graph-viewbar { position: relative; min-width: 0; gap: 8px; }
 .graph-views { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
 .graph-view { height: 22px; border-radius: 3px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
 .graph-view:hover { background: var(--graph-hover); color: var(--color-ink); }
-.graph-view:focus-visible, .graph-filters-trigger:focus-visible, .graph-filter-chip:focus-visible, .graph-filter-reset:focus-visible, .graph-columns-trigger:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: 1px; }
+.graph-display-trigger:focus-visible, .graph-view:focus-visible, .graph-filters-trigger:focus-visible, .graph-filter-chip:focus-visible, .graph-filter-reset:focus-visible, .graph-columns-trigger:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: 1px; }
 .graph-view-active { background: transparent; color: var(--color-ink); font-weight: 700; }
 
 .graph-active-filters { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 4px; overflow: hidden; }
 .graph-filter-chip { display: inline-flex; height: 22px; min-width: 0; max-width: 150px; align-items: center; gap: 4px; border: 1px solid color-mix(in srgb, var(--color-accent) 42%, var(--color-rule)); border-radius: 3px; background: var(--color-accent-soft); padding: 0 5px 0 7px; color: var(--color-ink-2); font-size: 9.5px; }
 .graph-filter-chip:hover { background: var(--color-chrome-mid); color: var(--color-ink); }
 .graph-filter-chip svg { flex: 0 0 auto; color: var(--color-accent); }
-.graph-filters-root { position: relative; margin-left: auto; flex: 0 0 auto; }
-.graph-filters-trigger { display: inline-flex; height: 24px; align-items: center; gap: 5px; border: 1px solid var(--color-rule-light); border-radius: 3px; background: var(--color-chrome-high); padding: 0 7px; color: var(--color-ink-3); font-size: 10px; }
-.graph-filters-trigger:hover, .graph-filters-trigger[aria-expanded='true'] { background: var(--color-chrome-mid); color: var(--color-ink); }
+.graph-filters-root { margin-left: 4px; flex: 0 0 auto; }
+.graph-filters-trigger, .graph-display-trigger { display: inline-flex; height: 24px; align-items: center; gap: 5px; border: 1px solid var(--color-rule-light); border-radius: 3px; background: var(--color-chrome-high); padding: 0 7px; color: var(--color-ink-3); font-size: 10px; }
+.graph-display-trigger:hover, .graph-display-trigger[aria-expanded='true'], .graph-filters-trigger:hover, .graph-filters-trigger[aria-expanded='true'] { background: var(--color-chrome-mid); color: var(--color-ink); }
+.graph-display-root { position: relative; margin-left: auto; flex: 0 0 auto; }
+.graph-display-trigger { border-color: transparent; background: transparent; }
+.graph-filter-label { display: inline-flex; align-items: center; gap: 4px; }
 .graph-filter-count { min-width: 14px; color: var(--color-accent); font-family: var(--font-mono); font-size: 9px; text-align: center; }
 .graph-filter-active { border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-rule)); color: var(--color-ink); }
 
-.graph-filters-popover { position: absolute; z-index: 250; top: 28px; right: 0; width: min(340px, calc(100cqw - 24px)); max-height: min(430px, calc(100vh - 80px)); overflow-y: auto; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); padding: 6px; box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 12%, transparent); }
+.graph-filters-popover, .graph-display-popover { position: absolute; z-index: 250; top: 28px; right: 0; width: min(340px, calc(100cqw - 24px)); max-height: min(430px, calc(100vh - 80px)); overflow-y: auto; border: 1px solid var(--color-rule); border-radius: 3px; background: var(--color-surface); padding: 6px; box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 12%, transparent); }
+.graph-filters-popover { right: 12px; }
 .graph-filter-row { display: grid; min-height: 36px; grid-template-columns: 70px minmax(0, 1fr); align-items: center; gap: 8px; border-bottom: 1px solid var(--color-rule-light); padding: 4px 5px; }
 .graph-filter-row:last-child { border-bottom: 0; }
 .graph-filter-row > span { color: var(--color-ink-3); font-size: 10px; }
 .graph-filter-control { display: flex; min-width: 0; align-items: center; gap: 4px; }
-.graph-project-view-active { border-color: color-mix(in srgb, var(--color-accent) 72%, var(--color-rule)); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 680; }
+:deep(.graph-project-view-active) { border-color: color-mix(in srgb, var(--color-accent) 72%, var(--color-rule)); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 680; }
 .graph-filter-reset { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 3px; color: var(--color-ink-3); }
 .graph-filter-reset:hover:not(:disabled) { background: var(--color-chrome-mid); color: var(--color-ink); }
 .graph-filter-reset:disabled { opacity: 0.28; }
@@ -544,6 +664,23 @@ defineExpose({ closeMenus })
 .graph-columns-menu > button:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: -2px; }
 .graph-checkbox { display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid var(--color-rule); border-radius: 3px; color: transparent; }
 .graph-checkbox-checked { border-color: color-mix(in srgb, var(--color-accent) 52%, var(--color-rule)); background: var(--color-accent-soft); color: var(--color-accent); }
+
+/* One set of controls changes layout; values and event ownership stay shared. */
+.graph-viewbar-inline .graph-filters-root { min-width: 0; flex: 0 1 auto; }
+.graph-viewbar-inline .graph-filters-popover { position: static; display: flex; width: auto; max-height: none; align-items: center; gap: 8px; overflow: visible; border: 0; border-radius: 0; background: transparent; padding: 0; box-shadow: none; }
+.graph-viewbar-inline .graph-filters-popover .graph-filter-row { display: flex; min-width: 0; min-height: 0; gap: 3px; border: 0; padding: 0; }
+.graph-viewbar-inline .graph-filters-popover .graph-filter-row > span { display: flex; flex: 0 0 auto; }
+.graph-viewbar-inline .graph-filters-popover .graph-filter-control { gap: 0; }
+.graph-viewbar-inline .graph-filters-popover :deep(.graph-select-trigger) { width: 74px; height: 22px; border-color: transparent; background: transparent; padding: 0 4px; font-size: 10px; }
+.graph-viewbar-inline .graph-filters-popover :deep([data-board-project-filter]) { width: 100px; }
+.graph-viewbar-inline .graph-filters-popover :deep([data-board-assignee-filter]) { width: 80px; }
+.graph-viewbar-inline .graph-filters-popover :deep(.graph-owner-empty) { width: 26px; padding: 0 6px; }
+.graph-viewbar-inline .graph-filters-popover :deep(.graph-project-view-active),
+.graph-viewbar-inline .graph-filters-popover :deep(.graph-filter-active) { background: var(--color-accent-soft); }
+.graph-viewbar-inline .graph-filters-popover :deep(.graph-select-trigger:hover),
+.graph-viewbar-inline .graph-filters-popover :deep(.graph-select-trigger[aria-expanded='true']) { background: var(--color-chrome-mid); color: var(--color-ink); }
+.graph-viewbar-inline .graph-filters-popover .graph-filter-reset { width: 18px; height: 22px; }
+.graph-viewbar-inline .graph-filters-popover .graph-filter-reset:disabled { display: none; }
 
 @container business-graph (max-width: 520px) {
   .graph-filter-chip { max-width: 108px; }

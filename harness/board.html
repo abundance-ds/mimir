@@ -5,7 +5,12 @@
   <title>board harness</title>
   <style>
     html, body { margin: 0; height: 100%; }
-    #app { height: 100vh; display: flex; flex-direction: column; }
+    #app {
+      height: 100vh; display: flex; flex-direction: column;
+      container: business-graph / inline-size;
+      --graph-hover: var(--color-chrome-mid);
+      --graph-focus: var(--color-accent);
+    }
   </style>
 </head>
 <body>

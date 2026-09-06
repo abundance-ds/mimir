@@ -65,7 +65,7 @@
           <p>Private, project, and team knowledge are being indexed.</p>
         </div>
         <EntityList
-          v-else-if="graph.searchQuery"
+          v-else-if="graph.searchQuery && graph.section !== 'work'"
           ref="entityList"
           :nodes="projectionNodes"
           :lookup="graph.nodes"
@@ -114,7 +114,10 @@
         />
         <WorkBoard
           v-else-if="graph.section === 'work' && graph.view === 'board'"
+          ref="workBoard"
+          :search-query="graph.searchQuery.trim()"
           :issues="boardIssues"
+          :unfiltered-issues="graph.issues"
           :nodes="graph.nodes"
           :projects="graph.projects"
           :group-by="boardGroup"
@@ -248,6 +251,7 @@ const graph = useBusinessGraphStore()
 const meetings = useMeetingsStore()
 const inspector = ref(null)
 const entityList = ref(null)
+const workBoard = ref(null)
 const viewbar = ref(null)
 
 function forwardSave(...args) {
@@ -263,6 +267,7 @@ defineExpose({
   },
   focusInspectorEntry: () => inspector.value?.focusEntry?.(),
   focusListEdge(edge) {
+    if (workBoard.value) return workBoard.value.focusEdge(edge)
     if (!entityList.value) return false
     entityList.value.focusEdge(edge)
     return true

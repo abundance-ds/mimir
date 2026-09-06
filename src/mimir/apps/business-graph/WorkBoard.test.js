@@ -86,9 +86,70 @@ describe('WorkBoard rows', () => {
     expect(wrapper.get('[data-board-card="i1"] .board-row-owner').text()).toBe('you')
   })
 
+  it('puts missing, legacy, and unresolved projects in one No project column', async () => {
+    const orphanIssues = [
+      { id: 'missing', kind: 'issue', title: 'Unassigned task' },
+      { id: 'legacy', kind: 'issue', title: 'Old task', projectId: 'FDE' },
+      { id: 'deleted', kind: 'issue', title: 'Orphan task', projectId: 'deleted-project' },
+    ]
+    const allIssues = [issues[0], ...orphanIssues]
+    const wrapper = render({ issues: allIssues, unfilteredIssues: allIssues, groupBy: 'project' })
+    expect(wrapper.findAll('[data-board-column]').map(column => column.attributes('data-board-column')))
+      .toEqual(['project-x', '__unassigned__'])
+    const noProject = wrapper.get('[data-board-column="__unassigned__"]')
+    expect(noProject.get('.board-column-name').text()).toBe('No project')
+    expect(noProject.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
+      .toEqual(['missing', 'legacy', 'deleted'])
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(allIssues.length)
+
+    await wrapper.get('[data-board-card="legacy"]').trigger('keydown', { key: 'ArrowLeft' })
+    expect(wrapper.emitted('move')[0][0]).toEqual({ issue: orphanIssues[1], projectId: 'project-x' })
+    expect(orphanIssues[1].projectId).toBe('FDE')
+
+    await wrapper.setProps({ issues: [issues[0]], searchQuery: 'evidence' })
+    expect(wrapper.get('[data-board-column="__unassigned__"]').element).toBe(noProject.element)
+    expect(noProject.get('.board-column-count').text()).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('omits No project when all tasks have a matching project', () => {
+    const wrapper = render({ issues: [issues[0]], groupBy: 'project' })
+    expect(wrapper.find('[data-board-column="__unassigned__"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('keeps a task without a status in Backlog', () => {
+    const wrapper = render({ issues: [{ id: 'missing-status', kind: 'issue', title: 'New task' }] })
+    expect(wrapper.get('[data-board-column="backlog"] [data-board-card]').attributes('data-board-card'))
+      .toBe('missing-status')
+    wrapper.unmount()
+  })
+
   it('shows initials for everyone when no reader is configured', () => {
     const wrapper = render({ selfId: '' })
     expect(wrapper.get('[data-board-card="i1"] .board-row-owner').text()).toBe('PP')
     expect(wrapper.find('.board-row-owner-self').exists()).toBe(false)
+  })
+
+  it('does not run card actions from nested property controls', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-card-priority="i1"]').trigger('keydown', { key: 'ArrowRight' })
+    await wrapper.get('[data-card-due="i1"]').trigger('keydown', { key: 'p' })
+    expect(wrapper.emitted('move')).toBeUndefined()
+    expect(wrapper.emitted('patch')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('drops hidden cards from selection before a bulk change', async () => {
+    const wrapper = render()
+    await wrapper.get('[data-board-card="i1"]').trigger('click', { metaKey: true })
+    await wrapper.get('[data-board-card="i2"]').trigger('click', { metaKey: true })
+    await wrapper.setProps({ issues: [issues[0]] })
+    await wrapper.setProps({ issues })
+    await wrapper.get('[data-board-card="i1"]').trigger('keydown', { key: 'p' })
+    expect(wrapper.emitted('bulk-patch')).toBeUndefined()
+    expect(wrapper.emitted('patch')[0][0].issue.id).toBe('i1')
+    wrapper.unmount()
   })
 })

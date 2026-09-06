@@ -241,6 +241,42 @@ describe('business graph store', () => {
     expect(store.historyForward).toBeNull()
   })
 
+  it('filters all loaded Work items by linked names and terms without the content-search limit', async () => {
+    const store = useBusinessGraphStore()
+    store.nodes = [
+      { id: 'p', kind: 'project', title: 'Étude Alpha' },
+      { id: 'a', kind: 'person', title: 'Anna Berg' },
+      ...Array.from({ length: 150 }, (_, i) => ({
+        id: `i-${i}`, kind: 'issue', title: 'Evidence review',
+        projectId: 'p', assigneeId: 'a', tags: ['heor'],
+      })),
+    ]
+    store.prepareSearch('ETUDE anna heor')
+    expect(store.visibleNodes).toHaveLength(150)
+    expect(searchGraph).not.toHaveBeenCalled()
+    store.prepareSearch('missing')
+    expect(store.visibleNodes).toHaveLength(0)
+    store.clearSearch()
+    expect(store.visibleNodes).toHaveLength(150)
+  })
+
+  it('switches between Work filtering and graph content search with the same query', async () => {
+    const store = useBusinessGraphStore()
+    await store.start('/alpha')
+    store.prepareSearch('evidence')
+    expect(store.visibleNodes.map(node => node.id)).toEqual(['issue-1'])
+    let finishSearch
+    searchGraph.mockReturnValue(new Promise(resolve => { finishSearch = resolve }))
+    store.setSection('all')
+    expect(store.searching).toBe(true)
+    store.setSection('work')
+    expect(store.searching).toBe(false)
+    finishSearch([{ node: summaries[1] }])
+    await Promise.resolve()
+    expect(store.searchResults).toEqual([])
+    expect(store.visibleNodes.map(node => node.id)).toEqual(['issue-1'])
+  })
+
   it('invalidates an in-flight result when a newer search draft is prepared', async () => {
     let resolveSearch
     vi.mocked(searchGraph).mockReturnValue(new Promise(resolve => {
@@ -249,6 +285,7 @@ describe('business graph store', () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
 
+    store.setSection('all')
     const pending = store.search('b')
     expect(store.searching).toBe(true)
 
@@ -271,6 +308,7 @@ describe('business graph store', () => {
     const store = useBusinessGraphStore()
     await store.start('/alpha')
 
+    store.setSection('all')
     const pending = store.search('bank')
     expect(store.searching).toBe(true)
     store.stop()

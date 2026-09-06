@@ -308,6 +308,7 @@ const {
   toggleScope,
 } = useGraphNavigation({
   graph,
+  kindFilter: allKindFilter,
   root,
   workspaceSurface,
   appHeader,

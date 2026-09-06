@@ -1,6 +1,6 @@
 <template>
   <div ref="board" data-graph-work-board class="work-board">
-    <div v-if="!issues.length" class="board-empty">
+    <div v-if="!issues.length && !searchQuery" class="board-empty">
       <h2>No work matches this view</h2>
       <p>Create work, broaden the project, owner, or priority filter, or include another scope.</p>
       <button
@@ -169,8 +169,11 @@
             </GraphSelect>
           </article>
 
+          <p v-if="searchQuery && !grouped[column.id]?.length" class="board-no-matches">
+            No matches
+          </p>
           <button
-            v-if="!grouped[column.id]?.length"
+            v-else-if="!grouped[column.id]?.length"
             type="button"
             class="board-empty-column"
             :data-graph-control="`board-empty-${column.id}`"
@@ -195,7 +198,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   IconAntennaBars3,
   IconAntennaBars5,
@@ -213,10 +216,13 @@ import {
   assigneeDisplay,
   dueInfo,
   waitingReason,
+  workProjectId,
 } from './workRow.js'
 
 const props = defineProps({
   issues: { type: Array, default: () => [] },
+  /** Keep the No project column stable while search filters visible cards. */
+  unfilteredIssues: { type: Array, default: null },
   nodes: { type: Array, default: () => [] },
   projects: { type: Array, default: () => [] },
   groupBy: { type: String, default: 'status' },
@@ -225,6 +231,7 @@ const props = defineProps({
   selfId: { type: String, default: '' },
   /** Hide the project token when one project already scopes the board. */
   hideProject: { type: Boolean, default: false },
+  searchQuery: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -240,6 +247,22 @@ const emit = defineEmits([
 const board = ref(null)
 const selectedIds = ref([])
 const selectionAnchor = ref(null)
+
+// A filter must never leave hidden cards in a bulk action or range selection.
+watch(() => props.issues, issues => {
+  const visible = new Set(issues.map(issue => issue.id))
+  selectedIds.value = selectedIds.value.filter(id => visible.has(id))
+  selectionAnchor.value = null
+})
+
+defineExpose({
+  focusEdge(edge) {
+    const rows = board.value?.querySelectorAll('[data-board-card]') || []
+    const target = rows[edge === 'last' ? rows.length - 1 : 0]
+    target?.focus()
+    return Boolean(target)
+  },
+})
 
 const statuses = WORK_STATUSES
 const statusOptions = Object.freeze(
@@ -258,6 +281,9 @@ const priorityIcons = Object.freeze({
   low: IconArrowNarrowDown,
 })
 const priorityOrder = ['low', 'normal', 'high', 'urgent']
+const projectIds = computed(() => new Set(props.projects.map(project => project.id)))
+const hasNoProject = computed(() => (props.unfilteredIssues || props.issues)
+  .some(issue => workProjectId(issue, projectIds.value) === UNASSIGNED))
 const boardColumns = computed(() => {
   if (props.groupBy === 'project') {
     return [
@@ -265,7 +291,7 @@ const boardColumns = computed(() => {
         id: project.id,
         label: project.title || project.properties?.slug || project.slug || 'Untitled project',
       })),
-      { id: UNASSIGNED, label: 'No project' },
+      ...(hasNoProject.value ? [{ id: UNASSIGNED, label: 'No project' }] : []),
     ]
   }
   return statuses
@@ -275,7 +301,7 @@ const grouped = computed(() => Object.fromEntries(
     column.id,
     props.issues.filter(issue => (
       props.groupBy === 'project'
-        ? (issue.projectId || UNASSIGNED) === column.id
+        ? workProjectId(issue, projectIds.value) === column.id
         : (issue.status || 'backlog') === column.id
     )),
   ]),
@@ -342,6 +368,7 @@ function updateSelection(event, issue, columnId, index) {
 }
 
 function onRowKeydown(event, issue, columnId, index) {
+  if (event.target !== event.currentTarget || event.isComposing) return
   if (event.key === 'Escape') {
     event.preventDefault()
     selectedIds.value = []
@@ -445,7 +472,9 @@ function patchDue(issue, value) {
 function projectLabel(issue) {
   if (!issue.projectId) return ''
   const project = byId.value.get(issue.projectId)
-  return project?.title || project?.slug || project?.properties?.slug || issue.projectId
+  return project?.kind === 'project'
+    ? project.title || project.slug || project.properties?.slug || 'Untitled project'
+    : ''
 }
 
 function assignee(issue) {
@@ -490,6 +519,7 @@ function human(value) {
   flex: 1 1 auto;
   overflow-x: auto;
   overflow-y: hidden;
+  padding: 8px;
   background: var(--color-chrome);
 }
 
@@ -499,17 +529,19 @@ function human(value) {
   width: max-content;
   min-width: 100%;
   height: 100%;
+  gap: 8px;
 }
 
 .board-column {
   display: flex;
-  min-width: 264px;
-  max-width: 440px;
+  width: 252px;
+  min-width: 252px;
+  max-width: 420px;
   height: 100%;
-  flex: 1 1 264px;
+  flex: 1 1 252px;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--color-rule);
+  border: 1px solid var(--color-rule);
   background: var(--color-chrome);
 }
 
@@ -633,10 +665,10 @@ function human(value) {
   position: relative;
   display: grid;
   width: 100%;
-  height: 66px;
+  height: 84px;
   flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: 18px 16px 16px;
+  grid-template-rows: 36px 16px 16px;
   align-items: center;
   column-gap: 8px;
   row-gap: 1px;
@@ -681,6 +713,8 @@ function human(value) {
 }
 
 .board-row-title {
+  display: -webkit-box;
+  height: 36px;
   overflow: hidden;
   grid-row: 1;
   grid-column: 1;
@@ -689,11 +723,14 @@ function human(value) {
   font-weight: 600;
   letter-spacing: -0.005em;
   line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .board-row-owner {
+  align-self: start;
   grid-row: 1;
   grid-column: 2;
   color: var(--color-ink-2);
@@ -731,7 +768,7 @@ function human(value) {
   grid-row: 3;
 }
 
-.board-row-context .meta-status {
+.board-row-context :deep(.meta-status) {
   height: 16px;
   flex: 0 0 auto;
   padding: 0 3px;
@@ -798,7 +835,7 @@ function human(value) {
   font-weight: 650;
 }
 
-.board-row .board-priority {
+.board-row :deep(.board-priority) {
   width: 22px;
   height: 18px;
   grid-row: 3;
@@ -810,16 +847,16 @@ function human(value) {
   color: var(--color-ink-2);
 }
 
-.board-row .board-priority.priority-urgent {
+.board-row :deep(.board-priority.priority-urgent) {
   color: var(--color-rem);
 }
 
-.board-row .board-priority.priority-high {
+.board-row :deep(.board-priority.priority-high) {
   color: var(--color-ink);
 }
 
-.board-row .board-priority.priority-normal,
-.board-row .board-priority.priority-low {
+.board-row :deep(.board-priority.priority-normal),
+.board-row :deep(.board-priority.priority-low) {
   color: var(--color-ink-4);
 }
 
@@ -834,6 +871,13 @@ function human(value) {
   border-radius: 2px;
   color: var(--color-ink-4);
   font-size: 11px;
+}
+
+.board-no-matches {
+  padding: 14px 8px;
+  color: var(--color-ink-3);
+  font-size: 11px;
+  text-align: center;
 }
 
 .board-empty-column:hover,

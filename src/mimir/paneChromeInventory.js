@@ -35,6 +35,7 @@ export const PANE_CHROME_INVENTORY = Object.freeze([
 
   { file: 'editor/components/workspace/EditorToolbar.vue', marker: 'data-editor-toolbar', kind: 'pane-bar', cssClass: 'editor-toolbar' },
   { file: 'editor/components/shell/AppFooter.vue', marker: 'data-editor-footer', kind: 'pane-footer', cssClass: 'app-footer' },
+  { file: 'editor/components/workspace/ImagePreview.vue', marker: 'data-image-toolbar', kind: 'pane-bar' },
   { file: 'editor/components/workspace/PdfPreview.vue', marker: 'data-pdf-toolbar', kind: 'pane-bar' },
   { file: 'mimir/components/FileHistoryPanel.vue', marker: 'data-file-history-toolbar', kind: 'pane-bar' },
 

@@ -83,15 +83,21 @@ preserved.
 
 Work and Graph are the two primary projections. Work is the default issue
 projection with Board and List views. Graph is the complete node surface; its
-List and Timeline views can filter by kind, while Meetings handles Scribe intake
+List and Timeline views can filter by kind. Startup and selecting Graph reset
+the kind filter to All kinds, including for old saved projections.
+Meetings handles Scribe intake
 and Changes shows the event stream. Peek and Focus edit one revision-aware draft;
-navigation commits that draft first. Graph search filters the active projection.
+navigation commits that draft first. In Work, search filters the loaded issues
+immediately by title, summary, tags, project, owner, and work details. Terms
+combine and ignore case and accents. Board keeps its columns, and List keeps
+its groups and sort order. Empty search columns remain visible; clearing the
+query restores the work. Graph uses debounced content search.
 The dispatch bar supports lookup, deterministic commands, and agent work with a
 bounded, source-aware context pack. Raw ids and source revisions stay out of
 normal UI. Projection navigation stays direct at every width.
 
 Work rows share one grammar (`business-graph/workRow.js`) across Board and
-List. A Board card has a fixed height and fixed slots: title with
+List. A Board card has a fixed height and fixed slots: a two-line title with
 the owner at its right, the project beneath, then the due date with the
 waiting reason after it, and the priority control at the bottom right. Only
 the title and the waiting reason truncate. Due dates are words relative
@@ -100,13 +106,28 @@ a missing date is a quiet calendar control. The waiting slot reads
 `waiting for <reason>`, and `me`, `human`, or `owner` reads as `you`. The
 owner slot shows the assignee's initials, or `you` for the configured person;
 the last editor stays in Changes. Board columns share the width and scroll
-when there is no room. Cards are `chrome-high` plates with a 2 px radius
+when there is no room. Column sizing is independent of card text and search
+results. Cards are `chrome-high` plates with a 2 px radius
 and a 4 px gap on a `chrome` column. The List is single-line
 rows under sticky group headers and follows the Board grouping (status or
-project). Project and Owner filters live in the Filters popover because they
-scope the visible work. Each active filter appears as a clearable chip, and a
+project). The second header keeps frequent task filters beside the views:
+Project, an Owner icon until a person is selected, and Filter for Priority.
+Selected values have adjacent clear actions. In narrow panes, these controls
+move into Filter, with named, clearable active-filter chips. The available pane
+width determines the layout, including when Peek is open. The smallest panes
+show the active filter count; open Filter to read or clear each selected value.
+Display stays separate at the right and contains Group by, Sort, and Columns.
+Columns appears only on a status-grouped Board; collapsed columns do not count
+as task filters. A
 scoped project drops the project slot from rows. The Owner list offers You,
 active team members, and Unassigned.
+
+Work treats missing project assignments, old labels, and references without a
+matching loaded Project as No project. Board grouping, List grouping, and the
+Project filter share this rule; stored references are preserved. Old project
+labels do not get their own columns or filter options. The No project column
+appears only when needed and remains in place while search filters its cards.
+Missing status continues to use Backlog.
 
 Settings > Graph > You selects the reader's Person node
 (`businessGraphSelfPersonId`). It drives the `you` token and the Owner

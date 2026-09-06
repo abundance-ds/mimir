@@ -273,7 +273,9 @@ function priorityIcon(priority = 'normal') {
 function projectLabel(node) {
   if (!node.projectId) return ''
   const project = byId.value.get(node.projectId)
-  return project?.title || project?.slug || project?.properties?.slug || node.projectId
+  return project?.kind === 'project'
+    ? project.title || project.slug || project.properties?.slug || 'Untitled project'
+    : ''
 }
 
 function assignee(node) {

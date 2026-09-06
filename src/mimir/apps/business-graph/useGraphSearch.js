@@ -7,6 +7,14 @@ export function useGraphSearch({ graph, projectionNodes, focusResults, focusInpu
   let timer = null
   let generation = 0
 
+  watch(() => graph.section, () => {
+    clearTimeout(timer)
+    timer = null
+    generation += 1
+    searchPending.value = false
+    searchResultFocusIntent.value = ''
+  })
+
   watch(
     () => graph.searchQuery,
     query => {
@@ -38,7 +46,7 @@ export function useGraphSearch({ graph, projectionNodes, focusResults, focusInpu
     clearTimeout(timer)
     timer = null
     graph.prepareSearch(value)
-    if (!value.trim()) {
+    if (!value.trim() || graph.section === 'work') {
       searchPending.value = false
       return
     }

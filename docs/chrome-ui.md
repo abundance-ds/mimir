@@ -104,7 +104,7 @@ Terminal, and agent sessions have no row 2.
 |---|---|---|
 | Files ledger status | `FilesActivity.vue` | Mono 10 px status line |
 | Files ledger columns | `FilesActivity.vue` | Mono 10 px column labels in the tree grid |
-| Graph viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; clearable active-filter chips; Filters button 24 px; filter popover |
+| Graph viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; frequent task filters beside the views; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
 
 ### Canvases
 
@@ -114,7 +114,7 @@ Terminal, and agent sessions have no row 2.
 | Chat transcript, Terminal, Today journal | `surface` | |
 | Files tree | rows on the pane ground, 28 px rows, hover `chrome` | |
 | Routines, Tracker | `chrome-high` root | Section headers inside Tracker views are 28 px with `rule-light` |
-| Graph board | `chrome` columns, `chrome-high` 66 px cards with `rule-light` edge and 2 px radius, hover `chrome-mid` | Column headers 38 px `chrome-high` with `rule` |
+| Graph board | `chrome` columns, `chrome-high` cards with `rule-light` edge and 2 px radius, hover `chrome-mid` | 8 px canvas inset and column gap; 252–420 px columns with a full `rule` edge; headers 38 px `chrome-high` inside each column |
 | Graph list | sticky group headers 28 px `chrome-mid`, rows 34 px | |
 | Sidebar | `chrome`, rows 32 px, hover `chrome-mid`, section kickers 24 px mono 9 px uppercase, project box `surface` with `rule` | |
 
@@ -194,9 +194,9 @@ The 2026-09-04 repair made these changes:
 
 1. The full top band uses `chrome` with a `rule` below it.
 2. Graph row 2 keeps Work and Graph navigation, search, scope, refresh, and New.
-   Row 3 keeps the views and one Filters button. The popover owns project,
-   owner, group, sort, priority, and column controls. Active filters appear
-   as named, clearable chips. The row does not scroll sideways.
+   Row 3 keeps frequent task filters beside the views and Display at the right.
+   Narrow panes collect task filters under Filter with named, clearable chips.
+   Layout settings stay in Display. The row does not scroll sideways.
 3. Routines New is a labelled 28 px action in the pane band.
 4. Tracker content headers use the 28 px sub-bar height.
 5. Files and Routines confirmation dialog headers use 36 px.

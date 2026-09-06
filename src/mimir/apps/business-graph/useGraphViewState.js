@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { BUSINESS_SECTIONS } from '../../../stores/businessGraph.js'
 import { waitingOnHuman } from './predicates.js'
-import { UNASSIGNED, WORK_STATUSES, initials } from './workRow.js'
+import { UNASSIGNED, WORK_STATUSES, initials, workProjectId } from './workRow.js'
 
 export const BOARD_STATUSES = WORK_STATUSES
 
@@ -63,7 +63,7 @@ export function useGraphViewState({ graph, settings }) {
   const sections = BUSINESS_SECTIONS
   const currentSection = computed(() => sections.find(item => item.id === graph.section))
   const viewOptions = computed(() => VIEWS_BY_SECTION[graph.section] || VIEWS_BY_SECTION.all)
-  const projectFilterOptions = computed(() => buildProjectOptions(graph, projectFilter.value))
+  const projectFilterOptions = computed(() => buildProjectOptions(graph))
   const selfPersonId = computed(() => String(settings.businessGraphSelfPersonId || '').trim())
   const assigneeFilterOptions = computed(() => (
     buildAssigneeOptions(graph, assigneeFilter.value, selfPersonId.value)
@@ -97,6 +97,14 @@ export function useGraphViewState({ graph, settings }) {
       : 'Create the first item or include another physical scope.'
   ))
 
+  // Restore old project filters as No project only after the graph is loaded.
+  watch([() => graph.loading, () => graph.projects, projectFilter], () => {
+    if (graph.loading || !graph.status || !projectFilter.value || projectFilter.value === UNASSIGNED) return
+    if (!graph.projects.some(project => project.id === projectFilter.value)) {
+      projectFilter.value = UNASSIGNED
+    }
+  })
+
   watch(
     () => settings.settingsReady,
     ready => {
@@ -109,7 +117,6 @@ export function useGraphViewState({ graph, settings }) {
         assigneeFilter,
         boardGroup,
         boardSort,
-        allKindFilter,
         collapsedBoardStatuses,
       })
       hydrated = true
@@ -205,7 +212,6 @@ function hydrateViewState({
   assigneeFilter,
   boardGroup,
   boardSort,
-  allKindFilter,
   collapsedBoardStatuses,
 }) {
   const saved = settings.businessGraphViewState || {}
@@ -233,14 +239,6 @@ function hydrateViewState({
   graph.section = savedSection
   graph.view = graph.sectionViews[savedSection]
 
-  const savedGraph = saved.graph || {}
-  if (ALL_KIND_OPTIONS.some(option => option.value === savedGraph.kind)) {
-    allKindFilter.value = savedGraph.kind
-  }
-  else if (legacySection === 'projects') allKindFilter.value = 'project'
-  else if (legacySection === 'knowledge') allKindFilter.value = 'knowledge'
-  else if (legacySection === 'journal') allKindFilter.value = 'journal'
-
   const work = saved.work || {}
   if (['status', 'project'].includes(work.groupBy)) boardGroup.value = work.groupBy
   if (typeof work.project === 'string') projectFilter.value = work.project
@@ -259,7 +257,7 @@ function hydrateViewState({
   }
 }
 
-function buildProjectOptions(graph, selectedProject) {
+function buildProjectOptions(graph) {
   const options = [...graph.projects]
     .sort((left, right) => projectLabel(left).localeCompare(projectLabel(right)))
     .map(project => ({
@@ -267,22 +265,6 @@ function buildProjectOptions(graph, selectedProject) {
       label: projectLabel(project),
       hint: project.properties?.slug || project.slug || '',
     }))
-  const knownIds = new Set(graph.projects.map(project => project.id))
-  const legacyProjects = [...new Set(
-    graph.issues
-      .map(issue => String(issue.projectId || '').trim())
-      .filter(projectId => projectId && !knownIds.has(projectId)),
-  )].sort((left, right) => left.localeCompare(right))
-  for (const projectId of legacyProjects) {
-    options.push({ value: projectId, label: projectId, hint: 'Legacy project' })
-  }
-  if (
-    selectedProject
-    && selectedProject !== '__unassigned__'
-    && !options.some(option => option.value === selectedProject)
-  ) {
-    options.push({ value: selectedProject, label: selectedProject, hint: 'Unavailable project' })
-  }
   return [
     { value: '', label: 'All projects', separatorAfter: true },
     ...options,
@@ -293,8 +275,10 @@ function buildProjectOptions(graph, selectedProject) {
 function filterProjection(graph, filters) {
   let items = graph.visibleNodes
   if (graph.section === 'work') {
-    if (filters.project === '__unassigned__') items = items.filter(item => !item.projectId)
-    else if (filters.project) items = items.filter(item => item.projectId === filters.project)
+    if (filters.project) {
+      const projectIds = new Set(graph.projects.map(project => project.id))
+      items = items.filter(item => workProjectId(item, projectIds) === filters.project)
+    }
     if (filters.priority) items = items.filter(item => item.priority === filters.priority)
     if (filters.assignee === UNASSIGNED) items = items.filter(item => !item.assigneeId)
     else if (filters.assignee) items = items.filter(item => item.assigneeId === filters.assignee)

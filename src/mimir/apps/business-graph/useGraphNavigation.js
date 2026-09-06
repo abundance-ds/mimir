@@ -5,6 +5,7 @@ import { graphErrorMessage } from './graphErrors.js'
 
 export function useGraphNavigation({
   graph,
+  kindFilter,
   root,
   workspaceSurface,
   appHeader,
@@ -133,6 +134,7 @@ export function useGraphNavigation({
     const change = () => {
       focusMode.value = false
       if (graph.selectedNode) graph.closeInspector({ restore: false })
+      if (section === 'all') kindFilter.value = ''
       graph.setSection(section)
     }
     if (!commitThen(change)) change()

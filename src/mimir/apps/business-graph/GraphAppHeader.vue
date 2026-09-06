@@ -23,9 +23,12 @@
         data-graph-search
         data-graph-control="global-search"
         type="search"
-        placeholder="Search the graph…"
-        aria-label="Search the business graph"
+        :placeholder="section === 'work' ? 'Filter work…' : 'Search the graph…'"
+        :aria-label="section === 'work' ? 'Filter work' : 'Search the business graph'"
+        :title="section === 'work' ? 'Filter by title, project, owner, tags, or work details' : 'Search graph content'"
         autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
         spellcheck="false"
         @input="$emit('update:searchValue', $event.target.value)"
         @keydown.down.prevent="$emit('focusSearchResults', 'first')"
@@ -68,12 +71,15 @@
           data-graph-scope-trigger
           data-graph-control="scope-trigger"
           class="graph-scope-trigger"
+          :aria-label="`Scopes: ${scopeSummary}`"
+          :title="`Scopes: ${scopeSummary}`"
           :aria-expanded="scopeMenu"
           aria-haspopup="menu"
           @click="toggleScopeMenu"
           @keydown.down.prevent="openScopeMenu('first')"
           @keydown.up.prevent="openScopeMenu('last')"
         >
+          <IconStack :size="14" class="graph-scope-icon" aria-hidden="true" />
           <span>{{ scopeSummary }}</span>
           <IconChevronDown :size="12" />
         </button>
@@ -142,6 +148,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   IconCheck,
   IconChevronDown,
+  IconStack,
   IconPlus,
   IconRefresh,
   IconSearch,
@@ -294,6 +301,7 @@ defineExpose({ closeMenus, focusSearch })
 .graph-primary-button { display: inline-flex; min-height: 28px; align-items: center; justify-content: center; gap: 5px; border-radius: 5px; background: var(--color-accent); padding: 0 9px; color: var(--color-accent-ink, white); font-size: 11px; font-weight: 650; }
 .graph-primary-button:hover { background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink)); }
 .graph-scope-trigger { height: 28px; gap: 7px; border-radius: 5px; padding: 0 8px; color: var(--color-ink-3); font-size: 10px; font-weight: 540; }
+.graph-scope-icon { display: none; }
 .graph-scope-trigger:hover { background: var(--graph-hover); color: var(--color-ink); }
 .graph-section:focus-visible, .graph-icon-button:focus-visible, .graph-primary-button:focus-visible, .graph-scope-trigger:focus-visible, .graph-search-clear:focus-visible { outline: 2px solid var(--graph-focus); outline-offset: 1px; }
 
@@ -316,6 +324,10 @@ defineExpose({ closeMenus, focusSearch })
   .graph-primary-button span { display: none; }
 }
 @container business-graph (max-width: 419px) {
+  .graph-topbar { grid-template-columns: auto minmax(80px, 1fr) auto; gap: 5px; }
   .graph-section { padding-inline: 8px; }
+  .graph-scope-trigger { width: 28px; justify-content: center; padding: 0; }
+  .graph-scope-trigger span, .graph-scope-trigger > svg:last-child { display: none; }
+  .graph-scope-icon { display: block; }
 }
 </style>

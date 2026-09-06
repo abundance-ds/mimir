@@ -272,12 +272,13 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('migrates a saved Project projection to the Graph kind filter', async () => {
+  it.each(['projects', 'knowledge', 'all'])('opens saved %s state without a kind filter', async section => {
     const settings = useSettingsStore()
     await settings.load()
     settings.set('businessGraphViewState', {
-      section: 'projects',
+      section,
       sectionViews: { projects: 'portfolio' },
+      graph: { kind: 'knowledge' },
       work: {},
     })
 
@@ -287,9 +288,52 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.get('[data-graph-section="all"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-graph-view="list"]').attributes('aria-pressed')).toBe('true')
     await wrapper.get('[data-graph-filters-trigger]').trigger('click')
-    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Projects')
+    expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
     expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')))
-      .toEqual(['project-alpha'])
+      .toEqual(expect.arrayContaining(['issue-1', 'issue-legacy', 'project-alpha']))
+    wrapper.unmount()
+  })
+
+  it('clears the kind filter when Graph is selected again', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const graphTab = wrapper.get('[data-graph-section="all"]')
+    await graphTab.trigger('click')
+    for (const leaveGraph of [false, true]) {
+      await wrapper.get('[data-graph-filters-trigger]').trigger('click')
+      await wrapper.get('[data-all-kind-filter]').trigger('click')
+      document.querySelector('[data-graph-select-option="knowledge"]').click()
+      await flushPromises()
+      expect(wrapper.get('[data-all-kind-filter]').text()).toContain('Knowledge')
+      if (leaveGraph) await wrapper.get('[data-graph-section="work"]').trigger('click')
+      await graphTab.trigger('click')
+      expect(wrapper.get('[data-all-kind-filter]').text()).toContain('All kinds')
+      expect(wrapper.findAll('[data-graph-node]')).toHaveLength(3)
+    }
+    wrapper.unmount()
+  })
+
+  it('uses No project for orphan tasks in the Board, List, and saved Project filter', async () => {
+    summaries.push(
+      { id: 'issue-unassigned', kind: 'issue', title: 'No assignment', status: 'plan', scopeId: 'team:main' },
+      { id: 'issue-orphan', kind: 'issue', title: 'Deleted project task', projectId: 'deleted-project', status: 'plan', scopeId: 'team:main' },
+    )
+    const settings = useSettingsStore()
+    await settings.load()
+    settings.set('businessGraphViewState', {
+      section: 'work', sectionViews: { work: 'board' },
+      work: { project: 'fde', groupBy: 'project' },
+    })
+    const wrapper = render()
+    await flushPromises()
+    const expectedIds = ['issue-legacy', 'issue-unassigned', 'issue-orphan'].sort()
+    expect(wrapper.get('[data-board-project-filter]').text()).toContain('No project')
+    expect(wrapper.get('[data-board-column="__unassigned__"] .board-column-count').text()).toBe('3')
+    expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')).sort()).toEqual(expectedIds)
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')).sort()).toEqual(expectedIds)
+    expect(wrapper.text()).not.toContain('deleted-project')
+    expect(settings.businessGraphViewState.work.project).toBe('__unassigned__')
     wrapper.unmount()
   })
 
@@ -899,9 +943,60 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
+  it('filters Work immediately in its existing columns and restores cards on clear', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const board = wrapper.get('[data-graph-work-board]').element
+    const columns = wrapper.findAll('[data-board-column]').map(item => item.element)
+    const input = wrapper.get('[data-graph-search]')
+    expect(input.attributes('placeholder')).toBe('Filter work…')
+
+    await input.setValue('ALPHA heor')
+    expect(searchGraph).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-graph-work-board]').element).toBe(board)
+    expect(wrapper.findAll('[data-board-column]').map(item => item.element)).toEqual(columns)
+    expect(wrapper.findAll('[data-board-card]').map(item => item.attributes('data-board-card'))).toEqual(['issue-1'])
+    expect(wrapper.get('[data-board-column="plan"] .board-column-count').text()).toBe('1')
+    await input.trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('[data-board-card="issue-1"]').element)
+
+    await input.setValue('no matching work')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-board-column]').map(item => item.element)).toEqual(columns)
+    expect(wrapper.get('.graph-search-count').text()).toBe('0')
+    expect(wrapper.findAll('.board-no-matches')).toHaveLength(columns.length)
+    await input.trigger('keydown', { key: 'Escape' })
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
+    expect(document.activeElement).toBe(input.element)
+    wrapper.unmount()
+  })
+
+  it('combines Work search with filters and keeps grouping in List', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-graph-filters-trigger]').trigger('click')
+    await wrapper.get('[data-board-priority-filter]').trigger('click')
+    document.querySelector('[data-graph-select-option="high"]').click()
+    await flushPromises()
+    const input = wrapper.get('[data-graph-search]')
+    await input.setValue('anna')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(0)
+    await input.setValue('evidence')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(1)
+    await wrapper.get('[data-graph-view="list"]').trigger('click')
+    expect(wrapper.find('[data-graph-work-board]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-graph-node]')).toHaveLength(1)
+    expect(wrapper.findComponent({ name: 'EntityList' }).props('groupBy')).toBe('status')
+    await wrapper.get('[data-graph-view="board"]').trigger('click')
+    expect(wrapper.findAll('[data-board-card]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('filters the active projection through a persistent debounced search', async () => {
     const wrapper = render()
     await flushPromises()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
     vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
 
     const input = wrapper.get('[data-graph-search]')
@@ -975,6 +1070,7 @@ describe('BusinessGraphApp', () => {
     expect([...viewbarGroups].map(group => group.className)).toEqual([
       'graph-views',
       'graph-filters-root',
+      'graph-display-root',
     ])
     const filtersTrigger = wrapper.get('[data-graph-filters-trigger]')
     expect(filtersTrigger.attributes('aria-expanded')).toBe('false')
@@ -1004,7 +1100,8 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.findAll('[data-board-card]')).toHaveLength(2)
 
     await wrapper.get('[data-board-project-filter]').trigger('click')
-    document.querySelector('[data-graph-select-option="fde"]').click()
+    expect(document.querySelector('[data-graph-select-option="fde"]')).toBeNull()
+    document.querySelector('[data-graph-select-option="__unassigned__"]').click()
     await flushPromises()
     expect(wrapper.findAll('[data-board-card]').map(card => card.attributes('data-board-card')))
       .toEqual(['issue-legacy'])
@@ -1020,6 +1117,7 @@ describe('BusinessGraphApp', () => {
     await priorityReset.trigger('click')
     expect(wrapper.get('[data-board-priority-filter]').text()).toContain('All priorities')
 
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
     const columnsReset = wrapper.get('[data-graph-control="board-columns-expand-all"]')
     expect(columnsReset.attributes('disabled')).toBeDefined()
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
@@ -1051,6 +1149,7 @@ describe('BusinessGraphApp', () => {
   it('keeps every character typed while replacing a committed search', async () => {
     const wrapper = render()
     await flushPromises()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
     vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
 
     const input = wrapper.get('[data-graph-search]')
@@ -1116,6 +1215,7 @@ describe('BusinessGraphApp', () => {
     ))
     const wrapper = render()
     await flushPromises()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
 
     const input = wrapper.get('[data-graph-search]')
     await input.setValue('b')
@@ -1204,7 +1304,7 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(wrapper.get('[data-graph-filters-popover]').isVisible()).toBe(false)
 
-    await filtersTrigger.trigger('click')
+    await wrapper.get('[data-graph-display-trigger]').trigger('click')
     await wrapper.get('[data-board-columns-trigger]').trigger('click')
     await flushPromises()
     expect(document.querySelector('[data-board-columns-menu]')).not.toBeNull()
@@ -1242,6 +1342,8 @@ describe('BusinessGraphApp', () => {
     await flushPromises()
     expect(document.activeElement).toBe(wrapper.get('[data-board-project-filter]').element)
 
+    await wrapper.get('[data-graph-display-trigger]').trigger('keydown', { key: 'ArrowDown' })
+    await flushPromises()
     const columnsTrigger = wrapper.get('[data-board-columns-trigger]')
     columnsTrigger.element.focus()
     await columnsTrigger.trigger('keydown', { key: 'ArrowUp' })

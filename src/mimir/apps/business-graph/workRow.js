@@ -17,6 +17,11 @@ export const WORK_STATUSES = Object.freeze([
 
 export const UNASSIGNED = '__unassigned__'
 
+/** Missing, legacy, and unresolved project references share one Work bucket. */
+export function workProjectId(issue, projectIds) {
+  return projectIds.has(issue.projectId) ? issue.projectId : UNASSIGNED
+}
+
 /**
  * Describe a due date relative to today.
  * @returns {{ state: 'none'|'overdue'|'today'|'soon'|'later', days: number|null, label: string }}
@@ -87,8 +92,8 @@ export function groupWorkRows(issues, { groupBy = 'status', projects = [] } = {}
       })),
       { id: UNASSIGNED, label: 'No project' },
     ]
-    const known = new Set(definitions.map(group => group.id))
-    keyFor = issue => (known.has(issue.projectId) ? issue.projectId : UNASSIGNED)
+    const known = new Set(projects.map(project => project.id))
+    keyFor = issue => workProjectId(issue, known)
   } else {
     definitions = WORK_STATUSES
     const known = new Set(definitions.map(group => group.id))

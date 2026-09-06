@@ -1,9 +1,14 @@
 import { createApp, h, ref } from 'vue'
+import { createPinia } from 'pinia'
 import '../src/shared/styles/fonts.css'
 import '../src/shared/styles/themes.css'
 import '../src/shared/styles/app.css'
 import WorkBoard from '../src/mimir/apps/business-graph/WorkBoard.vue'
 import EntityList from '../src/mimir/apps/business-graph/EntityList.vue'
+import GraphViewbar from '../src/mimir/apps/business-graph/GraphViewbar.vue'
+import GraphAppHeader from '../src/mimir/apps/business-graph/GraphAppHeader.vue'
+import { useBusinessGraphStore } from '../src/stores/businessGraph.js'
+import { useGraphViewState } from '../src/mimir/apps/business-graph/useGraphViewState.js'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.setAttribute('data-theme', params.get('theme') || 'parchment')
@@ -27,7 +32,7 @@ const people = [
 const selfId = params.get('self') === '0' ? '' : 'person-waq'
 const titles = {
   backlog: [
-    'Draft comparator landscape', 'Scope RWE extraction template', 'Collect payer objections',
+    'Draft comparator landscape for the European reimbursement submission', 'Scope RWE extraction template', 'Collect payer objections',
     'Review search strategy', 'Outline evidence gaps',
   ],
   plan: [
@@ -75,28 +80,64 @@ const groupBy = ref(params.get('group') || 'status')
 const app = createApp({
   components: { WorkBoard },
   setup() {
+    const graph = useBusinessGraphStore()
+    graph.nodes = [...projects, ...people, ...issues]
+    graph.view = params.get('list') === '1' ? 'list' : 'board'
+    const state = useGraphViewState({ graph, settings: { settingsReady: false, businessGraphSelfPersonId: selfId } })
+    state.boardGroup.value = groupBy.value
+    const toolbar = () => h(GraphViewbar, {
+      section: 'work', sectionLabel: 'Work', view: graph.view,
+      viewOptions: state.viewOptions.value,
+      projectFilter: state.projectFilter.value, projectOptions: state.projectFilterOptions.value,
+      assigneeFilter: state.assigneeFilter.value, assigneeOptions: state.assigneeFilterOptions.value,
+      priorityFilter: state.priorityFilter.value, priorityOptions: state.priorityFilterOptions,
+      groupBy: state.boardGroup.value, groupOptions: state.boardGroupOptions,
+      sortBy: state.boardSort.value, sortOptions: state.boardSortOptions,
+      statuses: state.boardStatuses, collapsedStatuses: state.collapsedBoardStatuses.value,
+      onSetView: value => { graph.view = value },
+      'onUpdate:projectFilter': value => { state.projectFilter.value = value },
+      'onUpdate:assigneeFilter': value => { state.assigneeFilter.value = value },
+      'onUpdate:priorityFilter': value => { state.priorityFilter.value = value },
+      'onUpdate:groupBy': value => { state.boardGroup.value = value },
+      'onUpdate:sortBy': value => { state.boardSort.value = value },
+      onToggleStatus: state.toggleBoardStatusCollapse,
+      onExpandAll: state.expandAllBoardStatuses,
+    })
     return () => [
-      params.get('list') === '1'
+      h(GraphAppHeader, {
+        sections: state.sections, section: 'work', sectionLabel: 'Work',
+        searchValue: graph.searchQuery, searchQuery: graph.searchQuery,
+        resultCount: state.boardIssues.value.length,
+        'onUpdate:searchValue': graph.prepareSearch, onClearSearch: graph.clearSearch,
+      }),
+      toolbar(),
+      graph.view === 'list'
         ? h(EntityList, {
-            nodes: issues,
+            nodes: state.boardIssues.value,
             lookup: [...projects, ...people, ...issues],
             projects,
             mode: 'work',
-            groupBy: params.get('group') || 'status',
+            groupBy: state.boardGroup.value,
             selfId,
             style: 'flex: 1 1 auto; min-height: 0;',
           })
         : h(WorkBoard, {
-            issues,
+            issues: state.boardIssues.value,
+            unfilteredIssues: issues,
+            searchQuery: graph.searchQuery,
             nodes: [...projects, ...people, ...issues],
             projects,
-            groupBy: groupBy.value,
+            groupBy: state.boardGroup.value,
+            collapsedStatuses: state.collapsedBoardStatuses.value,
+            hideProject: state.projectScoped.value,
+            onExpandColumn: state.expandBoardStatus,
             selfId,
             style: 'flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;',
           }),
     ]
   },
 })
+app.use(createPinia())
 app.mount('#app')
 
 if (params.get('menu') === '1') {
