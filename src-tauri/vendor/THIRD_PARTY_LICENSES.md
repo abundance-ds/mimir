@@ -295,7 +295,7 @@ model assets remain in `THIRD_PARTY_NOTICES.md`.
 | cargo:mime@0.3.17 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/mime/0.3.17/download | 6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a |
 | cargo:mimir-meeting-audio@0.1.0 | MIT | first-party |  |
 | cargo:mimir-meeting-detect@0.1.0 | MIT | first-party |  |
-| cargo:mimir@0.3.0 | NOASSERTION | first-party |  |
+| cargo:mimir@0.3.1 | NOASSERTION | first-party |  |
 | cargo:minimal-lexical@0.2.1 | MIT OR Apache-2.0 | https://crates.io/api/v1/crates/minimal-lexical/0.2.1/download | 68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a |
 | cargo:minisign-verify@0.2.5 | MIT | https://crates.io/api/v1/crates/minisign-verify/0.2.5/download | 22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e |
 | cargo:miniz_oxide@0.8.9 | MIT OR Zlib OR Apache-2.0 | https://crates.io/api/v1/crates/miniz_oxide/0.8.9/download | 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316 |

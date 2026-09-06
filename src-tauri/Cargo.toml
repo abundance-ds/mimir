@@ -1,6 +1,6 @@
 [package]
 name = "mimir"
-version = "0.3.0"
+version = "0.3.1"
 description = "A local AI-native workbench for CLI agents and reviewed files"
 authors = ["Mimir"]
 edition = "2021"
