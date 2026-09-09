@@ -40,6 +40,17 @@ describe('workspace files store', () => {
     listWorkspaceDirectory.mockResolvedValue(loadIpcFixture('workspace_file_list_directory'))
   })
 
+  it('restores expanded folders when returning to a workspace', async () => {
+    const store = useWorkspaceFilesStore()
+    await store.openWorkspace('/alpha')
+    await store.toggleDirectory('docs')
+    await store.openWorkspace('/beta')
+    expect([...store.expandedDirectories]).toEqual([])
+    await store.openWorkspace('/alpha')
+    expect([...store.expandedDirectories]).toEqual(['docs'])
+    expect(listWorkspaceDirectory).toHaveBeenLastCalledWith('docs')
+  })
+
   it('opens a workspace as a recent-first review inbox', async () => {
     const store = useWorkspaceFilesStore()
     await store.openWorkspace('/w')

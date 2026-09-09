@@ -32,7 +32,10 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
   const treeLoadingPaths = ref(new Set())
   const treeErrors = ref({})
   const expandedDirectories = ref(new Set())
+  const expandedByWorkspace = new Map()
   let activeSearchToken = null
+  const contentRequests = new Map()
+  let contentSearchQueue = Promise.resolve()
   let queryGeneration = 0
   let watchUnlisten = null
   let watchStartPromise = null
@@ -54,6 +57,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
   async function openWorkspace(path) {
     const next = String(path || '').trim()
     if (!next) throw new Error('Workspace path must not be empty.')
+    if (workspacePath.value) expandedByWorkspace.set(workspacePath.value, [...expandedDirectories.value])
     queryGeneration += 1
     loading.value = true
     error.value = ''
@@ -69,6 +73,11 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
       treeErrors.value = {}
       expandedDirectories.value = new Set()
       await loadDirectory('')
+      const restored = []
+      for (const directory of expandedByWorkspace.get(next) || []) {
+        try { await loadTreeDirectory(directory); restored.push(directory) } catch { /* Keep missing folders closed. */ }
+      }
+      expandedDirectories.value = new Set(restored)
       await startWatching()
     } catch (cause) {
       error.value = errorMessage(cause)
@@ -220,30 +229,57 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     }
   }
 
-  async function searchContent(value) {
+  async function searchContent(value, { owner = null, pathQuery = query.value || null } = {}) {
     const text = String(value || '').trim()
-    if (activeSearchToken) await cancelContentSearch(activeSearchToken)
+    const previous = contentRequests.get(owner)
+    const cancellation = Promise.resolve(previous?.token
+      ? cancelContentSearch(previous.token)
+      : undefined)
+    // The queued request still reports cancellation errors to its caller.
+    // Attach a handler now while a different presentation finishes searching.
+    void cancellation.catch(() => {})
+    contentRequests.delete(owner)
     if (!text) {
-      activeSearchToken = null
-      contentMatches.value = []
-      contentTruncated.value = false
-      return
+      if (owner === null) {
+        contentMatches.value = []
+        contentSearching.value = false
+        contentTruncated.value = false
+      }
+      await cancellation
+      return null
     }
-    const token = await beginContentSearch()
-    activeSearchToken = token
-    contentSearching.value = true
-    try {
-      const report = await searchIndexedContent(token, {
-        query: text,
-        pathQuery: query.value || null,
-        maxResults: 200,
-      })
-      if (activeSearchToken !== token || report.cancelled) return
-      contentMatches.value = report.matches || []
-      contentTruncated.value = Boolean(report.truncated)
-    } finally {
-      if (activeSearchToken === token) contentSearching.value = false
-    }
+    const request = { workspace: workspacePath.value, token: null }
+    contentRequests.set(owner, request)
+    const current = () => contentRequests.get(owner) === request
+      && workspacePath.value === request.workspace
+    if (owner === null) contentSearching.value = true
+    // Native search has one cancellation generation. Different presentations
+    // must take turns; replacing a query cancels only that caller's token.
+    const search = contentSearchQueue.then(async () => {
+      await cancellation
+      if (!current()) return null
+      const token = await beginContentSearch()
+      request.token = token
+      activeSearchToken = token
+      if (!current()) {
+        await cancelContentSearch(token)
+        return null
+      }
+      const report = await searchIndexedContent(token, { query: text, pathQuery, maxResults: 200 })
+      if (!current() || report.cancelled) return null
+      if (owner === null) {
+        contentMatches.value = report.matches || []
+        contentTruncated.value = Boolean(report.truncated)
+      }
+      return report
+    }).catch(cause => {
+      if (current()) throw cause
+      return null
+    }).finally(() => {
+      if (owner === null && current()) contentSearching.value = false
+    })
+    contentSearchQueue = search.catch(() => {})
+    return search
   }
 
   async function startWatching() {
@@ -343,6 +379,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
 
   async function dispose() {
     queryGeneration += 1
+    contentRequests.clear()
     if (activeSearchToken) await cancelContentSearch(activeSearchToken)
     activeSearchToken = null
     watchUnlisten?.()

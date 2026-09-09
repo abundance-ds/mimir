@@ -2,11 +2,24 @@
   <section
     ref="activityRef"
     data-files-activity
-    class="files-activity relative flex h-full min-h-0 flex-col overflow-hidden bg-surface text-ink"
+    class="files-activity relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden text-ink"
+    :class="compact ? 'files-compact bg-chrome' : 'bg-surface'"
     aria-label="Files"
     @keydown.capture="onCommandKeydown"
   >
-    <header data-files-toolbar class="pane-bar items-end">
+    <div v-if="compact" data-files-compact-toolbar class="flex h-[32px] min-w-0 shrink-0 items-center gap-1 px-[12px]" role="toolbar" aria-label="Files">
+      <button v-for="option in compactViews" :key="option.id" type="button"
+        :data-files-mode="option.id" :aria-label="option.label" :title="option.label"
+        :aria-pressed="viewMode === option.id"
+        class="grid size-[28px] shrink-0 place-items-center text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+        :class="{ 'bg-chrome-mid text-ink': viewMode === option.id }"
+        @click="setViewMode(option.id)">
+        <component :is="option.icon" :size="14" :stroke-width="1.75" />
+      </button>
+      <span class="min-w-0 flex-1" />
+      <WorkbenchMenu label="File actions" :items="compactActions" compact @select="compactAction"><IconDots :size="14" /></WorkbenchMenu>
+    </div>
+    <header v-else data-files-toolbar class="pane-bar items-end">
       <nav class="flex h-full min-w-0 flex-1 items-end" aria-label="Files view">
         <button
           v-for="option in views"
@@ -44,7 +57,7 @@
       <button
         type="button"
         data-files-new-file
-        title="New file (⌘N)"
+        title="New file"
         aria-label="New file"
         class="mb-1 grid size-7 shrink-0 place-items-center text-ink-3 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
         @click="promptNew('file')"
@@ -88,63 +101,64 @@
 
     <div
       v-if="files.workspacePath && !(viewMode === 'changes' && gitReview.repositoryState === 'not-repository')"
-      class="mx-2 my-2 flex h-8 shrink-0 items-center"
+      class="files-search mx-2 my-2 flex shrink-0 items-center" :class="compact ? 'flex-col gap-1' : 'h-8'"
+      @focusin="searchFocused = true"
+      @focusout="onSearchFocusOut"
     >
-      <div
-        v-if="viewMode !== 'changes'"
-        class="flex h-full shrink-0 border border-r-0 border-rule-light bg-chrome-high p-0.5"
-        role="group"
-        aria-label="Search scope"
-      >
-        <button
-          v-for="scope in searchScopes"
-          :key="scope.id"
-          type="button"
-          :data-files-search-scope="scope.id"
-          :aria-pressed="searchScope === scope.id"
-          class="h-full px-2 font-mono text-[9px] text-ink-4 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
-          :class="{ 'bg-surface text-ink': searchScope === scope.id }"
-          @click="setSearchScope(scope.id)"
+      <template v-for="part in compact ? ['field', 'scopes'] : ['scopes', 'field']" :key="part">
+        <div
+          v-if="part === 'scopes' && viewMode !== 'changes' && (!compact || searchFocused || query)"
+          class="files-search-scopes flex h-full shrink-0 border border-r-0 border-rule-light bg-chrome-high p-0.5"
+          role="group"
+          aria-label="Search scope"
         >
-          {{ scope.label }}
-        </button>
-      </div>
-      <label class="flex h-full min-w-0 flex-1 items-center gap-2 border border-rule-light bg-chrome-high px-2 focus-within:border-accent/60">
-        <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-4" />
-        <input
-          ref="queryInput"
-          v-model="query"
-          data-files-search
-          type="search"
-          autocapitalize="off"
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck="false"
-          :placeholder="searchPlaceholder"
-          class="h-full min-w-0 flex-1 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-4"
-          @input="onQueryInput"
-          @keydown.down.prevent="enterSearchResults(1)"
-          @keydown.up.prevent="enterSearchResults(-1)"
-          @keydown.esc.prevent="clearQuery"
-        />
-        <span
-          v-if="contentMode && files.contentSearching"
-          class="font-mono text-[9px] text-ink-4"
-        >
-          Searching
-        </span>
-        <kbd v-else-if="!query" class="font-mono text-[9px] text-ink-4">⌘F</kbd>
-        <button
-          v-else
-          type="button"
-          title="Clear search"
-          aria-label="Clear search"
-          class="grid size-5 place-items-center text-ink-4 hover:text-ink"
-          @click="clearQuery"
-        >
-          <IconX :size="12" :stroke-width="1.8" />
-        </button>
-      </label>
+          <button
+            v-for="scope in searchScopes"
+            :key="scope.id"
+            type="button"
+            :data-files-search-scope="scope.id"
+            :aria-pressed="searchScope === scope.id"
+            class="h-full px-2 font-mono text-[9px] text-ink-4 outline-none hover:bg-chrome hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+            :class="{ 'bg-surface text-ink': searchScope === scope.id }"
+            @mousedown.prevent
+            @click="setSearchScope(scope.id)"
+          >
+            {{ scope.label }}
+          </button>
+        </div>
+        <label v-if="part === 'field'" class="files-search-field flex h-8 min-w-0 flex-1 items-center gap-2 border border-rule-light bg-chrome-high px-2 focus-within:border-accent/60">
+          <IconSearch :size="13" :stroke-width="1.8" class="shrink-0 text-ink-4" />
+          <input
+            :ref="setQueryInput"
+            v-model="query"
+            data-files-search
+            type="text"
+            role="searchbox"
+            aria-label="Search files"
+            autocapitalize="off"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            :placeholder="searchPlaceholder"
+            class="h-full min-w-0 flex-1 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-4"
+            @input="onQueryInput"
+            @keydown.down.prevent="enterSearchResults(1)"
+            @keydown.up.prevent="enterSearchResults(-1)"
+            @keydown.esc.prevent="clearQuery"
+          />
+          <kbd v-if="!query" class="font-mono text-[9px] text-ink-4">⌘F</kbd>
+          <button
+            v-else
+            type="button"
+            title="Clear search"
+            aria-label="Clear search"
+            class="grid size-5 place-items-center text-ink-4 hover:text-ink"
+            @click="clearQuery"
+          >
+            <IconX :size="12" :stroke-width="1.8" />
+          </button>
+        </label>
+      </template>
     </div>
 
     <div
@@ -167,7 +181,7 @@
     </div>
 
     <div
-      v-if="files.workspacePath && !contentMode && viewMode !== 'changes'"
+      v-if="!compact && files.workspacePath && !contentMode && viewMode !== 'changes'"
       data-files-ledger-header
       data-files-ledger-columns
       role="group"
@@ -268,7 +282,7 @@
       :aria-multiselectable="contentMode ? undefined : 'true'"
       tabindex="0"
       :data-files-drop-root="rootDropActive ? '' : undefined"
-      class="scrollbar-thin min-h-0 flex-1 overflow-auto bg-surface outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+      class="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       :class="{ 'ring-1 ring-inset ring-accent': rootDropActive }"
       @keydown="onListKeydown"
       @contextmenu="onListContextMenu"
@@ -311,6 +325,17 @@
         </div>
       </div>
 
+      <div v-else-if="searchPending" data-files-search-pending role="status"
+        class="px-3 py-4 text-[11px] text-ink-3">Searching…</div>
+
+      <div v-else-if="searchError" data-files-search-error role="alert"
+        class="px-3 py-4 text-[11px] text-ink-3">
+        <p>Files could not be searched.</p>
+        <p class="mt-1 break-words text-[10px]">{{ searchError }}</p>
+        <button type="button" class="mt-2 h-7 border border-rule px-2 hover:bg-chrome-mid focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          data-files-search-retry @click="fileSearch.schedule({ immediate: true })">Try again</button>
+      </div>
+
       <template v-else-if="contentMode">
         <button
           v-for="(match, index) in contentMatches"
@@ -319,12 +344,12 @@
           data-content-match
           role="option"
           :aria-selected="contentFocusedIndex === index"
-          class="block h-11 w-full border-b border-rule-light px-3 text-left outline-none hover:bg-chrome-high focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-          :class="{ 'bg-accent-soft': contentFocusedIndex === index }"
+          class="block h-11 w-full px-3 text-left outline-none hover:bg-chrome-high focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
+          :class="[compact ? '' : 'border-b border-rule-light', contentFocusedIndex === index ? (compact ? 'bg-chrome-high' : 'bg-accent-soft') : '']"
           @click="openContentMatch(match, index, true)"
           @dblclick.prevent="openContentMatch(match, index, false)"
         >
-          <span class="flex min-w-0 items-center gap-2 font-mono text-[9px] text-accent">
+          <span class="flex min-w-0 items-center gap-2 font-mono text-[10px] text-ink-2">
             <span class="min-w-0 flex-1 truncate">{{ match.relativePath }}</span>
             <span class="shrink-0 tabular-nums text-ink-4">{{ match.line }}:{{ match.column }}</span>
           </span>
@@ -332,11 +357,11 @@
         </button>
 
         <div
-          v-if="query.trim() && !files.contentSearching && !contentMatches.length"
+          v-if="query.trim() && !contentMatches.length"
           data-files-empty
           class="grid h-40 place-items-center px-8 text-center text-[11px] text-ink-3"
         >
-          No content matches. Try another phrase.
+          {{ searchLimited ? 'No matches in the files searched. Some files were not fully searched.' : 'No content matches.' }}
         </div>
         <div
           v-else-if="!query.trim()"
@@ -350,11 +375,11 @@
           </div>
         </div>
         <div
-          v-if="files.contentTruncated"
+          v-if="searchLimited && contentMatches.length"
           role="status"
           class="border-t border-rule bg-chrome-high px-3 py-2 text-[10px] text-ink-3"
         >
-          The search limit was reached. Use a more specific phrase.
+          Search results are incomplete. Some files were not fully searched.
         </div>
       </template>
 
@@ -370,6 +395,7 @@
           <FileTreeRow
             v-else
             :row="item.row"
+            :compact="compact"
             :selected="selectedPaths.has(item.row.entry.path)"
             :active="isActive(item.row.entry)"
             :ancestry="isActiveAncestry(item.row.entry)"
@@ -427,6 +453,8 @@
             </button>
           </div>
         </div>
+        <div v-if="query.trim() && searchLimited" role="status"
+          class="px-3 py-2 text-[10px] text-ink-3">Showing the first 250 matches. Use a longer filename or path.</div>
       </template>
     </div>
 
@@ -448,10 +476,10 @@
       </div>
     </div>
 
-    <footer
-      v-if="files.workspacePath"
+    <PaneBand as="footer" kind="footer"
+      v-if="files.workspacePath && !compact"
       data-files-footer
-      class="pane-footer gap-3 px-3"
+      class="gap-3 px-3"
     >
       <span>{{ footerCount }}</span>
       <span
@@ -481,7 +509,7 @@
         Collapse all
       </button>
       <span v-else class="files-footer-secondary ml-auto truncate">{{ workspaceName }}</span>
-    </footer>
+    </PaneBand>
 
     <div
       v-if="operationError || operationNotice"
@@ -655,6 +683,10 @@
 </template>
 
 <script setup>
+import PaneBand from '../../shared/ui/chrome/PaneBand.vue'
+
+import WorkbenchMenu from '../components/WorkbenchMenu.vue'
+import { IconDots, IconPlus, IconChevronDown } from '@tabler/icons-vue'
 import { computed, defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IconAlertTriangle,
@@ -692,6 +724,7 @@ import { useFileDrop } from '../files/useFileDrop.js'
 import { useFileFavorites } from '../files/useFileFavorites.js'
 import { useFileMutations } from '../files/useFileMutations.js'
 import { useFileSelection } from '../files/useFileSelection.js'
+import { useFileSearch } from '../files/useFileSearch.js'
 import { useFileTreeDrag } from '../files/useFileTreeDrag.js'
 import {
   compareFileRows,
@@ -730,11 +763,12 @@ const ContextAction = defineComponent({
 })
 
 const props = defineProps({
-  activity: { type: Object, required: true },
+  activity: { type: Object, default: () => ({ id: 'files' }) },
+  compact: Boolean,
   active: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace', 'diagnostic'])
+const emit = defineEmits(['openFile', 'reviewGit', 'chooseWorkspace', 'diagnostic', 'openManager'])
 const FILE_SORT_OPTIONS = Object.freeze([
   { id: 'name', label: 'Name' },
   { id: 'kind', label: 'Kind' },
@@ -753,8 +787,18 @@ const editorFiles = useFileStore()
 const gitReview = useGitReviewStore()
 const settings = useSettingsStore()
 const viewMode = ref('project')
-const searchScope = ref('paths')
-const query = ref('')
+const fileSearch = useFileSearch({
+  workspacePath: computed(() => files.workspacePath),
+  indexedFiles: computed(() => files.files),
+  searchContent: (value, options) => files.searchContent(value, options),
+})
+const { query, scope: searchScope, pathResults, contentResults,
+  pending: searchPending, limited: searchLimited, error: searchError } = fileSearch
+const searchFocused = ref(false)
+const viewScroll = new Map()
+const viewSelections = new Map()
+const workspaceViews = new Map()
+let searchReturn = null
 const activityRef = ref(null)
 const queryInput = ref(null)
 const listRef = ref(null)
@@ -773,10 +817,8 @@ const excludedGitPaths = computed(() => new Map(
 const gitOnly = ref(false)
 const contentFocusedIndex = ref(-1)
 const sortStateByView = ref(defaultFileSortStates())
-let queryTimer = null
 let gitRefreshTimer = null
 
-const SEARCH_DEBOUNCE_MS = 130
 // Windowed rendering: only trees larger than this render behind spacers.
 const VIRTUALIZE_AT = 300
 const OVERSCAN_ROWS = 20
@@ -792,11 +834,18 @@ const views = Object.freeze([
   { id: 'recent', label: 'Recent', icon: IconClock },
   { id: 'favorites', label: 'Favorites', icon: IconStar },
 ])
+const compactViews = [
+  { id: 'project', label: 'File tree', icon: IconFolderOpen },
+  { id: 'favorites', label: 'Favorites', icon: IconStar },
+  { id: 'recent', label: 'Recent', icon: IconClock },
+]
 const searchScopes = Object.freeze([
-  { id: 'paths', label: 'Paths' },
+  { id: 'paths', label: 'Names' },
   { id: 'contents', label: 'Contents' },
 ])
-const contentMode = computed(() => viewMode.value !== 'changes' && searchScope.value === 'contents')
+const contentMode = computed(() => viewMode.value !== 'changes'
+  && searchScope.value === 'contents'
+  && (!props.compact || Boolean(query.value.trim())))
 const sortState = computed(() => sortStateByView.value[viewMode.value] || sortStateByView.value.project)
 const sortKey = computed(() => sortState.value.key)
 const sortDirection = computed(() => sortState.value.direction)
@@ -883,7 +932,8 @@ const visibleRows = computed(() => {
     return gitChangeRows().filter(row => !isPendingTrashPath(row.entry.path))
   }
   let rows
-  if (viewMode.value === 'recent') rows = recentRows()
+  if (props.compact && query.value.trim()) rows = searchRows()
+  else if (viewMode.value === 'recent') rows = recentRows()
   else if (viewMode.value === 'favorites') rows = favoriteRows()
   else if (query.value.trim()) rows = searchRows()
   else {
@@ -895,13 +945,13 @@ const visibleRows = computed(() => {
 })
 
 const contentMatches = computed(() => {
-  let matches = files.contentMatches
-  if (viewMode.value === 'recent') {
+  let matches = contentResults.value
+  if (!props.compact && viewMode.value === 'recent') {
     const recent = new Set(editorFiles.recentFiles
       .filter(path => pathIsInsideWorkspace(path, files.workspacePath))
       .map(normalizePath))
     matches = matches.filter(match => recent.has(normalizePath(match.path)))
-  } else if (viewMode.value === 'favorites') {
+  } else if (!props.compact && viewMode.value === 'favorites') {
     const favoritePaths = favorites.value.map(record => ({
       path: normalizeRelative(record.relativePath),
       directory: Boolean(record.isDirectory),
@@ -1036,7 +1086,7 @@ function trapDialogFocus(event, dialog) {
 const { dropTarget, importing } = useFileDrop({
   listRef,
   rows: () => renderedRows.value,
-  acceptsDrop: () => Boolean(files.workspacePath),
+  acceptsDrop: () => props.active && Boolean(files.workspacePath),
   importPaths: importDroppedPaths,
   springOpen: expandDirectory,
 })
@@ -1208,6 +1258,7 @@ const isLoading = computed(() => files.loading || (
 ))
 const surfaceError = computed(() => files.error || files.treeErrors[''] || '')
 const searchPlaceholder = computed(() => {
+  if (props.compact) return searchScope.value === 'contents' ? 'Search project contents…' : 'Find files…'
   if (viewMode.value === 'changes') return 'Filter changed files'
   if (contentMode.value) return ({
     project: 'Search project contents',
@@ -1255,13 +1306,18 @@ const selectedFileSummary = computed(() => {
   return parts.join(' · ')
 })
 
-watch(() => files.workspacePath, () => {
-  clearTimeout(queryTimer)
-  query.value = ''
+watch(() => files.workspacePath, (path, previous) => {
+  if (previous) workspaceViews.set(previous, {
+    view: searchReturn?.view || viewMode.value,
+    scroll: searchReturn?.scroll ?? (listRef.value?.scrollTop || 0),
+  })
+  const remembered = workspaceViews.get(path)
+  viewMode.value = remembered?.view || 'project'
+  nextTick(() => { if (listRef.value) listRef.value.scrollTop = remembered?.scroll || 0 })
+  viewScroll.clear(); viewSelections.clear(); searchReturn = null
+  fileSearch.clear()
   gitOnly.value = false
   contentFocusedIndex.value = -1
-  void files.setQuery('')
-  void files.searchContent('')
   resetSelection()
   // A pending name belongs to the project that is leaving: its parent folder
   // means nothing in the arriving one.
@@ -1291,7 +1347,6 @@ onMounted(() => {
   }
 })
 onUnmounted(() => {
-  clearTimeout(queryTimer)
   clearTimeout(gitRefreshTimer)
   listResizeObserver?.disconnect()
   activityResizeObserver?.disconnect()
@@ -1348,7 +1403,7 @@ function flattenDirectory(parent, depth, rows, seen = new Set()) {
 }
 
 function searchRows() {
-  return sortedRows(files.visibleFiles.map((entry) => makeRow(entry, 0, { secondary: true })))
+  return sortedRows(pathResults.value.map((entry) => makeRow(entry, 0, { secondary: true })))
 }
 
 function recentRows() {
@@ -1440,13 +1495,36 @@ function isPendingTrashPath(path) {
   })
 }
 
+const compactActions = computed(() => [
+  { id: 'file', label: 'New file', disabled: !files.workspacePath },
+  { id: 'folder', label: 'New folder', disabled: !files.workspacePath },
+  { id: 'collapse', label: 'Collapse all' },
+  { id: 'refresh', label: 'Refresh' },
+  { id: 'manager', label: 'Open File Manager' },
+])
+function compactAction(id) {
+  if (id === 'manager') emit('openManager')
+  else if (id === 'refresh') void refresh()
+  else if (id === 'collapse') collapseAll()
+  else if (id === 'file' || id === 'folder') promptNew(id)
+}
+
 function setViewMode(mode) {
+  if (!searchReturn) {
+    viewScroll.set(viewMode.value, listRef.value?.scrollTop || 0)
+    viewSelections.set(viewMode.value, { selected: [...selectedPaths.value], focused: focusedIndex.value })
+  } else {
+    viewScroll.set(searchReturn.view, searchReturn.scroll)
+    viewSelections.set(searchReturn.view, { selected: searchReturn.selected, focused: searchReturn.focused })
+  }
+  searchReturn = null
   viewMode.value = mode
-  query.value = ''
-  void files.setQuery('')
-  void files.searchContent('')
+  nextTick(() => { if (listRef.value) listRef.value.scrollTop = viewScroll.get(mode) || 0 })
+  fileSearch.clear()
   contentFocusedIndex.value = -1
   clearSelection()
+  const remembered = viewSelections.get(mode)
+  if (remembered) { selectedPaths.value = new Set(remembered.selected); focusedIndex.value = remembered.focused }
   if (mode === 'changes') void gitReview.openWorkspace(files.workspacePath)
   nextTick(() => (mode === 'changes' ? gitListRef.value?.enter?.(1) : listRef.value?.focus()))
 }
@@ -1497,48 +1575,45 @@ function updateSortState(key, direction) {
   })
 }
 
+function onSearchFocusOut(event) {
+  searchFocused.value = Boolean(event.currentTarget?.contains(event.relatedTarget))
+}
+
+function setQueryInput(element) {
+  queryInput.value = element
+}
+
 function setSearchScope(scope) {
   if (!searchScopes.some(option => option.id === scope) || searchScope.value === scope) return
-  clearTimeout(queryTimer)
-  searchScope.value = scope
-  query.value = ''
-  void files.setQuery('')
-  void files.searchContent('')
+  fileSearch.setScope(scope)
   contentFocusedIndex.value = -1
   clearSelection()
   nextTick(() => queryInput.value?.focus())
 }
 
 function onQueryInput() {
-  clearTimeout(queryTimer)
+  if (query.value.trim() && !searchReturn) {
+    searchReturn = { view: viewMode.value, scroll: listRef.value?.scrollTop || 0, selected: [...selectedPaths.value], focused: focusedIndex.value }
+    if (props.compact) viewMode.value = 'project'
+  }
+  if (!query.value.trim()) { clearQuery(); return }
   if (viewMode.value === 'changes') return
-  queryTimer = setTimeout(async () => {
-    try {
-      if (contentMode.value) {
-        await files.searchContent(query.value)
-        contentFocusedIndex.value = -1
-      } else if (viewMode.value === 'project') {
-        await files.setQuery(query.value)
-        focusedIndex.value = 0
-      }
-      selectedPaths.value = new Set()
-    } catch (error) {
-      operationError.value = describeError(
-        error,
-        contentMode.value ? 'Content search failed' : 'File filter failed',
-      )
-    }
-  }, SEARCH_DEBOUNCE_MS)
+  contentFocusedIndex.value = -1
+  focusedIndex.value = 0
+  selectedPaths.value = new Set()
+  fileSearch.schedule()
 }
 
 function clearQuery() {
-  clearTimeout(queryTimer)
-  query.value = ''
-  void files.setQuery('')
-  void files.searchContent('')
+  fileSearch.clear()
   focusedIndex.value = 0
   contentFocusedIndex.value = -1
   selectedPaths.value = new Set()
+  if (searchReturn) {
+    const saved = searchReturn; searchReturn = null; viewMode.value = saved.view
+    selectedPaths.value = new Set(saved.selected); focusedIndex.value = saved.focused
+    nextTick(() => { if (listRef.value) listRef.value.scrollTop = saved.scroll })
+  }
   queryInput.value?.focus()
 }
 
@@ -1637,6 +1712,7 @@ function onListKeydown(event) {
     selectedPaths.value = new Set(visibleRows.value.map((item) => item.entry.path))
   } else if (event.key === 'Escape') {
     if (nameAction.value) cancelNameAction()
+    else if (query.value.trim()) clearQuery()
     else clearSelection()
   }
 }
@@ -1658,7 +1734,7 @@ function onContentListKeydown(event) {
 function openContentMatch(match, index, preview) {
   contentFocusedIndex.value = index
   const entry = indexedByPath.value.get(normalizePath(match.path)) || fallbackFileEntry(match.path)
-  emit('openFile', { path: match.path, preview, entry })
+  emit('openFile', { path: match.path, line: match.line, column: match.column, preview, entry })
 }
 
 function scrollContentMatchIntoView() {
@@ -1947,6 +2023,11 @@ function directionOptions(key) {
 </script>
 
 <style scoped>
+.files-compact .files-search-field { width:100%; flex:none; }
+.files-compact .files-search-scopes { height:24px; align-self:flex-start; border:0; }
+.files-compact .files-search { align-items:stretch; }
+.files-compact :deep(.files-ledger-grid) { min-width:0; }
+
 .files-activity {
   container: files / inline-size;
 }

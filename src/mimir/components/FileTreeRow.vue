@@ -7,10 +7,11 @@
     :aria-level="row.depth + 1"
     :aria-expanded="entry.isDirectory ? String(row.expanded) : undefined"
     :aria-selected="selected"
-    class="files-ledger-grid group relative grid w-full min-w-[248px] items-center border-b border-rule-light"
+    class="files-ledger-grid group relative grid w-full min-w-[248px] items-center"
     :class="[
       row.secondary ? 'h-9' : 'h-7',
-      selected ? 'bg-accent-soft text-ink' : 'text-ink-2 hover:bg-chrome-high',
+      compact ? 'compact-file-row' : '',
+      selected ? (compact ? 'bg-chrome-high text-ink' : 'bg-accent-soft text-ink') : (compact ? 'text-ink-2 hover:bg-chrome-mid' : 'text-ink-2 hover:bg-chrome-high'),
       dropTarget ? 'bg-accent-soft ring-1 ring-inset ring-accent' : '',
       dragSource ? 'opacity-45' : '',
     ]"
@@ -22,20 +23,21 @@
       v-for="guide in row.depth"
       :key="guide"
       aria-hidden="true"
-      class="pointer-events-none absolute inset-y-0 w-px bg-rule-light"
-      :style="{ left: `${10 + (guide - 1) * 17}px` }"
+      class="pointer-events-none absolute inset-y-0 w-px"
+      :class="compact ? 'bg-rule' : 'bg-rule-light'"
+      :style="{ left: `${10 + (guide - 1) * (compact ? 12 : 17)}px` }"
     />
     <span
-      v-if="ancestry"
+      v-if="ancestry && !compact"
       aria-hidden="true"
       class="pointer-events-none absolute inset-y-0 w-px bg-accent/55"
-      :style="{ left: `${10 + Math.max(row.depth - 1, 0) * 17}px` }"
+      :style="{ left: `${10 + Math.max(row.depth - 1, 0) * (compact ? 12 : 17)}px` }"
     />
 
     <form
       v-if="editing"
       class="flex h-full min-w-0 flex-1 items-center"
-      :style="{ paddingLeft: `${7 + row.depth * 17}px` }"
+      :style="{ paddingLeft: `${7 + row.depth * (compact ? 12 : 17)}px` }"
       @click.stop
       @dblclick.stop
       @submit.prevent="$emit('commit-edit')"
@@ -62,7 +64,7 @@
       v-else
       type="button"
       class="flex h-full min-w-0 items-center text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
-      :style="{ paddingLeft: `${4 + row.depth * 17}px` }"
+      :style="{ paddingLeft: `${4 + row.depth * (compact ? 12 : 17)}px` }"
       :title="entry.relativePath || entry.name"
       :aria-label="entryAriaLabel"
     >
@@ -93,13 +95,13 @@
       />
       <span class="min-w-0 flex-1">
         <span
-          class="block truncate text-[12px]"
-          :class="[
+          class="truncate text-[12px]"
+          :class="[compact ? 'flex' : 'block',
             entry.isDirectory ? 'font-medium' : '',
             active ? 'font-semibold text-ink' : '',
           ]"
         >
-          {{ entry.name }}
+          <template v-if="compact && !entry.isDirectory && entry.name.includes('.')"><span class="min-w-0 truncate">{{ entry.name.slice(0, entry.name.lastIndexOf('.')) }}</span><span class="shrink-0">{{ entry.name.slice(entry.name.lastIndexOf('.')) }}</span></template><template v-else>{{ entry.name }}</template>
         </span>
         <span
           v-if="row.secondary"
@@ -126,12 +128,12 @@
 
     <span
       data-file-git
-      class="px-1 text-right font-mono text-[9px] font-semibold tabular-nums"
+      class="truncate px-1 text-right font-mono text-[9px] font-semibold tabular-nums"
       :class="gitClass"
       :title="gitTitle"
       :aria-label="gitTitle || 'No Git change'"
     >
-      {{ gitDisplay || '—' }}
+      {{ gitDisplay || (compact ? '' : '—') }}
     </span>
 
     <time
@@ -199,6 +201,7 @@ import {
 } from '../files/fileLedger.js'
 
 const props = defineProps({
+  compact: Boolean,
   row: { type: Object, required: true },
   selected: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
@@ -239,6 +242,7 @@ const entryIcon = computed(() => {
   return IconFile
 })
 const iconClass = computed(() => {
+  if (props.compact) return props.active || (entry.value.isDirectory && props.row.expanded) ? 'text-ink-2' : 'text-ink-3'
   if (entry.value.isDirectory) return props.row.expanded ? 'text-accent' : 'text-ink-3'
   if (entry.value.openBehavior === 'pdf' || extension.value === 'pdf') return 'text-rem'
   return props.active ? 'text-accent' : 'text-ink-3'
@@ -269,7 +273,7 @@ const gitTitle = computed(() => (
     ? `${props.row.gitCount} changed ${props.row.gitCount === 1 ? 'file' : 'files'} inside`
     : gitLabel(props.row.gitStatus)
 ))
-const gitClass = computed(() => ({
+const gitClass = computed(() => props.compact && (entry.value.isDirectory || props.row.gitStatus === 'modified') ? 'text-ink-4' : ({
   new: 'text-add',
   modified: 'text-accent',
   deleted: 'text-rem',
@@ -357,4 +361,7 @@ function activate() {
     display: none;
   }
 }
+.compact-file-row.files-ledger-grid { grid-template-columns:minmax(0, 1fr) 32px; min-width:0; overflow:hidden; padding-right:2px; }
+.compact-file-row [data-file-kind], .compact-file-row [data-file-modified], .compact-file-row [data-file-size], .compact-file-row [data-file-favorite] { display:none; }
+.compact-file-row input { min-width:0; }
 </style>
