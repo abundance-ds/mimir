@@ -6,6 +6,8 @@ and cleanup. `src/stores/files.js` owns open files and save state.
 
 ## Files and tabs
 
+[Scratchpad](scratchpad.md) is a global Editor tab with its own saved-text history.
+
 - Tabs are `text`, `pdf`, or `external`. Inspect files before opening; only text
   enters CodeMirror and UTF-8 read/write commands.
 - A single click opens a clean preview; editing or pinning makes it persistent.

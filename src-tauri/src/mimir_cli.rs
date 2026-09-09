@@ -19,6 +19,10 @@ const MIMIR_GRAPH_REFERENCE: &str = include_str!("../../skills/mimir-graph/refer
 const MIMIR_MEETINGS_SKILL: &str = include_str!("../../skills/mimir-meetings/SKILL.md");
 const MIMIR_OVERVIEW_SKILL: &str = include_str!("../../skills/mimir/SKILL.md");
 const MIMIR_CLI_MODULES: &[(&str, &str)] = &[
+    (
+        "mimir-file-suggestion.mjs",
+        include_str!("../../bin/mimir-file-suggestion.mjs"),
+    ),
     ("mimir-skills.mjs", MIMIR_SKILLS_SOURCE),
     ("mimir-agents.mjs", MIMIR_AGENTS_SOURCE),
     ("mimir-scopes.mjs", MIMIR_SCOPES_SOURCE),

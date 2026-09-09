@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { fallbackOpenEntry, isSvgPath } from '../../shared/utils/filePreview.js'
 import { readFile } from '../../services/fileSystem.js'
+import { resolveScratchpad } from '../../services/scratchpad.js'
 import { inspectWorkspaceEntry } from '../../services/workspaceFileOperations.js'
 import { basename } from '../../shared/utils/path.js'
 import { getCommentsFromState } from '../codemirror/comments.js'
@@ -27,8 +28,12 @@ export function useEditorCommandApi({
   openSettings,
   commentPrompt,
 }) {
-  async function mimirOpen(path, { preview = false, entry = null } = {}) {
+  async function mimirOpen(path, { preview = false, entry = null, focus = true } = {}) {
     if (!path) throw new Error('path is required')
+    if (path.endsWith('/scratchpad.md') && window.__TAURI_INTERNALS__) {
+      const canonical = await resolveScratchpad(path)
+      if (canonical) { path = canonical; preview = false; entry = { openBehavior: 'text', scratchpad: true } }
+    }
     flushEditorContent({ bridge: 'flush' })
     let inspected = entry?.openBehavior ? entry : null
     if (!inspected) {
@@ -52,8 +57,8 @@ export function useEditorCommandApi({
     })
     await nextTick()
     if (kind === 'text') editorSurfaceRef.value?.scrollToPos(0)
-    emitNavigate({ path })
-    if (kind === 'text') restoreEditorFocus()
+    if (focus) emitNavigate({ path })
+    if (kind === 'text' && focus) restoreEditorFocus()
     return mimirActive()
   }
 
@@ -218,10 +223,12 @@ export function useEditorCommandApi({
     return { proposalId: review.proposalId, status: 'pending_review' }
   }
 
-  async function mimirReveal({ path, line, column, offset } = {}) {
+  async function mimirReveal({ path, line, column, offset, preview, entry } = {}) {
     if (path) {
       const index = openFiles.value.findIndex(file => file.path === path)
-      if (index >= 0) {
+      if (typeof preview === 'boolean') {
+        await mimirOpen(path, { preview, entry })
+      } else if (index >= 0) {
         flushEditorContent({ bridge: 'flush' })
         fileManager.setActiveTab(index)
         emitNavigate({ path })

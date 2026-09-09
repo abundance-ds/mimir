@@ -1,11 +1,12 @@
 ---
 name: mimir
-description: Use Mimir's TODAY scratchpad, Editor, and tool discovery. For Graph, Scribe, or configuration, use the matching mimir-* skill.
+description: Use Mimir's Today, shared Scratchpad, Editor, and tool discovery. For Graph, Scribe, or configuration, use the matching mimir-* skill.
 ---
 
 # Mimir
 
-- **TODAY / scratchpad:** read `mimir_state.today`; append with `today_append`. No Graph skill needed.
+- **Scratchpad:** read and edit `~/.mimir/scratchpad.md` with normal file tools. Project `scratchpad.md` links point there. Keep the links intact. Mimir opens the Editor and keeps saved history.
+- **Today (daily plan):** read `mimir_state.today`; append with `today_append`. No Graph skill needed.
 - **Editor:** `mimir_state` reads; `mimir_propose` opens a reviewed diff.
 - **Graph / Journal:** `mimir-graph`.
 - **Scribe:** `mimir-meetings`.

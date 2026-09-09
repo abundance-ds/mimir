@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { fallbackOpenEntry } from '../shared/utils/filePreview.js'
 import { inspectWorkspaceEntry } from './workspaceFileOperations.js'
+import { resolveScratchpad, scratchpadSnapshot } from './scratchpad.js'
 
 const isTauri = () => !!window.__TAURI_INTERNALS__
 
@@ -65,6 +66,9 @@ export async function saveFile(path, content) {
 
 export async function readFile(path) {
   if (!isTauri()) return ''
+  if (path.endsWith('/scratchpad.md') && await resolveScratchpad(path)) {
+    return (await scratchpadSnapshot()).content
+  }
   const result = await invoke('read_text_file', { path })
   return result.content
 }

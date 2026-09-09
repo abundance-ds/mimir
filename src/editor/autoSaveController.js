@@ -24,7 +24,7 @@ export function createAutoSaveController({
 
   function schedule(file = getFile()) {
     clear()
-    if (!isAutoSaveEnabled()) return
+    if (!isAutoSaveEnabled(file)) return
     const scheduledFile = file
     if (!scheduledFile?.path) return
 
@@ -38,7 +38,7 @@ export function createAutoSaveController({
       if (getFile() === scheduledFile) flush({ bridge: 'flush' })
 
       if (
-        !isAutoSaveEnabled()
+        !isAutoSaveEnabled(scheduledFile)
         || !scheduledFile.path
         || !scheduledFile.dirty
       ) return

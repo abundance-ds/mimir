@@ -152,6 +152,13 @@ describe('Editor lifecycle controllers', () => {
     expect(fileManager.setActiveTab).toHaveBeenCalledWith(0)
     expect(editorSurfaceRef.value.scrollToPos).toHaveBeenLastCalledWith(8)
 
+    await commands.mimirReveal({ path: '/w/match.md', line: 3, column: 2, preview: true })
+    expect(fileManager.openFile).toHaveBeenLastCalledWith('/w/match.md', '# document', expect.objectContaining({ preview: true }))
+    expect(editorSurfaceRef.value.scrollToPos).toHaveBeenLastCalledWith(13)
+    await commands.mimirReveal({ path: '/w/match.md', line: 3, column: 2, preview: false })
+    expect(fileManager.openFile).toHaveBeenLastCalledWith('/w/match.md', '# document', expect.objectContaining({ preview: false }))
+    expect(editorSurfaceRef.value.scrollToPos).toHaveBeenLastCalledWith(13)
+
     files.value.push({ id: 'svg', path: '/w/logo.svg', kind: 'text', content: '<svg/>', previewView: { scale: 2 } })
     await commands.mimirReveal({ path: '/w/logo.svg' })
     expect(currentFile.value.previewView.sourceMode).toBeUndefined()

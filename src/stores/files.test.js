@@ -636,6 +636,16 @@ describe('files store', () => {
     expect(saveFileDialog).toHaveBeenCalledWith('/work/untitled.md')
   })
 
+  it('does not let early workspace bootstrap prevent saved-tab hydration', async () => {
+    const store = useFileStore()
+    store.setWorkspaceScope('/project', ['/project'])
+    expect(store.openFiles).toHaveLength(0)
+    const restore = vi.fn(() => store.restorePath({ path: '/home/.mimir/scratchpad.md', content: 'Saved draft' }))
+    await store.hydrateSession(restore)
+    expect(restore).toHaveBeenCalledOnce()
+    expect(store.currentFile.content).toBe('Saved draft')
+  })
+
   it('saveAs() starts a named file in its current folder', async () => {
     saveFileDialog.mockResolvedValue('/tmp/new-name.md')
     saveFile.mockResolvedValue(undefined)

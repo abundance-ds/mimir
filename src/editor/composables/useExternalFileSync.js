@@ -1,6 +1,7 @@
 export function useExternalFileSync({
   fileManager,
   readFile,
+  ignorePath = () => false,
   onReloaded = () => {},
   onError = error => console.error('[external-file-sync]', error),
 }) {
@@ -41,7 +42,7 @@ export function useExternalFileSync({
 
   function applyEventContent(payload = {}) {
     const path = String(payload.path || '')
-    if (!path || typeof payload.content !== 'string') return false
+    if (!path || ignorePath(path) || typeof payload.content !== 'string') return false
     const file = findOpenTextFile(path)
     if (!file) return false
     nextRefreshVersion(path)
@@ -58,6 +59,7 @@ export function useExternalFileSync({
 
     const refreshes = []
     for (const file of fileManager.openFiles) {
+      if (ignorePath(file.path)) continue
       if (!changed.has(normalizePath(file.path))) continue
       if (file.kind !== 'text') {
         file.previewRevision = (file.previewRevision || 0) + 1

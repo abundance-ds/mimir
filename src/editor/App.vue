@@ -33,8 +33,21 @@
       @open-in-browser="onOpenInBrowser"
     />
 
+    <div v-if="scratchpadPending" class="pane-subbar flex items-center gap-2 px-3 text-xs text-ink-2" role="status">
+      Scratchpad updated
+      <button class="text-accent focus-visible:outline" @mousedown.prevent @click="scratchpadEditor.show()">Open</button>
+    </div>
     <div class="editor-body flex-1 flex min-h-0 bg-chrome">
       <div class="editor-workspace flex-1 flex flex-col min-w-0">
+        <ScratchpadBar v-if="scratchpadActive"
+          :history="scratchpadEditor.store.history" :content="currentFile?.content || ''"
+          :selected="scratchpadSelected" :changes="scratchpadChanges" :get-content="flushEditorContent"
+          @update:changes="scratchpadEditor.toggleChanges"
+          :conflict="scratchpadConflict" :busy="scratchpadBusy" :error="scratchpadEditor.store.error"
+          @browse="scratchpadEditor.browse" @replace="scratchpadEditor.replace"
+          @use-latest="scratchpadEditor.replace(scratchpadEditor.store.content, { useLatest: true })"
+          @error="showDiagnosticError"
+        />
         <InlineAI
           v-if="inlineAIState && !isResourcePreview"
           :key="inlineAIKey"
@@ -73,7 +86,7 @@
           @discard="onDiscardPendingReviews"
         />
         <EditorToolbar
-          v-if="editorToolbarVisible && !gitReviewVisible"
+          v-if="editorToolbarVisible && !gitReviewVisible && !scratchpadActive"
           :active-formats="activeFormats"
           :has-selection="Boolean(selectionText)"
           :comment-count="commentManager.visibleComments.length"
@@ -84,6 +97,10 @@
           @discard-file="requestDiscardFile(currentFile)"
         />
         <div class="editor-panes flex-1 flex min-h-0 overflow-hidden" :class="{ 'flex-col': isSvgFile }">
+          <ScratchpadHistory v-if="scratchpadHistoryVisible"
+            :content="scratchpadSelected?.content ?? currentFile?.content ?? ''"
+            :before="scratchpadBefore" :changes="scratchpadChanges"
+          />
           <GitDiffView v-if="gitReviewVisible" />
           <BatchDiffView
             v-else-if="visibleDiffActive && diffStore.isBatch && reviewTabActive"
@@ -111,7 +128,7 @@
           />
           <EditorSurface
             ref="editorSurfaceRef"
-            v-show="!gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
+            v-show="!scratchpadHistoryVisible && !gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
             :content="currentFile?.content ?? ''"
             :path="currentFile?.path ?? ''"
             :file-id="currentFile?.id ?? ''"
@@ -133,7 +150,7 @@
         </div>
 
         <AppFooter
-          v-if="!isResourcePreview && !gitReviewVisible"
+          v-if="!scratchpadHistoryVisible && !isResourcePreview && !gitReviewVisible"
           :zoomLevel="state.zoomLevel"
           :selectionText="selectionText"
           :stats="documentStats"
@@ -330,6 +347,9 @@ import { useEditorProposalLifecycle } from './composables/useEditorProposalLifec
 import { useEditorNativeLifecycle } from './composables/useEditorNativeLifecycle.js'
 import { useEditorSessionLifecycle } from './composables/useEditorSessionLifecycle.js'
 import { useEditorCommandApi } from './composables/useEditorCommandApi.js'
+import { useScratchpadEditor } from './composables/useScratchpadEditor.js'
+import ScratchpadBar from './components/workspace/ScratchpadBar.vue'
+import ScratchpadHistory from './components/workspace/ScratchpadHistory.vue'
 import { useFileOpen } from './composables/useFileOpen.js'
 import { useContentSync } from './composables/useContentSync.js'
 import { useExternalFileSync } from './composables/useExternalFileSync.js'
@@ -378,6 +398,7 @@ const emit = defineEmits([
   'quickOpenRequest',
   'reviewGitWithAgent',
   'diagnostic',
+  'scratchpadReveal',
 ])
 const editorShellRef = ref(null)
 
@@ -502,6 +523,7 @@ watch(() => currentFile.value?.path, () => {
 })
 
 function discardModeForFile(file) {
+  if (file?.meta?.scratchpad) return ''
   if (!file || file.newTab || file.kind !== 'text' || file.reviews?.length) return ''
   if (diffStore.active) {
     if (!diffStore.isBatch && singleDiffTargetsFile(diffStore, file)) return ''
@@ -573,7 +595,7 @@ const editorTabs = computed(() => {
   let untitledCount = 0
   return visibleOpenFiles.value.map(file => ({
     ...tabFromFile(file, {
-      autoSaveEnabled: editorSettings.editorAutoSave,
+      autoSaveEnabled: editorSettings.editorAutoSave || file.meta?.scratchpad === true,
       untitledIndex: file.path ? 0 : ++untitledCount,
     }),
     lifecycleAction: discardModeForFile(file),
@@ -640,7 +662,7 @@ const feedbackMatchesCurrentFile = computed(() => (
 ))
 const footerSave = computed(() => footerSaveStatus({
   file: currentFile.value,
-  autoSaveEnabled: editorSettings.editorAutoSave,
+  autoSaveEnabled: editorSettings.editorAutoSave || currentFile.value?.meta?.scratchpad === true,
   savingVisible: feedbackMatchesCurrentFile.value && saveFeedback.savingVisible,
   savedVisible: feedbackMatchesCurrentFile.value && saveFeedback.savedVisible,
   savedLabel: saveFeedback.savedLabel,
@@ -812,6 +834,7 @@ watch(
 const externalFileSync = useExternalFileSync({
   fileManager,
   readFile,
+  ignorePath: path => path === scratchpadEditor.store.path,
   onReloaded: (file) => {
     if (fileManager.currentFile !== file) return
     if (visibleDiffActive.value) diffStore.deactivate()
@@ -858,7 +881,7 @@ const autoSave = createAutoSaveController({
   flush: flushEditorContent,
   save: saveCurrentFile,
   getFile: () => currentFile.value,
-  isAutoSaveEnabled: () => editorSettings.editorAutoSave,
+  isAutoSaveEnabled: file => editorSettings.editorAutoSave || file?.meta?.scratchpad === true,
   onError: () => {},
 })
 
@@ -942,6 +965,15 @@ async function requestEditorWindowClose(options) {
 }
 
 async function closeEditorTab(index) {
+  const tab = displayTabs.value[index]
+  const file = tab?.type === 'file' ? openFiles.value[tab.fileIndex] : null
+  if (file?.meta?.scratchpad) {
+    flushEditorContent({ bridge: 'flush' })
+    if (file.dirty) {
+      try { if (!await saveCurrentFile({ file })) return false }
+      catch (cause) { showDiagnosticError(cause); return false }
+    }
+  }
   if (await dismissEditorSurface()) return false
   const closed = await onCloseTab(index)
   if (closed) {
@@ -965,7 +997,9 @@ function prepareWorkspaceSwitch() {
 
 function restoreEditorFocus() {
   void nextTick(() => {
-    if (isResourcePreview.value && !visibleDiffActive.value && !gitReviewVisible.value) {
+    if (scratchpadHistoryVisible.value) {
+      editorShellRef.value?.querySelector('[data-scratchpad-history]')?.focus({ preventScroll: true })
+    } else if (isResourcePreview.value && !visibleDiffActive.value && !gitReviewVisible.value) {
       editorShellRef.value?.querySelector('.image-viewport, [data-pdf-preview-viewport]')?.focus({ preventScroll: true })
     } else editorSurfaceRef.value?.focus?.()
   })
@@ -1252,10 +1286,12 @@ watch(() => editorSettings.aiInlineRewrite, (enabled) => {
 // --- Toolbar actions ---
 
 function onFormat(action) {
+  if (scratchpadHistoryVisible.value) return
   editorSurfaceRef.value?.format(action)
 }
 
 function onEditCommand(action) {
+  if (scratchpadHistoryVisible.value) return
   editorSurfaceRef.value?.edit(action)
 }
 
@@ -1532,6 +1568,22 @@ async function mimirOpen(...args) {
   return mimirOpenCommand(...args)
 }
 
+function showDiagnosticError(cause) { emit('diagnostic', String(cause)) }
+const scratchpadEditor = useScratchpadEditor({
+  fileManager, currentFile, flush: flushEditorContent, sync: syncOpenFileSnapshot,
+  open: mimirOpen, save: saveCurrentFile, ownsFocus: mimirOwnsFocus,
+  reviewing: () => visibleDiffActive.value || gitReviewVisible.value,
+  reveal: payload => emit('scratchpadReveal', payload), reportError: showDiagnosticError,
+})
+const { active: scratchpadActive, selected: scratchpadSelected, changes: scratchpadChanges,
+  pending: scratchpadPending, conflict: scratchpadConflict, busy: scratchpadBusy } = scratchpadEditor
+const scratchpadHistoryVisible = computed(() => scratchpadActive.value && Boolean(scratchpadSelected.value || scratchpadChanges.value))
+const scratchpadBefore = computed(() => {
+  const history = scratchpadEditor.store.history
+  const index = scratchpadSelected.value ? history.findIndex(s => s.time === scratchpadSelected.value.time) : history.length - 1
+  return history[index - 1]?.content || ''
+})
+
 async function mimirReviewGit(request = {}) {
   flushEditorContent({ bridge: 'flush' })
   inlineAIState.value = null
@@ -1601,7 +1653,29 @@ watch(() => gitReview.active, (active) => {
   if (!active) gitReviewTabActive.value = false
 })
 
+const navigationTabs = computed(() => displayTabs.value.map(tab => ({
+  id: tab.id, name: tab.name, type: tab.type,
+  path: visibleOpenFiles.value.find(file => file.id === tab.id)?.path || null,
+})))
+const activeNavigationTab = computed(() => displayTabs.value[displayActiveTab.value]?.id || '')
+function selectNavigationTab(id) {
+  const index = displayTabs.value.findIndex(tab => tab.id === id)
+  if (index < 0) return false
+  selectEditorTab(index)
+  emit('navigateEditor')
+  // Review and New Tab surfaces may have no document input to focus.
+  void nextTick(() => {
+    const shell = editorShellRef.value
+    if (!shell?.contains(document.activeElement)) {
+      shell?.querySelector('[data-editor-tabs-region] [role="tab"][aria-selected="true"]')?.focus()
+    }
+  })
+  return true
+}
+
 defineExpose({
+  navigationTabs, activeNavigationTab, selectNavigationTab,
+  mimirScratchpad: scratchpadEditor.show,
   mimirOpen,
   mimirReviewGit,
   mimirReviewHistory,
@@ -1620,6 +1694,7 @@ defineExpose({
   mimirOwnsFocus,
   mimirCycleTab,
   mimirCloseActiveTab,
+  mimirHasOpenTabs: () => displayTabs.value.length > 0,
   mimirPrepareWorkspaceSwitch: prepareWorkspaceSwitch,
   mimirOpenSettings,
 })
@@ -1701,7 +1776,10 @@ onMounted(async () => {
   document.addEventListener('keydown', onEditorKeydown)
   void windowCloseGuard.setup().catch(reportSessionError)
 
+  await scratchpadEditor.start()
+  if (editorDisposed) return
   await editorSession.hydrate()
+  scratchpadEditor.reconcile()
 
   // An async onMounted callback is not canceled by Vue. If this component was
   // replaced during hydration, the replacement owns persistence and native
@@ -1749,6 +1827,7 @@ onUnmounted(() => {
   clearTimeout(documentStatsTimer)
   contentSync.dispose()
   externalFileSync.dispose()
+  scratchpadEditor.dispose()
   nativeLifecycle.dispose()
   proposalLifecycle.dispose()
   saveFeedback.dispose()

@@ -89,6 +89,7 @@ pub mod mimir_cli;
 mod persistence;
 pub mod routine_runtime;
 pub mod routines;
+mod scratchpad;
 mod session;
 mod shell_exec;
 pub mod tool_bridge;
@@ -1172,6 +1173,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            scratchpad::scratchpad_snapshot,
+            scratchpad::scratchpad_save,
+            scratchpad::scratchpad_resolve,
+            scratchpad::scratchpad_prepare,
             ai::ai_config_dir,
             ai::ai_model_registry,
             ai::ai_key_status,

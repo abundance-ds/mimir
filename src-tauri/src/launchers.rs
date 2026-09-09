@@ -427,6 +427,13 @@ pub fn resolve_launch(
         .transpose()?
         .flatten();
     if let Some(agent_id) = agent_id.as_deref() {
+        append_scratchpad_args(
+            agent_id,
+            home_path,
+            Path::new(&cwd),
+            &mut environment,
+            &mut args,
+        )?;
         let skills = prepare_agent_skills(agent_id, home_path, Path::new(&cwd), &environment)?;
         append_mimir_connection_args(
             agent_id,
@@ -450,6 +457,118 @@ pub fn resolve_launch(
         cwd,
         env: environment,
     })
+}
+
+fn append_scratchpad_args(
+    agent: &str,
+    home: &Path,
+    cwd: &Path,
+    environment: &mut BTreeMap<String, String>,
+    args: &mut Vec<String>,
+) -> Result<(), String> {
+    if !["codex", "claude", "pi", "gemini"].contains(&agent) {
+        return Ok(());
+    }
+    if let Err(error) = crate::scratchpad::prepare_alias(home, cwd) {
+        // Scratchpad setup must not prevent an otherwise valid agent launch.
+        // Workspace activation reports the same error in the workbench.
+        log::warn!("Could not prepare the Scratchpad link: {error}");
+    }
+    let directory = home.join(".mimir").to_string_lossy().into_owned();
+    let flag = match agent {
+        "codex" | "claude" => Some("--add-dir"),
+        "gemini" => Some("--include-directories"),
+        _ => None,
+    };
+    if let Some(flag) = flag {
+        if !args
+            .windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == directory)
+        {
+            args.extend([flag.into(), directory]);
+        }
+    }
+    if agent != "claude" {
+        return Ok(());
+    }
+    let config = environment
+        .get("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".claude"));
+    let mut previous = None;
+    for file in [
+        config.join("settings.json"),
+        cwd.join(".claude/settings.json"),
+        cwd.join(".claude/settings.local.json"),
+    ] {
+        if let Ok(raw) = fs::read_to_string(file) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(command) = value
+                    .pointer("/fileSuggestion/command")
+                    .and_then(|s| s.as_str())
+                {
+                    previous = Some(command.to_owned());
+                }
+            }
+        }
+    }
+    // Preserve all explicit --settings values. Change only fileSuggestion in
+    // the final settings object, which has precedence for this launch.
+    let settings_index = args
+        .iter()
+        .rposition(|arg| arg == "--settings" || arg.starts_with("--settings="));
+    let inline_settings =
+        settings_index.is_some_and(|index| args[index].starts_with("--settings="));
+    let mut settings = if let Some(index) = settings_index {
+        let raw = if inline_settings {
+            args[index].trim_start_matches("--settings=")
+        } else {
+            args.get(index + 1)
+                .ok_or("Claude --settings needs a value.")?
+        };
+        let value = if raw.trim_start().starts_with('{') {
+            raw.to_string()
+        } else {
+            fs::read_to_string(cwd.join(raw))
+                .map_err(|e| format!("Could not read Claude settings: {e}"))?
+        };
+        serde_json::from_str::<serde_json::Value>(&value)
+            .map_err(|e| format!("Could not read Claude settings: {e}"))?
+    } else {
+        serde_json::json!({})
+    };
+    if !settings.is_object() {
+        return Err("Claude settings must contain a JSON object.".into());
+    }
+    if let Some(command) = settings
+        .pointer("/fileSuggestion/command")
+        .and_then(|s| s.as_str())
+    {
+        previous = Some(command.to_owned());
+    }
+    if let Some(command) = previous.filter(|s| !s.contains("mimir-file-suggestion.mjs")) {
+        environment.insert("MIMIR_CLAUDE_FILE_SUGGESTION".into(), command);
+    }
+    environment.insert(
+        "MIMIR_SCRATCHPAD_PATH".into(),
+        crate::scratchpad::path_at(home)
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let script = home.join(".mimir/bin/mimir-file-suggestion.mjs");
+    let quoted = format!("'{}'", script.to_string_lossy().replace('\'', "'\\''"));
+    settings["fileSuggestion"] =
+        serde_json::json!({"type": "command", "command": format!("node {quoted}")});
+    if let Some(index) = settings_index {
+        if inline_settings {
+            args[index] = format!("--settings={settings}");
+        } else {
+            args[index + 1] = settings.to_string();
+        }
+    } else {
+        args.extend(["--settings".into(), settings.to_string()]);
+    }
+    Ok(())
 }
 
 fn prepare_cli_session_id(
@@ -1025,6 +1144,37 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[test]
+    fn scratchpad_completion_preserves_explicit_claude_settings_and_user_hook() {
+        let home = tempdir().unwrap();
+        let mut environment = BTreeMap::new();
+        let mut args = vec![
+            "--settings={\"model\":\"custom\",\"fileSuggestion\":{\"type\":\"command\",\"command\":\"my-file-search\"}}".into(),
+            "--permission-mode".into(), "default".into(),
+        ];
+        append_scratchpad_args(
+            "claude",
+            home.path(),
+            home.path(),
+            &mut environment,
+            &mut args,
+        )
+        .unwrap();
+        let settings: serde_json::Value =
+            serde_json::from_str(args[0].strip_prefix("--settings=").unwrap()).unwrap();
+        assert_eq!(settings["model"], "custom");
+        assert_eq!(
+            environment.get("MIMIR_CLAUDE_FILE_SUGGESTION").unwrap(),
+            "my-file-search"
+        );
+        assert!(settings["fileSuggestion"]["command"]
+            .as_str()
+            .unwrap()
+            .contains("mimir-file-suggestion.mjs"));
+        assert_eq!(&args[1..3], &["--permission-mode", "default"]);
+        assert!(!home.path().join(".claude/settings.json").exists());
+    }
+
     fn append_test_args(agent_id: &str, home: &Path, mcp_url: &str, args: &mut Vec<String>) {
         append_mimir_connection_args(
             agent_id,
@@ -1187,6 +1337,8 @@ mod tests {
             [
                 "--model",
                 "gpt 5",
+                "--add-dir",
+                &directory.path().join(".mimir").to_string_lossy(),
                 "-c",
                 r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
                 "-c",

@@ -588,6 +588,9 @@ fn list_directory(root: &Path, directory: &str) -> Result<Vec<WorkspaceEntry>, S
                 Ok(value) => value,
                 Err(_) => continue,
             };
+            if dirs::home_dir().is_some_and(|home| canonical == crate::scratchpad::path_at(&home)) {
+                continue;
+            }
             if !canonical.starts_with(&canonical_root) {
                 continue;
             }

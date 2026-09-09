@@ -11,6 +11,7 @@ beforeEach(() => {
 // Every command registered in src-tauri/src/lib.rs → generate_handler![...].
 // Keep this list in sync when adding/removing Rust commands.
 const VALID_TAURI_COMMANDS = new Set([
+  'scratchpad_snapshot', 'scratchpad_save', 'scratchpad_resolve', 'scratchpad_prepare',
   // ai
   'ai_config_dir', 'ai_model_registry', 'ai_key_status', 'ai_set_api_key', 'ai_generate',
   // ai_proxy

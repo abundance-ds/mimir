@@ -1,5 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
+import { useScratchpadStore } from './scratchpad.js'
+import { resolveScratchpad } from '../services/scratchpad.js'
 import { openFileDialog, saveFileDialog, saveFile } from '../services/fileSystem.js'
 import { SAVE_STATE } from '../shared/saveState.js'
 
@@ -8,6 +10,7 @@ let nextFileId = 1
 let nextDraftId = 1
 
 export const useFileStore = defineStore('files', () => {
+  const scratchpad = useScratchpadStore()
   const openFiles = ref([])
   const recentFiles = ref([])
   const workspaceProjectionEnabled = ref(false)
@@ -46,6 +49,8 @@ export const useFileStore = defineStore('files', () => {
       ...(Array.isArray(workspacePaths) ? workspacePaths : []),
     ])
     reconcileWorkspaceOwnership()
+    // Workspace bootstrap must not create a fallback before saved tabs load.
+    if (!sessionHydrated.value && !openFiles.value.length) return
     if (!ensureWorkspaceSelection({ preferScoped: scopeChanged })) {
       newFile()
     }
@@ -63,6 +68,7 @@ export const useFileStore = defineStore('files', () => {
   }
 
   function workspaceForFile(file) {
+    if (file?.path && file.path === scratchpad.path) return null
     if (!file?.path) return ''
     return owningWorkspacePath(file.path, [
       file.workspacePath,
@@ -79,6 +85,7 @@ export const useFileStore = defineStore('files', () => {
   }
 
   function isFileVisible(file) {
+    if (file?.path && file.path === scratchpad.path) return true
     if (!workspaceProjectionEnabled.value) return true
     const owner = workspaceForFile(file)
     return !owner || owner === workspaceScope.value
@@ -125,6 +132,7 @@ export const useFileStore = defineStore('files', () => {
       ? owningWorkspacePath(path, [workspacePath, ...knownWorkspacePaths.value])
       : ''
     return {
+      scratchpadBase: path && path === scratchpad.path ? content : undefined,
       id: nextFileId++,
       path,
       draftId: path ? null : (draftId || createDraftId()),
@@ -161,7 +169,12 @@ export const useFileStore = defineStore('files', () => {
     let operation
     const execute = async () => {
         try {
-          await saveFile(targetPath, targetContent)
+          if (targetPath === scratchpad.path) {
+            await scratchpad.save(targetContent, file.scratchpadBase ?? file.content)
+            file.scratchpadBase = targetContent
+          } else {
+            await saveFile(targetPath, targetContent)
+          }
           addRecentFile(targetPath)
           const isLatestWrite = writesByFileId.get(file.id) === operation
           const isCurrentSnapshot = file.path === targetPath && file.content === targetContent
@@ -210,6 +223,7 @@ export const useFileStore = defineStore('files', () => {
 
   function addRecentFile(path) {
     if (!path) return
+    if (path === scratchpad.path) return
     recentFiles.value = [
       path,
       ...recentFiles.value.filter((p) => p !== path),
@@ -251,6 +265,14 @@ export const useFileStore = defineStore('files', () => {
     meta = null,
     workspacePath,
   } = {}) {
+    if (path?.endsWith('/scratchpad.md') && typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+      const canonical = await resolveScratchpad(path)
+      if (canonical) {
+        path = canonical
+        preview = false
+        meta = { ...meta, scratchpad: true }
+      }
+    }
     const active = currentFile.value
     const existingIdx = openFiles.value.findIndex(f => f.path === path)
     if (existingIdx !== -1) {
@@ -283,6 +305,7 @@ export const useFileStore = defineStore('files', () => {
       replacement.path = path
       replacement.draftId = null
       replacement.content = content
+      replacement.scratchpadBase = path === scratchpad.path ? content : undefined
       replacement.newTab = false
       replacement.kind = kind
       replacement.preview = preview
@@ -473,6 +496,7 @@ export const useFileStore = defineStore('files', () => {
     const nextContent = String(content)
     if (file.content === nextContent) return false
     file.content = nextContent
+    if (file.path === scratchpad.path) file.scratchpadBase = nextContent
     file.saveState = SAVE_STATE.idle
     file.saveError = null
     file.reviews = null
@@ -541,6 +565,12 @@ export const useFileStore = defineStore('files', () => {
     const path = await saveFileDialog(defaultPath)
     if (!path) return false
     if (!openFiles.value.includes(file)) return false
+    if (file.path === scratchpad.path && path !== scratchpad.path) {
+      // Export a copy; the shared tab keeps its identity and destination.
+      await saveFile(path, file.content)
+      addRecentFile(path)
+      return true
+    }
     file.path = path
     file.draftId = null
     file.workspacePath = workspaceForPath(path)
