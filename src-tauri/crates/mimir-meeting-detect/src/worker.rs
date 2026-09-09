@@ -21,7 +21,7 @@ pub(crate) struct WakeSignal {
 }
 
 impl WakeSignal {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             sequence: AtomicU64::new(0),
             mutex: Mutex::new(()),
@@ -82,7 +82,14 @@ struct Shared {
 /// completes.
 pub struct DetectionMonitor {
     shared: Arc<Shared>,
-    worker: Mutex<Option<JoinHandle<()>>>,
+    worker_id: thread::ThreadId,
+    shutdown: Mutex<WorkerShutdown>,
+}
+
+struct WorkerShutdown {
+    worker: Option<JoinHandle<Result<(), DetectError>>>,
+    // Read only after the worker is joined, while holding the shutdown lock.
+    result: Result<(), DetectError>,
 }
 
 impl std::fmt::Debug for DetectionMonitor {
@@ -159,20 +166,22 @@ impl DetectionMonitor {
         }
     }
 
+    /// Stops and joins the worker, retaining its cleanup result for later callers.
+    /// A call from a worker callback requests stop but returns `WorkerSelfJoin`;
+    /// an external caller must wait for completion.
     pub fn stop(&self) -> Result<(), DetectError> {
         self.shared.running.store(false, Ordering::Release);
         self.shared.wake.wake();
-        let Some(worker) = mutex_lock(&self.worker).take() else {
-            return Ok(());
-        };
-
-        if worker.thread().id() == thread::current().id() {
-            // The worker observes `running = false` immediately after the
-            // callback. A later owner can join it without self-deadlocking.
-            *mutex_lock(&self.worker) = Some(worker);
-            return Ok(());
+        // Check before taking the lock: an external caller can hold it while
+        // joining this thread, whose current callback may also request stop.
+        if self.worker_id == thread::current().id() {
+            return Err(DetectError::WorkerSelfJoin);
         }
-        worker.join().map_err(|_| DetectError::WorkerPanicked)
+        let mut shutdown = mutex_lock(&self.shutdown);
+        if let Some(worker) = shutdown.worker.take() {
+            shutdown.result = worker.join().unwrap_or(Err(DetectError::WorkerPanicked));
+        }
+        shutdown.result.clone()
     }
 
     fn start_with_factory<S, F>(
@@ -215,7 +224,7 @@ impl DetectionMonitor {
             .name("mimir-meeting-detect".into())
             .spawn(move || {
                 let source = factory(wake);
-                run_worker(source, worker_shared, poll_interval, ready_tx);
+                run_worker(source, worker_shared, poll_interval, ready_tx)
             })
             .map_err(|error| DetectError::WorkerStart(error.to_string()))?;
 
@@ -228,7 +237,11 @@ impl DetectionMonitor {
 
         Ok(Self {
             shared,
-            worker: Mutex::new(Some(worker)),
+            worker_id: worker.thread().id(),
+            shutdown: Mutex::new(WorkerShutdown {
+                worker: Some(worker),
+                result: Ok(()),
+            }),
         })
     }
 }
@@ -244,7 +257,7 @@ fn run_worker(
     shared: Arc<Shared>,
     poll_interval: Duration,
     ready: mpsc::SyncSender<()>,
-) {
+) -> Result<(), DetectError> {
     let mut wake_sequence = 0;
     let mut ready = Some(ready);
 
@@ -256,7 +269,8 @@ fn run_worker(
         wake_sequence = shared.wake.wait(wake_sequence, poll_interval);
     }
 
-    if let Err(error) = source.shutdown() {
+    let result = source.shutdown();
+    if let Err(error) = &result {
         let mut snapshot = rw_write(&shared.snapshot);
         snapshot.status = DetectorStatus::Degraded;
         snapshot.diagnostic = Some(format!(
@@ -264,6 +278,7 @@ fn run_worker(
         ));
         snapshot.generation = snapshot.generation.saturating_add(1);
     }
+    result
 }
 
 fn update_once(source: &mut impl ObservationSource, shared: &Shared) {
@@ -487,6 +502,202 @@ mod tests {
         assert_eq!(drops.load(Ordering::SeqCst), 1);
         monitor.stop().unwrap();
         assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    struct ShutdownSource {
+        result: Result<(), DetectError>,
+        panic: bool,
+        shutdowns: Arc<AtomicUsize>,
+        entered: Option<mpsc::Sender<()>>,
+        release: Option<mpsc::Receiver<()>>,
+    }
+
+    impl ObservationSource for ShutdownSource {
+        fn observe(&mut self, _: bool) -> Observation {
+            Observation {
+                permission: PermissionSnapshot {
+                    state: PermissionState::Granted,
+                    can_request: false,
+                    remediation: None,
+                },
+                active_apps: Vec::new(),
+                diagnostic: None,
+            }
+        }
+
+        fn shutdown(&mut self) -> Result<(), DetectError> {
+            self.shutdowns.fetch_add(1, Ordering::SeqCst);
+            if let Some(entered) = self.entered.take() {
+                entered.send(()).unwrap();
+            }
+            if let Some(release) = self.release.take() {
+                release.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            assert!(!self.panic, "injected shutdown panic");
+            self.result.clone()
+        }
+    }
+
+    #[test]
+    fn failed_shutdown_and_worker_panic_are_retained_for_repeated_stop() {
+        for panic in [false, true] {
+            let shutdowns = Arc::new(AtomicUsize::new(0));
+            let count = shutdowns.clone();
+            let monitor = DetectionMonitor::start_with_factory(
+                DetectionConfig::default(),
+                |_| {},
+                move |_| ShutdownSource {
+                    result: Err(DetectError::Native("injected removal failure".into())),
+                    panic,
+                    shutdowns: count,
+                    entered: None,
+                    release: None,
+                },
+            )
+            .unwrap();
+
+            for _ in 0..2 {
+                let error = monitor.stop().unwrap_err();
+                if panic {
+                    assert!(matches!(error, DetectError::WorkerPanicked));
+                } else {
+                    assert!(
+                        matches!(error, DetectError::Native(ref message) if message == "injected removal failure")
+                    );
+                    assert!(monitor
+                        .snapshot()
+                        .diagnostic
+                        .unwrap()
+                        .contains("injected removal failure"));
+                }
+            }
+            drop(monitor);
+            assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn concurrent_stop_waits_for_cleanup_and_returns_the_same_result() {
+        for fail in [false, true] {
+            let shutdowns = Arc::new(AtomicUsize::new(0));
+            let count = shutdowns.clone();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let monitor = Arc::new(
+                DetectionMonitor::start_with_factory(
+                    DetectionConfig::default(),
+                    |_| {},
+                    move |_| ShutdownSource {
+                        result: if fail {
+                            Err(DetectError::Native("injected removal failure".into()))
+                        } else {
+                            Ok(())
+                        },
+                        panic: false,
+                        shutdowns: count,
+                        entered: Some(entered_tx),
+                        release: Some(release_rx),
+                    },
+                )
+                .unwrap(),
+            );
+            let first_monitor = monitor.clone();
+            let first = thread::spawn(move || first_monitor.stop());
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+            let (attempt_tx, attempt_rx) = mpsc::channel();
+            let (result_tx, result_rx) = mpsc::channel();
+            let second_monitor = monitor.clone();
+            let second = thread::spawn(move || {
+                attempt_tx.send(()).unwrap();
+                result_tx.send(second_monitor.stop()).unwrap();
+            });
+            attempt_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let early_result = result_rx.recv_timeout(Duration::from_millis(100));
+            // Release cleanup before assertions so a failed test cannot strand it.
+            release_tx.send(()).unwrap();
+            let first_result = first.join().unwrap().map_err(|error| error.to_string());
+            second.join().unwrap();
+            assert!(matches!(early_result, Err(mpsc::RecvTimeoutError::Timeout)));
+            let second_result = result_rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .map_err(|error| error.to_string());
+            assert_eq!(first_result.is_err(), fail);
+            assert_eq!(first_result, second_result);
+            assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn worker_callback_cannot_deadlock_an_external_stop() {
+        let owner = Arc::new(Mutex::new(None::<std::sync::Weak<DetectionMonitor>>));
+        let callback_owner = owner.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let (callback_tx, callback_rx) = mpsc::channel();
+        let monitor = Arc::new(
+            DetectionMonitor::start_with_factory(
+                DetectionConfig {
+                    enabled: false,
+                    sustained_use: Duration::ZERO,
+                    ..DetectionConfig::default()
+                },
+                move |event| {
+                    if matches!(event, DetectionEvent::CandidateSuggested(_)) {
+                        entered_tx.send(()).unwrap();
+                        release_rx
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(Duration::from_secs(5))
+                            .unwrap();
+                        let monitor = callback_owner
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap()
+                            .upgrade()
+                            .unwrap();
+                        callback_tx.send(monitor.stop()).unwrap();
+                    }
+                },
+                |_| FakeSource {
+                    shutdowns: Arc::new(AtomicUsize::new(0)),
+                    drops: Arc::new(AtomicUsize::new(0)),
+                },
+            )
+            .unwrap(),
+        );
+        *owner.lock().unwrap() = Some(Arc::downgrade(&monitor));
+        monitor.set_enabled(true);
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let external_monitor = monitor.clone();
+        let (external_tx, external_rx) = mpsc::channel();
+        let external = thread::spawn(move || {
+            external_tx.send(external_monitor.stop()).unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while monitor.shutdown.try_lock().is_ok() && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        let joining = monitor.shutdown.try_lock().is_err();
+        release_tx.send(()).unwrap();
+
+        assert!(
+            joining,
+            "external caller must be joining before the callback requests stop"
+        );
+        assert!(matches!(
+            callback_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Err(DetectError::WorkerSelfJoin)
+        ));
+        external_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        external.join().unwrap();
+        monitor.stop().unwrap();
     }
 
     #[test]

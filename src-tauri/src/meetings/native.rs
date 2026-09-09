@@ -47,10 +47,7 @@ use std::collections::HashSet;
 use std::{
     collections::VecDeque,
     path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex, MutexGuard,
-    },
+    sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -317,7 +314,7 @@ pub fn bootstrap_native_meeting_engine(
         lifecycle: NativeMeetingLifecycle {
             detector,
             retention,
-            stopped: AtomicBool::new(false),
+            shutdown_result: OnceLock::new(),
         },
     })
 }
@@ -598,29 +595,31 @@ impl MeetingCredentialResolver for EndpointBoundMeetingCredentialResolver {
 struct NativeMeetingLifecycle {
     detector: Option<Arc<DetectionMonitor>>,
     retention: RetentionMaintenance,
-    stopped: AtomicBool,
+    shutdown_result: OnceLock<Result<(), String>>,
 }
 
 impl NativeMeetingLifecycle {
     fn shutdown(&self) -> Result<(), String> {
-        if self.stopped.swap(true, Ordering::AcqRel) {
-            return Ok(());
-        }
-        let retention = self.retention.shutdown();
-        let detector = self
-            .detector
-            .as_ref()
-            .map(|detector| {
-                detector
-                    .stop()
-                    .map_err(|error| format!("Could not stop native meeting detection: {error}"))
+        // Repeated callers wait for cleanup and receive the same final result.
+        self.shutdown_result
+            .get_or_init(|| {
+                let retention = self.retention.shutdown();
+                let detector = self
+                    .detector
+                    .as_ref()
+                    .map(|detector| {
+                        detector.stop().map_err(|error| {
+                            format!("Could not stop native meeting detection: {error}")
+                        })
+                    })
+                    .unwrap_or(Ok(()));
+                match (retention, detector) {
+                    (Ok(()), Ok(())) => Ok(()),
+                    (Err(first), Ok(())) | (Ok(()), Err(first)) => Err(first),
+                    (Err(first), Err(second)) => Err(format!("{first}; {second}")),
+                }
             })
-            .unwrap_or(Ok(()));
-        match (retention, detector) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(first), Ok(())) | (Ok(()), Err(first)) => Err(first),
-            (Err(first), Err(second)) => Err(format!("{first}; {second}")),
-        }
+            .clone()
     }
 }
 
@@ -717,6 +716,70 @@ mod tests {
     use super::*;
     use mimir_meeting_detect::{DetectionCandidate, DetectorStatus, PermissionSnapshot};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn lifecycle_shutdown_waits_for_cleanup_and_retains_success_or_failure() {
+        use std::sync::mpsc;
+
+        for fail in [false, true] {
+            let signal = Arc::new((Mutex::new(false), Condvar::new()));
+            let worker_signal = signal.clone();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                let (stopping, _) = worker_signal
+                    .1
+                    .wait_timeout_while(
+                        worker_signal.0.lock().unwrap(),
+                        Duration::from_secs(5),
+                        |stopping| !*stopping,
+                    )
+                    .unwrap();
+                assert!(*stopping);
+                drop(stopping);
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(!fail, "injected maintenance shutdown failure");
+            });
+            let lifecycle = Arc::new(NativeMeetingLifecycle {
+                detector: None,
+                retention: RetentionMaintenance {
+                    signal,
+                    worker: Mutex::new(Some(worker)),
+                },
+                shutdown_result: OnceLock::new(),
+            });
+            let first_lifecycle = lifecycle.clone();
+            let first = thread::spawn(move || first_lifecycle.shutdown());
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+            let second_lifecycle = lifecycle.clone();
+            let (attempt_tx, attempt_rx) = mpsc::channel();
+            let (result_tx, result_rx) = mpsc::channel();
+            let second = thread::spawn(move || {
+                attempt_tx.send(()).unwrap();
+                result_tx.send(second_lifecycle.shutdown()).unwrap();
+            });
+            attempt_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let early_result = result_rx.recv_timeout(Duration::from_millis(100));
+            release_tx.send(()).unwrap();
+            let first_result = first.join().unwrap();
+            second.join().unwrap();
+
+            assert!(matches!(early_result, Err(mpsc::RecvTimeoutError::Timeout)));
+            assert_eq!(first_result.is_err(), fail);
+            assert_eq!(
+                first_result,
+                result_rx.recv_timeout(Duration::from_secs(5)).unwrap()
+            );
+            assert_eq!(first_result, lifecycle.shutdown());
+            if fail {
+                assert!(first_result
+                    .unwrap_err()
+                    .contains("retention worker panicked"));
+            }
+        }
+    }
 
     fn endpoint(url: &str) -> super::super::config::CustomSttEndpoint {
         let parsed = url::Url::parse(url).unwrap();

@@ -51,8 +51,8 @@ listeners, and file-open draining.
 3. The user resolves every dirty document.
 4. Session and Settings snapshots flush.
 5. Renderer confirms native exit.
-6. Native code disconnects Chat, stops Tracker and Routines, interrupts live
-   Activities, and flushes durable stores.
+6. Native code stops Scribe, disconnects Chat, stops Tracker and Routines,
+   interrupts live Activities, and flushes durable stores.
 
 Direct window close uses its own guarded close path. Repeated close requests
 share one promise. HMR and destroyed windows still run component cleanup; they

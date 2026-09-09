@@ -551,6 +551,13 @@
                     <span class="scribe-row-time">
                       {{ meetingDate(hit.meeting) }} · {{ formatDuration(hit.meeting.durationMs) }}
                     </span>
+                    <span
+                      v-if="meetingBackgroundStatus(hit.meeting)"
+                      data-scribe-row-progress
+                      class="font-mono text-info"
+                    >
+                      {{ meetingBackgroundStatus(hit.meeting) }}
+                    </span>
                     <span class="scribe-row-context">
                       <span
                         v-for="item in meetingContextItems(hit.meeting)"
@@ -608,6 +615,13 @@
                       <span data-scribe-row-meta class="scribe-row-meta">
                         <span class="scribe-row-time">
                           {{ meetingDate(meeting) }} · {{ formatDuration(meeting.durationMs) }}
+                        </span>
+                        <span
+                          v-if="meetingBackgroundStatus(meeting)"
+                          data-scribe-row-progress
+                          class="font-mono text-info"
+                        >
+                          {{ meetingBackgroundStatus(meeting) }}
                         </span>
                         <span class="scribe-row-context">
                           <span
@@ -810,7 +824,6 @@ const selectedSummaryAgentPreset = computed(() => (
   || null
 ))
 let timer = null
-let lastActiveMeetingId = null
 let meetingSearchTimer = null
 let notesSaveTimer = null
 let notesSavePromise = null
@@ -951,14 +964,6 @@ const emptyLiveTranscript = computed(() => {
   return 'Listening · transcript will appear shortly'
 })
 
-watch(() => meetings.activeMeeting?.id, id => {
-  if (id) lastActiveMeetingId = id
-  if (!id && lastActiveMeetingId) {
-    detailMeetingId.value = lastActiveMeetingId
-    lastActiveMeetingId = null
-  }
-})
-
 watch(
   () => meetings.activeMeeting || detailMeeting.value,
   meeting => {
@@ -1061,15 +1066,14 @@ async function prepare() {
   }
 }
 
-async function stop() {
+function stop() {
   actionError.value = ''
-  try {
-    const stopping = meetings.stop()
-    liveAnnouncement.value = 'Recording stopped. Finalizing transcript in the background.'
-    await Promise.all([flushNotes(), stopping])
-  } catch (error) {
+  const stopping = meetings.stop()
+  leaveMeetingDetail()
+  liveAnnouncement.value = 'Recording stopped. Finalizing transcript in the background.'
+  void Promise.all([flushNotes(), stopping]).catch(error => {
     actionError.value = message(error)
-  }
+  })
 }
 
 async function continueMeeting(meeting) {
@@ -1107,7 +1111,7 @@ function dismissNotice() {
 async function openMeeting(id) {
   const meeting = meetingById(id)
   if (!meeting) return
-  if (notesMeetingId.value && notesMeetingId.value !== id) await flushNotes()
+  if (notesMeetingId.value && notesMeetingId.value !== id) void flushNotes()
   actionError.value = ''
   const recent = meetings.meetings.some(candidate => candidate.id === id)
   meetings.select(id)
@@ -1278,8 +1282,12 @@ async function createGraphContextEntity(meetingId, request) {
   }
 }
 
-async function closeDetail() {
-  await flushNotes()
+function closeDetail() {
+  void flushNotes()
+  leaveMeetingDetail()
+}
+
+function leaveMeetingDetail() {
   closeMeetingMenu({ restoreFocus: false })
   detailMeetingId.value = null
   detailSearchMeeting.value = null
@@ -1598,6 +1606,16 @@ function meetingCanContinue(meeting) {
 
 function meetingRecordActionLabel(meeting) {
   return meeting?.lifecycle === 'arming' ? 'Record' : 'Continue'
+}
+
+function meetingBackgroundStatus(meeting) {
+  if (['stopping', 'finalizing'].includes(meeting?.lifecycle)) {
+    return 'Finalizing transcript'
+  }
+  const summary = meetingSummaryPhase(meeting)
+  if (summary === 'queued') return 'Summary queued'
+  if (summary === 'running') return 'Creating summary'
+  return ''
 }
 
 function recoveryStatus(meeting) {

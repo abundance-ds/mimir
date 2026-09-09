@@ -37,7 +37,7 @@ const APP_FAMILIES: &[(&str, &str)] = &[
     ("us.zoom.xos", "Zoom"),
 ];
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum DetectError {
     #[error("meeting detection is unsupported on this platform")]
     UnsupportedPlatform,
@@ -51,6 +51,10 @@ pub enum DetectError {
     WorkerInitializationTimeout,
     #[error("meeting detection worker panicked during shutdown")]
     WorkerPanicked,
+    #[error(
+        "meeting detection stop was requested, but the worker cannot wait for its own shutdown"
+    )]
+    WorkerSelfJoin,
     #[error("meeting detection must use a non-decreasing monotonic clock")]
     MonotonicTimeRegression,
 }

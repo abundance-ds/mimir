@@ -1493,6 +1493,12 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Exit => {
+                if let Err(error) = app_handle
+                    .state::<meetings::native::NativeMeetingEngine>()
+                    .shutdown()
+                {
+                    log::error!("Could not stop Scribe before exit: {error}");
+                }
                 app_handle.state::<chat::ChatRuntime>().disconnect();
                 if let Err(error) = app_handle
                     .state::<tracker::TrackerRuntimeState>()

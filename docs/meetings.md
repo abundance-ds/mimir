@@ -10,9 +10,10 @@ explicit action activates Mimir and uses the normal permission, consent, and
 candidate-validation path. A stale suggestion cannot start capture. Microphone
 use by another app is the detection signal, so a call with its microphone off
 is not visible to Scribe. Detection polls while enabled and does not require a
-routine app restart. Microphone and system audio remain separate durable 16 kHz
-mono tracks. Transcription follows committed audio and never blocks the capture
-callback.
+routine app restart. Detection replaces listeners after microphone device
+changes, retries failed registration, and clears errors after recovery.
+Microphone and system audio remain separate durable 16 kHz mono tracks.
+Transcription follows committed audio and never blocks the capture callback.
 
 ## Product contract
 
@@ -25,6 +26,9 @@ callback.
   processing continues in the background and produces one terminal transcript.
   Failed or partial transcripts remain recoverable; silence completes without
   invented content.
+- Leaving a meeting never waits for note persistence or transcript finalization.
+  The overview shows background progress. Pending edits stay retryable, and a
+  failed Stop restores the visible recording controls.
 - A user-written title cannot be replaced by automatic work.
 - Preparation notes, Project, People, and scope stay editable before, during,
   and after capture.
@@ -46,6 +50,8 @@ honest `Interrupted` and `Failed` exits.
   snapshot; capture survives renderer destruction.
 - Quit performs the durable Stop path. If capture state cannot be checked or
   stopped, Mimir remains open.
+- App exit explicitly stops detection and maintenance. Repeated shutdown calls
+  wait for completion and return the same cleanup result. Exit logs failures.
 - Continue retains the meeting and history but creates a new capture `runId`.
 - Repair is keyed by `runId`, uses verified committed audio from sequence zero,
   stages output privately, and replaces transcript data only after a complete

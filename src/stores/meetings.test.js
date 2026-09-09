@@ -241,6 +241,35 @@ describe('meetings store', () => {
     })
   })
 
+  it('retains a failed meeting draft and saves it on the next retry', async () => {
+    const active = {
+      id: 'live', title: 'Live', lifecycle: 'capturing', notes: '',
+      jobs: [], gaps: [], channels: ['microphone', 'system'],
+    }
+    vi.mocked(updateMeeting)
+      .mockRejectedValueOnce(new Error('Temporary save failure'))
+      .mockResolvedValueOnce({
+        ...emptySnapshot,
+        revision: 2,
+        activeMeetingId: 'live',
+        meetings: [{ ...active, notes: 'Do not lose this.' }],
+      })
+    const store = useMeetingsStore()
+    store.applySnapshot({
+      ...emptySnapshot,
+      activeMeetingId: 'live',
+      meetings: [active],
+    })
+    store.stageMeetingNotes('live', 'Do not lose this.')
+
+    await expect(store.flushMeetingDraft('live')).rejects.toThrow('Temporary save failure')
+    await expect(store.flushMeetingDraft('live')).resolves.toMatchObject({
+      notes: 'Do not lose this.',
+    })
+    expect(updateMeeting).toHaveBeenNthCalledWith(1, 'live', { notes: 'Do not lose this.' })
+    expect(updateMeeting).toHaveBeenNthCalledWith(2, 'live', { notes: 'Do not lose this.' })
+  })
+
   it('keeps a bounded per-source audio-check result outside meeting history', async () => {
     const store = useMeetingsStore()
     await store.checkAudio()

@@ -12,7 +12,7 @@ use crate::{
     worker::{Observation, ObservationSource, WakeSignal},
     AppEvidence, DetectError, PermissionSnapshot, PermissionState,
 };
-use cidre::{arc, av, core_audio as ca};
+use cidre::{arc, av, core_audio as ca, os};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSRunningApplication;
 use objc2_foundation::NSString;
@@ -25,26 +25,79 @@ const APPLE_CALL_DAEMON_IDS: &[&str] = &[
     "com.apple.TelephonyUtilities.callservicesd",
 ];
 
-pub(crate) struct MacObservationSource {
+// Keep the native calls at one boundary so device changes and failures can be
+// tested without changing the host's audio devices or microphone permission.
+pub(crate) trait AudioHardware {
+    fn default_input_device(&self) -> os::Result<ca::Device>;
+    fn add_listener(
+        &self,
+        object: ca::Obj,
+        address: &ca::PropAddr,
+        callback: &mut ca::PropListenerBlock,
+    ) -> os::Result;
+    fn remove_listener(
+        &self,
+        object: ca::Obj,
+        address: &ca::PropAddr,
+        callback: &mut ca::PropListenerBlock,
+    ) -> os::Result;
+}
+
+pub(crate) struct CoreAudio;
+
+impl AudioHardware for CoreAudio {
+    fn default_input_device(&self) -> os::Result<ca::Device> {
+        ca::System::default_input_device()
+    }
+
+    fn add_listener(
+        &self,
+        object: ca::Obj,
+        address: &ca::PropAddr,
+        callback: &mut ca::PropListenerBlock,
+    ) -> os::Result {
+        object.add_prop_listener_block(address, None, callback)
+    }
+
+    fn remove_listener(
+        &self,
+        object: ca::Obj,
+        address: &ca::PropAddr,
+        callback: &mut ca::PropListenerBlock,
+    ) -> os::Result {
+        object.remove_prop_listener_block(address, None, callback)
+    }
+}
+
+pub(crate) struct MacObservationSource<H: AudioHardware = CoreAudio> {
     // Declaration order is teardown order. Listeners are removed before their
     // Arc-backed callback context is released.
-    listeners: Vec<ListenerRegistration>,
+    listeners: Vec<ListenerRegistration<H>>,
     wake: Arc<WakeSignal>,
-    default_input: Option<ca::Device>,
+    hardware: Arc<H>,
     listener_diagnostic: Option<String>,
 }
 
 impl MacObservationSource {
     pub(crate) fn new(wake: Arc<WakeSignal>) -> Self {
+        Self::with_hardware(wake, Arc::new(CoreAudio))
+    }
+}
+
+impl<H: AudioHardware> MacObservationSource<H> {
+    fn with_hardware(wake: Arc<WakeSignal>, hardware: Arc<H>) -> Self {
         Self {
             listeners: Vec::new(),
             wake,
-            default_input: None,
+            hardware,
             listener_diagnostic: None,
         }
     }
 
     fn ensure_listeners(&mut self) {
+        // Every refresh retries missing listeners and unresolved removal errors.
+        // Only failures from this attempt belong in the current snapshot.
+        self.listener_diagnostic = None;
         if !self
             .listeners
             .iter()
@@ -69,6 +122,7 @@ impl MacObservationSource {
     }
 
     fn remove_listeners(&mut self) -> Result<(), DetectError> {
+        self.listener_diagnostic = None;
         let mut failures = Vec::new();
         let mut index = 0;
         while index < self.listeners.len() {
@@ -82,9 +136,6 @@ impl MacObservationSource {
                 }
             }
         }
-        if self.listeners.is_empty() {
-            self.default_input = None;
-        }
         if failures.is_empty() {
             Ok(())
         } else {
@@ -93,14 +144,20 @@ impl MacObservationSource {
     }
 
     fn register_system_listener(&mut self, address: ca::PropAddr, label: &'static str) {
-        match ListenerRegistration::register(*ca::System::OBJ, address, &self.wake, label) {
+        match ListenerRegistration::register(
+            self.hardware.clone(),
+            *ca::System::OBJ,
+            address,
+            &self.wake,
+            label,
+        ) {
             Ok(listener) => self.listeners.push(listener),
             Err(error) => self.add_listener_diagnostic(error.to_string()),
         }
     }
 
     fn refresh_default_input_listener(&mut self) {
-        let device = match ca::System::default_input_device() {
+        let device = match self.hardware.default_input_device() {
             Ok(device) => device,
             Err(error) => {
                 self.add_listener_diagnostic(format!(
@@ -109,23 +166,27 @@ impl MacObservationSource {
                 return;
             }
         };
-        if self.default_input == Some(device) {
-            return;
-        }
-
         if let Some(index) = self
             .listeners
             .iter()
             .position(|listener| listener.label == "Core Audio input-running listener")
         {
+            // A device is tracked only while its listener is registered. A
+            // failed registration must be retried even if the device is unchanged.
+            if self.listeners[index].object == device.0 {
+                return;
+            }
             if let Err(error) = self.listeners[index].unregister() {
                 self.add_listener_diagnostic(error.to_string());
                 return;
             }
             self.listeners.remove(index);
         }
-        self.default_input = Some(device);
+        if device.0 == ca::Obj::UNKNOWN {
+            return;
+        }
         match ListenerRegistration::register(
+            self.hardware.clone(),
             device.0,
             ca::PropSelector::DEVICE_IS_RUNNING_SOMEWHERE.global_addr(),
             &self.wake,
@@ -148,7 +209,7 @@ impl MacObservationSource {
     }
 }
 
-impl ObservationSource for MacObservationSource {
+impl<H: AudioHardware> ObservationSource for MacObservationSource<H> {
     fn observe(&mut self, include_active_apps: bool) -> Observation {
         let permission = microphone_permission();
         if include_active_apps {
@@ -181,16 +242,18 @@ impl ObservationSource for MacObservationSource {
     }
 }
 
-struct ListenerRegistration {
+struct ListenerRegistration<H: AudioHardware> {
     object: ca::Obj,
     address: ca::PropAddr,
     callback: arc::R<ca::PropListenerBlock>,
+    hardware: Arc<H>,
     label: &'static str,
     registered: bool,
 }
 
-impl ListenerRegistration {
+impl<H: AudioHardware> ListenerRegistration<H> {
     fn register(
+        hardware: Arc<H>,
         object: ca::Obj,
         address: ca::PropAddr,
         wake: &Arc<WakeSignal>,
@@ -200,8 +263,8 @@ impl ListenerRegistration {
         let mut callback = cidre::blocks::EscBlock::<
             fn(number_addresses: u32, addresses: *const ca::PropAddr),
         >::new2(move |_number_addresses, _addresses| wake.wake());
-        object
-            .add_prop_listener_block(&address, None, &mut callback)
+        hardware
+            .add_listener(object, &address, &mut callback)
             .map_err(|error| {
                 DetectError::Native(format!("Could not register {label}: {error:?}"))
             })?;
@@ -209,6 +272,7 @@ impl ListenerRegistration {
             object,
             address,
             callback,
+            hardware,
             label,
             registered: true,
         })
@@ -218,17 +282,28 @@ impl ListenerRegistration {
         if !self.registered {
             return Ok(());
         }
-        self.object
-            .remove_prop_listener_block(&self.address, None, &mut self.callback)
-            .map_err(|error| {
-                DetectError::Native(format!("Could not remove {}: {error:?}", self.label))
-            })?;
+        match self
+            .hardware
+            .remove_listener(self.object, &self.address, &mut self.callback)
+        {
+            Ok(()) => {}
+            // Devices can disappear before we remove their listeners. There is
+            // no live object left to unregister from; retire this registration
+            // so replacement, disable, and shutdown can complete.
+            Err(error) if error == ca::hardware_err::BAD_OBJ => {}
+            Err(error) => {
+                return Err(DetectError::Native(format!(
+                    "Could not remove {}: {error:?}",
+                    self.label
+                )));
+            }
+        }
         self.registered = false;
         Ok(())
     }
 }
 
-impl Drop for ListenerRegistration {
+impl<H: AudioHardware> Drop for ListenerRegistration<H> {
     fn drop(&mut self) {
         let _ = self.unregister();
     }
@@ -397,7 +472,260 @@ fn append_diagnostic(target: &mut Option<String>, diagnostic: String) {
 mod tests {
     use super::*;
     use crate::DetectionConfig;
-    use std::{thread, time::Duration};
+    use std::{sync::Mutex, thread, time::Duration};
+
+    struct FakeHardware {
+        state: Mutex<FakeHardwareState>,
+    }
+
+    struct FakeHardwareState {
+        default_input: os::Result<ca::Device>,
+        add_error: Option<(ca::Obj, os::Error)>,
+        remove_error: Option<(ca::Obj, os::Error)>,
+        additions: Vec<ca::Obj>,
+        removals: Vec<ca::Obj>,
+    }
+
+    impl AudioHardware for FakeHardware {
+        fn default_input_device(&self) -> os::Result<ca::Device> {
+            self.state.lock().unwrap().default_input
+        }
+
+        fn add_listener(
+            &self,
+            object: ca::Obj,
+            _address: &ca::PropAddr,
+            _callback: &mut ca::PropListenerBlock,
+        ) -> os::Result {
+            let mut state = self.state.lock().unwrap();
+            state.additions.push(object);
+            match state.add_error {
+                Some((failed, error)) if failed == object => Err(error),
+                _ => Ok(()),
+            }
+        }
+
+        fn remove_listener(
+            &self,
+            object: ca::Obj,
+            _address: &ca::PropAddr,
+            _callback: &mut ca::PropListenerBlock,
+        ) -> os::Result {
+            let mut state = self.state.lock().unwrap();
+            state.removals.push(object);
+            match state.remove_error {
+                Some((failed, error)) if failed == object => Err(error),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    fn fake_source(device: u32) -> (MacObservationSource<FakeHardware>, Arc<FakeHardware>) {
+        let hardware = Arc::new(FakeHardware {
+            state: Mutex::new(FakeHardwareState {
+                default_input: Ok(ca::Device(ca::Obj(device))),
+                add_error: None,
+                remove_error: None,
+                additions: Vec::new(),
+                removals: Vec::new(),
+            }),
+        });
+        let source =
+            MacObservationSource::with_hardware(Arc::new(WakeSignal::new()), hardware.clone());
+        (source, hardware)
+    }
+
+    #[test]
+    fn removed_input_device_does_not_block_replacement_or_retry_removal_on_drop() {
+        let (mut source, hardware) = fake_source(41);
+        source.ensure_listeners();
+        {
+            let mut state = hardware.state.lock().unwrap();
+            state.default_input = Ok(ca::Device(ca::Obj(42)));
+            state.remove_error = Some((ca::Obj(41), ca::hardware_err::BAD_OBJ));
+        }
+
+        source.ensure_listeners();
+
+        assert!(source.listener_diagnostic.is_none());
+        assert!(hardware
+            .state
+            .lock()
+            .unwrap()
+            .additions
+            .contains(&ca::Obj(42)));
+        assert_eq!(source.listeners.len(), 3);
+        drop(source);
+        assert_eq!(
+            hardware
+                .state
+                .lock()
+                .unwrap()
+                .removals
+                .iter()
+                .filter(|id| **id == ca::Obj(41))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_input_registration_retries_same_device_and_clears_error() {
+        let (mut source, hardware) = fake_source(41);
+        hardware.state.lock().unwrap().add_error = Some((ca::Obj(41), ca::hardware_err::BAD_OBJ));
+        source.ensure_listeners();
+        assert!(source.listener_diagnostic.is_some());
+        assert_eq!(source.listeners.len(), 2);
+
+        hardware.state.lock().unwrap().add_error = None;
+        source.ensure_listeners();
+
+        assert_eq!(source.listeners.len(), 3);
+        assert!(source.listener_diagnostic.is_none());
+        assert_eq!(
+            hardware
+                .state
+                .lock()
+                .unwrap()
+                .additions
+                .iter()
+                .filter(|id| **id == ca::Obj(41))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn no_default_input_waits_for_a_device_without_registering_object_zero() {
+        let (mut source, hardware) = fake_source(0);
+        source.ensure_listeners();
+        source.ensure_listeners();
+        assert_eq!(source.listeners.len(), 2);
+        assert!(!hardware
+            .state
+            .lock()
+            .unwrap()
+            .additions
+            .contains(&ca::Obj::UNKNOWN));
+        assert!(source.listener_diagnostic.is_none());
+
+        hardware.state.lock().unwrap().default_input = Ok(ca::Device(ca::Obj(42)));
+        source.ensure_listeners();
+        assert_eq!(source.listeners.len(), 3);
+
+        {
+            let mut state = hardware.state.lock().unwrap();
+            state.default_input = Ok(ca::Device(ca::Obj::UNKNOWN));
+            state.remove_error = Some((ca::Obj(42), ca::hardware_err::BAD_OBJ));
+        }
+        source.ensure_listeners();
+        assert_eq!(source.listeners.len(), 2);
+        assert!(source.listener_diagnostic.is_none());
+        assert!(!hardware
+            .state
+            .lock()
+            .unwrap()
+            .additions
+            .contains(&ca::Obj::UNKNOWN));
+    }
+
+    #[test]
+    fn other_removal_errors_remain_visible_until_retry_succeeds() {
+        let (mut source, hardware) = fake_source(41);
+        source.ensure_listeners();
+        {
+            let mut state = hardware.state.lock().unwrap();
+            state.default_input = Ok(ca::Device(ca::Obj(42)));
+            state.remove_error = Some((ca::Obj(41), ca::hardware_err::ILLEGAL_OP));
+        }
+
+        for _ in 0..2 {
+            source.ensure_listeners();
+            assert!(source
+                .listener_diagnostic
+                .as_deref()
+                .unwrap()
+                .contains("Could not remove"));
+            assert!(!hardware
+                .state
+                .lock()
+                .unwrap()
+                .additions
+                .contains(&ca::Obj(42)));
+        }
+        hardware.state.lock().unwrap().remove_error = None;
+        source.ensure_listeners();
+
+        assert!(source.listener_diagnostic.is_none());
+        assert!(hardware
+            .state
+            .lock()
+            .unwrap()
+            .additions
+            .contains(&ca::Obj(42)));
+    }
+
+    #[test]
+    fn system_listener_registration_recovers_and_clears_error() {
+        let (mut source, hardware) = fake_source(41);
+        hardware.state.lock().unwrap().add_error =
+            Some((*ca::System::OBJ, ca::hardware_err::ILLEGAL_OP));
+        source.ensure_listeners();
+        assert!(source.listener_diagnostic.is_some());
+        assert_eq!(source.listeners.len(), 1);
+
+        hardware.state.lock().unwrap().add_error = None;
+        source.ensure_listeners();
+        assert_eq!(source.listeners.len(), 3);
+        assert!(source.listener_diagnostic.is_none());
+    }
+
+    #[test]
+    fn default_input_query_error_clears_after_same_device_recovers() {
+        let (mut source, hardware) = fake_source(41);
+        source.ensure_listeners();
+        hardware.state.lock().unwrap().default_input = Err(ca::hardware_err::NOT_RUNNING);
+        source.ensure_listeners();
+        assert!(source
+            .listener_diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("Could not resolve"));
+
+        hardware.state.lock().unwrap().default_input = Ok(ca::Device(ca::Obj(41)));
+        source.ensure_listeners();
+        assert!(source.listener_diagnostic.is_none());
+        assert_eq!(hardware.state.lock().unwrap().additions.len(), 3);
+    }
+
+    #[test]
+    fn shutdown_accepts_a_removed_device_and_is_idempotent() {
+        let (mut source, hardware) = fake_source(41);
+        source.ensure_listeners();
+        hardware.state.lock().unwrap().remove_error =
+            Some((ca::Obj(41), ca::hardware_err::BAD_OBJ));
+
+        source.shutdown().unwrap();
+        source.shutdown().unwrap();
+        assert!(source.listeners.is_empty());
+        drop(source);
+        assert_eq!(hardware.state.lock().unwrap().removals.len(), 3);
+    }
+
+    #[test]
+    fn partial_disable_does_not_prevent_input_registration_when_reenabled() {
+        let (mut source, hardware) = fake_source(41);
+        source.ensure_listeners();
+        hardware.state.lock().unwrap().remove_error =
+            Some((*ca::System::OBJ, ca::hardware_err::ILLEGAL_OP));
+        assert!(source.remove_listeners().is_err());
+        assert_eq!(source.listeners.len(), 2);
+
+        hardware.state.lock().unwrap().remove_error = None;
+        source.ensure_listeners();
+        assert_eq!(source.listeners.len(), 3);
+        assert!(source.listener_diagnostic.is_none());
+    }
 
     #[test]
     fn bundle_leaf_is_safe_for_fallback_display() {
@@ -428,6 +756,9 @@ mod tests {
         })
         .unwrap();
         thread::sleep(Duration::from_millis(250));
+        assert!(monitor.snapshot().diagnostic.is_none());
+        // stop must surface native cleanup errors, including on repeated calls.
+        monitor.stop().unwrap();
         monitor.stop().unwrap();
     }
 }

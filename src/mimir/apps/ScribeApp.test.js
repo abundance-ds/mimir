@@ -357,6 +357,107 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
   })
 
+  it('returns to the meeting overview while Stop finishes in the background', async () => {
+    const active = meeting({
+      lifecycle: 'capturing',
+      transcription: 'listening',
+      transcriptFinal: false,
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      activeMeetingId: active.id,
+      meetings: [active],
+    }))
+    let finishSave
+    vi.mocked(updateMeeting).mockImplementation(() => new Promise(resolve => {
+      finishSave = resolve
+    }))
+    let finishStop
+    vi.mocked(stopMeeting).mockImplementation(() => new Promise(resolve => {
+      finishStop = resolve
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-live-title]').setValue('Last-second title')
+
+    await wrapper.get('[data-scribe-stop]').trigger('click')
+
+    expect(wrapper.get('[data-scribe-home-toolbar]').exists()).toBe(true)
+    expect(wrapper.find('[data-scribe-detail-header]').exists()).toBe(false)
+    expect(wrapper.get('[data-scribe-meeting-row]').text()).toContain('Finalizing transcript')
+    await vi.waitFor(() => expect(updateMeeting).toHaveBeenCalledWith('m1', {
+      title: 'Last-second title',
+    }))
+    expect(wrapper.get('[data-scribe-home-toolbar]').exists()).toBe(true)
+    expect(stopMeeting).not.toHaveBeenCalled()
+
+    finishSave(snapshot({
+      revision: 2,
+      activeMeetingId: active.id,
+      meetings: [{ ...active, title: 'Last-second title' }],
+    }))
+    await vi.waitFor(() => expect(stopMeeting).toHaveBeenCalledWith('m1'))
+    finishStop(snapshot({
+      revision: 3,
+      meetings: [{
+        ...active,
+        title: 'Last-second title',
+        lifecycle: 'ready',
+        transcription: 'final',
+        transcriptFinal: true,
+      }],
+    }))
+    await flushPromises()
+  })
+
+  it('returns from meeting detail while its save finishes in the background', async () => {
+    const savedMeeting = meeting({ notes: '' })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [savedMeeting] }))
+    let finishSave
+    vi.mocked(updateMeeting).mockImplementation(() => new Promise(resolve => {
+      finishSave = resolve
+    }))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-meeting-row]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await wrapper.get('[data-scribe-title]').setValue('Edited title')
+
+    await wrapper.get('button[title="Meetings"]').trigger('click')
+
+    expect(wrapper.get('[data-scribe-home-toolbar]').exists()).toBe(true)
+    await vi.waitFor(() => expect(updateMeeting).toHaveBeenCalledWith('m1', {
+      title: 'Edited title',
+    }))
+    expect(wrapper.get('[data-scribe-home-toolbar]').exists()).toBe(true)
+    finishSave(snapshot({
+      revision: 2,
+      meetings: [{ ...savedMeeting, title: 'Edited title' }],
+    }))
+    await flushPromises()
+  })
+
+  it('restores the recorder when the immediate native Stop signal fails', async () => {
+    const active = meeting({
+      lifecycle: 'capturing',
+      transcription: 'listening',
+      transcriptFinal: false,
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      revision: 2,
+      activeMeetingId: active.id,
+      meetings: [active],
+    }))
+    vi.mocked(signalMeetingStop).mockRejectedValue(new Error('Microphone did not stop'))
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true))
+
+    await wrapper.get('[data-scribe-stop]').trigger('click')
+
+    await vi.waitFor(() => expect(wrapper.find('[data-scribe-error]').exists()).toBe(true))
+    expect(wrapper.get('[data-scribe-stop]').exists()).toBe(true)
+    expect(wrapper.get('[data-scribe-error]').text()).toContain('Microphone did not stop')
+    expect(stopMeeting).not.toHaveBeenCalled()
+  })
+
   it('advances the recording clock during silence without native events', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-02T10:00:00.000Z'))
