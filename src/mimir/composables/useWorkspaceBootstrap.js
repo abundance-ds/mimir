@@ -44,7 +44,6 @@ export function useWorkspaceBootstrap({
   const viewportWidth = ref(window.innerWidth)
   const unavailableWorkspacePaths = ref(new Set())
   const workspaceViewByPath = new Map()
-  let desktopLayout = null
   let automaticResumeEnabled = false
   let automaticResumeLauncherFailure = ''
   let automaticResumeWorkers = 0
@@ -91,12 +90,23 @@ export function useWorkspaceBootstrap({
     }
     void reconcileWorkspaces()
 
+    // Renderer tools have no native session record. Recreate only saved tool
+    // identities; mounting and selection remain lazy in ActivityHost.
+    const savedTabs = Array.isArray(settings.workbenchLayout?.openTabIds) ? settings.workbenchLayout.openTabIds : []
+    await Promise.allSettled([...new Set([...savedTabs, settings.workbenchLayout?.activeActivityId])].filter(id => typeof id === 'string' && id.startsWith('app:')).map(async id => {
+      if (activities.byId(id)) return
+      const app = appsCatalog.apps?.find(app => `app:${app.id}` === id)
+      if (!app || ['terminal', 'process'].includes(app.mode)) return
+      const payload = await appsCatalog.prepareActivity(app, workspaceFiles.workspacePath || '')
+      activities.upsert(payload.activity)
+    }))
+
     const savedActivity = settings.workbenchLayout?.activeActivityId
     const savedRecord = savedActivity ? activities.byId(savedActivity) : null
-    if (savedRecord && isActivityVisible(savedRecord)) {
+    if (savedRecord && savedActivity !== 'files' && isActivityVisible(savedRecord)) {
       workbench.openActivity(savedActivity)
     } else if (!activities.byId(workbench.activeActivityId)) {
-      workbench.openActivity('files')
+      workbench.openActivity('')
     }
     initialized.value = true
     persistWorkbench()
@@ -196,17 +206,18 @@ export function useWorkspaceBootstrap({
 
   function restoreWorkbench() {
     const saved = settings.workbenchLayout
-    if (saved && typeof saved === 'object') workbench.restoreLayout(saved)
+    if (saved && typeof saved === 'object') {
+      workbench.restoreLayout(saved)
+      workbench.restoreTabs(saved.openTabIds || [])
+    }
   }
 
   function persistWorkbench(layout = workbench.layoutSnapshot()) {
     if (!initialized.value) return
-    const persistedLayout = responsiveZone.value === 'wide'
-      ? layout
-      : (desktopLayout || layout)
     settings.set('workbenchLayout', {
-      ...persistedLayout,
-      activeActivityId: workbench.activeActivityId || 'files',
+      ...layout,
+      activeActivityId: workbench.activeActivityId || '',
+      openTabIds: [...workbench.openTabIds],
     })
   }
 
@@ -214,16 +225,19 @@ export function useWorkspaceBootstrap({
     viewportWidth.value = window.innerWidth
     const nextZone = responsiveZoneFor(window.innerWidth)
     if (!force && nextZone === responsiveZone.value) return
-    if (responsiveZone.value === 'wide' && nextZone !== 'wide') {
-      desktopLayout = workbench.layoutSnapshot()
-    }
+    const zones = ['focus', 'compact', 'wide']
+    const shrinking = zones.indexOf(nextZone) < zones.indexOf(responsiveZone.value)
+    const editorWasOpen = workbench.paneLayout.editor.state === 'expanded'
+    const mainWasOpen = workbench.paneLayout.activity.state === 'expanded'
+    const keepEditor = preferEditor ?? (
+      editorWasOpen && (!mainWasOpen || responsiveEditorPreference())
+    )
     workbench.setSinglePaneMode(nextZone === 'focus')
-    applyResponsiveZone(workbench, nextZone, {
-      preferEditor: preferEditor ?? responsiveEditorPreference(),
-      desktopLayout,
-    })
+    // Width growth must not undo an explicit panel choice.
+    if (force || shrinking) {
+      applyResponsiveZone(workbench, nextZone, { preferEditor: keepEditor })
+    }
     responsiveZone.value = nextZone
-    if (nextZone === 'wide') desktopLayout = null
   }
 
   function responsiveEditorPreference() {
@@ -235,10 +249,8 @@ export function useWorkspaceBootstrap({
 
   function focusNarrowPane(pane) {
     if (responsiveZone.value !== 'focus') return
-    applyResponsiveZone(workbench, 'focus', {
-      preferEditor: pane === 'editor',
-      desktopLayout,
-    })
+    // Focus changes must preserve the user's manual sidebar choice.
+    workbench.setPaneState(pane, 'expanded')
   }
 
   async function chooseWorkspace() {
@@ -312,7 +324,7 @@ export function useWorkspaceBootstrap({
       diagnostic.value = graphWarning
       const workspaceView = rememberedWorkspaceView(path)
       const activityId = restorableActivityId(workspaceView)
-      workbench.resetActivityHistory(activityId)
+      workbench.selectWorkspaceActivity(activityId)
       restoreWorkspaceDetails(workspaceView, activityId)
       if (activate) {
         if (activityId === 'files') openCoreActivity('files')
@@ -333,7 +345,7 @@ export function useWorkspaceBootstrap({
   function rememberActiveActivity(path) {
     const workspace = normalizedWorkspacePath(path)
     const activityId = String(workbench.activeActivityId || '').trim()
-    if (!workspace || !activityId) return
+    if (!workspace) return
     const file = editorFiles.currentFile
     workspaceViewByPath.set(workspace, {
       activityId,
@@ -352,7 +364,7 @@ export function useWorkspaceBootstrap({
 
   function restorableActivityId(workspaceView) {
     const activityId = workspaceView?.activityId
-    if (!activityId) return 'files'
+    if (!activityId) return ''
     try {
       const activity = activities.byId(activityId)
       if (
@@ -366,7 +378,7 @@ export function useWorkspaceBootstrap({
     } catch {
       // Session memory is optional. A bad candidate must not block a workspace switch.
     }
-    return 'files'
+    return ''
   }
 
   function restoreWorkspaceDetails(workspaceView, activityId) {

@@ -33,6 +33,7 @@ const DEFAULTS = {
   sidebarToolOrder: [],
   sidebarNewActivityOrder: [],
   sidebarChatsCollapsed: false,
+  sidebarToolsCollapsed: false,
   chatNotifications: true,
   workbenchFileFavorites: {},
   workbenchFileSort: {},
@@ -59,10 +60,11 @@ const DEFAULTS = {
   businessGraphSelfPersonId: '',
   recentWorkspaceFolders: [],
   workbenchLayout: {
-    sidebar: { state: 'expanded', width: 240 },
+    sidebar: { state: 'expanded', width: 280 },
     activity: { state: 'expanded', width: 560 },
     editor: { state: 'expanded', width: 520 },
-    activeActivityId: 'files',
+    activeActivityId: '',
+    openTabIds: [],
   },
 }
 

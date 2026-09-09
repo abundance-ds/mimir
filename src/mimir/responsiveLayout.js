@@ -21,25 +21,11 @@ export function fittedEditorWidth(viewportWidth, requestedWidth, sidebarWidth) {
 
 export function applyResponsiveZone(workbench, zone, {
   preferEditor = false,
-  desktopLayout = null,
 } = {}) {
-  if (zone === 'wide') {
-    if (desktopLayout) workbench.restoreLayout(desktopLayout)
-    return
-  }
+  if (zone === 'wide') return
 
   workbench.setPaneState('sidebar', 'rail')
-  if (zone === 'compact') {
-    workbench.setPaneState(
-      'activity',
-      desktopLayout?.activity?.state === 'rail' ? 'rail' : 'expanded',
-    )
-    workbench.setPaneState(
-      'editor',
-      desktopLayout?.editor?.state === 'rail' ? 'rail' : 'expanded',
-    )
-    return
-  }
+  if (zone === 'compact') return
 
   if (preferEditor) {
     workbench.setPaneState('activity', 'rail')

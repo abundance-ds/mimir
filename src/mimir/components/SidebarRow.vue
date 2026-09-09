@@ -21,7 +21,7 @@
       :aria-controls="editing ? undefined : ariaControls || undefined"
       :title="editing ? undefined : $attrs.title"
     >
-      <span class="ml-3 grid size-7 shrink-0 place-items-center">
+      <span class="ml-[12px] grid size-[28px] shrink-0 place-items-center">
         <slot />
       </span>
       <span

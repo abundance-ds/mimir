@@ -47,6 +47,26 @@ describe('usePaneChrome', () => {
     wrapper.unmount()
   })
 
+  it('keeps tool actions beside tabs without an extra header row', async () => {
+    const Surface = surface(ref(true), ref('3 armed'))
+    const wrapper = mount(PaneFrame, {
+      props: { pane: 'activity', title: 'Routines', meta: 'Ready' },
+      attachTo: document.body,
+      slots: {
+        tabs: '<div role="tablist"><button role="tab">Routines</button></div>',
+        actions: '<button data-explicit-action>Return</button>',
+        default: () => h(Surface, { active: true }),
+      },
+    })
+    await nextTick()
+    const header = wrapper.get('[data-pane-header="activity"]')
+    expect(header.get('[role=tablist]').exists()).toBe(true)
+    expect(header.get('[data-surface-action]').exists()).toBe(true)
+    expect(header.get('[data-explicit-action]').exists()).toBe(true)
+    expect(wrapper.find('.pane-bar').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('renders actions inline and keeps the pane meta when the surface is inactive or alone', async () => {
     const Surface = surface(ref(false), ref('hidden meta'))
     const wrapper = mount(PaneFrame, {

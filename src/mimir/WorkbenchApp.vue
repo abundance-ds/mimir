@@ -17,45 +17,25 @@
         :workspace-missing="currentWorkspaceMissing"
         :recent-workspaces="recentWorkspaces"
         :tools="toolRows"
-        :new-activity="newActivityRows"
-        :activities="sidebarActivities"
-        :chat-targets="chat.targets"
-        :chat-enabled="chat.config.enabled"
-        :chat-members="chat.members"
-        :active-chat-target="chat.activeTarget"
-        :chat-unread-total="chat.unreadTotal"
-        :chat-section-collapsed="settings.sidebarChatsCollapsed"
-        :active-activity-id="workbench.activeActivityId || ''"
-        :resuming-activity-ids="activityRuntime.resumingActivityIds"
-        :blocking-input-activity-ids="activityRuntime.blockingInputActivityIds"
-        :activity-sort="activityNavigator.mode"
+        :tools-collapsed="settings.sidebarToolsCollapsed"
+        :active-tool-id="activeToolId"
         :meeting-capture="meetingCapture"
         @launch="onLaunch"
-        @select-activity="selectActivity"
-        @select-chat="openChatTarget"
-        @new-chat="openNewChat"
         @choose-workspace="chooseWorkspace"
         @create-workspace="createWorkspace"
         @dismiss-missing-workspaces="dismissMissingWorkspaces"
         @open-workspace="openWorkspace"
         @reconcile-workspaces="reconcileWorkspaces"
         @toggle-collapse="toggleSidebar"
-        @rename-activity="renameActivity"
-        @stop-activity="stopActivity"
-        @archive-activity="closeActivity"
-        @clear-activity="clearActivity"
-        @archive-activities="archiveActivities"
-        @clear-activities="clearActivities"
-        @selection-change="sidebarSelectedActivityIds = $event"
         @reorder-tools="reorderTools"
-        @reorder-activities="reorderActivities"
-        @sort-activities="sortActivities"
-        @toggle-chat-collapse="settings.set('sidebarChatsCollapsed', !settings.sidebarChatsCollapsed)"
+        @toggle-tools="settings.set('sidebarToolsCollapsed', !settings.sidebarToolsCollapsed)"
         @settings="openSettings"
         @open-meeting="onLaunch('app:scribe')"
         @set-meeting-mic-muted="setMeetingMicrophoneMuted"
         @stop-meeting="stopMeetingCapture"
-      />
+      >
+        <template #files><FilesActivity compact :active="!collapsed" @open-file="openFileInEditor" @review-git="reviewGitInEditor" @choose-workspace="chooseWorkspace" @diagnostic="showDiagnostic" @open-manager="openFileManager" /></template>
+      </WorkbenchSidebar>
     </template>
 
     <template #activity>
@@ -64,7 +44,9 @@
         :title="activityTitle"
         :meta="activityMeta"
       >
+        <template #tabs><ActivityTabs :tabs="mainTabs" :active-id="workbench.activeActivityId || ''" :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds" @select="selectActivity" @close="closeMainTab" @rename="renameActivity" @new="openQuickOpen('tabs')" @reorder="workbench.reorderTabs" /></template>
         <template #actions>
+          <button v-if="activeActivity?.id === 'files' && fileManagerReturn" type="button" class="h-7 px-2 text-[11px]" @click="selectActivity(fileManagerReturn)">Return to {{ activities.byId(fileManagerReturn)?.title || 'session' }}</button>
           <ChatPaneActions
             v-if="chat.config.enabled && activeActivity?.id === 'chats'"
             :agents="chatAgentRows"
@@ -87,7 +69,7 @@
             :activities="hostActivities"
             :active-id="workbench.activeActivityId || ''"
             :restoring-activity-ids="activityRuntime.resumingActivityIds"
-            @recover="openCoreActivity('files')"
+            @recover="openQuickOpen('tabs')"
           >
             <template
               v-for="activity in hostActivities"
@@ -155,6 +137,7 @@
         @navigate-editor="onEditorNavigate"
         @review-git-with-agent="startGitReviewWithAgent"
         @diagnostic="showDiagnostic"
+        @scratchpad-reveal="onScratchpadReveal"
       />
     </template>
   </WorkbenchShell>
@@ -168,7 +151,10 @@
     :projects="availableWorkspaces"
     :current-project-path="workspaceFiles.workspacePath"
     :new-activity="newActivityRows"
-    :activities="unavailableActivities"
+    :activities="[...mainTabs, ...unavailableActivities]"
+    :documents="editorRef?.navigationTabs || []"
+    :recent-tab-keys="recentTabKeys"
+    :current-tab-key="currentTabKey"
     :history="historyActivities"
     @close="quickOpen = false"
     @activate="activateQuickOpenResult"
@@ -203,6 +189,7 @@ import { useActivityRuntimeStore } from '../stores/activityRuntime.js'
 import { useAppsCatalogStore } from '../stores/appsCatalog.js'
 import { useChatStore } from '../stores/chat.js'
 import { useFileStore } from '../stores/files.js'
+import { prepareScratchpad } from '../services/scratchpad.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useMeetingsStore } from '../stores/meetings.js'
 import { useSettingsStore } from '../stores/settings.js'
@@ -218,6 +205,7 @@ import {
 import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
 import { useTodayStore } from '../stores/today.js'
 import FilesActivity from './activities/FilesActivity.vue'
+import ActivityTabs from './components/ActivityTabs.vue'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
 import ChatActivity from './activities/ChatActivity.vue'
 import UnavailableActivity from './activities/UnavailableActivity.vue'
@@ -386,7 +374,7 @@ const activityLifecycle = useActivityLifecycle({
   diagnostic,
   coreActivityIds: CORE_ACTIVITY_IDS,
   isStableActivity: isToolActivity,
-  getSidebarActivities: () => sidebarActivities.value,
+  getSidebarActivities: () => mainTabs.value,
   openCoreActivity,
   selectActivity,
   openActivityRecord,
@@ -436,6 +424,41 @@ const sidebarActivities = computed(() => (
     },
   )
 ))
+
+const mainTabs = computed(() => {
+  const candidates = new Map(hostActivities.value.filter(activity =>
+    !closingActivityIds.value.has(activity.id)
+    && (CORE_ACTIVITY_IDS.has(activity.id) || isToolActivity(activity) || activityIsVisibleInCurrentWorkspace(activity) || (activity.id === workbench.activeActivityId && activityWorkspaceIsUnavailable(activity)))
+  ).map(activity => [activity.id, activity]))
+  return workbench.openTabIds.map(id => candidates.get(id)).filter(Boolean).map(activity => ({
+    ...activity, openTab: true, unique: CORE_ACTIVITY_IDS.has(activity.id) || isToolActivity(activity),
+  }))
+})
+const activeToolId = computed(() => {
+  if (editorFiles.currentFile?.meta?.scratchpad && lastWorkbenchFocus.value.owner === 'editor') return 'core:scratchpad'
+  const activity = activeActivity.value
+  return activity?.source?.appId ? `app:${activity.source.appId}` : `core:${activity?.id || ''}`
+})
+const fileManagerReturn = ref('')
+function openFileManager() {
+  if (workbench.activeActivityId !== 'files') fileManagerReturn.value = workbench.activeActivityId
+  selectActivity('files')
+}
+async function closeMainTab(id) {
+  const tab = mainTabs.value.find(tab => tab.id === id)
+  if (!tab) return
+  if (tab.unique) {
+    workbench.closeTab(id, mainTabs.value.map(tab => tab.id))
+    return
+  }
+  await closeActivity(id)
+}
+watch(() => [settings.settingsReady, activityRuntime.ready, sidebarActivities.value.map(a => a.id).join('|')], () => {
+  if (!settings.settingsReady || !activityRuntime.ready) return
+  for (const activity of sidebarActivities.value) {
+    if (!workbench.openTabIds.includes(activity.id)) workbench.openTabIds.push(activity.id)
+  }
+})
 const unavailableActivities = computed(() => (
   navigableActivities.value.filter(activity => (
     !activityIsVisibleInCurrentWorkspace(activity)
@@ -472,10 +495,10 @@ const activityTitle = computed(() => {
 })
 const activityMeta = computed(() => {
   const activity = activeActivity.value
-  if (!activity) return 'Unavailable'
+  if (!activity) return ''
   if (activity.id === 'chats') {
-    if (chat.status.state !== 'connected') {
-      return chat.status.state.replace('_', ' ')
+    if (chat.status?.state !== 'connected') {
+      return (chat.status?.state || 'offline').replace('_', ' ')
     }
     const target = chat.activeRecord
     if (!target) return 'No chats'
@@ -581,14 +604,7 @@ const freshActivityApps = computed(() => availableApps.value.filter(createsFresh
 const toolAppIds = computed(() => new Set(stableApps.value.map(app => app.id)))
 
 const toolRows = computed(() => orderSidebarRows([
-  {
-    id: 'core:files',
-    activityId: 'files',
-    title: 'Files',
-    icon: 'files',
-    shortcut: '',
-    available: true,
-  },
+  { id: 'core:scratchpad', title: 'Scratchpad', icon: 'scratchpad', available: true },
   {
     id: 'core:routines',
     activityId: 'routines',
@@ -598,6 +614,7 @@ const toolRows = computed(() => orderSidebarRows([
     available: true,
   },
   ...stableApps.value.map(appRow),
+  ...(chat.config.enabled ? [{ id: 'core:chats', title: 'Chats', icon: 'chats', activityId: 'chats' }] : []),
 ], settings.sidebarToolOrder))
 
 const newActivityRows = computed(() => orderSidebarRows([
@@ -689,13 +706,12 @@ const {
   editorRef,
   editorFiles,
   workbench,
-  sidebarActivities,
+  sidebarActivities: mainTabs,
   sidebarSelection: sidebarSelectedActivityIds,
   toggleSidebar,
   selectActivity,
-  closeActivity,
+  closeActivity: closeMainTab,
   closeActivities,
-  collapseEmptyEditor,
 })
 
 watch(
@@ -709,7 +725,7 @@ watch(
   () => tracker.enabled,
   enabled => {
     if (!enabled && activeActivity.value?.source?.appId === 'tracker') {
-      openCoreActivity('files')
+      workbench.closeTab(workbench.activeActivityId, mainTabs.value.map(tab => tab.id))
     }
   },
 )
@@ -783,6 +799,7 @@ watch(
     workbench.paneLayout.activity.state,
     workbench.paneLayout.editor.state,
     workbench.activeActivityId,
+    workbench.openTabIds.join('|'),
   ],
   () => persistWorkbench(),
 )
@@ -791,7 +808,7 @@ watch(
   () => chat.config.enabled,
   enabled => {
     if (!enabled && workbench.activeActivityId === 'chats') {
-      openCoreActivity('files')
+      workbench.closeTab(workbench.activeActivityId, mainTabs.value.map(tab => tab.id))
     }
   },
 )
@@ -837,8 +854,9 @@ onMounted(async () => {
     }),
   ])
   if (!tracker.enabled && activeActivity.value?.source?.appId === 'tracker') {
-    openCoreActivity('files')
+    workbench.closeTab(workbench.activeActivityId, mainTabs.value.map(tab => tab.id))
   }
+  workbench.restoreTabs(workbench.openTabIds.filter(id => activities.byId(id) && !activities.byId(id).archivedAt && !activities.byId(id).closeRequestedAt))
   workbenchReady = true
   void processMeetingRecordRequests()
 })
@@ -914,7 +932,13 @@ async function processMeetingRecordRequests() {
 }
 
 async function onLaunch(id) {
+  if (id === 'core:scratchpad') {
+    try { await editorRef.value?.mimirScratchpad?.() }
+    catch (cause) { showDiagnostic(`Scratchpad could not open: ${errorMessage(cause)}`) }
+    return
+  }
   if (id === 'core:files') return openCoreActivity('files')
+  if (id === 'core:chats') return openCoreActivity('chats')
   if (id === 'core:routines') return openCoreActivity('routines')
   if (id.startsWith('app:')) {
     const appId = id.slice('app:'.length)
@@ -923,6 +947,8 @@ async function onLaunch(id) {
       diagnostic.value = `App '${appId}' is no longer installed. Reload Apps in Settings.`
       return
     }
+    const existing = activities.byId(`app:${appId}`)
+    if (existing && !createsFreshActivity(app)) { selectActivity(existing.id); return }
     try {
       const payload = await appsCatalog.prepareActivity(app, workspaceFiles.workspacePath || '')
       await dispatchAppPayload(payload)
@@ -1102,6 +1128,10 @@ async function startGraphWork(request) {
 }
 
 function openCoreActivity(id) {
+  if (id === 'files') {
+    workbench.setPaneState('sidebar', 'expanded')
+    return
+  }
   ensureCoreActivities()
   selectActivity(id)
 }
@@ -1211,6 +1241,16 @@ function finishWorkspaceSetup(result) {
   resolve?.(result || null)
 }
 
+// Navigation recency changes only when the user changes the focused tab.
+// Process output and file saves must not reorder the picker.
+const recentTabKeys = ref([])
+const currentTabKey = computed(() => lastWorkbenchFocus.value.owner === 'editor'
+  ? (editorRef.value?.activeNavigationTab ? `document:${editorRef.value.activeNavigationTab}` : '')
+  : (workbench.activeActivityId ? `activity:${workbench.activeActivityId}` : ''))
+watch(currentTabKey, key => {
+  if (key) recentTabKeys.value = [key, ...recentTabKeys.value.filter(item => item !== key)].slice(0, 200)
+}, { immediate: true })
+
 async function activateQuickOpenResult(result) {
   if (!result?.type) return
   if (result.type === 'project') {
@@ -1223,6 +1263,13 @@ async function activateQuickOpenResult(result) {
   }
   if (result.type === 'project-create') {
     await createWorkspace()
+    return
+  }
+  if (result.type === 'document') {
+    if (editorRef.value?.selectNavigationTab?.(result.documentId)) {
+      focusNarrowPane('editor')
+      workbench.setPaneState('editor', 'expanded')
+    }
     return
   }
   if (result.type === 'file') {
@@ -1262,6 +1309,7 @@ async function openFileInEditor(request) {
         path,
         line: request.line,
         column: request.column,
+        ...(typeof request.preview === 'boolean' ? { preview: request.preview, entry: request.entry || null } : {}),
       })
     } else {
       await editorRef.value?.mimirOpen(path, {
@@ -1343,6 +1391,21 @@ function onEditorNavigate() {
   focusNarrowPane('editor')
   workbench.setPaneState('editor', 'expanded')
 }
+
+function onScratchpadReveal({ focus = true } = {}) {
+  if (focus) focusNarrowPane('editor')
+  // In a one-pane window, retain the terminal during an external write.
+  if (focus || !workbench.singlePaneMode) workbench.setPaneState('editor', 'expanded')
+}
+
+watch(() => workspaceFiles.workspacePath, workspace => {
+  if (!workspace || !window.__TAURI_INTERNALS__) return
+  void prepareScratchpad(workspace).then(prepared => {
+    if (prepared === false && workspaceFiles.workspacePath === workspace) {
+      showDiagnostic('This project already has scratchpad.md. The shared Scratchpad is at ~/.mimir/scratchpad.md.')
+    }
+  }).catch(cause => showDiagnostic(`Scratchpad link: ${errorMessage(cause)}`))
+}, { immediate: true })
 
 function surfaceFor(activity) {
   if (activity.kind === 'files') return FilesActivity

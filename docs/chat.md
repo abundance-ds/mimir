@@ -6,8 +6,8 @@ transport and removes UI/tools but keeps credentials and cached history.
 
 ## Product and agents
 
-- The Sidebar shows room presence and unread state. Each room retains its draft
-  and scroll position.
+- Chats opens as one unique main tab. Go to lists rooms and unread state.
+  Each room retains its draft and scroll position.
 - Offline history and search remain available; sending waits for connection.
 - Attachments support picker, drop, and paste, then verify size and SHA-256
   before native open.

@@ -54,7 +54,7 @@ describe('responsive workbench layout', () => {
     expect(fittedEditorWidth(1600, 900, 240)).toBe(900)
   })
 
-  it('restores the user desktop layout after leaving a narrow window', () => {
+  it('preserves collapsed panels and remembered widths after leaving a narrow window', () => {
     const workbench = useWorkbenchStore()
     workbench.setPaneWidth('sidebar', 286)
     workbench.setPaneState('editor', 'rail')
@@ -63,6 +63,6 @@ describe('responsive workbench layout', () => {
     applyResponsiveZone(workbench, 'focus', { desktopLayout: desktop })
     applyResponsiveZone(workbench, 'wide', { desktopLayout: desktop })
 
-    expect(workbench.layoutSnapshot()).toEqual(desktop)
+    expect(workbench.layoutSnapshot()).toEqual({ ...desktop, sidebar: { ...desktop.sidebar, state: 'rail' } })
   })
 })

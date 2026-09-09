@@ -194,6 +194,7 @@
           </div>
 
           <div class="flex h-7 shrink-0 items-center gap-3 border-t border-rule bg-chrome-high px-3 font-mono text-[9px] text-ink-3">
+            <button v-if="!inNewActivityView" type="button" data-quick-open-new-tab class="px-1 text-ink hover:bg-chrome-mid focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent" @click="enterNewActivityView">New tab</button>
             <span>↑↓ select</span>
             <span>↵ {{ selectedResult?.verb || 'open' }}</span>
             <span class="ml-auto">
@@ -250,6 +251,9 @@ const props = defineProps({
   currentProjectPath: { type: String, default: '' },
   newActivity: { type: Array, default: () => [] },
   activities: { type: Array, default: () => [] },
+  documents: { type: Array, default: () => [] },
+  recentTabKeys: { type: Array, default: () => [] },
+  currentTabKey: { type: String, default: '' },
   history: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'activate'])
@@ -268,7 +272,7 @@ const scope = computed(() => (
   inNewActivityView.value ? 'new-activity' : parsedQuery.value.scope
 ))
 const dialogTitle = computed(() => (
-  inNewActivityView.value ? 'Go to: New activity' : 'Go to'
+  inNewActivityView.value ? 'Go to: New activity' : props.initialView === 'tabs' ? 'New tab' : 'Go to'
 ))
 const inputPlaceholder = computed(() => (
   inNewActivityView.value
@@ -306,10 +310,14 @@ const results = computed(() => buildQuickOpenResults({
   currentProjectPath: props.currentProjectPath,
   newActivity: props.newActivity,
   activities: props.activities,
+  documents: props.documents,
+  recentTabKeys: props.recentTabKeys,
+  currentTabKey: props.currentTabKey,
   history: props.history,
   files: files.visibleFiles,
   historySnippets: historySnippets.value,
   newActivityView: inNewActivityView.value,
+  tabPicker: props.initialView === 'tabs',
 }))
 const selectedResult = computed(() => results.value[selectedIndex.value] || null)
 let queryTimer = null
@@ -418,6 +426,8 @@ function activate(result) {
     enterNewActivityView()
     return
   }
+  // Selection owns the destination focus. Only cancellation returns to the opener.
+  previousFocus = null
   emit('activate', result)
   requestClose()
 }

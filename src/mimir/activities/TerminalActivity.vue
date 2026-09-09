@@ -14,16 +14,16 @@
         class="flex items-center"
       >
         <button
-          v-if="live"
+          v-if="live && mode === 'terminal'"
           type="button"
           data-terminal-interrupt
           title="Interrupt command (Ctrl-C)"
           aria-label="Interrupt command (Ctrl-C)"
-          class="grid size-7 shrink-0 place-items-center text-ink-3 hover:bg-chrome hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          class="pane-icon-button"
           @pointerdown.stop
           @click.stop="interrupt"
         >
-          <IconPlayerStop :size="13" :stroke-width="1.7" />
+          <IconPlayerStop :size="15" :stroke-width="1.8" />
         </button>
         <button
           v-else-if="ended && status !== 'interrupted'"

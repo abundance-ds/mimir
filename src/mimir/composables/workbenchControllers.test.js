@@ -48,6 +48,7 @@ describe('Workbench controllers', () => {
     }
     const workbench = reactive({
       activeActivityId: 'run:a',
+      closeTab(id, ids) { if (this.activeActivityId === id) this.activeActivityId = ids.find(candidate => candidate !== id) || '' },
       paneLayout: { activity: { state: 'expanded' } },
       openActivity: vi.fn((id) => {
         workbench.activeActivityId = id
@@ -367,7 +368,53 @@ describe('Workbench controllers', () => {
     sidebar.remove()
   })
 
-  it('routes native New through the focused CLI Activity and falls back to Editor New File', () => {
+  it.each(['none', 'activity', 'editor', 'sidebar'])('closes the window from %s when no tabs remain', async owner => {
+    const closeWindow = vi.fn(async () => {})
+    const closeActivity = vi.fn()
+    const closeEditor = vi.fn(async () => false)
+    const rows = ref([])
+    const editorFiles = { openFiles: [] }
+    const quickOpen = ref(false)
+    const controller = useWorkbenchKeyboardRouting({
+      quickOpen,
+      settings: { set: vi.fn() },
+      editorRef: ref({ mimirCloseActiveTab: closeEditor }),
+      editorFiles,
+      workbench: { activeActivityId: 'stale' },
+      sidebarActivities: rows,
+      closeActivity,
+      closeWindow,
+    })
+    controller.lastFocus.value = { owner, activityId: 'stale' }
+    const closeKey = () => controller.onKeydown({
+      key: 'w', metaKey: true, target: document.body,
+      preventDefault: vi.fn(), stopImmediatePropagation: vi.fn(),
+    })
+
+    // A remaining tab takes priority even when the remembered focus is empty.
+    rows.value = [{ id: 'run:a' }]
+    closeKey()
+    expect(closeActivity).toHaveBeenCalledWith('run:a')
+    expect(closeWindow).not.toHaveBeenCalled()
+    rows.value = []
+    editorFiles.openFiles.push({ id: 'draft' })
+    closeKey()
+    await nextTick()
+    expect(closeEditor).toHaveBeenCalledOnce()
+    expect(closeWindow).not.toHaveBeenCalled()
+
+    editorFiles.openFiles = []
+    quickOpen.value = true
+    closeKey()
+    expect(quickOpen.value).toBe(false)
+    expect(closeWindow).not.toHaveBeenCalled()
+    closeKey()
+    expect(closeWindow).toHaveBeenCalledOnce()
+    controller.closeNativeFocusedSurface()
+    expect(closeWindow).toHaveBeenCalledTimes(2)
+  })
+
+  it('routes native New to the tab picker from main tools and sessions, and Editor New File from the Editor', () => {
     const quickOpen = ref(false)
     const quickOpenInitialView = ref('root')
     const quickOpenPreferredTargetId = ref('')
@@ -397,8 +444,14 @@ describe('Workbench controllers', () => {
     controller.newNativeFocusedSurface()
 
     expect(quickOpen.value).toBe(true)
-    expect(quickOpenInitialView.value).toBe('new-activity')
+    expect(quickOpenInitialView.value).toBe('tabs')
     expect(quickOpenPreferredTargetId.value).toBe('preset:review')
+    expect(newFile).not.toHaveBeenCalled()
+    quickOpen.value = false
+    activityNewTargetId.value = null
+    controller.newNativeFocusedSurface()
+    expect(quickOpen.value).toBe(true)
+    expect(quickOpenInitialView.value).toBe('tabs')
     expect(newFile).not.toHaveBeenCalled()
 
     quickOpen.value = false
@@ -528,6 +581,20 @@ describe('Workbench controllers', () => {
     expect(workbench.paneLayout.editor.state).toBe('expanded')
     expect(toolRuntime.start).toHaveBeenCalledTimes(1)
     expect(controller.initialized.value).toBe(true)
+    const previousWidth = window.innerWidth
+    window.innerWidth = 700
+    controller.syncResponsiveLayout()
+    expect(workbench.paneLayout.sidebar.state).toBe('rail')
+    workbench.setPaneState('sidebar', 'expanded')
+    controller.focusNarrowPane('editor')
+    expect(workbench.paneLayout.editor.state).toBe('expanded')
+    expect(workbench.paneLayout.sidebar.state).toBe('expanded')
+    controller.focusNarrowPane('activity')
+    expect(workbench.paneLayout.activity.state).toBe('expanded')
+    expect(workbench.paneLayout.sidebar.state).toBe('expanded')
+    controller.syncResponsiveLayout()
+    expect(workbench.paneLayout.sidebar.state).toBe('expanded')
+    window.innerWidth = previousWidth
     controller.dispose()
   })
 
@@ -859,19 +926,19 @@ describe('Workbench controllers', () => {
     expect(prepareEditorWorkspaceSwitch.mock.invocationCallOrder[0]).toBeLessThan(
       workspaceFiles.openWorkspace.mock.invocationCallOrder[0],
     )
-    expect(workbench.activeActivityId).toBe('files')
-    expect(workbench.canGoPreviousActivity).toBe(false)
+    expect(workbench.activeActivityId).toBe('')
+    expect(workbench.openTabIds).toBeDefined()
 
     workbench.openActivity('agent:beta')
     editorFiles.currentFile = { path: '/beta/plan.md' }
     await controller.openWorkspace('/alpha/')
     expect(workbench.activeActivityId).toBe('agent:alpha')
-    expect(workbench.canGoPreviousActivity).toBe(false)
+    expect(workbench.openTabIds).toBeDefined()
     expect(editorFiles.currentFile.path).toBe('/alpha/notes.md')
 
     await controller.openWorkspace('/beta')
     expect(workbench.activeActivityId).toBe('agent:beta')
-    expect(workbench.canGoPreviousActivity).toBe(false)
+    expect(workbench.openTabIds).toBeDefined()
     expect(editorFiles.currentFile.path).toBe('/beta/plan.md')
     controller.dispose()
   })
@@ -1155,8 +1222,8 @@ describe('Workbench controllers', () => {
     })
     await controller.openWorkspace('/alpha')
 
-    expect(workbench.activeActivityId).toBe('files')
-    expect(workbench.canGoPreviousActivity).toBe(false)
+    expect(workbench.activeActivityId).toBe('')
+    expect(workbench.openTabIds).toBeDefined()
     controller.dispose()
   })
 })

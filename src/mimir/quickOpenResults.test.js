@@ -37,6 +37,34 @@ const files = Array.from({ length: 10 }, (_, index) => ({
 }))
 
 describe('quick open results', () => {
+  it('lists all open tabs first in navigation order, with the current tab last', () => {
+    const activities = Array.from({ length: 8 }, (_, i) => ({ id: `agent:${i}`, title: `Work ${i}`, openTab: true, kind: 'agent' }))
+    const documents = [{ id: 'draft', name: 'Untitled', path: null }, { id: 'saved', name: 'a.md', path: '/w/a.md' }]
+    const results = buildQuickOpenResults({ activities, documents, recentTabKeys: ['activity:agent:0', 'document:draft', 'activity:agent:4'], currentTabKey: 'activity:agent:0', newActivity: [launcher], files: [{ name: 'a.md', path: '/w/a.md' }] })
+    expect(results.slice(0, 3).map(row => row.key)).toEqual(['document:draft', 'activity:agent:4', 'activity:agent:1'])
+    expect(results.filter(row => row.group === 'Open tabs')).toHaveLength(10)
+    expect(results[9].key).toBe('activity:agent:0')
+    expect(results.some(row => row.type === 'file' && row.path === '/w/a.md')).toBe(false)
+  })
+
+  it('keeps every search source and prefix reachable after prioritising open tabs', () => {
+    const input = {
+      activities: [{ id: 'agent:open', title: 'Match session', openTab: true }],
+      documents: [{ id: 'draft', name: 'Match document' }],
+      tools: [{ id: 'core:match', title: 'Match tool' }],
+      newActivity: [{ id: 'launch', title: 'Match launcher' }],
+      projects: [{ name: 'Match project', path: '/match' }],
+      files: [{ name: 'Match file', path: '/match/file.md' }],
+      chats: [{ id: 'match-room', title: 'Match room', kind: 'direct' }],
+      history: [{ ...archived, title: 'Match history' }],
+    }
+    expect(buildQuickOpenResults({ ...input, query: 'match' }).map(row => row.type)).toEqual(['activity', 'document', 'new-activity', 'tool', 'project', 'file', 'chat', 'history'])
+    for (const [prefix, type] of [['a:', 'activity'], ['n:', 'new-activity'], ['t:', 'tool'], ['p:', 'project'], ['f:', 'file'], ['c:', 'chat'], ['h:', 'history']]) {
+      expect(buildQuickOpenResults({ ...input, query: `${prefix}match` }).some(row => row.type === type)).toBe(true)
+    }
+    expect(buildQuickOpenResults({ ...input, query: 'f:document' })[0]).toMatchObject({ type: 'document', documentId: 'draft', verb: 'Switch' })
+  })
+
   it('parses optional scopes without requiring them', () => {
     expect(parseQuickOpenQuery('review')).toEqual({ scope: 'all', term: 'review' })
     expect(parseQuickOpenQuery('a:release')).toEqual({ scope: 'activities', term: 'release' })

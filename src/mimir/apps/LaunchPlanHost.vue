@@ -69,14 +69,15 @@
       </div>
     </div>
 
-    <footer data-launch-plan-footer class="pane-footer px-3">
+    <PaneBand as="footer" kind="footer" data-launch-plan-footer class="px-3">
       <span>{{ app.id }}</span>
       <span class="ml-auto">{{ activity.workspacePath || 'app directory' }}</span>
-    </footer>
+    </PaneBand>
   </section>
 </template>
 
 <script setup>
+import PaneBand from '../../shared/ui/chrome/PaneBand.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import {
   IconBolt,

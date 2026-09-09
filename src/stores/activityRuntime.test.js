@@ -428,7 +428,7 @@ describe('activity runtime store', () => {
     await expect(resume).rejects.toThrow('provider session unavailable')
 
     expect(runtime.resumingActivityIds.has(interrupted.id)).toBe(false)
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useWorkbenchStore().activeActivityId).toBe('')
     expect(store.byId(interrupted.id)).toMatchObject({
       status: 'interrupted',
       error: 'Automatic resume failed: provider session unavailable',
@@ -454,7 +454,7 @@ describe('activity runtime store', () => {
       expect(store.byId(interrupted.id).status).toBe('idle')
     })
 
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useWorkbenchStore().activeActivityId).toBe('')
     expect(store.byId(interrupted.id)).toMatchObject({
       status: 'idle',
       unread: false,

@@ -1,33 +1,17 @@
 <template>
-    <div
-        v-bind="$attrs"
-        ref="stripEl"
-        role="tablist"
-        aria-label="Open editor tabs"
-        class="relative flex h-full min-w-0 flex-1 items-end gap-0 whitespace-nowrap"
-        :style="dragState.active ? { '--drag-tab-w': dragTabWidth + 'px' } : {}"
-    >
-        <TransitionGroup
-            ref="scrollRef"
-            :name="dragState.active ? '' : 'tabs'"
-            @before-leave="onTabBeforeLeave"
-            @wheel="onTabWheel"
-            tag="div"
-            class="tab-scroll flex h-full min-w-0 flex-1 items-end gap-0 overflow-x-auto overflow-y-hidden"
-        >
-            <div
+    <PaneTabStrip v-bind="$attrs" ref="stripEl" label="Open editor tabs" @wheel="hideTooltip()"
+        :style="dragState.active ? { '--drag-tab-w': dragTabWidth + 'px' } : {}">
+            <PaneTab
                 v-for="(tab, i) in tabs"
                 :key="tab.id"
-                class="file-tab-wrap no-drag h-[28px] relative"
+                class="file-tab-wrap" :selected="activeTab === i" :label="tab.name"
                 :class="[
                     dragState.active && dragState.fromIndex === i ? 'tab-dragging' : '',
                     dragState.dropTarget === i ? 'tab-drop-gap' : '',
-                    arrivedTabIndex === i ? 'tab-arrived' : '',
                 ]"
-                :style="{ '--tab-ideal-width': `${tabIdealWidth(tab.name)}px` }"
             >
-              <button
-                class="file-tab relative flex h-full w-full select-none items-center gap-1 overflow-hidden whitespace-nowrap rounded-t-[3px] pl-2 pr-7 font-mono text-[11.5px]"
+              <PaneTabButton
+                class="file-tab" :selected="activeTab === i"
                 :class="[
                     activeTab === i ? 'tab-active' : 'tab-inactive',
                     ['review', 'git-review'].includes(tab.type) ? 'tab-review' : '',
@@ -67,26 +51,20 @@
                             : 'Unsaved changes'
                     "
                 ></span>
-              </button>
-              <button
-                  class="tab-close"
-                  :aria-label="`Close ${tab.name}`"
-                  title="Close tab"
-                  @click.stop="$emit('close-tab', i)"
-              >&times;</button>
-            </div>
-
-            <button
-                key="__add__"
-                class="no-drag ml-2 flex h-[28px] w-7 shrink-0 items-center justify-center rounded-sm text-ink-3 hover:bg-chrome-mid hover:text-ink"
-                aria-label="New tab"
-                title="New tab"
-                @click="$emit('add-tab')"
-            >
-                <IconPlus :size="14" :stroke-width="1.8" />
-            </button>
-        </TransitionGroup>
-    </div>
+              </PaneTabButton>
+              <PaneTabClose :label="tab.name" @close="$emit('close-tab', i)" />
+            </PaneTab>
+        <template #trailing>
+        <button
+            class="pane-icon-button no-drag self-center"
+            aria-label="New tab"
+            title="New tab"
+            @click="$emit('add-tab')"
+        >
+            <IconPlus :size="15" :stroke-width="1.8" />
+        </button>
+        </template>
+    </PaneTabStrip>
 
     <Teleport to="body">
         <Transition name="tab-tooltip">
@@ -151,8 +129,12 @@ import { IconPlus } from "@tabler/icons-vue";
 import { computed, ref, reactive, watch, nextTick, onUnmounted } from "vue";
 import { platformKind } from "../../../shared/platform.js";
 import { dirname } from "../../../shared/utils/path.js";
-import { splitTabName, tabIdealWidth } from "../../tabPresentation.js";
+import { splitTabName } from "../../tabPresentation.js";
 
+import PaneTab from "../../../shared/ui/chrome/PaneTab.vue";
+import PaneTabButton from "../../../shared/ui/chrome/PaneTabButton.vue";
+import PaneTabClose from "../../../shared/ui/chrome/PaneTabClose.vue";
+import PaneTabStrip from "../../../shared/ui/chrome/PaneTabStrip.vue";
 defineOptions({ inheritAttrs: false });
 
 const DRAG_THRESHOLD = 5;
@@ -172,7 +154,7 @@ const emit = defineEmits([
 ]);
 
 const stripEl = ref(null);
-const scrollRef = ref(null);
+
 const tooltipEl = ref(null);
 const tooltip = reactive({
     visible: false,
@@ -209,25 +191,9 @@ let previousBodyCursor = "";
 let previousBodyUserSelect = "";
 
 function getScrollEl() {
-    const r = scrollRef.value;
-    return r?.$el ?? r;
+    return stripEl.value?.scroll;
 }
 
-function onTabWheel(e) {
-    const el = getScrollEl();
-    if (!el || el.scrollWidth <= el.clientWidth) return;
-    hideTooltip();
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-    e.preventDefault();
-    el.scrollLeft += e.deltaY;
-}
-
-function onTabBeforeLeave(el) {
-    if (dragState.active) return;
-    el.style.width = el.offsetWidth + "px";
-    el.style.flex = "none";
-    el.style.overflow = "hidden";
-}
 
 watch(
     () => props.activeTab,
@@ -236,7 +202,7 @@ watch(
             const buttons = getTabButtons();
             const active = buttons[props.activeTab];
             if (active && getScrollEl()) {
-                active.scrollIntoView({
+                active.closest('.pane-tab').scrollIntoView({
                     behavior: "auto",
                     block: "nearest",
                     inline: "nearest",
@@ -250,7 +216,7 @@ watch(() => props.tabs.length, () => closeTabMenu({ restoreFocus: false }));
 
 function getTabButtons() {
     if (!stripEl.value) return [];
-    return Array.from(stripEl.value.querySelectorAll("button.file-tab"));
+    return Array.from(stripEl.value.$el.querySelectorAll("button.file-tab"));
 }
 
 function positionTooltip(anchor) {
@@ -377,30 +343,36 @@ function onTabMenuKeydown(event) {
 
 function snapGhost(tabEl, targetBtn) {
     if (!ghostEl) {
-        ghostEl = tabEl.cloneNode(true);
-        ghostEl.className = "tab-drag-ghost snapped";
+        ghostEl = tabEl.closest('.pane-tab').cloneNode(true);
+        ghostEl.className = "pane-tab selected pane-tab-drag-preview snapped";
+        ghostEl.style.width = `${dragTabWidth.value}px`;
+        ghostEl.setAttribute('aria-hidden', 'true');
+        ghostEl.inert = true;
         document.body.appendChild(ghostEl);
     }
     if (!ghostEl.classList.contains("snapped")) {
         ghostEl.classList.remove("floating");
         ghostEl.classList.add("snapped");
     }
-    const r = targetBtn.getBoundingClientRect();
+    const r = targetBtn.closest('.pane-tab').getBoundingClientRect();
     ghostEl.style.left = `${r.left - dragTabWidth.value}px`;
     ghostEl.style.top = `${r.top}px`;
 }
 
 function snapGhostAfterLast(tabEl, lastBtn) {
     if (!ghostEl) {
-        ghostEl = tabEl.cloneNode(true);
-        ghostEl.className = "tab-drag-ghost snapped";
+        ghostEl = tabEl.closest('.pane-tab').cloneNode(true);
+        ghostEl.className = "pane-tab selected pane-tab-drag-preview snapped";
+        ghostEl.style.width = `${dragTabWidth.value}px`;
+        ghostEl.setAttribute('aria-hidden', 'true');
+        ghostEl.inert = true;
         document.body.appendChild(ghostEl);
     }
     if (!ghostEl.classList.contains("snapped")) {
         ghostEl.classList.remove("floating");
         ghostEl.classList.add("snapped");
     }
-    const r = lastBtn.getBoundingClientRect();
+    const r = lastBtn.closest('.pane-tab').getBoundingClientRect();
     ghostEl.style.left = `${r.right + 2}px`;
     ghostEl.style.top = `${r.top}px`;
 }
@@ -425,7 +397,7 @@ function onPointerDown(index, e) {
     cancelDrag();
 
     const tabEl = getTabButtons()[index];
-    dragTabWidth.value = tabEl ? tabEl.offsetWidth : 80;
+    dragTabWidth.value = tabEl ? tabEl.closest('.pane-tab').offsetWidth : 92;
     dragState.fromIndex = index;
     dragState.dropTarget = -1;
     dragState.active = false;
@@ -456,7 +428,7 @@ function onPointerMove(e) {
     let target = -1;
 
     for (let i = 0; i < buttons.length; i++) {
-        const rect = buttons[i].getBoundingClientRect();
+        const rect = buttons[i].closest('.pane-tab').getBoundingClientRect();
         const mid = rect.left + rect.width / 2;
         if (e.clientX < mid) {
             target = i;
@@ -568,60 +540,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Scrollbar hiding — Tailwind cannot express this */
-.tab-scroll {
-    scrollbar-width: none;
-}
-
-.tab-scroll::-webkit-scrollbar {
-    display: none;
-}
-
-/* TransitionGroup: enter */
-.tabs-enter-active {
-    transition:
-        opacity 150ms ease,
-        transform 150ms ease;
-}
-
-.tabs-enter-from {
-    opacity: 0;
-    transform: translateX(-8px);
-}
-
-/* TransitionGroup: leave (width-collapse) */
-.tabs-leave-active {
-    transition:
-        width 200ms ease,
-        opacity 150ms ease,
-        padding 200ms ease;
-}
-
-.tabs-leave-to {
-    width: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    opacity: 0;
-}
-
-/* Content-aware preferred widths share spare room, then shrink to a firm floor. */
-.file-tab-wrap {
-    flex: 1 1 var(--tab-ideal-width, 148px);
-    min-width: 92px;
-    max-width: 188px;
-}
-
-.file-tab {
-    min-width: 0;
-    border: 1px solid transparent;
-    border-bottom: 0;
-}
-
-.file-tab:focus-visible {
-    outline: 1px solid var(--color-accent);
-    outline-offset: -2px;
-}
-
 .tab-name {
     display: flex;
     align-items: baseline;
@@ -639,73 +557,6 @@ onUnmounted(() => {
     flex: 0 0 auto;
 }
 
-/* Tab separator line — pseudo-element + :has() require vanilla CSS */
-.file-tab::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    top: 20%;
-    height: 60%;
-    width: 1px;
-    background: var(--color-rule-light);
-}
-
-.file-tab.tab-active::after,
-.file-tab:hover::after,
-.file-tab-wrap:has(+ .file-tab-wrap .tab-active) .file-tab::after,
-.file-tab-wrap:has(+ .file-tab-wrap:hover) .file-tab::after {
-    opacity: 0;
-}
-
-/* Tab close button — child selector + hover cascade */
-.tab-close {
-    position: absolute;
-    z-index: 1;
-    right: 6px;
-    top: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    margin-left: 2px;
-    border-radius: 3px;
-    font-size: 14px;
-    line-height: 1;
-    color: var(--color-ink-3);
-    flex-shrink: 0;
-    opacity: 0;
-}
-
-.file-tab-wrap:hover .tab-close,
-.file-tab-wrap:focus-within .tab-close,
-.file-tab-wrap:has(.tab-active) .tab-close {
-    opacity: 1;
-}
-
-.tab-close:hover {
-    background: var(--color-chrome-mid);
-    color: var(--color-ink);
-}
-
-/* Tab states */
-.tab-inactive {
-    color: var(--color-ink-2);
-    background: transparent;
-}
-
-.tab-inactive:hover {
-    color: var(--color-ink-2);
-    background: var(--color-chrome-mid);
-}
-
-.tab-active {
-    color: var(--color-ink);
-    border-color: var(--color-rule);
-    background: var(--color-chrome-high);
-    font-weight: 600;
-}
-
 /* Drag states */
 .tab-dragging {
     flex: 0 0 0 !important;
@@ -719,34 +570,6 @@ onUnmounted(() => {
 
 .tab-drop-gap {
     margin-left: var(--drag-tab-w, 80px);
-}
-
-/* Arrival pulse */
-.tab-arrived {
-    animation: tab-arrive-pulse 600ms ease;
-}
-
-@keyframes tab-arrive-pulse {
-    0%,
-    15% {
-        box-shadow: 0 0 0 3px
-            color-mix(in srgb, var(--color-accent) 25%, transparent);
-    }
-    100% {
-        box-shadow: 0 0 0 0 transparent;
-    }
-}
-
-/* Review tab */
-.tab-review {
-    font-family: var(--font-sans);
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0;
-}
-.tab-review.tab-active {
-    font-weight: 600;
-    color: var(--color-accent);
 }
 
 .editor-tab-tooltip {
@@ -856,30 +679,5 @@ onUnmounted(() => {
     .tab-tooltip-leave-active {
         transition: none;
     }
-}
-</style>
-
-<style>
-/* Global: drag ghost (rendered outside component tree) */
-.tab-drag-ghost {
-    position: fixed;
-    z-index: 99999;
-    pointer-events: none;
-    font-size: 10.5px;
-    font-family: var(--font-mono);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.tab-drag-ghost.snapped {
-    padding: 4px 8px;
-    border-radius: 5px 5px 0 0;
-    background: var(--color-chrome-mid, #f0f0f0);
-    border: 1px solid var(--color-rule-light, #ddd);
-    border-bottom-color: transparent;
-    box-shadow: none;
-    opacity: 0.55;
-    transform: none;
 }
 </style>

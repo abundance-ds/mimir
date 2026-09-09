@@ -3,17 +3,18 @@
     type="button"
     :data-pane-restore="pane"
     :title="`Restore ${title}`"
+    :aria-label="`Restore ${pane === 'activity' ? 'Activity' : 'Editor'}: ${title}`"
     class="group absolute inset-0 z-30 flex h-full w-full flex-col items-center overflow-hidden bg-chrome-high text-ink-3 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
     @click="$emit('restore')"
   >
-    <span
-      v-if="!quiet"
-      class="flex h-10 w-full shrink-0 items-center justify-center border-b border-rule-light"
+    <PaneBand as="span" kind="header"
+      data-rail-header
+      class="w-full justify-center"
       aria-hidden="true"
     >
-      <IconArrowBarRight v-if="pane === 'activity'" :size="15" :stroke-width="1.9" />
-      <IconArrowBarLeft v-else :size="15" :stroke-width="1.9" />
-    </span>
+      <IconArrowBarRight v-if="!controls.quietRail && pane === 'activity'" :size="15" :stroke-width="1.8" />
+      <IconArrowBarLeft v-else-if="!controls.quietRail" :size="15" :stroke-width="1.8" />
+    </PaneBand>
 
     <span class="flex min-h-0 flex-1 items-center justify-center py-3">
       <span class="flex max-h-full min-h-0 items-center gap-2 [writing-mode:vertical-rl]">
@@ -26,18 +27,21 @@
       </span>
     </span>
 
-    <span class="flex h-10 w-full shrink-0 items-center justify-center border-t border-rule-light">
-      <span class="max-w-8 truncate font-mono text-[9px] font-semibold uppercase text-ink-4">
+    <PaneBand as="span" kind="footer" data-rail-footer class="w-full justify-center !px-0">
+      <span class="max-w-full truncate font-mono text-[9px] font-semibold uppercase text-ink-4">
         {{ pane === 'activity' ? 'Work' : 'Editor' }}
       </span>
-    </span>
+    </PaneBand>
   </button>
 </template>
 
 <script setup>
+import PaneBand from '../../shared/ui/chrome/PaneBand.vue'
+
+import { usePaneControls } from '../composables/usePaneControls.js'
 import { IconArrowBarLeft, IconArrowBarRight } from '@tabler/icons-vue'
 
-defineProps({
+const props = defineProps({
   pane: {
     type: String,
     required: true,
@@ -45,8 +49,8 @@ defineProps({
   },
   title: { type: String, required: true },
   meta: { type: String, default: '' },
-  quiet: { type: Boolean, default: false },
 })
 
+const { controls } = usePaneControls(() => props.pane)
 defineEmits(['restore'])
 </script>

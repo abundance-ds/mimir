@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const editorOpen = vi.hoisted(() => vi.fn())
+const editorScratchpad = vi.hoisted(() => vi.fn())
 const editorReveal = vi.hoisted(() => vi.fn())
 const editorOpenSettings = vi.hoisted(() => vi.fn())
 const editorClose = vi.hoisted(() => vi.fn())
@@ -48,6 +49,15 @@ vi.mock('../editor/App.vue', async () => {
       ],
       setup(_props, { expose }) {
         expose({
+          get navigationTabs() { return useFileStore().visibleOpenFiles.map(file => ({ id: file.id, name: file.path || 'Untitled', path: file.path })) },
+          get activeNavigationTab() { return useFileStore().currentFile?.id || '' },
+          selectNavigationTab(id) {
+            const index = useFileStore().openFiles.findIndex(file => file.id === id)
+            if (index < 0) return false
+            useFileStore().setActiveTab(index)
+            return true
+          },
+          mimirScratchpad: editorScratchpad,
           mimirOpen: editorOpen,
           mimirReveal: editorReveal,
           mimirOpenSettings: editorOpenSettings,
@@ -370,14 +380,49 @@ describe('WorkbenchApp', () => {
   }
 
   async function chooseActivitySource(wrapper, label) {
-    await wrapper.get('[data-activity-create-button]').trigger('click')
-    const menu = document.body.querySelector('[data-activity-create-menu]')
-    const option = [...menu.querySelectorAll('[data-activity-create-option]')]
+    await wrapper.get('[data-new-main-tab]').trigger('click')
+    const menu = document.body.querySelector('[data-quick-open]')
+    const option = [...menu.querySelectorAll('[data-quick-open-row]')]
       .find(candidate => candidate.textContent.includes(label))
     expect(option, `${label} activity source`).toBeTruthy()
     option.click()
     await flushPromises()
   }
+
+  it('restores saved tool tabs without creating duplicate sessions', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
+      mimirWorkspaceFolder: '/w',
+      workbenchLayout: { activeActivityId: 'app:ledger', openTabIds: ['routines', 'app:ledger'] },
+    }))
+    const wrapper = await render()
+    expect(useWorkbenchStore().activeActivityId).toBe('app:ledger')
+    expect(wrapper.findAll('[data-main-tab]').map(tab => tab.attributes('data-main-tab'))).toEqual(['routines', 'app:ledger'])
+    expect(activityApi.spawnActivity).not.toHaveBeenCalled()
+  })
+
+  it('opens New Tab with Cmd+T in the main pane and keeps the Editor shortcut separate', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const pane = wrapper.get('[data-pane="activity"]')
+    pane.element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', metaKey: true, bubbles: true }))
+    await nextTick()
+    expect(wrapper.get('[data-quick-open]').text()).toContain('New tab')
+    expect(wrapper.get('[data-quick-open-key="new:preset:review"]').exists()).toBe(true)
+  })
+
+  it('keeps the visible Files sidebar ready for drops while File Manager is open', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    useWorkbenchStore().setPaneState('sidebar', 'expanded')
+    await nextTick()
+    const sidebarFiles = wrapper.findAllComponents({ name: 'FilesActivity' }).find(component => component.props('compact'))
+    sidebarFiles.vm.$emit('openManager')
+    await flushPromises()
+    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(sidebarFiles.props('active')).toBe(true)
+    useWorkbenchStore().setPaneState('sidebar', 'rail')
+    await nextTick()
+    expect(sidebarFiles.props('active')).toBe(false)
+  })
 
   it('composes the lean three-pane shell and compact launch menu', async () => {
     const wrapper = await render()
@@ -389,17 +434,18 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-editor-stub]').exists()).toBe(true)
     expect(toolRuntimeStart).toHaveBeenCalledTimes(1)
     expect(rows).toEqual([
-      'tool:core:files',
+      'tool:core:scratchpad',
       'tool:core:routines',
       'tool:app:ledger',
+      'tool:core:chats',
     ])
-    expect(wrapper.get('[data-activity-surface="files"]').exists()).toBe(true)
-    await wrapper.get('[data-activity-create-button]').trigger('click')
+    expect(wrapper.get('[data-pane="sidebar"] [data-files-activity]').exists()).toBe(true)
+    await wrapper.get('[data-new-main-tab]').trigger('click')
     const review = document.body.querySelector(
-      '[data-activity-create-id="preset:review"]',
+      '[data-quick-open-key="new:preset:review"]',
     )
     expect(review).toBeTruthy()
-    expect(review.querySelector('svg').getAttribute('viewBox')).toBe('0 0 256 260')
+    expect(review.textContent).toContain('Review with Codex')
   })
 
   it('shows a sync error after the current diagnostic is dismissed', async () => {
@@ -471,8 +517,9 @@ describe('WorkbenchApp', () => {
     useActivitiesStore().upsert(activity)
     await nextTick()
 
-    await wrapper.get('[data-sidebar-row="activity:agent:rename"]').trigger('dblclick')
-    const input = wrapper.get('[data-activity-rename="agent:rename"]')
+    await wrapper.get('[data-main-tab="agent:rename"] [role=tab]').trigger('click')
+    await wrapper.get('[data-main-tab="agent:rename"] [role=tab]').trigger('dblclick')
+    const input = wrapper.get('[data-tab-rename]')
     await input.setValue('Review API contract')
     terminalFocus.mockClear()
     await input.trigger('keydown', { key: 'Enter' })
@@ -484,7 +531,7 @@ describe('WorkbenchApp', () => {
       'Review API contract',
     )
     expect(useWorkbenchStore().activeActivityId).toBe('agent:rename')
-    expect(terminalFocus).toHaveBeenCalled()
+    expect(document.activeElement.getAttribute('role')).toBe('tab')
   })
 
   it('promotes a terminal API failure to the Activity row error state', async () => {
@@ -508,49 +555,15 @@ describe('WorkbenchApp', () => {
     await nextTick()
 
     expect(store.byId('agent:surface-error').error).toBe('Could not send terminal input.')
-    expect(wrapper.get('[data-activity-error="agent:surface-error"]').exists()).toBe(true)
+    expect(wrapper.get('[data-main-tab="agent:surface-error"] [aria-label="Error"]').exists()).toBe(true)
   })
 
-  it('keeps the rail room switcher open without focusing chat after delayed activation', async () => {
+  it('opens Chats as one unique tool tab', async () => {
     const wrapper = await render()
-    const chat = useChatStore()
-    chat.status = {
-      state: 'connected',
-      endpoint: 'wss://chat.abundanceds.com/webirc',
-      account: 'waqr',
-      relayReady: true,
-      diagnostic: null,
-    }
-    chat.targets = [{
-      id: '#general',
-      kind: 'channel',
-      title: 'general',
-      unreadCount: 0,
-      muted: false,
-    }]
-    chat.activeTarget = '#general'
-    let finishSelection
-    vi.spyOn(chat, 'selectTarget').mockImplementation(() => new Promise(resolve => {
-      finishSelection = resolve
-    }))
-    useWorkbenchStore().setPaneState('sidebar', 'rail')
-    await nextTick()
-
-    await wrapper.get('[data-sidebar-row="chat:hub"] button').trigger('click')
+    await wrapper.get('[data-sidebar-row="tool:core:chats"]').trigger('click')
     await flushPromises()
-    await nextTick()
-    const room = wrapper.get('[data-chat-target="#general"]').element
-    room.focus()
-    expect(document.activeElement).toBe(room)
-    expect(chatFocus).not.toHaveBeenCalled()
-
-    finishSelection('')
-    await flushPromises()
-    await nextTick()
-
-    expect(useWorkbenchStore().activeActivityId).toBe('chats')
-    expect(chatFocus).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-chat-rail-switcher]').exists()).toBe(true)
+    await wrapper.get('[data-sidebar-row="tool:core:chats"]').trigger('click')
+    expect(useWorkbenchStore().openTabIds.filter(id => id === 'chats')).toHaveLength(1)
   })
 
   it('routes the persistent sidebar microphone control through the human meeting store', async () => {
@@ -637,9 +650,9 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-sidebar-row="tool:app:scratch"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="tool:app:business-graph"]').exists()).toBe(true)
     expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
-    await wrapper.get('[data-activity-create-button]').trigger('click')
+    await wrapper.get('[data-new-main-tab]').trigger('click')
     expect(document.body.querySelector(
-      '[data-activity-create-id="app:review-runner"]',
+      '[data-quick-open-key="new:app:review-runner"]',
     )).toBeTruthy()
     expect(wrapper.find('[data-sidebar-row="tool:app:review-runner"]').exists()).toBe(false)
   })
@@ -651,7 +664,7 @@ describe('WorkbenchApp', () => {
     settings.set('sidebarToolOrder', [
       'app:ledger',
       'core:routines',
-      'core:files',
+      'core:chats',
       'app:not-installed',
     ])
     await nextTick()
@@ -659,7 +672,8 @@ describe('WorkbenchApp', () => {
     expect(wrapper.findAll('[data-tool-key]').map((row) => row.attributes('data-tool-key'))).toEqual([
       'app:ledger',
       'core:routines',
-      'core:files',
+      'core:chats',
+      'core:scratchpad',
     ])
 
     await wrapper
@@ -674,9 +688,24 @@ describe('WorkbenchApp', () => {
     expect(settings.sidebarToolOrder).toEqual([
       'core:routines',
       'app:ledger',
-      'core:files',
+      'core:chats',
+      'core:scratchpad',
       'app:not-installed',
     ])
+  })
+
+  it('opens Scratchpad in the Editor without changing the main tab', async () => {
+    const wrapper = await render()
+    const workbench = useWorkbenchStore()
+    const active = workbench.activeActivityId
+    const tabs = [...workbench.openTabIds]
+    await wrapper.get('[data-sidebar-row="tool:core:scratchpad"]').find('button').trigger('click')
+    expect(editorScratchpad).toHaveBeenCalled()
+    expect(workbench.activeActivityId).toBe(active)
+    expect(workbench.openTabIds).toEqual(tabs)
+    wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('scratchpadReveal', { focus: false })
+    await nextTick()
+    expect(workbench.activeActivityId).toBe(active)
   })
 
   it('always boots with the mounted Editor visible and keeps one global Settings entry', async () => {
@@ -755,9 +784,9 @@ describe('WorkbenchApp', () => {
   it('keeps unavailable CLI tools out of the launch surface', async () => {
     const wrapper = await render()
 
-    await wrapper.get('[data-activity-create-button]').trigger('click')
+    await wrapper.get('[data-new-main-tab]').trigger('click')
     expect(document.body.querySelector(
-      '[data-activity-create-id="preset:claude"]',
+      '[data-quick-open-key="new:preset:claude"]',
     )).toBeNull()
     expect(activityApi.resolveLauncher).not.toHaveBeenCalled()
   })
@@ -845,7 +874,7 @@ describe('WorkbenchApp', () => {
 
       expect(useSettingsStore().mimirWorkspaceFolder).toBe('/w')
       expect(useWorkbenchStore().activeActivityId).toBe('agent:gone')
-      expect(wrapper.get('[data-sidebar-row="activity:agent:gone"]').exists()).toBe(true)
+      expect(wrapper.get('[data-main-tab="agent:gone"]').exists()).toBe(true)
     } finally {
       delete window.__TAURI_INTERNALS__
     }
@@ -871,10 +900,10 @@ describe('WorkbenchApp', () => {
     })
     await nextTick()
 
-    expect(wrapper.find('[data-sidebar-row="activity:agent:alpha"]').exists()).toBe(true)
-    expect(wrapper.find('[data-sidebar-row="activity:agent:beta"]').exists()).toBe(false)
+    expect(wrapper.find('[data-main-tab="agent:alpha"]').exists()).toBe(true)
+    expect(wrapper.find('[data-main-tab="agent:beta"]').exists()).toBe(false)
 
-    await wrapper.get('[data-sidebar-row="activity:agent:alpha"]').find('button').trigger('click')
+    await wrapper.get('[data-main-tab="agent:alpha"]').find('button').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-terminal-stub="agent:alpha"]').exists()).toBe(true)
 
@@ -886,13 +915,13 @@ describe('WorkbenchApp', () => {
     await betaProject.trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('[data-sidebar-row="activity:agent:alpha"]').exists()).toBe(false)
-    expect(wrapper.find('[data-sidebar-row="activity:agent:beta"]').exists()).toBe(true)
+    expect(wrapper.find('[data-main-tab="agent:alpha"]').exists()).toBe(false)
+    expect(wrapper.find('[data-main-tab="agent:beta"]').exists()).toBe(true)
     expect(store.byId('agent:alpha').status).toBe('working')
     expect(activityApi.stopActivity).not.toHaveBeenCalled()
     expect(wrapper.get('[data-terminal-stub="agent:alpha"]').attributes('data-active')).toBe('false')
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
-    expect(useWorkbenchStore().canGoPreviousActivity).toBe(false)
+    expect(useWorkbenchStore().activeActivityId).toBe('')
+    expect(useWorkbenchStore().openTabIds).toContain('agent:alpha')
   })
 
   it('saves a manual position for each new Activity and drops positions for closed ones', async () => {
@@ -938,8 +967,8 @@ describe('WorkbenchApp', () => {
 
     const wrapper = await render()
 
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
-    expect(wrapper.find('[data-sidebar-row="activity:agent:beta"]').exists()).toBe(false)
+    expect(useWorkbenchStore().activeActivityId).toBe('')
+    expect(wrapper.find('[data-main-tab="agent:beta"]').exists()).toBe(false)
   })
 
   it('launches an available preset in the selected workspace', async () => {
@@ -1146,11 +1175,11 @@ describe('WorkbenchApp', () => {
     })
     await nextTick()
 
-    await wrapper.get('[data-activity-create-button]').trigger('click')
-    const menu = document.body.querySelector('[data-activity-create-menu]')
-    const terminal = [...menu.querySelectorAll('[data-activity-create-option]')]
+    await wrapper.get('[data-new-main-tab]').trigger('click')
+    const menu = document.body.querySelector('[data-quick-open]')
+    const terminal = [...menu.querySelectorAll('[data-quick-open-row]')]
       .find(option => option.textContent.includes('Terminal'))
-    expect(menu.textContent).not.toContain('Chat')
+    expect(menu.textContent).toContain('Chats')
     terminal.click()
     await flushPromises()
 
@@ -1171,7 +1200,7 @@ describe('WorkbenchApp', () => {
       null,
     )
     expect(useWorkbenchStore().activeActivityId).toMatch(/^terminal:/)
-    expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
+    expect(document.body.querySelector('[data-quick-open]')).toBeNull()
   })
 
   it('opens returned routine runs as PTY surfaces and reruns the current routine definition', async () => {
@@ -1229,7 +1258,7 @@ describe('WorkbenchApp', () => {
     expect(appsApi.resolveAppLaunch).toHaveBeenCalledWith('ledger', '/w')
     expect(useWorkbenchStore().activeActivityId).toBe('app:ledger')
     expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
-    expect(wrapper.find('[data-sidebar-row="activity:app:ledger"]').exists()).toBe(false)
+    expect(wrapper.find('[data-main-tab="app:ledger"]').exists()).toBe(true)
     expect(wrapper.get('[data-sidebar-row="tool:app:ledger"] button').attributes('aria-current')).toBe('page')
   })
 
@@ -1353,10 +1382,12 @@ describe('WorkbenchApp', () => {
     ).rejects.toThrow("Launcher preset 'missing' is not configured")
   })
 
-  it('collapses a stable Tool with Cmd+W without archiving its internal Activity', async () => {
+  it('closes and reopens a unique tool tab without replacing its surface', async () => {
     const wrapper = await render({ workspace: '/w' })
     await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
     await flushPromises()
+    const originalSurface = wrapper.get('[data-activity-surface="app:ledger"]').element
+    appsApi.resolveAppLaunch.mockClear()
     activityApi.stopActivity.mockClear()
     activityApi.setActivityArchived.mockClear()
 
@@ -1374,13 +1405,14 @@ describe('WorkbenchApp', () => {
     expect(activityApi.stopActivity).not.toHaveBeenCalled()
     expect(activityApi.setActivityArchived).not.toHaveBeenCalled()
     expect(useActivitiesStore().byId('app:ledger').archivedAt).toBeNull()
-    expect(useWorkbenchStore().activeActivityId).toBe('app:ledger')
-    expect(activityPane.attributes('data-pane-state')).toBe('rail')
+    expect(useWorkbenchStore().activeActivityId).toBe('')
+    expect(activityPane.attributes('data-pane-state')).toBe('expanded')
 
     await wrapper.get('[data-sidebar-row="tool:app:ledger"]').trigger('click')
     await flushPromises()
     expect(useActivitiesStore().byId('app:ledger').archivedAt).toBeNull()
-    expect(wrapper.get('[data-activity-surface="app:ledger"]').exists()).toBe(true)
+    expect(wrapper.get('[data-activity-surface="app:ledger"]').element).toBe(originalSurface)
+    expect(appsApi.resolveAppLaunch).not.toHaveBeenCalled()
   })
 
   it('archives the exact focused Activity row with Cmd+W even when it failed', async () => {
@@ -1399,7 +1431,7 @@ describe('WorkbenchApp', () => {
     await nextTick()
     activityApi.setActivityArchived.mockClear()
 
-    const failedRow = wrapper.get('[data-sidebar-row="activity:agent:failed"]')
+    const failedRow = wrapper.get('[data-main-tab="agent:failed"]')
     const failedRowButton = failedRow.get('button')
     failedRowButton.element.focus()
     failedRowButton.element.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1415,10 +1447,10 @@ describe('WorkbenchApp', () => {
     expect(store.byId('agent:failed').archivedAt).toEqual(expect.any(String))
     expect(store.byId('agent:selected').archivedAt).toBeNull()
     expect(useWorkbenchStore().activeActivityId).toBe('agent:selected')
-    expect(wrapper.find('[data-sidebar-row="activity:agent:failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-main-tab="agent:failed"]').exists()).toBe(false)
   })
 
-  it('closes a live Activity before archiving it from the Sidebar menu', async () => {
+  it('closes a live Activity before archiving it from the tab menu', async () => {
     const wrapper = await render({ workspace: '/w' })
     useActivitiesStore().upsert(
       activityRecord('agent:menu-archive', 'Menu archive', '2026-07-25T13:00:00Z'),
@@ -1427,20 +1459,37 @@ describe('WorkbenchApp', () => {
     activityApi.closeActivity.mockClear()
     activityApi.setActivityArchived.mockClear()
 
-    await wrapper.get('[data-activity-menu-button="agent:menu-archive"]').trigger('click')
-    const menu = wrapper.get('[data-activity-menu="agent:menu-archive"]')
-    const archive = menu.findAll('button').find(button => button.text().includes('Archive'))
-    expect(archive.attributes('disabled')).toBeUndefined()
-    await archive.trigger('click')
+    await wrapper.get('[data-main-tab="agent:menu-archive"]').trigger('contextmenu', { clientX: 300, clientY: 40 })
+    await nextTick()
+    const close = [...document.querySelectorAll('[role="menuitem"]')].find(button => button.textContent.includes('Stop and archive'))
+    close.click()
     await flushPromises()
 
     expect(activityApi.closeActivity).toHaveBeenCalledWith('agent:menu-archive')
     expect(activityApi.setActivityArchived).not.toHaveBeenCalled()
   })
 
+  it('switches to an existing unsaved document from Go to without reopening it', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const files = useFileStore()
+    files.newFile()
+    const first = files.currentFile.id
+    files.newFile()
+    const count = files.openFiles.length
+    const picker = wrapper.findComponent({ name: 'QuickOpen' })
+    await nextTick()
+    expect(picker.props('documents').some(tab => tab.id === first)).toBe(true)
+    picker.vm.$emit('activate', { type: 'document', documentId: first })
+    await flushPromises()
+    expect(files.currentFile.id).toBe(first)
+    expect(files.openFiles).toHaveLength(count)
+    expect(editorOpen).not.toHaveBeenCalled()
+    expect(useWorkbenchStore().paneLayout.editor.state).toBe('expanded')
+  })
+
   it('opens a Files result in the mounted Editor without changing Activity', async () => {
     const wrapper = await render({ workspace: '/w' })
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useWorkbenchStore().activeActivityId).toBe('')
 
     await wrapper.get('[data-file-row="/w/README.md"] button').trigger('dblclick')
     await flushPromises()
@@ -1449,7 +1498,18 @@ describe('WorkbenchApp', () => {
       preview: false,
       entry: expect.objectContaining({ openBehavior: 'text' }),
     })
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useWorkbenchStore().activeActivityId).toBe('')
+  })
+
+  it('preserves preview and pin requests when revealing a Files content match', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const files = wrapper.findAllComponents({ name: 'FilesActivity' }).find(component => component.props('compact'))
+    const match = { path: '/w/README.md', line: 4, column: 3, entry: { openBehavior: 'text' } }
+    for (const preview of [true, false]) {
+      files.vm.$emit('openFile', { ...match, preview })
+      await flushPromises()
+      expect(editorReveal).toHaveBeenLastCalledWith({ ...match, preview })
+    }
   })
 
   it('reveals a terminal file reference at its source location', async () => {
@@ -1490,7 +1550,7 @@ describe('WorkbenchApp', () => {
 
     expect(editorReviewGit).toHaveBeenCalledWith(request)
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
-    expect(useWorkbenchStore().activeActivityId).toBe('files')
+    expect(useWorkbenchStore().activeActivityId).toBe('')
   })
 
   it('starts a focused agent Activity from a Git review', async () => {
@@ -1549,7 +1609,7 @@ describe('WorkbenchApp', () => {
       bubbles: true,
     }))
     await nextTick()
-    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 240px')
+    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 280px')
 
     document.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'w',
@@ -1600,7 +1660,7 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-quick-open]').exists()).toBe(true)
   })
 
-  it('opens New activity on Cmd+N in a CLI panel with its launcher selected', async () => {
+  it('opens the full tab picker on Cmd+N in a CLI panel with its launcher selected', async () => {
     const wrapper = await render({ workspace: '/w' })
     const record = {
       ...activityRecord('agent:review', 'Review with Codex', '2026-07-29T10:00:00Z'),
@@ -1624,7 +1684,7 @@ describe('WorkbenchApp', () => {
 
     expect(wrapper.get('[data-quick-open-type="new-activity"]').exists()).toBe(true)
     expect(wrapper.find('[data-quick-open-type="new-activity-enter"]').exists()).toBe(false)
-    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(false)
+    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(true)
     expect(wrapper.get('[data-quick-open-key="new:preset:review"]').attributes('aria-selected'))
       .toBe('true')
     expect(editorNew).not.toHaveBeenCalled()
@@ -1707,7 +1767,7 @@ describe('WorkbenchApp', () => {
     })
     await nextTick()
 
-    expect(wrapper.find('[data-sidebar-row="activity:agent:closed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-main-tab="agent:closed"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Archived')
 
     document.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1734,7 +1794,7 @@ describe('WorkbenchApp', () => {
     expect(store.byId('agent:closed').archivedAt).toBeNull()
     expect(store.byId('agent:closed').session.runId).toBe('run-2')
     expect(useWorkbenchStore().activeActivityId).toBe('agent:closed')
-    expect(wrapper.get('[data-sidebar-row="activity:agent:closed"]').exists()).toBe(true)
+    expect(wrapper.get('[data-main-tab="agent:closed"]').exists()).toBe(true)
   })
 
   it('switches projects before restoring work from global History', async () => {
@@ -1778,7 +1838,7 @@ describe('WorkbenchApp', () => {
     expect(useSettingsStore().mimirWorkspaceFolder).toBe('/other/project')
     expect(store.byId('agent:other-history').archivedAt).toBeNull()
     expect(useWorkbenchStore().activeActivityId).toBe('agent:other-history')
-    expect(wrapper.find('[data-sidebar-row="activity:agent:other-history"]').exists()).toBe(true)
+    expect(wrapper.find('[data-main-tab="agent:other-history"]').exists()).toBe(true)
   })
 
   it('resumes an archived PTY routine when Rust omits its null archivedAt field', async () => {
@@ -1893,7 +1953,7 @@ describe('WorkbenchApp', () => {
       await nextTick()
 
       expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
-      expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 240px')
+      expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 280px')
     } finally {
       modal.remove()
     }
@@ -1906,7 +1966,7 @@ describe('WorkbenchApp', () => {
     store.upsert(activityRecord('agent:two', 'Two', '2026-07-25T09:00:00Z'))
     await nextTick()
 
-    const first = wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button')
+    const first = wrapper.get('[data-main-tab="agent:one"]').find('button')
     first.element.focus()
     await first.trigger('keydown', {
       key: 'ArrowRight',
@@ -1916,9 +1976,8 @@ describe('WorkbenchApp', () => {
     await nextTick()
 
     expect(useWorkbenchStore().activeActivityId).toBe('agent:two')
-    expect(document.activeElement).toBe(
-      wrapper.get('[data-sidebar-row="activity:agent:two"]').find('button').element,
-    )
+    await flushPromises()
+    expect(terminalFocus).toHaveBeenCalled()
 
     const editor = wrapper.get('[data-editor-stub]')
     editor.element.focus()
@@ -1939,7 +1998,7 @@ describe('WorkbenchApp', () => {
 
     // WebKit does not focus buttons on click: the row click selects the
     // Activity while document focus stays on <body>.
-    const row = wrapper.get('[data-sidebar-row="activity:agent:one"]')
+    const row = wrapper.get('[data-main-tab="agent:one"]')
     row.find('button').element.dispatchEvent(
       new Event('pointerdown', { bubbles: true }),
     )
@@ -1968,7 +2027,7 @@ describe('WorkbenchApp', () => {
     await nextTick()
     activityApi.setActivityArchived.mockClear()
 
-    const row = wrapper.get('[data-sidebar-row="activity:agent:ended"]')
+    const row = wrapper.get('[data-main-tab="agent:ended"]')
     row.find('button').element.dispatchEvent(
       new Event('pointerdown', { bubbles: true }),
     )
@@ -1999,7 +2058,7 @@ describe('WorkbenchApp', () => {
 
     await wrapper.get('[data-pane-restore="activity"]').trigger('click')
     await nextTick()
-    expect(document.activeElement).toBe(wrapper.get('[data-pane-action="expand"]').element)
+    expect(document.activeElement).toBe(wrapper.get('[aria-label="All tabs"]').element)
 
     const sidebarCollapse = wrapper.get('[data-sidebar-collapse]')
     sidebarCollapse.element.focus()
@@ -2021,15 +2080,15 @@ describe('WorkbenchApp', () => {
     })
     await nextTick()
 
-    const row = wrapper.get('[data-sidebar-row="activity:agent:ended"]')
-    await row.trigger('click')
+    const row = wrapper.get('[data-main-tab="agent:ended"]')
+    await row.find('[role=tab]').trigger('click')
     row.find('button').element.focus()
     row.find('button').element.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
     wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('closeRequest')
     await flushPromises()
 
     expect(activityApi.setActivityArchived).toHaveBeenCalledWith('agent:ended', true)
-    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('rail')
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
 
     useFileStore().newFile()
     wrapper.get('[data-editor-stub]').element.focus()
@@ -2040,7 +2099,7 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('rail')
   })
 
-  it('adapts narrow windows to one focused surface and restores the desktop layout', async () => {
+  it('adapts narrow windows to one focused surface and preserves panel choices when widened', async () => {
     const wrapper = await render({ workspace: '/w' })
     useFileStore().newFile()
     const activityPane = wrapper.get('[data-pane="activity"]')
@@ -2063,19 +2122,39 @@ describe('WorkbenchApp', () => {
     window.innerWidth = 900
     window.dispatchEvent(new Event('resize'))
     await nextTick()
-    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('rail')
     expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('expanded')
-    expect(wrapper.get('[data-pane="editor"]').attributes('style')).toContain('width: 512px')
 
     window.innerWidth = 800
     window.dispatchEvent(new Event('resize'))
     await nextTick()
-    expect(wrapper.get('[data-pane="editor"]').attributes('style')).toContain('width: 412px')
+    expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('rail')
 
     window.innerWidth = 1280
     window.dispatchEvent(new Event('resize'))
     await nextTick()
-    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 240px')
+    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 52px')
+  })
+
+  it.each(['sidebar', 'activity', 'editor'])('keeps a manual %s collapse across wider window boundaries', async (pane) => {
+    window.innerWidth = 700
+    const wrapper = await render({ workspace: '/w' })
+    const workbench = useWorkbenchStore()
+    workbench.setPaneState(pane, 'rail')
+    await nextTick()
+    for (const width of [800, 1039, 1040, 1500]) {
+      window.innerWidth = width
+      window.dispatchEvent(new Event('resize'))
+      await nextTick()
+      expect(workbench.paneLayout[pane].state).toBe('rail')
+    }
+    if (pane === 'editor') {
+      expect(useFileStore().currentFile).toBeFalsy()
+      expect(wrapper.get('[data-pane="editor"]').attributes('data-pane-state')).toBe('rail')
+      expect(editorNew).not.toHaveBeenCalled()
+    }
+    wrapper.unmount()
+    expect(useSettingsStore().workbenchLayout[pane].state).toBe('rail')
   })
 
   it('restores persisted widths but refuses to boot with the Editor hidden', async () => {

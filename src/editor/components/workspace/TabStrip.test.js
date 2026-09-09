@@ -28,10 +28,10 @@ describe('TabStrip', () => {
   it('keeps file tabs visible and bottom-aligned in the full editor header', () => {
     const w = mountStrip({ activeTab: 0 })
     const tablist = w.get('[role="tablist"]')
-    const scrollRegion = w.get('.tab-scroll')
+    const scrollRegion = w.get('.pane-tab-scroll')
 
-    expect(tablist.classes()).toEqual(expect.arrayContaining(['h-full', 'items-end']))
-    expect(scrollRegion.classes()).toEqual(expect.arrayContaining(['h-full', 'items-end']))
+    expect(tablist.classes()).toEqual(expect.arrayContaining(['pane-tab-scroll']))
+    expect(scrollRegion.classes()).toEqual(expect.arrayContaining(['pane-tab-scroll']))
     expect(fileTabs(w)[0].classes()).toContain('tab-active')
     expect(fileTabs(w)[0].attributes('aria-label')).toBe('doc.md')
   })
@@ -161,7 +161,8 @@ describe('TabStrip', () => {
     const w = mountStrip()
     const plusBtn = w.find('button[aria-label="New tab"]')
     expect(plusBtn.exists()).toBe(true)
-    expect(plusBtn.classes()).toContain('h-[28px]')
+    expect(plusBtn.classes()).toContain('pane-icon-button')
+    expect(plusBtn.element.closest('.tab-scroll')).toBeNull()
     expect(plusBtn.classes()).not.toContain('my-auto')
     await plusBtn.trigger('click')
     expect(w.emitted('add-tab')).toBeTruthy()
@@ -170,7 +171,7 @@ describe('TabStrip', () => {
   it('keeps the last-tab close affordance available for embedded pane collapse', () => {
     const w = mountStrip({ tabs: [{ id: 'tab-solo', name: 'solo.md', dirty: false }] })
     const closeButton = w.get('button[aria-label="Close solo.md"]')
-    expect(closeButton.attributes('title')).toBe('Close tab')
+    expect(closeButton.attributes('title')).toBe('Close')
   })
 
   it('offers close and Move to Trash actions in a named-file tab menu', async () => {

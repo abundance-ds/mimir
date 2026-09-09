@@ -15,7 +15,7 @@
       @click.stop="togglePopover"
       @keydown.down.prevent="openPopover"
     >
-      <span class="ml-3 grid size-7 shrink-0 place-items-center border border-rule-light bg-chrome-mid font-sans text-[10px] font-semibold uppercase text-ink-2 group-hover:border-rule">
+      <span class="ml-[12px] grid size-[28px] shrink-0 place-items-center border border-rule-light bg-chrome-mid font-sans text-[10px] font-semibold uppercase text-ink-2 group-hover:border-rule">
         {{ monogram }}
       </span>
       <span v-if="!collapsed" class="ml-2 min-w-0 flex-1">

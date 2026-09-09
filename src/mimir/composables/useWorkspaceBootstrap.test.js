@@ -51,7 +51,7 @@ describe('workspace bootstrap graph configuration', () => {
     }
     const workbench = {
       activeActivityId: 'files',
-      resetActivityHistory: vi.fn(),
+      selectWorkspaceActivity: vi.fn(),
       setPaneState: vi.fn(),
     }
     const bootstrap = useWorkspaceBootstrap({

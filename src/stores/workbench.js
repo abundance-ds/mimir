@@ -9,25 +9,23 @@ const PANE_IDS = ['sidebar', 'activity', 'editor']
 const PANE_STATES = new Set(['expanded', 'rail'])
 
 const DEFAULT_LAYOUT = Object.freeze({
-  sidebar: Object.freeze({ state: 'expanded', width: 240 }),
+  sidebar: Object.freeze({ state: 'expanded', width: 280 }),
   activity: Object.freeze({ state: 'expanded', width: 560 }),
   editor: Object.freeze({ state: 'expanded', width: 520 }),
 })
 
 const WIDTH_RANGES = Object.freeze({
-  sidebar: Object.freeze({ min: 180, max: 320 }),
+  sidebar: Object.freeze({ min: 240, max: 400 }),
   activity: Object.freeze({ min: 336 }),
   editor: Object.freeze({ min: 336 }),
 })
 
 export const useWorkbenchStore = defineStore('workbench', () => {
   const paneLayout = reactive(cloneDefaultLayout())
-  const activityHistory = ref(createHistory('files'))
+  const activeActivityId = ref('')
+  const openTabIds = ref([])
   const singlePaneMode = ref(false)
 
-  const activeActivityId = computed(() => activityHistory.value.current)
-  const canGoPreviousActivity = computed(() => activityHistory.value.back.length > 0)
-  const canGoNextActivity = computed(() => activityHistory.value.forward.length > 0)
   const expandedPanes = computed(() =>
     PANE_IDS.filter((pane) => paneLayout[pane].state === 'expanded'),
   )
@@ -107,45 +105,37 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   function openActivity(id) {
-    const next = normalizedActivityId(id)
-    const history = activityHistory.value
-    if (history.current === next) return
-    activityHistory.value = {
-      current: next,
-      back: history.current ? [...history.back, history.current] : [...history.back],
-      forward: [],
+    const next = String(id || '').trim()
+    if (next && !openTabIds.value.includes(next)) openTabIds.value.push(next)
+    activeActivityId.value = next
+  }
+
+  function closeTab(id, visibleIds = openTabIds.value) {
+    const index = visibleIds.indexOf(id)
+    openTabIds.value = openTabIds.value.filter(tab => tab !== id)
+    if (activeActivityId.value === id) {
+      const remaining = visibleIds.filter(tab => tab !== id)
+      activeActivityId.value = remaining[Math.min(Math.max(index, 0), remaining.length - 1)] || ''
     }
   }
 
-  function previousActivity() {
-    const history = activityHistory.value
-    if (!history.back.length) return
-    const previous = history.back[history.back.length - 1]
-    activityHistory.value = {
-      current: previous,
-      back: history.back.slice(0, -1),
-      forward: history.current ? [history.current, ...history.forward] : [...history.forward],
-    }
+  function restoreTabs(ids) {
+    openTabIds.value = [...new Set((Array.isArray(ids) ? ids : []).filter(id => typeof id === 'string' && id))]
   }
 
-  function nextActivity() {
-    const history = activityHistory.value
-    if (!history.forward.length) return
-    const [next, ...forward] = history.forward
-    activityHistory.value = {
-      current: next,
-      back: history.current ? [...history.back, history.current] : [...history.back],
-      forward,
-    }
+  function reorderTabs(ids) {
+    const visible = new Set(ids)
+    let index = 0
+    openTabIds.value = openTabIds.value.map(id => visible.has(id) ? ids[index++] : id)
   }
 
-  function resetActivityHistory(current = 'files') {
-    activityHistory.value = createHistory(normalizedActivityId(current))
+  function selectWorkspaceActivity(current = '') {
+    openActivity(current)
   }
 
   function resetForWorkspace() {
     restoreLayout(DEFAULT_LAYOUT)
-    resetActivityHistory()
+    selectWorkspaceActivity()
   }
 
   function normalizeLayout() {
@@ -162,10 +152,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   return {
     paneLayout,
-    activityHistory,
+    openTabIds,
+    closeTab,
+    restoreTabs,
+    reorderTabs,
     activeActivityId,
-    canGoPreviousActivity,
-    canGoNextActivity,
     expandedPanes,
     singlePaneMode,
     setPaneState,
@@ -177,16 +168,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     restoreLayout,
     layoutSnapshot,
     openActivity,
-    previousActivity,
-    nextActivity,
-    resetActivityHistory,
+    selectWorkspaceActivity,
     resetForWorkspace,
   }
 })
-
-function createHistory(current = null) {
-  return { current, back: [], forward: [] }
-}
 
 function cloneDefaultLayout() {
   return {
@@ -202,12 +187,6 @@ function clampPaneWidth(pane, value) {
   const width = Number.isFinite(value) ? value : fallback
   const lower = Math.max(range.min, width)
   return Number.isFinite(range.max) ? Math.min(range.max, lower) : lower
-}
-
-function normalizedActivityId(id) {
-  const value = String(id || '').trim()
-  if (!value) throw new Error('Activity id must not be empty.')
-  return value
 }
 
 function assertPane(pane) {

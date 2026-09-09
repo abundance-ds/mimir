@@ -70,15 +70,14 @@ describe('Workbench focus-aware keyboard routing', () => {
     })).toEqual({ action: 'close-activity', activityId: '' })
   })
 
-  it('routes New to the CLI Activity chooser without stealing Editor New File', () => {
+  it('routes New to the main tab chooser without stealing Editor New File', () => {
     expect(routeWorkbenchKey({
       key: 'n',
       primary: true,
       focusOwner: 'activity',
       activityNewTargetId: 'preset:review',
     })).toEqual({
-      action: 'quick-open-new-activity',
-      targetId: 'preset:review',
+      action: 'new-tab',
     })
     expect(routeWorkbenchKey({
       key: 'n',
@@ -86,8 +85,7 @@ describe('Workbench focus-aware keyboard routing', () => {
       focusOwner: 'activity',
       activityNewTargetId: '',
     })).toEqual({
-      action: 'quick-open-new-activity',
-      targetId: '',
+      action: 'new-tab',
     })
     expect(routeWorkbenchKey({
       key: 'n',
@@ -99,11 +97,11 @@ describe('Workbench focus-aware keyboard routing', () => {
       key: 'n',
       primary: true,
       focusOwner: 'activity',
-    })).toBeNull()
+    })).toEqual({ action: 'new-tab' })
   })
 
-  it('does not steal close or tab switching without a focus owner', () => {
-    expect(routeWorkbenchKey({ key: 'w', primary: true })).toBeNull()
+  it('routes close without a focus owner but leaves tab switching alone', () => {
+    expect(routeWorkbenchKey({ key: 'w', primary: true })).toEqual({ action: 'close-focused' })
     expect(routeWorkbenchKey({
       key: 'ArrowRight',
       primary: true,

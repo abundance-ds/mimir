@@ -1,5 +1,6 @@
 import { nextTick, ref } from 'vue'
 import { nextWorkbenchZoom, workbenchZoomKeyAction } from '../../shared/workbenchZoom.js'
+import { closeCurrentWindow } from '../../services/window.js'
 import { routeWorkbenchKey } from '../workbenchKeyboard.js'
 
 export function useWorkbenchKeyboardRouting({
@@ -17,11 +18,13 @@ export function useWorkbenchKeyboardRouting({
   selectActivity,
   closeActivity,
   closeActivities,
-  collapseEmptyEditor,
+  closeWindow = closeCurrentWindow,
 }) {
   const lastFocus = ref({ owner: 'none', activityId: '' })
 
   function onKeydown(event) {
+    if (event.isComposing || event.keyCode === 229) return
+    if (event.target?.closest?.('[data-tab-rename]')) return
     const zoomAction = workbenchZoomKeyAction(event)
     if (zoomAction) {
       consume(event)
@@ -67,15 +70,14 @@ export function useWorkbenchKeyboardRouting({
       focusOwner: focus.owner,
       sidebarActivityId: focus.activityId,
       sidebarSelectionCount: sidebarSelection.value.length,
-      activityNewTargetId: activityNewTargetId.value,
     })
     if (!result) return
 
     consume(event)
-    if (result.action === 'quick-open') {
+    if (result.action === 'new-tab') {
+      openQuickOpen('tabs', String(event.key).toLowerCase() === 'n' ? activityNewTargetId.value : '')
+    } else if (result.action === 'quick-open') {
       openQuickOpen()
-    } else if (result.action === 'quick-open-new-activity') {
-      openQuickOpen('new-activity', result.targetId)
     } else if (result.action === 'toggle-sidebar') {
       void toggleSidebar()
     } else if (result.action === 'cycle-editor') {
@@ -87,12 +89,14 @@ export function useWorkbenchKeyboardRouting({
       })
     } else if (result.action === 'close-editor') {
       closeForFocus({ owner: 'editor', activityId: '' })
+    } else if (result.action === 'close-focused') {
+      closeForFocus(focus)
     } else if (result.action === 'close-selected-activities') {
       void closeActivities?.(sidebarSelection.value)
     } else if (result.action === 'close-activity') {
       closeForFocus({
-        owner: result.activityId ? 'sidebar' : 'activity',
-        activityId: result.activityId,
+        owner: 'activity',
+        activityId: result.activityId || focus.activityId,
       })
     }
   }
@@ -106,7 +110,7 @@ export function useWorkbenchKeyboardRouting({
       return { owner: 'editor', activityId: '' }
     }
     if (element.closest('[data-pane="activity"]')) {
-      return { owner: 'activity', activityId: '' }
+      return { owner: 'activity', activityId: element.closest('[data-main-tab]')?.getAttribute('data-main-tab') || '' }
     }
     if (element.closest('[data-pane="sidebar"]')) {
       const row = element.closest('[data-sidebar-row^="activity:"]')
@@ -129,6 +133,7 @@ export function useWorkbenchKeyboardRouting({
       quickOpen.value = false
       return
     }
+    if (document.querySelector('[aria-modal="true"]')) return
     const current = keyboardFocus(document.activeElement)
     closeForFocus(current.owner === 'none' ? lastFocus.value : current)
   }
@@ -137,8 +142,8 @@ export function useWorkbenchKeyboardRouting({
     if (quickOpen.value || document.querySelector('[aria-modal="true"]')) return
     const current = keyboardFocus(document.activeElement)
     const focus = current.owner === 'none' ? lastFocus.value : current
-    if (focus.owner === 'activity' && activityNewTargetId.value !== null) {
-      openQuickOpen('new-activity', activityNewTargetId.value)
+    if (focus.owner === 'activity') {
+      openQuickOpen('tabs', activityNewTargetId.value)
       return
     }
     editorRef.value?.mimirNewFile?.()
@@ -152,30 +157,36 @@ export function useWorkbenchKeyboardRouting({
   }
 
   function closeForFocus(focus) {
-    if (focus.owner === 'editor') {
-      const visibleFiles = editorFiles.visibleOpenFiles || editorFiles.openFiles
-      if (!visibleFiles.length) collapseEmptyEditor()
-      else void editorRef.value?.mimirCloseActiveTab?.()
+    const rows = sidebarActivities.value
+    const visibleFiles = editorFiles.visibleOpenFiles || editorFiles.openFiles
+    const hasEditorTabs = editorRef.value?.mimirHasOpenTabs?.() ?? Boolean(visibleFiles.length)
+    if (focus.owner === 'editor' && hasEditorTabs) {
+      void editorRef.value?.mimirCloseActiveTab?.()
       return
     }
-    if (focus.owner === 'activity') {
-      void closeActivity(workbench.activeActivityId)
+    if (focus.owner === 'sidebar' && sidebarSelection.value.length) {
+      void closeActivities?.(sidebarSelection.value)
       return
     }
-    if (focus.owner === 'sidebar') {
-      if (sidebarSelection.value.length) {
-        void closeActivities?.(sidebarSelection.value)
-        return
-      }
-      if (focus.activityId) void closeActivity(focus.activityId)
+    const tab = rows.find(tab => tab.id === focus.activityId)
+      || rows.find(tab => tab.id === workbench.activeActivityId)
+      || rows[0]
+    if (tab) {
+      void closeActivity(tab.id)
+      return
     }
+    if (hasEditorTabs) {
+      void editorRef.value?.mimirCloseActiveTab?.()
+      return
+    }
+    void closeWindow().catch(error => console.error('[workbench-close]', error))
   }
 
   function cycleActivity(direction, { focusSidebar = false, fromId = '' } = {}) {
     const rows = sidebarActivities.value
     if (!rows.length) return
     const index = rows.findIndex(
-      activity => activity.id === (fromId || workbench.activeActivityId),
+      activity => activity.id === (rows.some(tab => tab.id === fromId) ? fromId : workbench.activeActivityId),
     )
     const start = index < 0 ? (direction > 0 ? -1 : 0) : index
     const next = (start + direction + rows.length) % rows.length

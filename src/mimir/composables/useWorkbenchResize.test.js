@@ -40,7 +40,7 @@ describe('useWorkbenchResize', () => {
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150 }))
     runFrame()
 
-    expect(store.paneLayout.sidebar.width).toBe(290)
+    expect(store.paneLayout.sidebar.width).toBe(330)
     expect(resize.dragging.value).toBe(true)
 
     window.dispatchEvent(new MouseEvent('pointerup', { clientX: 150 }))
@@ -60,11 +60,11 @@ describe('useWorkbenchResize', () => {
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150 }))
 
     expect(setPaneWidth).not.toHaveBeenCalled()
-    expect(store.paneLayout.sidebar.width).toBe(240)
+    expect(store.paneLayout.sidebar.width).toBe(280)
 
     runFrame()
     expect(setPaneWidth).toHaveBeenCalledTimes(1)
-    expect(setPaneWidth).toHaveBeenCalledWith('sidebar', 290)
+    expect(setPaneWidth).toHaveBeenCalledWith('sidebar', 330)
   })
 
   it('flushes the exact final width on release even with a frame pending', () => {
@@ -76,7 +76,7 @@ describe('useWorkbenchResize', () => {
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 145 }))
     window.dispatchEvent(new MouseEvent('pointerup', { clientX: 145 }))
 
-    expect(store.paneLayout.sidebar.width).toBe(285)
+    expect(store.paneLayout.sidebar.width).toBe(325)
     expect(setPaneWidth).toHaveBeenCalledTimes(1)
 
     runFrame()
@@ -101,12 +101,12 @@ describe('useWorkbenchResize', () => {
     resize.start('sidebar', { clientX: 100 })
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 1000 }))
     runFrame()
-    expect(store.paneLayout.sidebar.width).toBe(320)
+    expect(store.paneLayout.sidebar.width).toBe(400)
 
     resize.dispose()
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: -1000 }))
     runFrame()
-    expect(store.paneLayout.sidebar.width).toBe(320)
+    expect(store.paneLayout.sidebar.width).toBe(400)
     expect(resize.dragging.value).toBe(false)
   })
 
@@ -121,6 +121,6 @@ describe('useWorkbenchResize', () => {
     runFrame()
 
     expect(setPaneWidth).not.toHaveBeenCalled()
-    expect(store.paneLayout.sidebar.width).toBe(240)
+    expect(store.paneLayout.sidebar.width).toBe(280)
   })
 })

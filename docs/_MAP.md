@@ -17,13 +17,14 @@ and [issues.md](issues.md); UI work also requires
 | Area | Owning document | Main source |
 |---|---|---|
 | Workbench and navigation | [workbench-design.md](workbench-design.md) | `src/mimir/components/`, `src/mimir/composables/`, `src/stores/workbench.js` |
-| Shell chrome: bars, bands, footers, layers | [chrome-ui.md](chrome-ui.md) | `src/shared/styles/pane-chrome.css`, `src/mimir/paneChromeInventory.js`, `PaneFrame.vue`, `AppHeader.vue` |
+| Shell chrome: bars, bands, footers, layers | [chrome-ui.md](chrome-ui.md) | `src/shared/ui/chrome/`, `src/shared/styles/pane-chrome.css`, `src/mimir/paneControls.js`, `src/mimir/paneChromeInventory.js` |
 | Activities, terminals, agents | [activities.md](activities.md), [agent-setup.md](agent-setup.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores and surfaces |
 | Files and Project Git | [files.md](files.md) | `file_index*.rs`, `workspace_files.rs`, `git.rs`, `managed_git.rs`; Files Activity and stores |
 | Business graph and Team Git | [business-graph.md](business-graph.md) | native `business_graph/`; graph service, store, and app |
 | Scribe | [meetings.md](meetings.md) | native `meetings/`, `meeting_filing.rs`; Scribe service, store, and app |
 | Tracker | [tracker.md](tracker.md) | native `tracker/`; Tracker service, store, app, and settings |
 | Editor, diffs, comments | [editor-system.md](editor-system.md), [comments.md](comments.md) | `src/editor/`, file/diff/comment stores |
+| Shared Scratchpad | [scratchpad.md](scratchpad.md) | native `scratchpad.rs`; Scratchpad service, store, and Editor components |
 | Inline and provider AI | [ai-system.md](ai-system.md), [inline-ai.md](inline-ai.md) | native `ai*`; `src/services/ai/`, Inline AI, ghost extension |
 | Tools and agent API | [agent-interface.md](agent-interface.md), [mcp.md](mcp.md) | `tool_*`, `mimir_cli.rs`, `bin/mimir*` |
 | Apps | [apps-system.md](apps-system.md) | `apps.rs`, app catalog, hosts, and SDK |

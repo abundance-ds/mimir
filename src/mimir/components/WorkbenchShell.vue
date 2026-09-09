@@ -57,7 +57,6 @@
         pane="activity"
         :title="activityTitle"
         :meta="activityMeta"
-        quiet
         @restore="restorePane('activity')"
       />
     </section>

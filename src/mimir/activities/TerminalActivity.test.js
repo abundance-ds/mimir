@@ -445,10 +445,8 @@ describe('TerminalActivity', () => {
     expect(wrapper.text()).not.toContain('/workspace')
     expect(wrapper.get('[data-terminal-controls]').attributes('aria-label')).toBe('Codex process controls')
     expect(wrapper.find('[data-terminal-paste]').exists()).toBe(false)
-    const interrupt = wrapper.get('[data-terminal-interrupt]')
-    expect(interrupt.find('svg').exists()).toBe(true)
-    expect(interrupt.attributes('title')).toBe('Interrupt command (Ctrl-C)')
     expect(wrapper.find('[data-terminal-stop]').exists()).toBe(false)
+    expect(wrapper.find('[data-terminal-interrupt]').exists()).toBe(false)
   })
 
   it('explains an automatic resume failure without asking for another Resume click', async () => {
@@ -480,8 +478,8 @@ describe('TerminalActivity', () => {
     const wrapper = await initialize(render({}, { stubTeleport: false }))
 
     expect(target.querySelector('[data-terminal-controls]')).not.toBeNull()
-    expect(target.querySelector('[data-terminal-interrupt]')).not.toBeNull()
     expect(target.querySelector('[data-terminal-stop]')).toBeNull()
+    expect(target.querySelector('[data-terminal-interrupt]')).toBeNull()
 
     await wrapper.setProps({ active: false })
     expect(target.querySelector('[data-terminal-controls]')).toBeNull()
@@ -607,7 +605,7 @@ describe('TerminalActivity', () => {
       status: 'done',
     })
     await nextTick()
-    expect(wrapper.get('[data-terminal-interrupt]').exists()).toBe(true)
+    expect(wrapper.find('[data-terminal-stop]').exists()).toBe(false)
     expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
 
     api.callback({
@@ -1055,16 +1053,24 @@ describe('TerminalActivity', () => {
     await flushPromises()
   })
 
-  it('keeps interrupt and restart as explicit actions', async () => {
+  it('retains Ctrl-C for a plain terminal', async () => {
+    const wrapper = await initialize(render({ activity: { ...agent, kind: 'terminal' } }))
+    await wrapper.get('[data-terminal-interrupt]').trigger('click')
+    await flushPromises()
+    expect(Array.from(api.write.mock.calls[0][1])).toEqual([3])
+    expect(wrapper.emitted('request-stop-and-archive')).toBeUndefined()
+  })
+
+  it('leaves agent closure to its tab and retains restart after exit', async () => {
     const wrapper = await initialize()
     await wrapper.vm.pasteText('pasted')
     await flushPromises()
     expect(Array.from(api.write.mock.calls[0][1])).toEqual([112, 97, 115, 116, 101, 100])
 
-    await wrapper.get('[data-terminal-interrupt]').trigger('click')
-    await flushPromises()
-    expect(Array.from(api.write.mock.calls[1][1])).toEqual([3])
-    expect(wrapper.emitted('interrupt')[0][0]).toEqual({ activityId: 'agent:one' })
+    expect(wrapper.find('[data-terminal-stop]').exists()).toBe(false)
+    expect(api.write).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('request-stop-and-archive')).toBeUndefined()
+    expect(wrapper.emitted('interrupt')).toBeUndefined()
 
     api.callback({
       type: 'exit',
@@ -1162,8 +1168,8 @@ describe('TerminalActivity', () => {
     expect(api.attach).toHaveBeenLastCalledWith('agent:one', expect.any(String))
     expect(writtenBytes(terminal).at(-1)).toEqual([66])
     expect(wrapper.find('[data-terminal-restart]').exists()).toBe(false)
-    expect(wrapper.find('[data-terminal-interrupt]').exists()).toBe(true)
     expect(wrapper.find('[data-terminal-stop]').exists()).toBe(false)
+    expect(wrapper.find('[data-terminal-interrupt]').exists()).toBe(false)
   })
 
   it('does not reset or attach twice when initial attachment already acquired the resumed run', async () => {

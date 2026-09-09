@@ -16,7 +16,7 @@ describe('workbench store', () => {
     const store = useWorkbenchStore()
 
     expect(store.paneLayout).toEqual({
-      sidebar: { state: 'expanded', width: 240 },
+      sidebar: { state: 'expanded', width: 280 },
       activity: { state: 'expanded', width: 560 },
       editor: { state: 'expanded', width: 520 },
     })
@@ -35,12 +35,12 @@ describe('workbench store', () => {
     store.setPaneWidth('sidebar', 20)
     store.setPaneWidth('activity', 100)
     store.setPaneWidth('editor', 100)
-    expect(store.paneLayout.sidebar.width).toBe(180)
+    expect(store.paneLayout.sidebar.width).toBe(240)
     expect(store.paneLayout.activity.width).toBe(336)
     expect(store.paneLayout.editor.width).toBe(336)
 
     store.setPaneWidth('sidebar', 900)
-    expect(store.paneLayout.sidebar.width).toBe(320)
+    expect(store.paneLayout.sidebar.width).toBe(400)
   })
 
   it('restores Editor when Activity is collapsed while Editor is already railed', () => {
@@ -104,7 +104,7 @@ describe('workbench store', () => {
     const store = useWorkbenchStore()
 
     store.restoreLayout({
-      sidebar: { state: 'rail', width: 240 },
+      sidebar: { state: 'rail', width: 280 },
       activity: { state: 'rail', width: 560 },
       editor: { state: 'rail', width: 520 },
     })
@@ -124,7 +124,7 @@ describe('workbench store', () => {
     })
 
     expect(store.paneLayout).toEqual({
-      sidebar: { state: 'expanded', width: 240 },
+      sidebar: { state: 'expanded', width: 280 },
       activity: { state: 'rail', width: 336 },
       editor: { state: 'expanded', width: 520 },
     })
@@ -141,62 +141,29 @@ describe('workbench store', () => {
     expect(JSON.parse(JSON.stringify(store.layoutSnapshot()))).toEqual(store.layoutSnapshot())
   })
 
-  it('tracks independent Activity navigation history', () => {
+  it('opens unique tabs once and selects without changing order', () => {
     const store = useWorkbenchStore()
-
-    store.openActivity('files')
-    store.openActivity('agent:alpha')
-    store.openActivity('terminal:beta')
-    expect(store.activeActivityId).toBe('terminal:beta')
-
-    store.previousActivity()
-    expect(store.activeActivityId).toBe('agent:alpha')
-    store.previousActivity()
-    expect(store.activeActivityId).toBe('files')
-    store.nextActivity()
-    expect(store.activeActivityId).toBe('agent:alpha')
-
-    store.openActivity('app:gamma')
-    expect(store.activeActivityId).toBe('app:gamma')
-    expect(store.canGoNextActivity).toBe(false)
+    store.openActivity('graph'); store.openActivity('agent'); store.openActivity('graph')
+    expect(store.openTabIds).toEqual(['graph', 'agent'])
+    expect(store.activeActivityId).toBe('graph')
   })
-
-  it('does not duplicate history when the active Activity is selected again', () => {
+  it('closes to the adjacent visible tab and preserves hidden project tabs', () => {
     const store = useWorkbenchStore()
-
-    store.openActivity('files')
-    store.openActivity('files')
-    store.previousActivity()
-
-    expect(store.activeActivityId).toBe('files')
-    expect(store.canGoPreviousActivity).toBe(false)
+    store.restoreTabs(['other-project', 'graph', 'agent', 'terminal'])
+    store.openActivity('agent')
+    store.closeTab('agent', ['graph', 'agent', 'terminal'])
+    expect(store.activeActivityId).toBe('terminal')
+    expect(store.openTabIds).toEqual(['other-project', 'graph', 'terminal'])
+    store.closeTab('terminal', ['terminal'])
+    expect(store.activeActivityId).toBe('')
+    expect(store.paneLayout.activity.state).toBe('expanded')
   })
-
-  it('resets Activity navigation for a project switch without changing pane layout', () => {
+  it('reorders visible tabs while retaining other project positions', () => {
     const store = useWorkbenchStore()
-    store.openActivity('agent:alpha')
-    store.setPaneState('sidebar', 'rail')
-    store.setPaneWidth('editor', 700)
-
-    store.resetActivityHistory()
-
-    expect(store.activeActivityId).toBe('files')
-    expect(store.canGoPreviousActivity).toBe(false)
-    expect(store.paneLayout.sidebar).toEqual({ state: 'rail', width: 240 })
-    expect(store.paneLayout.editor).toEqual({ state: 'expanded', width: 700 })
-  })
-
-  it('resets navigation and layout cleanly for a different workspace', () => {
-    const store = useWorkbenchStore()
-    store.openActivity('agent:alpha')
-    store.setPaneState('sidebar', 'rail')
-    store.setPaneWidth('editor', 700)
-
-    store.resetForWorkspace()
-
-    expect(store.activeActivityId).toBe('files')
-    expect(store.canGoPreviousActivity).toBe(false)
-    expect(store.paneLayout.sidebar).toEqual({ state: 'expanded', width: 240 })
-    expect(store.paneLayout.editor).toEqual({ state: 'expanded', width: 520 })
+    store.restoreTabs(['a', 'hidden', 'b', 'a', null])
+    store.reorderTabs(['b', 'a'])
+    expect(store.openTabIds).toEqual(['b', 'hidden', 'a'])
+    store.selectWorkspaceActivity('b')
+    expect(store.openTabIds).toEqual(['b', 'hidden', 'a'])
   })
 })

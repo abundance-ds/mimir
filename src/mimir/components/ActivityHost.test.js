@@ -62,7 +62,7 @@ describe('ActivityHost', () => {
       props: { activities: [], activeId: 'missing' },
     })
 
-    expect(wrapper.get('[data-activity-missing]').text()).toContain('missing')
+    expect(wrapper.get('[data-activity-missing]').text()).toContain('could not be restored')
     expect(wrapper.get('[data-activity-recover]').exists()).toBe(true)
   })
 

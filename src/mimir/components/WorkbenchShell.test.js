@@ -36,10 +36,24 @@ describe('WorkbenchShell', () => {
     })
   }
 
+  it.each(['expanded', 'rail'])('keeps both rail rows when the sidebar is %s', async (sidebar) => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+    store.setPaneState('sidebar', sidebar)
+    for (const pane of ['activity', 'editor']) {
+      store.setPaneState(pane, 'rail')
+      await wrapper.vm.$nextTick()
+      const rail = wrapper.get(`[data-pane-restore="${pane}"]`)
+      expect(rail.get('[data-rail-header]').classes()).toContain('pane-header')
+      expect(rail.get('[data-rail-footer]').classes()).toContain('pane-footer')
+      expect(rail.find('[data-rail-header] svg').exists()).toBe(pane === 'editor')
+    }
+  })
+
   it('renders the three pane stages edge to edge', () => {
     const wrapper = render()
 
-    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 240px')
+    expect(wrapper.get('[data-pane="sidebar"]').attributes('style')).toContain('width: 280px')
     expect(wrapper.get('[data-pane="activity"]').attributes('data-pane-state')).toBe('expanded')
     expect(wrapper.get('[data-pane="editor"]').attributes('style')).toContain('width: 520px')
     expect(wrapper.get('[data-testid="sidebar-slot"]').exists()).toBe(true)

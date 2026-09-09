@@ -59,7 +59,7 @@ describe('Pane chrome contract', () => {
       const source = read(entry.file)
       const tag = openingTag(source, entry.marker)
       expect(tag, `${entry.file}: no element carries ${entry.marker}`).not.toBe('')
-      const classes = staticClass(tag)
+      const classes = [staticClass(tag), tag.startsWith('<PaneBand') ? `pane-${tag.match(/kind="(header|footer)"/)?.[1]}` : ''].join(' ')
       expect(classes.split(/\s+/), `${entry.file} ${entry.marker}: missing ${entry.kind}`).toContain(entry.kind)
       const otherKinds = PANE_CHROME_KINDS.filter(kind => kind !== entry.kind)
       for (const kind of otherKinds) {
@@ -87,19 +87,22 @@ describe('Pane chrome contract', () => {
       ['mimir/components/WorkbenchSidebar.vue', 'data-sidebar-header'],
       ['mimir/components/PaneFrame.vue', 'data-pane-header'],
       ['editor/components/shell/AppHeader.vue', 'data-editor-header'],
+      ['mimir/components/RailRestore.vue', 'data-rail-header'],
     ])
   })
 
-  it('keeps editor file tabs legible and raised from the header band', () => {
-    const source = read('editor/components/workspace/TabStrip.vue')
-    const inactive = ownRuleBlocks(source, 'tab-inactive').join('\n')
-    const active = ownRuleBlocks(source, 'tab-active').join('\n')
-
-    expect(inactive).toContain('color: var(--color-ink-2)')
-    expect(active).toContain('border-color: var(--color-rule)')
-    expect(active).toContain('background: var(--color-chrome-high)')
-    expect(active).not.toContain('box-shadow')
-    expect(active).not.toContain('var(--color-accent)')
+  it('owns tab appearance in shared components, with no panel-specific tab skin', () => {
+    const shared = read('shared/ui/chrome/PaneTab.vue')
+    expect(shared).toContain('background: var(--color-chrome-high)')
+    expect(shared).toContain('font-family: var(--font-sans)')
+    for (const file of ['editor/components/workspace/TabStrip.vue', 'mimir/components/ActivityTabs.vue']) {
+      const source = read(file)
+      for (const component of ['PaneTab', 'PaneTabButton', 'PaneTabClose', 'PaneTabStrip']) {
+        expect(source).toContain(`<${component}`)
+      }
+      expect(source).not.toMatch(/\.(?:file-tab|main-tab|tab-active|tab-inactive|tab-close)\s*\{/)
+      expect(source).not.toContain('rounded-t-')
+    }
   })
 
   it('keeps identity out of app surfaces that use the pane header', () => {
@@ -115,8 +118,10 @@ describe('Pane chrome contract', () => {
 
   it('keeps the remaining shell rows on their specified heights', () => {
     const sidebarFooter = openingTag(read('mimir/components/WorkbenchSidebar.vue'), 'data-sidebar-footer')
-    expect(staticClass(sidebarFooter).split(/\s+/)).toContain('h-8')
-    expect(staticClass(sidebarFooter)).not.toMatch(/\bpy-/)
+    expect(sidebarFooter).toContain('<PaneBand')
+    expect(sidebarFooter).toContain('kind="footer"')
+    const settingsButton = openingTag(read('mimir/components/WorkbenchSidebar.vue'), 'data-sidebar-settings')
+    expect(staticClass(settingsButton).split(/\s+/)).toContain('h-full')
 
     expect(read('mimir/activities/RoutinesActivity.vue')).toContain('<span>New</span>')
     for (const file of [

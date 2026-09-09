@@ -29,11 +29,16 @@ export const PANE_CHROME_INVENTORY = Object.freeze([
   { file: 'mimir/components/PaneFrame.vue', marker: 'data-pane-header', kind: 'pane-header' },
   { file: 'editor/components/shell/AppHeader.vue', marker: 'data-editor-header', kind: 'pane-header' },
 
+  { file: 'mimir/components/RailRestore.vue', marker: 'data-rail-header', kind: 'pane-header' },
+  { file: 'mimir/components/RailRestore.vue', marker: 'data-rail-footer', kind: 'pane-footer' },
+  { file: 'mimir/components/WorkbenchSidebar.vue', marker: 'data-sidebar-footer', kind: 'pane-footer' },
+
   { file: 'mimir/apps/business-graph/GraphAppHeader.vue', marker: 'data-graph-topbar', kind: 'pane-bar', cssClass: 'graph-topbar' },
   { file: 'mimir/apps/business-graph/GraphViewbar.vue', marker: 'data-graph-viewbar', kind: 'pane-subbar', cssClass: 'graph-viewbar' },
   { file: 'mimir/apps/business-graph/DispatchBar.vue', marker: 'data-graph-dispatch', kind: 'pane-footer-input', cssClass: 'dispatch-bar' },
 
   { file: 'editor/components/workspace/EditorToolbar.vue', marker: 'data-editor-toolbar', kind: 'pane-bar', cssClass: 'editor-toolbar' },
+  { file: 'editor/components/workspace/ScratchpadBar.vue', marker: 'data-scratchpad-toolbar', kind: 'pane-bar' },
   { file: 'editor/components/shell/AppFooter.vue', marker: 'data-editor-footer', kind: 'pane-footer', cssClass: 'app-footer' },
   { file: 'editor/components/workspace/ImagePreview.vue', marker: 'data-image-toolbar', kind: 'pane-bar' },
   { file: 'editor/components/workspace/PdfPreview.vue', marker: 'data-pdf-toolbar', kind: 'pane-bar' },

@@ -38,10 +38,10 @@
     >
       <div class="max-w-xs">
         <p class="font-mono text-[10px] uppercase tracking-[0.14em] text-rem">
-          Activity unavailable
+          {{ activeId ? 'Tab unavailable' : 'New tab' }}
         </p>
         <p class="mt-2 text-[12px] leading-relaxed text-ink-2">
-          {{ activeId || 'The selected Activity' }} is missing or could not be restored.
+          {{ activeId ? 'This tab could not be restored.' : 'Open a tool or start a session.' }}
         </p>
         <button
           type="button"
@@ -49,7 +49,7 @@
           class="mt-4 h-8 border border-rule px-3 text-[10px] font-semibold text-ink-2 hover:bg-chrome hover:text-ink"
           @click="$emit('recover')"
         >
-          Open Files
+          New tab
         </button>
       </div>
     </div>

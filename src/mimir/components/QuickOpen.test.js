@@ -96,6 +96,35 @@ describe('QuickOpen', () => {
     })
   }
 
+  it('does not return focus to the opener after selecting a destination', async () => {
+    const opener = document.createElement('button')
+    const destination = document.createElement('button')
+    document.body.append(opener, destination)
+    opener.focus()
+    const w = render(true, { attachTo: document.body, props: { documents: [{ id: 'draft', name: 'Untitled' }], onActivate: () => destination.focus() } })
+    await flushPromises()
+    await w.get('input').trigger('keydown', { key: 'Enter' })
+    await w.setProps({ open: false })
+    await flushPromises()
+    expect(document.activeElement).toBe(destination)
+    w.unmount()
+    opener.remove()
+    destination.remove()
+  })
+
+  it('selects an open unsaved document by keyboard and keeps New tab available', async () => {
+    const w = render(true, { props: { documents: [{ id: 'draft', name: 'Untitled' }] } })
+    await flushPromises()
+    const input = w.get('input')
+    await input.setValue('untitled')
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('activate')[0][0]).toMatchObject({ type: 'document', documentId: 'draft' })
+    await input.setValue('no such entry')
+    await w.get('[data-quick-open-new-tab]').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Codex')
+  })
+
   it('shows a compact new-activity row, recent files, and history without live activities', () => {
     const wrapper = render()
     expect(wrapper.findAll('[data-quick-open-type]').map((row) => row.attributes('data-quick-open-type'))).toEqual([

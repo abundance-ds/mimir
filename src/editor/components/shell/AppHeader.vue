@@ -1,9 +1,10 @@
 <template>
-    <div
+    <PaneBand as="div" kind="header"
         ref="headerRef"
         data-tauri-drag-region="deep"
         data-editor-header
-        class="pane-header relative z-40 gap-0 px-[14px] whitespace-nowrap overflow-visible drag-region"
+        class="relative z-40 gap-0 whitespace-nowrap overflow-visible drag-region"
+        :class="embedded ? 'px-[8px]' : 'px-[14px]'"
         @keydown.esc="closeMenu"
     >
         <!-- Left: traffic-light spacer -->
@@ -17,34 +18,7 @@
         <!-- Gap between traffic lights and tabs -->
         <div v-if="!hideSidebar" data-tauri-drag-region class="w-7 shrink-0 self-stretch"></div>
 
-        <div
-            v-if="embedded && activityRailed"
-            data-editor-restore-cluster
-            class="no-drag mr-1 flex shrink-0 items-center border-r border-rule pr-1"
-        >
-            <button
-                v-if="sidebarRailed && activityRailed"
-                type="button"
-                data-editor-action="restore-sidebar"
-                class="sidebar-toggle no-drag"
-                title="Restore sidebar"
-                aria-label="Restore sidebar"
-                @click="restorePane('sidebar')"
-            >
-                <IconArrowBarRight :size="15" :stroke-width="1.9" />
-            </button>
-            <button
-                v-if="activityRailed"
-                type="button"
-                data-editor-action="restore-activity"
-                class="sidebar-toggle no-drag"
-                title="Restore activity"
-                aria-label="Restore activity"
-                @click="restorePane('activity')"
-            >
-                <IconLayoutSidebarLeftExpand :size="17" />
-            </button>
-        </div>
+        <PaneRestoreControls v-if="embedded" pane="editor" />
 
         <!-- File tabs -->
         <TabStrip
@@ -290,7 +264,7 @@
             <button
                 type="button"
                 data-editor-action="open-in-browser"
-                class="sidebar-toggle"
+                class="pane-icon-button sidebar-toggle"
                 :class="{ 'has-error': browserOpenError }"
                 :title="browserOpenError || 'Open in browser'"
                 aria-label="Open in browser"
@@ -303,49 +277,23 @@
             <span v-if="browserOpenError" class="sr-only" role="alert">{{ browserOpenError }}</span>
         </div>
 
-        <!-- Standalone editor sidebar toggle. Workbench pane controls live outside the editor. -->
-        <button
-            v-if="embedded"
-            type="button"
-            data-editor-action="expand"
-            class="sidebar-toggle no-drag"
-            :class="{ 'is-open': editorExpanded }"
-            :title="editorExpanded ? 'Restore split' : 'Expand Editor'"
-            :aria-label="editorExpanded ? 'Restore split' : 'Expand Editor'"
-            @click="workbench.setEditorExpanded(!editorExpanded)"
-        >
-            <IconArrowsMinimize v-if="editorExpanded" :size="15" :stroke-width="1.8" />
-            <IconArrowsMaximize v-else :size="15" :stroke-width="1.8" />
-        </button>
-        <button
-            v-if="embedded"
-            type="button"
-            data-editor-action="collapse"
-            class="sidebar-toggle no-drag"
-            title="Collapse editor"
-            aria-label="Collapse editor"
-            @click="collapseEditor"
-        >
-            <IconArrowBarToRight :size="15" :stroke-width="1.8" />
-        </button>
+        <PaneSizeControls v-if="embedded" pane="editor" />
 
-    </div>
+    </PaneBand>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import PaneBand from '../../../shared/ui/chrome/PaneBand.vue'
+
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { platformKind } from "../../../shared/platform.js";
 import { basename, dirname } from "../../../shared/utils/path.js";
-import { useWorkbenchStore } from "../../../stores/workbench.js";
+import PaneRestoreControls from "../../../mimir/components/PaneRestoreControls.vue";
+import PaneSizeControls from "../../../mimir/components/PaneSizeControls.vue";
 import TabStrip from "../workspace/TabStrip.vue";
 import {
     IconArrowBackUp,
     IconArrowForwardUp,
-    IconArrowBarToRight,
-    IconArrowBarRight,
-    IconArrowsMaximize,
-    IconArrowsMinimize,
-    IconLayoutSidebarLeftExpand,
     IconChevronDown,
     IconClipboard,
     IconCopy,
@@ -396,15 +344,8 @@ const emit = defineEmits([
 ]);
 
 const headerRef = ref(null);
-const workbench = useWorkbenchStore();
 const openMenu = ref(null);
 const isMac = computed(() => platformKind() === "macos");
-const sidebarRailed = computed(() => workbench.paneLayout.sidebar.state === "rail");
-const activityRailed = computed(() => workbench.paneLayout.activity.state === "rail");
-const editorExpanded = computed(
-    () => workbench.paneLayout.editor.state === "expanded"
-        && workbench.paneLayout.activity.state === "rail",
-);
 const clippedRecentFiles = computed(() => props.recentFiles.slice(0, 7));
 
 function closeMenu() {
@@ -451,24 +392,9 @@ function runEditAction(action) {
     emit("edit-command", action);
 }
 
-async function restorePane(pane) {
-    workbench.setPaneState(pane, "expanded");
-    await nextTick();
-    const target = pane === "sidebar"
-        ? document.querySelector("[data-sidebar-collapse], [data-sidebar-workspace]")
-        : document.querySelector('[data-pane-header="activity"] button:not(:disabled), [data-pane="activity"] button:not(:disabled)');
-    target?.focus();
-}
-
-async function collapseEditor() {
-    workbench.setPaneState("editor", "rail");
-    await nextTick();
-    document.querySelector('[data-pane-restore="editor"]')?.focus();
-}
-
 function onPointerDown(event) {
     if (!openMenu.value) return;
-    if (headerRef.value?.contains(event.target)) return;
+    if (headerRef.value?.$el?.contains(event.target)) return;
     closeMenu();
 }
 
@@ -671,40 +597,6 @@ onUnmounted(() => {
 
 .subtle-item {
     color: var(--color-ink-3);
-}
-
-.sidebar-toggle {
-    position: relative;
-    width: 28px;
-    height: 26px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: var(--color-ink-3);
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
-    transition:
-        color 140ms ease,
-        background 140ms ease,
-        border-color 140ms ease;
-}
-
-.sidebar-toggle:hover:not(:disabled) {
-    color: var(--color-ink);
-    background: var(--color-chrome-mid);
-    border-color: var(--color-rule-light);
-}
-
-.sidebar-toggle:focus-visible {
-    outline: 1px solid var(--color-accent);
-    outline-offset: -1px;
-}
-
-.sidebar-toggle:disabled {
-    cursor: default;
-    opacity: 0.45;
 }
 
 .sidebar-toggle.has-error {

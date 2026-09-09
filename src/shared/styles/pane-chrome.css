@@ -13,6 +13,31 @@
     background: var(--color-chrome);
   }
 
+  /* Pixel dimensions stay fixed at the 13 px interface root font. */
+  .pane-icon-button {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-ink-3);
+  }
+
+  .pane-icon-button:hover:not(:disabled) {
+    background: var(--color-chrome-mid);
+    color: var(--color-ink);
+  }
+
+  .pane-icon-button:focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
+  }
+
+  .pane-icon-button:disabled {
+    opacity: 0.45;
+  }
+
   .pane-bar {
     display: flex;
     height: 36px;

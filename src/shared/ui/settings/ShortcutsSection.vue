@@ -54,7 +54,9 @@ const editorShortcuts = [
 
 const workbenchShortcuts = [
   { action: 'Go to', keys: ['⌘', 'P'] },
-  { action: 'Cycle activities', keys: ['⌥', '⌘', '←', '/', '⌥', '⌘', '→'] },
+  { action: 'New main tab', keys: ['⌘', 'T', '/', '⌘', 'N'] },
+  { action: 'Rename session tab', keys: ['F2'] },
+  { action: 'Cycle tabs', keys: ['⌥', '⌘', '←', '/', '⌥', '⌘', '→'] },
   { action: 'Toggle sidebar', keys: ['⌘', 'B'] },
   { action: 'Zoom in / out', keys: ['⌘', '+', '/', '⌘', '−'] },
   { action: 'Reset zoom', keys: ['⌘', '0'] },

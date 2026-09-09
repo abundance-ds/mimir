@@ -9,7 +9,7 @@
         <button
           type="button"
           data-routines-new
-          title="New routine (⌘N)"
+          :title="actionsHost ? 'New routine' : 'New routine (⌘N)'"
           class="no-drag inline-flex h-7 items-center gap-1.5 px-2 text-[10px] font-semibold text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
           @click="openCreate"
         >
@@ -329,13 +329,13 @@
       </details>
     </div>
 
-    <footer v-if="routines.loaded" data-routines-footer class="pane-footer px-3">
+    <PaneBand as="footer" kind="footer" v-if="routines.loaded" data-routines-footer class="px-3">
       <span class="min-w-0 flex-1 truncate" :title="routines.directory">
         {{ routines.directory || '~/.mimir/routines' }}
       </span>
       <span v-if="notice" data-routine-notice class="shrink-0 text-accent">{{ notice }}</span>
       <span v-else class="shrink-0 tabular-nums">rev {{ routines.revision }}</span>
-    </footer>
+    </PaneBand>
 
     <div
       v-if="routines.error && routines.loaded && !dialogMode"
@@ -382,7 +382,7 @@
           <ContextAction label="Move to Trash…" action="trash" shortcut="⌘⌫" danger @select="trashContext" />
         </template>
         <template v-else>
-          <ContextAction label="New routine…" action="new" shortcut="⌘N" @select="createContext" />
+          <ContextAction label="New routine…" action="new" :shortcut="actionsHost ? '' : '⌘N'" @select="createContext" />
           <ContextAction label="Reveal definitions folder" action="reveal-directory" @select="revealDirectoryContext" />
           <ContextAction label="Reload definitions" action="reload" shortcut="⌘R" @select="reloadContext" />
         </template>
@@ -863,6 +863,8 @@
 </template>
 
 <script setup>
+import PaneBand from '../../shared/ui/chrome/PaneBand.vue'
+
 import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import {

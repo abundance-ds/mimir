@@ -116,9 +116,9 @@
       </button>
     </div>
 
-    <footer
+    <PaneBand as="footer" kind="footer"
       data-today-statusbar
-      class="pane-footer px-2"
+      class="px-2"
     >
       <nav
         data-today-date-nav
@@ -185,11 +185,13 @@
           <IconChevronRight :size="14" :stroke-width="1.7" />
         </button>
       </nav>
-    </footer>
+    </PaneBand>
   </section>
 </template>
 
 <script setup>
+import PaneBand from '../../shared/ui/chrome/PaneBand.vue'
+
 import {
   computed,
   nextTick,

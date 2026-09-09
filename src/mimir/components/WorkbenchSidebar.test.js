@@ -1,175 +1,36 @@
+import { afterEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { nextTick } from 'vue'
 import WorkbenchSidebar from './WorkbenchSidebar.vue'
-
-const tools = [
-  { id: 'files', activityId: 'files', title: 'Files', icon: 'files', shortcut: '' },
-  { id: 'app:scratch', activityId: 'app:scratch', title: 'Today', icon: 'today' },
-]
-
-const launchers = [
-  { id: 'codex', title: 'Codex', icon: 'codex' },
-  {
-    id: 'terminal',
-    title: 'Terminal',
-    icon: 'terminal',
-    available: false,
-    unavailableReason: 'shell unavailable',
-  },
-]
-
-const activities = [
-  {
-    id: 'agent:one',
-    title: 'Review API',
-    kind: 'agent',
-    status: 'working',
-    retention: 'durable',
-    unread: true,
-    updatedAt: '2026-07-25T10:00:00Z',
-    source: { presetId: 'codex-review' },
-    host: { type: 'pty' },
-  },
-  {
-    id: 'terminal:two',
-    title: 'Dev server',
-    kind: 'terminal',
-    status: 'idle',
-    retention: 'ephemeral',
-    updatedAt: '2026-07-25T09:00:00Z',
-    source: { presetId: 'terminal' },
-    host: { type: 'pty' },
-  },
-]
-
-const batchActivities = [
-  {
-    id: 'run:one',
-    title: 'One',
-    kind: 'agent',
-    status: 'done',
-    retention: 'durable',
-    updatedAt: '2026-07-25T10:00:00Z',
-    source: { presetId: 'codex' },
-    host: { type: 'pty' },
-  },
-  {
-    id: 'run:two',
-    title: 'Two',
-    kind: 'terminal',
-    status: 'stopped',
-    retention: 'ephemeral',
-    updatedAt: '2026-07-25T09:00:00Z',
-    source: { presetId: 'terminal' },
-    host: { type: 'pty' },
-  },
-  {
-    id: 'run:three',
-    title: 'Three',
-    kind: 'agent',
-    status: 'working',
-    retention: 'durable',
-    updatedAt: '2026-07-25T08:00:00Z',
-    source: { presetId: 'codex' },
-    host: { type: 'pty' },
-  },
-  {
-    id: 'run:four',
-    title: 'Four',
-    kind: 'agent',
-    status: 'done',
-    retention: 'durable',
-    updatedAt: '2026-07-25T07:00:00Z',
-    source: { presetId: 'codex' },
-    host: { type: 'pty' },
-  },
-]
-
-function render(collapsed = false, attach = false) {
-  return mount(WorkbenchSidebar, {
-    ...(attach ? { attachTo: document.body } : {}),
-    props: {
-      collapsed,
-      workspaceName: 'mimir',
-      workspacePath: '/work/mimir',
-      tools,
-      newActivity: launchers,
-      activities,
-      chatTargets: [
-        { id: '#general', kind: 'channel', title: 'general', unreadCount: 2 },
-        { id: 'anna', kind: 'direct', title: 'Anna', unreadCount: 0 },
-      ],
-      chatUnreadTotal: 2,
-      activeActivityId: 'agent:one',
-    },
-  })
-}
-
+let wrapper
+afterEach(() => wrapper?.unmount())
 describe('WorkbenchSidebar', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('renders tool rows without a redundant group label, one flat Chats list, and live Activities', () => {
-    const wrapper = render()
-    const rows = wrapper.findAll('[data-sidebar-row]').map((row) => row.attributes('data-sidebar-row'))
-
-    expect(rows).toEqual([
-      'tool:files',
-      'tool:app:scratch',
-      'chat:#general',
-      'chat:anna',
-      'activity:agent:one',
-      'activity:terminal:two',
-    ])
-    expect(wrapper.text()).toContain('mimir')
-    expect(wrapper.text()).not.toContain('Tools')
-    expect(wrapper.text()).not.toContain('New activity')
-    expect(wrapper.get('[data-activity-working="agent:one"]').exists()).toBe(true)
-    expect(wrapper.find('[data-activity-working="terminal:two"]').exists()).toBe(false)
-    expect(wrapper.get('[data-sidebar-row="activity:terminal:two"] [data-sidebar-meta]').text()).toBeTruthy()
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"] svg').attributes('viewBox')).toBe('0 0 256 260')
-    expect(wrapper.find('[data-sidebar-row="tool:files"] [data-sidebar-meta]').exists()).toBe(false)
-  })
-
-  it('removes the entire Chats section when chat is disabled', async () => {
-    const wrapper = render()
-    await wrapper.setProps({ chatEnabled: false })
-
-    expect(wrapper.find('[data-sidebar-chats]').exists()).toBe(false)
-    expect(wrapper.find('[data-sidebar-row^="chat:"]').exists()).toBe(false)
-    expect(wrapper.get('[data-sidebar-row="tool:files"]').exists()).toBe(true)
-  })
-
   it('keeps human-only microphone mute and Stop available in expanded and rail modes', async () => {
-    const wrapper = render()
-    await wrapper.setProps({
-      meetingCapture: {
-        id: 'meeting-1',
-        title: 'Architecture review',
-        lifecycle: 'capturing',
-        startedAt: new Date(Date.now() - 62_000).toISOString(),
-        durationMs: 62_000,
-        micMuted: false,
+    wrapper = mount(WorkbenchSidebar, {
+      props: {
+        meetingCapture: {
+          id: 'meeting-1',
+          title: 'Architecture review',
+          lifecycle: 'capturing',
+          startedAt: new Date(Date.now() - 62_000).toISOString(),
+          durationMs: 62_000,
+          micMuted: false,
+        },
       },
     })
 
     expect(wrapper.get('[data-sidebar-meeting-capture]').text()).toContain('Recording')
-    expect(wrapper.get('[data-sidebar-meeting-capture]').text()).toContain('Architecture review')
     expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
-      .toBe('Mute meeting microphone')
+      .toBe('Mute microphone')
     await wrapper.get('[data-sidebar-meeting-microphone]').trigger('click')
     expect(wrapper.emitted('setMeetingMicMuted')).toEqual([[true]])
-    await wrapper.get('[data-sidebar-meeting-stop]').trigger('click')
+    await wrapper.get('[aria-label="Stop recording"]').trigger('click')
     expect(wrapper.emitted('stopMeeting')).toHaveLength(1)
 
     await wrapper.setProps({ collapsed: true })
     expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
-      .toBe('Mute meeting microphone')
-    expect(wrapper.get('[data-sidebar-meeting-stop]').attributes('aria-label'))
-      .toBe('Stop meeting recording')
-    await wrapper.get('[data-sidebar-meeting-open]').trigger('click')
+      .toBe('Mute microphone')
+    expect(wrapper.get('[aria-label="Stop recording"]').exists()).toBe(true)
+    await wrapper.get('[title="Open recording"]').trigger('click')
     expect(wrapper.emitted('openMeeting')).toHaveLength(1)
 
     await wrapper.setProps({
@@ -179,560 +40,78 @@ describe('WorkbenchSidebar', () => {
       },
     })
     expect(wrapper.get('[data-sidebar-meeting-microphone]').attributes('aria-label'))
-      .toBe('Unmute meeting microphone')
+      .toBe('Unmute microphone')
   })
 
-  it('keeps the same rows and exposes source identity in rail mode', async () => {
-    const wrapper = render()
-    const activityRow = wrapper.get('[data-sidebar-row="activity:agent:one"]').element
+  it('does not insert a restore row into the sidebar rail', () => {
+    const wrapper = mount(WorkbenchSidebar, { props: { collapsed: true } })
+    expect(wrapper.find('[data-sidebar-restore]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-header]').element.nextElementSibling.contains(wrapper.get('[data-sidebar-workspace]').element)).toBe(true)
+  })
 
+  it('keeps Files mounted when Tools or the sidebar is collapsed', async () => {
+    wrapper = mount(WorkbenchSidebar, {
+      props: { tools: [{ id: 'graph', title: 'Graph', icon: 'graph' }] },
+      slots: { files: '<input data-files value="selected file" />' },
+    })
+    const files = wrapper.get('[data-files]').element
+    await wrapper.get('[data-tools-disclosure]').trigger('click')
+    expect(wrapper.emitted('toggleTools')).toHaveLength(1)
+    await wrapper.setProps({ toolsCollapsed: true })
+    expect(wrapper.get('[data-files]').element).toBe(files)
+    expect(
+      wrapper.get('nav[aria-label="Tools"]').attributes('style'),
+    ).toContain('display: none')
     await wrapper.setProps({ collapsed: true })
-
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').element).toBe(activityRow)
-    expect(wrapper.get('[data-sidebar-monogram="agent:one"]').attributes('data-activity-identity')).toBe('Codex')
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').attributes('title')).toContain('Review API')
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button').attributes('aria-label')).toContain('Review API')
-    expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
-    expect(wrapper.get('[data-sidebar-copy="activity:agent:one"]').attributes('aria-hidden')).toBe('true')
-  })
-
-  it('emits explicit launcher, activity, workspace, and collapse intents', async () => {
-    const wrapper = render()
-
-    await wrapper.get('[data-sidebar-row="activity:terminal:two"]').trigger('click')
-    await wrapper.get('[data-sidebar-workspace]').trigger('click')
-    document.body.querySelector('[data-project-open-folder]')?.click()
-    await wrapper.get('[data-sidebar-collapse]').trigger('click')
-    await wrapper.get('[data-sidebar-settings]').trigger('click')
-
-    expect(wrapper.emitted('selectActivity')[0]).toEqual(['terminal:two'])
-    expect(wrapper.emitted('chooseWorkspace')).toHaveLength(1)
+    expect(wrapper.get('[data-files]').element).toBe(files)
+    expect(
+      wrapper.get('nav[aria-label="Tools"]').attributes('style') || '',
+    ).toContain('display: none')
+    expect(wrapper.find('[data-sidebar-collapse]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-header]').find('button').exists()).toBe(false)
+    await wrapper.get('[aria-label="Open Files"]').trigger('click')
     expect(wrapper.emitted('toggleCollapse')).toHaveLength(1)
-    expect(wrapper.emitted('settings')).toHaveLength(1)
   })
-
-  it('keeps pane collapse in the top chrome and Settings anchored at the bottom', () => {
-    const wrapper = render()
-
-    expect(wrapper.get('[data-sidebar-header]').find('[data-sidebar-collapse]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-header]').text()).toBe('')
-    expect(wrapper.get('[data-sidebar-footer]').find('[data-sidebar-settings]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-settings]').text()).toContain('Settings')
-  })
-
-  it('discloses Chats and Activities independently while Tools remain stable', async () => {
-    const wrapper = render()
-
-    const chatsToggle = wrapper.get('[data-chat-section-toggle]')
-    const activitiesToggle = wrapper.get('[data-sidebar-activities-toggle]')
-    expect(chatsToggle.attributes('aria-expanded')).toBe('true')
-    expect(activitiesToggle.attributes('aria-expanded')).toBe('true')
-    expect(wrapper.text()).not.toContain('Archived')
-
-    await chatsToggle.trigger('click')
-    expect(wrapper.emitted('toggleChatCollapse')).toHaveLength(1)
-    await wrapper.setProps({ chatSectionCollapsed: true })
-    expect(wrapper.find('[data-sidebar-row="chat:#general"]').exists()).toBe(false)
-    expect(wrapper.get('[data-sidebar-row="tool:app:scratch"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
-
-    await activitiesToggle.trigger('click')
-    expect(wrapper.find('[data-sidebar-row="activity:agent:one"]').exists()).toBe(false)
-
+  it('retains the Tools heading space without a hidden keyboard stop', async () => {
+    wrapper = mount(WorkbenchSidebar)
+    const disclosure = wrapper.get('[data-tools-disclosure]').element
     await wrapper.setProps({ collapsed: true })
-    expect(wrapper.get('[data-sidebar-row="chat:hub"]').exists()).toBe(true)
-    expect(wrapper.get('[data-sidebar-row="activity:agent:one"]').exists()).toBe(true)
+    expect(wrapper.get('[data-tools-disclosure]').element).toBe(disclosure)
+    expect(wrapper.get('[data-tools-disclosure]').classes()).toContain('invisible')
+    expect(wrapper.get('[data-tools-disclosure]').attributes('tabindex')).toBe('-1')
+    expect(wrapper.get('[data-tools-disclosure]').attributes('aria-hidden')).toBe('true')
+    await wrapper.setProps({ collapsed: false })
+    expect(wrapper.get('[data-tools-disclosure]').classes()).not.toContain('invisible')
+    expect(wrapper.get('[data-tools-disclosure]').attributes('tabindex')).toBeUndefined()
   })
 
-  it('keeps Activity identity icons clean in rail mode', () => {
-    const wrapper = render(true)
-
-    expect(wrapper.findAll('[data-sidebar-row="activity:agent:one"]')).toHaveLength(1)
-    expect(wrapper.get('[data-activity-working="agent:one"]').exists()).toBe(true)
-    expect(wrapper.find('[data-sidebar-monogram="agent:one"] [data-activity-unread]').exists()).toBe(false)
-    expect(wrapper.find('[data-sidebar-monogram="agent:one"] [data-activity-status]').exists()).toBe(false)
-  })
-
-  it('shows one clear meta treatment without exposing done or idle', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime('2026-08-14T12:00:30Z')
-    const updatedAt = '2026-08-14T12:00:00Z'
-    const states = [
-      { id: 'working', status: 'working' },
-      { id: 'attention', status: 'needs-input' },
-      { id: 'prompt-ready', status: 'needs-input' },
-      { id: 'active-attention', status: 'needs-input', unread: true },
-      { id: 'error', status: 'error' },
-      { id: 'api-error', status: 'idle', error: 'API authentication failed' },
-      { id: 'working-error', status: 'working', error: 'API rate limit exceeded' },
-      { id: 'unread', status: 'idle', unread: true },
-      { id: 'done', status: 'done' },
-      { id: 'idle', status: 'idle' },
-      { id: 'interrupted', status: 'interrupted' },
-      { id: 'resuming', status: 'interrupted' },
-    ].map(state => ({
-      title: state.id,
-      kind: 'agent',
-      retention: 'durable',
-      updatedAt,
-      source: { presetId: 'codex' },
-      host: { type: 'pty' },
-      ...state,
-    }))
-    const wrapper = mount(WorkbenchSidebar, {
-      props: {
-        activities: states,
-        resumingActivityIds: new Set(['resuming']),
-        blockingInputActivityIds: new Set(['attention', 'active-attention']),
-        activeActivityId: 'active-attention',
-      },
+  it('moves keyboard focus through Tools without opening a tool', async () => {
+    wrapper = mount(WorkbenchSidebar, {
+      attachTo: document.body,
+      props: { tools: [
+        { id: 'today', title: 'Today', icon: 'today' },
+        { id: 'graph', title: 'Graph', icon: 'graph' },
+        { id: 'scribe', title: 'Scribe', icon: 'scribe' },
+      ] },
     })
-
-    expect(wrapper.get('[data-activity-working="working"]').exists()).toBe(true)
-    expect(wrapper.find('[data-activity-working="resuming"]').exists()).toBe(false)
-    expect(wrapper.get('[data-activity-attention="attention"]').classes()).toContain('bg-attn/65')
-    expect(wrapper.get('[data-activity-error="error"]').classes()).toContain('bg-rem')
-    expect(wrapper.get('[data-activity-error="api-error"]').exists()).toBe(true)
-    expect(wrapper.get('[data-activity-error="working-error"]').exists()).toBe(true)
-    expect(wrapper.find('[data-activity-working="working-error"]').exists()).toBe(false)
-    expect(wrapper.get('[data-activity-unread="unread"]').classes()).toContain('bg-info/60')
-
-    for (const id of [
-      'done',
-      'idle',
-      'interrupted',
-      'resuming',
-      'prompt-ready',
-      'active-attention',
-    ]) {
-      const row = wrapper.get(`[data-sidebar-row="activity:${id}"]`)
-      expect(row.get('[data-sidebar-meta]').text()).toBe('now')
-      expect(row.attributes('title')).not.toContain(`· ${id}`)
-      expect(row.find('[data-activity-unread], [data-activity-attention], [data-activity-error]').exists()).toBe(false)
-    }
-    expect(wrapper.get('[data-sidebar-row="activity:prompt-ready"]').attributes('title'))
-      .not.toContain('needs input')
-    expect(wrapper.get('[data-sidebar-row="activity:active-attention"]').attributes('title'))
-      .not.toContain('needs input')
-    expect(wrapper.get('[data-sidebar-row="activity:active-attention"]').attributes('title'))
-      .not.toContain('new response')
-    wrapper.unmount()
-  })
-
-  it('refreshes all compact times with one minute ticker', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime('2026-08-14T12:00:30Z')
-    const wrapper = mount(WorkbenchSidebar, {
-      props: {
-        activities: [{
-          id: 'agent:quiet',
-          title: 'Quiet',
-          kind: 'agent',
-          status: 'idle',
-          retention: 'durable',
-          updatedAt: '2026-08-14T12:00:00Z',
-          source: {},
-          host: { type: 'pty' },
-        }],
-      },
-    })
-
-    expect(wrapper.get('[data-sidebar-meta]').text()).toBe('now')
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(wrapper.get('[data-sidebar-meta]').text()).toBe('1m')
-    wrapper.unmount()
-  })
-
-  it('activates the rail chat hub without moving focus out of its room switcher', async () => {
-    const wrapper = render(true, true)
-    await wrapper.get('[data-sidebar-row="chat:hub"] button').trigger('click')
-
-    expect(wrapper.emitted('selectChat')).toEqual([
-      ['#general', { focus: false }],
-    ])
-    expect(document.body.querySelector('[data-chat-rail-switcher]')).not.toBeNull()
-    wrapper.unmount()
-    document.body.innerHTML = ''
-  })
-
-  it('keeps unavailable launchers out of the compact creation menu', async () => {
-    const wrapper = render(false, true)
-
-    await wrapper.get('[data-activity-create-button]').trigger('click')
-    const menu = document.body.querySelector('[data-activity-create-menu]')
-    expect(menu.textContent).toContain('Codex')
-    expect(menu.textContent).not.toContain('Terminal')
-    expect(wrapper.find('[data-sidebar-row="launcher:terminal"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('moves contextual row focus with arrows and Home/End without activating', async () => {
-    const wrapper = render(false, true)
-    const files = wrapper.get('[data-sidebar-row="tool:files"]').find('button')
-    files.element.focus()
-
-    await files.trigger('keydown', { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(
-      wrapper.get('[data-sidebar-row="tool:app:scratch"]').find('button').element,
-    )
-    await wrapper.get('[data-sidebar-row="tool:app:scratch"]').find('button')
-      .trigger('keydown', { key: 'End' })
-    expect(document.activeElement).toBe(
-      wrapper.get('[data-sidebar-row="activity:terminal:two"]').find('button').element,
-    )
-    await wrapper.get('[data-sidebar-row="activity:terminal:two"]').find('button')
-      .trigger('keydown', { key: 'Home' })
-    expect(document.activeElement).toBe(files.element)
+    const today = wrapper.get('[data-tool-key="today"] button')
+    const graph = wrapper.get('[data-tool-key="graph"] button')
+    const scribe = wrapper.get('[data-tool-key="scribe"] button')
+    today.element.focus()
+    await today.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(graph.element)
+    await graph.trigger('keydown', { key: 'End' })
+    expect(document.activeElement).toBe(scribe.element)
+    await scribe.trigger('keydown', { key: 'Home' })
+    expect(document.activeElement).toBe(today.element)
     expect(wrapper.emitted('launch')).toBeUndefined()
-    wrapper.unmount()
   })
-
-  it('makes rename discoverable by double-click, F2, and the actions menu', async () => {
-    const wrapper = render(false, true)
-    const row = wrapper.get('[data-sidebar-row="activity:agent:one"]')
-
-    await row.trigger('dblclick')
-    const input = wrapper.get('[data-activity-rename="agent:one"]')
-    expect(input.element.closest('button')).toBeNull()
-    input.element.focus()
-    await input.setValue('API review')
-    await input.trigger('keydown', { key: ' ' })
-    await input.trigger('keyup', { key: ' ' })
-    expect(document.activeElement).toBe(input.element)
-    expect(wrapper.get('[data-activity-rename="agent:one"]').element.value).toBe('API review')
-    expect(wrapper.emitted('renameActivity')).toBeUndefined()
-    await input.trigger('keydown', { key: 'Enter' })
-    expect(wrapper.emitted('renameActivity').at(-1)).toEqual([
-      { id: 'agent:one', title: 'API review' },
-    ])
-    expect(wrapper.emitted('selectActivity').at(-1)).toEqual(['agent:one'])
-
-    await row.find('button').trigger('keydown', { key: 'F2' })
-    expect(wrapper.get('[data-activity-rename="agent:one"]').exists()).toBe(true)
-    await wrapper.get('[data-activity-rename="agent:one"]').trigger('keydown', { key: 'Escape' })
-
-    await row.trigger('contextmenu')
-    expect(wrapper.get('[data-activity-menu="agent:one"]').text()).toContain('Rename')
-    wrapper.unmount()
-  })
-
-  it('opens row and sort menus from the keyboard with roving focus and Escape restore', async () => {
-    const wrapper = render(false, true)
-    const rowButton = wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button')
-
-    rowButton.element.focus()
-    await rowButton.trigger('keydown', { key: 'F10', shiftKey: true })
-    const activityMenu = wrapper.get('[data-activity-menu="agent:one"]')
-    expect(document.activeElement.textContent).toContain('Rename')
-    await activityMenu.trigger('keydown', { key: 'ArrowDown' })
-    expect(document.activeElement.textContent).toContain('Stop')
-    await activityMenu.trigger('keydown', { key: 'ArrowDown' })
-    expect(document.activeElement.textContent).toContain('Archive')
-    await activityMenu.trigger('keydown', { key: 'Escape' })
-    expect(document.activeElement).toBe(
-      wrapper.get('[data-activity-menu-button="agent:one"]').element,
-    )
-
-    const sortButton = wrapper.get('[data-activity-sort-button]')
-    sortButton.element.focus()
-    await sortButton.trigger('keydown', { key: 'ArrowDown' })
-    const sortMenu = wrapper.get('[data-activity-sort-menu]')
-    expect(document.activeElement.textContent).toContain('Manual')
-    await sortMenu.trigger('keydown', { key: 'End' })
-    expect(document.activeElement.textContent).toContain('Name')
-    await sortMenu.trigger('keydown', { key: 'Escape' })
-    expect(document.activeElement).toBe(sortButton.element)
-    wrapper.unmount()
-  })
-
-  it('creates every dynamic Activity type from the compact plus menu without Chat', async () => {
-    const wrapper = mount(WorkbenchSidebar, {
-      attachTo: document.body,
-      props: {
-        newActivity: [
-          { id: 'app:ledger', title: 'Ledger', icon: 'apps', available: true },
-          { id: 'preset:codex', title: 'Codex', icon: 'codex', available: true },
-          { id: 'preset:terminal', title: 'Terminal', icon: 'terminal', available: true },
-        ],
-        activities,
-      },
+  it('launches a tool without creating a session row', async () => {
+    wrapper = mount(WorkbenchSidebar, {
+      props: { tools: [{ id: 'graph', title: 'Graph', icon: 'graph' }] },
     })
-    const create = wrapper.get('[data-activity-create-button]')
-
-    create.element.focus()
-    await create.trigger('keydown', { key: 'ArrowDown' })
-    const menu = document.body.querySelector('[data-activity-create-menu]')
-    const options = [...menu.querySelectorAll('[data-activity-create-option]')]
-
-    expect(create.attributes('title')).toBe('New Activity')
-    expect(create.attributes('aria-expanded')).toBe('true')
-    expect(menu.textContent).toContain('Codex')
-    expect(menu.textContent).toContain('Terminal')
-    expect(menu.textContent).toContain('Ledger')
-    expect(menu.textContent).not.toContain('Chat')
-    expect(menu.querySelector('[data-activity-create-divider]')).not.toBeNull()
-    expect(options.map(option => option.textContent.trim())).toEqual([
-      'Codex',
-      'Terminal',
-      'Ledger',
-    ])
-    expect(document.activeElement).toBe(options[0])
-
-    options.find(option => option.textContent.includes('Terminal')).click()
-    await nextTick()
-    expect(wrapper.emitted('launch').at(-1)).toEqual(['preset:terminal'])
-    expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
-    expect(document.activeElement).toBe(create.element)
-
-    await wrapper.setProps({ collapsed: true })
-    expect(wrapper.get('[data-activity-create-button]').attributes('title')).toBe('New Activity')
-    wrapper.unmount()
-  })
-
-  it('restores focus to the Activity plus button when its menu closes with Escape', async () => {
-    const wrapper = mount(WorkbenchSidebar, {
-      attachTo: document.body,
-      props: {
-        newActivity: [
-          { id: 'preset:terminal', title: 'Terminal', icon: 'terminal', available: true },
-        ],
-      },
-    })
-    const create = wrapper.get('[data-activity-create-button]')
-    create.element.focus()
-    await create.trigger('click')
-    const menu = document.body.querySelector('[data-activity-create-menu]')
-
-    menu.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      bubbles: true,
-      cancelable: true,
-    }))
-    await nextTick()
-
-    expect(document.body.querySelector('[data-activity-create-menu]')).toBeNull()
-    expect(document.activeElement).toBe(create.element)
-    wrapper.unmount()
-  })
-
-  it('archives live and ended Activities through the normal close path', async () => {
-    const wrapper = render()
-
-    await wrapper.get('[data-activity-menu-button="agent:one"]').trigger('click')
-    const liveMenu = wrapper.get('[data-activity-menu="agent:one"]')
-    const stop = liveMenu.findAll('button').find((button) => button.text().includes('Stop'))
-    expect(stop.attributes('disabled')).toBeUndefined()
-    await stop.trigger('click')
-    expect(wrapper.emitted('stopActivity').at(-1)).toEqual(['agent:one'])
-
-    await wrapper.get('[data-activity-menu-button="agent:one"]').trigger('click')
-    const reopenedLiveMenu = wrapper.get('[data-activity-menu="agent:one"]')
-    const archive = reopenedLiveMenu.findAll('button').find((button) => button.text().includes('Archive'))
-    expect(archive.attributes('disabled')).toBeUndefined()
-    await archive.trigger('click')
-    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['agent:one'])
-
-    await wrapper.setProps({
-      activities: [
-        activities[0],
-        { ...activities[1], status: 'done' },
-      ],
-    })
-    await wrapper.get('[data-activity-menu-button="terminal:two"]').trigger('click')
-    const endedMenu = wrapper.get('[data-activity-menu="terminal:two"]')
-    expect(endedMenu.text()).toContain('Archive')
-    expect(endedMenu.text()).toContain('Delete')
-    await endedMenu.findAll('button').find((button) => button.text().includes('Archive')).trigger('click')
-    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['terminal:two'])
-
-    await wrapper.get('[data-activity-menu-button="terminal:two"]').trigger('click')
-    const reopenedMenu = wrapper.get('[data-activity-menu="terminal:two"]')
-    await reopenedMenu.findAll('button').find((button) => button.text().includes('Delete')).trigger('click')
-    expect(wrapper.emitted('clearActivity').at(-1)).toEqual(['terminal:two'])
-  })
-
-  it('toggles multi-selection with Cmd+click and batch-archives only eligible Activities', async () => {
-    const wrapper = render()
-    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
-
-    await wrapper.get('[data-sidebar-row="activity:run:one"]').trigger('click', { metaKey: true })
-    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
-
-    expect(wrapper.emitted('selectActivity')).toBeUndefined()
-    expect(wrapper.get('[data-sidebar-row="activity:run:one"]').attributes('data-selected')).toBe('true')
-    expect(wrapper.get('[data-sidebar-row="activity:run:two"]').attributes('data-selected')).toBe('true')
-    expect(wrapper.get('[data-activity-selection-count]').text()).toBe('2 selected')
-
-    const archive = wrapper.get('[data-activity-selection-archive]')
-    expect(archive.attributes('title')).toContain('Archive 2')
-    await archive.trigger('click')
-    expect(wrapper.emitted('archiveActivities')).toEqual([[['run:one', 'run:two']]])
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
-
-    await wrapper.get('[data-sidebar-row="activity:run:three"]').trigger('click', { metaKey: true })
-    expect(wrapper.get('[data-activity-selection-archive]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-activity-selection-delete]').attributes('disabled')).toBeDefined()
-    await wrapper.get('[data-sidebar-row="activity:run:three"]').trigger('click', { metaKey: true })
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
-  })
-
-  it('extends selection with Shift+click and batch-deletes only stopped Activities', async () => {
-    const wrapper = render()
-    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
-
-    await wrapper.get('[data-sidebar-row="activity:run:four"]').trigger('click', { shiftKey: true })
-    expect(wrapper.get('[data-activity-selection-count]').text()).toBe('4 selected')
-
-    const remove = wrapper.get('[data-activity-selection-delete]')
-    expect(remove.attributes('title')).toContain('Delete 3')
-    await remove.trigger('click')
-    expect(wrapper.emitted('clearActivities')).toEqual([[['run:one', 'run:two', 'run:four']]])
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
-  })
-
-  it('clears selection with Escape, plain activation clicks, and vanished rows', async () => {
-    const wrapper = render()
-    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
-
-    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(true)
-    await wrapper.get('[data-sidebar-row="activity:run:two"]').find('button')
-      .trigger('keydown', { key: 'Escape' })
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
-
-    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
-    await wrapper.get('[data-sidebar-row="activity:run:four"]').trigger('click')
-    expect(wrapper.emitted('selectActivity').at(-1)).toEqual(['run:four'])
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
-
-    await wrapper.get('[data-sidebar-row="activity:run:one"]').trigger('click', { metaKey: true })
-    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
-    await wrapper.setProps({
-      activities: batchActivities.filter((activity) => activity.id !== 'run:one'),
-    })
-    expect(wrapper.get('[data-activity-selection-count]').text()).toBe('1 selected')
-  })
-
-  it('clears selection on document-level Escape and reports selection changes', async () => {
-    const wrapper = render(false, true)
-    await wrapper.setProps({ activities: batchActivities, activeActivityId: 'run:one' })
-
-    await wrapper.get('[data-sidebar-row="activity:run:one"]').trigger('click', { metaKey: true })
-    await wrapper.get('[data-sidebar-row="activity:run:two"]').trigger('click', { metaKey: true })
-    expect(wrapper.emitted('selectionChange').at(-1)).toEqual([['run:one', 'run:two']])
-
-    // Escape with a row menu open closes the menu path only, not the selection.
-    await wrapper.get('[data-activity-menu-button="run:one"]').trigger('click')
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await nextTick()
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(true)
-
-    // With menus closed, Escape from anywhere outside the panes clears it,
-    // even though WebKit left focus on <body> after the clicks.
-    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    await nextTick()
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await nextTick()
-    expect(wrapper.find('[data-activity-selection-bar]').exists()).toBe(false)
-    expect(wrapper.emitted('selectionChange').at(-1)).toEqual([[]])
-    wrapper.unmount()
-  })
-
-  it('supports keyboard manual reorder and explicit useful sort modes', async () => {
-    const wrapper = render()
-    const rowButton = wrapper.get('[data-sidebar-row="activity:agent:one"]').find('button')
-
-    await rowButton.trigger('keydown', {
-      key: 'ArrowDown',
-      altKey: true,
-      shiftKey: true,
-    })
-    expect(wrapper.emitted('reorderActivities').at(-1)).toEqual([
-      ['terminal:two', 'agent:one'],
-    ])
-
-    await wrapper.get('[data-activity-sort-button]').trigger('click')
-    const recent = wrapper
-      .get('[data-activity-sort-menu]')
-      .findAll('button')
-      .find((button) => button.text().includes('Most recent'))
-    await recent.trigger('click')
-    expect(wrapper.emitted('sortActivities').at(-1)).toEqual(['recent'])
-  })
-
-  it('manually reorders Tools without exposing duplicate activity launcher rows', async () => {
-    const wrapper = render()
-    const today = wrapper.get('[data-sidebar-row="tool:app:scratch"]')
-
-    await today.find('button').trigger('keydown', {
-      key: 'ArrowUp',
-      altKey: true,
-      shiftKey: true,
-    })
-    expect(wrapper.emitted('reorderTools').at(-1)).toEqual([
-      ['app:scratch', 'files'],
-    ])
-    expect(wrapper.find('[data-sidebar-row^="launcher:"]').exists()).toBe(false)
-  })
-
-  it('commits pointer drag reorder only after crossing the movement threshold', async () => {
-    const wrapper = render()
-    const first = wrapper.get('[data-sidebar-row="activity:agent:one"]')
-    const second = wrapper.get('[data-sidebar-row="activity:terminal:two"]')
-    vi.spyOn(first.element, 'getBoundingClientRect').mockReturnValue({
-      top: 0,
-      height: 36,
-    })
-    vi.spyOn(second.element, 'getBoundingClientRect').mockReturnValue({
-      top: 36,
-      height: 36,
-    })
-
-    await first.trigger('pointerdown', { button: 0, clientX: 4, clientY: 10 })
-    document.dispatchEvent(new PointerEvent('pointermove', {
-      clientX: 6,
-      clientY: 80,
-    }))
-    document.dispatchEvent(new PointerEvent('pointerup', {
-      clientX: 6,
-      clientY: 80,
-    }))
-
-    expect(wrapper.emitted('reorderActivities').at(-1)).toEqual([
-      ['terminal:two', 'agent:one'],
-    ])
-  })
-
-  it('uses the Anthropic provider mark and truthful renderer-app lifecycle actions', async () => {
-    const wrapper = mount(WorkbenchSidebar, {
-      props: {
-        newActivity: [{ id: 'preset:claude', title: 'Claude', icon: 'claude' }],
-        activities: [{
-          id: 'app:ledger',
-          title: 'Ledger',
-          kind: 'app',
-          status: 'ready',
-          retention: 'durable',
-          updatedAt: '2026-07-25T10:00:00Z',
-          source: { appId: 'ledger' },
-          host: { type: 'app', mode: 'embedded' },
-        }],
-      },
-    })
-
-    await wrapper.get('[data-activity-create-button]').trigger('click')
-    expect(document.body.querySelector(
-      '[data-activity-create-id="preset:claude"] svg',
-    ).getAttribute('viewBox')).toBe('110 145 292 222')
-    await wrapper.get('[data-activity-menu-button="app:ledger"]').trigger('click')
-    const menu = wrapper.get('[data-activity-menu="app:ledger"]')
-    expect(menu.text()).not.toContain('Stop / kill')
-    expect(menu.text()).toContain('Archive')
-    expect(menu.text()).toContain('Delete')
-    const archive = menu.findAll('button').find((button) => button.text().includes('Archive'))
-    expect(archive.attributes('disabled')).toBeUndefined()
-    await archive.trigger('click')
-    expect(wrapper.emitted('archiveActivity').at(-1)).toEqual(['app:ledger'])
-    wrapper.unmount()
+    await wrapper.get('[data-tool-key="graph"]').trigger('click')
+    expect(wrapper.emitted('launch')).toEqual([['graph']])
+    expect(wrapper.find('[data-sidebar-row^="activity:"]').exists()).toBe(false)
   })
 })

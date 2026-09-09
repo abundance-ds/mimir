@@ -9,6 +9,7 @@ export function usePointerReorder({
   keyAttribute,
   keys,
   onReorder,
+  axis = 'y',
 }) {
   const drag = ref(null)
   const dropIndicator = ref(null)
@@ -42,7 +43,7 @@ export function usePointerReorder({
       drag.value.active = true
       beginDraggingAffordance()
     }
-    updateDropIndicator(event.clientY)
+    updateDropIndicator(axis === 'x' ? event.clientX : event.clientY)
   }
 
   function onPointerUp() {
@@ -96,14 +97,14 @@ export function usePointerReorder({
     draggingAffordanceActive = false
   }
 
-  function updateDropIndicator(clientY) {
+  function updateDropIndicator(position) {
     const rows = root.value?.querySelectorAll(rowSelector) || []
     let best = null
     for (const row of rows) {
       const id = row.getAttribute(keyAttribute)
       if (id === drag.value?.key) continue
       const rect = row.getBoundingClientRect()
-      if (clientY < rect.top + rect.height / 2) {
+      if (position < (axis === 'x' ? rect.left + rect.width / 2 : rect.top + rect.height / 2)) {
         best = { beforeId: id, afterId: null }
         break
       }

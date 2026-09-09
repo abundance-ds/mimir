@@ -22,7 +22,7 @@ interrupted. Do not infer command state from output or silence.
 
 ## Workspace projection
 
-The Sidebar shows the active working set for the current workspace. Workspace
+The main tab strip shows the active working set for the current workspace. Workspace
 switching hides other Project Activities but never stops or retargets them.
 Home/custom-cwd Activities stay global. Scope is captured at launch and does
 not change when a launcher preset changes.
@@ -48,6 +48,11 @@ workspace first. Activities do not add missing folders to the project switcher.
 - Install the Activity listener before the initial native list and terminal
   restore calls.
 - Stop is idempotent. Archive and clear require an ended Activity.
+- The live tab close/context action uses
+  “Stop and archive”: request process closure, then archive after the native
+  ended state arrives. AI CLI headers have no separate Stop button. Plain
+  terminal header controls retain Ctrl-C interrupt.
+  Ended session tabs show Archive; unique tool tabs show Close.
 
 Interrupted agent rows can resume their exact CLI session when their workspace
 becomes active. Restore is limited to one attempt per app session, keeps startup
@@ -56,7 +61,7 @@ Deliberately stopped Activities do not resume.
 
 Native ownership is `src-tauri/src/activities/` and `activity_commands.rs`.
 Renderer ownership is the Activity stores, Workbench lifecycle composables,
-Sidebar, and Activity surfaces. Launcher and continuation details are in
+main tabs, and Activity surfaces. Launcher and continuation details are in
 [agent-setup.md](agent-setup.md).
 
 Cmd+Up/Down scroll; Cmd+Left/Right send Ctrl-A/E; Cmd+Delete sends Ctrl-E,U; Shift+Enter sends Ctrl-J.

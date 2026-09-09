@@ -47,7 +47,7 @@ export function useActivityLifecycle({
   async function archiveActivity(id) {
     try {
       await activityRuntime.setArchived(id, true)
-      if (workbench.activeActivityId === id) openCoreActivity('files')
+      workbench.closeTab(id, getSidebarActivities().map(item => item.id))
     } catch (cause) {
       diagnostic.value = `Activity could not be archived: ${errorMessage(cause)}`
     }
@@ -114,7 +114,7 @@ export function useActivityLifecycle({
     try {
       const wasActive = workbench.activeActivityId === id
       await activityRuntime.clear(id)
-      if (wasActive) openCoreActivity('files')
+      if (wasActive) workbench.closeTab(id, getSidebarActivities().map(item => item.id))
     } catch (cause) {
       diagnostic.value = `Activity could not be cleared: ${errorMessage(cause)}`
     }
@@ -144,22 +144,15 @@ export function useActivityLifecycle({
       return true
     } catch (cause) {
       unmarkClosing(activity.id)
+      selectActivity(activity.id)
       diagnostic.value = `Activity could not be closed: ${errorMessage(cause)}`
       return false
     }
   }
 
   function moveAfterClosing(id, currentOrder) {
-    if (workbench.activeActivityId !== id) return
-    const index = currentOrder.indexOf(id)
-    const remaining = currentOrder.filter(activityId => activityId !== id)
-    const nextId = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]
-    if (nextId) {
-      selectActivity(nextId)
-      return
-    }
-    workbench.openActivity('files')
-    workbench.setPaneState('activity', 'rail')
+    workbench.closeTab(id, currentOrder)
+    if (workbench.activeActivityId) selectActivity(workbench.activeActivityId)
   }
 
   async function finalizeClosedActivity(activity) {
@@ -174,6 +167,7 @@ export function useActivityLifecycle({
       unmarkClosing(activity.id)
     } catch (cause) {
       unmarkClosing(activity.id)
+      selectActivity(activity.id)
       diagnostic.value = `Activity could not be closed: ${errorMessage(cause)}`
     } finally {
       finalizingClosures.delete(activity.id)

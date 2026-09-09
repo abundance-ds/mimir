@@ -6,25 +6,13 @@ export function routeWorkbenchKey({
   focusOwner = 'none',
   sidebarActivityId = '',
   sidebarSelectionCount = 0,
-  activityNewTargetId = null,
 }) {
   if (!primary) return null
   const normalized = String(key || '').toLowerCase()
 
   if (!alt && !shift && normalized === 'p') return { action: 'quick-open' }
+  if (!alt && !shift && ['t', 'n'].includes(normalized) && focusOwner === 'activity') return { action: 'new-tab' }
   if (!alt && !shift && normalized === 'b') return { action: 'toggle-sidebar' }
-  if (
-    !alt
-    && !shift
-    && normalized === 'n'
-    && focusOwner === 'activity'
-    && activityNewTargetId !== null
-  ) {
-    return {
-      action: 'quick-open-new-activity',
-      targetId: activityNewTargetId,
-    }
-  }
 
   if (alt && !shift && (key === 'ArrowLeft' || key === 'ArrowRight')) {
     const direction = key === 'ArrowLeft' ? -1 : 1
@@ -44,6 +32,7 @@ export function routeWorkbenchKey({
         return { action: 'close-activity', activityId: sidebarActivityId }
       }
     }
+    return { action: 'close-focused' }
   }
 
   return null

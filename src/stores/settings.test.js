@@ -69,10 +69,11 @@ describe('settings store', () => {
     expect(store.workbenchFileFavorites).toEqual({})
     expect(store.workbenchFileSort).toEqual({})
     expect(store.workbenchLayout).toEqual({
-      sidebar: { state: 'expanded', width: 240 },
+      sidebar: { state: 'expanded', width: 280 },
       activity: { state: 'expanded', width: 560 },
       editor: { state: 'expanded', width: 520 },
-      activeActivityId: 'files',
+      activeActivityId: '',
+      openTabIds: [],
     })
     expect(store.exportFormat).toBeUndefined()
     expect(store.telemetryEnabled).toBeUndefined()

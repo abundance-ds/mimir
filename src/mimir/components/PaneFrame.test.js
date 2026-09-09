@@ -36,7 +36,7 @@ describe('PaneFrame', () => {
     expect(wrapper.get('[data-pane-action="collapse"]').attributes('title')).toBe('Collapse Codex')
     expect(wrapper.get('[data-pane-action="expand"]').attributes('title')).toBe('Expand Activity')
     expect(wrapper.get('[data-pane-action="collapse"]').attributes('data-collapse-direction')).toBe('left')
-    expect(render('editor').get('[data-pane-action="collapse"]').attributes('data-collapse-direction')).toBe('right')
+    expect(render('editor').get('[data-editor-action="collapse"]').attributes('data-collapse-direction')).toBe('right')
   })
 
   it('uses the Activity expand control to focus the pane and restore the split', async () => {
@@ -49,6 +49,8 @@ describe('PaneFrame', () => {
     expect(wrapper.get('[data-pane-action="expand"]').attributes('title')).toBe('Restore split')
 
     await wrapper.get('[data-pane-action="expand"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-pane-action="expand"]').exists()).toBe(true)
     expect(store.paneLayout.activity.state).toBe('expanded')
     expect(store.paneLayout.editor.state).toBe('expanded')
   })
@@ -66,20 +68,13 @@ describe('PaneFrame', () => {
     expect(wrapper.find('[data-pane-rail="activity"]').exists()).toBe(false)
   })
 
-  it('routes Previous and Next through the Activity history', async () => {
+  it('removes previous and next history controls', () => {
     const wrapper = render()
-    const store = useWorkbenchStore()
-    store.openActivity('agent:one')
-    store.openActivity('terminal:two')
-    await wrapper.vm.$nextTick()
-
-    await wrapper.get('[data-pane-action="previous"]').trigger('click')
-    expect(store.activeActivityId).toBe('agent:one')
-    await wrapper.get('[data-pane-action="next"]').trigger('click')
-    expect(store.activeActivityId).toBe('terminal:two')
+    expect(wrapper.find('[data-pane-action="previous"]').exists()).toBe(false)
+    expect(wrapper.find('[data-pane-action="next"]').exists()).toBe(false)
   })
 
-  it('lets the first expanded content header restore a railed sidebar', async () => {
+  it('restores Sidebar from the Main header', async () => {
     const wrapper = render()
     const store = useWorkbenchStore()
     store.setPaneState('sidebar', 'rail')
@@ -87,7 +82,6 @@ describe('PaneFrame', () => {
 
     expect(wrapper.get('[data-pane-header="activity"]').classes()).toContain('pl-6')
     await wrapper.get('[data-pane-action="restore-sidebar"]').trigger('click')
-
     expect(store.paneLayout.sidebar.state).toBe('expanded')
   })
 })

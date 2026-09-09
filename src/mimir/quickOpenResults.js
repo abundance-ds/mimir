@@ -39,10 +39,14 @@ export function buildQuickOpenResults({
   currentProjectPath = '',
   newActivity = [],
   activities = [],
+  documents = [],
+  recentTabKeys = [],
+  currentTabKey = '',
   history = [],
   files = [],
   historySnippets = new Map(),
   newActivityView = false,
+  tabPicker = false,
 }) {
   if (newActivityView) {
     const normalized = String(query || '').trim().toLocaleLowerCase()
@@ -54,20 +58,42 @@ export function buildQuickOpenResults({
   const searching = Boolean(normalized)
   const results = []
 
+  const openActivities = activities.filter(activity => activity.openTab)
+  const openRows = [
+    ...openActivities.map(activity => {
+      const row = activityResult(activity)
+      if (activity.unique) row.icon = tools.find(tool =>
+        tool.activityId === activity.id || tool.id === `core:${activity.id}` || tool.id === activity.id
+      )?.icon || 'apps'
+      return row
+    }),
+    ...documents.map(documentResult),
+  ]
+  const recent = new Map(recentTabKeys.map((key, index) => [key, index]))
+  openRows.sort((a, b) => Number(a.key === currentTabKey) - Number(b.key === currentTabKey)
+    || (recent.get(a.key) ?? Infinity) - (recent.get(b.key) ?? Infinity))
+  if (scope === 'all' && !tabPicker) {
+    results.push(...matchingRows(openRows, normalized).map(row => ({ ...row, group: 'Open tabs' })))
+  }
+  if (scope === 'files') results.push(...matchingRows(documents.map(documentResult), normalized))
+
   if (scope === 'all') {
-    if (!searching) results.push(newActivityEnterResult(newActivity))
+    if (!searching && tabPicker) results.push(...newActivity.map(newActivityResult))
+    else if (!searching) results.push(newActivityEnterResult(newActivity))
     else results.push(...mixedMatches(newActivity.map(newActivityResult), normalized))
   } else if (scope === 'new-activity') {
     results.push(...matchingRows(newActivity.map(newActivityResult), normalized))
   }
 
+  if (tabPicker && scope === 'all') results.push(...matchingRows(documents.map(documentResult), normalized))
+
   if (scope === 'all' || scope === 'activities') {
-    const matches = matchingRows(activities.map(activityResult), normalized)
+    const matches = matchingRows(activities.filter(activity => scope !== 'all' || tabPicker || !activity.openTab).map(activityResult), normalized)
     results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
   }
 
   if (scope === 'all' || scope === 'tools') {
-    const matches = matchingRows(tools.map(toolResult), normalized)
+    const matches = matchingRows(tools.filter(tool => scope !== 'all' || tabPicker || !openActivities.some(activity => tool.id === `core:${activity.id}` || tool.id === activity.id)).map(toolResult), normalized)
     results.push(...(scope === 'all' ? matches.slice(0, DEFAULT_GROUP_LIMIT) : matches))
   }
 
@@ -88,7 +114,7 @@ export function buildQuickOpenResults({
 
   if (scope === 'all' || scope === 'files') {
     const limit = scope === 'files' ? FILE_SCOPE_LIMIT : DEFAULT_GROUP_LIMIT
-    results.push(...matchingRows(files.map(fileResult), normalized).slice(0, limit))
+    results.push(...matchingRows(files.filter(file => !documents.some(document => document.path && samePath(document.path, file.path))).map(fileResult), normalized).slice(0, limit))
   }
 
   if ((scope === 'all' && searching) || scope === 'chats') {
@@ -245,9 +271,9 @@ function activityResult(activity) {
     group: 'Activities',
     title: activity.title || provider,
     project: basename(workspacePath),
-    meta: joinMeta(provider, humanStatus(activity.status), 'workspace not found'),
+    meta: activity.unique ? 'Tool' : joinMeta(provider, humanStatus(activity.status), activity.openTab ? '' : 'workspace not found'),
     detail: workspacePath,
-    verb: 'Open',
+    verb: activity.openTab ? 'Switch' : 'Open',
     icon: providerIcon(provider, activity.kind),
     activityId: activity.id,
     search: [
@@ -257,7 +283,7 @@ function activityResult(activity) {
       activity.id,
       workspacePath,
       basename(workspacePath),
-      'workspace not found',
+      activity.openTab ? '' : 'workspace not found',
     ],
   })
 }
@@ -333,6 +359,16 @@ function historyVerb(activity) {
   const available = activity?.resumeAvailable
     ?? Boolean(activity?.session?.cliSessionId)
   return available ? 'Resume' : 'Restore transcript'
+}
+
+function documentResult(document) {
+  return result({
+    key: `document:${document.id}`, type: 'document', group: 'Open tabs',
+    title: document.name || 'Untitled', meta: document.type?.includes('review') ? 'Review' : 'Document',
+    detail: document.path || '', verb: 'Switch', icon: 'file',
+    documentId: document.id, path: document.path,
+    search: [document.name, document.path, document.type, 'document'],
+  })
 }
 
 function fileResult(file) {
