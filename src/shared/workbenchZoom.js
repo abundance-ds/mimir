@@ -1,7 +1,9 @@
 // Interface zoom: whole-window webview zoom, persisted as `workbenchZoom` (percent)
 // in settings. Distinct from the editor's content zoom (editorUI.zoomLevel),
 // which scales only editor text and is controlled from the editor footer.
-import { isTauriRuntime, primaryModifierPressed } from './platform.js'
+import { isTauriRuntime } from './platform.js'
+
+import { shortcutForEvent } from './shortcuts.js'
 
 export const WORKBENCH_ZOOM_LEVELS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200]
 export const DEFAULT_WORKBENCH_ZOOM = 100
@@ -28,26 +30,10 @@ export function nextWorkbenchZoom(current, action) {
   return zoom
 }
 
-function isZoomInKey(event) {
-  return event.key === '+' || event.key === '=' || event.code === 'Equal' || event.code === 'NumpadAdd'
-}
-
-function isZoomOutKey(event) {
-  return event.key === '-' || event.key === '_' || event.code === 'Minus' || event.code === 'NumpadSubtract'
-}
-
-function isZoomResetKey(event) {
-  return event.key === '0' || event.code === 'Digit0' || event.code === 'Numpad0'
-}
-
-// Primary modifier only (Cmd on macOS): Ctrl+- must keep reaching terminal
-// shells on macOS, where it is readline undo.
+// Ctrl shortcuts on macOS remain available to terminal shells.
 export function workbenchZoomKeyAction(event) {
-  if (!primaryModifierPressed(event) || event.altKey) return null
-  if (isZoomInKey(event)) return 'in'
-  if (isZoomOutKey(event)) return 'out'
-  if (isZoomResetKey(event)) return 'reset'
-  return null
+  const binding = shortcutForEvent(event, ['global'])
+  return binding?.id.startsWith('zoom-') ? binding.id.slice(5) : null
 }
 
 export async function applyWorkbenchZoom(percent) {

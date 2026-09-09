@@ -1,3 +1,5 @@
+import { matchShortcut } from '../shared/shortcuts.js'
+
 export function routeWorkbenchKey({
   key,
   primary,
@@ -7,15 +9,12 @@ export function routeWorkbenchKey({
   sidebarActivityId = '',
   sidebarSelectionCount = 0,
 }) {
-  if (!primary) return null
-  const normalized = String(key || '').toLowerCase()
+  const binding = matchShortcut({ key, primary, alt, shift }, ['global', 'panel'])
+  if (!binding) return null
+  if (binding.scope === 'global') return { action: binding.id }
 
-  if (!alt && !shift && normalized === 'p') return { action: 'quick-open' }
-  if (!alt && !shift && ['t', 'n'].includes(normalized) && focusOwner === 'activity') return { action: 'new-tab' }
-  if (!alt && !shift && normalized === 'b') return { action: 'toggle-sidebar' }
-
-  if (alt && !shift && (key === 'ArrowLeft' || key === 'ArrowRight')) {
-    const direction = key === 'ArrowLeft' ? -1 : 1
+  if (binding.id.startsWith('cycle-')) {
+    const direction = binding.direction
     if (focusOwner === 'editor') return { action: 'cycle-editor', direction }
     if (focusOwner === 'activity' || focusOwner === 'sidebar') {
       return { action: 'cycle-activity', direction }
@@ -23,7 +22,7 @@ export function routeWorkbenchKey({
     return null
   }
 
-  if (!alt && !shift && normalized === 'w') {
+  if (binding.id === 'close') {
     if (focusOwner === 'editor') return { action: 'close-editor' }
     if (focusOwner === 'activity') return { action: 'close-activity', activityId: '' }
     if (focusOwner === 'sidebar') {

@@ -16,7 +16,7 @@ and [issues.md](issues.md); UI work also requires
 
 | Area | Owning document | Main source |
 |---|---|---|
-| Workbench and navigation | [workbench-design.md](workbench-design.md) | `src/mimir/components/`, `src/mimir/composables/`, `src/stores/workbench.js` |
+| Workbench and navigation | [workbench-design.md](workbench-design.md) | `src/mimir/components/`, `src/mimir/composables/`, `src/stores/workbench.js`, `src/shared/shortcuts.js` |
 | Shell chrome: bars, bands, footers, layers | [chrome-ui.md](chrome-ui.md) | `src/shared/ui/chrome/`, `src/shared/styles/pane-chrome.css`, `src/mimir/paneControls.js`, `src/mimir/paneChromeInventory.js` |
 | Activities, terminals, agents | [activities.md](activities.md), [agent-setup.md](agent-setup.md) | native `activities/`, `activity_commands.rs`, `launchers.rs`; renderer Activity stores and surfaces |
 | Files and Project Git | [files.md](files.md) | `file_index*.rs`, `workspace_files.rs`, `git.rs`, `managed_git.rs`; Files Activity and stores |

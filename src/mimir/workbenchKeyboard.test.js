@@ -70,34 +70,11 @@ describe('Workbench focus-aware keyboard routing', () => {
     })).toEqual({ action: 'close-activity', activityId: '' })
   })
 
-  it('routes New to the main tab chooser without stealing Editor New File', () => {
-    expect(routeWorkbenchKey({
-      key: 'n',
-      primary: true,
-      focusOwner: 'activity',
-      activityNewTargetId: 'preset:review',
-    })).toEqual({
-      action: 'new-tab',
-    })
-    expect(routeWorkbenchKey({
-      key: 'n',
-      primary: true,
-      focusOwner: 'activity',
-      activityNewTargetId: '',
-    })).toEqual({
-      action: 'new-tab',
-    })
-    expect(routeWorkbenchKey({
-      key: 'n',
-      primary: true,
-      focusOwner: 'editor',
-      activityNewTargetId: 'preset:review',
-    })).toBeNull()
-    expect(routeWorkbenchKey({
-      key: 'n',
-      primary: true,
-      focusOwner: 'activity',
-    })).toEqual({ action: 'new-tab' })
+  it.each(['activity', 'editor', 'sidebar', 'none'])('keeps global commands identical from %s', focusOwner => {
+    for (const [key, action] of [['t', 'new-tab'], ['n', 'new-document'], ['p', 'quick-open'], ['b', 'toggle-sidebar'], [',', 'settings'], ['1', 'focus-main'], ['2', 'focus-editor']]) {
+      expect(routeWorkbenchKey({ key, primary: true, focusOwner })).toEqual({ action })
+      expect(routeWorkbenchKey({ key, primary: true, focusOwner, alt: true })).toBeNull()
+    }
   })
 
   it('routes close without a focus owner but leaves tab switching alone', () => {

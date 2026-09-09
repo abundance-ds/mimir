@@ -20,6 +20,7 @@ import { useWorkspaceBootstrap } from './useWorkspaceBootstrap.js'
 
 describe('Workbench controllers', () => {
   beforeEach(() => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
     setActivePinia(createPinia())
     vi.clearAllMocks()
     window.innerWidth = 1280
@@ -414,7 +415,7 @@ describe('Workbench controllers', () => {
     expect(closeWindow).toHaveBeenCalledTimes(2)
   })
 
-  it('routes native New to the tab picker from main tools and sessions, and Editor New File from the Editor', () => {
+  it('routes native New to an Editor document from every pane', () => {
     const quickOpen = ref(false)
     const quickOpenInitialView = ref('root')
     const quickOpenPreferredTargetId = ref('')
@@ -443,16 +444,16 @@ describe('Workbench controllers', () => {
     activityPane.focus()
     controller.newNativeFocusedSurface()
 
-    expect(quickOpen.value).toBe(true)
-    expect(quickOpenInitialView.value).toBe('tabs')
-    expect(quickOpenPreferredTargetId.value).toBe('preset:review')
-    expect(newFile).not.toHaveBeenCalled()
+    expect(quickOpen.value).toBe(false)
+    expect(quickOpenInitialView.value).toBe('root')
+    expect(quickOpenPreferredTargetId.value).toBe('')
+    expect(newFile).toHaveBeenCalledTimes(1)
     quickOpen.value = false
     activityNewTargetId.value = null
     controller.newNativeFocusedSurface()
-    expect(quickOpen.value).toBe(true)
-    expect(quickOpenInitialView.value).toBe('tabs')
-    expect(newFile).not.toHaveBeenCalled()
+    expect(quickOpen.value).toBe(false)
+    expect(quickOpenInitialView.value).toBe('root')
+    expect(newFile).toHaveBeenCalledTimes(2)
 
     quickOpen.value = false
     const editorPane = document.createElement('section')
@@ -462,7 +463,7 @@ describe('Workbench controllers', () => {
     editorPane.focus()
     controller.newNativeFocusedSurface()
 
-    expect(newFile).toHaveBeenCalledTimes(1)
+    expect(newFile).toHaveBeenCalledTimes(3)
     activityPane.remove()
     editorPane.remove()
   })

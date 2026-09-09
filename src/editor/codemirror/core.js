@@ -1,3 +1,4 @@
+import { editorKeyBinding } from '../../shared/shortcuts.js'
 import { EditorState, Compartment, Prec } from '@codemirror/state'
 import { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
@@ -333,7 +334,7 @@ export function createEditorState({ doc, path = '', extensions = [], onChange, o
 
   const selectionRewriteKeymap = Prec.highest(keymap.of([
     {
-      key: 'Mod-k',
+      key: editorKeyBinding('inline-ai'),
       run(view) {
         if (!isSelectionRewriteEnabled()) return false
         const selection = view.state.selection.main

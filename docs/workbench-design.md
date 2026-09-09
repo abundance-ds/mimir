@@ -67,9 +67,10 @@ must never replace or disturb the mounted Editor document and review state.
   tabs only close their view. An ongoing Scribe recording retains its visible
   Sidebar controls. Closing the last main tab shows New Tab without collapsing
   the pane.
-- Cmd/Ctrl+T or Cmd/Ctrl+N in the main pane and its `+` button open the New Tab picker with
-  session sources, tools, open tabs, files, projects, chats, and History.
-  Cmd/Ctrl+N in the Editor creates a document.
+- Cmd/Ctrl+T and the Main `+` button open the Main New Tab picker with session
+  sources, tools, open tabs, files, projects, chats, and History.
+  Cmd/Ctrl+N always creates an Editor document, including from Main or Sidebar.
+  Native New uses the same document action.
 - Open tab identities and order persist in `workbenchLayout.openTabIds`.
   Native session records remain the lifecycle authority. Saved renderer tools
   are reconstructed from their installed catalog, with lazy surface mounting.
@@ -78,6 +79,38 @@ must never replace or disturb the mounted Editor document and review state.
   Global tool tabs retain one identity. The project switcher is available in
   expanded and rail states; Activity records do not create project entries.
 - Chats remains one unique tool tab. Rooms are available through Go to.
+
+## Keyboard scope
+
+`src/shared/shortcuts.js` owns command bindings, scope, and Settings labels.
+The Workbench capture handler, Editor fallback handler, interface zoom, and
+Inline AI binding use this registry. Settings groups commands by scope.
+
+| App-wide shortcut | Action |
+|---|---|
+| Cmd/Ctrl+P | Go to |
+| Cmd/Ctrl+T | Main New Tab picker |
+| Cmd/Ctrl+N | New Editor document |
+| Cmd/Ctrl+B | Expand/collapse Sidebar |
+| Cmd/Ctrl+, | Settings |
+| Cmd/Ctrl+1 | Focus Main; expand it if collapsed |
+| Cmd/Ctrl+2 | Focus Editor; expand it if collapsed |
+| Cmd/Ctrl++ / − / 0 | Interface zoom in / out / reset |
+
+Focusing an empty Editor creates a document through the same New action.
+Focus commands respect the single-content-pane layout in narrow windows.
+Creation and focus commands have the same target from every panel, including
+text inputs and inline tab rename fields. IME composition is left alone.
+
+Close and previous/next tab remain panel-scoped. When native buttons leave
+focus on the body, the last clicked/focused panel remains the target. Editor
+Save, Open, toolbar, and formatting shortcuts require Editor focus and do not
+act through unrelated text inputs. On macOS, Control chords remain available
+to terminals; the app uses Command. Other platforms use Control.
+
+Dialogs and Go to suspend panel commands behind them. Zoom remains available.
+The embedded Editor cannot run global fallback commands after a dialog blocks
+the Workbench handler. The standalone Editor retains its document commands.
 
 ## Go to
 

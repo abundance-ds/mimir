@@ -204,6 +204,7 @@ import * as appsApi from '../services/appsCatalog.js'
 import * as routinesApi from '../services/routines.js'
 import { useActivitiesStore } from '../stores/activities.js'
 import { useChatStore } from '../stores/chat.js'
+import { useEditorUIStore } from '../stores/editorUI.js'
 import { useFileStore } from '../stores/files.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useMeetingsStore } from '../stores/meetings.js'
@@ -231,6 +232,7 @@ describe('WorkbenchApp', () => {
     wrappers = []
     setActivePinia(pinia)
     vi.resetAllMocks()
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
     editorOpen.mockReset()
     editorReveal.mockReset()
     editorOpenSettings.mockReset()
@@ -400,7 +402,59 @@ describe('WorkbenchApp', () => {
     expect(activityApi.spawnActivity).not.toHaveBeenCalled()
   })
 
-  it('opens New Tab with Cmd+T in the main pane and keeps the Editor shortcut separate', async () => {
+  it.each(['activity', 'editor', 'sidebar'])('uses the same creation and Settings shortcuts from an input in %s', async pane => {
+    const wrapper = await render({ workspace: '/w' })
+    const field = document.createElement('input')
+    wrapper.get(`[data-pane="${pane}"]`).element.append(field)
+    field.focus()
+    const press = key => field.dispatchEvent(new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true }))
+    press('t')
+    await nextTick()
+    expect(wrapper.get('[data-quick-open]').text()).toContain('New tab')
+    wrapper.findComponent({ name: 'QuickOpen' }).vm.$emit('close')
+    await nextTick()
+    field.focus()
+    press('n')
+    await flushPromises()
+    expect(editorNew).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    field.focus()
+    press(',')
+    await nextTick()
+    expect(useEditorUIStore().settingsOpen).toBe(true)
+    field.remove()
+  })
+
+  it('focuses and restores the named pane at narrow widths', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    useFileStore().newFile()
+    window.innerWidth = 700
+    window.dispatchEvent(new Event('resize'))
+    const workbench = useWorkbenchStore()
+    workbench.setPaneState('editor', 'expanded')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', metaKey: true, bubbles: true }))
+    await flushPromises()
+    expect(workbench.paneLayout.activity.state).toBe('expanded')
+    expect(workbench.paneLayout.editor.state).toBe('rail')
+    expect(document.activeElement.closest('[data-pane]').dataset.pane).toBe('activity')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', metaKey: true, bubbles: true }))
+    await flushPromises()
+    expect(workbench.paneLayout.editor.state).toBe('expanded')
+    expect(workbench.paneLayout.activity.state).toBe('rail')
+    expect(document.activeElement.closest('[data-pane]').dataset.pane).toBe('editor')
+    expect(editorNew).not.toHaveBeenCalled()
+  })
+
+  it('creates a document when focusing an empty Editor, without opening an empty panel', async () => {
+    await render({ workspace: '/w' })
+    useWorkbenchStore().setPaneState('editor', 'rail')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', metaKey: true, bubbles: true }))
+    await flushPromises()
+    expect(editorNew).toHaveBeenCalledTimes(1)
+    expect(useWorkbenchStore().paneLayout.editor.state).toBe('expanded')
+  })
+
+  it('opens the Main tab picker with Cmd+T', async () => {
     const wrapper = await render({ workspace: '/w' })
     const pane = wrapper.get('[data-pane="activity"]')
     pane.element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
@@ -1660,7 +1714,7 @@ describe('WorkbenchApp', () => {
     expect(wrapper.get('[data-quick-open]').exists()).toBe(true)
   })
 
-  it('opens the full tab picker on Cmd+N in a CLI panel with its launcher selected', async () => {
+  it('creates an Editor document with Cmd+N from a CLI panel', async () => {
     const wrapper = await render({ workspace: '/w' })
     const record = {
       ...activityRecord('agent:review', 'Review with Codex', '2026-07-29T10:00:00Z'),
@@ -1682,23 +1736,12 @@ describe('WorkbenchApp', () => {
     }))
     await nextTick()
 
-    expect(wrapper.get('[data-quick-open-type="new-activity"]').exists()).toBe(true)
-    expect(wrapper.find('[data-quick-open-type="new-activity-enter"]').exists()).toBe(false)
-    expect(wrapper.find('[data-quick-open-type="tool"]').exists()).toBe(true)
-    expect(wrapper.get('[data-quick-open-key="new:preset:review"]').attributes('aria-selected'))
-      .toBe('true')
-    expect(editorNew).not.toHaveBeenCalled()
-
-    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-
-    expect(activityApi.resolveLauncher).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'review' }),
-      '/w',
-    )
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    expect(editorNew).toHaveBeenCalledTimes(1)
+    expect(useWorkbenchStore().paneLayout.editor.state).toBe('expanded')
   })
 
-  it('routes the embedded native New action through the last focused pane', async () => {
+  it('routes the embedded native New action to an Editor document', async () => {
     const wrapper = await render({ workspace: '/w' })
     const record = {
       ...activityRecord('agent:review', 'Review with Codex', '2026-07-29T10:00:00Z'),
@@ -1715,16 +1758,13 @@ describe('WorkbenchApp', () => {
     wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('newRequest')
     await nextTick()
 
-    expect(wrapper.get('[data-quick-open-type="new-activity"]').exists()).toBe(true)
-    expect(wrapper.get('[data-quick-open-key="new:preset:review"]').attributes('aria-selected'))
-      .toBe('true')
-    expect(editorNew).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-quick-open]').exists()).toBe(false)
+    expect(editorNew).toHaveBeenCalledTimes(1)
 
-    await wrapper.get('[data-quick-open-backdrop]').trigger('click')
     wrapper.get('[data-editor-stub]').element.focus()
     wrapper.findComponent({ name: 'EditorApp' }).vm.$emit('newRequest')
 
-    expect(editorNew).toHaveBeenCalledTimes(1)
+    expect(editorNew).toHaveBeenCalledTimes(2)
   })
 
   it('routes Escape through the Go to hierarchy before closing the root', async () => {

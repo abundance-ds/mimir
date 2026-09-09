@@ -1673,7 +1673,13 @@ function selectNavigationTab(id) {
   return true
 }
 
+function focusEditorPane() {
+  editorShellRef.value?.querySelector('[data-editor-tabs-region] [role="tab"][aria-selected="true"]')?.focus()
+  restoreEditorFocus()
+}
+
 defineExpose({
+  mimirFocus: focusEditorPane,
   navigationTabs, activeNavigationTab, selectNavigationTab,
   mimirScratchpad: scratchpadEditor.show,
   mimirOpen,
@@ -1718,6 +1724,7 @@ const { onDiffAcceptAll, onDiffRejectAll, onDiffChunksResolved, onDiffNavigateCh
 // --- Keyboard shortcuts ---
 
 useKeyboardShortcuts({
+  embedded: props.embedded,
   onFormat,
   onSave,
   onSaveAs,
@@ -1726,7 +1733,7 @@ useKeyboardShortcuts({
   onNewTab: openNewTabPage,
   onCloseTab: closeActiveEditorTab,
   onRewriteSelection,
-  editorHasFocus: () => Boolean(editorSurfaceRef.value?.hasFocus?.()),
+  editorHasFocus: () => Boolean(editorShellRef.value?.contains(document.activeElement)),
 })
 
 function onEditorKeydown(event) {

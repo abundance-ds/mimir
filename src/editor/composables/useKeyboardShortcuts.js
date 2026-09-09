@@ -2,10 +2,11 @@ import { onMounted, onUnmounted } from 'vue'
 import { useEditorUIStore } from '../../stores/editorUI.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useFileStore } from '../../stores/files.js'
-import { primaryModifierPressed } from '../../shared/platform.js'
+import { shortcutForEvent } from '../../shared/shortcuts.js'
 import { workbenchZoomKeyAction, nextWorkbenchZoom } from '../../shared/workbenchZoom.js'
 
 export function useKeyboardShortcuts({
+  embedded = false,
   onFormat,
   onSave,
   onSaveAs,
@@ -21,98 +22,48 @@ export function useKeyboardShortcuts({
   const files = useFileStore()
 
   function onKeydown(e) {
-    const mod = primaryModifierPressed(e)
-    const key = e.key.toLowerCase()
-
-    // Interface zoom for the standalone editor window. Inside the workbench
-    // this never fires: WorkbenchApp handles zoom chords at capture phase and
-    // stops propagation. Editor content zoom stays on the footer controls.
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return
+    // The Workbench capture handler consumes global bindings. This also
+    // supplies those commands when the Editor runs in its standalone window.
     const zoomAction = workbenchZoomKeyAction(e)
     if (zoomAction) {
       e.preventDefault()
       settings.set('workbenchZoom', nextWorkbenchZoom(settings.workbenchZoom, zoomAction))
       return
     }
-
-    if (mod && e.key === ',') {
+    const binding = shortcutForEvent(e)
+    if (!binding) return
+    if (embedded && binding.scope === 'global') return
+    if (binding.id === 'settings') {
       e.preventDefault()
       ui.settingsOpen = !ui.settingsOpen
       return
     }
-    if (mod && e.key === '/') {
+    if (document.querySelector('[aria-modal="true"]')) return
+    if (binding.id === 'new-document' || binding.id === 'new-tab') {
       e.preventDefault()
-      settings.set(
-        'editorToolbarMode',
-        settings.editorToolbarMode === 'none' ? 'top' : 'none',
-      )
-    }
-    if (mod && e.shiftKey && key === 'b') {
-      e.preventDefault()
-      onFormat('bold')
-    }
-    if (mod && !e.shiftKey && key === 'i') {
-      e.preventDefault()
-      onFormat('italic')
-    }
-    // Strikethrough
-    if (mod && e.shiftKey && key === 'x') {
-      e.preventDefault()
-      onFormat('strikethrough')
-    }
-    // Bullet list
-    if (mod && e.shiftKey && e.code === 'Digit8') {
-      e.preventDefault()
-      onFormat('bullet-list')
-    }
-    // Numbered list
-    if (mod && e.shiftKey && e.code === 'Digit7') {
-      e.preventDefault()
-      onFormat('numbered-list')
-    }
-    // Blockquote
-    if (mod && e.shiftKey && e.key === '>') {
-      e.preventDefault()
-      onFormat('blockquote')
-    }
-    if (mod && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-      if (!editorHasFocus()) return
-      e.preventDefault()
-      const len = files.visibleOpenFiles.length
-      if (len > 1) {
-        const cur = files.activeVisibleFileIndex
-        const next = e.key === 'ArrowLeft'
-          ? (cur - 1 + len) % len
-          : (cur + 1) % len
-        files.setActiveVisibleTab(next)
-      }
+      if (binding.id === 'new-document') onNewFile()
+      else onNewTab()
       return
     }
-    // File operations
-    if (mod && !e.shiftKey && key === 'o') {
+    if (!editorHasFocus()) return
+    const input = e.target?.closest?.('input, textarea, [contenteditable="true"]')
+    if (input && !input.closest('.cm-editor')) return
+    if (binding.id === 'inline-ai') return // CodeMirror owns its selection command.
+    if (binding.format) { e.preventDefault(); onFormat(binding.format); return }
+    if (binding.id === 'toolbar') {
       e.preventDefault()
-      onOpenDialog()
+      settings.set('editorToolbarMode', settings.editorToolbarMode === 'none' ? 'top' : 'none')
+      return
     }
-    if (mod && !e.shiftKey && key === 's') {
+    if (binding.id.startsWith('cycle-')) {
       e.preventDefault()
-      onSave()
+      const len = files.visibleOpenFiles.length
+      if (len > 1) files.setActiveVisibleTab((files.activeVisibleFileIndex + binding.direction + len) % len)
+      return
     }
-    if (mod && e.shiftKey && key === 's') {
-      e.preventDefault()
-      onSaveAs()
-    }
-    if (mod && !e.shiftKey && key === 't') {
-      e.preventDefault()
-      onNewTab()
-    }
-    if (mod && !e.shiftKey && key === 'n') {
-      e.preventDefault()
-      onNewFile()
-    }
-    if (mod && !e.shiftKey && key === 'w') {
-      if (!editorHasFocus()) return
-      e.preventDefault()
-      onCloseTab()
-    }
+    const actions = { 'open-file': onOpenDialog, save: onSave, 'save-as': onSaveAs, close: onCloseTab }
+    if (actions[binding.id]) { e.preventDefault(); actions[binding.id]() }
   }
 
   onMounted(() => document.addEventListener('keydown', onKeydown))

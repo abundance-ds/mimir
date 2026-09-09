@@ -1,3 +1,5 @@
+import { primaryModifierPressed } from '../../shared/platform.js'
+import { useEditorUIStore } from '../../stores/editorUI.js'
 import { nextTick, ref } from 'vue'
 import { nextWorkbenchZoom, workbenchZoomKeyAction } from '../../shared/workbenchZoom.js'
 import { closeCurrentWindow } from '../../services/window.js'
@@ -7,7 +9,6 @@ export function useWorkbenchKeyboardRouting({
   quickOpen,
   quickOpenInitialView = ref('root'),
   quickOpenPreferredTargetId = ref(''),
-  activityNewTargetId = ref(null),
   settings,
   editorRef,
   editorFiles,
@@ -16,15 +17,16 @@ export function useWorkbenchKeyboardRouting({
   sidebarSelection = ref([]),
   toggleSidebar,
   selectActivity,
+  focusMain,
   closeActivity,
   closeActivities,
   closeWindow = closeCurrentWindow,
 }) {
+  const editorUI = useEditorUIStore()
   const lastFocus = ref({ owner: 'none', activityId: '' })
 
   function onKeydown(event) {
     if (event.isComposing || event.keyCode === 229) return
-    if (event.target?.closest?.('[data-tab-rename]')) return
     const zoomAction = workbenchZoomKeyAction(event)
     if (zoomAction) {
       consume(event)
@@ -40,7 +42,7 @@ export function useWorkbenchKeyboardRouting({
     if (quickOpen.value && event.key === 'Escape') return
     if (
       quickOpen.value
-      && (event.metaKey || event.ctrlKey)
+      && primaryModifierPressed(event)
       && event.key.toLowerCase() === 'w'
     ) {
       consume(event)
@@ -64,7 +66,7 @@ export function useWorkbenchKeyboardRouting({
     const focus = direct.owner === 'none' ? lastFocus.value : direct
     const result = routeWorkbenchKey({
       key: event.key,
-      primary: event.metaKey || event.ctrlKey,
+      primary: primaryModifierPressed(event),
       alt: event.altKey,
       shift: event.shiftKey,
       focusOwner: focus.owner,
@@ -72,10 +74,17 @@ export function useWorkbenchKeyboardRouting({
       sidebarSelectionCount: sidebarSelection.value.length,
     })
     if (!result) return
+    if (event.target?.closest?.('[data-tab-rename]') && ['close-editor', 'close-activity', 'close-focused', 'cycle-editor', 'cycle-activity'].includes(result.action)) return
 
     consume(event)
     if (result.action === 'new-tab') {
-      openQuickOpen('tabs', String(event.key).toLowerCase() === 'n' ? activityNewTargetId.value : '')
+      openQuickOpen('tabs')
+    } else if (result.action === 'new-document') {
+      void newDocument()
+    } else if (result.action === 'settings') {
+      editorUI.settingsOpen = !editorUI.settingsOpen
+    } else if (result.action === 'focus-main' || result.action === 'focus-editor') {
+      void focusPanel(result.action === 'focus-main' ? 'activity' : 'editor')
     } else if (result.action === 'quick-open') {
       openQuickOpen()
     } else if (result.action === 'toggle-sidebar') {
@@ -140,13 +149,31 @@ export function useWorkbenchKeyboardRouting({
 
   function newNativeFocusedSurface() {
     if (quickOpen.value || document.querySelector('[aria-modal="true"]')) return
-    const current = keyboardFocus(document.activeElement)
-    const focus = current.owner === 'none' ? lastFocus.value : current
-    if (focus.owner === 'activity') {
-      openQuickOpen('tabs', activityNewTargetId.value)
-      return
+    void newDocument()
+  }
+
+  async function newDocument() {
+    await editorRef.value?.mimirNewFile?.()
+    workbench.setPaneState?.('editor', 'expanded')
+    lastFocus.value = { owner: 'editor', activityId: '' }
+    await nextTick()
+    editorRef.value?.mimirFocus?.()
+  }
+
+  async function focusPanel(pane) {
+    if (pane === 'editor') {
+      const hasTabs = editorRef.value?.mimirHasOpenTabs?.() ?? Boolean((editorFiles.visibleOpenFiles || editorFiles.openFiles).length)
+      if (!hasTabs) { await newDocument(); return }
     }
-    editorRef.value?.mimirNewFile?.()
+    workbench.setPaneState?.(pane, 'expanded')
+    lastFocus.value = { owner: pane, activityId: '' }
+    await nextTick()
+    const target = document.querySelector(`[data-pane="${pane}"] [role="tab"][aria-selected="true"]`)
+      || document.querySelector(`[data-pane="${pane}"] button:not(:disabled), [data-pane="${pane}"] [tabindex="0"]`)
+    target?.focus()
+    if (pane === 'editor') editorRef.value?.mimirFocus?.()
+    else if (focusMain) focusMain()
+    else if (workbench.activeActivityId) selectActivity(workbench.activeActivityId)
   }
 
   function openQuickOpen(view = 'root', preferredTargetId = '') {

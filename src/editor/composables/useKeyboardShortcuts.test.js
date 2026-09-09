@@ -54,6 +54,28 @@ function press(key, { shift = false, alt = false, mod = true, code = '' } = {}) 
 }
 
 describe('useKeyboardShortcuts', () => {
+  it('leaves Editor actions alone when another panel has focus', () => {
+    const { handlers } = mountShortcuts({ editorHasFocus: () => false, embedded: true })
+    for (const key of ['s', 'o', 'i', '/']) press(key)
+    press('b', { shift: true })
+    expect(handlers.onSave).not.toHaveBeenCalled()
+    expect(handlers.onOpenDialog).not.toHaveBeenCalled()
+    expect(handlers.onFormat).not.toHaveBeenCalled()
+  })
+
+  it('does not run global fallbacks or format unrelated text inputs inside the embedded Editor', () => {
+    const { handlers } = mountShortcuts({ embedded: true })
+    press('n')
+    press('t')
+    expect(handlers.onNewFile).not.toHaveBeenCalled()
+    expect(handlers.onNewTab).not.toHaveBeenCalled()
+    const input = document.createElement('input')
+    document.body.append(input)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', ctrlKey: true, metaKey: true, bubbles: true }))
+    expect(handlers.onFormat).not.toHaveBeenCalled()
+    input.remove()
+  })
+
   it('toggles the settings dialog on Mod+,', () => {
     mountShortcuts()
     const ui = useEditorUIStore()

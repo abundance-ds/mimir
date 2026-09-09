@@ -1,72 +1,28 @@
 <template>
   <div>
-    <div class="section-title">Editor</div>
-    <div class="shortcuts-table">
-      <div
-        v-for="(s, i) in editorShortcuts"
-        :key="'e' + i"
-        class="shortcut-row"
-        :class="{ last: i === editorShortcuts.length - 1 }"
-      >
-        <span class="shortcut-action">{{ s.action }}</span>
-        <span class="shortcut-keys">
-          <span
-            v-for="(k, ki) in s.keys"
-            :key="ki"
-            :class="k === '/' ? 'key-sep' : 'kbd'"
-          >{{ k }}</span>
-        </span>
+    <section v-for="group in groups" :key="group.scope" class="shortcut-group">
+      <div class="section-title">{{ group.title }}</div>
+      <div class="shortcuts-table">
+        <div v-for="(binding, index) in group.items" :key="binding.id" class="shortcut-row" :class="{ last: index === group.items.length - 1 }">
+          <span class="shortcut-action">{{ binding.label }}</span>
+          <span class="shortcut-keys"><span v-for="(key, i) in shortcutKeys(binding)" :key="i" class="kbd">{{ key }}</span></span>
+        </div>
       </div>
-    </div>
-
-    <div class="section-title mt">Workbench</div>
-    <div class="shortcuts-table">
-      <div
-        v-for="(s, i) in workbenchShortcuts"
-        :key="'p' + i"
-        class="shortcut-row"
-        :class="{ last: i === workbenchShortcuts.length - 1 }"
-      >
-        <span class="shortcut-action">{{ s.action }}</span>
-        <span class="shortcut-keys">
-          <span
-            v-for="(k, ki) in s.keys"
-            :key="ki"
-            :class="k === '/' ? 'key-sep' : 'kbd'"
-          >{{ k }}</span>
-        </span>
-      </div>
-    </div>
+    </section>
+    <p class="mt-4 text-[11px] text-ink-3">Dialogs temporarily block commands for the panels behind them. Rename a session with F2 while its tab has focus. In Files, use ↑/↓ to select and Enter to open.</p>
   </div>
 </template>
-
 <script setup>
-const editorShortcuts = [
-  { action: 'Inline AI', keys: ['⌘', 'K'] },
-  { action: 'Cycle toolbar', keys: ['⌘', '/'] },
-  { action: 'Bold', keys: ['⇧', '⌘', 'B'] },
-  { action: 'Italic', keys: ['⌘', 'I'] },
-  { action: 'Settings', keys: ['⌘', ','] },
-  { action: 'Save', keys: ['⌘', 'S'] },
-  { action: 'New document', keys: ['⌘', 'N'] },
-  { action: 'Close tab', keys: ['⌘', 'W'] },
-]
-
-const workbenchShortcuts = [
-  { action: 'Go to', keys: ['⌘', 'P'] },
-  { action: 'New main tab', keys: ['⌘', 'T', '/', '⌘', 'N'] },
-  { action: 'Rename session tab', keys: ['F2'] },
-  { action: 'Cycle tabs', keys: ['⌥', '⌘', '←', '/', '⌥', '⌘', '→'] },
-  { action: 'Toggle sidebar', keys: ['⌘', 'B'] },
-  { action: 'Zoom in / out', keys: ['⌘', '+', '/', '⌘', '−'] },
-  { action: 'Reset zoom', keys: ['⌘', '0'] },
-  { action: 'Open selected file', keys: ['Enter'] },
-  { action: 'Navigate files', keys: ['↑', '/', '↓'] },
-]
+import { SHORTCUTS, shortcutKeys } from '../../shortcuts.js'
+const groups = [
+  { scope: 'global', title: 'App-wide' },
+  { scope: 'panel', title: 'Focused panel' },
+  { scope: 'editor', title: 'Editor' },
+].map(group => ({ ...group, items: SHORTCUTS.filter(binding => binding.scope === group.scope) }))
 </script>
 
 <style scoped>
-.mt {
+.shortcut-group + .shortcut-group {
   margin-top: 20px;
 }
 
