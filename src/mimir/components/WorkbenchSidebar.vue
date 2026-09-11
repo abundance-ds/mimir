@@ -134,7 +134,7 @@
     </div>
     <div data-sidebar-files class="sidebar-files-dock relative flex shrink-0 flex-col overflow-visible border-t border-rule"
       :style="{ height: `${filesHidden ? 28 : filesSize.height.value + 28}px` }">
-      <div v-if="!filesCollapsed && !collapsed" data-sidebar-files-resize role="separator" tabindex="0"
+      <div v-if="!filesCollapsed && !filesHidden" data-sidebar-files-resize role="separator" tabindex="0"
         aria-label="Resize Files" aria-orientation="horizontal"
         :aria-valuemin="filesSize.minimum.value" :aria-valuemax="filesSize.maximum.value" :aria-valuenow="filesSize.height.value"
         class="sidebar-files-resize" @pointerdown="filesSize.start" @keydown="filesSize.keydown" />
@@ -242,7 +242,7 @@ watch(() => props.collapsed, rail => {
   })
 })
 const filesSize = useSidebarFilesSize(props, emit, body)
-const filesHidden = computed(() => props.collapsed || (props.filesCollapsed && !filesSize.opening.value))
+const filesHidden = computed(() => props.collapsed || filesSize.closing.value || (props.filesCollapsed && !filesSize.opening.value))
 async function restoreSidebar() {
   emit('toggleCollapse')
   await nextTick()

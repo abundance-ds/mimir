@@ -9,6 +9,7 @@ export function useSidebarFilesSize(props, emit, body) {
   const available = ref(600)
   const draft = ref(null)
   const opening = ref(false)
+  const closing = ref(false)
   const resizing = ref(false)
   const maximum = computed(() => Math.max(0, available.value - 112 - (props.meetingCapture ? 86 : 0)))
   const minimum = computed(() => Math.min(MIN_SIDEBAR_FILES_HEIGHT, maximum.value))
@@ -45,7 +46,12 @@ export function useSidebarFilesSize(props, emit, body) {
     } else {
       if (!delta && !gesture.moved) return
       guardDragClick()
-      draft.value = clamp(gesture.startHeight + delta)
+      const nextHeight = gesture.startHeight + delta
+      // Keep the gesture's original edge after snapping, so reversing the same
+      // drag opens Files again. A small gap prevents flicker at the threshold.
+      const threshold = minimum.value / 2 + (closing.value ? OPEN_DRAG_THRESHOLD : 0)
+      closing.value = nextHeight < threshold
+      draft.value = clamp(nextHeight)
     }
     gesture.moved = true
   }
@@ -53,6 +59,7 @@ export function useSidebarFilesSize(props, emit, body) {
     gesture = null
     draft.value = null
     opening.value = false
+    closing.value = false
     resizing.value = false
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', finish)
@@ -68,14 +75,17 @@ export function useSidebarFilesSize(props, emit, body) {
   function finish(event) {
     if (!gesture || event.pointerId !== gesture.pointerId) return
     move(event)
-    if (gesture.moved) {
-      if (!gesture.fromCollapsed || opening.value) {
+    const moved = gesture.moved
+    if (moved) {
+      if (!gesture.fromCollapsed && closing.value) {
+        emit('toggleFiles')
+      } else if (!gesture.fromCollapsed || opening.value) {
         emit('resizeFiles', clamp(height.value))
         if (gesture.fromCollapsed) emit('toggleFiles')
       }
-      focusControl()
     }
     reset()
+    if (moved) focusControl()
   }
   function abort() {
     if (!gesture) return
@@ -121,5 +131,5 @@ export function useSidebarFilesSize(props, emit, body) {
     }
   })
   onBeforeUnmount(() => { reset(); clearClickGuard(); observer?.disconnect() })
-  return { height, minimum, maximum, resizing, opening, start, startCollapsed, keydown }
+  return { height, minimum, maximum, resizing, opening, closing, start, startCollapsed, keydown }
 }

@@ -131,6 +131,75 @@ describe('WorkbenchSidebar', () => {
     expect(wrapper.emitted('resizeFiles')).toHaveLength(1)
   })
 
+  it('snaps Files closed and opens it again during the same drag without losing the mounted browser', async () => {
+    wrapper = mount(WorkbenchSidebar, {
+      attachTo: document.body, props: { filesHeight: 240 },
+      slots: { files: '<input data-files-search value="retained" />' },
+    })
+    const input = wrapper.get('[data-files-search]').element
+    const pointer = (type, clientY) => window.dispatchEvent(new PointerEvent(type, { clientY, pointerId: 1 }))
+    await wrapper.get('[data-sidebar-files-resize]').trigger('pointerdown', { button: 0, clientY: 300, pointerId: 1 })
+    pointer('pointermove', 460) // Below the usable minimum, but above the collapse threshold.
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('140px')
+    pointer('pointermove', 490)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('28px')
+    expect(wrapper.find('[data-sidebar-files-resize]').exists()).toBe(false)
+    expect(wrapper.get('[data-sidebar-files-content]').isVisible()).toBe(false)
+    expect(wrapper.emitted('toggleFiles')).toBeUndefined()
+    pointer('pointermove', 483) // Small pointer jitter must not reopen it.
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('28px')
+    pointer('pointermove', 450)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('140px')
+    expect(wrapper.get('[data-files-search]').element).toBe(input)
+    expect(wrapper.get('[data-sidebar-files-content]').isVisible()).toBe(true)
+    pointer('pointerup', 350)
+    expect(wrapper.emitted('resizeFiles')).toEqual([[190]])
+    expect(wrapper.emitted('toggleFiles')).toBeUndefined()
+    await wrapper.setProps({ filesHeight: 190 })
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('218px')
+  })
+
+  it('saves drag collapse on release, suppresses its click, and can drag open again', async () => {
+    wrapper = mount(WorkbenchSidebar, { attachTo: document.body, props: { filesHeight: 240 } })
+    await wrapper.get('[data-sidebar-files-resize]').trigger('pointerdown', { button: 0, clientY: 300, pointerId: 1 })
+    window.dispatchEvent(new PointerEvent('pointermove', { clientY: 510, pointerId: 1 }))
+    await wrapper.vm.$nextTick()
+    window.dispatchEvent(new PointerEvent('pointerup', { clientY: 510, pointerId: 1 }))
+    expect(wrapper.emitted('toggleFiles')).toEqual([[]])
+    expect(wrapper.emitted('resizeFiles')).toBeUndefined()
+    await wrapper.setProps({ filesCollapsed: true })
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('28px')
+    expect(document.activeElement).toBe(wrapper.get('[data-sidebar-files-toggle]').element)
+    await wrapper.get('[data-sidebar-files-toggle]').trigger('click', { detail: 1 })
+    expect(wrapper.emitted('toggleFiles')).toHaveLength(1)
+    await wrapper.get('[data-sidebar-files-toggle]').trigger('pointerdown', { button: 0, clientY: 500, pointerId: 2 })
+    window.dispatchEvent(new PointerEvent('pointerup', { clientY: 340, pointerId: 2 }))
+    expect(wrapper.emitted('resizeFiles')).toEqual([[160]])
+    expect(wrapper.emitted('toggleFiles')).toHaveLength(2)
+    await wrapper.setProps({ filesCollapsed: false, filesHeight: 160 })
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('188px')
+  })
+
+  it.each(['Escape', 'pointercancel'])('restores the open Files height when a snapped drag is cancelled with %s', async cancel => {
+    wrapper = mount(WorkbenchSidebar, { attachTo: document.body, props: { filesHeight: 240 } })
+    await wrapper.get('[data-sidebar-files-resize]').trigger('pointerdown', { button: 0, clientY: 300, pointerId: 1 })
+    window.dispatchEvent(new PointerEvent('pointermove', { clientY: 510, pointerId: 1 }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('28px')
+    if (cancel === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    else window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { clientY: 510, pointerId: 1 }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('268px')
+    expect(wrapper.emitted('toggleFiles')).toBeUndefined()
+    expect(wrapper.emitted('resizeFiles')).toBeUndefined()
+    expect(document.activeElement).toBe(wrapper.get('[data-sidebar-files-resize]').element)
+  })
+
   it('previews an upward drag from collapsed and saves height only on release', async () => {
     wrapper = mount(WorkbenchSidebar, {
       attachTo: document.body,
