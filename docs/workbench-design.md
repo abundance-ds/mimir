@@ -9,7 +9,10 @@ must never replace or disturb the mounted Editor document and review state.
   a mounted 52 px rail. Narrow windows still collapse it automatically; the
   user can expand it manually.
 - Activity defaults to 560 px; Editor defaults to 520 px. Each content pane has
-  a 336 px working minimum and collapses to a 44 px rail.
+  a 336 px working minimum and collapses to a 44 px rail. A manually restored
+  Sidebar fits the available width without replacing its saved width. If the
+  window cannot fit both content panes, only one remains open. At the smallest
+  window size, that pane uses the remaining width to prevent horizontal overflow.
 - Activity and Editor cannot both remain railed. In narrow windows, opening one
   rails the other.
 - Activity owns flexible width in a split. If it becomes a rail, Editor takes
@@ -19,10 +22,10 @@ must never replace or disturb the mounted Editor document and review state.
   collapse panels to fit. Window growth preserves current panel states; it
   never restores an older layout or opens an empty Editor. Manual expand
   controls reopen panels. Current states persist at every window width.
-- Pane controls retain the original header arrangement. Sidebar restore
-  precedes Main restore when both are collapsed. Main has a quiet rail;
-  Editor has a rail arrow. [chrome-ui.md](chrome-ui.md) owns the six-state
-  control map and the Expand / Restore split toggle.
+- Sidebar expand occupies the Tools heading slot in the Sidebar rail.
+  Main restore remains in the Editor header. Main has a quiet rail; Editor
+  has a rail arrow. [chrome-ui.md](chrome-ui.md) owns the six-state control
+  map and the Expand / Restore split toggle.
 - Activities and apps lift primary actions into the main header through
   `usePaneChrome`. Main tabs do not add a second status or actions row.
   Bar heights and layers are fixed in [design-system.md](design-system.md),
@@ -30,9 +33,50 @@ must never replace or disturb the mounted Editor document and review state.
 
 ## Sidebar and main tabs
 
-- The Sidebar contains the project switcher, collapsible Tools, Files, and
-  Settings. Tools has a bounded height; Files takes the remaining space.
+- The Sidebar contains the project switcher, Tools, Activities, Files, and
+  Settings. Tools and Activities remain open and share one scroll area. Each
+  heading and navigation row keeps its height when the available space changes.
   [files.md](files.md) owns the file browser controls.
+- Files is the only collapsible section. When collapsed, its row sits directly
+  above Settings. Opening it grows the file browser upward below navigation.
+  Collapse sits beside the file actions menu in its header. The expanded browser
+  extends to Settings with no Files footer.
+  Drag its top edge to change its height. With the Sidebar expanded, dragging
+  the collapsed Files row upward opens a live height preview. Release saves the
+  height; Escape or dragging back down keeps it collapsed. A click restores the
+  saved height. The rail icon remains a click control.
+  Arrow keys resize the focused separator;
+  Shift uses a larger step. Home and End reach the limits; Escape cancels a drag.
+  `sidebarFilesCollapsed` and `sidebarFilesHeight` persist through Settings.
+  Window shrinking limits the displayed height without replacing the saved height.
+  Sidebar rail mode collapses Files to its bottom icon and gives the released
+  space to navigation. That icon expands the Sidebar and opens Files at its saved
+  height. Restoring the Sidebar restores its prior file preference and navigation
+  scroll position.
+  The browser remains mounted through both kinds of collapse.
+- Activities shows the open session tabs for the current workspace, in their
+  relative tab order. It excludes unique tools, which remain in Tools. Both
+  views use the same selected Activity, names, lifecycle records, rename and
+  close actions. Reordering session rows changes the same tab order while
+  retaining tool and other-project tab positions. Output never reorders rows.
+- The Activities heading retains an attention signal. New Activity opens the
+  existing New Tab picker. In the Sidebar rail, session rows retain their icons,
+  selection, and attention signals. The rail uses one navigation scroll area;
+  restoring the Sidebar restores its previous scroll position. Tools and Activities have no disclosure state.
+- Sidebar row arrows and Home/End move focus; Enter/Space selects. F2,
+  double-click, and the context menu rename sessions when the Sidebar is
+  expanded. The context menu and pointer drag reorder rows. Rows have no close
+  button. Close remains available in the context menu and the Main header or
+  tabs, through the same lifecycle action.
+- Sidebar status retains the original nine-dot Working animation and compact
+  relative times. Error records take priority. Starting and working records
+  animate; restoration never appears as new work. Inactive blocking input
+  requests use an attention dot, and inactive unread replies use an information
+  dot. Ordinary prompts, idle shells, and ended sessions stay quiet. Error,
+  attention, and unread markers have named tooltips and accessible labels.
+  The rail keeps a compact signal beside the provider icon. Reduced-motion
+  mode shows a static grid. One
+  minute clock updates all row times without changing row order.
 - [Scratchpad](scratchpad.md) opens its unique Editor tab from Tools. Other
   Tools are stable main-tab destinations. Opening an existing tool selects its
   unique tab. Closing its tab retains the mounted surface during the app
@@ -41,6 +85,13 @@ must never replace or disturb the mounted Editor document and review state.
   remains with each tool; closing a tab is not a reset command.
 - Main tabs contain tools, agents, and terminals. Document tabs remain in the
   Editor. Switching main tabs does not change the Editor document or review.
+- Settings > Appearance > Show main tabs saves `showMainTabs` (default true).
+  When off, the existing Main title and status header returns, with Open views,
+  New Activity, and Close. Open views reuses the searchable All Tabs menu.
+  Close uses Stop and archive for live PTYs, Archive for ended sessions, and
+  Close for tools. Editor document tabs remain visible. The setting changes
+  only navigation controls: selection, order, surfaces, and pane layout remain
+  intact. Sidebar width and collapse never change this preference.
 - Tabs use a small existing provider/tool icon and a short title. Tabs are
   28 px high, with widths that shrink to fit. Selection adds a quiet background
   without an enclosing border. The label area selects the tab. Close is always visible

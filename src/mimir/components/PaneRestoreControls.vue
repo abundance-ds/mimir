@@ -4,13 +4,12 @@
       :data-pane-action="pane === 'activity' ? `restore-${target}` : undefined"
       :data-editor-action="pane === 'editor' ? `restore-${target}` : undefined"
       :title="`Restore ${target}`" :aria-label="`Restore ${target}`" @click="restore(target)">
-      <IconLayoutSidebarLeftExpand v-if="target === 'sidebar'" :size="15" :stroke-width="1.8" />
-      <IconArrowBarRight v-else :size="15" :stroke-width="1.8" />
+      <IconArrowBarRight :size="15" :stroke-width="1.8" />
     </button>
   </nav>
 </template>
 <script setup>
-import { IconLayoutSidebarLeftExpand, IconArrowBarRight } from '@tabler/icons-vue'
+import { IconArrowBarRight } from '@tabler/icons-vue'
 import { usePaneControls } from '../composables/usePaneControls.js'
 const props = defineProps({ pane: { type: String, required: true } })
 const { controls, restore } = usePaneControls(() => props.pane)

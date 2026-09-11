@@ -1,65 +1,156 @@
 #!/usr/bin/env node
-// Checks real browser geometry against the Files harness; uses existing Puppeteer.
+// Real production components, measured in a browser. Fixture data has no user state.
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const puppeteer = require(process.env.PUPPETEER_MODULE || 'puppeteer-core')
 const base = process.argv[2] || 'http://127.0.0.1:1420'
 const browser = await puppeteer.launch({
-  executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: true,
+  executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
 })
 try {
   const page = await browser.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
+  const paint = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const measure = () => page.evaluate(() => {
     const side = document.querySelector('[data-sidebar-state]')
     const rect = element => {
       if (!element) return null
       const box = element.getBoundingClientRect()
-      if (!box.width || !box.height) return null
       return [box.x + box.width / 2, box.y + box.height / 2]
     }
     const get = selector => rect(side.querySelector(selector))
     return {
       workspace: get('[data-sidebar-workspace] > span'),
       tools: [...side.querySelectorAll('[data-tool-key] svg')].map(rect),
-      toolsScroll: side.querySelector('nav[aria-label="Tools"]').scrollTop,
-      record: get('[title="Open recording"] svg'),
-      microphone: get('[data-sidebar-meeting-microphone] svg'),
-      stop: get('[aria-label="Stop recording"] svg'),
-      files: get('[data-sidebar-files-restore] svg') || get('[data-files-mode="project"] svg'),
+      activities: [...side.querySelectorAll('[data-activity-key] > button svg')].map(rect),
+      navigationScroll: side.querySelector('[data-sidebar-navigation-scroll]').scrollTop,
+      navigationHeight: side.querySelector('[data-sidebar-navigation-scroll]').clientHeight,
+      record: get('[title="Open recording"] svg'), microphone: get('[data-sidebar-meeting-microphone] svg'),
+      stop: get('[aria-label="Stop recording"] svg'), files: get('[data-sidebar-files-toggle] svg') || get('[data-files-mode="project"] svg'),
       settings: get('[data-sidebar-settings] svg'),
     }
   })
   let count = 0
-  for (const width of [240, 280, 400]) for (const height of [420, 800]) {
-    for (const tools of [5, 30]) for (const recording of [false, true]) for (const toolsClosed of [false, true]) {
-      const label = JSON.stringify({ width, height, tools, recording, toolsClosed })
+  for (const width of [240, 280, 400]) for (const height of [360, 520, 900]) {
+    for (const long of [false, true]) for (const recording of [false, true]) for (const filesClosed of [false, true]) {
+      const label = JSON.stringify({ width, height, long, recording, filesClosed })
       await page.setViewport({ width: 1400, height })
-      await page.goto(`${base}/harness/files.html?width=${width}&tools=${tools}${recording ? '&recording' : ''}${toolsClosed ? '&toolsClosed' : ''}`, { waitUntil: 'networkidle0' })
-      if (!toolsClosed && tools === 30) {
-        await page.$eval('[data-sidebar-state] nav[aria-label="Tools"]', element => { element.scrollTop = 55 })
-      }
+      await page.goto(`${base}/harness/files.html?width=${width}&tools=${long ? 30 : 5}&activities=${long ? 20 : 2}${recording ? '&recording' : ''}${filesClosed ? '&filesClosed' : ''}`, { waitUntil: 'domcontentloaded' })
+      await page.waitForSelector('[data-sidebar-files]')
+      await paint()
+      await page.$eval('[data-sidebar-navigation-scroll]', el => { el.scrollTop = 55 })
       const before = await measure()
-      await page.click('[data-sidebar-collapse]')
-      assert.deepEqual(await measure(), before, `Collapse moved icons: ${label}`)
-      const hiddenHeading = await page.$eval('[data-tools-disclosure]', element => ({
-        height: element.getBoundingClientRect().height,
-        visibility: getComputedStyle(element).visibility,
-        tabIndex: element.tabIndex,
-      }))
-      assert(hiddenHeading.height > 0)
-      assert.equal(hiddenHeading.visibility, 'hidden')
-      assert.equal(hiddenHeading.tabIndex, -1)
-      await page.click('[data-sidebar-files-restore]')
-      assert.deepEqual(await measure(), before, `Restore moved icons: ${label}`)
+      for (const collapsed of [true, false]) {
+        await page.click(collapsed ? '[data-sidebar-collapse]' : '[data-sidebar-restore]')
+        await paint()
+        const after = await measure()
+        if (!collapsed) assert.deepEqual(after, before, `Restore lost expanded positions or scroll: ${label}`)
+        else {
+          assert.deepEqual(after.workspace, before.workspace)
+          assert.deepEqual(after.settings, before.settings)
+          const unscroll = state => [...state.tools, ...state.activities].map(([x, y]) => [x, y + state.navigationScroll])
+          assert.deepEqual(unscroll(after), unscroll(before), `Rail changed navigation row spacing: ${label}`)
+          assert(after.navigationHeight >= before.navigationHeight, `Rail must release Files space: ${label}`)
+          assert.equal(await page.$eval('[data-sidebar-files]', el => el.clientHeight), 28)
+          assert(await page.$eval('[data-sidebar-state]', side => side.querySelector('[data-sidebar-files-toggle]').getBoundingClientRect().bottom === side.querySelector('[data-sidebar-footer]').getBoundingClientRect().top))
+        }
+        const geometry = await page.$eval('[data-sidebar-state]', side => ({
+          rowHeights: [...side.querySelectorAll('[data-tool-key], [data-activity-key]')].map(row => row.getBoundingClientRect().height),
+          nested: [...side.querySelectorAll('nav')].some(nav => ['auto', 'scroll'].includes(getComputedStyle(nav).overflowY)),
+          outerOverflow: side.scrollHeight > side.clientHeight,
+          horizontalOverflow: side.querySelector('[data-sidebar-navigation-scroll]').scrollWidth > side.querySelector('[data-sidebar-navigation-scroll]').clientWidth,
+          footer: side.querySelector('[data-sidebar-footer]').getBoundingClientRect().bottom === side.getBoundingClientRect().bottom,
+        }))
+        assert(geometry.rowHeights.every(value => value === 24), `Row height: ${label}`)
+        assert(!geometry.nested && !geometry.outerOverflow && !geometry.horizontalOverflow && geometry.footer, `Overflow: ${label} ${JSON.stringify(geometry)}`)
+      }
       count++
     }
   }
+  await page.setViewport({ width: 1400, height: 900 })
+  await page.goto(`${base}/harness/files.html?width=280&activities=4`, { waitUntil: 'networkidle0' })
+  await page.click('[data-activity-key="session-1"] > button')
+  assert.equal(await page.$eval('[data-main-tab="session-1"] [role=tab]', el => el.getAttribute('aria-selected')), 'true')
+  await page.click('[data-main-tab="session-0"] [role=tab]')
+  assert.equal(await page.$eval('[data-activity-key="session-0"] > button', el => el.getAttribute('aria-current')), 'page')
+  const before = await measure()
+  assert.equal(await page.$$eval('[data-sidebar-files-toggle]', rows => rows.length), 0)
+  assert(await page.$eval('[data-sidebar-state]', side => side.querySelector('[data-sidebar-files-content]').getBoundingClientRect().bottom === side.querySelector('[data-sidebar-footer]').getBoundingClientRect().top))
+  await page.click('[data-files-collapse]')
+  await paint()
+  const closed = await measure()
+  assert.deepEqual(closed.tools, before.tools)
+  assert.deepEqual(closed.activities, before.activities)
+  assert.equal(await page.$eval('[data-sidebar-files]', el => el.clientHeight), 28)
+  await page.click('[data-sidebar-files-toggle]')
+  await paint()
+  assert.deepEqual(await measure(), before)
+  const handle = await page.$('[data-sidebar-files-resize]')
+  const box = await handle.boundingBox()
+  await page.mouse.move(box.x + 80, box.y + 4)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 80, box.y - 76, { steps: 6 })
+  await page.mouse.up()
+  await paint()
+  const resized = await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow')))
+  assert.equal(resized, 320)
+  await page.click('[data-files-collapse]')
+  await page.click('[data-sidebar-files-toggle]')
+  assert.equal(await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow'))), resized)
+  await page.setViewport({ width: 1400, height: 360 })
+  await paint()
+  assert(await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow'))) < resized)
+  await page.setViewport({ width: 1400, height: 900 })
+  await paint()
+  assert.equal(await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow'))), resized)
+  // Open directly from the collapsed row, with a live pointer-sized preview.
+  await page.click('[data-files-collapse]')
+  const collapsedRow = await (await page.$('[data-sidebar-files-toggle]')).boundingBox()
+  const grab = { x: collapsedRow.x + 70, y: collapsedRow.y + 14 }
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  await page.mouse.move(grab.x, grab.y - 200, { steps: 8 })
+  await paint()
+  assert.equal(await page.$eval('[data-sidebar-files]', el => el.clientHeight), 228)
+  assert.equal(await page.$$eval('[data-sidebar-files-resize]', els => els.length), 0, 'Drag preview must not commit state')
+  await page.mouse.up()
+  await paint()
+  assert.equal(await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow'))), 200)
+  assert(await page.$eval('[data-sidebar-files-resize]', el => el === document.activeElement))
+  // A small movement remains a click and restores the newly saved size.
+  await page.click('[data-files-collapse]')
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  await page.mouse.move(grab.x + 1, grab.y - 3)
+  await page.mouse.up()
+  await paint()
+  assert.equal(await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow'))), 200)
+  // Escape must retain the collapsed state through pointer release and its click.
+  await page.click('[data-files-collapse]')
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  await page.mouse.move(grab.x, grab.y - 180, { steps: 6 })
+  await page.keyboard.press('Escape')
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.up()
+  await paint()
+  assert.equal(await page.$eval('[data-sidebar-files]', el => el.clientHeight), 28)
+  await page.click('[data-sidebar-files-toggle]')
+  assert.equal(await page.$eval('[data-sidebar-files-resize]', el => Number(el.getAttribute('aria-valuenow'))), 200)
+  const search = '[data-sidebar-state] [data-files-search]'
+  const fieldBox = await (await page.$(search)).boundingBox()
+  await page.click(search)
+  assert.deepEqual(await (await page.$(search)).boundingBox(), fieldBox, 'Focus must not add rows')
+  assert.equal(await page.$$eval('[data-files-search-scope]', els => els.length), 0)
+  await page.type(search, 'alpha')
+  await page.waitForSelector('[data-sidebar-state] [data-search-kind="content"]')
+  const results = await page.$$eval('[data-sidebar-state] [data-files-search-match]', rows => rows.map(row => ({ kind: row.dataset.searchKind, path: row.dataset.searchPath, height: row.getBoundingClientRect().height })))
+  assert.deepEqual(results.map(row => row.kind), ['name', 'content'])
+  assert.equal(new Set(results.map(row => row.path)).size, results.length)
+  assert(results.every(row => row.height === 44))
+  if (process.env.SIDEBAR_SCREENSHOT) await page.screenshot({ path: process.env.SIDEBAR_SCREENSHOT })
   assert.deepEqual(errors, [])
-  console.log(`Passed ${count} Sidebar layouts: icon coordinates and Tools scroll stay fixed through collapse and restore.`)
-} finally {
-  await browser.close()
-}
+  console.log(`Passed ${count} Sidebar layouts, fixed icon positions, shared scroll, drawer resize/restore, drag from collapsed, and unified search.`)
+} finally { await browser.close() }

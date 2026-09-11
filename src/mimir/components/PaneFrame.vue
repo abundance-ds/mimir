@@ -14,8 +14,9 @@
       >
         <PaneRestoreControls :pane="pane" />
 
+        <slot name="leading" />
         <slot name="tabs">
-          <div class="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
+          <div data-pane-title class="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
             <div class="truncate text-[12px] font-semibold leading-none">{{ title }}</div>
             <div v-if="metaLine" class="truncate font-mono text-[9px] uppercase tracking-[0.08em] text-ink-4">
               {{ metaLine }}

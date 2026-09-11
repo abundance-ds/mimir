@@ -11,10 +11,11 @@ export function useWorkbenchResize(workbench, options = {}) {
       throw new Error(`Pane '${pane}' does not have a user resize edge.`)
     }
     disposeGesture()
+    const paneElement = event.currentTarget?.closest?.('[data-pane-shell]')?.querySelector(`[data-pane="${pane}"]`)
     gesture = {
       pane,
       startX: Number(event.clientX) || 0,
-      startWidth: workbench.paneLayout[pane].width,
+      startWidth: paneElement?.getBoundingClientRect().width || workbench.paneLayout[pane].width,
     }
     dragging.value = true
     window.addEventListener('pointermove', onMove)

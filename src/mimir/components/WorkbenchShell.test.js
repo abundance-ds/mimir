@@ -87,7 +87,7 @@ describe('WorkbenchShell', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.get('[data-pane="editor"]').classes()).toContain('flex-1')
-    expect(wrapper.get('[data-pane="editor"]').attributes('style') || '').not.toContain('width')
+    expect(wrapper.get('[data-pane="editor"]').attributes('style') || '').not.toContain('width: 520px')
   })
 
   it('fits remembered Editor width against live viewport geometry', async () => {
@@ -105,6 +105,40 @@ describe('WorkbenchShell', () => {
     await wrapper.setProps({ viewportWidth: 1280 })
     expect(wrapper.get('[data-pane="editor"]').attributes('style')).toContain('width: 892px')
     expect(store.paneLayout.editor.width).toBe(900)
+  })
+
+  it('fits a manually restored Sidebar in a small window without changing its saved width', async () => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+    store.setPaneWidth('sidebar', 400)
+    await wrapper.setProps({ viewportWidth: 700 })
+    expect(store.singlePaneMode).toBe(true)
+    expect(store.paneLayout.activity.state).toBe('rail')
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('320px')
+    expect(wrapper.get('[data-pane="editor"]').element.style.minWidth).toBe('336px')
+    await wrapper.setProps({ viewportWidth: 520 })
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('240px')
+    expect(wrapper.get('[data-pane="editor"]').element.style.minWidth).toBe('236px')
+    await wrapper.setProps({ viewportWidth: 1280 })
+    expect(wrapper.get('[data-pane="sidebar"]').element.style.width).toBe('400px')
+    expect(store.paneLayout.sidebar.width).toBe(400)
+    expect(store.paneLayout.activity.state).toBe('rail')
+    expect(store.singlePaneMode).toBe(false)
+  })
+
+  it('uses one content pane when a restored Sidebar leaves insufficient split space', async () => {
+    const wrapper = render()
+    const store = useWorkbenchStore()
+    store.setPaneState('sidebar', 'rail')
+    await wrapper.setProps({ viewportWidth: 850 })
+    expect(store.singlePaneMode).toBe(false)
+    store.setPaneState('sidebar', 'expanded')
+    await wrapper.vm.$nextTick()
+    expect(store.singlePaneMode).toBe(true)
+    expect(store.paneLayout.editor.state).toBe('expanded')
+    store.setPaneState('activity', 'expanded')
+    expect(store.paneLayout.editor.state).toBe('rail')
+    wrapper.unmount()
   })
 
   it('keeps the Sidebar component visible in its rail and restores hidden content panes outside their stages', async () => {

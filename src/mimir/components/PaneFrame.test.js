@@ -74,14 +74,13 @@ describe('PaneFrame', () => {
     expect(wrapper.find('[data-pane-action="next"]').exists()).toBe(false)
   })
 
-  it('restores Sidebar from the Main header', async () => {
+  it('leaves Sidebar restore in the Sidebar rail', async () => {
     const wrapper = render()
     const store = useWorkbenchStore()
     store.setPaneState('sidebar', 'rail')
     await wrapper.vm.$nextTick()
 
     expect(wrapper.get('[data-pane-header="activity"]').classes()).toContain('pl-6')
-    await wrapper.get('[data-pane-action="restore-sidebar"]').trigger('click')
-    expect(store.paneLayout.sidebar.state).toBe('expanded')
+    expect(wrapper.find('[data-pane-action="restore-sidebar"]').exists()).toBe(false)
   })
 })

@@ -33,14 +33,14 @@ describe('pane control ownership', () => {
     try {
       expect(wrapper.findAll('[data-editor-action="restore-activity"]')).toHaveLength(activity === 'rail' ? 1 : 0)
       if (activity === 'rail') {
-        expect(wrapper.get('[data-editor-restore-cluster]').findAll('button').map(button => button.attributes('data-editor-action'))).toEqual(sidebar === 'rail' ? ['restore-sidebar', 'restore-activity'] : ['restore-activity'])
+        expect(wrapper.get('[data-editor-restore-cluster]').findAll('button').map(button => button.attributes('data-editor-action'))).toEqual(['restore-activity'])
       }
-      const sidebarRestores = wrapper.findAll('[data-pane-action="restore-sidebar"], [data-editor-action="restore-sidebar"]')
+      const sidebarRestores = wrapper.findAll('[data-sidebar-restore], [data-pane-action="restore-sidebar"], [data-editor-action="restore-sidebar"]')
       expect(sidebarRestores).toHaveLength(sidebar === 'rail' ? 1 : 0)
       if (sidebar === 'rail') {
-        expect(sidebarRestores[0].element.closest('[data-pane]').dataset.pane).toBe(activity === 'rail' ? 'editor' : 'activity')
+        expect(sidebarRestores[0].element.closest('[data-pane]').dataset.pane).toBe('sidebar')
       }
-      expect(wrapper.findAll('[data-sidebar-restore]')).toHaveLength(0)
+      expect(wrapper.findAll('[data-sidebar-restore]')).toHaveLength(sidebar === 'rail' ? 1 : 0)
       for (const pane of ['activity', 'editor']) {
         const rail = wrapper.find(`[data-pane-restore="${pane}"]`)
         expect(rail.exists()).toBe(store.paneLayout[pane].state === 'rail')
@@ -59,7 +59,7 @@ describe('pane control ownership', () => {
         store.setPaneState('activity', 'rail')
         await nextTick()
         expect(wrapper.find('[data-pane-action="restore-sidebar"]').exists()).toBe(false)
-        await wrapper.get('[data-editor-action="restore-sidebar"]').trigger('click')
+        await wrapper.get('[data-sidebar-restore]').trigger('click')
         await nextTick()
         expect(document.activeElement).toBe(wrapper.get('[data-sidebar-collapse]').element)
         store.setPaneState('sidebar', 'rail')
@@ -96,7 +96,7 @@ describe('pane control ownership', () => {
         await nextTick()
       }
       if (sidebar === 'rail') {
-        await wrapper.get('[data-pane-action="restore-sidebar"]').trigger('click')
+        await wrapper.get('[data-sidebar-restore]').trigger('click')
         await nextTick()
         expect(store.paneLayout.sidebar.state).toBe('expanded')
         expect(document.activeElement).toBe(wrapper.get('[data-sidebar-collapse]').element)

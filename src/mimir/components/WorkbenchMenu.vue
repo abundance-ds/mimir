@@ -107,7 +107,7 @@ function focusItem(index) {
 }
 async function show(event) {
   returnFocus =
-    event?.currentTarget?.querySelector?.('[role=tab]') || trigger.value
+    event?.currentTarget?.querySelector?.('[role=tab], [data-activity-key] > button') || trigger.value
   const rect = trigger.value?.getBoundingClientRect()
   position.value = {
     left: `${Math.max(4, Math.min(event?.clientX ?? rect?.left ?? 4, window.innerWidth - (props.compact ? 200 : 264)))}px`,

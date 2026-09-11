@@ -9,7 +9,8 @@ must explain the interface without decorative copy or motion.
 - Every state change has a visible control; shortcuts only accelerate it.
 - Active filters are named and clearable in one action.
 - Hover never reveals required content or moves geometry. Selection uses
-  `accent-soft`, not a filled card.
+  `accent-soft`, with neutral Files sidebar selection as specified in
+  [chrome-ui.md](chrome-ui.md). Selection must not resemble a filled card.
 - Color never carries state alone. Pair it with a word, glyph, or stable
   instrument position.
 - Keep normal UI at 9 px or larger and row data at 10 px or larger.
@@ -73,7 +74,7 @@ rules that relate them.
 ## Graph and rows
 
 - Projection rows use hairlines, full-width hover, and stable geometry.
-- Sidebar rows are 32 px; dense file rows are 28 px.
+- Tools and Activities rows are 24 px in the Sidebar and rail. File rows are 28 px.
 - Graph property controls are borderless at rest and gain a quiet hover wash
   and focus ring. Visible labels explain editable values.
 - Graph notes are unframed document text. Dialog fields can remain boxed.

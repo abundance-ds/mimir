@@ -358,7 +358,7 @@ describe('WorkbenchApp', () => {
     vi.useRealTimers()
   })
 
-  async function render({ workspace = '' } = {}) {
+  async function render({ workspace = '', teleport = true } = {}) {
     if (workspace) {
       localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
         mimirWorkspaceFolder: workspace,
@@ -369,7 +369,7 @@ describe('WorkbenchApp', () => {
       global: {
         plugins: [pinia],
         stubs: {
-          Teleport: true,
+          Teleport: teleport,
           Transition: false,
           EmbeddedAppHost: true,
         },
@@ -390,6 +390,175 @@ describe('WorkbenchApp', () => {
     option.click()
     await flushPromises()
   }
+
+  it('shares session selection, names, and order between Activities and main tabs', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const activities = useActivitiesStore()
+    for (const id of ['one', 'two']) activities.upsert(activityRecord(id, id, '2026-07-25T10:00:00Z'))
+    await nextTick()
+    const workbench = useWorkbenchStore()
+    workbench.restoreTabs(['one', 'routines', 'two'])
+    await nextTick()
+    const rows = () => wrapper.findAll('[data-activity-key]').map(row => row.attributes('data-activity-key'))
+    const tabs = () => wrapper.findAll('[data-main-tab]').map(row => row.attributes('data-main-tab'))
+    const editor = wrapper.get('[data-editor-stub]').element
+    expect(rows()).toEqual(['one', 'two'])
+    await wrapper.get('[data-activity-key="one"] > button').trigger('click')
+    expect(workbench.activeActivityId).toBe('one')
+    expect(wrapper.get('[data-main-tab="one"] [role=tab]').attributes('aria-selected')).toBe('true')
+    await flushPromises()
+    expect(terminalFocus).toHaveBeenCalled()
+    await wrapper.get('[data-main-tab="two"] [role=tab]').trigger('click')
+    expect(wrapper.get('[data-activity-key="two"] > button').attributes('aria-current')).toBe('page')
+    await wrapper.get('[data-activity-key="two"] > button').trigger('keydown', { key: 'F2' })
+    await wrapper.get('[data-tab-rename]').setValue('New title')
+    await wrapper.get('[data-tab-rename]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.get('[data-main-tab="two"]').text()).toContain('New title')
+    expect(wrapper.get('[data-activity-key="two"]').text()).toContain('New title')
+    await wrapper.get('[data-main-tab="one"] [role=tab]').trigger('dblclick')
+    await wrapper.get('[data-tab-rename]').setValue('From tab')
+    await wrapper.get('[data-tab-rename]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.get('[data-activity-key="one"]').text()).toContain('From tab')
+    wrapper.findComponent({ name: 'SidebarActivities' }).vm.$emit('reorder', ['two', 'one'])
+    await nextTick()
+    expect(tabs()).toEqual(['two', 'routines', 'one'])
+    wrapper.findComponent({ name: 'ActivityTabs' }).vm.$emit('reorder', ['one', 'two', 'routines'])
+    await nextTick()
+    expect(rows()).toEqual(['one', 'two'])
+    const selected = workbench.activeActivityId
+    await wrapper.get('[data-files-collapse]').trigger('click')
+    const settings = useSettingsStore()
+    await settings.flush()
+    expect(JSON.parse(storage.get('mimir:editor:settings:v1')).sidebarFilesCollapsed).toBe(true)
+    expect(wrapper.get('nav[aria-label="Open Activities"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-sidebar-files-content]').isVisible()).toBe(false)
+    expect(workbench.activeActivityId).toBe(selected)
+    expect(tabs()).toEqual(['one', 'two', 'routines'])
+    expect(wrapper.get('[data-editor-stub]').element).toBe(editor)
+    expect(activityApi.closeActivity).not.toHaveBeenCalled()
+  })
+
+  it('closes a live session from the header through the existing stop and archive path', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const activities = useActivitiesStore()
+    activities.upsert(activityRecord('live', 'Live run', '2026-07-25T10:00:00Z'))
+    await nextTick()
+    useSettingsStore().set('showMainTabs', false)
+    useWorkbenchStore().openActivity('live')
+    await nextTick()
+    expect(wrapper.find('[data-activity-close]').exists()).toBe(false)
+    expect(wrapper.get('[data-close-main-view]').attributes('title')).toBe('Stop and archive')
+    await wrapper.get('[data-close-main-view]').trigger('click')
+    await flushPromises()
+    expect(activityApi.closeActivity).toHaveBeenCalledWith('live')
+    expect(activityApi.setActivityArchived).not.toHaveBeenCalled()
+    activities.upsert({ ...activities.byId('live'), status: 'stopped' })
+    await flushPromises()
+    expect(activityApi.setActivityArchived).toHaveBeenCalledWith('live', true)
+    expect(wrapper.find('[data-main-tab="live"]').exists()).toBe(false)
+    expect(wrapper.find('[data-activity-key="live"]').exists()).toBe(false)
+  })
+
+  it('uses the existing header with tabs hidden and preserves navigation and mounted content', async () => {
+    const wrapper = await render({ workspace: '/w', teleport: false })
+    const activities = useActivitiesStore()
+    const workbench = useWorkbenchStore()
+    const settings = useSettingsStore()
+    for (const id of ['one', 'two']) activities.upsert(activityRecord(id, id, '2026-07-25T10:00:00Z'))
+    await nextTick()
+    workbench.restoreTabs(['one', 'routines', 'two'])
+    workbench.openActivity('one')
+    await flushPromises()
+    const editor = wrapper.get('[data-editor-stub]').element
+    const terminal = wrapper.get('[data-terminal-stub="one"]').element
+    const order = [...workbench.openTabIds]
+    settings.set('showMainTabs', false)
+    await nextTick()
+    expect(wrapper.find('[data-main-tab]').exists()).toBe(false)
+    expect(wrapper.get('[data-pane-title]').text()).toContain('one')
+    expect(wrapper.find('[data-activity-close]').exists()).toBe(false)
+    expect(wrapper.get('[data-editor-stub]').element).toBe(editor)
+    expect(wrapper.get('[data-terminal-stub="one"]').element).toBe(terminal)
+    expect(workbench.openTabIds).toEqual(order)
+    await wrapper.get('[data-activity-key="two"] > button').trigger('click')
+    expect(workbench.activeActivityId).toBe('two')
+    expect(wrapper.get('[data-pane-title]').text()).toContain('two')
+    settings.set('sidebarFilesCollapsed', true)
+    workbench.setPaneState('sidebar', 'rail')
+    await nextTick()
+    await wrapper.get('[aria-label="Open views"]').trigger('click')
+    await flushPromises()
+    const menu = document.querySelector('[role="dialog"][aria-label="Open views"]')
+    expect(menu.textContent).toContain('Routines')
+    const input = menu.querySelector('input')
+    input.value = 'routines'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(input)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(workbench.activeActivityId).toBe('routines')
+    expect(wrapper.get('[data-close-main-view]').attributes('title')).toBe('Close')
+    await wrapper.get('[data-close-main-view]').trigger('click')
+    expect(workbench.openTabIds).not.toContain('routines')
+    await wrapper.get('[data-new-main-tab]').trigger('click')
+    expect(document.querySelector('[data-quick-open]')).toBeTruthy()
+    settings.set('showMainTabs', true)
+    await nextTick()
+    expect(wrapper.find('[data-main-tab="one"]').exists()).toBe(true)
+    expect(wrapper.find('[data-close-main-view]').exists()).toBe(false)
+    expect(wrapper.get('[data-terminal-stub="one"]').element).toBe(terminal)
+    expect(wrapper.get('[data-editor-stub]').element).toBe(editor)
+    expect(activityApi.closeActivity).not.toHaveBeenCalled()
+  })
+
+  it('restores the saved tab preference and retains New Activity in an empty header', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({ showMainTabs: false }))
+    const wrapper = await render()
+    expect(wrapper.find('[data-main-tab]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="Open views"]').exists()).toBe(true)
+    expect(wrapper.find('[data-close-main-view]').exists()).toBe(false)
+    await wrapper.get('[data-new-main-tab]').trigger('click')
+    expect(document.querySelector('[data-quick-open]')).toBeTruthy()
+  })
+
+  it('projects native work status to the Sidebar without inferring work from output', async () => {
+    const wrapper = await render({ workspace: '/w' })
+    const activities = useActivitiesStore()
+    activities.upsert({ ...activityRecord('signals', 'Signal test', '2026-07-25T10:00:00Z'), status: 'idle' })
+    await nextTick()
+    const receive = activityApi.listenToActivityEvents.mock.calls[0][0]
+    receive({ type: 'output', activityId: 'signals', bytes: [65] })
+    await nextTick()
+    expect(wrapper.find('[data-activity-working="signals"]').exists()).toBe(false)
+    receive({ type: 'status', activityId: 'signals', status: 'working', needsInputIsBlocking: false })
+    await nextTick()
+    expect(wrapper.get('[data-activity-working="signals"]').findAll('span')).toHaveLength(9)
+    receive({ type: 'status', activityId: 'signals', status: 'idle', needsInputIsBlocking: false })
+    await nextTick()
+    expect(wrapper.find('[data-activity-working="signals"]').exists()).toBe(false)
+  })
+
+  it('restores the Files drawer height and disclosure without hiding Activities or main tabs', async () => {
+    localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
+      mimirWorkspaceFolder: '/w', sidebarFilesCollapsed: true, sidebarFilesHeight: 300,
+    }))
+    const wrapper = await render()
+    useActivitiesStore().upsert(activityRecord('saved', 'Saved session', '2026-07-25T10:00:00Z'))
+    await nextTick()
+    expect(wrapper.get('[data-sidebar-files-toggle]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('nav[aria-label="Open Activities"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-sidebar-files-content]').isVisible()).toBe(false)
+    expect(wrapper.find('[data-main-tab="saved"]').exists()).toBe(true)
+    await wrapper.get('[data-sidebar-files-toggle]').trigger('click')
+    expect(wrapper.get('[data-activity-key="saved"]').isVisible()).toBe(true)
+    expect(wrapper.get('[data-sidebar-files]').element.style.height).toBe('328px')
+    await wrapper.get('[data-sidebar-files-resize]').trigger('keydown', { key: 'ArrowDown' })
+    await useSettingsStore().flush()
+    expect(JSON.parse(storage.get('mimir:editor:settings:v1')).sidebarFilesHeight).toBe(272)
+  })
 
   it('restores saved tool tabs without creating duplicate sessions', async () => {
     localStorage.setItem('mimir:editor:settings:v1', JSON.stringify({
@@ -955,6 +1124,8 @@ describe('WorkbenchApp', () => {
     await nextTick()
 
     expect(wrapper.find('[data-main-tab="agent:alpha"]').exists()).toBe(true)
+    expect(wrapper.find('[data-activity-key="agent:alpha"]').exists()).toBe(true)
+    expect(wrapper.find('[data-activity-key="agent:beta"]').exists()).toBe(false)
     expect(wrapper.find('[data-main-tab="agent:beta"]').exists()).toBe(false)
 
     await wrapper.get('[data-main-tab="agent:alpha"]').find('button').trigger('click')
@@ -970,6 +1141,8 @@ describe('WorkbenchApp', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-main-tab="agent:alpha"]').exists()).toBe(false)
+    expect(wrapper.find('[data-activity-key="agent:alpha"]').exists()).toBe(false)
+    expect(wrapper.find('[data-activity-key="agent:beta"]').exists()).toBe(true)
     expect(wrapper.find('[data-main-tab="agent:beta"]').exists()).toBe(true)
     expect(store.byId('agent:alpha').status).toBe('working')
     expect(activityApi.stopActivity).not.toHaveBeenCalled()
@@ -1348,6 +1521,27 @@ describe('WorkbenchApp', () => {
     expect(surface.contains(document.activeElement)).toBe(true)
   })
 
+  it('opens the Graph record requested from Scribe detail', async () => {
+    appsApi.loadAppsCatalog.mockResolvedValue({
+      directory: '/home/me/.mimir/apps', diagnostics: [],
+      apps: ['scribe', 'business-graph'].map(id => ({
+        id, title: id, mode: 'rust-helper', helper: id, builtin: true, tools: [],
+      })),
+    })
+    appsApi.resolveAppLaunch.mockImplementation(async appId => ({
+      mode: 'rust-helper', appId, helper: appId,
+    }))
+    const wrapper = await render({ workspace: '/w' })
+    await wrapper.get('[data-sidebar-row="tool:app:scribe"]').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    wrapper.findComponent({ name: 'ScribeApp' }).vm.$emit('openGraphNode', 'meeting-filed')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(useWorkbenchStore().activeActivityId).toBe('app:business-graph')
+    expect(invoke).toHaveBeenCalledWith('graph_get', { id: 'meeting-filed' })
+  })
+
   it('launches external Apps as one real PTY Activity from the plus menu and MCP', async () => {
     appsApi.loadAppsCatalog.mockResolvedValue({
       directory: '/home/me/.mimir/apps',
@@ -1469,7 +1663,7 @@ describe('WorkbenchApp', () => {
     expect(appsApi.resolveAppLaunch).not.toHaveBeenCalled()
   })
 
-  it('archives the exact focused Activity row with Cmd+W even when it failed', async () => {
+  it.each(['[data-main-tab="agent:failed"]', '[data-activity-key="agent:failed"]'])('archives the exact focused session with Cmd+W from %s', async selector => {
     const wrapper = await render({ workspace: '/w' })
     const store = useActivitiesStore()
     store.upsert({
@@ -1485,7 +1679,7 @@ describe('WorkbenchApp', () => {
     await nextTick()
     activityApi.setActivityArchived.mockClear()
 
-    const failedRow = wrapper.get('[data-main-tab="agent:failed"]')
+    const failedRow = wrapper.get(selector)
     const failedRowButton = failedRow.get('button')
     failedRowButton.element.focus()
     failedRowButton.element.dispatchEvent(new KeyboardEvent('keydown', {
@@ -1502,6 +1696,7 @@ describe('WorkbenchApp', () => {
     expect(store.byId('agent:selected').archivedAt).toBeNull()
     expect(useWorkbenchStore().activeActivityId).toBe('agent:selected')
     expect(wrapper.find('[data-main-tab="agent:failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-activity-key="agent:failed"]').exists()).toBe(false)
   })
 
   it('closes a live Activity before archiving it from the tab menu', async () => {
@@ -2104,9 +2299,9 @@ describe('WorkbenchApp', () => {
     sidebarCollapse.element.focus()
     await sidebarCollapse.trigger('click')
     await nextTick()
-    expect(document.activeElement).toBe(wrapper.get('[data-pane-action="restore-sidebar"]').element)
+    expect(document.activeElement).toBe(wrapper.get('[data-sidebar-restore]').element)
 
-    await wrapper.get('[data-pane-action="restore-sidebar"]').trigger('click')
+    await wrapper.get('[data-sidebar-restore]').trigger('click')
     await nextTick()
     expect(document.activeElement).toBe(wrapper.get('[data-sidebar-collapse]').element)
   })

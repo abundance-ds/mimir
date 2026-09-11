@@ -71,7 +71,7 @@ Three columns, one band across the top, one row grammar below it.
  ┌───────────────┬────────────────────────────┬──────────────────────────┐
  │ top 40        │ pane header 40             │ editor header 40, tabs   │ row 1: band
  │               ├────────────────────────────┼──────────────────────────┤
- │ rows 32       │ bar 36                     │ toolbar 36               │ row 2: bar
+ │ rows 24       │ bar 36                     │ toolbar 36               │ row 2: bar
  │               │ sub bar 28                 │                          │ row 3: sub bar
  │               │                            │                          │
  │               │ content                    │ document, surface        │ canvas
@@ -103,7 +103,7 @@ Heights include the rule. Layer is the background token.
 | Surface | File | Height | Layer | Rule | Content |
 |---|---|---|---|---|---|
 | Sidebar top | `WorkbenchSidebar.vue` | 40 | `chrome` | `rule` | Collapse button; project switcher follows below |
-| Activity pane header | `PaneFrame.vue` | 40 | `chrome` | `rule` | All Tabs on the left, main tabs with provider icons and short titles, New Tab, Expand / Restore split, collapse |
+| Activity pane header | `PaneFrame.vue` | 40 | `chrome` | `rule` | Optional main tabs; otherwise the existing title/meta with Open views, New Activity, and Close. Expand / Restore split and collapse stay fixed |
 | Editor header | `editor/components/shell/AppHeader.vue` | 40 | `chrome` | `rule` | Bottom-aligned file tabs; active tab is a neutral `chrome-high` plate; HTML open-in-browser, add, Expand / Restore split, collapse |
 | Rail restore | `RailRestore.vue` | 40 top cell, 26 footer | `chrome` top and footer; `chrome-high` body, hover `chrome-mid` | `rule` | Vertical title; Editor has a restore arrow; Main keeps a quiet top cell |
 
@@ -112,7 +112,6 @@ Heights include the rule. Layer is the background token.
 | Surface | File | Content | Before 2026-09-04 |
 |---|---|---|---|
 | Editor toolbar | `editor/components/workspace/EditorToolbar.vue` | Format buttons 22 px, 12 px inset | 30 px, `chrome-mid`, `rule-light` |
-| Files sidebar controls | `FilesActivity.vue` | Quiet icon controls; see [Files](files.md#sidebar-browser) | |
 | Files view tabs (wide manager) | `FilesActivity.vue` | Project, Changes, Recent, Favorites with 2 px accent underline; three 28 px icon buttons | 40 px |
 | Graph top bar | `business-graph/GraphAppHeader.vue` | Direct Work and Graph tabs 26 px at every width; search 28 px; scope 28 px; refresh; New | 40 px, `surface` mix, brand mark, wrapped to two rows under 1050 px |
 | Tracker range | `TrackerApp.vue` | Range tabs, previous, range label, next | 36 px wrapping strip under a 40 px identity header |
@@ -130,6 +129,11 @@ and primary actions go into the Activity pane header through
 `usePaneChrome` (`src/mimir/composables/usePaneChrome.js`). Today, Chat,
 Terminal, and agent sessions have no row 2.
 
+The compact Files sidebar uses a 28 px strip with 28 px icon buttons on
+`chrome`. Its search field follows directly, without an extra top margin.
+The strip and search field form one navigation group; the wide File Manager
+retains the pane-bar layout above. [Files](files.md) owns their behavior.
+
 ### Row 3, the sub bar, 28 px `chrome-high` with `rule-light`
 
 | Surface | File | Content |
@@ -144,11 +148,12 @@ Terminal, and agent sessions have no row 2.
 |---|---|---|
 | Editor document | `surface` | Commit Mono, 28 px inset matches the status footer |
 | Chat transcript, Terminal, Today journal | `surface` | |
-| Files tree | `surface`, 28 px rows, hover `chrome-high` | |
+| Files tree (wide manager) | `surface`, 28 px rows, hover `chrome-high` | |
+| Files tree (sidebar) | `chrome`, hover `chrome-mid`, selection `chrome-high` | Neutral folder icons and counts; guides use `rule`; accent remains for keyboard focus and drop targets |
 | Routines, Tracker | `chrome-high` root | Section headers inside Tracker views are 28 px with `rule-light` |
 | Graph board | `chrome` columns, `chrome-high` cards with `rule-light` edge and 2 px radius, hover `chrome-mid` | 8 px canvas inset and column gap; 252–420 px columns with a full `rule` edge; headers 38 px `chrome-high` inside each column |
 | Graph list | sticky group headers 28 px `chrome-mid`, rows 34 px | |
-| Sidebar | `chrome`, rows 32 px, hover `chrome-mid`, section kickers 24 px mono 9 px uppercase, project box `surface` with `rule` | |
+| Sidebar | `chrome`, navigation rows 24 px, hover `chrome-mid`, section headings 28 px sans 11 px, project box `surface` with `rule` | |
 
 ### Footers
 
@@ -239,8 +244,8 @@ The 2026-09-04 repair made these changes:
    tabs fill that band, align to its bottom edge, and use a raised active plate.
 9. Work and Graph navigation stays direct at every width. List, Timeline,
    Meetings, and Changes remain views within Graph.
-10. The original sidebar had no Tools heading. The tab layout now uses a
-    collapsible Tools group above Files; main sessions live in the tab strip.
+10. Tools and Activities have fixed headings above Files. Main sessions
+    also remain in the horizontal tab strip.
 
 ## 6. Expanded and rail states
 
@@ -251,17 +256,17 @@ are 26 px. Chat and Graph input footers retain their input height.
 | Sidebar | Main | Editor | Sidebar restore | Main restore | Editor restore |
 |---|---|---|---|---|---|
 | E | E | E | — | — | — |
-| R | E | E | Main header | — | — |
+| R | E | E | Sidebar Tools heading slot | — | — |
 | E | R | E | — | Editor header; Main rail body | — |
-| R | R | E | First in Editor header | Second in Editor header; Main rail body | — |
+| R | R | E | Sidebar Tools heading slot | Editor header; Main rail body | — |
 | E | E | R | — | — | Editor rail arrow and body |
-| R | E | R | Main header | — | Editor rail arrow and body |
+| R | E | R | Sidebar Tools heading slot | — | Editor rail arrow and body |
 
-The original header arrangement is retained. When Main is collapsed, its
-restore button appears at the left of the Editor header. If Sidebar is also
-collapsed, Sidebar restore comes first, then Main restore, then the file
-tabs. Main's rail has no separate top arrow. Its 40 px top cell remains, and
-its body still restores Main. Editor's rail keeps its own top arrow.
+When Main is collapsed, its restore button appears at the left of the Editor
+header, before the file tabs. Sidebar expand occupies the Tools heading slot
+in its rail in every layout. Main's rail has no separate top arrow. Its 40 px
+top cell remains, and its body still restores Main. Editor's rail keeps its
+own top arrow.
 
 Each content header retains one Expand / Restore split toggle at the same
 position relative to its right edge. Expand makes that pane the open content
@@ -269,8 +274,7 @@ pane; Restore split reopens the other pane when the window permits a split.
 The button changes icon and label, and retains focus. Collapse remains a
 separate action. It opens the opposite pane if necessary, because both
 content panes cannot stay collapsed. A restore action moves focus into the
-restored pane. Sidebar restore stays in the visible content header and has
-no added row in the Sidebar rail.
+restored pane. Sidebar expand uses the Tools heading row; it does not add a row.
 
 The macOS window buttons start at x=14 and extend past the 52 px Sidebar
 rail. The quiet Main rail top cell leaves this area free. The Sidebar
@@ -284,11 +288,11 @@ scrolling tab list, so it stays visible when the list overflows.
 `harness/pane-chrome.html` mounts the actual shell, Sidebar, Main tabs, and
 Editor header with local sample content. Query parameters select `sidebar`,
 `activity`, or `editor` as `rail`; `tabs=12` checks overflow and `html` adds
-the browser action. `theme` selects a theme. Use the panel controls to check
+the browser action. `vertical` hides Main tabs; `theme` selects a theme. Use the panel controls to check
 state transitions. The combined component test `PaneControls.test.js` checks all six states,
 restore ownership, focus return, and collapse of the sole open content pane.
 Browser checks cover all six states at 1360 px and the three Sidebar rail
-states at 760 px. They check the restore-button order, quiet Main top cell,
+states at 760 px, with Main tabs shown and hidden. They check the restore-button order, quiet Main top cell,
 40 px headers, expansion toggle identity and position within its header,
 focus return, and restore actions. `scripts/check-pane-controls.mjs` runs
 these checks with an existing Puppeteer Core installation. Native macOS
@@ -297,22 +301,29 @@ window-button clearance still needs an installed-app check.
 ## 7. Sidebar icon positions
 
 Sidebar collapse changes the width and label visibility. It retains row
-positions. Workspace, Tools, recording controls, Files, and Settings share
+spacing. Workspace, Tools, Activities, recording controls, Files, and Settings share
 an icon centre 26 px from the left edge in both states.
 
-- The Tools heading keeps its row when its label is hidden. The hidden
-  control is absent from keyboard navigation and the accessibility tree.
-- The Tools list uses the same 30% height limit in both states. Its scroll
-  position and the user's Tools disclosure state remain unchanged.
-- Files occupies the same region in both states. The rail folder button
-  shares the 32 px row and icon position of the expanded File tree button.
-  The file browser remains mounted while hidden.
+- Tools and Activities use 24 px navigation rows in the Sidebar and rail.
+  Their headings remain 28 px. In the rail, the Tools heading becomes Expand sidebar. It remains
+  visible and keyboard accessible, with its icon at the same 26 px centre.
+  This heading stays at the top while one shared navigation area scrolls.
+  The Activities heading and New button are hidden in the rail.
+- Navigation rows never shrink and have no nested scroll areas. The rail hides
+  the navigation scrollbar while retaining wheel and keyboard navigation.
+- Collapsed Files has a 28 px restore row directly above Settings. Expanded
+  Files has Collapse beside its header menu and no footer. In the rail, Files
+  collapses to one icon above Settings and releases its space to navigation.
+  The top resize rule has a slightly stronger neutral color, an 8 px hit target,
+  and a 2 px hover/focus highlight. Its behavior and saved state belong to
+  [workbench-design.md](workbench-design.md#sidebar-and-main-tabs).
 - Recording controls use three fixed rows in both states. The rail hides
   their labels; it does not wrap the controls or move Files below them.
 - Settings remains anchored in the 26 px footer.
 
 `scripts/check-sidebar-geometry.mjs` uses the real Files harness to compare
-icon coordinates and Tools scroll before collapse, in the rail, and after
-restore. It covers 240, 280, and 400 px sidebar widths, short and tall
-windows, long tool lists, recording controls, and closed Tools groups.
+navigation row spacing, the collapsed Files rail, and restored Sidebar scroll.
+It covers 240, 280, and 400 px sidebar widths, short and tall
+windows, long tool and session lists, recording controls, open/closed Files,
+drag resizing, size restoration, and search field geometry.
 It uses an existing Puppeteer Core installation through `PUPPETEER_MODULE`.

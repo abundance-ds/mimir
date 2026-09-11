@@ -38,6 +38,20 @@
     <div class="section-title">Interface</div>
     <div class="setting-row">
       <div class="setting-label">
+        Show main tabs
+        <span class="setting-desc">Hide tabs to use Sidebar navigation. Editor document tabs stay visible.</span>
+      </div>
+      <button
+        type="button"
+        class="toggle-switch"
+        :class="{ 'toggle-on': settings.showMainTabs }"
+        :aria-pressed="settings.showMainTabs"
+        aria-label="Show main tabs"
+        @click="settings.set('showMainTabs', !settings.showMainTabs)"
+      ><span class="toggle-knob"></span></button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
         Zoom
         <span class="setting-desc">Scales the whole window · ⌘+ / ⌘− · ⌘0 resets</span>
       </div>

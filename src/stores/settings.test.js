@@ -43,6 +43,7 @@ describe('settings store', () => {
     expect(store.aiInlineRewrite).toBe(true)
     expect(store.mimirWorkspaceFolder).toBe('')
     expect(store.mimirTeamFolder).toBeUndefined()
+    expect(store.sidebarFilesCollapsed).toBe(false)
     expect(store.sidebarToolOrder).toEqual([])
     expect(store.sidebarNewActivityOrder).toEqual([])
     expect(store.sidebarChatsCollapsed).toBe(false)

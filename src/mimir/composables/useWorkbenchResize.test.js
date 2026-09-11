@@ -67,6 +67,20 @@ describe('useWorkbenchResize', () => {
     expect(setPaneWidth).toHaveBeenCalledWith('sidebar', 330)
   })
 
+  it('starts a drag from the fitted width so a narrow window has no dead drag distance', () => {
+    const store = useWorkbenchStore()
+    store.setPaneWidth('sidebar', 400)
+    const shell = document.createElement('main')
+    shell.dataset.paneShell = 'workbench'
+    shell.innerHTML = '<section data-pane="sidebar"></section><button></button>'
+    shell.querySelector('section').getBoundingClientRect = () => ({ width: 320 })
+    const resize = useWorkbenchResize(store)
+    resize.start('sidebar', { clientX: 320, currentTarget: shell.querySelector('button') })
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 }))
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 300 }))
+    expect(store.paneLayout.sidebar.width).toBe(300)
+  })
+
   it('flushes the exact final width on release even with a frame pending', () => {
     const store = useWorkbenchStore()
     const resize = useWorkbenchResize(store)

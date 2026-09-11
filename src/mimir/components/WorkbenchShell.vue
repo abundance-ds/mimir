@@ -107,9 +107,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import RailRestore from './RailRestore.vue'
-import { CONTENT_PANE_MIN_WIDTH, fittedEditorWidth } from '../responsiveLayout.js'
+import { CONTENT_PANE_MIN_WIDTH, FOCUS_WORKBENCH_WIDTH, fittedEditorWidth, fittedSidebarWidth } from '../responsiveLayout.js'
 import {
   ACTIVITY_RAIL_WIDTH,
   EDITOR_RAIL_WIDTH,
@@ -130,6 +130,18 @@ const emit = defineEmits(['resizeStart', 'restore'])
 const workbench = useWorkbenchStore()
 const layout = workbench.paneLayout
 
+// A manual Sidebar restore can leave less space than the window's zone allows.
+// Fit the live panes without replacing any saved width or reopening a pane.
+watch(() => [props.viewportWidth, layout.sidebar.width, layout.sidebar.state], () => {
+  const sidebar = layout.sidebar.state === 'rail' ? SIDEBAR_RAIL_WIDTH : fittedSidebarWidth(props.viewportWidth, layout.sidebar.width)
+  const single = props.viewportWidth < FOCUS_WORKBENCH_WIDTH || props.viewportWidth - sidebar < CONTENT_PANE_MIN_WIDTH * 2
+  if (single && layout.activity.state === 'expanded' && layout.editor.state === 'expanded'
+    && document.activeElement?.closest('[data-pane]')?.dataset.pane === 'activity') {
+    workbench.setPaneState('editor', 'rail')
+  }
+  workbench.setSinglePaneMode(single)
+}, { immediate: true })
+
 const railWidths = {
   sidebar: SIDEBAR_RAIL_WIDTH,
   activity: ACTIVITY_RAIL_WIDTH,
@@ -143,19 +155,23 @@ const canResizeEditor = computed(
 const activityStyle = computed(() => (
   isRail('activity')
     ? { width: `${ACTIVITY_RAIL_WIDTH}px` }
-    : { minWidth: `${CONTENT_PANE_MIN_WIDTH}px` }
+    : { minWidth: `${isRail('editor') ? singleContentWidth.value : CONTENT_PANE_MIN_WIDTH}px` }
 ))
+
+const singleContentWidth = computed(() => Math.min(CONTENT_PANE_MIN_WIDTH,
+  Math.max(0, props.viewportWidth - paneWidth('sidebar') - ACTIVITY_RAIL_WIDTH)))
 
 const editorClass = computed(() => (
   isRail('editor')
     ? 'shrink-0'
-    : (isRail('activity') ? 'min-w-[336px] flex-1' : 'min-w-[336px] shrink-0')
+    : (isRail('activity') ? 'flex-1' : 'shrink-0')
 ))
 
 const editorStyle = computed(() => {
   if (isRail('editor')) return { width: `${EDITOR_RAIL_WIDTH}px` }
-  if (isRail('activity')) return {}
+  if (isRail('activity')) return { minWidth: `${singleContentWidth.value}px` }
   return {
+    minWidth: `${CONTENT_PANE_MIN_WIDTH}px`,
     width: `${fittedEditorWidth(
       props.viewportWidth,
       layout.editor.width,
@@ -169,7 +185,8 @@ function isRail(pane) {
 }
 
 function paneWidth(pane) {
-  return isRail(pane) ? railWidths[pane] : layout[pane].width
+  if (isRail(pane)) return railWidths[pane]
+  return pane === 'sidebar' ? fittedSidebarWidth(props.viewportWidth, layout.sidebar.width) : layout[pane].width
 }
 
 function startResize(pane, event) {
@@ -186,7 +203,7 @@ async function restorePane(pane) {
         document.querySelector('[data-pane="editor"] [data-editor-tabs-region] button:not(:disabled)')
         || document.querySelector('[data-pane="editor"] button:not(:disabled)')
       )
-  target?.focus()
+  target?.focus({ preventScroll: true })
 }
 </script>
 

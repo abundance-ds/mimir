@@ -71,6 +71,22 @@ describe('AppearanceSection', () => {
     expect(saved.editorTheme).toBe('slate')
   })
 
+  it('saves and restores the main tab preference', async () => {
+    const { wrapper, store } = await render()
+    const toggle = wrapper.get('[aria-label="Show main tabs"]')
+    expect(toggle.attributes('aria-pressed')).toBe('true')
+    await toggle.trigger('click')
+    expect(store.showMainTabs).toBe(false)
+    await store.flush()
+    expect(JSON.parse(storage.get('mimir:editor:settings:v1')).showMainTabs).toBe(false)
+    wrapper.unmount()
+    const restored = await render()
+    await restored.store.load()
+    await nextTick()
+    expect(restored.wrapper.get('[aria-label="Show main tabs"]').attributes('aria-pressed')).toBe('false')
+    restored.wrapper.unmount()
+  })
+
   it('steps interface zoom through the defined levels and clamps at the ends', async () => {
     const { wrapper, store } = await render()
     const zoomIn = wrapper.get('[aria-label="Zoom interface in"]')

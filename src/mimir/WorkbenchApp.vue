@@ -17,8 +17,20 @@
         :workspace-missing="currentWorkspaceMissing"
         :recent-workspaces="recentWorkspaces"
         :tools="toolRows"
-        :tools-collapsed="settings.sidebarToolsCollapsed"
         :active-tool-id="activeToolId"
+        :activities="sessionTabs"
+        :active-activity-id="workbench.activeActivityId || ''"
+        :files-collapsed="settings.sidebarFilesCollapsed"
+        :files-height="settings.sidebarFilesHeight"
+        :blocking-ids="activityRuntime.blockingInputActivityIds"
+        :restoring-ids="activityRuntime.resumingActivityIds"
+        @toggle-files="settings.set('sidebarFilesCollapsed', !settings.sidebarFilesCollapsed)"
+        @resize-files="settings.set('sidebarFilesHeight', $event)"
+        @select-activity="selectActivity"
+        @close-activity="closeMainTab"
+        @rename-activity="renameActivity"
+        @reorder-activities="workbench.reorderTabs"
+        @new-activity="openQuickOpen('tabs')"
         :meeting-capture="meetingCapture"
         @launch="onLaunch"
         @choose-workspace="chooseWorkspace"
@@ -28,13 +40,12 @@
         @reconcile-workspaces="reconcileWorkspaces"
         @toggle-collapse="toggleSidebar"
         @reorder-tools="reorderTools"
-        @toggle-tools="settings.set('sidebarToolsCollapsed', !settings.sidebarToolsCollapsed)"
         @settings="openSettings"
         @open-meeting="onLaunch('app:scribe')"
         @set-meeting-mic-muted="setMeetingMicrophoneMuted"
         @stop-meeting="stopMeetingCapture"
       >
-        <template #files><FilesActivity compact :active="!collapsed" @open-file="openFileInEditor" @review-git="reviewGitInEditor" @choose-workspace="chooseWorkspace" @diagnostic="showDiagnostic" @open-manager="openFileManager" /></template>
+        <template #files="{ collapse }"><FilesActivity compact collapsible :active="!collapsed && !settings.sidebarFilesCollapsed" @collapse="collapse" @open-file="openFileInEditor" @review-git="reviewGitInEditor" @choose-workspace="chooseWorkspace" @diagnostic="showDiagnostic" @open-manager="openFileManager" /></template>
       </WorkbenchSidebar>
     </template>
 
@@ -44,8 +55,23 @@
         :title="activityTitle"
         :meta="activityMeta"
       >
-        <template #tabs><ActivityTabs :tabs="mainTabs" :active-id="workbench.activeActivityId || ''" :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds" @select="selectActivity" @close="closeMainTab" @rename="renameActivity" @new="openQuickOpen('tabs')" @reorder="workbench.reorderTabs" /></template>
+        <template v-if="settings.showMainTabs" #tabs><ActivityTabs :tabs="mainTabs" :active-id="workbench.activeActivityId || ''" :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds" @select="selectActivity" @close="closeMainTab" @rename="renameActivity" @new="openQuickOpen('tabs')" @reorder="workbench.reorderTabs" /></template>
+        <template v-if="!settings.showMainTabs" #leading>
+          <ActivityTabMenu label="Open views" :tabs="mainTabs" :active-id="workbench.activeActivityId || ''"
+            :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds"
+            @select="selectActivity" @new="openQuickOpen('tabs')"
+          />
+        </template>
         <template #actions>
+          <template v-if="!settings.showMainTabs">
+            <button type="button" data-new-main-tab class="pane-icon-button" title="New Activity (⌘T)" aria-label="New Activity" @click="openQuickOpen('tabs')">
+              <IconPlus :size="15" :stroke-width="1.8" />
+            </button>
+            <button v-if="activeMainTab" type="button" data-close-main-view class="pane-icon-button"
+              :title="activityCloseLabel(activeMainTab)" :aria-label="`${activityCloseLabel(activeMainTab)} ${activeMainTab.title}`"
+              @click="closeMainTab(activeMainTab.id)"
+            ><IconX :size="13" :stroke-width="1.8" /></button>
+          </template>
           <button v-if="activeActivity?.id === 'files' && fileManagerReturn" type="button" class="h-7 px-2 text-[11px]" @click="selectActivity(fileManagerReturn)">Return to {{ activities.byId(fileManagerReturn)?.title || 'session' }}</button>
           <ChatPaneActions
             v-if="chat.config.enabled && activeActivity?.id === 'chats'"
@@ -95,6 +121,7 @@
                 @open-settings="openSettings"
                 @start-work="startGraphWork"
                 @open-meeting="openScribeMeeting"
+                @open-graph-node="openGraphNode"
                 @diagnostic="showDiagnostic"
                 @surface-error="recordActivitySurfaceError"
                 @activity-input="activityRuntime.markActivityInteraction(hostedActivity.id)"
@@ -181,7 +208,7 @@ import {
   ref,
   watch,
 } from 'vue'
-import { IconAlertTriangle, IconX } from '@tabler/icons-vue'
+import { IconAlertTriangle, IconPlus, IconX } from '@tabler/icons-vue'
 import { IconMessages } from '@tabler/icons-vue'
 import EditorApp from '../editor/App.vue'
 import { useActivitiesStore } from '../stores/activities.js'
@@ -192,6 +219,7 @@ import { useFileStore } from '../stores/files.js'
 import { prepareScratchpad } from '../services/scratchpad.js'
 import { useLaunchersStore } from '../stores/launchers.js'
 import { useMeetingsStore } from '../stores/meetings.js'
+import { useBusinessGraphStore } from '../stores/businessGraph.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useTrackerStore } from '../stores/tracker.js'
 import { useWorkbenchStore } from '../stores/workbench.js'
@@ -206,6 +234,8 @@ import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
 import { useTodayStore } from '../stores/today.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import ActivityTabs from './components/ActivityTabs.vue'
+import ActivityTabMenu from './components/ActivityTabMenu.vue'
+import { activityCloseLabel } from './composables/useActivityNavigation.js'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
 import ChatActivity from './activities/ChatActivity.vue'
 import UnavailableActivity from './activities/UnavailableActivity.vue'
@@ -434,6 +464,8 @@ const mainTabs = computed(() => {
     ...activity, openTab: true, unique: CORE_ACTIVITY_IDS.has(activity.id) || isToolActivity(activity),
   }))
 })
+const activeMainTab = computed(() => mainTabs.value.find(tab => tab.id === workbench.activeActivityId))
+const sessionTabs = computed(() => mainTabs.value.filter(tab => !tab.unique))
 const activeToolId = computed(() => {
   if (editorFiles.currentFile?.meta?.scratchpad && lastWorkbenchFocus.value.owner === 'editor') return 'core:scratchpad'
   const activity = activeActivity.value
@@ -991,6 +1023,13 @@ async function openScribeMeeting(meetingId) {
   }
 }
 
+async function openGraphNode(nodeId) {
+  const graph = useBusinessGraphStore()
+  graph.requestedNodeId = nodeId
+  await onLaunch('app:business-graph')
+  if (workbench.activeActivityId !== 'app:business-graph') graph.requestedNodeId = ''
+}
+
 async function stopMeetingCapture() {
   try {
     await meetings.stop()
@@ -1174,15 +1213,14 @@ async function toggleSidebar() {
   await nextTick()
   const target = workbench.paneLayout.sidebar.state === 'rail'
     ? (
-        document.querySelector('[data-pane-action="restore-sidebar"]')
-        || document.querySelector('[data-editor-action="restore-sidebar"]')
+        document.querySelector('[data-sidebar-restore]')
         || document.querySelector('[data-sidebar-workspace]')
       )
     : (
         document.querySelector('[data-sidebar-collapse]')
         || document.querySelector('[data-sidebar-workspace]')
       )
-  target?.focus()
+  target?.focus({ preventScroll: true })
 }
 
 function reorderActivities(ids) {

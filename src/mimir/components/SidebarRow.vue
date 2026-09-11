@@ -1,7 +1,9 @@
 <template>
   <div
-    class="group relative flex h-8 w-full items-center text-left text-ink-2 hover:bg-chrome-mid hover:text-ink"
+    class="group relative flex w-full shrink-0 items-center overflow-hidden text-left text-ink-2 hover:bg-chrome-mid hover:text-ink"
     :class="{
+      'h-[24px]': compact,
+      'h-[28px]': !compact,
       'bg-accent-soft text-ink': active || selected,
       'text-ink-4': muted && !active && !selected,
     }"
@@ -11,7 +13,7 @@
     <component
       :is="editing ? 'div' : 'button'"
       :type="editing ? undefined : 'button'"
-      class="flex h-full min-w-0 flex-1 items-center text-left"
+      class="flex h-full min-w-0 flex-1 items-center text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent"
       :aria-label="editing ? undefined : ariaLabel || (collapsed ? label : undefined)"
       :aria-current="!editing && active ? 'page' : undefined"
       :aria-pressed="!editing && selected ? 'true' : undefined"
@@ -21,7 +23,7 @@
       :aria-controls="editing ? undefined : ariaControls || undefined"
       :title="editing ? undefined : $attrs.title"
     >
-      <span class="ml-[12px] grid size-[28px] shrink-0 place-items-center">
+      <span class="ml-[12px] grid h-full w-[28px] shrink-0 place-items-center">
         <slot />
       </span>
       <span
@@ -61,6 +63,7 @@ defineProps({
   ariaLabel: { type: String, default: '' },
   meta: { type: String, default: '' },
   collapsed: { type: Boolean, default: false },
+  compact: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
   editing: { type: Boolean, default: false },

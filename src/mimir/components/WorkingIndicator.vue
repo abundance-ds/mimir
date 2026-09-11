@@ -1,7 +1,9 @@
 <template>
   <span
-    class="inline-grid shrink-0 grid-cols-[repeat(3,3px)] grid-rows-[repeat(3,3px)] gap-[2px]"
-    aria-label="Working"
+    class="working-indicator inline-grid shrink-0 grid-cols-[repeat(3,3px)] grid-rows-[repeat(3,3px)] gap-[2px]"
+    :class="{ 'working-indicator-paused': paused }"
+    :aria-label="label"
+    role="img"
   >
     <span
       v-for="n in 9"
@@ -10,6 +12,13 @@
     />
   </span>
 </template>
+
+<script setup>
+defineProps({
+  label: { type: String, default: 'Working' },
+  paused: Boolean,
+})
+</script>
 
 <style scoped>
 span > span:nth-child(1) { animation: m1 5s ease-in-out infinite; }
@@ -21,6 +30,16 @@ span > span:nth-child(6) { animation: m6 5s ease-in-out infinite; }
 span > span:nth-child(7) { animation: m7 5s ease-in-out infinite; }
 span > span:nth-child(8) { animation: m8 5s ease-in-out infinite; }
 span > span:nth-child(9) { animation: m9 5s ease-in-out infinite; }
+
+.working-indicator-paused > span:nth-child(n) { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: reduce) {
+  .working-indicator > span:nth-child(n) {
+    animation: none;
+    opacity: .55;
+    will-change: auto;
+  }
+}
 
 @keyframes m1 {
   0%, 100% { opacity: 1; }

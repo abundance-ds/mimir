@@ -33,7 +33,9 @@ const DEFAULTS = {
   sidebarToolOrder: [],
   sidebarNewActivityOrder: [],
   sidebarChatsCollapsed: false,
-  sidebarToolsCollapsed: false,
+  sidebarFilesCollapsed: false,
+  sidebarFilesHeight: 240,
+  showMainTabs: true,
   chatNotifications: true,
   workbenchFileFavorites: {},
   workbenchFileSort: {},
@@ -251,7 +253,10 @@ function cloneSetting(value) {
   return value
 }
 
-const NORMALIZERS = { workbenchZoom: clampWorkbenchZoom }
+const NORMALIZERS = {
+  workbenchZoom: clampWorkbenchZoom,
+  sidebarFilesHeight: value => Number.isFinite(value) ? Math.max(112, Math.round(value)) : 240,
+}
 
 function normalizeSetting(key, value) {
   const normalize = NORMALIZERS[key]

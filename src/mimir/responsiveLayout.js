@@ -19,6 +19,11 @@ export function fittedEditorWidth(viewportWidth, requestedWidth, sidebarWidth) {
   return Math.min(requested, available)
 }
 
+export function fittedSidebarWidth(viewportWidth, requestedWidth, contentRailWidth = 44) {
+  return Math.min(finiteWidth(requestedWidth), Math.max(240,
+    finiteWidth(viewportWidth) - CONTENT_PANE_MIN_WIDTH - contentRailWidth))
+}
+
 export function applyResponsiveZone(workbench, zone, {
   preferEditor = false,
 } = {}) {
