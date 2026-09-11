@@ -41,7 +41,10 @@ must never replace or disturb the mounted Editor document and review state.
   above Settings. Opening it grows the file browser upward below navigation.
   Collapse sits beside the file actions menu in its header. The expanded browser
   extends to Settings with no Files footer.
-  Drag its top edge to change its height. With the Sidebar expanded, dragging
+  Drag its top edge to change its height. Dragging below half the minimum height
+  snaps Files closed. Keep the pointer held and drag upward to open it again
+  during the same gesture. Releasing while closed preserves the saved open height;
+  Escape restores the state from before the drag. With the Sidebar expanded, dragging
   the collapsed Files row upward opens a live height preview. Release saves the
   height; Escape or dragging back down keeps it collapsed. A click restores the
   saved height. The rail icon remains a click control.
