@@ -325,5 +325,16 @@ an icon centre 26 px from the left edge in both states.
 navigation row spacing, the collapsed Files rail, and restored Sidebar scroll.
 It covers 240, 280, and 400 px sidebar widths, short and tall
 windows, long tool and session lists, recording controls, open/closed Files,
-drag resizing, size restoration, and search field geometry.
-It uses an existing Puppeteer Core installation through `PUPPETEER_MODULE`.
+drag resizing, drag collapse and reopening, size restoration, and search field geometry.
+`scripts/check-activity-states.mjs` checks status markers, live animation,
+reduced motion, and row heights in the Sidebar and rail, in light and dark themes.
+Both scripts use the running dev server (port 1420 by default) and an existing
+Puppeteer Core installation through `PUPPETEER_MODULE`:
+
+```bash
+PUPPETEER_MODULE=/absolute/path/to/puppeteer-core node scripts/check-sidebar-geometry.mjs
+PUPPETEER_MODULE=/absolute/path/to/puppeteer-core node scripts/check-activity-states.mjs
+```
+
+These browser fixtures do not prove native input behavior. The Files native
+checks and remaining gaps are in [files.md](files.md#verification).

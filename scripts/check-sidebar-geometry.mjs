@@ -172,7 +172,15 @@ try {
   assert.deepEqual(await (await page.$(search)).boundingBox(), fieldBox, 'Focus must not add rows')
   assert.equal(await page.$$eval('[data-files-search-scope]', els => els.length), 0)
   await page.type(search, 'alpha')
-  await page.waitForSelector('[data-sidebar-state] [data-search-kind="content"]')
+  assert.equal(await page.$eval(search, el => el.value), 'alpha', 'Search must retain every typed character after drag restore')
+  await page.waitForSelector('[data-sidebar-state] [data-search-kind="content"]').catch(async error => {
+    console.error('Search state after drag restore:', await page.$eval('[data-sidebar-state]', sidebar => ({
+      query: sidebar.querySelector('[data-files-search]')?.value,
+      focused: document.activeElement?.outerHTML,
+      text: sidebar.innerText,
+    })), errors)
+    throw error
+  })
   const results = await page.$$eval('[data-sidebar-state] [data-files-search-match]', rows => rows.map(row => ({ kind: row.dataset.searchKind, path: row.dataset.searchPath, height: row.getBoundingClientRect().height })))
   assert.deepEqual(results.map(row => row.kind), ['name', 'content'])
   assert.equal(new Set(results.map(row => row.path)).size, results.length)
