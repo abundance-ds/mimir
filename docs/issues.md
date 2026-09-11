@@ -5,6 +5,11 @@ task scope.
 
 ## Open
 
+- Files sidebar: native file-drop and workspace-switch-during-search checks
+  remain open. The current development build has native evidence for search
+  order, match navigation, separate panel queries, and the revised Files layout;
+  see [files.md](files.md#verification).
+
 - Release 0.3.2: signed installed-app checks for launch/relaunch, file save,
   one terminal Activity, and permission prompts have no new runtime record.
   The Scribe and managed Git evidence gaps below also remain open.

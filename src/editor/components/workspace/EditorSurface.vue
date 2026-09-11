@@ -103,10 +103,12 @@ defineExpose({
       hasSelection: sel.from !== sel.to,
     }
   },
-  scrollToPos(pos) {
+  scrollToPos(pos, { select = false } = {}) {
     if (!view.value) return
+    const position = Math.max(0, Math.min(view.value.state.doc.length, pos))
     view.value.dispatch({
-      effects: EditorView.scrollIntoView(pos, { y: 'center', yMargin: 60 }),
+      ...(select ? { selection: { anchor: position } } : {}),
+      effects: EditorView.scrollIntoView(position, { y: 'center', yMargin: 60 }),
     })
   },
   poke() {

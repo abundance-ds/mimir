@@ -229,7 +229,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
     }
   }
 
-  async function searchContent(value, { owner = null, pathQuery = query.value || null } = {}) {
+  async function searchContent(value, { owner = null, pathQuery = query.value || null, maxMatchesPerFile = null } = {}) {
     const text = String(value || '').trim()
     const previous = contentRequests.get(owner)
     const cancellation = Promise.resolve(previous?.token
@@ -265,7 +265,7 @@ export const useWorkspaceFilesStore = defineStore('workspaceFiles', () => {
         await cancelContentSearch(token)
         return null
       }
-      const report = await searchIndexedContent(token, { query: text, pathQuery, maxResults: 200 })
+      const report = await searchIndexedContent(token, { query: text, pathQuery, maxResults: 200, ...(maxMatchesPerFile ? { maxMatchesPerFile } : {}) })
       if (!current() || report.cancelled) return null
       if (owner === null) {
         contentMatches.value = report.matches || []

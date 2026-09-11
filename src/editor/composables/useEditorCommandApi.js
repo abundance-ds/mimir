@@ -251,7 +251,7 @@ export function useEditorCommandApi({
         position = Math.min(documentLine.to, documentLine.from + column - 1)
       }
     }
-    editorSurfaceRef.value?.scrollToPos(position)
+    editorSurfaceRef.value?.scrollToPos(position, { select: [line, column, offset].some(Number.isFinite) })
     restoreEditorFocus()
     return mimirActive()
   }

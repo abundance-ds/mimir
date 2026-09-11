@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
+import { flushPromises } from '@vue/test-utils'
 import { filterIndexedFiles } from '../../services/fileIndex.js'
-import { useFileSearch } from './useFileSearch.js'
+import { useFileSearch, fileMatchParts } from './useFileSearch.js'
 
 vi.mock('../../services/fileIndex.js', () => ({ filterIndexedFiles: vi.fn() }))
 
@@ -65,7 +66,7 @@ describe('file search ownership and transitions', () => {
     expect(search.pathResults.value).toEqual([hit('new.md').file])
   })
 
-  it('clear invalidates in-flight filename work and restores Names', async () => {
+  it('clear invalidates in-flight filename work and restores browsing', async () => {
     const { search } = setup()
     let finish
     filterIndexedFiles.mockImplementation(() => new Promise(resolve => { finish = resolve }))
@@ -74,24 +75,52 @@ describe('file search ownership and transitions', () => {
     finish([hit('old.md')])
     await nextTick()
     expect(search.query.value).toBe('')
-    expect(search.scope.value).toBe('paths')
     expect(search.phase.value).toBe('idle')
     expect(search.pathResults.value).toEqual([])
   })
 
-  it('preserves the query on scope change and rejects the late response from the other scope', async () => {
+  it('publishes ranked names before content and appends each remaining file only once', async () => {
     const { search, searchContent } = setup()
     let finish
-    filterIndexedFiles.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    filterIndexedFiles.mockResolvedValue([hit('needle.md'), hit('needle-copy.md')])
+    searchContent.mockImplementation(query => query ? new Promise(resolve => { finish = resolve }) : Promise.resolve(null))
     await type(search, 'needle')
-    searchContent.mockImplementation(async query => query ? { matches: [{ excerpt: 'needle here' }] } : null)
-    search.setScope('contents')
-    expect(search.query.value).toBe('needle')
-    await vi.advanceTimersByTimeAsync(130)
-    finish([hit('needle.md')])
-    await nextTick()
-    expect(search.contentResults.value).toEqual([{ excerpt: 'needle here' }])
-    expect(search.pathResults.value).toEqual([])
+    expect(search.pending.value).toBe(true)
+    expect(search.results.value.map(hit => hit.name)).toEqual(['needle.md', 'needle-copy.md'])
+    const first = search.results.value[0]
+    finish({ matches: [
+      { ...hit('needle.md').file, excerpt: 'needle', line: 2 },
+      { ...hit('other.md').file, excerpt: 'needle', line: 3 },
+      { ...hit('other.md').file, excerpt: 'needle', line: 4 },
+    ] })
+    await flushPromises()
+    expect(search.pending.value).toBe(false)
+    expect(search.results.value).toEqual([first, expect.objectContaining({ name: 'needle-copy.md', matchKind: 'name' }), expect.objectContaining({ name: 'other.md', matchKind: 'content', line: 3 })])
+    expect(searchContent).toHaveBeenLastCalledWith('needle', expect.objectContaining({ maxMatchesPerFile: 1, pathQuery: null }))
+  })
+
+  it('retains filename hits when content search fails and retains content hits when filename search fails', async () => {
+    const { search, searchContent } = setup()
+    filterIndexedFiles.mockResolvedValue([hit('needle.md')])
+    searchContent.mockImplementation(async query => { if (query) throw Error('Read failed'); return null })
+    await type(search, 'needle')
+    expect(search.results.value[0].name).toBe('needle.md')
+    expect(search.error.value).toContain('Read failed')
+    filterIndexedFiles.mockRejectedValueOnce(Error('Index failed'))
+    searchContent.mockImplementation(async () => ({ matches: [{ ...hit('other.md').file, line: 2 }] }))
+    await type(search, 'other')
+    expect(search.results.value[0].matchKind).toBe('content')
+    expect(search.error.value).toContain('Index failed')
+  })
+
+  it('highlights literal text without HTML or regular expression interpretation', () => {
+    expect(fileMatchParts('<img> a.b A.B', 'a.b')).toEqual([
+      { text: '<img> ', match: false }, { text: 'a.b', match: true },
+      { text: ' ', match: false }, { text: 'A.B', match: true },
+    ])
+    expect(fileMatchParts('İstanbul NEEDLE', 'needle')).toEqual([
+      { text: 'İstanbul ', match: false }, { text: 'NEEDLE', match: true },
+    ])
   })
 
   it('does not allow one presentation to cancel or replace another', async () => {
@@ -140,9 +169,9 @@ describe('file search ownership and transitions', () => {
       .mockResolvedValueOnce([hit('found.md')])
     await type(search, 'found')
     expect(search.phase.value).toBe('error')
-    expect(search.error.value).toBe('Index unavailable')
+    expect(search.error.value).toContain('Index unavailable')
     search.schedule({ immediate: true })
-    await nextTick()
+    await flushPromises()
     expect(search.phase.value).toBe('ready')
     expect(search.error.value).toBe('')
   })
@@ -150,7 +179,6 @@ describe('file search ownership and transitions', () => {
   it('distinguishes native cancellation from a completed search with no matches', async () => {
     const { search, searchContent } = setup()
     searchContent.mockImplementation(async query => query ? null : null)
-    search.setScope('contents')
     await type(search, 'needle')
     expect(search.phase.value).toBe('interrupted')
     expect(search.error.value).toContain('interrupted')
@@ -172,7 +200,6 @@ describe('file search ownership and transitions', () => {
   it('clears a previous content limit as soon as a new search starts', async () => {
     const { search, searchContent } = setup()
     searchContent.mockImplementation(async query => query ? { matches: [], truncated: true } : null)
-    search.setScope('contents')
     await type(search, 'first')
     expect(search.limited.value).toBe(true)
     search.query.value = 'second'

@@ -4,6 +4,7 @@ import { createApp, h, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import '../src/shared/styles/app.css'
 import WorkbenchSidebar from '../src/mimir/components/WorkbenchSidebar.vue'
+import ActivityTabs from '../src/mimir/components/ActivityTabs.vue'
 import FilesActivity from '../src/mimir/activities/FilesActivity.vue'
 import { useWorkspaceFilesStore } from '../src/stores/workspaceFiles.js'
 import { useSettingsStore } from '../src/stores/settings.js'
@@ -37,8 +38,8 @@ window.__TAURI_INTERNALS__ = {
         await new Promise(resolve => setTimeout(resolve, query === 'slow' ? 1200 : 150))
         if (query === 'error') throw new Error('Fixture search failure')
         if (query === 'limit') return { matches: [], truncated: true }
-        const matches = indexed.filter(entry => entry.name.toLowerCase().includes(query)).map(entry => ({
-          ...entry, line: 4, column: 1, excerpt: `Search notes for ${entry.name}`,
+        const matches = indexed.filter(entry => entry.name.toLowerCase().includes(query) || (query === 'alpha' && entry.name === 'sidebar.vue')).map(entry => ({
+          ...entry, line: 4, column: 1, excerpt: `${query} search notes for ${entry.name}`,
         }))
         return { matches, truncated: false }
       }
@@ -64,8 +65,35 @@ const files = useWorkspaceFilesStore()
 createApp({
   setup() {
     const params = new URLSearchParams(location.search)
-    const width = ref(Number(params.get('width')) || 240), collapsed = ref(false), toolsCollapsed = ref(params.has('toolsClosed'))
+    const width = ref(Number(params.get('width')) || 240), collapsed = ref(false), filesCollapsed = ref(params.has('filesClosed')), filesHeight = ref(Number(params.get('filesHeight')) || 240)
     const tools = Array.from({ length: Number(params.get('tools')) || 5 }, (_, index) => ({ id: `tool-${index}`, title: `Tool ${index + 1}`, icon: index % 2 ? 'today' : 'graph' }))
+    const activities = ref(Array.from({ length: Number(params.get('activities')) || 0 }, (_, index) => ({
+      id: `session-${index}`, title: `Review file navigation ${index + 1}`, kind: index % 2 ? 'terminal' : 'agent',
+      status: index === 1 ? 'needs-input' : 'working', host: { type: 'pty' },
+    })))
+    if (params.has('states')) activities.value = [
+      ['working', 'Review API', 'working'],
+      ['starting', 'Starting agent', 'starting'],
+      ['needs-input', 'Approval required', 'needs-input'],
+      ['unread', 'New reply', 'idle'],
+      ['error', 'API request failed', 'error'],
+      ['resuming', 'Resuming session', 'starting'],
+      ['idle', 'Terminal', 'idle'],
+      ['done', 'Finished review', 'done'],
+      ['interrupted', 'Interrupted session', 'interrupted'],
+      ['prompt-ready', 'Prompt ready', 'needs-input'],
+    ].map(([id, title, status], index) => ({
+      id, title, status, kind: id === 'idle' ? 'terminal' : 'agent',
+      source: { presetId: id === 'idle' ? 'terminal' : 'codex' }, host: { type: 'pty' },
+      updatedAt: new Date(Date.now() - (index + 1) * 60_000).toISOString(), unread: id === 'unread',
+    }))
+    const blockingIds = new Set(params.has('states') ? ['needs-input'] : ['session-1'])
+    const restoringIds = new Set(params.has('states') ? ['resuming'] : [])
+    const activeActivityId = ref(activities.value[0]?.id || '')
+    const selectActivity = id => { activeActivityId.value = id }
+    const closeActivity = id => { activities.value = activities.value.filter(tab => tab.id !== id) }
+    const reorderActivities = ids => { activities.value = ids.map(id => activities.value.find(tab => tab.id === id)) }
+    const renameActivity = ({ id, title }) => { activities.value.find(tab => tab.id === id).title = title }
     const meetingCapture = params.has('recording') ? { id: 'fixture-meeting', lifecycle: 'capturing', micMuted: false } : null
     const opened = ref('Select a file to preview its path.')
     const button = (label, click) => h('button', { class: 'h-7 px-2 border border-rule hover:bg-chrome-mid', onClick: click }, label)
@@ -82,12 +110,17 @@ createApp({
       h('div', { class: 'flex min-h-0 flex-1' }, [
         h('div', { class: 'shrink-0 border-r border-rule', style: { width: `${collapsed.value ? 52 : width.value}px` } }, [
           h(WorkbenchSidebar, {
-            workspaceName: 'Project', workspacePath: root, collapsed: collapsed.value, toolsCollapsed: toolsCollapsed.value,
-            tools, meetingCapture,
-            onToggleCollapse: () => { collapsed.value = !collapsed.value }, onToggleTools: () => { toolsCollapsed.value = !toolsCollapsed.value },
-          }, { files: () => h(FilesActivity, { compact: true, active: !collapsed.value, onOpenFile: open }) }),
+            workspaceName: 'Project', workspacePath: root, collapsed: collapsed.value, filesCollapsed: filesCollapsed.value, filesHeight: filesHeight.value,
+            tools, meetingCapture, blockingIds, restoringIds, activities: activities.value, activeActivityId: activeActivityId.value,
+            onToggleFiles: () => { filesCollapsed.value = !filesCollapsed.value }, onResizeFiles: value => { filesHeight.value = value },
+            onSelectActivity: selectActivity, onCloseActivity: closeActivity, onReorderActivities: reorderActivities, onRenameActivity: renameActivity,
+            onToggleCollapse: () => { collapsed.value = !collapsed.value },
+          }, { files: ({ collapse }) => h(FilesActivity, { compact: true, collapsible: true, onCollapse: collapse, active: !collapsed.value && !filesCollapsed.value, onOpenFile: open }) }),
         ]),
-        h('div', { class: 'w-[540px] min-w-0 border-r border-rule' }, [h(FilesActivity, { active: true, onOpenFile: open })]),
+        h('div', { class: 'flex w-[540px] min-w-0 flex-col border-r border-rule' }, [
+          h('div', { class: 'pane-header' }, [h(ActivityTabs, { tabs: activities.value, blockingIds, restoringIds, activeId: activeActivityId.value, onSelect: selectActivity, onClose: closeActivity, onReorder: reorderActivities, onRename: renameActivity })]),
+          h('div', { class: 'min-h-0 flex-1' }, [h(FilesActivity, { active: true, onOpenFile: open })]),
+        ]),
         h('div', { class: 'min-w-0 flex-1 p-4 text-ink-3' }, opened.value),
       ]),
     ])

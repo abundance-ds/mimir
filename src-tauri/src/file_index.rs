@@ -204,6 +204,8 @@ pub struct ContentSearchRequest {
     /// Optional fuzzy filename/relative-path restriction.
     pub path_query: Option<String>,
     pub max_results: Option<usize>,
+    /// File navigation can request one excerpt per file instead of every line.
+    pub max_matches_per_file: Option<usize>,
     pub max_files: Option<usize>,
     pub max_total_bytes: Option<usize>,
     pub max_file_bytes: Option<usize>,
@@ -698,6 +700,7 @@ impl WorkspaceFileIndex {
             // One case-fold per file instead of one per line. Lowercasing
             // never adds or removes newlines, so both iterators stay aligned.
             let content_lower = content.to_lowercase();
+            let mut file_matches = 0;
             for (line_index, (line, lower)) in
                 content.lines().zip(content_lower.lines()).enumerate()
             {
@@ -717,9 +720,16 @@ impl WorkspaceFileIndex {
                     column,
                     excerpt: make_excerpt(line, column - 1, query.chars().count()),
                 });
+                file_matches += 1;
                 if report.matches.len() >= max_results {
                     report.truncated = true;
                     return report;
+                }
+                if request
+                    .max_matches_per_file
+                    .is_some_and(|limit| file_matches >= limit.max(1))
+                {
+                    break;
                 }
             }
         }
@@ -1370,6 +1380,45 @@ mod tests {
         assert_eq!(report.matches[0].column, 241);
         assert!(report.matches[0].excerpt.contains("NEEDLE"));
         assert!(report.matches[0].excerpt.chars().count() <= MAX_EXCERPT_CHARS + 2);
+    }
+
+    #[test]
+    fn file_search_can_return_one_location_per_file_without_starving_other_files() {
+        let temp = TempDir::new().unwrap();
+        write(temp.path(), "many.md", &"needle\n".repeat(50));
+        write(temp.path(), "other.md", "first\nneedle\nneedle");
+        let index = WorkspaceFileIndex::open(temp.path()).unwrap();
+        let report = index.search_content(
+            index.begin_content_search(),
+            &ContentSearchRequest {
+                query: "needle".into(),
+                max_matches_per_file: Some(1),
+                max_results: Some(3),
+                ..Default::default()
+            },
+        );
+        assert_eq!(report.matches.len(), 2);
+        assert!(!report.truncated);
+        assert_ne!(report.matches[0].path, report.matches[1].path);
+        assert_eq!(
+            report
+                .matches
+                .iter()
+                .find(|hit| hit.name == "other.md")
+                .unwrap()
+                .line,
+            2
+        );
+        // Existing callers still receive multiple line locations per file.
+        let report = index.search_content(
+            index.begin_content_search(),
+            &ContentSearchRequest {
+                query: "needle".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(report.matches.len(), 52);
+        assert!(!report.truncated);
     }
 
     #[test]

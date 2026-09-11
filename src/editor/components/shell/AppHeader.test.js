@@ -22,7 +22,7 @@ describe('embedded editor header', () => {
     })
   }
 
-  it.each(['expanded', 'rail'])('orders the original restore group when Sidebar is %s', async (sidebar) => {
+  it.each(['expanded', 'rail'])('keeps Main restore in the header when Sidebar is %s', async (sidebar) => {
     const wrapper = render()
     const workbench = useWorkbenchStore()
     workbench.setPaneState('sidebar', sidebar)
@@ -30,8 +30,8 @@ describe('embedded editor header', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.classes()).toContain('pane-header')
     expect(wrapper.find('[data-editor-restore-cluster]').exists()).toBe(true)
-    expect(wrapper.get('[data-editor-restore-cluster]').findAll('button').map(button => button.attributes('data-editor-action'))).toEqual(sidebar === 'rail' ? ['restore-sidebar', 'restore-activity'] : ['restore-activity'])
-    expect(wrapper.find('[data-editor-action="restore-sidebar"]').exists()).toBe(sidebar === 'rail')
+    expect(wrapper.get('[data-editor-restore-cluster]').findAll('button').map(button => button.attributes('data-editor-action'))).toEqual(['restore-activity'])
+    expect(wrapper.find('[data-editor-action="restore-sidebar"]').exists()).toBe(false)
     expect(wrapper.get('[data-editor-action="expand"]').attributes('title')).toBe('Restore split')
   })
 

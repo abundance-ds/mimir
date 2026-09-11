@@ -122,6 +122,20 @@ describe('EditorSurface feature extensions', () => {
     wrapper.unmount()
   })
 
+  it('moves the cursor for a search destination while ordinary scrolling retains selection', () => {
+    const wrapper = mount(EditorSurface, {
+      props: { content: 'first\nsecond\nthird', path: '/work/search.md' },
+      global: { plugins: [createPinia()] },
+    })
+    wrapper.vm.scrollToPos(8, { select: true })
+    expect(wrapper.vm.getCursor()).toMatchObject({ line: 2, column: 3, offset: 8 })
+    wrapper.vm.scrollToPos(0)
+    expect(wrapper.vm.getCursor().offset).toBe(8)
+    wrapper.vm.scrollToPos(999, { select: true })
+    expect(wrapper.vm.getCursor().offset).toBe(wrapper.vm.getContent().length)
+    wrapper.unmount()
+  })
+
   it('keeps the row highlight and adds the line-number highlight', async () => {
     const pinia = createPinia()
     const wrapper = mount(EditorSurface, {

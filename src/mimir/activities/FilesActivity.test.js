@@ -143,7 +143,7 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-files-mode="favorites"]').attributes('aria-pressed')).toBe('true')
     await wrapper.get('[aria-label="File actions"]').trigger('click')
     await flushPromises()
-    expect([...document.querySelectorAll('[role=menuitem]')].map(item => item.textContent.trim())).toEqual(['New file', 'New folder', 'Collapse all', 'Refresh', 'Open File Manager'])
+    expect([...document.querySelectorAll('[role=menuitem]')].map(item => item.textContent.trim())).toEqual(['New file', 'New folder', 'Refresh', 'Open File Manager'])
     const manager = [...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent.includes('Open File Manager'))
     manager.click()
     expect(wrapper.emitted('openManager')).toHaveLength(1)
@@ -183,8 +183,8 @@ describe('FilesActivity', () => {
       expect(wrapper.find('[data-files-empty]').exists()).toBe(false)
       await vi.advanceTimersByTimeAsync(140)
 
-      expect(wrapper.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual([found.path])
-      await wrapper.get('[data-file-row] button').trigger('click')
+      expect(wrapper.findAll('[data-files-search-match]').map(row => row.attributes('data-search-path'))).toEqual([found.path])
+      await wrapper.get('[data-files-search-match]').trigger('click')
       expect(wrapper.emitted('openFile').at(-1)[0]).toMatchObject({ path: found.path, preview: true })
     } finally {
       wrapper.unmount()
@@ -203,11 +203,11 @@ describe('FilesActivity', () => {
       await vi.advanceTimersByTimeAsync(140)
       await store.setQuery('missing')
       await store.setQuery('')
-      expect(sidebar.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual(['/w/new.md'])
-      expect(manager.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual(['/w/src/lib.rs'])
+      expect(sidebar.findAll('[data-files-search-match]').map(row => row.attributes('data-search-path'))).toEqual(['/w/new.md'])
+      expect(manager.findAll('[data-files-search-match]').map(row => row.attributes('data-search-path'))).toEqual(['/w/src/lib.rs'])
       await manager.get('[aria-label="Clear search"]').trigger('click')
       expect(sidebar.get('[data-files-search]').element.value).toBe('new')
-      expect(sidebar.findAll('[data-file-row]')).toHaveLength(1)
+      expect(sidebar.findAll('[data-files-search-match]')).toHaveLength(1)
     } finally {
       sidebar.unmount()
       manager.unmount()
@@ -222,7 +222,6 @@ describe('FilesActivity', () => {
       let finish
       fileIndex.searchIndexedContent.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
       await wrapper.get('[data-files-search]').trigger('focusin')
-      await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
       await wrapper.get('[data-files-search]').setValue('needle')
       await vi.advanceTimersByTimeAsync(140)
       expect(wrapper.get('[data-files-search]').attributes('type')).toBe('text')
@@ -247,23 +246,21 @@ describe('FilesActivity', () => {
   it('shows one honest empty message when a content search was only partial', async () => {
     const wrapper = render({ compact: true })
     await wrapper.get('[data-files-search]').trigger('focusin')
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'not found', [], { truncated: true })
-    expect(wrapper.get('[data-files-empty]').text()).toBe('No matches in the files searched. Some files were not fully searched.')
+    expect(wrapper.get('[data-files-empty]').text()).toBe('No matches in the files searched.')
     expect(wrapper.text()).not.toContain('No content matches')
     expect(wrapper.text()).not.toContain('Use a more specific phrase')
-    expect(wrapper.get('[data-files-list]').findAll('[role="status"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Some results were omitted')
     wrapper.unmount()
   })
 
-  it.each(['project', 'favorites', 'recent'])('exits search through the %s view button and restores Names', async mode => {
+  it.each(['project', 'favorites', 'recent'])('exits search through the %s view button and restores browsing', async mode => {
     const wrapper = render({ compact: true })
     await wrapper.get('[data-files-search]').trigger('focusin')
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'needle', [], { truncated: true })
     await wrapper.get(`[data-files-mode="${mode}"]`).trigger('click')
     expect(wrapper.get('[data-files-search]').element.value).toBe('')
-    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Find files…')
+    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Search files…')
     expect(wrapper.get(`[data-files-mode="${mode}"]`).attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-files-list]').attributes('role')).toBe('tree')
     expect(wrapper.text()).not.toContain('Some files were not fully searched')
@@ -279,7 +276,7 @@ describe('FilesActivity', () => {
       list.element.scrollTop = 75
       await wrapper.get('[data-files-search]').setValue('lib')
       await vi.advanceTimersByTimeAsync(140)
-      await wrapper.get('[data-file-row] button').trigger('keydown', { key: 'Escape' })
+      await wrapper.get('[data-files-search-match]').trigger('keydown', { key: 'Escape' })
       expect(wrapper.get('[data-files-search]').element.value).toBe('')
       expect(wrapper.get('[data-file-row="/w/new.md"]').attributes('aria-selected')).toBe('true')
       expect(list.element.scrollTop).toBe(75)
@@ -289,25 +286,24 @@ describe('FilesActivity', () => {
     }
   })
 
-  it('keeps empty compact search controls available when focus moves into them', async () => {
+  it('places Collapse beside the actions menu only in the Sidebar header', async () => {
+    const wrapper = render({ compact: true, collapsible: true })
+    const toolbar = wrapper.get('[data-files-compact-toolbar]')
+    expect(toolbar.find('[data-files-collapse]').exists()).toBe(true)
+    expect(toolbar.findAll('button').at(-2).attributes('aria-label')).toBe('File actions')
+    await toolbar.get('[data-files-collapse]').trigger('click')
+    expect(wrapper.emitted('collapse')).toHaveLength(1)
+    await wrapper.setProps({ compact: false })
+    expect(wrapper.find('[data-files-collapse]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps one search field and adds no controls on focus', async () => {
     const wrapper = render({ compact: true })
-    document.body.appendChild(wrapper.element)
-    const input = wrapper.get('[data-files-search]')
-    input.element.focus()
-    await wrapper.vm.$nextTick()
-    const contents = wrapper.get('[data-files-search-scope="contents"]')
-    expect(input.element.compareDocumentPosition(contents.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    contents.element.focus()
-    await wrapper.vm.$nextTick()
-    expect(contents.element.isConnected).toBe(true)
-    expect(document.activeElement).toBe(contents.element)
-    await contents.trigger('click')
-    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toContain('contents')
-
-    wrapper.get('[data-files-list]').element.focus()
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-files-search-scope="contents"]').exists()).toBe(false)
+    const before = wrapper.get('[data-files-search]').element.parentElement.outerHTML
+    await wrapper.get('[data-files-search]').trigger('focusin')
+    expect(wrapper.get('[data-files-search]').element.parentElement.outerHTML).toBe(before)
+    expect(wrapper.find('[data-files-search-scope]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -315,17 +311,15 @@ describe('FilesActivity', () => {
     const sidebar = render({ compact: true })
     const manager = render()
     await sidebar.get('[data-files-search]').trigger('focusin')
-    await sidebar.get('[data-files-search-scope="contents"]').trigger('click')
-    await manager.get('[data-files-search-scope="contents"]').trigger('click')
     const alpha = { path: '/w/new.md', relativePath: 'new.md', line: 1, column: 1, excerpt: 'alpha' }
     const beta = { path: '/w/src/lib.rs', relativePath: 'src/lib.rs', line: 2, column: 1, excerpt: 'beta' }
 
     await completeContentQuery(sidebar, 'alpha', [alpha], { truncated: true })
     await completeContentQuery(manager, 'beta', [beta])
     expect(sidebar.get('[data-content-match]').text()).toContain('alpha')
-    expect(sidebar.text()).toContain('Search results are incomplete')
+    expect(sidebar.text()).toContain('Some results were omitted')
     expect(manager.get('[data-content-match]').text()).toContain('beta')
-    expect(manager.text()).not.toContain('Search results are incomplete')
+    expect(manager.text()).not.toContain('Some results were omitted')
 
     await manager.get('[data-files-mode="recent"]').trigger('click')
     expect(sidebar.get('[data-content-match]').text()).toContain('alpha')
@@ -340,7 +334,6 @@ describe('FilesActivity', () => {
     const wrapper = render({ compact: true })
     await wrapper.get('[data-files-mode="favorites"]').trigger('click')
     await wrapper.get('[data-files-search]').trigger('focusin')
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'alpha', [{ path: '/w/src/lib.rs', relativePath: 'src/lib.rs', line: 1, column: 1, excerpt: 'alpha' }])
     expect(wrapper.get('[data-content-match]').text()).toContain('alpha')
 
@@ -360,10 +353,8 @@ describe('FilesActivity', () => {
       let finishAlpha
       fileIndex.searchIndexedContent.mockImplementationOnce(() => new Promise(resolve => { finishAlpha = resolve }))
       await sidebar.get('[data-files-search]').trigger('focusin')
-      await sidebar.get('[data-files-search-scope="contents"]').trigger('click')
       await sidebar.get('[data-files-search]').setValue('alpha')
       await vi.advanceTimersByTimeAsync(140)
-      await manager.get('[data-files-search-scope="contents"]').trigger('click')
       await manager.get('[data-files-search]').setValue('beta')
       await vi.advanceTimersByTimeAsync(140)
 
@@ -396,7 +387,6 @@ describe('FilesActivity', () => {
       fileIndex.searchIndexedContent
         .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
         .mockResolvedValueOnce({ matches: [{ path: '/w/new.md', relativePath: 'new.md', line: 1, column: 1, excerpt: 'current result' }], cancelled: false })
-      await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
       await wrapper.get('[data-files-search]').setValue('old')
       await vi.advanceTimersByTimeAsync(140)
       await wrapper.get('[data-files-search]').setValue('current')
@@ -436,7 +426,7 @@ describe('FilesActivity', () => {
     expect(wrapper.get('[data-files-new-file]').attributes('title')).toContain('New file')
     expect(wrapper.get('[data-files-new-folder]').attributes('title')).toContain('New folder')
     expect(wrapper.get('[data-files-refresh]').exists()).toBe(true)
-    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Filter project files')
+    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Search files…')
   })
 
   it('shows the adaptive file ledger with kind, exact modification time, size, and fixed favorite controls', () => {
@@ -898,7 +888,7 @@ describe('FilesActivity', () => {
       expect(fileIndex.filterIndexedFiles).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(40)
       expect(fileIndex.filterIndexedFiles).toHaveBeenCalledWith('lib', 251)
-      expect(wrapper.findAll('[data-file-row]').map(row => row.attributes('data-file-row'))).toEqual(['/w/src/lib.rs'])
+      expect(wrapper.findAll('[data-files-search-match]').map(row => row.attributes('data-search-path'))).toEqual(['/w/src/lib.rs'])
       wrapper.unmount()
     } finally {
       vi.useRealTimers()
@@ -928,7 +918,7 @@ describe('FilesActivity', () => {
     }
   }
 
-  it('searches file contents through the visible scope control', async () => {
+  it('searches file contents automatically after filenames', async () => {
     vi.useFakeTimers()
     try {
       fileIndex.searchIndexedContent.mockResolvedValue({
@@ -945,14 +935,13 @@ describe('FilesActivity', () => {
       })
       const wrapper = render()
 
-      await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
-      expect(wrapper.get('[data-files-list]').attributes('role')).toBe('listbox')
       await wrapper.get('[data-files-search]').setValue('needle')
+      expect(wrapper.get('[data-files-list]').attributes('role')).toBe('listbox')
       await vi.advanceTimersByTimeAsync(140)
       await wrapper.vm.$nextTick()
 
       expect(fileIndex.searchIndexedContent).toHaveBeenLastCalledWith(expect.any(Object), {
-        query: 'needle', pathQuery: null, maxResults: 200,
+        query: 'needle', pathQuery: null, maxResults: 200, maxMatchesPerFile: 1,
       })
       expect(wrapper.get('[data-content-match]').text()).toContain('src/lib.rs')
       expect(wrapper.get('[data-content-match]').text()).toContain('12:4')
@@ -977,7 +966,6 @@ describe('FilesActivity', () => {
 
   it('enters content results without preselecting or skipping the first match', async () => {
     const wrapper = render()
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'needle', [
       {
         path: '/w/new.md',
@@ -1021,14 +1009,12 @@ describe('FilesActivity', () => {
     ]
 
     await wrapper.get('[data-files-mode="recent"]').trigger('click')
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'needle', matches)
     expect(wrapper.findAll('[data-content-match]').map(match => match.text())).toEqual([
       expect.stringContaining('src/lib.rs'),
     ])
 
     await wrapper.get('[data-files-mode="favorites"]').trigger('click')
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'needle', matches)
     expect(wrapper.findAll('[data-content-match]').map(match => match.text())).toEqual([
       expect.stringContaining('docs/guide.md'),
@@ -1046,7 +1032,6 @@ describe('FilesActivity', () => {
     expect(gitFilter.classes()).toContain('shrink-0')
     expect(gitFilter.classes()).not.toContain('files-footer-secondary')
 
-    await wrapper.get('[data-files-search-scope="contents"]').trigger('click')
     await completeContentQuery(wrapper, 'needle', [
       { path: '/w/new.md', relativePath: 'new.md', line: 1, column: 1, excerpt: 'changed' },
       { path: '/w/src/lib.rs', relativePath: 'src/lib.rs', line: 2, column: 1, excerpt: 'unchanged' },
@@ -1119,7 +1104,7 @@ describe('FilesActivity', () => {
 
     await wrapper.get('[data-files-mode="project"]').trigger('click')
     expect(wrapper.get('[data-file-row="/w/new.md"]').exists()).toBe(true)
-    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Filter project files')
+    expect(wrapper.get('[data-files-search]').attributes('placeholder')).toBe('Search files…')
   })
 
   it('removes Git controls and native diagnostics from a non-Git folder', async () => {
