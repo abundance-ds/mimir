@@ -973,6 +973,26 @@ describe('ScribeApp', () => {
     wrapper.unmount()
   })
 
+  it('keeps the saved Graph summary while regeneration runs and offers the result for review', async () => {
+    const wrapper = await openFiledMeeting()
+    const running = meeting({ graphNodeId: 'graph-m1', summary: 'Initial summary.', summaryState: 'running' })
+    vi.mocked(runMeetingSummary).mockResolvedValue(snapshot({ meetings: [running] }))
+    await wrapper.get('[data-scribe-regenerate-summary]').trigger('click')
+    activeFollowUpDialog(wrapper, 'summary').vm.$emit('submit')
+    await flushPromises()
+    expect(runMeetingSummary).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Edited in Graph.')
+    expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(false)
+    const generated = { ...running, summary: 'New generated summary.', summaryState: 'succeeded' }
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [generated] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: generated.summary }))
+    await useMeetingsStore().refresh()
+    await vi.waitFor(() => expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(true))
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Edited in Graph.')
+    expect(updateGraphNode).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('keeps Graph edits current without offering the old Scribe summary as a draft', async () => {
     const wrapper = await openFiledMeeting()
     await flushPromises()

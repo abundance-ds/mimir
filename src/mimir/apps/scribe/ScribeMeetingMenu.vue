@@ -15,7 +15,7 @@
       data-scribe-continue-meeting
       @click="choose('continue')"
     >
-      Continue recording
+      {{ continueLabel }}
     </button>
     <button
       v-if="context === 'row' && canRename"
@@ -74,6 +74,7 @@ const props = defineProps({
   context: { type: String, default: 'row' },
   canRetranscribe: { type: Boolean, default: false },
   canContinue: { type: Boolean, default: false },
+  continueLabel: { type: String, default: 'Continue recording' },
   canRename: { type: Boolean, default: true },
   filesPending: { type: Boolean, default: false },
   markdownPending: { type: Boolean, default: false },

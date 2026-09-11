@@ -2,7 +2,9 @@
   <section data-scribe-meeting-context class="meeting-context" aria-label="Meeting context">
     <label>
       <span>Project</span>
+      <strong v-if="readOnly" class="meeting-context-value">{{ projectLabel }}</strong>
       <GraphSelect
+        v-else
         :model-value="projectChoice"
         data-scribe-meeting-project
         variant="quiet"
@@ -21,7 +23,8 @@
 
     <div class="meeting-context-people">
       <span>People</span>
-      <div class="meeting-people-value">
+      <span v-if="readOnly" class="meeting-context-value">{{ selectedPeople.map(person => person.title).join(', ') || 'None' }}</span>
+      <div v-else class="meeting-people-value">
         <button
           v-for="person in selectedPeople"
           :key="person.id"
@@ -54,7 +57,9 @@
 
     <label>
       <span>Scope</span>
+      <strong v-if="readOnly" class="meeting-context-value">{{ scopeOptions.find(scope => scope.value === draft.scopeId)?.label || 'Unavailable' }}</strong>
       <GraphSelect
+        v-else
         :model-value="draft.scopeId || ''"
         data-scribe-meeting-scope
         variant="quiet"
@@ -84,6 +89,7 @@ const props = defineProps({
   scopes: { type: Array, default: () => [] },
   workspaceProjectId: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
+  readOnly: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   creating: { type: Boolean, default: false },
   error: { type: String, default: '' },
@@ -94,6 +100,11 @@ const draft = computed(() => normalizeDraft(props.modelValue))
 const projectChoice = computed(() => {
   if (!draft.value.projectResolved) return '__blank__'
   return draft.value.projectId || '__none__'
+})
+const projectLabel = computed(() => {
+  if (!draft.value.projectResolved) return 'Not set'
+  if (!draft.value.projectId) return 'None'
+  return props.projects.find(project => project.id === draft.value.projectId)?.title || 'Unavailable project'
 })
 const projectOptions = computed(() => [
   { value: '__blank__', label: 'Not set', hint: 'Decide later' },
@@ -116,7 +127,7 @@ const scopeOptions = computed(() => props.scopes.map(scope => ({
     || String(scope.kind || ''),
 })))
 const selectedPeople = computed(() => draft.value.peopleIds.map(id => (
-  props.people.find(person => person.id === id) || { id, title: id }
+  props.people.find(person => person.id === id) || { id, title: props.readOnly ? 'Unavailable person' : id }
 )))
 const availablePeopleOptions = computed(() => props.people
   .filter(person => !draft.value.peopleIds.includes(person.id))
@@ -187,6 +198,14 @@ function title(node) {
 .meeting-context-people > span {
   color: var(--color-ink-4);
   font-size: 9px;
+}
+
+.meeting-context .meeting-context-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink-2);
+  font-size: 10px;
+  text-overflow: ellipsis;
 }
 
 .meeting-people-value {

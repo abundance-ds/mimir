@@ -64,7 +64,7 @@ export function useFiledMeeting({ meeting, ready }) {
     void reload()
   })
   watch(ready, () => { void reload() })
-  watch(() => [meeting.value?.id, meeting.value?.summary], async ([id, summary], previous, onCleanup) => {
+  watch([() => meeting.value?.id, () => meeting.value?.summary], async ([id, summary], previous, onCleanup) => {
     let current = true
     onCleanup(() => { current = false })
     if (id !== previous?.[0]) draftHash.value = ''

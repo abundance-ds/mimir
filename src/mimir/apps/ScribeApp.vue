@@ -59,6 +59,7 @@
             class="scribe-title-input scribe-live-title"
             type="text"
             aria-label="Meeting title"
+            :disabled="Boolean(meetings.activeMeeting.graphNodeId)"
             autocomplete="off"
             autocorrect="off"
             autocapitalize="off"
@@ -66,18 +67,24 @@
             @blur="commitTitle(meetings.activeMeeting.id)"
           />
           <ScribeMeetingContext
-            v-model="graphDraft"
+            :model-value="filedContext || graphDraft"
             :projects="graphCatalog.projects"
             :people="graphCatalog.people"
             :scopes="graphCatalog.scopes"
             :workspace-project-id="workspaceProjectId"
             :disabled="!graphCatalog.scopes.length"
+            :read-only="Boolean(meetings.activeMeeting.graphNodeId)"
             :loading="graphCatalogLoading"
             :creating="graphEntityCreating"
             :error="graphCatalogError"
             @change="changeGraphDraft(meetings.activeMeeting.id, $event)"
             @create-entity="createGraphContextEntity(meetings.activeMeeting.id, $event)"
           />
+          <button
+            v-if="meetings.activeMeeting.graphNodeId"
+            type="button" class="scribe-quiet-button"
+            @click="$emit('openGraphNode', meetings.activeMeeting.graphNodeId)"
+          >View in Graph</button>
         </div>
         <div class="scribe-live-layout mx-auto mt-4 max-w-5xl">
           <section class="min-w-0">
@@ -236,6 +243,7 @@
               :scopes="graphCatalog.scopes"
               :workspace-project-id="workspaceProjectId"
               :disabled="!graphCatalog.scopes.length || filingPending || Boolean(detailMeeting.graphNodeId)"
+              :read-only="Boolean(detailMeeting.graphNodeId)"
               :loading="graphCatalogLoading"
               :creating="graphEntityCreating"
               :error="graphCatalogError"
@@ -253,6 +261,10 @@
             >
               {{ safeFailureDetail(actionError) }}
             </p>
+            <div v-if="filedError" class="scribe-inline-notice" role="alert">
+              <span>{{ filedError }}</span>
+              <button type="button" class="scribe-quiet-button" @click="reloadFiledMeeting">Reload</button>
+            </div>
 
             <div
               v-if="meetingNeedsRecovery(detailMeeting)"
@@ -392,10 +404,6 @@
               class="scribe-summary-panel"
             >
               <template v-if="detailMeeting.graphNodeId">
-                <div v-if="filedError" class="scribe-inline-notice" role="alert">
-                  <span>{{ filedError }}</span>
-                  <button type="button" class="scribe-quiet-button" @click="reloadFiledMeeting">Reload</button>
-                </div>
                 <p v-if="!filedNode" class="py-5 text-[10px] text-ink-3" role="status">
                   {{ filedLoading ? 'Loading Graph summary…' : 'The Graph summary is not available.' }}
                 </p>
@@ -740,7 +748,8 @@
       :position="meetingMenuPosition"
       :context="detailMeetingId === meetingMenuId ? 'detail' : 'row'"
       :can-retranscribe="meetingCanRetranscribe(menuMeeting)"
-      :can-continue="meetingCanContinue(menuMeeting)"
+      :can-continue="meetingCanContinue(menuMeeting) && (menuMeeting.lifecycle !== 'arming' || detailMeetingId !== menuMeeting.id)"
+      :continue-label="menuMeeting.lifecycle === 'arming' ? 'Record' : 'Continue recording'"
       :can-rename="!menuMeeting.graphNodeId"
       :files-pending="meetingActionPending(menuMeeting.id, 'export:files')"
       :markdown-pending="meetingActionPending(menuMeeting.id, 'export:markdown')"
@@ -938,7 +947,7 @@ const {
   reload: reloadFiledMeeting,
   resolve: resolveFiledDraft,
 } = useFiledMeeting({
-  meeting: detailMeeting,
+  meeting: computed(() => meetings.activeMeeting || detailMeeting.value),
   ready: () => props.active && !graphCatalogLoading.value && Boolean(graphCatalog.value.scopes.length),
 })
 const filedLocation = computed(() => {
@@ -1624,7 +1633,7 @@ async function deleteMeetingById(id) {
   if (!meeting) return
   closeMeetingMenu({ restoreFocus: false })
   const accepted = await confirm(
-    `Permanently delete “${meeting.title}” and its transcript, summary, and source audio?`,
+    `Permanently delete “${meeting.title}” and its transcript, summary, and source audio?${meeting.graphNodeId ? '\n\nThe filed Graph record will remain.' : ''}`,
     {
       title: 'Delete meeting?',
       kind: 'warning',
