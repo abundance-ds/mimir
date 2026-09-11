@@ -13,6 +13,8 @@ small trusted team.
 - [Files](docs/files.md) — project navigation;
   [Editor](docs/editor-system.md) — Markdown editing with agent changes as
   reviewable diffs.
+- [Scratchpad](docs/scratchpad.md) — one shared drafting document with local
+  saved history.
 - [Business graph](docs/business-graph.md) — linked projects, issues,
   decisions, shared resources, and knowledge stored as Markdown; Mimir keeps
   the Team graph synchronized through GitHub.

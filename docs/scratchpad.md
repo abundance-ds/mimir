@@ -21,6 +21,8 @@ are no task boundaries, named drafts, or special agent write tools.
   latest state. Later text remains in history.
 - **Clear** saves empty text; the prior content stays in history. **Copy** copies
   only authored text. **Save As** exports a copy and keeps the shared tab.
+  If Save As selects a project Scratchpad link, it saves the shared document
+  and keeps the link intact.
 - Closing the tab hides it. The next external write can open it again.
 
 ## Storage and conflicts
@@ -70,6 +72,11 @@ history, saves the detached text, moves the detached file to
 `scratchpad-recovered-<time>.md` beside the link, and restores the link. An unrelated
 replacement symlink is left alone.
 
+Created links are registered before ignore rules are changed, so a failed ignore
+update does not disable recovery. If Git starts tracking a normal replacement,
+Mimir stops managing that path. It does not replace the tracked file or recreate
+the link after the project deletes the file.
+
 | Agent | Completion and launch integration |
 |---|---|
 | Codex | Native project-file completion; adds `~/.mimir` with `--add-dir`. Existing sandbox settings stay in effect. |
@@ -91,6 +98,50 @@ leaves the project's file intact; use the canonical path for the shared document
   `ScratchpadHistory.vue` under `src/editor/`.
 - Native tests cover conflict rejection, retention, restore, header preservation,
   file collisions, local exclusions, linked worktrees, and replaced links.
-  Renderer tests cover focus, history browsing, conflicts, Clear, and global tabs.
 
 Today remains the daily planning tool. It has separate storage and behavior.
+
+## Verification
+
+Run the focused checks with:
+
+```bash
+bun run test:scratchpad
+```
+
+This runs the renderer state and Editor integration tests, the executable CLI
+helper tests, and the native Scratchpad tests. CI runs the renderer and native
+tests in its standard suites and runs the CLI helper tests in a separate step.
+
+| Area | Automated checks |
+|---|---|
+| Native file and history | Conflict rejection, 100-state retention, restore, comment preservation, missing-file intervals, final text written while closed, corrupt-history preservation, failed journal writes, and retry |
+| Project links | Name collisions, local exclusions, linked worktrees, detached-file recovery, failed ignore setup, and ownership ending when Git tracks a replacement |
+| Renderer state | Listener registration before the first read, snapshot refresh after events, serialized reads and saves, failure cleanup, and retry |
+| Editor | Global tab identity, duplicate link opens, dirty-buffer retention, Save As copies and aliases, focus, history browsing, Clear, and typing during Restore |
+| Claude helper | Real Node process entry, canonical target selection, alias deduplication, unrelated files with the same name, existing suggestion commands, Git fallback without `rg`, and invalid input |
+
+The development-app check on 8 September 2026 used Claude Code 2.1.263:
+`@scratchpad` selected the canonical file; two edits appeared in the Editor;
+terminal input retained focus; Previous did not change the live file; Restore
+and Clear kept the previous text in history; the tab returned after restart.
+
+The earlier terminal experiment also checked native completion and file edits
+with Codex 0.153.4, Pi 0.82.1, and Gemini CLI 0.58.0. These are dated results,
+not verification of later CLI versions or a signed release.
+
+Before release, run the following checks in the installed signed app:
+
+1. Start a fresh session for each of the four agents. Select `@scratchpad`, make
+   two edits, and verify the same Editor tab updates while terminal input keeps
+   focus. Record the CLI versions and any trust prompts.
+2. Close the Scratchpad tab, then edit from the agent. Check that it opens again.
+   Repeat with another document focused, a review open, and history displayed.
+   Check the update notice and the terminal in a one-pane window.
+3. Type in the Editor while the agent writes. Check both conflict choices and
+   confirm that both texts remain in history. Check Copy, Save As, and Clear.
+4. Quit and reopen Mimir. Check the tab and history. Change the file while Mimir
+   is closed, reopen it, and confirm that the final text becomes the latest state.
+
+These remaining native checks cannot be proved by renderer mocks. No additional
+draft schema, agent tool, or storage service is required for this trial.

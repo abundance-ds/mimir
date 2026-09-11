@@ -331,6 +331,12 @@ pub fn prepare_alias(home: &Path, workspace: &Path) -> Result<bool, String> {
         #[cfg(not(unix))]
         return Ok(false);
     }
+    // Keep recovery active even if a later ignore-file update fails.
+    let mut owned = aliases(home)?;
+    if !owned.contains(&link) {
+        owned.push(link.clone());
+        persistence::write_json_atomic(aliases_path(home), &owned).map_err(|e| e.to_string())?;
+    }
     let ignore = workspace.join(".ignore");
     let created_ignore = !ignore.exists();
     if let (Some(root), Some(exclude)) = (
@@ -363,26 +369,34 @@ pub fn prepare_alias(home: &Path, workspace: &Path) -> Result<bool, String> {
         }
     }
     append_rules(&ignore, &["!/scratchpad.md".into()])?;
-    let mut owned = aliases(home)?;
-    if !owned.contains(&link) {
-        owned.push(link);
-        persistence::write_json_atomic(aliases_path(home), &owned).map_err(|e| e.to_string())?;
-    }
     Ok(true)
 }
 
 fn repair_aliases(home: &Path, book: &mut Notebook) -> Result<bool, String> {
     let _guard = LINKS_LOCK.lock().map_err(|e| e.to_string())?;
     let mut changed = false;
-    for link in aliases(home)? {
-        if is_alias(&link, &book.path) || !link.parent().is_some_and(Path::is_dir) {
+    let mut owned = aliases(home)?;
+    let mut released = Vec::new();
+    for link in &owned {
+        if is_alias(link, &book.path) || !link.parent().is_some_and(Path::is_dir) {
             continue;
         }
         // An unrelated replacement link belongs to its author.
-        if fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink() || !m.is_file()) {
+        if fs::symlink_metadata(link).is_ok_and(|m| m.file_type().is_symlink() || !m.is_file()) {
             continue;
         }
-        if let Ok(raw) = fs::read_to_string(&link) {
+        // Git may now own a normal replacement or a tracked deletion. Stop
+        // managing that path; a later Git removal must not recreate our link.
+        if git(
+            link.parent().unwrap(),
+            &["ls-files", "--error-unmatch", "--", "scratchpad.md"],
+        )
+        .is_some()
+        {
+            released.push(link.clone());
+            continue;
+        }
+        if let Ok(raw) = fs::read_to_string(link) {
             let content = body(&raw);
             let expected = book.snapshot().content;
             book.save(content, &expected)?;
@@ -391,13 +405,17 @@ fn repair_aliases(home: &Path, book: &mut Notebook) -> Result<bool, String> {
                 "scratchpad-recovered-{}.md",
                 book.history.last().unwrap().time
             ));
-            fs::rename(&link, recovery).map_err(|e| e.to_string())?;
+            fs::rename(link, recovery).map_err(|e| e.to_string())?;
             changed = true;
         } else if link.exists() {
             continue;
         }
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&book.path, &link).map_err(|e| e.to_string())?;
+        std::os::unix::fs::symlink(&book.path, link).map_err(|e| e.to_string())?;
+    }
+    if !released.is_empty() {
+        owned.retain(|link| !released.contains(link));
+        persistence::write_json_atomic(aliases_path(home), &owned).map_err(|e| e.to_string())?;
     }
     Ok(changed)
 }
@@ -446,6 +464,113 @@ mod tests {
         fs::remove_file(&book.path).unwrap();
         assert!(!book.refresh().unwrap());
         assert_eq!(book.snapshot().content, "104");
+    }
+
+    #[test]
+    fn captures_final_text_written_while_closed() {
+        let home = tempdir().unwrap();
+        let mut book = Notebook::open(home.path()).unwrap();
+        book.save("Before closing", "").unwrap();
+        let path = book.path.clone();
+        drop(book);
+        fs::write(&path, "Intermediate offline text").unwrap();
+        fs::write(&path, "Final offline text").unwrap();
+        let book = Notebook::open(home.path()).unwrap();
+        assert_eq!(
+            book.history
+                .iter()
+                .map(|s| s.content.as_str())
+                .collect::<Vec<_>>(),
+            ["", "Before closing", "Final offline text"]
+        );
+        assert!(fs::read_to_string(path).unwrap().starts_with(HEADER));
+    }
+
+    #[test]
+    fn preserves_corrupt_history_and_recovers_the_live_text() {
+        let home = tempdir().unwrap();
+        let mut book = Notebook::open(home.path()).unwrap();
+        book.save("Keep this text", "").unwrap();
+        let journal = book.journal.clone();
+        drop(book);
+        let corrupt = "{broken history";
+        fs::write(&journal, corrupt).unwrap();
+        let book = Notebook::open(home.path()).unwrap();
+        assert_eq!(book.snapshot().content, "Keep this text");
+        assert_eq!(book.history.len(), 1);
+        assert!(fs::read_dir(journal.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .any(|entry| {
+                entry.path() != journal
+                    && fs::read_to_string(entry.path()).ok().as_deref() == Some(corrupt)
+            }));
+    }
+
+    #[test]
+    fn journal_failure_leaves_the_file_and_memory_unchanged_and_allows_retry() {
+        let home = tempdir().unwrap();
+        let mut book = Notebook::open(home.path()).unwrap();
+        book.save("Saved", "").unwrap();
+        let journal = book.journal.clone();
+        book.journal = home.path().join("blocked");
+        fs::create_dir(&book.journal).unwrap();
+        assert!(book.save("Unsaved", "Saved").is_err());
+        assert_eq!(book.snapshot().content, "Saved");
+        assert_eq!(body(&fs::read_to_string(&book.path).unwrap()), "Saved");
+        book.journal = journal;
+        book.save("Unsaved", "Saved").unwrap();
+        assert_eq!(book.snapshot().content, "Unsaved");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn tracked_replacement_and_its_deletion_are_not_repaired() {
+        let home = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        git(workspace.path(), &["init"]).unwrap();
+        prepare_alias(home.path(), workspace.path()).unwrap();
+        let link = workspace.path().join("scratchpad.md");
+        fs::remove_file(&link).unwrap();
+        fs::write(&link, "Project document").unwrap();
+        git(workspace.path(), &["add", "-f", "--", "scratchpad.md"]).unwrap();
+        let mut book = Notebook::open(home.path()).unwrap();
+        book.save("Shared text", "").unwrap();
+        assert!(!repair_aliases(home.path(), &mut book).unwrap());
+        assert!(!fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&link).unwrap(), "Project document");
+        assert!(aliases(home.path()).unwrap().is_empty());
+        git(
+            workspace.path(),
+            &["rm", "--cached", "-f", "--", "scratchpad.md"],
+        )
+        .unwrap();
+        fs::remove_file(&link).unwrap();
+        assert!(!repair_aliases(home.path(), &mut book).unwrap());
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert_eq!(book.snapshot().content, "Shared text");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ignore_setup_failure_does_not_abandon_an_owned_link() {
+        let home = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let shared_ignore = home.path().join("shared-ignore");
+        fs::write(&shared_ignore, "build/\n").unwrap();
+        std::os::unix::fs::symlink(&shared_ignore, workspace.path().join(".ignore")).unwrap();
+        assert!(prepare_alias(home.path(), workspace.path()).is_err());
+        assert_eq!(fs::read_to_string(shared_ignore).unwrap(), "build/\n");
+        let link = workspace.path().join("scratchpad.md");
+        fs::remove_file(&link).unwrap();
+        fs::write(&link, "Detached save").unwrap();
+        let mut book = Notebook::open(home.path()).unwrap();
+        assert!(repair_aliases(home.path(), &mut book).unwrap());
+        assert!(is_alias(&link, &book.path));
+        assert_eq!(book.snapshot().content, "Detached save");
     }
 
     #[test]

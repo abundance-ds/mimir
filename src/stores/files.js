@@ -562,9 +562,16 @@ export const useFileStore = defineStore('files', () => {
     if (!file || file.kind !== 'text') return false
     const defaultPath = file.path
       || (workspaceScope.value ? `${workspaceScope.value}/untitled.md` : 'untitled.md')
-    const path = await saveFileDialog(defaultPath)
+    let path = await saveFileDialog(defaultPath)
     if (!path) return false
     if (!openFiles.value.includes(file)) return false
+    if (file.path === scratchpad.path && path.endsWith('/scratchpad.md')
+      && typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+      // Save As can select the project link. Use the shared save path so the
+      // generic atomic file writer cannot replace that link with a plain file.
+      path = await resolveScratchpad(path) || path
+      if (!openFiles.value.includes(file)) return false
+    }
     if (file.path === scratchpad.path && path !== scratchpad.path) {
       // Export a copy; the shared tab keeps its identity and destination.
       await saveFile(path, file.content)

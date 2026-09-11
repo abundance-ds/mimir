@@ -74,6 +74,9 @@ jobs:
       - name: Test frontend
         run: bun run test
 
+      - name: Test Scratchpad CLI completion
+        run: node --test bin/mimir-file-suggestion.test.mjs
+
       - name: Build frontend
         run: bun run build
 

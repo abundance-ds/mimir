@@ -43,6 +43,7 @@ UPDATE_IPC_FIXTURES=1 cargo test --manifest-path src-tauri/Cargo.toml ipc_fixtur
 | Activity or terminal lifecycle | renderer Activity tests, native supervisor/launcher tests, live PTY smoke |
 | Command or tool contract | native registry/runtime tests, service tests, command check, CLI smoke |
 | Files or Git | native index/workspace/Git tests and Files/Editor tests |
+| Scratchpad | `bun run test:scratchpad`; native app checks in [scratchpad.md](scratchpad.md#verification) |
 | Graph | native graph/managed-Git tests, fixtures, and affected app tests |
 | Tracker | native engine/store/report tests and affected app/settings tests |
 | Routines or Apps | native owner tests and affected service/store/host tests |
