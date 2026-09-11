@@ -129,20 +129,44 @@
 
     <template v-else-if="detailMeeting">
       <header data-scribe-detail-header class="scribe-bar pane-bar">
-        <button type="button" class="scribe-quiet-button" title="Meetings" @click="closeDetail">
-          <IconChevronLeft :size="14" />
-          <span class="scribe-responsive-label">Meetings</span>
-        </button>
+        <nav class="scribe-location" aria-label="Meeting location">
+          <button type="button" class="scribe-quiet-button" title="Meetings" @click="closeDetail">Scribe</button>
+          <IconChevronRight :size="12" />
+          <button type="button" class="scribe-quiet-button" @click="closeDetail">Meetings</button>
+          <IconChevronRight :size="12" class="scribe-responsive-label" />
+          <span class="truncate scribe-responsive-label">{{ titleDraft }}</span>
+        </nav>
         <span class="min-w-0 flex-1" />
         <span data-scribe-save-state class="scribe-save-state" role="status">
           {{ notesSaveState }}
         </span>
         <button
-          v-if="meetingCanContinue(detailMeeting)"
+          v-if="detailMeeting.graphNodeId"
+          type="button"
+          data-scribe-open-graph
+          class="scribe-quiet-button"
+          @click="$emit('openGraphNode', detailMeeting.graphNodeId)"
+        >
+          View in Graph
+        </button>
+        <button
+          v-else-if="detailMeeting.lifecycle === 'ready' && summaryDraft.trim()"
+          type="button"
+          data-scribe-file-graph
+          class="scribe-primary-button"
+          :disabled="!canFileToGraph"
+          :title="filingHelp || 'File this summary to Graph'"
+          :aria-describedby="filingHelp ? 'scribe-filing-help' : undefined"
+          @click="fileToGraph"
+        >
+          {{ filingPending ? 'Filing…' : 'File to Graph' }}
+        </button>
+        <button
+          v-if="detailMeeting.lifecycle === 'arming' && meetingCanContinue(detailMeeting)"
           type="button"
           data-scribe-continue
           class="scribe-primary-button"
-          :disabled="Boolean(meetings.pending.start)"
+          :disabled="Boolean(meetings.pending.start) || filingPending"
           @click="continueMeeting(detailMeeting)"
         >
           <IconMicrophone :size="13" />
@@ -154,6 +178,7 @@
           class="scribe-icon-button"
           aria-label="Meeting actions"
           title="Meeting actions"
+          :disabled="filingPending"
           aria-haspopup="menu"
           :aria-expanded="meetingMenuOpen && meetingMenuId === detailMeeting.id"
           @pointerdown.stop
@@ -193,6 +218,7 @@
               class="scribe-title-input"
               type="text"
               aria-label="Meeting title"
+              :disabled="filingPending || Boolean(detailMeeting.graphNodeId)"
               autocomplete="off"
               autocorrect="off"
               autocapitalize="off"
@@ -201,22 +227,24 @@
             />
             <p class="scribe-meeting-date">
               {{ meetingDate(detailMeeting) }} · {{ formatDuration(detailMeeting.durationMs) }}
-              <template v-if="detailMeeting.graphNodeId"> · Filed in Graph</template>
+              <template v-if="detailMeeting.graphNodeId"> · {{ filedLocation }}</template>
             </p>
             <ScribeMeetingContext
-              v-if="!detailMeeting.graphNodeId"
-              v-model="graphDraft"
+              :model-value="filedContext || graphDraft"
               :projects="graphCatalog.projects"
               :people="graphCatalog.people"
               :scopes="graphCatalog.scopes"
               :workspace-project-id="workspaceProjectId"
-              :disabled="!graphCatalog.scopes.length"
+              :disabled="!graphCatalog.scopes.length || filingPending || Boolean(detailMeeting.graphNodeId)"
               :loading="graphCatalogLoading"
               :creating="graphEntityCreating"
               :error="graphCatalogError"
               @change="changeGraphDraft(detailMeeting.id, $event)"
               @create-entity="createGraphContextEntity(detailMeeting.id, $event)"
             />
+            <p v-if="filingHelp" id="scribe-filing-help" class="text-[10px] text-ink-3">
+              {{ filingHelp }}
+            </p>
             <p
               v-if="actionError"
               data-scribe-detail-error
@@ -295,11 +323,11 @@
                 </button>
               </div>
               <button
-                v-else-if="detailTab === 'summary' && canRunSummary && detailMeeting.summary"
+                v-else-if="detailTab === 'summary' && canRunSummary && (detailMeeting.summary || filedNode)"
                 type="button"
                 data-scribe-regenerate-summary
                 class="scribe-tab-action ml-auto"
-                :disabled="summaryRunPending"
+                :disabled="summaryRunPending || filingPending || filedSaving"
                 :aria-label="summaryActionLabel"
                 :title="summaryActionLabel"
                 @click="openSummaryDialog"
@@ -321,6 +349,7 @@
                 v-model="notesDraft"
                 data-scribe-detail-notes
                 aria-label="Meeting notes in Markdown"
+                :disabled="filingPending"
                 placeholder="Questions, reminders, actions, or anything useful…"
                 @change="changeNotes(detailMeeting.id)"
                 @save="flushNotes"
@@ -362,8 +391,44 @@
               aria-labelledby="scribe-detail-tab-summary"
               class="scribe-summary-panel"
             >
+              <template v-if="detailMeeting.graphNodeId">
+                <div v-if="filedError" class="scribe-inline-notice" role="alert">
+                  <span>{{ filedError }}</span>
+                  <button type="button" class="scribe-quiet-button" @click="reloadFiledMeeting">Reload</button>
+                </div>
+                <p v-if="!filedNode" class="py-5 text-[10px] text-ink-3" role="status">
+                  {{ filedLoading ? 'Loading Graph summary…' : 'The Graph summary is not available.' }}
+                </p>
+                <template v-else>
+                  <div class="scribe-filed-summary-bar">
+                    <span>{{ reviewingDraft && !summaryRunPending ? 'Replacement draft' : 'Current Graph summary' }}</span>
+                    <template v-if="summaryRunPending"><span role="status">{{ summaryActionLabel }}</span></template>
+                    <template v-else-if="hasFiledDraft">
+                      <button
+                        type="button" class="scribe-quiet-button" data-scribe-review-draft
+                        :disabled="filedSaving" @click="reviewingDraft = !reviewingDraft"
+                      >{{ reviewingDraft ? 'View current' : 'Review draft' }}</button>
+                      <template v-if="reviewingDraft">
+                        <button type="button" class="scribe-quiet-button" data-scribe-keep-current :disabled="filedSaving" @click="resolveFiledSummary(false)">Keep current</button>
+                        <button type="button" class="scribe-primary-button" data-scribe-update-graph :disabled="filedSaving || !summaryDraft.trim()" @click="resolveFiledSummary(true)">{{ filedSaving ? 'Saving…' : 'Update in Graph' }}</button>
+                      </template>
+                    </template>
+                  </div>
+                  <div data-scribe-summary-content class="scribe-summary-document">
+                    <ScribeMarkdownEditor
+                      v-if="reviewingDraft && hasFiledDraft && !summaryRunPending"
+                      v-model="summaryDraft"
+                      aria-label="Replacement meeting summary in Markdown"
+                      :disabled="filedSaving"
+                      @change="changeSummary(detailMeeting.id)"
+                      @save="flushNotes"
+                    />
+                    <ScribeMarkdownEditor v-else :model-value="filedNode.body || ''" aria-label="Current Graph summary" read-only />
+                  </div>
+                </template>
+              </template>
               <div
-                v-if="!detailMeeting.summary"
+                v-else-if="!detailMeeting.summary"
                 data-scribe-summary-content
                 class="scribe-summary-empty"
               >
@@ -383,7 +448,7 @@
                   v-model="summaryDraft"
                   aria-label="Meeting summary in Markdown"
                   placeholder="Write or generate a concise meeting summary…"
-                  :disabled="summaryRunPending"
+                  :disabled="summaryRunPending || filingPending"
                   @change="changeSummary(detailMeeting.id)"
                   @save="flushNotes"
                 />
@@ -397,6 +462,7 @@
     <template v-else>
       <main class="min-h-0 flex-1 overflow-y-auto">
         <div class="mx-auto max-w-3xl px-5 py-4">
+          <p class="mb-3 text-[11px] text-ink-3">Scribe</p>
           <section class="border-b border-rule pb-4">
             <div data-scribe-home-toolbar class="flex items-center gap-2">
               <button
@@ -506,6 +572,7 @@
               <h2 id="scribe-recent-title" class="min-w-0 flex-1 text-[12px] font-semibold">
                 {{ meetingSearchActive ? 'Search' : 'Meetings' }}
               </h2>
+              <button type="button" data-scribe-unfiled class="scribe-quiet-button" :aria-pressed="unfiledOnly" @click="unfiledOnly = !unfiledOnly">Unfiled</button>
               <button
                 v-if="!meetingSearchActive"
                 type="button"
@@ -522,13 +589,16 @@
             <p v-if="meetingSearchActive && meetings.pending.search" class="py-5 text-[10px] text-ink-3" role="status">
               Searching…
             </p>
-            <p v-else-if="meetingSearchActive && !meetings.searchResults.length" class="py-5 text-[10px] text-ink-3">
+            <p v-else-if="meetingSearchActive && !visibleSearchResults.length" class="py-5 text-[10px] text-ink-3">
               No matches
             </p>
             <div v-else-if="meetingSearchActive" class="mt-2 divide-y divide-rule-light border-t border-rule-light">
-              <button
-                v-for="hit in meetings.searchResults"
+              <div
+                v-for="hit in visibleSearchResults"
                 :key="hit.meeting.id"
+                class="scribe-library-row"
+              >
+              <button
                 type="button"
                 data-scribe-meeting-row
                 data-scribe-search-result
@@ -551,6 +621,7 @@
                     <span class="scribe-row-time">
                       {{ meetingDate(hit.meeting) }} · {{ formatDuration(hit.meeting.durationMs) }}
                     </span>
+                    <span v-if="hit.meeting.graphNodeId" class="scribe-row-filed">In Graph</span>
                     <span
                       v-if="meetingBackgroundStatus(hit.meeting)"
                       data-scribe-row-progress
@@ -582,12 +653,14 @@
                 </span>
                 <IconChevronRight :size="13" class="shrink-0 text-ink-3" />
               </button>
+              <button type="button" class="scribe-icon-button" :data-scribe-row-actions="hit.meeting.id" :aria-label="`Actions for ${hit.meeting.title}`" aria-haspopup="menu" title="Meeting actions" @click="openRowActions($event, hit.meeting)"><IconDots :size="15" /></button>
+              </div>
             </div>
             <p v-else-if="meetings.loading && !meetings.loaded" class="py-5 text-[10px] text-ink-3" role="status">
               Loading…
             </p>
-            <p v-else-if="!meetings.meetings.length" class="py-5 text-[10px] text-ink-3">
-              No meetings yet
+            <p v-else-if="!visibleMeetings.length" class="py-5 text-[10px] text-ink-3">
+              {{ unfiledOnly ? 'No unfiled meetings' : 'No meetings yet' }}
             </p>
             <div v-else class="mt-2">
               <section
@@ -599,9 +672,12 @@
               >
                 <h3 class="font-mono text-[9px] text-ink-3">{{ group.label }}</h3>
                 <div class="mt-1 divide-y divide-rule-light border-t border-rule-light">
-                  <button
+                  <div
                     v-for="meeting in group.meetings"
                     :key="meeting.id"
+                    class="scribe-library-row"
+                  >
+                  <button
                     type="button"
                     data-scribe-meeting-row
                     class="scribe-meeting-row"
@@ -616,6 +692,7 @@
                         <span class="scribe-row-time">
                           {{ meetingDate(meeting) }} · {{ formatDuration(meeting.durationMs) }}
                         </span>
+                        <span v-if="meeting.graphNodeId" class="scribe-row-filed">In Graph</span>
                         <span
                           v-if="meetingBackgroundStatus(meeting)"
                           data-scribe-row-progress
@@ -647,9 +724,12 @@
                     </span>
                     <IconChevronRight :size="13" class="shrink-0 text-ink-3" />
                   </button>
+                  <button type="button" class="scribe-icon-button" :data-scribe-row-actions="meeting.id" :aria-label="`Actions for ${meeting.title}`" aria-haspopup="menu" title="Meeting actions" @click="openRowActions($event, meeting)"><IconDots :size="15" /></button>
+                  </div>
                 </div>
               </section>
             </div>
+            <button v-if="!meetingSearchActive && meetings.meetingsTruncated" type="button" data-scribe-load-older class="scribe-quiet-button mt-3" :disabled="Boolean(meetings.pending['library-page'])" @click="loadOlderMeetings">Load older meetings</button>
           </section>
         </div>
       </main>
@@ -661,6 +741,7 @@
       :context="detailMeetingId === meetingMenuId ? 'detail' : 'row'"
       :can-retranscribe="meetingCanRetranscribe(menuMeeting)"
       :can-continue="meetingCanContinue(menuMeeting)"
+      :can-rename="!menuMeeting.graphNodeId"
       :files-pending="meetingActionPending(menuMeeting.id, 'export:files')"
       :markdown-pending="meetingActionPending(menuMeeting.id, 'export:markdown')"
       :audio-pending="meetingActionPending(menuMeeting.id, 'export:audio')"
@@ -750,6 +831,7 @@ import {
   summaryPromptFor,
 } from './scribe/summaryRecipes.js'
 import { readableTranscriptEntries } from './scribe/transcriptPresentation.js'
+import { useFiledMeeting } from './scribe/useFiledMeeting.js'
 
 const props = defineProps({
   workspacePath: { type: String, default: '' },
@@ -759,6 +841,7 @@ const emit = defineEmits([
   'openFile',
   'diagnostic',
   'openSettings',
+  'openGraphNode',
 ])
 const meetings = useMeetingsStore()
 const launchers = useLaunchersStore()
@@ -793,6 +876,8 @@ const agentDialogOpen = ref(false)
 const customTaskPrompt = ref('Follow up on this meeting.')
 const customActivityPending = ref(false)
 const meetingSearchDraft = ref('')
+const unfiledOnly = ref(false)
+const reviewingDraft = ref(false)
 const meetingSearchInput = ref(null)
 const detailSearchMeeting = ref(null)
 const meetingMenuId = ref('')
@@ -843,6 +928,27 @@ const detailMeeting = computed(() => {
   return meetings.meetings.find(meeting => meeting.id === detailMeetingId.value)
     || (detailSearchMeeting.value?.id === detailMeetingId.value ? detailSearchMeeting.value : null)
 })
+const {
+  node: filedNode,
+  context: filedContext,
+  loading: filedLoading,
+  saving: filedSaving,
+  error: filedError,
+  hasDraft: hasFiledDraft,
+  reload: reloadFiledMeeting,
+  resolve: resolveFiledDraft,
+} = useFiledMeeting({
+  meeting: detailMeeting,
+  ready: () => props.active && !graphCatalogLoading.value && Boolean(graphCatalog.value.scopes.length),
+})
+const filedLocation = computed(() => {
+  const scopeId = filedContext.value?.scopeId
+  const scope = graphCatalog.value.scopes.find(scope => scope.id === scopeId)
+  const label = { team: 'Team', private: 'Private', project: 'Workspace' }[scope?.kind]
+  return label ? `In Graph · ${label}` : 'In Graph'
+})
+watch(filedNode, node => { if (node?.title) titleDraft.value = node.title })
+watch(hasFiledDraft, hasDraft => { if (!hasDraft) reviewingDraft.value = false })
 const formattedElapsed = computed(() => {
   const active = meetings.activeMeeting
   if (!active?.startedAt) return formatDuration(0)
@@ -863,7 +969,9 @@ const detailLedger = computed(() => transcriptLedgerEntries(detailMeeting.value)
 const meetingSearchActive = computed(() => (
   [...meetingSearchDraft.value.trim()].length >= 3
 ))
-const meetingGroups = computed(() => groupMeetings(meetings.meetings))
+const visibleMeetings = computed(() => meetings.meetings.filter(meeting => !unfiledOnly.value || !meeting.graphNodeId))
+const visibleSearchResults = computed(() => meetings.searchResults.filter(hit => !unfiledOnly.value || !hit.meeting.graphNodeId))
+const meetingGroups = computed(() => groupMeetings(visibleMeetings.value))
 const meetingMenuOpen = computed(() => Boolean(meetingMenuId.value))
 const menuMeeting = computed(() => meetingById(meetingMenuId.value))
 const summaryRequestPending = computed(() => Boolean(
@@ -872,6 +980,30 @@ const summaryRequestPending = computed(() => Boolean(
 const summaryPhase = computed(() => meetingSummaryPhase(detailMeeting.value))
 const summaryRunPending = computed(() => (
   summaryRequestPending.value || ['queued', 'running'].includes(summaryPhase.value)
+))
+const filingPending = computed(() => Boolean(
+  detailMeeting.value && meetings.pending[`file:${detailMeeting.value.id}`],
+))
+const filingHelp = computed(() => {
+  if (detailMeeting.value?.graphNodeId || detailMeeting.value?.lifecycle !== 'ready'
+    || !summaryDraft.value.trim()) return ''
+  if (!graphDraft.value.projectResolved) return 'To file this summary, choose a Project or select None.'
+  if (!graphDraft.value.scopeId || (!graphCatalogLoading.value
+    && !graphCatalog.value.scopes.some(scope => scope.id === graphDraft.value.scopeId))) {
+    return 'To file this summary, choose a Scope.'
+  }
+  return ''
+})
+const canFileToGraph = computed(() => (
+  detailMeeting.value?.lifecycle === 'ready'
+  && !detailMeeting.value.graphNodeId
+  && Boolean(summaryDraft.value.trim())
+  && graphDraft.value.projectResolved
+  && graphCatalog.value.scopes.some(scope => scope.id === graphDraft.value.scopeId)
+  && !graphCatalogLoading.value
+  && !graphEntityCreating.value
+  && !summaryRunPending.value
+  && !filingPending.value
 ))
 const canRunSummary = computed(() => Boolean(
   detailMeeting.value?.transcriptFinal && detailMeeting.value?.segmentCount > 0,
@@ -971,7 +1103,7 @@ watch(
     if (notesMeetingId.value === meeting.id && notesDirty.value) return
     notesMeetingId.value = meeting.id
     notesDraft.value = meeting.notes || ''
-    titleDraft.value = meeting.title || 'Untitled meeting'
+    titleDraft.value = (filedNode.value && filedNode.value.id === meeting.graphNodeId ? filedNode.value.title : meeting.title) || 'Untitled meeting'
     summaryDraft.value = meeting.summary || ''
     graphDraft.value = normalizeGraphDraft(meeting.graphDraft)
     notesDirty.value = false
@@ -1117,9 +1249,10 @@ async function openMeeting(id) {
   meetings.select(id)
   detailSearchMeeting.value = recent ? null : meeting
   detailMeetingId.value = id
+  reviewingDraft.value = false
   detailTab.value = meeting.lifecycle === 'arming'
     ? 'notes'
-    : meeting.summary ? 'summary' : 'transcript'
+    : meeting.summary || meeting.graphNodeId ? 'summary' : 'transcript'
   editingMeeting.value = false
   summaryDialogOpen.value = false
   agentDialogOpen.value = false
@@ -1147,9 +1280,50 @@ function changeSummary(meetingId) {
   stageMeetingChange(meetingId, { summary: summaryDraft.value })
 }
 
+async function resolveFiledSummary(replace) {
+  const meeting = detailMeeting.value
+  if (!meeting?.graphNodeId || filedSaving.value) return
+  const summary = summaryDraft.value
+  const version = notesEditVersion
+  actionError.value = ''
+  try {
+    await meetings.flushMeetingDraft(meeting.id)
+    if (detailMeeting.value?.id !== meeting.id) return
+    if (notesEditVersion === version) notesDirty.value = false
+    if (await resolveFiledDraft(summary, replace)) {
+      reviewingDraft.value = false
+      liveAnnouncement.value = replace ? 'Graph summary updated' : 'Current Graph summary kept'
+    }
+  } catch (error) {
+    actionError.value = message(error)
+  }
+}
+
 function changeGraphDraft(meetingId, value) {
   graphDraft.value = normalizeGraphDraft(value)
   stageMeetingChange(meetingId, { graphDraft: graphDraft.value })
+}
+
+async function fileToGraph() {
+  if (!canFileToGraph.value) return
+  const id = detailMeeting.value.id
+  const version = notesEditVersion
+  const draft = normalizeGraphDraft(graphDraft.value)
+  actionError.value = ''
+  if (notesSaveTimer) window.clearTimeout(notesSaveTimer)
+  notesSaveTimer = null
+  try {
+    await meetings.fileToGraph({
+      meetingId: id,
+      scopeId: draft.scopeId,
+      projectId: draft.projectId,
+      peopleIds: draft.peopleIds,
+    })
+    if (notesMeetingId.value === id && notesEditVersion === version) notesDirty.value = false
+    liveAnnouncement.value = 'Meeting filed in Graph'
+  } catch (error) {
+    actionError.value = message(error)
+  }
 }
 
 function stageMeetingChange(meetingId, patch) {
@@ -1323,6 +1497,19 @@ function openRowMenu(event, meeting) {
   })
 }
 
+function openRowActions(event, meeting) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  openMeetingMenu(meeting, {
+    left: rect.right, top: rect.bottom + 4, alignEnd: true,
+    returnFocus: event.currentTarget,
+  })
+}
+
+async function loadOlderMeetings() {
+  try { await meetings.loadOlderMeetings() }
+  catch (error) { actionError.value = message(error) }
+}
+
 function onMeetingRowKeydown(event, meeting) {
   if (!(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return
   event.preventDefault()
@@ -1448,7 +1635,13 @@ async function deleteMeetingById(id) {
   if (!accepted) return
   try {
     await meetings.remove(id, 'all')
-    if (detailMeetingId.value === id) closeDetail()
+    if (notesMeetingId.value === id) {
+      if (notesSaveTimer) window.clearTimeout(notesSaveTimer)
+      notesSaveTimer = null
+      notesMeetingId.value = ''
+      notesDirty.value = false
+    }
+    if (detailMeetingId.value === id) leaveMeetingDetail()
   } catch (error) {
     actionError.value = message(error)
   }
@@ -1818,6 +2011,54 @@ function safeFailureDetail(value) {
 .scribe-transport {
   gap: 6px;
   padding-inline: 12px;
+}
+
+.scribe-location {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--color-ink-3);
+}
+
+.scribe-location > button,
+.scribe-location > svg {
+  flex-shrink: 0;
+}
+
+.scribe-library-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.scribe-library-row > .scribe-meeting-row {
+  min-width: 0;
+  flex: 1;
+}
+
+.scribe-library-row > .scribe-icon-button {
+  flex-shrink: 0;
+}
+
+.scribe-filed-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0 8px;
+  color: var(--color-ink-3);
+  font-size: 10px;
+}
+
+.scribe-filed-summary-bar > span:first-child {
+  margin-right: auto;
+}
+
+[data-scribe-unfiled][aria-pressed="true"] {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
 }
 
 .scribe-save-state {

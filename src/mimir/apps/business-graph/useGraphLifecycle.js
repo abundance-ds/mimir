@@ -1,7 +1,7 @@
 import { onUnmounted, watch } from 'vue'
 import { graphErrorMessage } from './graphErrors.js'
 
-export function useGraphLifecycle({ graph, meetings, active, workspacePath, diagnostic }) {
+export function useGraphLifecycle({ graph, active, workspacePath, diagnostic }) {
   let startInFlight = false
   let queuedStart = null
   let disposed = false
@@ -41,7 +41,6 @@ export function useGraphLifecycle({ graph, meetings, active, workspacePath, diag
     ([isActive, workspace]) => {
       const projectRoot = String(workspace || '').trim()
       if (!isActive) return
-      void meetings.initialize().catch(cause => diagnostic(graphErrorMessage(cause)))
       if (!projectRoot || mountsWorkspace(projectRoot)) return
       startGraph(projectRoot)
     },

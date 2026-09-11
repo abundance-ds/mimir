@@ -137,7 +137,7 @@
       "verificationScope": [
         "notes-first preparation",
         "BLUF summary and exact notes appendix",
-        "meeting inbox, stable transcript link, and editable Graph context"
+        "Scribe filing, stable transcript link, and editable Graph context"
       ]
     },
     {
@@ -1111,16 +1111,16 @@
     },
     {
       "kind": "js-test",
-      "path": "src/mimir/apps/business-graph/MeetingInbox.test.js",
-      "selector": "keeps project explicit, defaults scope to Team, and files concise context",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "files from Notes detail after saving the latest summary and links to the Graph record",
       "scenarios": [
         "MTG-133"
       ]
     },
     {
       "kind": "js-test",
-      "path": "src/mimir/apps/business-graph/MeetingInbox.test.js",
-      "selector": "restores context saved while the meeting was prepared",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "shows Graph context and summary after filing and applies only a reviewed replacement",
       "scenarios": [
         "MTG-133"
       ]

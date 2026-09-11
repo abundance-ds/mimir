@@ -5,11 +5,11 @@
     role="menu"
     aria-label="Meeting actions"
     class="scribe-meeting-menu"
-    :style="position"
+    :style="visiblePosition"
     @keydown="onKeydown"
   >
     <button
-      v-if="context === 'row' && canContinue"
+      v-if="canContinue"
       type="button"
       role="menuitem"
       data-scribe-continue-meeting
@@ -18,7 +18,7 @@
       Continue recording
     </button>
     <button
-      v-if="context === 'row'"
+      v-if="context === 'row' && canRename"
       type="button"
       role="menuitem"
       data-scribe-rename-meeting
@@ -69,11 +69,12 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
-defineProps({
+const props = defineProps({
   position: { type: Object, required: true },
   context: { type: String, default: 'row' },
   canRetranscribe: { type: Boolean, default: false },
   canContinue: { type: Boolean, default: false },
+  canRename: { type: Boolean, default: true },
   filesPending: { type: Boolean, default: false },
   markdownPending: { type: Boolean, default: false },
   audioPending: { type: Boolean, default: false },
@@ -92,10 +93,18 @@ const emit = defineEmits([
   'delete',
 ])
 const menu = ref(null)
+const visiblePosition = ref(props.position)
 
 onMounted(() => {
   document.addEventListener('pointerdown', onOutsidePointerDown)
-  nextTick(() => items()[0]?.focus())
+  nextTick(() => {
+    const rect = menu.value.getBoundingClientRect()
+    visiblePosition.value = {
+      left: `${Math.max(4, Math.min(rect.left, window.innerWidth - rect.width - 4))}px`,
+      top: `${Math.max(4, Math.min(rect.top, window.innerHeight - rect.height - 4))}px`,
+    }
+    items()[0]?.focus({ preventScroll: true })
+  })
 })
 
 onBeforeUnmount(() => {
@@ -139,6 +148,8 @@ function onKeydown(event) {
   position: fixed;
   z-index: 80;
   min-width: 168px;
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
   border: 1px solid var(--color-rule);
   background: var(--color-surface);
   padding: 3px;

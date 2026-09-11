@@ -99,23 +99,6 @@
           @seen="$emit('markNowSeen', $event)"
           @summarise="$emit('openSummary')"
         />
-        <MeetingInbox
-          v-else-if="graph.section === 'all' && graph.view === 'meetings'"
-          :meetings="pendingMeetings"
-          :projects="graph.projects"
-          :people="graph.people"
-          :scopes="graph.scopes"
-          :default-project-id="graph.workspaceProjectId"
-          :filing-id="filingMeetingId"
-          :error="filingError"
-          :has-more="meetings.meetingsTruncated"
-          :loading-more="Boolean(meetings.pending['library-page'])"
-          @file="$emit('fileMeeting', $event)"
-          @open-meeting="$emit('openMeeting', $event)"
-          @select="$emit('loadMeetingDetail', $event)"
-          @change="$emit('saveMeetingGraphDraft', $event)"
-          @load-more="$emit('loadOlderMeetings')"
-        />
         <WorkBoard
           v-else-if="graph.section === 'work' && graph.view === 'board'"
           ref="workBoard"
@@ -196,12 +179,10 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useMeetingsStore } from '../../../stores/meetings.js'
 import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import EntityList from './EntityList.vue'
 import GraphInspector from './GraphInspector.vue'
 import GraphViewbar from './GraphViewbar.vue'
-import MeetingInbox from './MeetingInbox.vue'
 import NowView from './NowView.vue'
 import TimelineView from './TimelineView.vue'
 import WorkBoard from './WorkBoard.vue'
@@ -234,9 +215,6 @@ defineProps({
   waitingOnYouIssues: { type: Array, default: () => [] },
   nowSeenAt: { type: String, default: '' },
   canSummarise: { type: Boolean, default: false },
-  pendingMeetings: { type: Array, default: () => [] },
-  filingMeetingId: { type: String, default: '' },
-  filingError: { type: String, default: '' },
   boardIssues: { type: Array, default: () => [] },
   unsearchedWorkIssues: { type: Array, default: () => [] },
   showClosedIssues: { type: Boolean, default: false },
@@ -248,11 +226,11 @@ defineProps({
 
 const emit = defineEmits([
   'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard', 'deleteNode', 'enterFocus',
-  'expandAllBoardStatuses', 'expandBoardStatus', 'fileMeeting', 'finalizeObjectClose',
-  'loadMeetingDetail', 'loadNowPage', 'loadOlderMeetings', 'markNowSeen', 'moveIssue',
+  'expandAllBoardStatuses', 'expandBoardStatus', 'finalizeObjectClose',
+  'loadNowPage', 'markNowSeen', 'moveIssue',
   'navigateObjectHistory', 'openActivity', 'openCreate', 'openFile', 'openMeeting',
   'openNode', 'openRelatedCreate', 'openRelatedNode', 'openSummary', 'openUrl',
-  'patchIssue', 'reorderIssue', 'returnToPeek', 'saveMeetingGraphDraft', 'saveNode',
+  'patchIssue', 'reorderIssue', 'returnToPeek', 'saveNode',
   'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:assigneeFilter',
   'update:boardGroup', 'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
   'update:showClosedIssues',
@@ -260,7 +238,6 @@ const emit = defineEmits([
 ])
 
 const graph = useBusinessGraphStore()
-const meetings = useMeetingsStore()
 const inspector = ref(null)
 const entityList = ref(null)
 const workBoard = ref(null)

@@ -31,6 +31,7 @@ const props = defineProps({
   ariaLabel: { type: String, required: true },
   placeholder: { type: String, default: 'Write anything…' },
   disabled: { type: Boolean, default: false },
+  readOnly: { type: Boolean, default: false },
   autofocus: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'change', 'save'])
@@ -97,7 +98,7 @@ onMounted(() => {
         autocorrect: 'off',
         autocapitalize: 'off',
       }),
-      editableCompartment.of(editableExtensions(props.disabled)),
+      editableCompartment.of(editableExtensions(props.disabled || props.readOnly)),
       EditorState.tabSize.of(2),
       history(),
       drawSelection(),
@@ -105,7 +106,7 @@ onMounted(() => {
       markdownListKeymap,
       syntaxHighlighting(highlightStyle),
       livePreviewExtension(() => true, null),
-      taskCheckboxExtension(() => !props.disabled),
+      taskCheckboxExtension(() => !props.disabled && !props.readOnly),
       editorTheme,
       editorPlaceholder(props.placeholder),
       keymap.of([
@@ -143,7 +144,7 @@ watch(() => props.modelValue, value => {
   applyingExternal = false
 })
 
-watch(() => props.disabled, disabled => {
+watch(() => props.disabled || props.readOnly, disabled => {
   view?.dispatch({ effects: editableCompartment.reconfigure(editableExtensions(disabled)) })
 })
 

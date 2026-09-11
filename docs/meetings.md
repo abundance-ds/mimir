@@ -31,11 +31,47 @@ Transcription follows committed audio and never blocks the capture callback.
   failed Stop restores the visible recording controls.
 - A user-written title cannot be replaced by automatic work.
 - Preparation notes, Project, People, and scope stay editable before, during,
-  and after capture.
+  and after capture, until filing.
 - Summary generation is a durable CLI Activity. **Ask agent** is a separate
   interactive Activity.
-- Scribe owns notes, audio, transcript, and summary. Filing creates one Graph
-  meeting with the summary and stable Scribe id; the transcript stays in Scribe.
+- Scribe owns preparation, notes, audio, transcript, and summary generation.
+  Filing creates one Graph meeting with the reviewed summary and stable Scribe
+  id. Graph owns that saved summary; the transcript stays in Scribe.
+
+## File a summary to Graph
+
+Scribe is the meeting workspace. Its overview lists all meetings. Turn on
+**Unfiled** to find meetings that have no Graph record. The same filter applies
+to search; **Load older meetings** extends the overview. Filed rows show
+**In Graph**. Graph has no separate Scribe inbox; its **Meetings** kind filter
+shows saved Graph records.
+
+Open a completed meeting in Scribe and review its Summary. Set Project to a
+project or **None**, check People and Scope, then click **File to Graph** in the
+detail header. Mimir saves pending edits before filing. The button changes to
+**View in Graph**, which opens the linked meeting record.
+
+After filing, Scribe shows the current Graph title, context, and summary.
+**In Graph · Team**, for example, shows where the record is stored. Use **View
+in Graph** to edit those saved values. Notes and transcript remain in Scribe.
+Use **Meeting actions → Continue recording** to add another recording to the
+same completed meeting.
+
+**Regenerate** creates a replacement draft. **Review draft** opens it for
+review and editing; **View current** returns to the saved Graph summary.
+**Update in Graph** replaces the saved summary. **Keep current** discards the
+offer to replace it. Generation never changes the Graph summary on its own.
+A saved hash identifies the last reviewed Scribe summary, so separate Graph
+edits do not make an old summary appear as a new draft. A conflicting Graph
+save keeps the draft available for review after **Reload**.
+
+## Delete a meeting
+
+Use the visible **Meeting actions (⋯)** button in the overview or detail view,
+then **Delete**. Right-click on an overview row also opens this menu. Confirm
+**Delete meeting** to remove the Scribe meeting, transcript, summary, and owned
+audio. This also works for a prepared meeting when the call did not occur.
+A filed Graph record and explicit exports remain separate records.
 
 ## Durability and recovery
 

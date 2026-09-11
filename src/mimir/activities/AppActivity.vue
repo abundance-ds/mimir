@@ -19,6 +19,7 @@
     @open-file="$emit('openFile', $event)"
     @open-activity="$emit('openActivity', $event)"
     @open-settings="$emit('openSettings', $event)"
+    @open-graph-node="$emit('openGraphNode', $event)"
     @diagnostic="$emit('diagnostic', $event)"
   />
   <TrackerApp
@@ -91,6 +92,7 @@ defineEmits([
   'openSettings',
   'startWork',
   'openMeeting',
+  'openGraphNode',
   'chooseWorkspace',
   'launchPlan',
   'diagnostic',

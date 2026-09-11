@@ -51,6 +51,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   const searchResults = ref([])
   const searching = ref(false)
   const selectedNode = ref(null)
+  const requestedNodeId = ref('')
   const selectedNeighbors = ref([])
   const inspectionHistory = ref([])
   const inspectionHistoryIndex = ref(-1)
@@ -502,6 +503,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
   function reset() {
     stop()
     status.value = null
+    requestedNodeId.value = ''
     nodes.value = []
     diagnostics.value = []
     events.value = []
@@ -622,6 +624,7 @@ export const useBusinessGraphStore = defineStore('businessGraph', () => {
     searchResults,
     searching,
     selectedNode,
+    requestedNodeId,
     selectedNeighbors,
     inspectionHistory,
     inspectionHistoryIndex,

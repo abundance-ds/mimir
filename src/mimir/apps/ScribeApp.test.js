@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { confirm } from '@tauri-apps/plugin-dialog'
+import { useMeetingsStore } from '../../stores/meetings.js'
+import { getGraphNode, updateGraphNode, listenForGraphChanges } from '../../services/businessGraph.js'
+import { summaryHash } from '../../services/filedMeeting.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import {
   deleteMeeting,
   dismissMeetingCandidate,
+  fileMeetingToGraph,
   issueMeetingStartConsent,
   listenToMeetingEvents,
+  loadMeetingLibraryPage,
   loadMeetingSnapshot,
   loadMeetingTranscriptPage,
   openMeetingSystemAudioSettings,
@@ -27,12 +33,19 @@ import {
 import ScribeApp from './ScribeApp.vue'
 import ScribeFollowUpDialog from './scribe/ScribeFollowUpDialog.vue'
 import ScribeMarkdownEditor from './scribe/ScribeMarkdownEditor.vue'
+import ScribeMeetingContext from './scribe/ScribeMeetingContext.vue'
 import { summaryPromptFor } from './scribe/summaryRecipes.js'
 
 const { launchPreset, loadGraphCatalog, createGraphEntity } = vi.hoisted(() => ({
   launchPreset: vi.fn(),
   loadGraphCatalog: vi.fn(),
   createGraphEntity: vi.fn(),
+}))
+
+vi.mock('../../services/businessGraph.js', () => ({
+  getGraphNode: vi.fn(),
+  updateGraphNode: vi.fn(),
+  listenForGraphChanges: vi.fn(),
 }))
 
 vi.mock('../../stores/activityRuntime.js', () => ({
@@ -54,6 +67,7 @@ vi.mock('../../services/meetings.js', async importOriginal => ({
   deleteMeetingModel: vi.fn(),
   dismissMeetingCandidate: vi.fn(),
   exportMeeting: vi.fn(),
+  fileMeetingToGraph: vi.fn(),
   installMeetingModel: vi.fn(),
   issueMeetingStartConsent: vi.fn(),
   listenToMeetingEvents: vi.fn(),
@@ -161,6 +175,11 @@ function activeFollowUpDialog(wrapper, mode) {
 describe('ScribeApp', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.mocked(confirm).mockReset().mockResolvedValue(true)
+    vi.mocked(getGraphNode).mockReset().mockResolvedValue(null)
+    vi.mocked(updateGraphNode).mockReset()
+    vi.mocked(listenForGraphChanges).mockReset().mockResolvedValue(vi.fn())
+    vi.mocked(loadMeetingLibraryPage).mockReset()
     vi.mocked(listenToMeetingEvents).mockReset().mockResolvedValue(vi.fn())
     vi.mocked(loadMeetingSnapshot).mockReset().mockResolvedValue(snapshot())
     vi.mocked(loadMeetingTranscriptPage).mockReset().mockResolvedValue(transcriptPage())
@@ -178,6 +197,7 @@ describe('ScribeApp', () => {
     vi.mocked(dismissMeetingCandidate).mockReset()
     vi.mocked(deleteMeeting).mockReset()
     vi.mocked(updateMeeting).mockReset()
+    vi.mocked(fileMeetingToGraph).mockReset().mockResolvedValue({ id: 'graph-m1', kind: 'meeting' })
     vi.mocked(startMeeting).mockReset()
     vi.mocked(stopMeeting).mockReset()
     vi.mocked(retryMeetingJob).mockReset()
@@ -584,8 +604,9 @@ describe('ScribeApp', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-scribe-title]').element.value).toBe('Planning'))
     expect(wrapper.get('#scribe-detail-tab-summary').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('#scribe-detail-panel-summary').text()).toContain('Decision captured')
-    expect(wrapper.get('[data-scribe-detail-header]').findAll('button')).toHaveLength(3)
-    expect(wrapper.get('[data-scribe-continue]').text()).toContain('Continue')
+    expect(wrapper.get('[data-scribe-detail-header]').findAll('button')).toHaveLength(4)
+    expect(wrapper.get('[data-scribe-file-graph]').text()).toBe('File to Graph')
+    expect(wrapper.find('[data-scribe-continue]').exists()).toBe(false)
     expect(wrapper.get('[data-scribe-save-state]').text()).toBe('Saved')
     expect(wrapper.find('[data-scribe-detail-header] [data-scribe-settings]').exists()).toBe(false)
     expect(wrapper.get('[data-scribe-regenerate-summary]').element.compareDocumentPosition(
@@ -645,7 +666,7 @@ describe('ScribeApp', () => {
 
     await wrapper.get('[data-scribe-detail-overflow]').trigger('click')
     expect(wrapper.find('[data-scribe-rename-meeting]').exists()).toBe(false)
-    expect(wrapper.find('[data-scribe-continue-meeting]').exists()).toBe(false)
+    expect(wrapper.find('[data-scribe-continue-meeting]').exists()).toBe(true)
     await wrapper.get('[data-scribe-ask-agent]').trigger('click')
     const dialog = activeFollowUpDialog(wrapper, 'agent')
     expect(dialog).toBeTruthy()
@@ -801,6 +822,252 @@ describe('ScribeApp', () => {
     expect(wrapper.find('[data-scribe-reviewed-tags]').exists()).toBe(false)
     expect(wrapper.find('[data-scribe-edit-tags-inline]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('customer')
+  })
+
+  async function openFilingMeeting(overrides = {}) {
+    const complete = meeting({
+      summary: 'Initial summary.',
+      graphDraft: {
+        projectResolved: true, projectId: 'project-alpha',
+        peopleIds: ['person-ana'], scopeId: 'team:main',
+      },
+      ...overrides,
+    })
+    loadGraphCatalog.mockResolvedValue({
+      scopes: [{ id: 'team:main', kind: 'team' }],
+      projects: [{ id: 'project-alpha', title: 'Alpha' }],
+      people: [{ id: 'person-ana', title: 'Ana' }],
+    })
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [complete] }))
+    vi.mocked(loadMeetingTranscriptPage).mockResolvedValue(transcriptPage({ summary: complete.summary }))
+    vi.mocked(updateMeeting).mockImplementation(async (_, patch) => {
+      Object.assign(complete, patch)
+      return snapshot({ meetings: [{ ...complete }] })
+    })
+    const wrapper = mount(ScribeApp, { props: { active: true, workspacePath: '/work' } })
+    await flushPromises()
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  it('files from Notes detail after saving the latest summary and links to the Graph record', async () => {
+    const wrapper = await openFilingMeeting()
+    const editor = wrapper.findComponent(ScribeMarkdownEditor)
+    editor.vm.setValue('Reviewed summary.')
+    await wrapper.get('#scribe-detail-tab-notes').trigger('click')
+    let finishSave
+    vi.mocked(updateMeeting).mockImplementation(() => new Promise(resolve => { finishSave = resolve }))
+    await wrapper.get('[data-scribe-file-graph]').trigger('click')
+    await flushPromises()
+    expect(updateMeeting).toHaveBeenCalledWith('m1', { summary: 'Reviewed summary.' })
+    expect(fileMeetingToGraph).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-scribe-file-graph]').text()).toBe('Filing…')
+    expect(wrapper.get('[data-scribe-file-graph]').attributes('disabled')).toBeDefined()
+    finishSave(snapshot({ meetings: [meeting({ summary: 'Reviewed summary.' })] }))
+    await flushPromises()
+    expect(fileMeetingToGraph).toHaveBeenCalledExactlyOnceWith({
+      meetingId: 'm1', scopeId: 'team:main', projectId: 'project-alpha', peopleIds: ['person-ana'],
+    })
+    expect(wrapper.find('[data-scribe-file-graph]').exists()).toBe(false)
+    await wrapper.get('[data-scribe-open-graph]').trigger('click')
+    expect(wrapper.emitted('openGraphNode')).toEqual([['graph-m1']])
+    wrapper.unmount()
+  })
+
+  it('requires an explicit Project choice and allows None without People', async () => {
+    const wrapper = await openFilingMeeting({
+      graphDraft: { projectResolved: false, projectId: null, peopleIds: [], scopeId: 'team:main' },
+    })
+    expect(wrapper.get('[data-scribe-file-graph]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('#scribe-filing-help').text()).toContain('Project or select None')
+    wrapper.findComponent(ScribeMeetingContext).vm.$emit('change', {
+      projectResolved: true, projectId: null, peopleIds: [], scopeId: 'team:main',
+    })
+    await flushPromises()
+    await wrapper.get('[data-scribe-file-graph]').trigger('click')
+    await flushPromises()
+    expect(fileMeetingToGraph).toHaveBeenCalledWith({
+      meetingId: 'm1', scopeId: 'team:main', projectId: null, peopleIds: [],
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['save', 'file'])('keeps filing retryable after a %s failure', async failure => {
+    const wrapper = await openFilingMeeting()
+    if (failure === 'save') {
+      wrapper.findComponent(ScribeMarkdownEditor).vm.setValue('Unsaved review.')
+      vi.mocked(updateMeeting).mockRejectedValueOnce(new Error('Could not save the summary.'))
+    } else {
+      vi.mocked(fileMeetingToGraph).mockRejectedValueOnce(new Error('Could not file the summary.'))
+    }
+    await wrapper.get('[data-scribe-file-graph]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-detail-error]').text()).toContain(`Could not ${failure}`)
+    expect(wrapper.get('[data-scribe-file-graph]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-scribe-open-graph]').exists()).toBe(false)
+    if (failure === 'save') expect(fileMeetingToGraph).not.toHaveBeenCalled()
+    await wrapper.get('[data-scribe-file-graph]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-open-graph]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('blocks filing while a replacement summary runs', async () => {
+    const wrapper = await openFilingMeeting({ summaryState: 'running' })
+    expect(wrapper.get('[data-scribe-file-graph]').attributes('disabled')).toBeDefined()
+    expect(fileMeetingToGraph).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  async function openFiledMeeting({ summary = 'Initial summary.', body = 'Edited in Graph.' } = {}) {
+    let node = {
+      id: 'graph-m1', kind: 'meeting', title: 'Graph title', body,
+      properties: { sourceMeetingId: 'm1', sourceSummaryHash: await summaryHash('Initial summary.') },
+      relations: [
+        { relation: 'part_of', target: 'project-alpha' },
+        { relation: 'attended_by', target: 'person-ana' },
+      ],
+      provenance: { scopeId: 'team:main', sourceRevision: 'revision-1' },
+    }
+    vi.mocked(getGraphNode).mockImplementation(async () => node)
+    vi.mocked(updateGraphNode).mockImplementation(async patch => {
+      node = {
+        ...node, ...(patch.body === undefined ? {} : { body: patch.body }),
+        properties: { ...node.properties, ...patch.setProperties },
+        provenance: { ...node.provenance, sourceRevision: 'revision-2' },
+      }
+      return node
+    })
+    const wrapper = await openFilingMeeting({ summary, graphNodeId: node.id })
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-summary-content]').text()).toContain(body))
+    return wrapper
+  }
+
+  it('shows Graph context and summary after filing and applies only a reviewed replacement', async () => {
+    const wrapper = await openFiledMeeting({ summary: 'Replacement summary.' })
+    expect(wrapper.get('[data-scribe-title]').element.value).toBe('Graph title')
+    expect(wrapper.text()).toContain('In Graph · Team')
+    expect(wrapper.findComponent(ScribeMeetingContext).props('modelValue')).toEqual({
+      projectResolved: true, projectId: 'project-alpha', peopleIds: ['person-ana'], scopeId: 'team:main',
+    })
+    expect(wrapper.get('[data-scribe-summary-content]').text()).not.toContain('Replacement summary.')
+    expect(wrapper.get('[data-scribe-summary-content] [role="textbox"]').attributes('contenteditable')).toBe('false')
+    await vi.waitFor(() => expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(true))
+    expect(updateGraphNode).not.toHaveBeenCalled()
+    await wrapper.get('[data-scribe-review-draft]').trigger('click')
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Replacement summary.')
+    wrapper.findComponent(ScribeMarkdownEditor).vm.setValue('Reviewed replacement.')
+    await flushPromises()
+    expect(wrapper.find('[data-scribe-update-graph]').exists()).toBe(true)
+    await wrapper.get('[data-scribe-update-graph]').trigger('click')
+    await vi.waitFor(() => expect(updateGraphNode).toHaveBeenCalledExactlyOnceWith({
+      id: 'graph-m1', expectedRevision: 'revision-1',
+      body: 'Reviewed replacement.', summary: 'Reviewed replacement.',
+      setProperties: { sourceSummaryHash: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    }))
+    expect(updateMeeting).toHaveBeenCalledWith('m1', { summary: 'Reviewed replacement.' })
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Reviewed replacement.')
+    expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps Graph edits current without offering the old Scribe summary as a draft', async () => {
+    const wrapper = await openFiledMeeting()
+    await flushPromises()
+    expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(false)
+    const node = await getGraphNode('graph-m1')
+    vi.mocked(getGraphNode).mockResolvedValue({ ...node, body: 'New Graph edit.' })
+    vi.mocked(listenForGraphChanges).mock.calls.at(-1)[0]()
+    await vi.waitFor(() => expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('New Graph edit.'))
+    expect(updateGraphNode).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps the Graph summary when a replacement is dismissed, including after reopening', async () => {
+    const wrapper = await openFiledMeeting({ summary: 'Replacement summary.' })
+    await vi.waitFor(() => expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-review-draft]').trigger('click')
+    await wrapper.get('[data-scribe-keep-current]').trigger('click')
+    await vi.waitFor(() => expect(updateGraphNode).toHaveBeenCalledOnce())
+    expect(updateGraphNode.mock.calls[0][0]).not.toHaveProperty('body')
+    await flushPromises()
+    await wrapper.get('[title="Meetings"]').trigger('click')
+    await wrapper.get('[data-scribe-meeting-row]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Edited in Graph.')
+    expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('retains a replacement draft when the Graph revision changed during review', async () => {
+    const wrapper = await openFiledMeeting({ summary: 'Replacement summary.' })
+    vi.mocked(updateGraphNode).mockRejectedValueOnce(new Error('Graph record changed. Reload before saving.'))
+    await vi.waitFor(() => expect(wrapper.find('[data-scribe-review-draft]').exists()).toBe(true))
+    await wrapper.get('[data-scribe-review-draft]').trigger('click')
+    await wrapper.get('[data-scribe-update-graph]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Graph record changed.'))
+    expect(wrapper.get('[data-scribe-summary-content]').text()).toContain('Replacement summary.')
+    expect(wrapper.get('[data-scribe-update-graph]').element.disabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not use a local summary when the linked Graph record is unavailable', async () => {
+    const wrapper = await openFilingMeeting({ graphNodeId: 'missing-record' })
+    expect(wrapper.text()).toContain('The Graph summary is not available.')
+    expect(wrapper.find('[data-scribe-summary-content]').exists()).toBe(false)
+    expect(wrapper.find('[data-scribe-file-graph]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('filters the overview and search to unfiled meetings and loads older records', async () => {
+    const filed = meeting({ id: 'filed', title: 'Filed meeting', graphNodeId: 'graph-filed' })
+    const unfiled = meeting({ id: 'unfiled', title: 'Unfiled meeting' })
+    const older = meeting({ id: 'older', title: 'Older meeting' })
+    const cursor = { id: 'filed', startedAt: filed.startedAt }
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({
+      meetings: [filed, unfiled], meetingsTruncated: true, nextMeetingsBefore: cursor,
+    }))
+    vi.mocked(loadMeetingLibraryPage).mockResolvedValue({ meetings: [older], hasMore: false, nextBefore: null })
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await flushPromises()
+    expect(wrapper.findAll('[data-scribe-meeting-row]')).toHaveLength(2)
+    await wrapper.get('[data-scribe-unfiled]').trigger('click')
+    expect(wrapper.get('[data-scribe-unfiled]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.findAll('[data-scribe-meeting-row]')).toHaveLength(1)
+    await wrapper.get('[data-scribe-load-older]').trigger('click')
+    await flushPromises()
+    expect(loadMeetingLibraryPage).toHaveBeenCalledWith(cursor)
+    expect(wrapper.findAll('[data-scribe-meeting-row]')).toHaveLength(2)
+    expect(wrapper.find('[data-scribe-load-older]').exists()).toBe(false)
+    vi.mocked(searchMeetingLibrary).mockResolvedValue([{ meeting: filed }, { meeting: older }])
+    await wrapper.get('[data-scribe-meeting-search]').setValue('meeting')
+    await vi.waitFor(() => expect(wrapper.findAll('[data-scribe-meeting-row]')).toHaveLength(1))
+    expect(wrapper.get('[data-scribe-meeting-row]').text()).toContain('Older meeting')
+    await wrapper.get('[data-scribe-unfiled]').trigger('click')
+    expect(wrapper.findAll('[data-scribe-meeting-row]')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('offers Delete for a no-show from the visible row menu (confirmed: %s)', async accepted => {
+    vi.mocked(confirm).mockResolvedValueOnce(accepted)
+    vi.mocked(loadMeetingSnapshot).mockResolvedValue(snapshot({ meetings: [meeting({ lifecycle: 'arming' })] }))
+    vi.mocked(deleteMeeting).mockResolvedValue(snapshot())
+    const wrapper = mount(ScribeApp, { props: { active: true } })
+    await flushPromises()
+    await wrapper.get('[data-scribe-row-actions="m1"]').trigger('click')
+    await wrapper.get('[data-scribe-delete-meeting]').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Planning'), expect.objectContaining({ okLabel: 'Delete meeting' }))
+    if (accepted) {
+      expect(deleteMeeting).toHaveBeenCalledWith('m1', 'all')
+      expect(wrapper.find('[data-scribe-meeting-row]').exists()).toBe(false)
+    } else {
+      expect(deleteMeeting).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-scribe-meeting-row]').exists()).toBe(true)
+    }
+    wrapper.unmount()
   })
 
   it('opens the one global Scribe settings surface', async () => {

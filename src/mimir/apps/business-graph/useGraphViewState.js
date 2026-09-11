@@ -41,7 +41,6 @@ const VIEWS_BY_SECTION = Object.freeze({
   all: [
     { id: 'list', label: 'List' },
     { id: 'timeline', label: 'Timeline' },
-    { id: 'meetings', label: 'Meetings' },
     { id: 'changes', label: 'Changes' },
   ],
   work: [
@@ -257,7 +256,11 @@ function hydrateViewState({
       VIEWS_BY_SECTION[section]?.some(option => option.id === view)
     )),
   )
-  graph.sectionViews = { ...graph.sectionViews, ...validViews }
+  graph.sectionViews = Object.fromEntries(Object.entries(VIEWS_BY_SECTION).map(([section, options]) => [
+    section,
+    validViews[section] || (options.some(option => option.id === graph.sectionViews[section])
+      ? graph.sectionViews[section] : options[0].id),
+  ]))
   if (legacySection) {
     const legacyView = savedViews[legacySection]
     graph.sectionViews.all = legacySection === 'now'

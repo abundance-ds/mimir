@@ -27,12 +27,14 @@ Feature: File concise meeting briefs into the Business Graph
     And Mimir appends the exact notes once after the concise summary
 
   @MTG-133 @automated @renderer @contract
-  Scenario: Completed summaries enter a small filing inbox
+  Scenario: Scribe owns summary review and filing
     Given Scribe completed an automatic meeting summary
-    When the Graph meeting inbox opens
+    When the user opens the meeting from Scribe with the Unfiled filter
     Then it shows the full concise summary without requiring prior metadata
     And it restores Project, People, and scope saved during preparation
     And filing asks only for Project, People, and scope
+    And the filed meeting shows the current Graph summary and context
+    And a replacement summary needs an explicit Update in Graph action
 
   @MTG-134 @automated @domain @native
   Scenario: Filing creates one existing meeting type

@@ -8,6 +8,7 @@ import {
   dismissMeetingCandidate,
   exportMeeting,
   exportMeetingToFinder,
+  fileMeetingToGraph,
   installMeetingModel,
   issueMeetingStartConsent,
   listenToMeetingAudioTestEvents,
@@ -267,6 +268,13 @@ export const useMeetingsStore = defineStore('meetings', () => {
     const operation = previous.catch(() => {}).then(() => (
       runPending(`update:${id}`, async () => {
         applySnapshot(await updateMeeting(id, patch))
+        if (Object.hasOwn(patch, 'summary') && transcriptWindows.value[id]) {
+          setTranscriptWindow(id, {
+            ...transcriptWindows.value[id],
+            summary: patch.summary,
+            summaryLoaded: true,
+          })
+        }
         return meetings.value.find(meeting => meeting.id === id) || null
       })
     ))
@@ -336,6 +344,19 @@ export const useMeetingsStore = defineStore('meetings', () => {
     return runPending(`summary:${id}`, async () => {
       applySnapshot(await runMeetingSummary(id, request))
       return meetings.value.find(meeting => meeting.id === id) || null
+    })
+  }
+
+  async function fileToGraph(request) {
+    const id = request.meetingId
+    if (pending.value[`file:${id}`]) return null
+    return runPending(`file:${id}`, async () => {
+      await flushMeetingDraft(id)
+      const node = await fileMeetingToGraph(request)
+      const linked = meeting => meeting.id === id ? { ...meeting, graphNodeId: node.id } : meeting
+      meetings.value = meetings.value.map(linked)
+      searchResults.value = searchResults.value.map(hit => ({ ...hit, meeting: linked(hit.meeting) }))
+      return node
     })
   }
 
@@ -841,6 +862,7 @@ export const useMeetingsStore = defineStore('meetings', () => {
     decideKg,
     retryJob,
     runSummary,
+    fileToGraph,
     retranscribe,
     remove,
     exportRecord,

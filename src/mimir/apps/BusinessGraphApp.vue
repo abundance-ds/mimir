@@ -77,9 +77,6 @@
       :waiting-on-you-issues="waitingOnYouIssues"
       :now-seen-at="nowSeenAt"
       :can-summarise="summaryAgents.length > 0"
-      :pending-meetings="pendingMeetings"
-      :filing-meeting-id="filingMeetingId"
-      :filing-error="filingError"
       :board-issues="boardIssues"
       :unsearched-work-issues="unsearchedWorkIssues"
       :show-closed-issues="showClosedIssues"
@@ -104,10 +101,6 @@
       @load-now-page="loadNowPage"
       @mark-now-seen="markNowSeen"
       @open-summary="summaryOpen = true"
-      @file-meeting="fileMeeting"
-      @load-meeting-detail="loadMeetingDetail"
-      @save-meeting-graph-draft="saveMeetingGraphDraft"
-      @load-older-meetings="loadOlderMeetings"
       @move-issue="moveIssue"
       @patch-issue="patchIssue"
       @bulk-patch-issues="bulkPatchIssues"
@@ -173,11 +166,10 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useActivitiesStore } from '../../stores/activities.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
-import { useMeetingsStore } from '../../stores/meetings.js'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import DispatchBar from './business-graph/DispatchBar.vue'
 import GraphAppFeedback from './business-graph/GraphAppFeedback.vue'
@@ -186,7 +178,6 @@ import GraphConfirmDialog from './business-graph/GraphConfirmDialog.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 import GraphWorkspace from './business-graph/GraphWorkspace.vue'
-import { useGraphMeetings } from './business-graph/useGraphMeetings.js'
 import { useGraphLifecycle } from './business-graph/useGraphLifecycle.js'
 import { useGraphKeyboard } from './business-graph/useGraphKeyboard.js'
 import { useGraphDispatch } from './business-graph/useGraphDispatch.js'
@@ -212,7 +203,6 @@ const emit = defineEmits([
 const activities = useActivitiesStore()
 const settings = useSettingsStore()
 const launchers = useLaunchersStore()
-const meetings = useMeetingsStore()
 const graph = useBusinessGraphStore()
 const root = ref(null)
 const appHeader = ref(null)
@@ -220,7 +210,6 @@ const workspaceSurface = ref(null)
 const dispatchBar = ref(null)
 useGraphLifecycle({
   graph,
-  meetings,
   active: () => props.active,
   workspacePath: () => props.workspacePath,
   diagnostic: message => emit('diagnostic', message),
@@ -274,19 +263,6 @@ const {
   focusInput: () => appHeader.value?.focusSearch(),
 })
 const {
-  fileMeeting,
-  filingError,
-  filingMeetingId,
-  loadMeetingDetail,
-  loadOlderMeetings,
-  pendingMeetings,
-  saveMeetingGraphDraft,
-} = useGraphMeetings({
-  graph,
-  meetings,
-  diagnostic: message => emit('diagnostic', message),
-})
-const {
   closeSummary,
   launchSummary,
   loadNowPage,
@@ -330,6 +306,15 @@ const {
   openFileResult: path => emit('openFile', path),
 })
 defineExpose({ focusEntry })
+watch(
+  [() => graph.requestedNodeId, () => props.active, () => graph.loading, () => graph.projectRoot],
+  ([id, active, loading, workspace]) => {
+    if (!id || !active || loading || workspace !== props.workspacePath) return
+    graph.requestedNodeId = ''
+    openNode(id)
+  },
+  { immediate: true, flush: 'post' },
+)
 const {
   delegateWork,
   dispatchEchoes,

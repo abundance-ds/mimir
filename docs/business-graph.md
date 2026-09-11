@@ -85,8 +85,8 @@ Work and Graph are the two primary projections. Work is the default issue
 projection with Board and List views. Graph is the complete node surface; its
 List and Timeline views can filter by kind. Startup and selecting Graph reset
 the kind filter to All kinds, including for old saved projections.
-Meetings handles Scribe intake
-and Changes shows the event stream. Peek and Focus edit one revision-aware draft;
+Changes shows the event stream. [Scribe](meetings.md) owns meeting preparation
+and filing. Peek and Focus edit one revision-aware draft;
 navigation commits that draft first. In Work, search filters the loaded issues
 immediately by title, summary, tags, project, owner, and work details. Terms
 combine and ignore case and accents. Board keeps its columns, and List keeps

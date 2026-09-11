@@ -22,11 +22,6 @@ vi.mock('../../services/externalLinks.js', () => ({
   openExternalUrl: vi.fn(),
 }))
 
-vi.mock('../../services/meetings.js', async importOriginal => ({
-  ...(await importOriginal()),
-  fileMeetingToGraph: vi.fn(),
-}))
-
 import {
   createGraphNode,
   deleteGraphNode,
@@ -42,10 +37,8 @@ import {
   updateGraphNode,
 } from '../../services/businessGraph.js'
 import { openExternalUrl } from '../../services/externalLinks.js'
-import { fileMeetingToGraph } from '../../services/meetings.js'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
-import { useMeetingsStore } from '../../stores/meetings.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
 import DispatchBar from './business-graph/DispatchBar.vue'
@@ -191,7 +184,6 @@ describe('BusinessGraphApp', () => {
       id: 'issue-1',
       undoToken: 'undo-issue-1',
     })
-    vi.mocked(fileMeetingToGraph).mockResolvedValue({ graphNodeId: 'meeting-filed' })
   })
 
   afterEach(async () => {
@@ -251,7 +243,7 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('keeps List, Timeline, Meetings, and Changes inside Graph', async () => {
+  it('keeps List, Timeline, and Changes inside Graph', async () => {
     const wrapper = render()
     await flushPromises()
 
@@ -259,7 +251,6 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.findAll('[data-graph-view]').map(tab => tab.text())).toEqual([
       'List',
       'Timeline',
-      'Meetings',
       'Changes',
     ])
 
@@ -530,46 +521,31 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('files a meeting and refreshes both Scribe and Graph projections', async () => {
+  it('restores the retired meeting inbox as the Graph list', async () => {
+    const settings = useSettingsStore()
+    settings.settingsReady = true
+    settings.businessGraphViewState = { section: 'all', sectionViews: { all: 'meetings' } }
     const wrapper = render()
     await flushPromises()
-    const meetings = useMeetingsStore()
+    expect(useBusinessGraphStore().view).toBe('list')
+    expect(wrapper.find('[data-graph-view="meetings"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('opens a record requested by Scribe after the Graph mounts', async () => {
     const graph = useBusinessGraphStore()
-    meetings.meetings = [{
-      id: 'meeting-ready',
-      title: 'Delivery review',
-      lifecycle: 'ready',
-      summary: '# BLUF\n\n- Ship Friday.',
-      startedAt: '2026-08-28T10:00:00.000Z',
-      durationMs: 1_800_000,
-      graphNodeId: null,
-      graphDraft: {
-        projectResolved: true,
-        projectId: null,
-        peopleIds: [],
-        scopeId: 'team:main',
-      },
-    }]
-    const flushMeeting = vi.spyOn(meetings, 'flushMeetingDraft').mockResolvedValue(true)
-    vi.spyOn(meetings, 'hydrateMeeting').mockResolvedValue(meetings.meetings[0])
-    const refreshMeetings = vi.spyOn(meetings, 'refresh').mockResolvedValue(true)
-    const refreshGraph = vi.spyOn(graph, 'refresh').mockResolvedValue(true)
-
-    await wrapper.get('[data-graph-section="all"]').trigger('click')
-    await wrapper.get('[data-graph-view="meetings"]').trigger('click')
-    await wrapper.get('[data-meeting-inbox-row="meeting-ready"]').trigger('click')
-    await wrapper.get('[data-meeting-file]').trigger('click')
+    graph.requestedNodeId = 'issue-1'
+    let finishMount
+    vi.mocked(openBusinessGraph).mockImplementationOnce(() => new Promise(resolve => { finishMount = resolve }))
+    const wrapper = render()
     await flushPromises()
-
-    expect(flushMeeting).toHaveBeenCalledWith('meeting-ready')
-    expect(fileMeetingToGraph).toHaveBeenCalledWith({
-      meetingId: 'meeting-ready',
-      scopeId: 'team:main',
-      projectId: null,
-      peopleIds: [],
-    })
-    expect(refreshMeetings).toHaveBeenCalled()
-    expect(refreshGraph).toHaveBeenCalledWith({ quiet: true })
+    expect(getGraphNode).not.toHaveBeenCalled()
+    expect(graph.requestedNodeId).toBe('issue-1')
+    finishMount({ scopes: scopeRows })
+    await flushPromises()
+    expect(getGraphNode).toHaveBeenCalledWith('issue-1')
+    expect(graph.selectedNode.id).toBe('issue-1')
+    expect(graph.requestedNodeId).toBe('')
     wrapper.unmount()
   })
 

@@ -7,6 +7,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +75,10 @@ pub fn meetings_file_to_graph(
 
     let mut properties = Map::new();
     properties.insert("sourceMeetingId".into(), Value::String(source.id.clone()));
+    properties.insert(
+        "sourceSummaryHash".into(),
+        Value::String(format!("{:x}", Sha256::digest(source.summary.as_bytes()))),
+    );
     properties.insert("durationMs".into(), Value::from(source.duration_ms));
     if let Some(started_at) = source.started_at.clone() {
         properties.insert("occurredAt".into(), Value::String(started_at));

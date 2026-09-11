@@ -119,12 +119,6 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'summary-cancel',
     'summary-start',
   ],
-  meetingInbox: [
-    'meeting-inbox-back',
-    'meeting-inbox-transcript',
-    'meeting-inbox-file',
-    'meeting-inbox-load-more',
-  ],
 })
 
 export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
@@ -153,8 +147,6 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
   'focus-resource-',
   'peek-meeting-person-remove-',
   'focus-meeting-person-remove-',
-  'meeting-inbox-person-remove-',
-  'meeting-inbox-open-',
 ])
 
 export const BUSINESS_GRAPH_SURFACES = Object.freeze([
@@ -178,7 +170,6 @@ export const BUSINESS_GRAPH_SURFACES = Object.freeze([
   'GraphSummaryDialog.vue',
   'GraphViewbar.vue',
   'GraphWorkspace.vue',
-  'MeetingInbox.vue',
   'NowView.vue',
   'ProjectStanding.vue',
   'TimelineView.vue',
