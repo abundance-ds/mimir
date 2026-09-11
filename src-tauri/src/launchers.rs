@@ -683,6 +683,13 @@ fn append_mimir_connection_args(
             ]);
         }
         append_codex_notify_capture(home, environment, args);
+        // Mimir owns the PTY title as a status channel. The word status keeps
+        // working with tui.animations=false; activity retains approval signals.
+        // This is a launch override only, never a write to the user's config.
+        const STATUS_TITLE: &str = r#"tui.terminal_title=["app-name","status","activity"]"#;
+        if !args.iter().any(|arg| arg == STATUS_TITLE) {
+            args.extend(["-c".into(), STATUS_TITLE.into()]);
+        }
     }
 
     match agent_id {
@@ -1343,6 +1350,8 @@ mod tests {
                 r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
                 "-c",
                 r#"notify=["mimir","internal","codex-notify"]"#,
+                "-c",
+                r#"tui.terminal_title=["app-name","status","activity"]"#,
             ]
         );
         assert_eq!(launch.cwd, directory.path().to_string_lossy());
@@ -1620,7 +1629,9 @@ mod tests {
                 "-c",
                 r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
                 "-c",
-                r#"notify=["mimir","internal","codex-notify"]"#
+                r#"notify=["mimir","internal","codex-notify"]"#,
+                "-c",
+                r#"tui.terminal_title=["app-name","status","activity"]"#
             ]
         );
 
@@ -1655,7 +1666,7 @@ mod tests {
         append_test_args("claude", home, mcp_url, &mut claude);
         append_test_args("pi", home, mcp_url, &mut pi);
         append_test_args("gemini", gemini_home.path(), mcp_url, &mut gemini);
-        assert_eq!(codex.len(), 4);
+        assert_eq!(codex.len(), 6);
         assert_eq!(claude.len(), 2);
         assert_eq!(pi.len(), 2);
     }
@@ -1705,6 +1716,8 @@ mod tests {
                 r#"mcp_servers.mimir_workbench.url="http://custom.example/mcp""#,
                 "-c",
                 r#"notify=["mimir","internal","codex-notify"]"#,
+                "-c",
+                r#"tui.terminal_title=["app-name","status","activity"]"#,
             ]
         );
         assert_eq!(claude, expected_claude);
@@ -1750,6 +1763,8 @@ mod tests {
                 r#"mcp_servers.mimir_workbench.url="http://127.0.0.1:29999/mcp""#,
                 "-c",
                 r#"notify=["mimir","internal","codex-notify"]"#,
+                "-c",
+                r#"tui.terminal_title=["app-name","status","activity"]"#,
             ]
         );
     }

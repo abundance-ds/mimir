@@ -203,9 +203,15 @@ export const useActivityRuntimeStore = defineStore('activityRuntime', () => {
     // A continuation keeps the launch policy of the session it belongs to.
     // Resolving the launcher again supplies the current executable and identity,
     // but must not silently replace the recorded model, permission, or tool flags.
-    const recordedArgs = Array.isArray(activity.launch?.args)
+    const recordedArgs = [...(Array.isArray(activity.launch?.args)
       ? activity.launch.args
-      : resolved.args
+      : resolved.args)]
+    // The native launcher owns the status title. Refresh this UI integration
+    // for old sessions while preserving their model, permission, and tool flags.
+    const statusTitle = resumeStrategy === 'codex'
+      ? resolved.args.find(arg => arg.startsWith('tui.terminal_title='))
+      : null
+    if (statusTitle && !recordedArgs.includes(statusTitle)) recordedArgs.push('-c', statusTitle)
     const recordedMcpUrl = activity.launch?.env?.MIMIR_MCP_URL || baseMcpUrl
     const record = {
       ...activity,

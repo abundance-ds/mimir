@@ -297,7 +297,10 @@ impl AgentStatusTracker {
             self.set_status(ActivityStatus::Idle, now_ms);
         }
 
-        if now_requires_action {
+        if let Some(status) = codex_word_status(title) {
+            self.has_status_signal = true;
+            self.set_status(status, now_ms);
+        } else if now_requires_action {
             self.has_status_signal = true;
             self.needs_input_is_blocking = true;
             self.set_status(ActivityStatus::NeedsInput, now_ms);
@@ -327,7 +330,8 @@ impl AgentStatusTracker {
         self.last_signal_at_ms = now_ms;
         if matches!(
             next,
-            ActivityStatus::Working
+            ActivityStatus::Starting
+                | ActivityStatus::Working
                 | ActivityStatus::Done
                 | ActivityStatus::Idle
                 | ActivityStatus::Error
@@ -387,6 +391,20 @@ pub fn is_spinner_prefix(value: &str) -> bool {
         .chars()
         .next()
         .is_some_and(|ch| matches!(ch as u32, 0x2800..=0x28ff | 0x2726))
+}
+
+// Mimir launches Codex with [app-name, status, activity] title items.
+// Match the complete status field; arbitrary title/prose text is not a signal.
+// Codex omits its title spinner entirely when tui.animations=false.
+fn codex_word_status(title: &str) -> Option<ActivityStatus> {
+    let rest = title.strip_prefix("codex | ")?;
+    let state = rest.split(" | ").next()?;
+    match state {
+        "Starting" => Some(ActivityStatus::Starting),
+        "Working" | "Thinking" | "Waiting" => Some(ActivityStatus::Working),
+        "Ready" => Some(ActivityStatus::Idle),
+        _ => None,
+    }
 }
 
 fn is_codex_action_required_title(title: &str) -> bool {
@@ -569,6 +587,69 @@ mod tests {
             ActivityStatus::NeedsInput
         );
         assert_eq!(status.poll(5_002).unwrap().status, ActivityStatus::Idle);
+    }
+
+    #[test]
+    fn codex_word_status_works_without_cli_animation_and_after_approval() {
+        let mut status = tracker(0);
+        assert_eq!(status.feed(b"\x1b]0;codex | Ready\x07", 0), None);
+        for (index, word) in ["Starting", "Working", "Thinking", "Waiting"]
+            .iter()
+            .enumerate()
+        {
+            let title = format!("\x1b]0;codex | {word}\x07");
+            status.feed(title, index as u64 + 1);
+            assert_eq!(
+                status.snapshot(10).status,
+                if *word == "Starting" {
+                    ActivityStatus::Starting
+                } else {
+                    ActivityStatus::Working
+                }
+            );
+        }
+        assert_eq!(status.poll(50_000), None, "work must survive silence");
+        assert_eq!(
+            status
+                .feed(b"\x1b]0;[ ! ] Action Required | codex\x07", 50_001)
+                .unwrap()
+                .status,
+            ActivityStatus::NeedsInput
+        );
+        assert!(status.snapshot(50_001).needs_input_is_blocking);
+        assert_eq!(
+            status
+                .feed(b"\x1b]0;codex | Working\x07", 50_002)
+                .unwrap()
+                .status,
+            ActivityStatus::Working
+        );
+        assert!(!status.snapshot(50_002).needs_input_is_blocking);
+        assert_eq!(
+            status
+                .feed(b"\x1b]0;codex | Ready\x07", 50_003)
+                .unwrap()
+                .status,
+            ActivityStatus::Idle
+        );
+        assert_eq!(status.feed(b"ordinary redraw", 50_004), None);
+    }
+
+    #[test]
+    fn codex_word_status_handles_split_sequences_and_animated_titles() {
+        let mut status = tracker(0);
+        for chunk in ["\x1b]", "0;codex | Wor", "king | ⠋", "\x1b", "\\"] {
+            status.feed(chunk, 1);
+        }
+        assert_eq!(status.snapshot(1).status, ActivityStatus::Working);
+        for title in [
+            "Working",
+            "codex | Working on docs",
+            "project | Working",
+            "codex | Not Ready",
+        ] {
+            assert_eq!(codex_word_status(title), None);
+        }
     }
 
     #[test]

@@ -3069,6 +3069,48 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn codex_word_status_drives_live_pty_records_without_animation() {
+        let temp = TempDir::new().unwrap();
+        let supervisor = create_supervisor(&temp);
+        let running = durable_record(
+            "codex-status",
+            "/bin/sh",
+            vec![
+                "-c".into(),
+                "printf '\\033]0;codex | Ready\\007'; read a; printf '\\033]0;codex | Working\\007'; read b; printf '\\033]0;[ ! ] Action Required | codex\\007'; read c; printf '\\033]0;codex | Working\\007'; read d; printf '\\033]0;codex | Ready\\007'; read e".into(),
+            ],
+        );
+        supervisor
+            .spawn(SpawnActivityRequest::new(running, 80, 24))
+            .unwrap();
+        let await_status = |expected| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let snapshot = supervisor.snapshot("codex-status", None).unwrap();
+                if snapshot.record.status == expected && !replay_bytes(&snapshot).is_empty() {
+                    assert!(snapshot.live);
+                    break;
+                }
+                assert!(Instant::now() < deadline, "missing status {expected:?}");
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        await_status(ActivityStatus::Idle);
+        for expected in [
+            ActivityStatus::Working,
+            ActivityStatus::NeedsInput,
+            ActivityStatus::Working,
+            ActivityStatus::Idle,
+        ] {
+            supervisor.write("codex-status", b"next\n").unwrap();
+            await_status(expected);
+        }
+        supervisor.stop("codex-status").unwrap();
+        wait_for_end(&supervisor, "codex-status");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn live_agent_completion_signal_settles_back_to_idle() {
         let temp = TempDir::new().unwrap();
         let supervisor = create_supervisor(&temp);

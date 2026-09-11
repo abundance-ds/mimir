@@ -20,6 +20,22 @@ A live plain shell is `idle`. PTY output cannot prove that a foreground command
 started or ended. Only process exit changes it to done, stopped, error, or
 interrupted. Do not infer command state from output or silence.
 
+## Agent status signals
+
+Native `activities/status.rs` reads the CLI's terminal control sequences.
+Codex launches use a one-run `tui.terminal_title` override with `app-name`,
+`status`, and `activity`. The title gives Mimir an explicit word state even
+when Codex has `tui.animations=false`, which removes its title spinner.
+Starting, Working, Thinking, Waiting, and Ready drive the Activity record;
+Action Required retains its blocking-input meaning. Existing spinner and
+progress signals remain supported for other clients.
+
+The override does not edit Codex configuration or enable its animations.
+Exact resume refreshes this status integration while retaining recorded model,
+permission, and tool flags. Already running CLI processes need a new launch or
+resume to receive the override. Ordinary PTY redraws never replace an explicit
+CLI status signal.
+
 ## Workspace projection
 
 The main tab strip shows the active working set for the current workspace. Workspace
