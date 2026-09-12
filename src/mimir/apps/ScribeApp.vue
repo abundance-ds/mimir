@@ -2,6 +2,7 @@
   <section
     ref="scribeRoot"
     data-scribe-app
+    @keydown="onDetailKeydown"
     class="flex h-full min-h-0 flex-col overflow-hidden bg-chrome-high text-ink"
   >
     <template v-if="meetings.activeMeeting">
@@ -136,13 +137,12 @@
 
     <template v-else-if="detailMeeting">
       <header data-scribe-detail-header class="scribe-bar pane-bar">
-        <nav class="scribe-location" aria-label="Meeting location">
-          <button type="button" class="scribe-quiet-button" title="Meetings" @click="closeDetail">Scribe</button>
-          <IconChevronRight :size="12" />
-          <button type="button" class="scribe-quiet-button" @click="closeDetail">Meetings</button>
-          <IconChevronRight :size="12" class="scribe-responsive-label" />
-          <span class="truncate scribe-responsive-label">{{ titleDraft }}</span>
-        </nav>
+        <button
+          type="button" data-scribe-back class="scribe-quiet-button"
+          aria-label="Back to meetings" title="Back to meetings (Esc)" @click="closeDetail"
+        >
+          <IconChevronLeft :size="14" /> Back
+        </button>
         <span class="min-w-0 flex-1" />
         <span data-scribe-save-state class="scribe-save-state" role="status">
           {{ notesSaveState }}
@@ -578,9 +578,8 @@
           <section class="pt-4" aria-labelledby="scribe-recent-title">
             <div class="flex items-center">
               <h2 id="scribe-recent-title" class="min-w-0 flex-1 text-[12px] font-semibold">
-                {{ meetingSearchActive ? 'Search' : 'Meetings' }}
+                {{ meetingSearchActive ? 'Search unfiled meetings' : 'Unfiled meetings' }}
               </h2>
-              <button type="button" data-scribe-unfiled class="scribe-quiet-button" :aria-pressed="unfiledOnly" @click="unfiledOnly = !unfiledOnly">Unfiled</button>
               <button
                 v-if="!meetingSearchActive"
                 type="button"
@@ -629,7 +628,6 @@
                     <span class="scribe-row-time">
                       {{ meetingDate(hit.meeting) }} · {{ formatDuration(hit.meeting.durationMs) }}
                     </span>
-                    <span v-if="hit.meeting.graphNodeId" class="scribe-row-filed">In Graph</span>
                     <span
                       v-if="meetingBackgroundStatus(hit.meeting)"
                       data-scribe-row-progress
@@ -668,7 +666,7 @@
               Loading…
             </p>
             <p v-else-if="!visibleMeetings.length" class="py-5 text-[10px] text-ink-3">
-              {{ unfiledOnly ? 'No unfiled meetings' : 'No meetings yet' }}
+              No unfiled meetings
             </p>
             <div v-else class="mt-2">
               <section
@@ -700,7 +698,6 @@
                         <span class="scribe-row-time">
                           {{ meetingDate(meeting) }} · {{ formatDuration(meeting.durationMs) }}
                         </span>
-                        <span v-if="meeting.graphNodeId" class="scribe-row-filed">In Graph</span>
                         <span
                           v-if="meetingBackgroundStatus(meeting)"
                           data-scribe-row-progress
@@ -776,7 +773,7 @@
       :prompt="summaryPromptDraft"
       :busy="summaryRunPending"
       :action-label="summaryActionLabel"
-      @close="summaryDialogOpen = false"
+      @close="closeFollowUpDialog"
       @update:format="selectSummaryTask"
       @update:agent="summaryAgent = $event"
       @update:prompt="summaryPromptDraft = $event"
@@ -792,7 +789,7 @@
       :busy="customActivityPending"
       :agent-available="Boolean(selectedSummaryAgentPreset)"
       :action-label="customActivityPending ? 'Opening…' : 'Open Activity'"
-      @close="agentDialogOpen = false"
+      @close="closeFollowUpDialog"
       @update:agent="summaryAgent = $event"
       @update:prompt="customTaskPrompt = $event"
       @submit="requestCustomSummaryActivity"
@@ -885,7 +882,6 @@ const agentDialogOpen = ref(false)
 const customTaskPrompt = ref('Follow up on this meeting.')
 const customActivityPending = ref(false)
 const meetingSearchDraft = ref('')
-const unfiledOnly = ref(false)
 const reviewingDraft = ref(false)
 const meetingSearchInput = ref(null)
 const detailSearchMeeting = ref(null)
@@ -978,8 +974,8 @@ const detailLedger = computed(() => transcriptLedgerEntries(detailMeeting.value)
 const meetingSearchActive = computed(() => (
   [...meetingSearchDraft.value.trim()].length >= 3
 ))
-const visibleMeetings = computed(() => meetings.meetings.filter(meeting => !unfiledOnly.value || !meeting.graphNodeId))
-const visibleSearchResults = computed(() => meetings.searchResults.filter(hit => !unfiledOnly.value || !hit.meeting.graphNodeId))
+const visibleMeetings = computed(() => meetings.meetings.filter(meeting => !meeting.graphNodeId))
+const visibleSearchResults = computed(() => meetings.searchResults.filter(hit => !hit.meeting.graphNodeId))
 const meetingGroups = computed(() => groupMeetings(visibleMeetings.value))
 const meetingMenuOpen = computed(() => Boolean(meetingMenuId.value))
 const menuMeeting = computed(() => meetingById(meetingMenuId.value))
@@ -1133,7 +1129,7 @@ watch(
   () => meetings.requestedMeetingId,
   id => {
     if (!id) return
-    void openMeeting(id)
+    void openMeeting(id, 'transcript')
     meetings.clearOpenRequest(id)
   },
   { immediate: true },
@@ -1172,7 +1168,7 @@ onUnmounted(() => {
 })
 
 function focusEntry() {
-  scribeRoot.value?.querySelector('[data-scribe-stop], [data-scribe-new]')?.focus()
+  scribeRoot.value?.querySelector('[data-scribe-back], [data-scribe-stop], [data-scribe-new]')?.focus({ preventScroll: true })
 }
 
 defineExpose({ focusEntry })
@@ -1249,7 +1245,7 @@ function dismissNotice() {
   meetings.dismissError?.()
 }
 
-async function openMeeting(id) {
+async function openMeeting(id, tab = '') {
   const meeting = meetingById(id)
   if (!meeting) return
   if (notesMeetingId.value && notesMeetingId.value !== id) void flushNotes()
@@ -1259,13 +1255,14 @@ async function openMeeting(id) {
   detailSearchMeeting.value = recent ? null : meeting
   detailMeetingId.value = id
   reviewingDraft.value = false
-  detailTab.value = meeting.lifecycle === 'arming'
+  detailTab.value = tab || (meeting.lifecycle === 'arming'
     ? 'notes'
-    : meeting.summary || meeting.graphNodeId ? 'summary' : 'transcript'
+    : meeting.summary || meeting.graphNodeId ? 'summary' : 'transcript')
   editingMeeting.value = false
   summaryDialogOpen.value = false
   agentDialogOpen.value = false
   resetSummaryRunDraft()
+  nextTick(focusEntry)
 }
 
 function changeNotes(meetingId) {
@@ -1465,9 +1462,21 @@ async function createGraphContextEntity(meetingId, request) {
   }
 }
 
+function onDetailKeydown(event) {
+  if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.repeat
+    || !props.active || meetings.activeMeeting || !detailMeeting.value) return
+  if (summaryDialogOpen.value || agentDialogOpen.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (meetingMenuOpen.value) closeMeetingMenu()
+  else if (editingMeeting.value) cancelMeetingEdit()
+  else closeDetail()
+}
+
 function closeDetail() {
   void flushNotes()
   leaveMeetingDetail()
+  nextTick(focusEntry)
 }
 
 function leaveMeetingDetail() {
@@ -1592,6 +1601,13 @@ function beginRename(id) {
 
 function cancelMeetingEdit() {
   editingMeeting.value = false
+  nextTick(focusEntry)
+}
+
+function closeFollowUpDialog() {
+  summaryDialogOpen.value = false
+  agentDialogOpen.value = false
+  nextTick(focusEntry)
 }
 
 async function saveMeetingEdits() {
@@ -2022,20 +2038,6 @@ function safeFailureDetail(value) {
   padding-inline: 12px;
 }
 
-.scribe-location {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 2px;
-  font-size: 10px;
-  color: var(--color-ink-3);
-}
-
-.scribe-location > button,
-.scribe-location > svg {
-  flex-shrink: 0;
-}
-
 .scribe-library-row {
   display: flex;
   min-width: 0;
@@ -2063,11 +2065,6 @@ function safeFailureDetail(value) {
 
 .scribe-filed-summary-bar > span:first-child {
   margin-right: auto;
-}
-
-[data-scribe-unfiled][aria-pressed="true"] {
-  background: var(--color-accent-soft);
-  color: var(--color-ink);
 }
 
 .scribe-save-state {

@@ -36,6 +36,7 @@ window.__TAURI_INTERNALS__ = {
    case 'plugin:event|listen': return 1
    case 'plugin:event|unlisten': return null
    case 'meetings_snapshot': return snapshot()
+   case 'meetings_get': return structuredClone(meeting)
    case 'meetings_transcript_page': return {meetingId:'m1',revision:1,totalSegments:1,hasMore:false,nextBefore:null,summary:meeting.summary,segments:[{id:'s1',text:'We agreed on the next release.',startMs:0,endMs:2000,channel:'microphone',final:true,revision:1}]}
    case 'meetings_update': Object.assign(meeting,args.patch);return snapshot()
    case 'meetings_file_to_graph': meeting.graphNodeId=graphNode.id;return structuredClone(graphNode)

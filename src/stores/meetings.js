@@ -577,6 +577,8 @@ export const useMeetingsStore = defineStore('meetings', () => {
   async function requestOpen(id) {
     const meetingId = String(id || '').trim()
     if (!meetingId) throw new Error('Meeting id is required.')
+    // Finish the initial library read before adding an older linked meeting.
+    await initialize()
     const meeting = await hydrateMeeting(meetingId)
     requestedMeetingId.value = meetingId
     void refreshTranscript(meetingId).catch(() => {})
