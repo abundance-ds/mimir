@@ -29,10 +29,11 @@ Feature: File concise meeting briefs into the Business Graph
   @MTG-133 @automated @renderer @contract
   Scenario: Scribe owns summary review and filing
     Given Scribe completed an automatic meeting summary
-    When the user opens the meeting from Scribe with the Unfiled filter
+    When the user opens the meeting from the Scribe overview
     Then it shows the full concise summary without requiring prior metadata
     And it restores Project, People, and scope saved during preparation
     And filing asks only for Project, People, and scope
+    And the filed meeting no longer appears in the Scribe overview or search
     And the filed meeting shows the current Graph summary and context
     And a replacement summary needs an explicit Update in Graph action
 
@@ -47,8 +48,9 @@ Feature: File concise meeting briefs into the Business Graph
   Scenario: A filed meeting links back to its full transcript
     Given a Graph meeting came from Scribe
     When the user chooses Open in Scribe
-    Then Mimir opens the exact Scribe meeting by stable id
+    Then Mimir opens the exact Scribe transcript by stable id
     And the full transcript remains owned by Scribe
+    And retained audio remains available through the meeting menu
 
   @MTG-136 @automated @domain @native
   Scenario: Filed meeting context stays editable

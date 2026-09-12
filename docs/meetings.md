@@ -40,11 +40,14 @@ Transcription follows committed audio and never blocks the capture callback.
 
 ## File a summary to Graph
 
-Scribe is the meeting workspace. Its overview lists all meetings. Turn on
-**Unfiled** to find meetings that have no Graph record. The same filter applies
-to search; **Load older meetings** extends the overview. Filed rows show
-**In Graph**. Graph has no separate Scribe inbox; its **Meetings** kind filter
-shows saved Graph records.
+Scribe is the meeting workspace. Its overview and search show only meetings
+that have no Graph record. **Load older meetings** extends the overview.
+Filed meetings are available in Graph through its **Meetings** kind filter.
+Filing removes a meeting from the Scribe overview without deleting its source.
+
+The Scribe flow is overview → details → overview. **Back** or **Escape** returns
+to the overview and saves pending edits in the background. An open menu or
+editor control can consume Escape first.
 
 Open a completed meeting in Scribe and review its Summary. Set Project to a
 project or **None**, check People and Scope, then click **File to Graph** in the
@@ -56,6 +59,13 @@ After filing, Scribe shows the current Graph title, context, and summary.
 in Graph** to edit those saved values. Notes and transcript remain in Scribe.
 Use **Meeting actions → Continue recording** to add another recording to the
 same completed meeting.
+
+Graph keeps the stable source meeting id. Its **Transcript → Open in Scribe**
+action opens that meeting's Transcript tab, including meetings outside the
+recent library page. The meeting menu provides **Show in Finder** and **Save
+audio copy** for retained audio. Transcript and audio stay local to Scribe;
+filing does not copy them to Team or delete them. Audio still follows the
+configured retention period. The transcript remains until explicit deletion.
 
 **Regenerate** creates a replacement draft. **Review draft** opens it for
 review and editing; **View current** returns to the saved Graph summary.

@@ -1135,6 +1135,12 @@
     },
     {
       "kind": "js-test",
+      "path": "src/mimir/apps/ScribeApp.test.js",
+      "selector": "opens an older filed transcript from Graph on first launch and keeps retained audio accessible",
+      "scenarios": ["MTG-135", "MTG-137"]
+    },
+    {
+      "kind": "js-test",
       "path": "src/mimir/apps/business-graph/GraphInspector.test.js",
       "selector": "edits filed meeting context and opens the exact Scribe source",
       "scenarios": [
