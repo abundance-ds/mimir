@@ -5,6 +5,7 @@
 - Use graph tools, never backing Markdown files.
 - Find before get. Never guess an id. A text match identifies an entity only
   when its title or id is exact.
+- Graph links: `[Title](mimir://graph/<id>)`, using an ID from `graph_find`.
 - `graph_find.query` searches ids, titles, tags, summaries, and bodies. `kinds`
   filters kinds; all filters combine; maximum `limit` is 100.
 - Use `graph_context` for an exact node's related context.

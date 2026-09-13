@@ -155,15 +155,15 @@
           />
           <EditorSurface
             ref="textSurfaceRef"
-            v-show="!isGraphDetails && !scratchpadHistoryVisible && !gitReviewVisible && !isResourcePreview && !isNewTabPage && (!visibleDiffActive || (diffStore.isBatch && !reviewTabActive && !diffStore.isBatchFileFocused))"
-            :content="currentFile?.content ?? ''"
-            :path="currentFile?.path ?? ''"
-            :file-id="currentFile?.id ?? ''"
+            :style="{ display: textSurfaceVisible ? undefined : 'none' }"
+            :content="textSurfaceDocument.content"
+            :path="textSurfaceDocument.path"
+            :file-id="textSurfaceDocument.fileId"
             :open-file-ids="openFileIds"
             :zoomLevel="state.zoomLevel"
             :maxWidth="editorContentMaxWidth"
             :showBorder="false"
-            :extensions="editorExtensions"
+            :extensions="textSurfaceDocument.extensions"
             :inlineAIEnabled="editorSettings.aiInlineRewrite"
             @change="onContentChange"
             @cursor="info => cursorLine = info.line"
@@ -884,6 +884,25 @@ const editorExtensions = computed(() => [
   }),
   ...taskCheckboxExtension(() => editorSettings.editorLivePreview && isMarkdownPath(currentFile.value?.path)),
 ])
+
+// Patch visibility with the DOM so Source can read scroll after the update.
+const textSurfaceVisible = computed(() => (
+  !isGraphDetails.value && !scratchpadHistoryVisible.value && !gitReviewVisible.value
+  && !isResourcePreview.value && !isNewTabPage.value
+  && (!visibleDiffActive.value || (diffStore.isBatch && !reviewTabActive.value && !diffStore.isBatchFileFocused))
+))
+
+// Details owns its draft. Retain the last Source projection and undo state
+// without parsing or updating an unseen document on each Graph selection.
+const textSurfaceDocument = computed(previous => {
+  if (isGraphDetails.value) return previous || { content: '', path: '', fileId: '', extensions: [] }
+  return {
+    content: currentFile.value?.content ?? '',
+    path: currentFile.value?.path ?? '',
+    fileId: currentFile.value?.id ?? '',
+    extensions: editorExtensions.value,
+  }
+})
 
 // --- Content sync + save ---
 

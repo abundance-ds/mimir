@@ -44,6 +44,12 @@ full-width wash from `markdownCodeBlocks.js`. The file store is the durable rend
 the active document projection. Toolbar pointer actions preserve focus and
 selection.
 
+Bun applies `patches/style-mod@4.1.3.patch` to both package exports. CodeMirror
+mounts reuse unchanged stylesheet text instead of replacing its text node and
+invalidating styles across the document. New rules and changed rule order still
+update normally. The editor style tests cover both exports and repeated Graph
+mounts. Remove the patch when the dependency provides the same behavior.
+
 ## Proposal and Git review
 
 - Rust owns proposal lifecycle; the renderer owns presentation and dirty

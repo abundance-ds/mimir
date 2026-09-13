@@ -9,6 +9,7 @@ import EditorSurface from './components/workspace/EditorSurface.vue'
 import GraphEditorTab from './components/workspace/GraphEditorTab.vue'
 import { useFileStore } from '../stores/files.js'
 import { useBusinessGraphStore } from '../stores/businessGraph.js'
+import { useDiffStore } from '../stores/diff.js'
 
 vi.mock('../services/session.js', () => ({ loadSession: vi.fn(async () => null), saveSession: vi.fn(async () => {}) }))
 vi.mock('./nativeMenu.js', () => ({ installNativeEditorMenu: vi.fn(async () => true), shouldInstallNativeEditorMenu: () => false }))
@@ -66,6 +67,87 @@ async function editor(props = {}) {
 }
 
 describe('Graph entry Editor tabs', () => {
+  it('keeps the hidden Source editor unchanged through Details opens and draft edits', async () => {
+    const wrapper = await editor()
+    await useFileStore().openFile('/work/ordinary.md', 'Ordinary note')
+    await flushPromises()
+    const surface = wrapper.findComponent(EditorSurface)
+    const view = surface.vm.getView()
+    view.dispatch({ changes: { from: 0, insert: 'EDIT ' }, selection: { anchor: 3 } })
+    await flushPromises()
+    const state = view.state
+    const extensions = surface.props('extensions')
+    await wrapper.vm.mimirOpenGraph('jon')
+    await wrapper.get('[data-inspector-title]').setValue('Updated Details title')
+    await wrapper.vm.mimirOpenGraph('jon')
+    expect(surface.element.style.display).toBe('none')
+    expect(view.state).toBe(state)
+    expect(surface.props('path')).toBe('/work/ordinary.md')
+    expect(surface.props('extensions')).toBe(extensions)
+    await wrapper.vm.mimirOpen('/work/ordinary.md')
+    expect(view.state.doc.toString()).toBe('EDIT Ordinary note')
+    expect(view.state.selection.main.anchor).toBe(3)
+    expect(undo(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe('Ordinary note')
+  })
+
+  it('retains Source scroll when Details is followed by a different Source document', async () => {
+    const wrapper = await editor()
+    await useFileStore().openFile('/work/ordinary.md', 'Ordinary note')
+    await flushPromises()
+    const surface = wrapper.findComponent(EditorSurface)
+    const view = surface.vm.getView()
+    view.dispatch({ changes: { from: 0, insert: 'EDIT ' } })
+    let scrollTop = 144
+    // A hidden WebKit box has no readable scroll geometry. Use the real
+    // parent visibility binding to check when the document watcher reads it.
+    Object.defineProperty(view.scrollDOM, 'scrollTop', {
+      configurable: true,
+      get: () => surface.element.style.display === 'none' ? 0 : scrollTop,
+      set: value => { scrollTop = surface.element.style.display === 'none' ? 0 : value },
+    })
+    await wrapper.vm.mimirOpenGraph('jon')
+    await wrapper.get('[data-graph-control="entry-source"]').trigger('click')
+    await flushPromises()
+    expect(surface.vm.getContent()).toBe(disk.content)
+    await wrapper.vm.mimirOpen('/work/ordinary.md')
+    expect(view.scrollDOM.scrollTop).toBe(144)
+    expect(view.state.doc.toString()).toBe('EDIT Ordinary note')
+    expect(undo(view)).toBe(true)
+  })
+
+  it('activates pending Source reviews only after the retained text editor has switched documents', async () => {
+    const wrapper = await editor()
+    await useFileStore().openFile('/work/ordinary.md', 'Ordinary note')
+    await flushPromises()
+    await wrapper.vm.mimirOpenGraph('jon')
+    const file = useFileStore().currentFile
+    file.reviews = [{ proposalId: 'review-jon', path, targetText: 'Working with', replacement: 'Discussing with' }]
+    const expected = file.content
+    await wrapper.get('[data-graph-control="entry-source"]').trigger('click')
+    await flushPromises()
+    expect(file.content).toBe(expected)
+    expect(file.dirty).toBe(false)
+    const diff = useDiffStore()
+    expect(diff.active).toBe(true)
+    expect(diff.originalContent).toBe(expected)
+    expect(diff.modifiedContent).toBe(expected.replace('Working with', 'Discussing with'))
+  })
+
+  it('starts with an empty Source projection when the initial tab is Details', async () => {
+    await useFileStore().openGraphDocument(disk, { preview: false })
+    const wrapper = await editor()
+    const surface = wrapper.findComponent(EditorSurface)
+    expect(wrapper.findComponent(GraphEditorTab).exists()).toBe(true)
+    expect(surface.vm.getContent()).toBe('')
+    expect(surface.props('path')).toBe('')
+    expect(surface.props('extensions')).toEqual([])
+    await wrapper.get('[data-graph-control="entry-source"]').trigger('click')
+    await flushPromises()
+    expect(surface.vm.getContent()).toBe(disk.content)
+    expect(surface.props('path')).toBe(path)
+  })
+
   it('opens a listed entry with one native source read and revisits its exact draft without open-path IPC', async () => {
     const wrapper = await editor()
     vi.mocked(invoke).mockClear()

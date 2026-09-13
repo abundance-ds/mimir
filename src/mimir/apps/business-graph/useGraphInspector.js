@@ -252,24 +252,20 @@ export function useGraphInspector(props, emit) {
       historyEntries.value = []
       historyError.value = ''
       resourceError.value = ''
-      void nextTick(growAll)
     },
     { immediate: true },
   )
 
   watch(
-    () => [draft.value.title, draft.value.summary, draft.value.deliverables, draft.value.files],
+    () => [
+      ...growingInputs.map(input => input.value),
+      draft.value.title, draft.value.summary, draft.value.deliverables, draft.value.files,
+    ],
     (values, previous) => {
-      values.forEach((value, index) => {
-        if (value !== previous[index]) grow(growingInputs[index].value)
-      })
+      grow(values.slice(0, growingInputs.length).filter((input, index) => (
+        input && (input !== previous[index] || values[index + growingInputs.length] !== previous[index + growingInputs.length])
+      )))
     },
-    { flush: 'post' },
-  )
-
-  watch(
-    () => growingInputs.map(input => input.value),
-    () => growAll(),
     { flush: 'post' },
   )
 
@@ -407,19 +403,22 @@ export function useGraphInspector(props, emit) {
   }
 
   function growAll() {
-    for (const input of growingInputs) grow(input.value)
+    grow(growingInputs.map(input => input.value))
   }
 
-  // Respect each field's minimum height while it grows with its content.
-  function grow(input) {
-    if (!input?.isConnected || !input.clientWidth) return
-    const style = getComputedStyle(input)
-    // Editor content stays mounted in its narrow, hidden rail. Measuring there
-    // wraps each word onto extra lines and leaves an oversized inline height.
-    if (style.visibility === 'hidden') return
-    input.style.height = '0px'
-    const floor = Number.parseFloat(style.minHeight) || 0
-    input.style.height = `${Math.max(input.scrollHeight, floor)}px`
+  // Batch reads and writes so each field does not force another layout pass.
+  function grow(inputs) {
+    const connected = inputs.filter(input => input?.isConnected)
+    if (!connected.length) return
+    const visible = connected.flatMap(input => {
+      if (!input.clientWidth) return []
+      const style = getComputedStyle(input)
+      // Rail content stays mounted. Size it only after it becomes visible.
+      return style.visibility === 'hidden' ? [] : [{ input, floor: Number.parseFloat(style.minHeight) || 0 }]
+    })
+    for (const { input } of visible) input.style.height = '0px'
+    const heights = visible.map(({ input, floor }) => Math.max(input.scrollHeight, floor))
+    visible.forEach(({ input }, index) => { input.style.height = `${heights[index]}px` })
   }
 
   function scopeFor(node) {

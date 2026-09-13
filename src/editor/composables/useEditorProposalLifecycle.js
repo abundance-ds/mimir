@@ -57,8 +57,14 @@ export function useEditorProposalLifecycle({
 
   const stopActiveFileWatch = watch(
     () => [fileManager.activeFileIndex, fileManager.currentFile?.kind],
-    () => {
+    async (_value, _previous, onCleanup) => {
       const file = fileManager.currentFile
+      let cancelled = false
+      onCleanup(() => { cancelled = true })
+      // Source may still show the preceding document during this Vue update.
+      // Wait for the surface before flushing its buffer into a pending review.
+      await nextTick()
+      if (cancelled || disposed || fileManager.currentFile !== file) return
       if (file?.reviews) {
         if (!activateDiffFromReviews(file)) diffStore.deactivate()
       } else if (diffStore.active && diffStore.reviewMeta?.ids) {

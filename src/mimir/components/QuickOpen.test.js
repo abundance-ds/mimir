@@ -3,10 +3,16 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkspaceFilesStore } from '../../stores/workspaceFiles.js'
 import QuickOpen from './QuickOpen.vue'
+import { buildQuickOpenResults } from '../quickOpenResults.js'
 
 const activityApi = vi.hoisted(() => ({
   searchHistory: vi.fn(),
 }))
+
+vi.mock('../quickOpenResults.js', async importOriginal => {
+  const actual = await importOriginal()
+  return { ...actual, buildQuickOpenResults: vi.fn(actual.buildQuickOpenResults) }
+})
 
 vi.mock('../../services/activities.js', () => ({
   searchActivityHistory: activityApi.searchHistory,
@@ -61,6 +67,7 @@ describe('QuickOpen', () => {
   beforeEach(() => {
     pinia = createPinia()
     setActivePinia(pinia)
+    vi.mocked(buildQuickOpenResults).mockClear()
     activityApi.searchHistory.mockReset()
     activityApi.searchHistory.mockResolvedValue([])
     const files = useWorkspaceFilesStore()
@@ -95,6 +102,53 @@ describe('QuickOpen', () => {
       },
     })
   }
+
+  it('does no result building while closed and reopens with the latest context', async () => {
+    const files = useWorkspaceFilesStore()
+    const readFileName = vi.fn(() => 'latest.md')
+    const wrapper = render(false)
+    files.files = [{ path: '/w/latest.md', relativePath: 'latest.md', get name() { return readFileName() } }]
+    await wrapper.setProps({ documents: [{ id: 'first-draft', name: 'First draft' }] })
+    await flushPromises()
+    expect(buildQuickOpenResults).not.toHaveBeenCalled()
+    expect(readFileName).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(buildQuickOpenResults).toHaveBeenCalled()
+    expect(readFileName).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('First draft')
+    await wrapper.get('[data-quick-open-input]').setValue('old search')
+    await wrapper.setProps({ open: false })
+    await flushPromises()
+    vi.mocked(buildQuickOpenResults).mockClear()
+    readFileName.mockClear().mockReturnValue('updated.md')
+
+    files.files = [{ path: '/w/updated.md', relativePath: 'updated.md', get name() { return readFileName() } }]
+    await wrapper.setProps({
+      documents: [{ id: 'latest-draft', name: 'Latest draft' }],
+      tools: [{ id: 'core:latest', title: 'Latest tool', icon: 'files' }],
+      projects: [{ name: 'latest-project', path: '/work/latest-project' }],
+      activities: [{ id: 'latest-agent', title: 'Latest activity', kind: 'agent', status: 'idle' }],
+    })
+    await flushPromises()
+    expect(buildQuickOpenResults).not.toHaveBeenCalled()
+    expect(readFileName).not.toHaveBeenCalled()
+    expect(activityApi.searchHistory).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.get('[data-quick-open-input]').element.value).toBe('')
+    expect(wrapper.text()).toContain('Latest draft')
+    expect(wrapper.text()).toContain('Latest tool')
+    expect(wrapper.text()).toContain('Latest activity')
+    expect(wrapper.text()).toContain('latest-project')
+    expect(wrapper.get('[data-quick-open-type="file"]').text()).toContain('updated.md')
+    expect(wrapper.text()).not.toContain('First draft')
+    expect(readFileName).toHaveBeenCalled()
+    await wrapper.get('[data-quick-open-input]').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('activate')[0][0]).toMatchObject({ type: 'document', documentId: 'latest-draft' })
+  })
 
   it('does not return focus to the opener after selecting a destination', async () => {
     const opener = document.createElement('button')

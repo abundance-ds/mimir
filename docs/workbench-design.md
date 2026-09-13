@@ -192,6 +192,8 @@ Cmd/Ctrl+P opens one grouped launcher near the window top.
   given text. Opening a result from another project switches there first.
 - The panel traps focus, ignores stale asynchronous results, and restores focus
   on cancellation. Selecting a result transfers focus to its destination.
+- Results are built only while the panel is open. Reopening uses current tabs,
+  files, and workspace context without scanning them during closed-panel updates.
 
 Workbench teardown snapshots layout and tab order before Settings flush.
 

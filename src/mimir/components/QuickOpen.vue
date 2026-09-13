@@ -302,23 +302,26 @@ const scopeLabel = computed(() => ({
   tools: 'Tools',
   chats: 'Chats',
 }[scope.value] || 'All'))
-const results = computed(() => buildQuickOpenResults({
-  query: query.value,
-  tools: props.tools,
-  chats: props.chats,
-  projects: props.projects,
-  currentProjectPath: props.currentProjectPath,
-  newActivity: props.newActivity,
-  activities: props.activities,
-  documents: props.documents,
-  recentTabKeys: props.recentTabKeys,
-  currentTabKey: props.currentTabKey,
-  history: props.history,
-  files: files.visibleFiles,
-  historySnippets: historySnippets.value,
-  newActivityView: inNewActivityView.value,
-  tabPicker: props.initialView === 'tabs',
-}))
+const results = computed(() => {
+  if (!props.open) return []
+  return buildQuickOpenResults({
+    query: query.value,
+    tools: props.tools,
+    chats: props.chats,
+    projects: props.projects,
+    currentProjectPath: props.currentProjectPath,
+    newActivity: props.newActivity,
+    activities: props.activities,
+    documents: props.documents,
+    recentTabKeys: props.recentTabKeys,
+    currentTabKey: props.currentTabKey,
+    history: props.history,
+    files: files.visibleFiles,
+    historySnippets: historySnippets.value,
+    newActivityView: inNewActivityView.value,
+    tabPicker: props.initialView === 'tabs',
+  })
+})
 const selectedResult = computed(() => results.value[selectedIndex.value] || null)
 let queryTimer = null
 let searchGeneration = 0

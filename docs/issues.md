@@ -5,6 +5,11 @@ task scope.
 
 ## Open
 
+- Scribe tests: two `meetings.ipc-contract.test.js` expectations omit the
+  normalized `ignoredApps` field. The reviewed-summary case in
+  `ScribeApp.test.js` also failed in a full-suite run but passed when that file
+  ran alone; investigate its asynchronous completion check.
+
 - Scribe notification repair: real banner/RECORD behavior and repeated-call CPU
   observations need a record from the repaired app. A long run with call
   transitions and signed installed-app verification remain open. Automated
@@ -69,8 +74,7 @@ task scope.
 
 - Business graph: final desktop screenshot critique (narrow/default/wide,
   railed/expanded, reduced-motion states) is a manual runtime release check —
-  automated behavior, accessibility, build, and performance verification is
-  complete. Do not infer this evidence from happy-dom geometry.
+  automated behavior and accessibility checks do not replace this review.
 
 - Terminal command-aware `working` status is a future specification candidate.
   The current truthful live-shell state is `idle`; any later implementation

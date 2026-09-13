@@ -422,6 +422,8 @@ watch(
     if (path !== previousPath) view.value.dispatch({ effects: languageEffect(path) })
     applyBackgroundContent(content)
   },
+  // Visibility must be patched before switchFile reads the retained Source scroll.
+  { flush: 'post' },
 )
 
 watch(() => props.openFileIds, (ids) => {
@@ -429,7 +431,7 @@ watch(() => props.openFileIds, (ids) => {
   for (const id of fileStates.keys()) {
     if (id !== activeFileId && !keep.has(id)) fileStates.delete(id)
   }
-})
+}, { flush: 'post' })
 </script>
 
 <style scoped>

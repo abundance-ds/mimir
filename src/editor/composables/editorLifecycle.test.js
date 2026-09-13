@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const services = vi.hoisted(() => ({
@@ -358,8 +358,40 @@ describe('Editor lifecycle controllers', () => {
     expect(file.reviews).toHaveLength(1)
     expect(diffStore.activate).not.toHaveBeenCalled()
     file.kind = 'text'
-    await Promise.resolve()
+    await nextTick()
+    expect(diffStore.activate).not.toHaveBeenCalled()
+    await nextTick()
     expect(diffStore.activate).toHaveBeenCalledWith(expect.objectContaining({ original: 'hello world', modified: 'hello Mimir' }))
+    lifecycle.dispose()
+  })
+
+  it.each(['navigation', 'dispose'])('cancels a deferred Source review after %s', async reason => {
+    const files = ref([
+      { path: '/graph/item.md', content: 'hello world', kind: 'graph', reviews: [{ proposalId: 'p1', targetText: 'world', replacement: 'Mimir' }] },
+      { path: '/w/other.md', content: 'other document', kind: 'text' },
+    ])
+    const activeFileIndex = ref(0)
+    const fileManager = {
+      get openFiles() { return files.value },
+      get activeFileIndex() { return activeFileIndex.value },
+      get currentFile() { return files.value[activeFileIndex.value] },
+    }
+    const diffStore = { active: false, activate: vi.fn(), deactivate: vi.fn() }
+    const flushEditorContent = vi.fn()
+    const lifecycle = useEditorProposalLifecycle({
+      fileManager, diffStore, openFiles: files, activeFileIndex,
+      currentEditorContent: () => fileManager.currentFile.content,
+      flushEditorContent, editorSurfaceRef: ref(null),
+      activateDiff: vi.fn(), activateBatchDiff: vi.fn(),
+    })
+    files.value[0].kind = 'text'
+    await nextTick()
+    if (reason === 'navigation') activeFileIndex.value = 1
+    else lifecycle.dispose()
+    await nextTick()
+    await nextTick()
+    expect(flushEditorContent).not.toHaveBeenCalled()
+    expect(diffStore.activate).not.toHaveBeenCalled()
     lifecycle.dispose()
   })
 })

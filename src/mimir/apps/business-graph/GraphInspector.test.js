@@ -251,6 +251,28 @@ describe('GraphInspector', () => {
       expect(inputs.map(input => input.style.height)).toEqual(['48px', '40px'])
     })
 
+    it('measures each field once on mount and only the changed field during typing', async () => {
+      const { wrapper, reads } = sizingInspector({ width: 520, hidden: false })
+      await flushPromises()
+      reads.forEach(read => { expect(read).toHaveBeenCalledOnce(); read.mockClear() })
+      await wrapper.get('[data-inspector-title]').setValue('A new title')
+      expect(reads[0]).toHaveBeenCalledOnce()
+      expect(reads[1]).not.toHaveBeenCalled()
+    })
+
+    it('resets all changed fields before measuring them and applies heights after the reads', async () => {
+      const { inputs, layout, resize } = sizingInspector({ width: 520, hidden: false })
+      await flushPromises()
+      inputs.forEach((input, index) => {
+        Object.defineProperty(input, 'scrollHeight', { configurable: true, get: () => {
+          expect(inputs.map(field => field.style.height)).toEqual(['0px', '0px'])
+          return layout.heights[index]
+        } })
+      })
+      resize(800, [60, 80])
+      expect(inputs.map(input => input.style.height)).toEqual(['60px', '80px'])
+    })
+
     it('resizes for same-entry source refreshes and typing, including text removal', async () => {
       const { wrapper, inputs, layout } = sizingInspector({ width: 520, hidden: false })
       await flushPromises()

@@ -164,6 +164,8 @@ its current view and draft. Working-note undo, caret, and scroll stay with the
 open tab; an external body replacement starts a fresh undo history.
 Title, summary, and file fields resize with their text and the Editor width.
 Sizing skips hidden rail content and runs again when the pane opens.
+Changed fields resize in one batch, with height reads before final height
+writes. Mounting and text changes share one watcher to avoid repeated sizing.
 **Details** and **Source** share one save queue.
 Changing views waits for pending writes and saves; a conflict keeps the draft
 and view intact. Details saves after a short pause; Source follows the Editor
@@ -206,6 +208,19 @@ Reopening the exact open tab reuses its snapshot and draft without a source
 read or a wait for its pending save. Git History availability runs when More
 actions opens; Team file discovery runs when More properties opens. References
 and neighbors load separately and do not block the initial document.
+Details retains the last Source editor state without updating its hidden
+document or extensions. Selecting Source applies the latest saved content and
+retains each open text tab’s undo, selection, and scroll state. Pending reviews
+activate after the Source buffer has caught up.
+Working-note theme and highlighting rules are shared across editor instances,
+so repeated opens do not add a new set for each entry.
+
+A WebKit check on 2026-09-14 compared four entry opens in each recording.
+With the [shared stylesheet fix](editor-system.md#codemirror-surface), the
+largest style calculation fell from 33.3 ms to 1.9 ms, and the largest forced
+layout fell from 53.1 ms to 1.9 ms. The repeated 77–84 ms style/layout pauses
+were absent from the final recording. These are recorded event durations,
+not complete click-to-display timings.
 
 In Work, search filters the loaded issues
 immediately by title, summary, tags, project, owner, and work details. Terms
