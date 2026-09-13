@@ -31,7 +31,14 @@ pub(super) fn execute(
         "graph.get" => {
             let id = required_string(&input, "id")?;
             let node = require_node(runtime, id)?;
-            value(node)
+            let mut result = serde_json::to_value(node).map_err(internal_error)?;
+            result["bodyReferences"] = serde_json::to_value(
+                runtime
+                    .references(id, &string_set(input.get("scopeIds")))
+                    .map_err(internal_error)?,
+            )
+            .map_err(internal_error)?;
+            value(result)
         }
         "graph.search" => {
             let query = required_string(&input, "query")?;
@@ -231,25 +238,38 @@ fn find(runtime: &GraphRuntime, input: Value) -> Result<NativeExecution, ToolErr
         Some(result) => Some(result?),
         None => None,
     };
+    let candidates = candidates
+        .into_iter()
+        .map(|node| {
+            let relations = if relation.is_some() || target_id.is_some() {
+                runtime
+                    .effective_relations(&node.id)
+                    .map_err(internal_error)?
+            } else {
+                Vec::new()
+            };
+            Ok((node, relations))
+        })
+        .collect::<Result<Vec<_>, ToolError>>()?;
     let mut items = candidates
         .into_iter()
-        .filter(|node| {
+        .filter(|(node, relations)| {
             scores
                 .as_ref()
                 .is_none_or(|scores| scores.contains_key(&node.id))
                 && relation.is_none_or(|expected| {
-                    node.relations.iter().any(|edge| {
+                    relations.iter().any(|edge| {
                         edge.relation == expected
                             && target_id.is_none_or(|target| edge.target == target)
                     })
                 })
                 && (relation.is_some()
-                    || target_id.is_none_or(|target| {
-                        node.relations.iter().any(|edge| edge.target == target)
-                    }))
+                    || target_id
+                        .is_none_or(|target| relations.iter().any(|edge| edge.target == target)))
                 && updated_after.is_none_or(|after| node.updated_at.as_str() >= after)
                 && updated_before.is_none_or(|before| node.updated_at.as_str() <= before)
         })
+        .map(|(node, _)| node)
         .collect::<Vec<_>>();
     if let Some(scores) = scores.as_ref() {
         items.sort_by(|left, right| {

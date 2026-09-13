@@ -467,6 +467,8 @@ pub struct GraphSearchResult {
 pub struct GraphNodePatch {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -512,6 +514,8 @@ pub struct GraphNodeCreate {
 pub struct GraphNodeDelete {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<String>,
 }
 
@@ -519,6 +523,8 @@ pub struct GraphNodeDelete {
 #[serde(rename_all = "camelCase")]
 pub struct GraphNodeMove {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_source_path: Option<String>,
     pub target_scope_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<String>,

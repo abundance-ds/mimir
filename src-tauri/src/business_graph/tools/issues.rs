@@ -118,6 +118,7 @@ fn issues_delete(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecutio
     require_issue(&require_node(runtime, &id)?)?;
     let deleted = runtime
         .delete(GraphNodeDelete {
+            expected_source_path: None,
             id,
             expected_revision: expected_revision(input),
         })

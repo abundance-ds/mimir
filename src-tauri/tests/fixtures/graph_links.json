@@ -1,0 +1,250 @@
+[
+  {
+    "name": "inline",
+    "body": "Discuss [Jon Minton](mimir://graph/jon-minton).",
+    "references": [
+      {
+        "targetId": "jon-minton",
+        "label": "Jon Minton",
+        "from": 8,
+        "to": 46
+      }
+    ]
+  },
+  {
+    "name": "repeated",
+    "body": "[Jon](mimir://graph/jon) and [J](mimir://graph/jon).",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon",
+        "from": 0,
+        "to": 24
+      },
+      {
+        "targetId": "jon",
+        "label": "J",
+        "from": 29,
+        "to": 51
+      }
+    ]
+  },
+  {
+    "name": "unicode-offsets",
+    "body": "🌙 Über [Jón 🚲](mimir://graph/jon) 東京.",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jón 🚲",
+        "from": 8,
+        "to": 35
+      }
+    ]
+  },
+  {
+    "name": "escaped-label",
+    "body": "[Jon \\[team\\]](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon [team]",
+        "from": 0,
+        "to": 33
+      }
+    ]
+  },
+  {
+    "name": "formatted-label",
+    "body": "[**Jon** and `Jo`](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon and Jo",
+        "from": 0,
+        "to": 37
+      }
+    ]
+  },
+  {
+    "name": "link-title",
+    "body": "[Jon](<mimir://graph/jon> \"Person\")",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon",
+        "from": 0,
+        "to": 35
+      }
+    ]
+  },
+  {
+    "name": "reference",
+    "body": "Ask [Jon][person].\n\n[person]: mimir://graph/jon \"Person\"",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon",
+        "from": 4,
+        "to": 17
+      }
+    ]
+  },
+  {
+    "name": "collapsed-reference",
+    "body": "Ask [Jon][].\n\n[Jon]: mimir://graph/jon",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon",
+        "from": 4,
+        "to": 11
+      }
+    ]
+  },
+  {
+    "name": "shortcut-reference",
+    "body": "Ask [Jon].\n\n[Jon]: mimir://graph/jon",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon",
+        "from": 4,
+        "to": 9
+      }
+    ]
+  },
+  {
+    "name": "autolink",
+    "body": "Visit <mimir://graph/jon>.",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "mimir://graph/jon",
+        "from": 6,
+        "to": 25
+      }
+    ]
+  },
+  {
+    "name": "entity-label",
+    "body": "[Jon &amp; Jo](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon & Jo",
+        "from": 0,
+        "to": 33
+      }
+    ]
+  },
+  {
+    "name": "inline-code",
+    "body": "`[Jon](mimir://graph/jon)`",
+    "references": []
+  },
+  {
+    "name": "fenced-code",
+    "body": "```md\n[Jon](mimir://graph/jon)\n```",
+    "references": []
+  },
+  {
+    "name": "indented-code",
+    "body": "    [Jon](mimir://graph/jon)",
+    "references": []
+  },
+  {
+    "name": "image",
+    "body": "![Jon](mimir://graph/jon)",
+    "references": []
+  },
+  {
+    "name": "escaped-opening",
+    "body": "\\[Jon](mimir://graph/jon)",
+    "references": []
+  },
+  {
+    "name": "comments",
+    "body": "<!-- [Jon](mimir://graph/jon) -->\n\nText <!-- [Jo](mimir://graph/jo) --> end.",
+    "references": []
+  },
+  {
+    "name": "html-block",
+    "body": "<div>\n[Jon](mimir://graph/jon)\n</div>",
+    "references": []
+  },
+  {
+    "name": "invalid-targets",
+    "body": "[A](mimir://graph/Upper) [B](mimir://graph/jon#heading) [C](mimir://graph/jon?x=y) [D](mimir://graph/../jon) [E](mimir://graph/jon/) [F](mimir://graph/jon%20doe) [G](mimir://other/jon) [H](MIMIR://graph/jon) [I](mimir://graph/-jon) [J](mimir://graph/jon-)",
+    "references": []
+  },
+  {
+    "name": "unresolved-reference",
+    "body": "[Jon][missing]",
+    "references": []
+  },
+  {
+    "name": "definition-only",
+    "body": "[person]: mimir://graph/jon",
+    "references": []
+  },
+  {
+    "name": "escaped-entity-label",
+    "body": "[\\&amp;](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "&amp;",
+        "from": 0,
+        "to": 27
+      }
+    ]
+  },
+  {
+    "name": "code-entity-label",
+    "body": "[`&amp;`](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "&amp;",
+        "from": 0,
+        "to": 28
+      }
+    ]
+  },
+  {
+    "name": "nested-image-label",
+    "body": "[J![x](other)](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "J",
+        "from": 0,
+        "to": 33
+      }
+    ]
+  },
+  {
+    "name": "hardbreak-label",
+    "body": "[Jon\\\nJo](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon Jo",
+        "from": 0,
+        "to": 28
+      }
+    ]
+  },
+  {
+    "name": "strikethrough-label",
+    "body": "[~~Jon~~](mimir://graph/jon)",
+    "references": [
+      {
+        "targetId": "jon",
+        "label": "Jon",
+        "from": 0,
+        "to": 28
+      }
+    ]
+  }
+]

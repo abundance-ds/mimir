@@ -1,0 +1,8 @@
+[
+  {
+    "id": "person-jon",
+    "title": "Jon Minton",
+    "kind": "person",
+    "scopeId": "project:mimir"
+  }
+]

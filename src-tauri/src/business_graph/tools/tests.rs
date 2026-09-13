@@ -42,6 +42,141 @@ fn fixture() -> (TempDir, GraphRuntime) {
 }
 
 #[test]
+fn body_references_are_consistent_across_read_tools_without_becoming_authored_relations() {
+    let (root, runtime) = fixture();
+    let path = root.path().join("graph/project-alpha.md");
+    let original = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        format!("{original}\nAsk [Alex](mimir://graph/alex) and [Alex again](mimir://graph/alex)."),
+    )
+    .unwrap();
+    runtime
+        .refresh(vec![path.to_string_lossy().into_owned()])
+        .unwrap();
+
+    let get = execute_native_tool(&runtime, "graph.get", json!({"id":"project-alpha"}))
+        .unwrap()
+        .value;
+    assert_eq!(get["relations"].as_array().unwrap().len(), 1);
+    assert_eq!(get["relations"][0]["relation"], "for_company");
+    assert_eq!(
+        get["bodyReferences"]["outgoing"].as_array().unwrap().len(),
+        2
+    );
+    let neighbors = execute_native_tool(&runtime, "graph.neighbors", json!({"id":"alex"}))
+        .unwrap()
+        .value;
+    assert_eq!(
+        neighbors
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["relation"] == "references")
+            .count(),
+        1
+    );
+    let found = execute_native_tool(
+        &runtime,
+        "graph.find",
+        json!({"relation":"references", "targetId":"alex"}),
+    )
+    .unwrap()
+    .value;
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["items"][0]["id"], "project-alpha");
+    assert_eq!(found["items"][0]["relations"].as_array().unwrap().len(), 1);
+
+    let context = execute_native_tool(
+        &runtime,
+        "graph.context",
+        json!({"focusId":"project-alpha", "maxNodes":10}),
+    )
+    .unwrap()
+    .value;
+    let nodes = context["nodes"].as_array().unwrap();
+    assert!(nodes.iter().any(|node| node["id"] == "alex"));
+    let source = nodes
+        .iter()
+        .find(|node| node["id"] == "project-alpha")
+        .unwrap();
+    assert!(source["relations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|relation| relation["relation"] == "references" && relation["target"] == "alex"));
+    let legacy = execute_native_tool(&runtime, "knowledge.graph", json!({}))
+        .unwrap()
+        .value;
+    assert!(legacy["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edge| edge["source"] == "project-alpha"
+            && edge["target"] == "alex"
+            && edge["rel"] == "references"));
+
+    let node = runtime.get("project-alpha").unwrap().unwrap();
+    runtime
+        .update(crate::business_graph::GraphNodePatch {
+            id: node.id,
+            title: Some("Renamed project".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let disk = fs::read_to_string(&path).unwrap();
+    let frontmatter = disk.split("---").nth(1).unwrap();
+    assert!(!frontmatter.contains("alex"));
+    runtime
+        .update(crate::business_graph::GraphNodePatch {
+            id: "project-alpha".into(),
+            body: Some("Reference removed".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let found = execute_native_tool(&runtime, "graph.find", json!({"targetId":"alex"}))
+        .unwrap()
+        .value;
+    assert_eq!(found["total"], 0);
+}
+
+#[test]
+fn context_membership_includes_old_nodes_beyond_the_first_page() {
+    let root = TempDir::new().unwrap();
+    let graph = root.path().join("graph");
+    fs::create_dir(&graph).unwrap();
+    for i in 0..505 {
+        fs::write(
+            graph.join(format!("note-{i}.md")),
+            format!("---\nkind: note\ntitle: Note {i}\nupdated: 2026-09-12\n---\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        graph.join("older.md"),
+        "---\nkind: note\ntitle: Older\nupdated: 2020-01-01\n---\n[Target](mimir://graph/oldest)",
+    )
+    .unwrap();
+    fs::write(
+        graph.join("oldest.md"),
+        "---\nkind: note\ntitle: Oldest\nupdated: 2010-01-01\n---\nTarget",
+    )
+    .unwrap();
+    let runtime = GraphRuntime::from_roots(vec![GraphSourceRoot::new(
+        "project:test",
+        GraphScopeKind::Project,
+        root.path(),
+    )]);
+    let context = execute_native_tool(&runtime, "graph.context", json!({"focusId":"older"}))
+        .unwrap()
+        .value;
+    assert_eq!(context["totalVisibleNodes"], 507);
+    let nodes = context["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    assert!(nodes.iter().any(|node| node["id"] == "oldest"));
+}
+
+#[test]
 fn definitions_are_accepted_by_the_canonical_registry() {
     let registry = ToolRegistry::new();
     for (name, alias, description, schema) in native_tool_definitions() {

@@ -2,8 +2,12 @@ use super::markdown::{parse_graph_markdown, serialize_graph_markdown, source_rev
 use super::model::{
     canonical_kind, is_known_kind, is_valid_id, GraphDeleteResult, GraphDiagnostic, GraphNeighbor,
     GraphNode, GraphNodeCreate, GraphNodeDelete, GraphNodeMove, GraphNodePatch, GraphProvenance,
-    GraphQuery, GraphQueryResult, GraphRelationDirection, GraphSearchResult, GraphSourceFormat,
-    GraphSourceRoot, ISSUE_PRIORITIES, ISSUE_STATUSES,
+    GraphQuery, GraphQueryResult, GraphRelation, GraphRelationDirection, GraphSearchResult,
+    GraphSourceFormat, GraphSourceRoot, ISSUE_PRIORITIES, ISSUE_STATUSES,
+};
+use super::references::{
+    extract_graph_references, normalize_title, title_match_rank, GraphBacklink, GraphBodyReference,
+    GraphLinkResolution, GraphLinkStatus, GraphLinkTarget, GraphOutgoingReference, GraphReferences,
 };
 use crate::persistence;
 use serde_json::Value;
@@ -16,6 +20,8 @@ use uuid::Uuid;
 
 const MAX_QUERY_LIMIT: usize = 500;
 const MAX_SEARCH_LIMIT: usize = 100;
+const MAX_LOOKUP_LIMIT: usize = 50;
+const MAX_LINK_TARGETS: usize = 200;
 
 #[derive(Debug, Clone, Default)]
 pub struct GraphStore {
@@ -24,10 +30,17 @@ pub struct GraphStore {
     by_scope: HashMap<String, BTreeSet<String>>,
     by_tag: HashMap<String, BTreeSet<String>>,
     outgoing: HashMap<String, Vec<(String, String)>>,
-    incoming: HashMap<String, Vec<(String, String)>>,
+    incoming: HashMap<String, BTreeSet<(String, String)>>,
+    title_order: BTreeSet<(String, String)>,
+    normalized_titles: HashMap<String, String>,
+    body_references: HashMap<String, Vec<GraphBodyReference>>,
+    reference_sources: HashMap<String, BTreeSet<String>>,
     source_diagnostics: Vec<GraphDiagnostic>,
+    node_diagnostics: BTreeMap<String, Vec<GraphDiagnostic>>,
     diagnostics: Vec<GraphDiagnostic>,
     revision: u64,
+    #[cfg(test)]
+    reference_parse_count: usize,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -91,6 +104,7 @@ impl GraphStore {
             }
             by_id.insert(node.id.clone(), node);
         }
+        sort_diagnostics(&mut diagnostics);
 
         let mut store = Self {
             nodes: by_id,
@@ -122,12 +136,68 @@ impl GraphStore {
         &self.diagnostics
     }
 
+    pub(crate) fn source_diagnostics(&self) -> &[GraphDiagnostic] {
+        &self.source_diagnostics
+    }
+
     pub fn get(&self, id: &str) -> Option<&GraphNode> {
         self.nodes.get(id)
     }
 
     pub(crate) fn snapshot_nodes(&self) -> Vec<GraphNode> {
         self.nodes.values().cloned().collect()
+    }
+
+    pub fn visible_ids(&self, scope_ids: &BTreeSet<String>) -> BTreeSet<String> {
+        if scope_ids.is_empty() {
+            return self.nodes.keys().cloned().collect();
+        }
+        scope_ids
+            .iter()
+            .filter_map(|scope| self.by_scope.get(scope))
+            .flat_map(|ids| ids.iter().cloned())
+            .collect()
+    }
+
+    /// Publish a parsed source batch without rebuilding untouched node indexes.
+    /// The runtime resolves source precedence and serializes publication.
+    pub(crate) fn apply_reconciled_nodes(
+        &mut self,
+        changes: Vec<(String, Option<GraphNode>)>,
+        mut source_diagnostics: Vec<GraphDiagnostic>,
+    ) -> bool {
+        sort_diagnostics(&mut source_diagnostics);
+        let mut changed = self.source_diagnostics != source_diagnostics;
+        let mut affected = BTreeSet::new();
+        for (id, replacement) in changes {
+            if self.nodes.get(&id) == replacement.as_ref() {
+                continue;
+            }
+            changed = true;
+            let availability_changed = self.nodes.contains_key(&id) != replacement.is_some();
+            if availability_changed {
+                self.collect_dependents(&id, &mut affected);
+            }
+            match replacement {
+                Some(node) => self.upsert_indexed(node),
+                None => {
+                    if let Some(node) = self.nodes.remove(&id) {
+                        self.remove_indexes(&node);
+                    }
+                }
+            }
+            if availability_changed {
+                self.collect_dependents(&id, &mut affected);
+            }
+            affected.insert(id);
+        }
+        if changed {
+            self.source_diagnostics = source_diagnostics;
+            self.refresh_node_diagnostics(affected);
+            self.refresh_diagnostics();
+            self.revision = self.revision.saturating_add(1);
+        }
+        changed
     }
 
     pub fn create_node(
@@ -187,9 +257,10 @@ impl GraphStore {
             })?;
         create_new_source(&source_path, serialized.as_bytes())?;
         node.provenance.source_revision = source_revision(&serialized);
-        self.nodes.insert(node.id.clone(), node.clone());
-        self.revision = self.revision.saturating_add(1);
-        self.rebuild_indexes();
+        self.apply_reconciled_nodes(
+            vec![(node.id.clone(), Some(node.clone()))],
+            self.source_diagnostics.clone(),
+        );
         Ok(node)
     }
 
@@ -213,12 +284,14 @@ impl GraphStore {
         let GraphNodeDelete {
             id,
             expected_revision,
+            expected_source_path,
         } = request;
         let node = self
             .nodes
             .get(&id)
             .cloned()
             .ok_or_else(|| GraphMutationError::NotFound(id.clone()))?;
+        validate_source_identity(&node, expected_source_path.as_deref())?;
         let source_path = PathBuf::from(&node.provenance.source_path);
         // A caller that omits expected_revision still acted on some observed
         // state: the store's in-memory copy, whose source_revision hashes the
@@ -247,9 +320,7 @@ impl GraphStore {
             path: source_path.to_string_lossy().into_owned(),
             message,
         })?;
-        self.nodes.remove(&id);
-        self.revision = self.revision.saturating_add(1);
-        self.rebuild_indexes();
+        self.apply_reconciled_nodes(vec![(id.clone(), None)], self.source_diagnostics.clone());
         Ok(GraphDeleteResult {
             id,
             source_path: source_path.to_string_lossy().into_owned(),
@@ -270,6 +341,7 @@ impl GraphStore {
             .get(&patch.id)
             .cloned()
             .ok_or_else(|| GraphMutationError::NotFound(patch.id.clone()))?;
+        validate_source_identity(&node, patch.expected_source_path.as_deref())?;
         let source_path = PathBuf::from(&node.provenance.source_path);
         let current_raw =
             fs::read_to_string(&source_path).map_err(|error| GraphMutationError::Read {
@@ -296,6 +368,7 @@ impl GraphStore {
                 actual: actual_revision,
             });
         }
+        refresh_mutation_base(&mut node, &current_raw, &actual_revision)?;
 
         if let Some(kind) = patch.kind {
             let kind = canonical_kind(&kind);
@@ -359,9 +432,10 @@ impl GraphStore {
             }
         })?;
         node.provenance.source_revision = source_revision(&serialized);
-        self.nodes.insert(node.id.clone(), node.clone());
-        self.revision = self.revision.saturating_add(1);
-        self.rebuild_indexes();
+        self.apply_reconciled_nodes(
+            vec![(node.id.clone(), Some(node.clone()))],
+            self.source_diagnostics.clone(),
+        );
         Ok(node)
     }
 
@@ -375,6 +449,7 @@ impl GraphStore {
             .get(&request.id)
             .cloned()
             .ok_or_else(|| GraphMutationError::NotFound(request.id.clone()))?;
+        validate_source_identity(&node, request.expected_source_path.as_deref())?;
         if node.provenance.scope_id == root.scope_id {
             return Ok(node);
         }
@@ -395,6 +470,7 @@ impl GraphStore {
                 actual: actual_revision,
             });
         }
+        refresh_mutation_base(&mut node, &current_raw, &actual_revision)?;
 
         let target_path = root.root.join("graph").join(format!("{}.md", node.id));
         node.provenance.scope_id = root.scope_id.clone();
@@ -415,9 +491,10 @@ impl GraphStore {
             });
         }
         node.provenance.source_revision = source_revision(&serialized);
-        self.nodes.insert(node.id.clone(), node.clone());
-        self.revision = self.revision.saturating_add(1);
-        self.rebuild_indexes();
+        self.apply_reconciled_nodes(
+            vec![(node.id.clone(), Some(node.clone()))],
+            self.source_diagnostics.clone(),
+        );
         Ok(node)
     }
 
@@ -533,6 +610,155 @@ impl GraphStore {
         neighbors
     }
 
+    /// A title-only query over the native catalog. Retain only a bounded result
+    /// set while matching, so broad queries do not allocate one row per node.
+    pub fn lookup(
+        &self,
+        query: &str,
+        scope_ids: &BTreeSet<String>,
+        limit: usize,
+    ) -> Vec<GraphLinkTarget> {
+        let limit = limit.clamp(1, MAX_LOOKUP_LIMIT);
+        let query = normalize_title(query);
+        if query.is_empty() {
+            return self
+                .title_order
+                .iter()
+                .filter_map(|(_, id)| self.visible_node(id, scope_ids))
+                .take(limit)
+                .map(GraphLinkTarget::from)
+                .collect();
+        }
+        let terms = query.split_whitespace().collect::<Vec<_>>();
+        let mut matches = BTreeSet::new();
+        for (title, id) in &self.title_order {
+            if self.visible_node(id, scope_ids).is_none() {
+                continue;
+            }
+            if let Some(rank) = title_match_rank(title, &query, &terms) {
+                matches.insert((rank, title, id));
+                if matches.len() > limit {
+                    matches.pop_last();
+                }
+            }
+        }
+        matches
+            .into_iter()
+            .filter_map(|(_, _, id)| self.nodes.get(id))
+            .map(GraphLinkTarget::from)
+            .collect()
+    }
+
+    /// Batch lookup does not reveal whether an unavailable target is hidden,
+    /// deleted, or temporarily unmounted. It never performs filesystem reads.
+    pub fn link_targets(
+        &self,
+        ids: &[String],
+        scope_ids: &BTreeSet<String>,
+    ) -> Vec<GraphLinkResolution> {
+        let mut seen = BTreeSet::new();
+        ids.iter()
+            .filter(|id| seen.insert(id.as_str()))
+            .take(MAX_LINK_TARGETS)
+            .map(|id| {
+                let node = self.visible_node(id, scope_ids);
+                GraphLinkResolution {
+                    id: id.clone(),
+                    status: if node.is_some() {
+                        GraphLinkStatus::Resolved
+                    } else {
+                        GraphLinkStatus::Unavailable
+                    },
+                    title: node.map(|node| node.title.clone()),
+                    kind: node.map(|node| node.kind.clone()),
+                    scope_id: node.map(|node| node.provenance.scope_id.clone()),
+                }
+            })
+            .collect()
+    }
+
+    pub fn references(&self, id: &str, scope_ids: &BTreeSet<String>) -> GraphReferences {
+        let Some(source) = self.visible_node(id, scope_ids) else {
+            return GraphReferences::default();
+        };
+        let outgoing = self
+            .body_references
+            .get(id)
+            .into_iter()
+            .flatten()
+            .map(|reference| {
+                let node = self
+                    .visible_node(&reference.target_id, scope_ids)
+                    .map(GraphLinkTarget::from);
+                GraphOutgoingReference {
+                    reference: reference.clone(),
+                    status: if node.is_some() {
+                        GraphLinkStatus::Resolved
+                    } else {
+                        GraphLinkStatus::Unavailable
+                    },
+                    node,
+                }
+            })
+            .collect();
+        let mut backlinks = self
+            .reference_sources
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter_map(|source_id| {
+                let node = self.visible_node(source_id, scope_ids)?;
+                Some(GraphBacklink {
+                    source: GraphLinkTarget::from(node),
+                    source_revision: node.provenance.source_revision.clone(),
+                    occurrences: self
+                        .body_references
+                        .get(source_id)
+                        .into_iter()
+                        .flatten()
+                        .filter(|reference| reference.target_id == id)
+                        .cloned()
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>();
+        backlinks.sort_by(|left, right| {
+            left.source
+                .title
+                .cmp(&right.source.title)
+                .then_with(|| left.source.id.cmp(&right.source.id))
+        });
+        GraphReferences {
+            source_revision: source.provenance.source_revision.clone(),
+            outgoing,
+            backlinks,
+        }
+    }
+
+    /// Use for reads and traversal only. Persisted GraphNode.relations stay
+    /// authored, even when an explicit `references` edge has the same target.
+    pub fn effective_relations(&self, id: &str) -> Vec<GraphRelation> {
+        let Some(node) = self.nodes.get(id) else {
+            return Vec::new();
+        };
+        let mut relations = node.relations.clone();
+        let mut targets: BTreeSet<_> = relations
+            .iter()
+            .filter(|relation| relation.relation == "references")
+            .map(|relation| relation.target.clone())
+            .collect();
+        for reference in self.body_references.get(id).into_iter().flatten() {
+            if targets.insert(reference.target_id.clone()) {
+                relations.push(GraphRelation {
+                    relation: "references".into(),
+                    target: reference.target_id.clone(),
+                    legacy: false,
+                });
+            }
+        }
+        relations
+    }
+
     fn candidate_ids(&self, query: &GraphQuery) -> Vec<String> {
         let mut candidate: Option<BTreeSet<String>> = None;
         for scope in &query.scope_ids {
@@ -580,39 +806,138 @@ impl GraphStore {
     }
 
     fn rebuild_indexes(&mut self) {
-        self.diagnostics = self.source_diagnostics.clone();
         self.by_kind.clear();
         self.by_scope.clear();
         self.by_tag.clear();
         self.outgoing.clear();
         self.incoming.clear();
+        self.title_order.clear();
+        self.normalized_titles.clear();
+        self.body_references.clear();
+        self.reference_sources.clear();
+        self.node_diagnostics.clear();
+        let nodes = std::mem::take(&mut self.nodes);
+        for (_, node) in nodes {
+            self.upsert_indexed(node);
+        }
+        self.refresh_node_diagnostics(self.nodes.keys().cloned().collect());
+        self.refresh_diagnostics();
+    }
 
-        for node in self.nodes.values() {
-            self.by_kind
-                .entry(node.kind.clone())
-                .or_default()
-                .insert(node.id.clone());
-            self.by_scope
-                .entry(node.provenance.scope_id.clone())
-                .or_default()
-                .insert(node.id.clone());
-            for tag in &node.tags {
-                self.by_tag
-                    .entry(tag.clone())
-                    .or_default()
-                    .insert(node.id.clone());
+    fn collect_dependents(&self, id: &str, affected: &mut BTreeSet<String>) {
+        affected.extend(
+            self.incoming
+                .get(id)
+                .into_iter()
+                .flatten()
+                .map(|(_, source)| source.clone()),
+        );
+    }
+
+    fn upsert_indexed(&mut self, node: GraphNode) {
+        let old = self.nodes.remove(&node.id);
+        let mut cached_title = None;
+        let mut cached_references = None;
+        if let Some(old) = &old {
+            let (title, references) = self.remove_indexes(old);
+            if old.title == node.title {
+                cached_title = title;
             }
+            if old.body == node.body {
+                cached_references = references;
+            }
+        }
+        let title = cached_title.unwrap_or_else(|| normalize_title(&node.title));
+        let references = cached_references.unwrap_or_else(|| {
+            #[cfg(test)]
+            {
+                self.reference_parse_count += 1;
+            }
+            extract_graph_references(&node.body)
+        });
+        self.by_kind
+            .entry(node.kind.clone())
+            .or_default()
+            .insert(node.id.clone());
+        self.by_scope
+            .entry(node.provenance.scope_id.clone())
+            .or_default()
+            .insert(node.id.clone());
+        for tag in &node.tags {
+            self.by_tag
+                .entry(tag.clone())
+                .or_default()
+                .insert(node.id.clone());
+        }
+        // Malformed source identities remain visible for repair, but cannot
+        // produce a valid graph URL and must not be offered for insertion.
+        if is_valid_id(&node.id) && !title.is_empty() {
+            self.title_order.insert((title.clone(), node.id.clone()));
+        }
+        self.normalized_titles.insert(node.id.clone(), title);
+        let mut edges: BTreeSet<(String, String)> = node
+            .relations
+            .iter()
+            .map(|relation| (relation.relation.clone(), relation.target.clone()))
+            .collect();
+        for reference in &references {
+            self.reference_sources
+                .entry(reference.target_id.clone())
+                .or_default()
+                .insert(node.id.clone());
+            edges.insert(("references".into(), reference.target_id.clone()));
+        }
+        for (relation, target) in &edges {
+            self.incoming
+                .entry(target.clone())
+                .or_default()
+                .insert((relation.clone(), node.id.clone()));
+        }
+        self.outgoing
+            .insert(node.id.clone(), edges.into_iter().collect());
+        self.body_references.insert(node.id.clone(), references);
+        self.nodes.insert(node.id.clone(), node);
+    }
+
+    fn remove_indexes(
+        &mut self,
+        node: &GraphNode,
+    ) -> (Option<String>, Option<Vec<GraphBodyReference>>) {
+        remove_id(&mut self.by_kind, &node.kind, &node.id);
+        remove_id(&mut self.by_scope, &node.provenance.scope_id, &node.id);
+        for tag in &node.tags {
+            remove_id(&mut self.by_tag, tag, &node.id);
+        }
+        let title = self.normalized_titles.remove(&node.id);
+        if let Some(title) = &title {
+            self.title_order.remove(&(title.clone(), node.id.clone()));
+        }
+        let references = self.body_references.remove(&node.id);
+        for reference in references.iter().flatten() {
+            remove_id(&mut self.reference_sources, &reference.target_id, &node.id);
+        }
+        for (relation, target) in self.outgoing.remove(&node.id).into_iter().flatten() {
+            if let Some(incoming) = self.incoming.get_mut(&target) {
+                incoming.remove(&(relation, node.id.clone()));
+                if incoming.is_empty() {
+                    self.incoming.remove(&target);
+                }
+            }
+        }
+        self.node_diagnostics.remove(&node.id);
+        (title, references)
+    }
+
+    fn refresh_node_diagnostics(&mut self, ids: BTreeSet<String>) {
+        for id in ids {
+            self.node_diagnostics.remove(&id);
+            let Some(node) = self.nodes.get(&id) else {
+                continue;
+            };
+            let mut diagnostics = Vec::new();
             for relation in &node.relations {
-                self.outgoing
-                    .entry(node.id.clone())
-                    .or_default()
-                    .push((relation.relation.clone(), relation.target.clone()));
-                self.incoming
-                    .entry(relation.target.clone())
-                    .or_default()
-                    .push((relation.relation.clone(), node.id.clone()));
                 if !self.nodes.contains_key(&relation.target) {
-                    self.diagnostics.push(GraphDiagnostic::warning(
+                    diagnostics.push(GraphDiagnostic::warning(
                         "dangling-relation",
                         format!(
                             "Graph node '{}' points to missing node '{}' through '{}'.",
@@ -623,6 +948,87 @@ impl GraphStore {
                     ));
                 }
             }
+            let mut seen = BTreeSet::new();
+            for reference in self.body_references.get(&id).into_iter().flatten() {
+                if !self.nodes.contains_key(&reference.target_id)
+                    && seen.insert(&reference.target_id)
+                {
+                    diagnostics.push(GraphDiagnostic::warning(
+                        "unresolved-body-reference",
+                        format!(
+                            "Graph node '{}' contains a link to unavailable node '{}'.",
+                            node.id, reference.target_id
+                        ),
+                        Some(node.id.clone()),
+                        Some(node.provenance.source_path.clone()),
+                    ));
+                }
+            }
+            if !diagnostics.is_empty() {
+                self.node_diagnostics.insert(id, diagnostics);
+            }
+        }
+    }
+
+    fn refresh_diagnostics(&mut self) {
+        self.diagnostics.clear();
+        self.diagnostics
+            .extend(self.source_diagnostics.iter().cloned());
+        self.diagnostics
+            .extend(self.node_diagnostics.values().flatten().cloned());
+    }
+}
+
+fn validate_source_identity(
+    node: &GraphNode,
+    expected: Option<&str>,
+) -> Result<(), GraphMutationError> {
+    if expected.is_some_and(|path| path != node.provenance.source_path) {
+        return Err(GraphMutationError::Invalid(
+            "The Graph source location changed. Reload the entry before saving.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn refresh_mutation_base(
+    node: &mut GraphNode,
+    raw: &str,
+    actual_revision: &str,
+) -> Result<(), GraphMutationError> {
+    if node.provenance.source_revision != actual_revision {
+        // A source editor can observe disk before the watcher updates the
+        // index. A caller with that current revision must retain current
+        // metadata, rather than serialize the older indexed node.
+        *node = parse_graph_markdown(
+            Path::new(&node.provenance.source_path),
+            &node.provenance.scope_id,
+            node.provenance.scope_kind,
+            node.provenance.source_format,
+            raw,
+        ).map_err(|error| GraphMutationError::Invalid(format!(
+            "The current Graph source cannot be read as an entry: {error}. Edit its source to repair it."
+        )))?.node;
+    }
+    Ok(())
+}
+
+fn sort_diagnostics(diagnostics: &mut [GraphDiagnostic]) {
+    diagnostics.sort_by(|left, right| {
+        left.source_path
+            .cmp(&right.source_path)
+            .then_with(|| left.node_id.cmp(&right.node_id))
+            .then_with(|| left.code.cmp(&right.code))
+            .then_with(|| left.message.cmp(&right.message))
+            .then_with(|| (left.level as u8).cmp(&(right.level as u8)))
+    });
+}
+
+fn remove_id(index: &mut HashMap<String, BTreeSet<String>>, key: &str, id: &str) {
+    if let Some(ids) = index.get_mut(key) {
+        ids.remove(id);
+        if ids.is_empty() {
+            index.remove(key);
         }
     }
 }
@@ -712,39 +1118,23 @@ fn allocate_id(
         }
         return Ok(requested.into());
     }
-    if kind == "issue" {
-        let timestamp = chrono::Utc::now().timestamp();
-        for _ in 0..16 {
-            let suffix = &Uuid::new_v4().simple().to_string()[..4];
-            let candidate = format!("issue-{timestamp}-{suffix}");
-            if !store.nodes.contains_key(&candidate) {
-                return Ok(candidate);
-            }
-        }
-        return Err(GraphMutationError::Invalid(
-            "could not allocate a unique issue id".into(),
-        ));
-    }
-
-    let base = slug_id(title);
-    if base.is_empty() {
-        return Err(GraphMutationError::Invalid(
-            "title must contain characters usable in an id".into(),
-        ));
-    }
-    for suffix in 1..=100 {
-        let candidate = if suffix == 1 {
-            base.clone()
-        } else {
-            format!("{base}-{suffix}")
-        };
+    let slug = if kind == "issue" {
+        format!("issue-{}", chrono::Utc::now().timestamp())
+    } else {
+        slug_id(title)
+    };
+    let base = if slug.is_empty() { kind } else { &slug };
+    // IDs are stable filenames. A complete random suffix prevents a new entry
+    // from taking a deleted entry's identity, without durable tombstones.
+    for _ in 0..16 {
+        let candidate = format!("{base}-{}", Uuid::new_v4().simple());
         if !store.nodes.contains_key(&candidate) {
             return Ok(candidate);
         }
     }
-    Err(GraphMutationError::Invalid(format!(
-        "could not allocate a unique id based on '{base}'"
-    )))
+    Err(GraphMutationError::Invalid(
+        "could not allocate a unique graph id".into(),
+    ))
 }
 
 fn slug_id(value: &str) -> String {
@@ -758,7 +1148,7 @@ fn slug_id(value: &str) -> String {
             slug.push('-');
             last_dash = true;
         }
-        if slug.len() >= 80 {
+        if slug.len() >= 87 {
             break;
         }
     }
@@ -1236,11 +1626,13 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(project.id, "value-evidence-strategy");
+        assert!(project.id.starts_with("value-evidence-strategy-"));
+        assert!(is_valid_id(&project.id));
         assert_eq!(project.provenance.scope_id, "project:test");
         assert!(root
             .path()
-            .join("graph/value-evidence-strategy.md")
+            .join("graph")
+            .join(format!("{}.md", project.id))
             .is_file());
 
         let issue = store
@@ -1289,6 +1681,7 @@ mod tests {
             .move_node(
                 &project_root,
                 GraphNodeMove {
+                    expected_source_path: None,
                     id: meeting.id.clone(),
                     target_scope_id: project_root.scope_id.clone(),
                     expected_revision: Some(meeting.provenance.source_revision),
@@ -1509,6 +1902,7 @@ mod tests {
         let error = store
             .delete_node_with(
                 GraphNodeDelete {
+                    expected_source_path: None,
                     id: node.id.clone(),
                     expected_revision: Some(node.provenance.source_revision),
                 },
@@ -1594,6 +1988,7 @@ mod tests {
         let error = store
             .delete_node_with(
                 GraphNodeDelete {
+                    expected_source_path: None,
                     id: node.id.clone(),
                     expected_revision: None,
                 },
@@ -1615,6 +2010,7 @@ mod tests {
         let deleted = store
             .delete_node_with(
                 GraphNodeDelete {
+                    expected_source_path: None,
                     id: "project-eversana".into(),
                     expected_revision: None,
                 },
@@ -1711,6 +2107,7 @@ mod tests {
         let deleted = store
             .delete_node_with(
                 GraphNodeDelete {
+                    expected_source_path: None,
                     id: node.id.clone(),
                     expected_revision: Some(node.provenance.source_revision),
                 },
@@ -1721,5 +2118,283 @@ mod tests {
         assert!(!Path::new(&deleted.source_path).exists());
         assert!(store.get("project-eversana").is_none());
         assert_eq!(store.len(), 2);
+    }
+
+    fn linked_node(id: &str, title: &str, body: &str, scope: &str) -> GraphNode {
+        GraphNode {
+            id: id.into(),
+            kind: "note".into(),
+            title: title.into(),
+            summary: String::new(),
+            body: body.into(),
+            tags: vec![],
+            relations: vec![],
+            properties: serde_json::Map::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            provenance: GraphProvenance {
+                scope_id: scope.into(),
+                scope_kind: GraphScopeKind::Team,
+                source_path: format!("/{scope}/graph/{id}.md"),
+                source_revision: source_revision(body),
+                source_format: GraphSourceFormat::Graph,
+            },
+        }
+    }
+
+    #[test]
+    fn body_occurrences_share_one_edge_and_keep_authored_relations_separate() {
+        let mut source = linked_node(
+            "source",
+            "Source",
+            "[Jon](mimir://graph/jon) and [J](mimir://graph/jon)",
+            "team",
+        );
+        source.relations = vec![
+            GraphRelation {
+                relation: "assigned_to".into(),
+                target: "jon".into(),
+                legacy: false,
+            },
+            GraphRelation {
+                relation: "references".into(),
+                target: "jon".into(),
+                legacy: true,
+            },
+        ];
+        let target = linked_node("jon", "Jon", "", "team");
+        let mut store = GraphStore::from_nodes(vec![source.clone(), target], vec![]);
+        let scopes = BTreeSet::new();
+        assert_eq!(store.references("source", &scopes).outgoing.len(), 2);
+        let backlinks = store.references("jon", &scopes).backlinks;
+        assert_eq!(backlinks.len(), 1);
+        assert_eq!(backlinks[0].occurrences.len(), 2);
+        assert_eq!(
+            backlinks[0].source_revision,
+            source.provenance.source_revision
+        );
+        assert_eq!(store.neighbors("source", &scopes).len(), 2);
+        assert_eq!(store.effective_relations("source"), source.relations);
+        assert_eq!(store.get("source").unwrap().relations, source.relations);
+
+        source.body = "[Jon](mimir://graph/jon)".into();
+        store.apply_reconciled_nodes(vec![(source.id.clone(), Some(source.clone()))], vec![]);
+        assert_eq!(
+            store.references("jon", &scopes).backlinks[0]
+                .occurrences
+                .len(),
+            1
+        );
+        source.body.clear();
+        store.apply_reconciled_nodes(vec![(source.id.clone(), Some(source.clone()))], vec![]);
+        assert!(store.references("jon", &scopes).backlinks.is_empty());
+        assert_eq!(store.effective_relations("source"), source.relations);
+        assert_eq!(store.neighbors("source", &scopes).len(), 2);
+        let serialized = serialize_graph_markdown(store.get("source").unwrap()).unwrap();
+        assert!(serialized.contains("assigned_to"));
+    }
+
+    #[test]
+    fn derived_edge_removal_and_restore_follow_only_the_source_body() {
+        let source = linked_node("source", "Source", "[Jon](mimir://graph/jon)", "team");
+        let target = linked_node("jon", "Jon", "", "team");
+        let mut store = GraphStore::from_nodes(vec![source.clone(), target], vec![]);
+        let mut changed = source.clone();
+        changed.body.clear();
+        store.apply_reconciled_nodes(vec![(changed.id.clone(), Some(changed))], vec![]);
+        assert!(store.effective_relations("source").is_empty());
+        assert!(store.neighbors("source", &BTreeSet::new()).is_empty());
+        store.apply_reconciled_nodes(vec![(source.id.clone(), Some(source))], vec![]);
+        assert_eq!(store.effective_relations("source").len(), 1);
+        assert_eq!(store.references("jon", &BTreeSet::new()).backlinks.len(), 1);
+        assert!(store.get("source").unwrap().relations.is_empty());
+        assert!(!serialize_graph_markdown(store.get("source").unwrap())
+            .unwrap()
+            .contains("references jon"));
+    }
+
+    #[test]
+    fn deletion_rename_scope_move_and_restore_resolve_without_reparsing_sources() {
+        let source = linked_node("source", "Source", "[Old name](mimir://graph/jon)", "team");
+        let mut target = linked_node("jon", "Jon", "", "team");
+        let mut store = GraphStore::from_nodes(vec![source.clone(), target.clone()], vec![]);
+        let parse_count = store.reference_parse_count;
+        target.title = "Jonathan".into();
+        store.apply_reconciled_nodes(vec![(target.id.clone(), Some(target.clone()))], vec![]);
+        let refs = store.references("source", &BTreeSet::new());
+        assert_eq!(refs.outgoing[0].reference.label, "Old name");
+        assert_eq!(refs.outgoing[0].node.as_ref().unwrap().title, "Jonathan");
+        assert_eq!(store.reference_parse_count, parse_count);
+        target.provenance.scope_id = "private".into();
+        store.apply_reconciled_nodes(vec![(target.id.clone(), Some(target.clone()))], vec![]);
+        let refs = store.references("source", &BTreeSet::from(["team".into()]));
+        assert_eq!(refs.outgoing[0].status, GraphLinkStatus::Unavailable);
+        assert!(refs.outgoing[0].node.is_none());
+        assert!(store
+            .references("jon", &BTreeSet::from(["team".into()]))
+            .backlinks
+            .is_empty());
+        store.apply_reconciled_nodes(vec![("jon".into(), None)], vec![]);
+        assert_eq!(
+            store.references("source", &BTreeSet::new()).outgoing[0].status,
+            GraphLinkStatus::Unavailable
+        );
+        assert_eq!(
+            store
+                .diagnostics()
+                .iter()
+                .filter(|row| row.code == "unresolved-body-reference")
+                .count(),
+            1
+        );
+        assert_eq!(store.get("source").unwrap(), &source);
+        store.apply_reconciled_nodes(vec![(target.id.clone(), Some(target))], vec![]);
+        assert_eq!(
+            store.references("source", &BTreeSet::new()).outgoing[0].status,
+            GraphLinkStatus::Resolved
+        );
+        assert_eq!(store.references("jon", &BTreeSet::new()).backlinks.len(), 1);
+        assert!(store.diagnostics().is_empty());
+        assert_eq!(store.reference_parse_count, parse_count + 1);
+    }
+
+    #[test]
+    fn lookup_covers_all_nodes_normalizes_titles_and_obeys_scopes_and_bounds() {
+        let mut nodes = (0..750)
+            .map(|index| {
+                linked_node(
+                    &format!("node-{index}"),
+                    &format!("Unrelated {index}"),
+                    "Jon body only",
+                    "team",
+                )
+            })
+            .collect::<Vec<_>>();
+        nodes.extend([
+            linked_node("jon", "Jón", "", "team"),
+            linked_node("jon-minton", "Jon Minton", "", "team"),
+            linked_node("jolo", "Jolo", "", "team"),
+            linked_node("meet-jon", "Meet Jon", "", "team"),
+            linked_node("banjo", "Banjo", "", "team"),
+            linked_node("private-jon", "Jon Secret", "", "private"),
+            linked_node("Invalid ID", "Jon Invalid", "", "team"),
+            linked_node("untitled", "", "", "team"),
+        ]);
+        let store = GraphStore::from_nodes(nodes, vec![]);
+        let team = BTreeSet::from(["team".into()]);
+        let results = store.lookup("JO", &team, 12);
+        assert_eq!(
+            results
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["jolo", "jon", "jon-minton", "meet-jon", "banjo"]
+        );
+        assert_eq!(store.lookup("jon", &team, 12)[0].id, "jon");
+        assert_eq!(store.lookup("mi jo", &team, 12)[0].id, "jon-minton");
+        assert_eq!(store.lookup("", &team, 999).len(), MAX_LOOKUP_LIMIT);
+        assert_eq!(store.lookup("", &team, 1)[0].id, "banjo");
+        assert_eq!(store.visible_ids(&team).len(), 757);
+        let resolved = store.link_targets(
+            &[
+                "private-jon".into(),
+                "missing".into(),
+                "jon".into(),
+                "jon".into(),
+            ],
+            &team,
+        );
+        assert_eq!(resolved.len(), 3);
+        for row in &resolved[..2] {
+            assert_eq!(row.status, GraphLinkStatus::Unavailable);
+            assert!(row.title.is_none() && row.kind.is_none() && row.scope_id.is_none());
+        }
+        assert_eq!(resolved[2].title.as_deref(), Some("Jón"));
+    }
+
+    #[test]
+    fn title_only_update_uses_cached_body_rows_and_body_edit_reparses_one_source() {
+        let nodes = (0..750)
+            .map(|index| {
+                linked_node(
+                    &format!("node-{index}"),
+                    &format!("Note {index}"),
+                    "[Target](mimir://graph/node-0)",
+                    "team",
+                )
+            })
+            .collect();
+        let mut store = GraphStore::from_nodes(nodes, vec![]);
+        assert_eq!(store.reference_parse_count, 750);
+        let mut node = store.get("node-749").unwrap().clone();
+        node.title = "Changed title".into();
+        node.tags = vec!["changed".into()];
+        store.apply_reconciled_nodes(vec![(node.id.clone(), Some(node.clone()))], vec![]);
+        assert_eq!(store.reference_parse_count, 750);
+        assert_eq!(
+            store.lookup("changed", &BTreeSet::new(), 12)[0].id,
+            "node-749"
+        );
+        assert_eq!(
+            store
+                .query(&GraphQuery {
+                    tags: BTreeSet::from(["changed".into()]),
+                    ..GraphQuery::default()
+                })
+                .total,
+            1
+        );
+        node.body.clear();
+        store.apply_reconciled_nodes(vec![(node.id.clone(), Some(node.clone()))], vec![]);
+        assert_eq!(store.reference_parse_count, 751);
+        assert_eq!(
+            store.references("node-0", &BTreeSet::new()).backlinks.len(),
+            749
+        );
+        let revision = store.revision();
+        assert!(!store.apply_reconciled_nodes(vec![(node.id.clone(), Some(node))], vec![]));
+        assert_eq!(store.revision(), revision);
+        assert_eq!(store.reference_parse_count, 751);
+    }
+
+    #[test]
+    fn reordered_source_diagnostics_do_not_publish_a_change() {
+        let a = GraphDiagnostic::warning(
+            "duplicate-id",
+            "Duplicate A",
+            Some("a".into()),
+            Some("/team/graph/a.md".into()),
+        );
+        let b = GraphDiagnostic::warning(
+            "source-file-invalid",
+            "Malformed B",
+            None,
+            Some("/team/graph/b.md".into()),
+        );
+        let mut store = GraphStore::from_nodes(vec![], vec![b.clone(), a.clone()]);
+        let revision = store.revision();
+        assert!(!store.apply_reconciled_nodes(vec![], vec![a, b]));
+        assert_eq!(store.revision(), revision);
+    }
+
+    #[test]
+    fn generated_ids_cannot_reuse_a_deleted_title_and_accept_long_or_unicode_titles() {
+        let store = GraphStore::default();
+        let first = allocate_id(&store, None, "person", "Jon Minton").unwrap();
+        let second = allocate_id(&store, None, "person", "Jon Minton").unwrap();
+        assert_ne!(first, second);
+        assert!(first.starts_with("jon-minton-"));
+        for title in ["東京", &"a".repeat(300)] {
+            let id = allocate_id(&store, None, "note", title).unwrap();
+            assert!(is_valid_id(&id));
+            assert!(id.len() <= 120);
+            let suffix = id.rsplit('-').next().unwrap();
+            assert_eq!(suffix.len(), 32);
+            assert!(Uuid::parse_str(suffix).is_ok());
+        }
+        assert_eq!(
+            allocate_id(&store, Some("jon"), "person", "Jon").unwrap(),
+            "jon"
+        );
     }
 }

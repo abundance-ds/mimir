@@ -31,6 +31,9 @@
 //!   interrupted in SQLite; snapshots contain ended activities.
 //! - `launchers::load_config`, settings, and session loaders write only when
 //!   the file is missing or quarantined; snapshots always provide valid files.
+//! - Routine catalog resolution prepares Scratchpad access when a supported
+//!   agent is installed. It can initialize `scratchpad.md` and its link registry;
+//!   this does not change the pre-existing snapshot files.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -173,13 +176,20 @@ fn every_shipped_snapshot_loads_cleanly_and_is_left_untouched() {
             .filter(|path| !after.contains_key(*path))
             .cloned()
             .collect::<Vec<_>>();
-        let expected_added = (!before.contains_key("activities/activities.sqlite3"))
+        let mut expected_added = (!before.contains_key("activities/activities.sqlite3"))
             .then(|| "activities/activities.sqlite3".to_string())
             .into_iter()
             .collect::<Vec<_>>();
+        // Agent availability is host tooling, so Scratchpad preparation is
+        // optional on CI. These are the only allowed additional files.
+        for path in ["scratchpad-links.json", "scratchpad.md"] {
+            if !before.contains_key(path) && after.contains_key(path) {
+                expected_added.push(path.to_string());
+            }
+        }
         assert_eq!(
             added, expected_added,
-            "[{version}] only the Activity SQLite migration may create a file"
+            "[{version}] only Activity migration and Scratchpad initialization may create files"
         );
         assert!(
             removed.is_empty(),

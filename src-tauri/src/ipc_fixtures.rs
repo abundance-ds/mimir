@@ -27,7 +27,8 @@ use crate::apps::{
 };
 use crate::business_graph::{
     GraphNode, GraphNodeSummary, GraphOpenResult, GraphProvenance, GraphQueryResult, GraphRelation,
-    GraphScopeDescriptor, GraphScopeKind, GraphSourceFormat,
+    GraphScopeDescriptor, GraphScopeKind, GraphSourceDocument, GraphSourceFormat, GraphSourceRoot,
+    GraphStore,
 };
 use crate::file_index::{ContentSearchMatch, ContentSearchReport, FileIndexEntry, IndexRefresh};
 use crate::git::GitStatusEntry;
@@ -513,6 +514,41 @@ fn graph_get() -> Option<GraphNode> {
     })
 }
 
+fn graph_link_store() -> GraphStore {
+    let mut source = graph_get().unwrap();
+    source.id = "note-source".into();
+    source.title = "Working note".into();
+    source.kind = "note".into();
+    source.properties.clear();
+    source.relations.clear();
+    source.body =
+        "Ask [Jon](mimir://graph/person-jon) about [Missing](mimir://graph/missing).".into();
+    let mut target = source.clone();
+    target.id = "person-jon".into();
+    target.title = "Jon Minton".into();
+    target.kind = "person".into();
+    target.body = "See [Working note](mimir://graph/note-source).".into();
+    GraphStore::from_nodes(vec![source, target], Vec::new())
+}
+
+fn graph_source_document(malformed: bool) -> GraphSourceDocument {
+    let root = GraphSourceRoot::new(
+        "project:mimir",
+        GraphScopeKind::Project,
+        "/Users/me/work/mimir",
+    );
+    let content = if malformed {
+        "---\ntitle: [unfinished\n---\nThe draft remains intact.\n"
+    } else {
+        "---\n# Keep this comment.\nkind: note\ntitle: Working note 🌙\ncustom: kept\n---\nAsk [Jon](mimir://graph/person-jon).\n"
+    };
+    GraphSourceDocument::from_source(
+        Path::new("/Users/me/work/mimir/graph/note-source.md"),
+        &root,
+        content.into(),
+    )
+}
+
 /// `file_index_files` → recent-first entries; `FileIndexSnapshot` serializes
 /// exactly like `Vec<FileIndexEntry>`.
 fn file_index_files() -> Vec<FileIndexEntry> {
@@ -931,6 +967,30 @@ fn fixtures() -> Vec<(&'static str, String)> {
         entry("graph_open", graph_open()),
         entry("graph_query", graph_query()),
         entry("graph_get", graph_get()),
+        entry("graph_source", Some(graph_source_document(false))),
+        entry("graph_source_save", graph_source_document(true)),
+        entry(
+            "graph_source_serialize",
+            crate::business_graph::runtime::graph_source_serialize(
+                graph_source_document(false).node.unwrap(),
+            )
+            .unwrap(),
+        ),
+        entry(
+            "graph_lookup",
+            graph_link_store().lookup("jo", &Default::default(), 12),
+        ),
+        entry(
+            "graph_link_targets",
+            graph_link_store().link_targets(
+                &["person-jon".into(), "missing".into()],
+                &Default::default(),
+            ),
+        ),
+        entry(
+            "graph_references",
+            graph_link_store().references("note-source", &Default::default()),
+        ),
         entry("file_index_files", file_index_files()),
         entry("file_index_refresh", file_index_refresh()),
         entry("file_index_search", file_index_search()),

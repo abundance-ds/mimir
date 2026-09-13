@@ -70,10 +70,11 @@ impl GraphRuntime {
             limit: 500,
             ..GraphQuery::default()
         })?;
-        let visible_ids = catalog
-            .items
-            .iter()
-            .map(|node| node.id.clone())
+        // Membership is not bounded by the first list page. The context body
+        // budget remains small even when its focus is an older graph entry.
+        let visible_ids = self
+            .visible_ids(&request.scope_ids)?
+            .into_iter()
             .collect::<HashSet<_>>();
         let selected = select_context_nodes(
             self,
@@ -89,9 +90,12 @@ impl GraphRuntime {
         let mut sensitive_nodes_redacted = 0;
         let mut truncated_bodies = 0;
         for id in selected {
-            let Some(node) = self.get(&id)? else {
+            let Some(mut node) = self.get(&id)? else {
                 continue;
             };
+            // This is a read projection only; authored YAML relations remain
+            // untouched. Sensitive nodes are still redacted by context_node.
+            node.relations = self.effective_relations(&id)?;
             nodes.push(context_node(
                 node,
                 &visible_ids,

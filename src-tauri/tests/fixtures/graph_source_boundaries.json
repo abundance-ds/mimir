@@ -1,0 +1,62 @@
+[
+  {
+    "name": "plain",
+    "content": "Ordinary body @jo",
+    "bodyFrom": 0,
+    "completionFrom": 0
+  },
+  {
+    "name": "lf",
+    "content": "---\ntitle: Name\n---\nBody @jo",
+    "bodyFrom": 20,
+    "completionFrom": 20
+  },
+  {
+    "name": "crlf",
+    "content": "---\r\ntitle: 🌙\r\n---\r\nBody @jo",
+    "bodyFrom": 21,
+    "completionFrom": 21
+  },
+  {
+    "name": "trailing-spaces",
+    "content": "--- \t\ntitle: Name\n--- \t\nBody @jo",
+    "bodyFrom": 24,
+    "completionFrom": 24
+  },
+  {
+    "name": "unicode-whitespace",
+    "content": "--- \ntitle: Name\n--- \nBody @jo",
+    "bodyFrom": 23,
+    "completionFrom": 23
+  },
+  {
+    "name": "unclosed",
+    "content": "---\ntitle: @jo",
+    "bodyFrom": 0,
+    "completionFrom": 14
+  },
+  {
+    "name": "indented-close",
+    "content": "---\ntitle: @jo\n  ---\nStill metadata",
+    "bodyFrom": 0,
+    "completionFrom": 35
+  },
+  {
+    "name": "indented-open",
+    "content": "  ---\nBody @jo",
+    "bodyFrom": 0,
+    "completionFrom": 0
+  },
+  {
+    "name": "bom-is-not-native-whitespace",
+    "content": "---﻿\nBody @jo",
+    "bodyFrom": 0,
+    "completionFrom": 0
+  },
+  {
+    "name": "empty",
+    "content": "",
+    "bodyFrom": 0,
+    "completionFrom": 0
+  }
+]

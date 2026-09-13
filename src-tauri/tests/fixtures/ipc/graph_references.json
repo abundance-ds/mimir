@@ -1,0 +1,44 @@
+{
+  "sourceRevision": "4f6a2c88",
+  "outgoing": [
+    {
+      "targetId": "person-jon",
+      "label": "Jon",
+      "from": 4,
+      "to": 35,
+      "status": "resolved",
+      "node": {
+        "id": "person-jon",
+        "title": "Jon Minton",
+        "kind": "person",
+        "scopeId": "project:mimir"
+      }
+    },
+    {
+      "targetId": "missing",
+      "label": "Missing",
+      "from": 42,
+      "to": 74,
+      "status": "unavailable"
+    }
+  ],
+  "backlinks": [
+    {
+      "source": {
+        "id": "person-jon",
+        "title": "Jon Minton",
+        "kind": "person",
+        "scopeId": "project:mimir"
+      },
+      "sourceRevision": "4f6a2c88",
+      "occurrences": [
+        {
+          "targetId": "note-source",
+          "label": "Working note",
+          "from": 4,
+          "to": 45
+        }
+      ]
+    }
+  ]
+}

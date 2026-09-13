@@ -1,0 +1,13 @@
+[
+  {
+    "id": "person-jon",
+    "status": "resolved",
+    "title": "Jon Minton",
+    "kind": "person",
+    "scopeId": "project:mimir"
+  },
+  {
+    "id": "missing",
+    "status": "unavailable"
+  }
+]

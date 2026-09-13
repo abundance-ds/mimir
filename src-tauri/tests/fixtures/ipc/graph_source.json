@@ -1,0 +1,26 @@
+{
+  "node": {
+    "id": "note-source",
+    "kind": "note",
+    "title": "Working note 🌙",
+    "summary": "",
+    "body": "Ask [Jon](mimir://graph/person-jon).\n",
+    "tags": [],
+    "relations": [],
+    "properties": {
+      "custom": "kept"
+    },
+    "createdAt": "",
+    "updatedAt": "",
+    "provenance": {
+      "scopeId": "project:mimir",
+      "scopeKind": "project",
+      "sourcePath": "/Users/me/work/mimir/graph/note-source.md",
+      "sourceRevision": "29cea4c4235d623bda53f5de31446882fd9fe7064834eb3a1c546427798606ad",
+      "sourceFormat": "graph"
+    }
+  },
+  "content": "---\n# Keep this comment.\nkind: note\ntitle: Working note 🌙\ncustom: kept\n---\nAsk [Jon](mimir://graph/person-jon).\n",
+  "sourceRevision": "29cea4c4235d623bda53f5de31446882fd9fe7064834eb3a1c546427798606ad",
+  "bodyFrom": 76
+}

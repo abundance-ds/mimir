@@ -102,6 +102,7 @@ pub fn parse_graph_markdown(
     }
 
     let (frontmatter, body) = split_frontmatter(raw);
+    let body = body.to_string();
     let meta = parse_frontmatter(frontmatter)?;
     let source_path = path.to_string_lossy().into_owned();
     let provenance = GraphProvenance {
@@ -485,13 +486,13 @@ fn is_frontmatter_delimiter(line: &str) -> bool {
     line.trim_end() == "---"
 }
 
-fn split_frontmatter(raw: &str) -> (&str, String) {
+pub(super) fn split_frontmatter(raw: &str) -> (&str, &str) {
     let mut lines = raw.split_inclusive('\n');
     let Some(first) = lines.next() else {
-        return ("", String::new());
+        return ("", "");
     };
     if !is_frontmatter_delimiter(first) {
-        return ("", raw.to_string());
+        return ("", raw);
     }
 
     let frontmatter_start = first.len();
@@ -499,14 +500,11 @@ fn split_frontmatter(raw: &str) -> (&str, String) {
     for line in lines {
         if is_frontmatter_delimiter(line) {
             let body_start = cursor + line.len();
-            return (
-                &raw[frontmatter_start..cursor],
-                raw[body_start..].to_string(),
-            );
+            return (&raw[frontmatter_start..cursor], &raw[body_start..]);
         }
         cursor += line.len();
     }
-    ("", raw.to_string())
+    ("", raw)
 }
 
 fn parse_frontmatter(raw: &str) -> Result<Map<String, Value>, GraphMarkdownError> {

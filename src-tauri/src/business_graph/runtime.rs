@@ -6,8 +6,14 @@ use super::model::{
     GraphQueryResult, GraphRestoreRequest, GraphScopeDescriptor, GraphScopeKind, GraphSearchResult,
     GraphSourceRoot,
 };
+use super::source_sync::{
+    graph_markdown_path, reconcile_sources, source_id, source_stamp, source_stamps, SourceStamp,
+};
 use super::store::{GraphMutationError, GraphStore};
-use super::{build_migration_report, GraphContextPack, GraphContextRequest, GraphMigrationReport};
+use super::{
+    build_migration_report, GraphContextPack, GraphContextRequest, GraphLinkResolution,
+    GraphLinkTarget, GraphMigrationReport, GraphReferences, GraphRelation,
+};
 use crate::persistence;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::{json, Map, Value};
@@ -16,17 +22,32 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fs,
     path::{Path, PathBuf},
-    sync::{mpsc, Mutex, RwLock},
-    time::Duration,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Mutex, RwLock,
+    },
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 const GRAPH_CHANGED_EVENT: &str = "mimir://graph-changed";
 const MAX_GRAPH_EVENTS: usize = 2_000;
+const RECONCILE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+#[path = "runtime_source.rs"]
+mod source;
+pub use source::{GraphSourceDocument, GraphSourceSaveRequest};
+
+#[cfg(test)]
+#[path = "runtime_link_tests.rs"]
+mod link_tests;
 
 #[derive(Default)]
 pub struct GraphRuntime {
+    // Writers and source scans share one order; readers only use `store`.
+    mutation_gate: Mutex<()>,
+    root_generation: AtomicU64,
     store: RwLock<GraphStore>,
     roots: RwLock<Vec<GraphSourceRoot>>,
     watchers: Mutex<Vec<RecommendedWatcher>>,
@@ -34,6 +55,7 @@ pub struct GraphRuntime {
     events: Mutex<VecDeque<GraphEvent>>,
     event_path: RwLock<Option<PathBuf>>,
     pending_source_revisions: Mutex<BTreeMap<String, Option<String>>>,
+    source_stamps: Mutex<BTreeMap<PathBuf, SourceStamp>>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +70,10 @@ impl GraphRuntime {
     #[cfg(test)]
     pub(crate) fn from_roots(roots: Vec<GraphSourceRoot>) -> Self {
         Self {
+            mutation_gate: Mutex::new(()),
+            root_generation: AtomicU64::new(0),
             store: RwLock::new(GraphStore::load(&roots)),
+            source_stamps: Mutex::new(source_stamps(&roots).unwrap_or_default()),
             roots: RwLock::new(roots),
             watchers: Mutex::new(Vec::new()),
             deleted: Mutex::new(VecDeque::new()),
@@ -63,6 +88,10 @@ impl GraphRuntime {
         app: &AppHandle,
         project_root: impl Into<PathBuf>,
     ) -> Result<GraphOpenResult, String> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| error.to_string())?;
         let project_root = canonical_directory(project_root.into(), "project graph root")?;
         let private_root = private_root()?;
         fs::create_dir_all(&private_root)
@@ -90,12 +119,25 @@ impl GraphRuntime {
 
         let event_path = graph_event_path(&project_root)?;
         let events = load_graph_events(&event_path)?;
+        let generation = self.root_generation.load(Ordering::Acquire).wrapping_add(1);
+        // Register before scanning so a disk edit cannot fall between them.
+        let watchers = watch_roots(app.clone(), &roots, generation)?;
+        let stamps = source_stamps(&roots).unwrap_or_default();
         let store = GraphStore::load(&roots);
         let result = open_result(&roots, &store);
-        let watchers = watch_roots(app.clone(), &roots)?;
-        *self.store.write().map_err(|error| error.to_string())? = store;
-        *self.roots.write().map_err(|error| error.to_string())? = roots;
+        {
+            // Match open_result's lock order and publish scope+store together.
+            let mut active_roots = self.roots.write().map_err(|error| error.to_string())?;
+            let mut active_store = self.store.write().map_err(|error| error.to_string())?;
+            *active_roots = roots;
+            *active_store = store;
+        }
         *self.watchers.lock().map_err(|error| error.to_string())? = watchers;
+        *self
+            .source_stamps
+            .lock()
+            .map_err(|error| error.to_string())? = stamps;
+        self.root_generation.store(generation, Ordering::Release);
         *self.events.lock().map_err(|error| error.to_string())? = events;
         *self.event_path.write().map_err(|error| error.to_string())? = Some(event_path);
         self.pending_source_revisions
@@ -106,22 +148,172 @@ impl GraphRuntime {
     }
 
     pub fn refresh(&self, paths: Vec<String>) -> Result<GraphChanged, String> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| error.to_string())?;
+        self.refresh_locked(paths)
+    }
+
+    fn refresh_locked(&self, paths: Vec<String>) -> Result<GraphChanged, String> {
         let roots = self
             .roots
             .read()
             .map_err(|error| error.to_string())?
             .clone();
-        let (next_revision, before_nodes) = {
+        if !paths.is_empty() {
+            return self.refresh_paths_locked(&roots, paths);
+        }
+        let (revision, before_nodes, before_diagnostics) = {
             let store = self.store.read().map_err(|error| error.to_string())?;
-            (store.revision().saturating_add(1), store.snapshot_nodes())
+            (
+                store.revision(),
+                store.snapshot_nodes(),
+                store.source_diagnostics().to_vec(),
+            )
         };
+        let stamps = source_stamps(&roots).unwrap_or_default();
         let mut store = GraphStore::load(&roots);
-        store.set_revision(next_revision);
         let after_nodes = store.snapshot_nodes();
+        let different =
+            before_nodes != after_nodes || before_diagnostics != store.source_diagnostics();
+        store.set_revision(revision.saturating_add(u64::from(different)));
         let changed = changed_result(&store, paths);
-        *self.store.write().map_err(|error| error.to_string())? = store;
+        if different {
+            *self.store.write().map_err(|error| error.to_string())? = store;
+        }
+        *self
+            .source_stamps
+            .lock()
+            .map_err(|error| error.to_string())? = stamps;
         self.record_external_changes(before_nodes, after_nodes, &changed.paths)?;
         Ok(changed)
+    }
+
+    fn refresh_paths_locked(
+        &self,
+        roots: &[GraphSourceRoot],
+        paths: Vec<String>,
+    ) -> Result<GraphChanged, String> {
+        let ids = paths
+            .iter()
+            .map(Path::new)
+            .filter(|path| {
+                roots
+                    .iter()
+                    .any(|root| graph_markdown_path(&root.root, path))
+            })
+            .filter_map(source_id)
+            .collect::<BTreeSet<_>>();
+        let (before, mut diagnostics) = {
+            let store = self.store.read().map_err(|error| error.to_string())?;
+            let before = ids
+                .iter()
+                .filter_map(|id| store.get(id).cloned())
+                .collect::<Vec<_>>();
+            let diagnostics = store
+                .source_diagnostics()
+                .iter()
+                .filter(|diagnostic| {
+                    !diagnostic
+                        .source_path
+                        .as_deref()
+                        .and_then(|path| source_id(Path::new(path)))
+                        .is_some_and(|id| ids.contains(&id))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            (before, diagnostics)
+        };
+        // Record metadata before reading. An edit during the read remains
+        // detectable by the watcher or the next periodic reconciliation.
+        let observed = ids
+            .iter()
+            .flat_map(|id| {
+                roots.iter().map(move |root| {
+                    let path = root.root.join("graph").join(format!("{id}.md"));
+                    let stamp = source_stamp(&path);
+                    (path, stamp)
+                })
+            })
+            .collect::<Vec<_>>();
+        let (nodes, fresh_diagnostics) = reconcile_sources(roots, &ids);
+        diagnostics.extend(fresh_diagnostics);
+        let after = nodes
+            .iter()
+            .filter_map(|(_, node)| node.clone())
+            .collect::<Vec<_>>();
+        let changed = {
+            let mut store = self.store.write().map_err(|error| error.to_string())?;
+            store.apply_reconciled_nodes(nodes, diagnostics);
+            changed_result(&store, paths)
+        };
+        {
+            let mut stamps = self
+                .source_stamps
+                .lock()
+                .map_err(|error| error.to_string())?;
+            for (path, stamp) in observed {
+                if let Some(stamp) = stamp {
+                    stamps.insert(path, stamp);
+                } else {
+                    stamps.remove(&path);
+                }
+            }
+        }
+        // Include all locations for the affected IDs: a duplicate source may
+        // have become authoritative even though only its old winner changed.
+        self.record_external_changes(before, after, &[])?;
+        Ok(changed)
+    }
+
+    fn refresh_watched(
+        &self,
+        paths: Vec<String>,
+        generation: u64,
+        periodic: bool,
+    ) -> Result<Option<GraphChanged>, String> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if generation != self.root_generation.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let paths = if periodic {
+            let roots = self
+                .roots
+                .read()
+                .map_err(|error| error.to_string())?
+                .clone();
+            let current = source_stamps(&roots)?;
+            let previous = self
+                .source_stamps
+                .lock()
+                .map_err(|error| error.to_string())?;
+            let paths = current
+                .keys()
+                .chain(previous.keys())
+                .filter(|path| current.get(*path) != previous.get(*path))
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<BTreeSet<_>>();
+            if paths.is_empty() {
+                return Ok(None);
+            }
+            paths.into_iter().collect()
+        } else {
+            paths
+        };
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        let revision = self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .revision();
+        let changed = self.refresh_locked(paths)?;
+        Ok((changed.graph_revision != revision).then_some(changed))
     }
 
     pub fn open_result(&self) -> Result<GraphOpenResult, String> {
@@ -158,6 +350,65 @@ impl GraphRuntime {
             .read()
             .map_err(|error| error.to_string())?
             .search(query, scope_ids, limit))
+    }
+
+    pub fn lookup(
+        &self,
+        query: &str,
+        scope_ids: &BTreeSet<String>,
+        limit: usize,
+    ) -> Result<Vec<GraphLinkTarget>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .lookup(query, scope_ids, limit))
+    }
+
+    pub fn link_targets(
+        &self,
+        ids: &[String],
+        scope_ids: &BTreeSet<String>,
+    ) -> Result<Vec<GraphLinkResolution>, String> {
+        if ids.len() > 200 {
+            return Err("Resolve no more than 200 graph links at once.".into());
+        }
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .link_targets(ids, scope_ids))
+    }
+
+    pub fn references(
+        &self,
+        id: &str,
+        scope_ids: &BTreeSet<String>,
+    ) -> Result<GraphReferences, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .references(id, scope_ids))
+    }
+
+    pub fn effective_relations(&self, id: &str) -> Result<Vec<GraphRelation>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .effective_relations(id))
+    }
+
+    pub(crate) fn visible_ids(
+        &self,
+        scope_ids: &BTreeSet<String>,
+    ) -> Result<BTreeSet<String>, String> {
+        Ok(self
+            .store
+            .read()
+            .map_err(|error| error.to_string())?
+            .visible_ids(scope_ids))
     }
 
     pub fn neighbors(
@@ -271,6 +522,10 @@ impl GraphRuntime {
     }
 
     pub fn update(&self, patch: GraphNodePatch) -> Result<GraphNode, GraphMutationError> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
         let updated = self
             .store
             .write()
@@ -284,6 +539,10 @@ impl GraphRuntime {
     }
 
     pub fn create(&self, create: GraphNodeCreate) -> Result<GraphNode, GraphMutationError> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
         let scope_order = default_scope_order(&create.kind);
         let root = {
             let roots = self
@@ -318,6 +577,10 @@ impl GraphRuntime {
     }
 
     pub fn move_scope(&self, request: GraphNodeMove) -> Result<GraphNode, GraphMutationError> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
         let previous_path = self
             .store
             .read()
@@ -350,6 +613,10 @@ impl GraphRuntime {
         &self,
         request: GraphNodeDelete,
     ) -> Result<GraphDeleteResult, GraphMutationError> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
         let node = self
             .store
             .read()
@@ -387,6 +654,10 @@ impl GraphRuntime {
     }
 
     pub fn restore(&self, request: GraphRestoreRequest) -> Result<GraphNode, GraphMutationError> {
+        let _mutation = self
+            .mutation_gate
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
         let backup = {
             let queue = self
                 .deleted
@@ -400,6 +671,26 @@ impl GraphRuntime {
                     GraphMutationError::NotFound(format!("undo token {}", request.undo_token))
                 })?
         };
+        let mounted = self
+            .roots
+            .read()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .iter()
+            .any(|root| graph_markdown_path(&root.root, &backup.path));
+        if !mounted {
+            return Err(GraphMutationError::Invalid(
+                "Open the original workspace before restoring this entry.".into(),
+            ));
+        }
+        if self
+            .store
+            .read()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
+            .get(&backup.id)
+            .is_some()
+        {
+            return Err(GraphMutationError::Exists(backup.id));
+        }
         if backup.path.exists() {
             return Err(GraphMutationError::Exists(backup.id));
         }
@@ -411,7 +702,7 @@ impl GraphRuntime {
         })?;
         let source_path = backup.path.to_string_lossy().into_owned();
         self.remember_source_revision(source_path.clone(), Some(source_revision(&backup.raw)))?;
-        self.refresh(vec![source_path])
+        self.refresh_locked(vec![source_path])
             .map_err(GraphMutationError::Invalid)?;
         let restored = self
             .get(&backup.id)
@@ -430,6 +721,16 @@ impl GraphRuntime {
         source_path: String,
         revision: Option<String>,
     ) -> Result<(), GraphMutationError> {
+        let path = PathBuf::from(&source_path);
+        let mut stamps = self
+            .source_stamps
+            .lock()
+            .map_err(|error| GraphMutationError::Invalid(error.to_string()))?;
+        if let Some(stamp) = source_stamp(&path) {
+            stamps.insert(path, stamp);
+        } else {
+            stamps.remove(&path);
+        }
         self.pending_source_revisions
             .lock()
             .map_err(|error| GraphMutationError::Invalid(error.to_string()))?
@@ -701,6 +1002,11 @@ fn graph_event_type(
     after: Option<&GraphNode>,
     changes: &[GraphFieldChange],
 ) -> String {
+    // A source edit can make frontmatter invalid or repair it. The file still
+    // exists in either case; loss of an indexed node is not a Trash action.
+    if action == "graph.source-save" && (before.is_none() || after.is_none()) {
+        return "updated".into();
+    }
     if before.is_none() && after.is_some() {
         if action.contains("restore") {
             return "restored".into();
@@ -816,6 +1122,41 @@ fn human_kind(value: &str) -> String {
 }
 
 #[tauri::command]
+pub async fn graph_source(
+    app: AppHandle,
+    path: String,
+) -> Result<Option<GraphSourceDocument>, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<GraphRuntime>().source(&path))
+        .await
+        .map_err(|error| format!("Graph source read task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn graph_source_serialize(node: GraphNode) -> Result<String, String> {
+    // Recovery export is pure formatting: no mounted source or disk write.
+    super::serialize_graph_markdown(&node).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn graph_source_save(
+    app: AppHandle,
+    request: GraphSourceSaveRequest,
+) -> Result<GraphSourceDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<GraphRuntime>();
+        let changed = source_revision(&request.content) != request.expected_revision;
+        let path = request.path.clone();
+        let result = runtime.source_save(request)?;
+        if changed {
+            emit_mutation_changed(&app, &runtime, path)?;
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("Graph source save task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn graph_open(app: AppHandle, project_root: String) -> Result<GraphOpenResult, String> {
     let worker_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -855,6 +1196,50 @@ pub fn graph_search(
     limit: Option<usize>,
 ) -> Result<Vec<GraphSearchResult>, String> {
     runtime.search(&query, &scope_ids, limit.unwrap_or(25))
+}
+
+#[tauri::command]
+pub async fn graph_lookup(
+    app: AppHandle,
+    query: String,
+    scope_ids: BTreeSet<String>,
+    limit: Option<usize>,
+) -> Result<Vec<GraphLinkTarget>, String> {
+    if query.len() > 512 {
+        return Err("The graph lookup query is too long.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<GraphRuntime>()
+            .lookup(&query, &scope_ids, limit.unwrap_or(12).clamp(1, 50))
+    })
+    .await
+    .map_err(|error| format!("Graph lookup task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn graph_link_targets(
+    app: AppHandle,
+    ids: Vec<String>,
+    scope_ids: BTreeSet<String>,
+) -> Result<Vec<GraphLinkResolution>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<GraphRuntime>().link_targets(&ids, &scope_ids)
+    })
+    .await
+    .map_err(|error| format!("Graph link task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn graph_references(
+    app: AppHandle,
+    id: String,
+    scope_ids: BTreeSet<String>,
+) -> Result<GraphReferences, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<GraphRuntime>().references(&id, &scope_ids)
+    })
+    .await
+    .map_err(|error| format!("Graph reference task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -912,126 +1297,146 @@ pub async fn graph_refresh(app: AppHandle) -> Result<GraphChanged, String> {
 }
 
 #[tauri::command]
-pub fn graph_update(
+pub async fn graph_update(
     app: AppHandle,
-    runtime: tauri::State<'_, GraphRuntime>,
     patch: GraphNodePatch,
     actor: Option<GraphActor>,
 ) -> Result<GraphNode, String> {
-    let before = runtime.get(&patch.id)?;
-    let updated = runtime.update(patch).map_err(|error| error.to_string())?;
-    runtime.record_mutation(
-        "graph.update",
-        actor.unwrap_or_else(GraphActor::human),
-        before,
-        Some(updated.clone()),
-        updated.provenance.source_path.clone(),
-    )?;
-    let status = runtime.open_result()?;
-    let changed = GraphChanged {
-        graph_revision: status.graph_revision,
-        node_count: status.node_count,
-        diagnostic_count: status.diagnostic_count,
-        paths: vec![updated.provenance.source_path.clone()],
-    };
-    app.emit(GRAPH_CHANGED_EVENT, changed)
-        .map_err(|error| error.to_string())?;
-    Ok(updated)
-}
-
-#[tauri::command]
-pub fn graph_create(
-    app: AppHandle,
-    runtime: tauri::State<'_, GraphRuntime>,
-    create: GraphNodeCreate,
-    actor: Option<GraphActor>,
-) -> Result<GraphNode, String> {
-    let created = runtime.create(create).map_err(|error| error.to_string())?;
-    runtime.record_mutation(
-        "graph.create",
-        actor.unwrap_or_else(GraphActor::human),
-        None,
-        Some(created.clone()),
-        created.provenance.source_path.clone(),
-    )?;
-    emit_mutation_changed(&app, &runtime, created.provenance.source_path.clone())?;
-    Ok(created)
-}
-
-#[tauri::command]
-pub fn graph_move_scope(
-    app: AppHandle,
-    runtime: tauri::State<'_, GraphRuntime>,
-    request: GraphNodeMove,
-    actor: Option<GraphActor>,
-) -> Result<GraphNode, String> {
-    let before = runtime
-        .get(&request.id)?
-        .ok_or_else(|| format!("Graph node not found: {}", request.id))?;
-    let previous_path = before.provenance.source_path.clone();
-    let moved = runtime
-        .move_scope(request)
-        .map_err(|error| error.to_string())?;
-    runtime.record_mutation(
-        "graph.move-scope",
-        actor.unwrap_or_else(GraphActor::human),
-        Some(before),
-        Some(moved.clone()),
-        moved.provenance.source_path.clone(),
-    )?;
-    let status = runtime.open_result()?;
-    app.emit(
-        GRAPH_CHANGED_EVENT,
-        GraphChanged {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<GraphRuntime>();
+        let before = runtime.get(&patch.id)?;
+        let updated = runtime.update(patch).map_err(|error| error.to_string())?;
+        runtime.record_mutation(
+            "graph.update",
+            actor.unwrap_or_else(GraphActor::human),
+            before,
+            Some(updated.clone()),
+            updated.provenance.source_path.clone(),
+        )?;
+        let status = runtime.open_result()?;
+        let changed = GraphChanged {
             graph_revision: status.graph_revision,
             node_count: status.node_count,
             diagnostic_count: status.diagnostic_count,
-            paths: vec![previous_path, moved.provenance.source_path.clone()],
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(moved)
+            paths: vec![updated.provenance.source_path.clone()],
+        };
+        app.emit(GRAPH_CHANGED_EVENT, changed)
+            .map_err(|error| error.to_string())?;
+        Ok(updated)
+    })
+    .await
+    .map_err(|error| format!("Graph mutation task failed: {error}"))?
 }
 
 #[tauri::command]
-pub fn graph_delete(
+pub async fn graph_create(
     app: AppHandle,
-    runtime: tauri::State<'_, GraphRuntime>,
+    create: GraphNodeCreate,
+    actor: Option<GraphActor>,
+) -> Result<GraphNode, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<GraphRuntime>();
+        let created = runtime.create(create).map_err(|error| error.to_string())?;
+        runtime.record_mutation(
+            "graph.create",
+            actor.unwrap_or_else(GraphActor::human),
+            None,
+            Some(created.clone()),
+            created.provenance.source_path.clone(),
+        )?;
+        emit_mutation_changed(&app, &runtime, created.provenance.source_path.clone())?;
+        Ok(created)
+    })
+    .await
+    .map_err(|error| format!("Graph mutation task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn graph_move_scope(
+    app: AppHandle,
+    request: GraphNodeMove,
+    actor: Option<GraphActor>,
+) -> Result<GraphNode, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<GraphRuntime>();
+        let before = runtime
+            .get(&request.id)?
+            .ok_or_else(|| format!("Graph node not found: {}", request.id))?;
+        let previous_path = before.provenance.source_path.clone();
+        let moved = runtime
+            .move_scope(request)
+            .map_err(|error| error.to_string())?;
+        runtime.record_mutation(
+            "graph.move-scope",
+            actor.unwrap_or_else(GraphActor::human),
+            Some(before),
+            Some(moved.clone()),
+            moved.provenance.source_path.clone(),
+        )?;
+        let status = runtime.open_result()?;
+        app.emit(
+            GRAPH_CHANGED_EVENT,
+            GraphChanged {
+                graph_revision: status.graph_revision,
+                node_count: status.node_count,
+                diagnostic_count: status.diagnostic_count,
+                paths: vec![previous_path, moved.provenance.source_path.clone()],
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(moved)
+    })
+    .await
+    .map_err(|error| format!("Graph mutation task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn graph_delete(
+    app: AppHandle,
     request: GraphNodeDelete,
     actor: Option<GraphActor>,
 ) -> Result<GraphDeleteResult, String> {
-    let before = runtime.get(&request.id)?;
-    let deleted = runtime.delete(request).map_err(|error| error.to_string())?;
-    runtime.record_mutation(
-        "graph.delete",
-        actor.unwrap_or_else(GraphActor::human),
-        before,
-        None,
-        deleted.source_path.clone(),
-    )?;
-    emit_mutation_changed(&app, &runtime, deleted.source_path.clone())?;
-    Ok(deleted)
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<GraphRuntime>();
+        let before = runtime.get(&request.id)?;
+        let deleted = runtime.delete(request).map_err(|error| error.to_string())?;
+        runtime.record_mutation(
+            "graph.delete",
+            actor.unwrap_or_else(GraphActor::human),
+            before,
+            None,
+            deleted.source_path.clone(),
+        )?;
+        emit_mutation_changed(&app, &runtime, deleted.source_path.clone())?;
+        Ok(deleted)
+    })
+    .await
+    .map_err(|error| format!("Graph mutation task failed: {error}"))?
 }
 
 #[tauri::command]
-pub fn graph_restore(
+pub async fn graph_restore(
     app: AppHandle,
-    runtime: tauri::State<'_, GraphRuntime>,
     request: GraphRestoreRequest,
     actor: Option<GraphActor>,
 ) -> Result<GraphNode, String> {
-    let restored = runtime
-        .restore(request)
-        .map_err(|error| error.to_string())?;
-    runtime.record_mutation(
-        "graph.restore",
-        actor.unwrap_or_else(GraphActor::human),
-        None,
-        Some(restored.clone()),
-        restored.provenance.source_path.clone(),
-    )?;
-    emit_mutation_changed(&app, &runtime, restored.provenance.source_path.clone())?;
-    Ok(restored)
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<GraphRuntime>();
+        let restored = runtime
+            .restore(request)
+            .map_err(|error| error.to_string())?;
+        runtime.record_mutation(
+            "graph.restore",
+            actor.unwrap_or_else(GraphActor::human),
+            None,
+            Some(restored.clone()),
+            restored.provenance.source_path.clone(),
+        )?;
+        emit_mutation_changed(&app, &runtime, restored.provenance.source_path.clone())?;
+        Ok(restored)
+    })
+    .await
+    .map_err(|error| format!("Graph mutation task failed: {error}"))?
 }
 
 pub(crate) fn emit_mutation_changed(
@@ -1055,6 +1460,7 @@ pub(crate) fn emit_mutation_changed(
 fn watch_roots(
     app: AppHandle,
     roots: &[GraphSourceRoot],
+    generation: u64,
 ) -> Result<Vec<RecommendedWatcher>, String> {
     let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
     let mut watchers = Vec::new();
@@ -1091,13 +1497,28 @@ fn watch_roots(
     std::thread::Builder::new()
         .name("mimir-business-graph-watch".into())
         .spawn(move || {
-            while let Ok(first) = receiver.recv() {
-                let mut changed_paths = first;
-                loop {
-                    match receiver.recv_timeout(Duration::from_millis(120)) {
-                        Ok(paths) => changed_paths.extend(paths),
-                        Err(mpsc::RecvTimeoutError::Timeout) => break,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            let mut reconcile_at = Instant::now() + RECONCILE_INTERVAL;
+            loop {
+                let (mut changed_paths, periodic) = match receiver
+                    .recv_timeout(reconcile_at.saturating_duration_since(Instant::now()))
+                {
+                    Ok(paths) => (paths, false),
+                    Err(mpsc::RecvTimeoutError::Timeout) => (Vec::new(), true),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                };
+                if !periodic {
+                    // Bound continuous event bursts so indexing cannot starve.
+                    let batch_deadline = Instant::now() + Duration::from_millis(500);
+                    loop {
+                        let remaining = batch_deadline.saturating_duration_since(Instant::now());
+                        if remaining.is_zero() {
+                            break;
+                        }
+                        match receiver.recv_timeout(Duration::from_millis(120).min(remaining)) {
+                            Ok(paths) => changed_paths.extend(paths),
+                            Err(mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
                     }
                 }
                 let mut seen = HashSet::new();
@@ -1107,32 +1528,20 @@ fn watch_roots(
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect::<Vec<_>>();
                 let runtime = app.state::<GraphRuntime>();
-                match runtime.refresh(paths) {
-                    Ok(changed) => {
+                match runtime.refresh_watched(paths, generation, periodic) {
+                    Ok(Some(changed)) => {
                         let _ = app.emit(GRAPH_CHANGED_EVENT, changed);
                     }
+                    Ok(None) => {}
                     Err(error) => log::warn!("Business graph refresh failed: {error}"),
+                }
+                if periodic {
+                    reconcile_at = Instant::now() + RECONCILE_INTERVAL;
                 }
             }
         })
         .map_err(|error| error.to_string())?;
     Ok(watchers)
-}
-
-fn graph_markdown_path(root: &Path, path: &Path) -> bool {
-    if path.extension().and_then(|value| value.to_str()) != Some("md") {
-        return false;
-    }
-    let Ok(relative) = path.strip_prefix(root) else {
-        return false;
-    };
-    matches!(
-        relative
-            .components()
-            .next()
-            .and_then(|component| component.as_os_str().to_str()),
-        Some("graph")
-    )
 }
 
 fn private_root() -> Result<PathBuf, String> {
@@ -1439,7 +1848,10 @@ mod tests {
             GraphSourceRoot::new("team:main", GraphScopeKind::Team, team.path()),
         ];
         let runtime = GraphRuntime {
+            mutation_gate: Mutex::new(()),
+            root_generation: AtomicU64::new(0),
             store: RwLock::new(GraphStore::load(&roots)),
+            source_stamps: Mutex::new(source_stamps(&roots).unwrap_or_default()),
             roots: RwLock::new(roots),
             watchers: Mutex::new(Vec::new()),
             deleted: Mutex::new(VecDeque::new()),
@@ -1536,7 +1948,7 @@ mod tests {
         assert_eq!(created.provenance.scope_id, "private:local");
         assert!(private
             .path()
-            .join("graph/my-method-annotation.md")
+            .join(format!("graph/{}.md", created.id))
             .is_file());
         let shared = fs::read_to_string(team.path().join("graph/shared-method.md")).unwrap();
         assert!(!shared.contains("my-method-annotation"));

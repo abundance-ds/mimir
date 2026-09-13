@@ -9,7 +9,9 @@ mod migration;
 mod model;
 #[cfg(test)]
 mod performance;
+mod references;
 pub(crate) mod runtime;
+mod source_sync;
 mod store;
 pub(crate) mod tools;
 
@@ -30,5 +32,9 @@ pub use model::{
     GraphScopeDescriptor, GraphScopeKind, GraphSearchResult, GraphSourceFormat, GraphSourceRoot,
     ENTITY_KINDS, ISSUE_PRIORITIES, ISSUE_STATUSES,
 };
-pub use runtime::GraphRuntime;
+pub use references::{
+    extract_graph_references, parse_graph_link_target, GraphBacklink, GraphBodyReference,
+    GraphLinkResolution, GraphLinkStatus, GraphLinkTarget, GraphOutgoingReference, GraphReferences,
+};
+pub use runtime::{GraphRuntime, GraphSourceDocument, GraphSourceSaveRequest};
 pub use store::{GraphMutationError, GraphStore};

@@ -13,6 +13,82 @@ use tempfile::TempDir;
 const SYNTHETIC_NODES: usize = 5_000;
 
 #[test]
+fn ten_thousand_linked_nodes_keep_lookup_and_single_node_updates_bounded() {
+    const COUNT: usize = 10_000;
+    let nodes = (0..COUNT)
+        .map(|index| {
+            let mut node = synthetic_node(index, COUNT);
+            node.body =
+                format!(
+            "{}\n\n[Next](mimir://graph/node-{}) and [Context](mimir://graph/node-{}).\n\n{}",
+            node.body, (index + 1) % COUNT, (index + 19) % COUNT,
+            "Evidence paragraph with supporting detail. ".repeat(index % 40),
+        );
+            node
+        })
+        .collect();
+    let started = Instant::now();
+    let mut store = GraphStore::from_nodes(nodes, vec![]);
+    let index_time = started.elapsed();
+    let scopes = BTreeSet::new();
+    let mut lookup_times = Vec::new();
+    for query in ["comparative", "ev", "item 9999", "nothing", ""] {
+        for _ in 0..5 {
+            let started = Instant::now();
+            let results = store.lookup(query, &scopes, 12);
+            lookup_times.push(started.elapsed());
+            assert!(results.len() <= 12);
+            if query == "item 9999" {
+                assert_eq!(results[0].id, "node-9999");
+            }
+        }
+    }
+    lookup_times.sort();
+    let lookup_p95 = lookup_times[lookup_times.len() * 95 / 100];
+
+    let mut node = store.get("node-9999").unwrap().clone();
+    node.body = "A changed source with [Context](mimir://graph/node-42).".into();
+    let started = Instant::now();
+    assert!(store.apply_reconciled_nodes(vec![(node.id.clone(), Some(node.clone()))], vec![]));
+    let body_update_time = started.elapsed();
+    node.title = "Changed title".into();
+    let started = Instant::now();
+    assert!(store.apply_reconciled_nodes(vec![(node.id.clone(), Some(node))], vec![]));
+    let title_update_time = started.elapsed();
+    let references = store.references("node-42", &scopes);
+    assert!(references
+        .backlinks
+        .iter()
+        .any(|row| row.source.id == "node-9999"));
+    assert!(store.diagnostics().is_empty());
+
+    eprintln!(
+        "business_graph_links_benchmark={}",
+        json!({
+            "nodes": COUNT, "indexMs": millis(index_time),
+            "lookupP95Ms": millis(lookup_p95), "bodyUpdateMs": millis(body_update_time),
+            "titleUpdateMs": millis(title_update_time),
+        })
+    );
+    assert_budget("10k linked-node index", index_time, Duration::from_secs(5));
+    assert_budget(
+        "10k title lookup p95",
+        lookup_p95,
+        Duration::from_millis(100),
+    );
+    assert_budget(
+        "one-source link update",
+        body_update_time,
+        Duration::from_millis(100),
+    );
+    assert_budget(
+        "one-source title update",
+        title_update_time,
+        Duration::from_millis(100),
+    );
+}
+
+#[test]
 fn graph_performance_budget_covers_index_query_search_and_traversal() {
     let nodes = (0..SYNTHETIC_NODES)
         .map(|index| synthetic_node(index, SYNTHETIC_NODES))

@@ -67,7 +67,14 @@ fn knowledge_catalog(runtime: &GraphRuntime, input: &Value) -> Result<NativeExec
 fn knowledge_get(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecution, ToolError> {
     let node = require_node(runtime, required_string(input, "id")?)?;
     require_knowledge(&node)?;
-    Ok(NativeExecution::read(knowledge_full(&node)))
+    let mut value = knowledge_full(&node);
+    value["bodyReferences"] = serde_json::to_value(
+        runtime
+            .references(&node.id, &scope_ids(input))
+            .map_err(internal_error)?,
+    )
+    .map_err(internal_error)?;
+    Ok(NativeExecution::read(value))
 }
 
 fn knowledge_search(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecution, ToolError> {
@@ -132,19 +139,20 @@ fn knowledge_graph(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecut
         .iter()
         .map(|node| node.id.as_str())
         .collect::<BTreeSet<_>>();
-    let edges = nodes
-        .iter()
-        .flat_map(|node| {
-            node.relations.iter().map(|relation| {
-                json!({
-                    "source": node.id,
-                    "target": relation.target,
-                    "rel": relation.relation,
-                    "missing": !ids.contains(relation.target.as_str()),
-                })
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut edges = Vec::new();
+    for node in &nodes {
+        for relation in runtime
+            .effective_relations(&node.id)
+            .map_err(internal_error)?
+        {
+            edges.push(json!({
+                "source": node.id,
+                "target": relation.target,
+                "rel": relation.relation,
+                "missing": !ids.contains(relation.target.as_str()),
+            }));
+        }
+    }
     let nodes = nodes.iter().map(knowledge_summary).collect::<Vec<_>>();
     Ok(NativeExecution::read(
         json!({ "nodes": nodes, "edges": edges }),
@@ -231,6 +239,7 @@ fn knowledge_delete(runtime: &GraphRuntime, input: &Value) -> Result<NativeExecu
     require_knowledge(&require_node(runtime, &id)?)?;
     let deleted = runtime
         .delete(GraphNodeDelete {
+            expected_source_path: None,
             id,
             expected_revision: expected_revision(input),
         })
