@@ -43,6 +43,21 @@ graph_delete  graph_restore  graph_context  graph_events
 graph_resource_add
 ```
 
+`graph_get` returns authored `relations` and a separate read-only
+`bodyReferences` object with outgoing references and backlinks. Do not copy
+derived references into a relation patch. `graph_find` relation filters and
+`graph_context` include body-derived connections. Context still applies scope
+and sensitive-content restrictions. [Business graph](business-graph.md#inline-links-and-backlinks)
+owns the Markdown syntax and editing behavior.
+
+When Graph Details is active, `mimir_state` reports `kind: "graph"` and no
+text cursor. With content included, `contentSource: "saved"` identifies the
+tab's saved Markdown snapshot; `graphDraft` contains the current Details fields.
+The snapshot can be older than disk during a conflict. Reading state
+does not save the draft. An explicit `mimir_propose`, or a `mimir_reveal` with
+a text location, saves the draft and opens Source before proceeding. A save
+conflict stops that operation and keeps the draft.
+
 Meetings:
 
 ```text

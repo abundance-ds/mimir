@@ -67,8 +67,10 @@ Only current, non-obvious constraints belong here. Known defects belong in
 - Legacy issue Project and assignee values can be labels, not node ids.
 - Validate only relations introduced by an edit; existing edges can point
   outside mounted scopes.
-- A rejected Graph save must clear queued navigation so the inspector remains
-  escapable.
+- Graph Details and Source share one FileStore draft and write queue. A failed
+  save must not change views, discard the draft, or use the ordinary writer.
+- Graph writes bind the source path as well as id and revision: two mounted
+  workspaces can contain legacy entries with the same id and bytes.
 
 ## Editor and files
 

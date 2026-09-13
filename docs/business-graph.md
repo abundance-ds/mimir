@@ -44,7 +44,7 @@ resolve to several local workspaces; absolute local paths never enter Team.
   back to a same-named Project file.
 - Shared files live under `resources/` and are normally linked from a Team
   `resource` node through structured `files` entries.
-- Focus on a Team Resource node can attach an unlinked file. Files above
+- Details on a Team Resource entry can attach an unlinked file. Files above
   100 MB are rejected before import.
 
 ## Managed synchronization and history
@@ -79,6 +79,77 @@ preserved.
 - A filed Scribe meeting stores its summary and stable Scribe id. The transcript
   remains in Scribe.
 
+## Inline links and backlinks
+
+In a Graph working note, type `@` and part of an entry title, or use **Link**.
+The same lookup works in the body of a Graph source in the Editor. Ordinary
+Markdown and frontmatter do not enable Graph completion or reference checks.
+The menu shows the title, kind, and scope. Arrow keys select a result;
+Enter inserts it; Escape closes the menu. Lookup ignores case and accents,
+prefers title and word prefixes, and searches every entry in the selected
+scopes. Work filters and the renderer's first list page do not limit lookup.
+Code, existing links, escaped text, email addresses, and IME composition do not
+start the menu. Create supports insertion; links open after the entry is saved.
+
+Links are ordinary Markdown with a Mimir target:
+`[Jon Minton](mimir://graph/jon-minton)`. Mimir generates the target ID; users
+select titles. The Graph editor shows the target's current title and exposes
+the Markdown when the cursor enters the link. Alt-click also permits source
+editing. The stored label remains fallback text. No alias system is used.
+
+Click a resolved link to open its entry in an Editor tab. Details shows
+**Links** and **Backlinks**. A backlink opens the referring entry and selects
+the reference in its current view. The previous draft stays in its own tab.
+If the source changed, Mimir finds a current occurrence of that target. If
+none remains, it opens the body without selecting unrelated text.
+
+The suggestion menu has a 320 px preferred width, bounded by the pane and
+viewport. Each row separates the title from its kind and scope. The popup
+sits outside clipping containers, stays keyboard-accessible, and follows
+pane resizing.
+
+Rust derives `references` connections from the saved body. Repeated links keep
+their separate locations but produce one connection. Removing the last link
+removes that connection; undo restores it on save. Explicit relations such as
+Assigned to remain independent. Derived references never enter YAML `links`
+or editable relation drafts. Native and editor parsers share a syntax fixture
+for inline, reference-style, and automatic links, Unicode, and exclusions.
+Code, images, and HTML comments do not create body references.
+
+Title changes and scope moves preserve the generated filename and ID. New
+generated IDs include a full UUID, so creating a new entry with a deleted
+entry's title does not reuse its identity. Existing IDs remain unchanged;
+explicit IDs supplied by agents or source files remain deliberate identities.
+Deleting an entry preserves referring text and marks links **Unavailable**.
+Restoring the same ID resolves them again. Hidden or unmounted targets also
+show Unavailable; this state does not claim permanent deletion. Native graph
+diagnostics report unresolved body targets. Restore rejects an unmounted
+source before writing. Renaming source files outside Mimir changes their IDs.
+
+GraphStore owns the title and reference indexes in memory. Lookup and target
+resolution read those indexes without reading files. A saved body reparses
+only that entry; a title edit reuses its parsed references. Watcher events
+reconcile only affected direct `graph/*.md` files across mounted roots, with
+the same duplicate-ID precedence as startup. Unchanged events do not change
+the graph revision or reload the UI. The existing worker checks file metadata
+every six hours to catch missed events; it sleeps between events and checks.
+Startup and manual Refresh perform a full reconciliation. Scans run outside
+the store lock; a mutation gate orders publication, writes, and scope changes.
+Native mutation commands run on background workers. No separate database or
+persistent index format is required.
+
+Verification covers 10,000 entries and 10,000 Markdown files, indexed lookup
+during scans and writes, single-file updates, syntax, deletion/restoration,
+scope restrictions, stale requests, undo, and tool/context consistency. Native
+benchmarks print measured costs with `cargo test --manifest-path
+src-tauri/Cargo.toml --lib business_graph -- --nocapture`. These debug tests do
+not establish native webview geometry, input-to-display latency, fan behavior,
+or energy use. Computer and browser interaction were excluded from this
+feature's verification. On the reference Mac, a debug run with 10,000 files
+measured lookup p95 at 35.2 ms during full scans and writes, one-file
+reconciliation at 1.5 ms, and full reconciliation at 1.81 s. These are measured
+native costs, not input-to-display guarantees.
+
 ## Product surface
 
 Work and Graph are the two primary projections. Work is the default issue
@@ -86,8 +157,32 @@ projection with Board and List views. Graph is the complete node surface; its
 List and Timeline views can filter by kind. Startup and selecting Graph reset
 the kind filter to All kinds, including for old saved projections.
 Changes shows the event stream. [Scribe](meetings.md) owns meeting preparation
-and filing. Peek and Focus edit one revision-aware draft;
-navigation commits that draft first. In Work, search filters the loaded issues
+and filing. Entry details open in Editor tabs, leaving the Graph projection
+in Main. Preview, pinning, close, and session restore use the Editor tab
+lifecycle. Reopening an entry or its source selects the same tab and keeps
+its current view and draft. Working-note undo, caret, and scroll stay with the
+open tab; an external body replacement starts a fresh undo history.
+**Details** and **Source** share one save queue.
+Changing views waits for pending writes and saves; a conflict keeps the draft
+and view intact. Details saves after a short pause; Source follows the Editor
+auto-save setting. Native source writes check the mounted path and revision.
+Malformed Graph YAML stays editable in Source; Details becomes available when
+it parses. Deleted or unmounted entries keep unsaved drafts without recreating
+the source. **Save As** exports the current draft, including a deleted or
+unmounted entry, as a separate Markdown copy. Rust formats rich recovery
+exports with the existing serializer; export does not write the original
+source. Confirmed scope moves retain the tab and update its path.
+
+Workspace startup owns Graph mounting and event listening, even when its Main
+app is closed. Refresh updates clean open Graph documents and retains dirty
+drafts with their original revision. Session restore keeps both the saved
+baseline and the current draft; remount checks source identity before writing.
+
+Entry-open requests pass from `BusinessGraphApp` through `AppActivity` to the
+Workbench's mounted Editor. Workbench integration tests click Board, List,
+and Timeline entries through this route, including when the Editor is a rail.
+
+In Work, search filters the loaded issues
 immediately by title, summary, tags, project, owner, and work details. Terms
 combine and ignore case and accents. Board keeps its columns, and List keeps
 its groups and sort order. Empty search columns remain visible; clearing the
@@ -114,7 +209,7 @@ project). The second header keeps frequent task filters beside the views:
 Project, an Owner icon until a person is selected, and Filter for Priority.
 Selected values have adjacent clear actions. In narrow panes, these controls
 move into Filter, with named, clearable active-filter chips. The available pane
-width determines the layout, including when Peek is open. The smallest panes
+width determines the layout. The smallest panes
 show the active filter count; open Filter to read or clear each selected value.
 Display stays separate at the right and contains Group by, Sort, Columns, and
 Show closed issues. Work hides Done and Cancelled issues by default. This setting

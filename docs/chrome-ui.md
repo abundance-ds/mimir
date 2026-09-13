@@ -140,6 +140,7 @@ retains the pane-bar layout above. [Files](files.md) owns their behavior.
 |---|---|---|
 | Files ledger status | `FilesActivity.vue` | Mono 10 px status line |
 | Files ledger columns | `FilesActivity.vue` | Mono 10 px column labels in the tree grid |
+| Graph entry view | `business-graph/GraphEntryDetails.vue` | 36 px band with Details and Source controls at 28 px; quiet save status, Save, and More; uses the Editor tab strip |
 | Graph viewbar | `business-graph/GraphViewbar.vue` | View buttons 22 px; frequent task filters beside the views; Display at the right; narrow panes use clearable active-filter chips and a 24 px Filter button |
 
 ### Canvases
@@ -184,6 +185,7 @@ counted as a row.
 | Surface | Layer | Edge |
 |---|---|---|
 | Select menus, scope menu, columns menu, dispatch overlay, date picker | `surface` | 1 px `rule`, 3 to 5 px radius, shadow |
+| Graph link suggestions | `surface`, `rule-light` edge, small shadow | 320 px preferred width within pane/viewport; title 12 px, kind/scope 10 px; body portal prevents clipping |
 | Graph create, confirm, summary dialogs | `surface` | own header and footer |
 | Routines dialogs | header 40 px `chrome-high` with `rule` | |
 | Quick open | own | 44 px top cell |

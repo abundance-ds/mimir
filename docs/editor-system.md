@@ -8,15 +8,17 @@ and cleanup. `src/stores/files.js` owns open files and save state.
 
 [Scratchpad](scratchpad.md) is a global Editor tab with its own saved-text history.
 
-- Tabs are `text`, `pdf`, or `external`. Inspect files before opening; only text
-  enters CodeMirror and UTF-8 read/write commands.
+- Tabs are `text`, `graph`, `pdf`, or `external`. Graph entries use Details and
+  Source in one tab; [business-graph.md](business-graph.md#product-surface) owns
+  their draft, source, and link rules. Inspect files before opening; only text
+  enters CodeMirror.
 - A single click opens a clean preview; editing or pinning makes it persistent.
 - Project tabs are hidden, not closed, when the workspace changes. Dirty state
   and reviews remain attached to their stable file id.
 - Files outside retained projects and untitled drafts are global. The
   standalone Editor shows all tabs.
 - External changes replace only clean buffers. Missing dirty files recover as
-  drafts; missing clean files disappear.
+  drafts; missing clean files disappear. Graph drafts retain their source identity.
 - Named `.html` and `.htm` tabs show an **Open in browser** action in the Editor
   header. The action saves dirty content before it opens the file with the
   operating system's default browser.
@@ -46,6 +48,9 @@ selection.
 
 - Rust owns proposal lifecycle; the renderer owns presentation and dirty
   buffers. Accept or reject is complete only after `proposal_respond` succeeds.
+- Text actions require Source for Graph entries. Source-location requests and
+  proposal-open actions save Details before changing views; failures keep the
+  draft. Review decisions cannot change an unseen rich draft.
 - Pending proposals survive restart. A source mismatch keeps the review open
   for recheck or explicit discard.
 - Single-file review is bound to a stable file id, not a visible tab index.

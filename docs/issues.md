@@ -5,6 +5,18 @@ task scope.
 
 ## Open
 
+- Scribe notification repair: real banner/RECORD behavior and repeated-call CPU
+  observations need a record from the repaired app. A long run with call
+  transitions and signed installed-app verification remain open. Automated
+  lifecycle tests do not establish these results; behavior belongs in
+  [meetings.md](meetings.md).
+
+- Dependency audit: `bun run check:advisories` reports the existing
+  `@ai-sdk/provider-utils` low-severity resource-consumption advisory
+  [GHSA-866g-f22w-33x8](https://github.com/advisories/GHSA-866g-f22w-33x8).
+  The Graph inline-link change does not change this JavaScript dependency.
+  Update the affected AI SDK dependency under its own checks.
+
 - Files sidebar: native file-drop and workspace-switch-during-search checks
   remain open. The current development build has native evidence for search
   order, match navigation, separate panel queries, and the revised Files layout;
