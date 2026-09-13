@@ -116,6 +116,7 @@
             ref="graphEditorTabRef"
             :file="currentFile"
             @source="setGraphView('source')"
+            @close-request="closeGraphDetails"
             @open-graph="mimirOpenGraph"
             @open-file="$emit('openGraphFile', $event)"
             @open-url="openMarkdownUrlLink"
@@ -435,6 +436,7 @@ const emit = defineEmits([
   'openGraphFile',
   'openGraphActivity',
   'openGraphMeeting',
+  'focusGraph',
 ])
 const editorShellRef = ref(null)
 
@@ -485,6 +487,7 @@ const editorSurfaceRef = computed(() => isGraphDetails.value ? null : textSurfac
 const graphViewError = ref('')
 const graphViewBusy = ref(false)
 let graphOpenGeneration = 0
+let graphClosePending = false
 const editorScrollInfo = ref({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
 const editorGeometryVersion = ref(0)
 const activeFormats = ref([])
@@ -1667,13 +1670,41 @@ async function mimirOpenGraph(request) {
   const target = typeof request === 'string' ? { id: request } : request
   if (!target?.id) throw new Error('An entry id is required.')
   flushEditorContent({ bridge: 'flush' })
-  const node = await getGraphNode(target.id)
+  // Native summaries identify their mounted scope. Graph sources are flat
+  // graph/{id}.md files; this is only a hint until graph_source validates it.
+  const summary = graph.nodes.find(node => node.id === target.id)
+    || graph.searchResults.find(node => node.id === target.id)
+  const scope = graph.scopes.find(scope => scope.id === (summary?.scopeId || summary?.provenance?.scopeId))
+  const scopedPath = scope?.root ? `${scope.root.replace(/\/$/, '')}/graph/${target.id}.md` : null
+  const sourcePath = summary?.sourcePath || summary?.provenance?.sourcePath
+  const hintedPath = sourcePath ? (sourcePath === scopedPath ? sourcePath : null) : scopedPath
+  const options = { preview: target.preview !== false, isCurrent }
+  const openPath = async path => {
+    // Open tabs already own their exact source snapshot and draft. Reopening
+    // one must neither read the source again nor wait for a pending save.
+    const existing = openFiles.value.find(file => file.path === path && file.graph?.node?.id === target.id && !file.graph.unavailable)
+    const document = existing
+      ? { node: existing.graph.node, content: existing.content, sourceRevision: existing.graph.sourceRevision, bodyFrom: existing.graph.bodyFrom }
+      : await graphSource(path)
+    if (!isCurrent() || !document?.node || document.node.id !== target.id) return null
+    return fileManager.openGraphDocument(document, options)
+  }
+  let hintError = null
+  let file = hintedPath ? await openPath(hintedPath).catch(error => { hintError = error; return null }) : null
   if (!isCurrent()) return null
-  if (!node?.provenance?.sourcePath) throw new Error('This entry is unavailable.')
-  const document = await graphSource(node.provenance.sourcePath)
-  if (!isCurrent()) return null
-  if (!document?.node || document.node.id !== target.id) throw new Error('This entry is unavailable.')
-  const file = await fileManager.openGraphDocument(document, { preview: target.preview !== false, isCurrent })
+  try {
+    if (!file) {
+      const node = await getGraphNode(target.id)
+      if (!isCurrent()) return null
+      const path = node?.provenance?.sourcePath
+      if (!path || path === hintedPath) throw hintError || new Error('This entry is unavailable.')
+      file = await openPath(path)
+      if (isCurrent() && !file) throw new Error('This entry is unavailable.')
+    }
+  } catch (error) {
+    if (!isCurrent()) return null
+    throw error
+  }
   if (!file || !isCurrent()) return null
   gitReviewTabActive.value = false
   reviewTabActive.value = false
@@ -1682,7 +1713,7 @@ async function mimirOpenGraph(request) {
   graphViewError.value = ''
   emit('navigateEditor', { path: file.path })
   await nextTick()
-  if (!isCurrent() || currentFile.value !== file) return file
+  if (!isCurrent() || currentFile.value !== file) return null
   if (target.targetId) {
     if (file.kind === 'graph') graphEditorTabRef.value?.revealReference(target)
     else {
@@ -1695,6 +1726,21 @@ async function mimirOpenGraph(request) {
     }
   } else restoreEditorFocus()
   return file
+}
+
+async function closeGraphDetails() {
+  const file = currentFile.value
+  if (file?.kind !== 'graph' || graphClosePending) return false
+  graphClosePending = true
+  try {
+    const closed = await closeEditorTab(displayActiveTab.value)
+    if (!closed || openFiles.value.includes(file)) return false
+    await nextTick()
+    emit('focusGraph', { id: file.graph?.node?.id || file.graph?.nodeId })
+    return true
+  } finally {
+    graphClosePending = false
+  }
 }
 
 async function undoGraphDelete() {

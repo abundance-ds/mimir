@@ -17,7 +17,7 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'work-show-closed',
     'work-show-empty-projects',
   ],
-  noteLinks: ['note-insert-link', 'note-links-retry'],
+  noteLinks: ['note-insert-link', 'note-links-retry', 'note-links-toggle', 'note-backlinks-toggle'],
   emptyStates: [
     'board-empty-create',
     'list-empty-create',
@@ -39,6 +39,13 @@ export const BUSINESS_GRAPH_UI_INVENTORY = Object.freeze({
     'create-submit',
   ],
   details: [
+    'entry-properties',
+    'entry-add-relation',
+    'entry-cancel-relation',
+    'entry-project-overview',
+    'entry-waiting-extra',
+    'entry-open-project',
+    'entry-open-owner',
     'focus-more',
     'focus-title',
     'focus-status',
@@ -115,10 +122,10 @@ export const BUSINESS_GRAPH_DYNAMIC_CONTROL_PREFIXES = Object.freeze([
   'focus-related-',
   'focus-connection-remove-',
   'focus-activity-',
-  'focus-deliverable-',
+  'focus-file-',
   'focus-history-',
-  'focus-resource-',
   'focus-meeting-person-remove-',
+  'entry-open-person-',
 ])
 
 export const BUSINESS_GRAPH_SURFACES = Object.freeze([

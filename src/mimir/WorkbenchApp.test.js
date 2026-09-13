@@ -238,6 +238,7 @@ describe('WorkbenchApp', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
     editorOpen.mockReset()
     editorOpenGraph.mockReset()
+    editorOpenGraph.mockResolvedValue({ path: '/w/graph/entry.md', kind: 'graph' })
     editorReveal.mockReset()
     editorOpenSettings.mockReset()
     editorClose.mockReset()
@@ -1610,6 +1611,31 @@ describe('WorkbenchApp', () => {
     expect(useWorkbenchStore().activeActivityId).toBe('app:scribe')
     expect(useWorkbenchStore().paneLayout.editor.state).toBe('expanded')
     expect(editorOpenGraph).toHaveBeenCalledWith('meeting-filed')
+  })
+
+  it('does not reopen or focus the Editor when a delayed Graph open is canceled', async () => {
+    appsApi.loadAppsCatalog.mockResolvedValue({
+      directory: '/home/me/.mimir/apps', diagnostics: [],
+      apps: [{ id: 'business-graph', title: 'Graph', mode: 'rust-helper', helper: 'business-graph', builtin: true, tools: [] }],
+    })
+    appsApi.resolveAppLaunch.mockResolvedValue({ mode: 'rust-helper', appId: 'business-graph', helper: 'business-graph' })
+    const wrapper = await render({ workspace: '/w' })
+    await wrapper.get('[data-sidebar-row="tool:app:business-graph"]').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    const workbench = useWorkbenchStore()
+    workbench.setPaneState('editor', 'rail')
+    const focusBefore = document.activeElement
+    let finish
+    editorOpenGraph.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    wrapper.findComponent({ name: 'BusinessGraphApp' }).vm.$emit('openGraphNode', { id: 'superseded' })
+    await flushPromises()
+    finish(null)
+    await flushPromises()
+    expect(editorOpenGraph).toHaveBeenCalledWith({ id: 'superseded' })
+    expect(workbench.paneLayout.editor.state).toBe('rail')
+    expect(workbench.activeActivityId).toBe('app:business-graph')
+    expect(document.activeElement).toBe(focusBefore)
   })
 
   it('launches external Apps as one real PTY Activity from the plus menu and MCP', async () => {

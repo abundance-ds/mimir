@@ -323,7 +323,9 @@ export const useFileStore = defineStore('files', () => {
     graphDocument = null,
     isCurrent = () => true,
   } = {}) {
-    if (path?.endsWith('/scratchpad.md') && typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+    // A supplied native Graph snapshot already classifies this path, including
+    // a Graph entry named scratchpad.md. It is not the shared Scratchpad.
+    if (!graphDocument && path?.endsWith('/scratchpad.md') && typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
       const canonical = await resolveScratchpad(path)
       if (canonical) {
         path = canonical

@@ -53,11 +53,12 @@ beforeEach(() => {
   const graph = useBusinessGraphStore()
   graph.status = { graphRevision: 1, scopes: [{ id: 'team:main', kind: 'team', root: '/work' }] }
   graph.activeScopeIds = ['team:main']
+  graph.nodes = [{ id: 'jon', kind: 'person', title: disk.node.title, scopeId: 'team:main', sourceRevision: 'r1' }]
 })
 
-async function editor() {
+async function editor(props = {}) {
   const wrapper = mount(App, {
-    props: { embedded: true },
+    props: { embedded: true, ...props },
     global: { stubs: { AppHeader: true, AppFooter: true, SettingsDialog: true, NewTabPage: true, InlineAI: true, GitDiffView: true } },
   })
   await flushPromises()
@@ -65,6 +66,153 @@ async function editor() {
 }
 
 describe('Graph entry Editor tabs', () => {
+  it('opens a listed entry with one native source read and revisits its exact draft without open-path IPC', async () => {
+    const wrapper = await editor()
+    vi.mocked(invoke).mockClear()
+    await wrapper.vm.mimirOpenGraph('jon')
+    const openCalls = () => vi.mocked(invoke).mock.calls.filter(([command]) => ['graph_get', 'graph_source'].includes(command))
+    expect(openCalls().map(([command]) => command)).toEqual(['graph_source'])
+    const file = useFileStore().currentFile
+    await wrapper.get('[data-inspector-title]').setValue('Keep the current draft')
+    await wrapper.vm.mimirOpen('/work/ordinary.md')
+    vi.mocked(invoke).mockClear()
+    await wrapper.vm.mimirOpenGraph('jon')
+    expect(openCalls()).toEqual([])
+    expect(useFileStore().currentFile).toBe(file)
+    expect(file.graph.draft.title).toBe('Keep the current draft')
+    expect(file.graph.sourceRevision).toBe('r1')
+  })
+
+  it('uses the native node lookup for a link target outside the loaded summaries', async () => {
+    const wrapper = await editor()
+    useBusinessGraphStore().nodes = []
+    vi.mocked(invoke).mockClear()
+    await wrapper.vm.mimirOpenGraph('jon')
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => ['graph_get', 'graph_source'].includes(command)).map(([command]) => command))
+      .toEqual(['graph_get', 'graph_source'])
+  })
+
+  it('revisits a dirty Graph tab while its save is still pending', async () => {
+    const wrapper = await editor()
+    await wrapper.vm.mimirOpenGraph('jon')
+    const files = useFileStore()
+    const file = files.currentFile
+    await wrapper.get('[data-inspector-title]').setValue('Saving this title')
+    let finish
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'graph_update'
+      ? new Promise(resolve => { finish = () => resolve(normalInvoke(command, args)) }) : normalInvoke(command, args))
+    const saving = files.save(file)
+    await wrapper.vm.mimirOpen('/work/ordinary.md')
+    vi.mocked(invoke).mockClear()
+    await wrapper.vm.mimirOpenGraph('jon')
+    expect(files.currentFile).toBe(file)
+    expect(file.saveState).toBe('saving')
+    expect(vi.mocked(invoke).mock.calls.some(([command]) => ['graph_get', 'graph_source'].includes(command))).toBe(false)
+    finish()
+    await saving
+    expect(file.dirty).toBe(false)
+  })
+
+  it.each(['unavailable', 'read error'])('recovers a moved source through native lookup when the listed path returns %s', async failure => {
+    const wrapper = await editor()
+    const moved = structuredClone(disk)
+    moved.node.provenance.sourcePath = '/team/graph/jon.md'
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => {
+      if (command === 'graph_get') return moved.node
+      if (command === 'graph_source') {
+        if (args.path === moved.node.provenance.sourcePath) return moved
+        return failure === 'read error' ? Promise.reject(new Error('Source moved during read')) : null
+      }
+      return normalInvoke(command, args)
+    })
+    vi.mocked(invoke).mockClear()
+    await wrapper.vm.mimirOpenGraph('jon')
+    expect(vi.mocked(invoke).mock.calls.filter(([command]) => ['graph_get', 'graph_source'].includes(command)))
+      .toEqual([['graph_source', { path }], ['graph_get', { id: 'jon' }], ['graph_source', { path: '/team/graph/jon.md' }]])
+    expect(useFileStore().currentFile.path).toBe('/team/graph/jon.md')
+  })
+
+  it('preserves the source read error when native lookup confirms the same path', async () => {
+    const wrapper = await editor()
+    const failure = new Error('Source permission denied')
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'graph_source' ? Promise.reject(failure) : normalInvoke(command, args))
+    await expect(wrapper.vm.mimirOpenGraph('jon')).rejects.toBe(failure)
+  })
+
+  it('does not reuse a same-id draft from another mounted root', async () => {
+    const wrapper = await editor()
+    await wrapper.vm.mimirOpenGraph('jon')
+    const previous = useFileStore().currentFile
+    await wrapper.get('[data-inspector-title]').setValue('Previous root draft')
+    const moved = structuredClone(disk)
+    moved.node.provenance.sourcePath = '/next/graph/jon.md'
+    moved.node.title = 'Current root entry'
+    moved.node.provenance.scopeId = 'project:next'
+    const graph = useBusinessGraphStore()
+    graph.status = { graphRevision: 1, scopes: [{ id: 'project:next', kind: 'project', root: '/next' }] }
+    graph.nodes = [{ id: 'jon', kind: 'person', scopeId: 'project:next' }]
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'graph_source' && args.path === '/next/graph/jon.md' ? moved : normalInvoke(command, args))
+    await wrapper.vm.mimirOpenGraph('jon')
+    expect(useFileStore().currentFile.path).toBe('/next/graph/jon.md')
+    expect(useFileStore().currentFile).not.toBe(previous)
+    expect(previous.graph.draft.title).toBe('Previous root draft')
+    expect(previous.dirty).toBe(true)
+  })
+
+  it('never opens a hinted source with the wrong native node identity', async () => {
+    const wrapper = await editor()
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'graph_source'
+      ? { ...disk, node: { ...disk.node, id: 'another-entry' } } : normalInvoke(command, args))
+    await expect(wrapper.vm.mimirOpenGraph('jon')).rejects.toThrow('unavailable')
+    expect(useFileStore().openFiles.some(file => file.graph)).toBe(false)
+  })
+
+  it('closes clean Details through the normal tab guard and requests Graph focus', async () => {
+    const wrapper = await editor()
+    await wrapper.vm.mimirOpenGraph('jon')
+    wrapper.findComponent(GraphEditorTab).vm.$emit('closeRequest')
+    await flushPromises()
+    expect(useFileStore().openFiles.some(file => file.path === path)).toBe(false)
+    expect(wrapper.emitted('focusGraph')).toEqual([[{ id: 'jon' }]])
+  })
+
+  it('keeps a dirty Details draft after close cancellation and only returns focus after confirmed close', async () => {
+    const wrapper = await editor()
+    await wrapper.vm.mimirOpenGraph('jon')
+    const file = useFileStore().currentFile
+    await wrapper.get('[data-inspector-title]').setValue('Keep until confirmed')
+    wrapper.findComponent(GraphEditorTab).vm.$emit('closeRequest')
+    await flushPromises()
+    expect(document.querySelector('#close-confirm-title')).not.toBeNull()
+    document.querySelector('.btn-cancel').click()
+    await flushPromises()
+    expect(useFileStore().currentFile).toBe(file)
+    expect(file.graph.draft.title).toBe('Keep until confirmed')
+    expect(wrapper.emitted('focusGraph')).toBeUndefined()
+    wrapper.findComponent(GraphEditorTab).vm.$emit('closeRequest')
+    await flushPromises()
+    document.querySelector('.btn-discard').click()
+    await flushPromises()
+    expect(useFileStore().openFiles.includes(file)).toBe(false)
+    expect(wrapper.emitted('focusGraph')).toEqual([[{ id: 'jon' }]])
+  })
+
+  it('keeps Details open while a source review response is pending', async () => {
+    const wrapper = await editor()
+    await wrapper.vm.mimirOpenGraph('jon')
+    const file = useFileStore().currentFile
+    file.reviewPending = true
+    wrapper.findComponent(GraphEditorTab).vm.$emit('closeRequest')
+    await flushPromises()
+    expect(useFileStore().currentFile).toBe(file)
+    expect(wrapper.emitted('focusGraph')).toBeUndefined()
+  })
+
   it('keeps one rich draft when its entry or source is opened again', async () => {
     const wrapper = await editor()
     await wrapper.vm.mimirOpenGraph('jon')
@@ -124,6 +272,46 @@ describe('Graph entry Editor tabs', () => {
     await pending
     expect(useFileStore().currentFile.path).toBe('/work/ordinary.md')
     expect(wrapper.findComponent(GraphEditorTab).exists()).toBe(false)
+  })
+
+  it('ignores a slow hinted source after the workspace changes', async () => {
+    const wrapper = await editor()
+    let finish
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === 'graph_source' && args.path === path
+      ? new Promise(resolve => { finish = resolve }) : normalInvoke(command, args))
+    const pending = wrapper.vm.mimirOpenGraph('jon')
+    await flushPromises()
+    await wrapper.setProps({ workspacePath: '/next', workspacePaths: ['/work', '/next'] })
+    finish(structuredClone(disk))
+    expect(await pending).toBeNull()
+    expect(useFileStore().openFiles.some(file => file.path === path)).toBe(false)
+  })
+
+  it.each(['graph_source', 'graph_get'])('ignores a late %s error after another navigation', async commandToDelay => {
+    const wrapper = await editor()
+    if (commandToDelay === 'graph_get') useBusinessGraphStore().nodes = []
+    let reject
+    const normalInvoke = vi.mocked(invoke).getMockImplementation()
+    vi.mocked(invoke).mockImplementation((command, args) => command === commandToDelay
+      ? new Promise((_resolve, fail) => { reject = fail }) : normalInvoke(command, args))
+    const opening = wrapper.vm.mimirOpenGraph('jon')
+    await flushPromises()
+    await wrapper.vm.mimirOpen('/work/ordinary.md')
+    reject(new Error('Old source could not be read'))
+    expect(await opening).toBeNull()
+    expect(useFileStore().currentFile.path).toBe('/work/ordinary.md')
+    expect(wrapper.emitted('diagnostic')).toBeUndefined()
+  })
+
+  it('returns cancellation when navigation changes after the Graph tab is selected', async () => {
+    const navigate = vi.fn()
+    const wrapper = await editor({ onNavigateEditor: navigate })
+    let laterNavigation
+    navigate.mockImplementationOnce(() => { laterNavigation = wrapper.vm.mimirOpen('/work/ordinary.md') })
+    expect(await wrapper.vm.mimirOpenGraph('jon')).toBeNull()
+    await laterNavigation
+    expect(useFileStore().currentFile.path).toBe('/work/ordinary.md')
   })
 
   it.each(['reveal', 'cycle'])('ignores a slow Graph open after %s selects an existing tab', async navigation => {

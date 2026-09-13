@@ -53,9 +53,13 @@ export function useGraphInspector(props, emit) {
   const summaryInput = ref(null)
   const deliverablesInput = ref(null)
   const filesInput = ref(null)
+  const growingInputs = [titleInput, summaryInput, deliverablesInput, filesInput]
+  let inputResizeObserver = null
   const copiedFact = ref('')
   let copiedFactTimer = null
   const moreOpen = ref(false)
+  const propertiesOpen = ref(false)
+  const connectionOpen = ref(false)
   const historyOpen = ref(false)
   const historyLoading = ref(false)
   const historyError = ref('')
@@ -99,8 +103,8 @@ export function useGraphInspector(props, emit) {
     hint: scope.kind === 'project' ? 'Current workspace' : '',
   })))
   const meetingAttendees = computed(() => draft.value.attendeeIds
-    .map(id => people.value.find(person => person.id === id))
-    .filter(Boolean))
+    .map(id => relatedTarget(id))
+    .filter(person => person?.kind === 'person'))
   const meetingPersonOptions = computed(() => people.value
     .filter(person => !draft.value.attendeeIds.includes(person.id))
     .map(person => ({ value: person.id, label: displayTitle(person) }))
@@ -109,7 +113,7 @@ export function useGraphInspector(props, emit) {
   function currentPersonOption(value) {
     const current = String(value || '').trim()
     if (!current || activeTeamPeople.value.some(person => person.id === current)) return []
-    const person = people.value.find(candidate => candidate.id === current)
+    const person = relatedTarget(current)
     if (person) {
       return [{ value: current, label: displayTitle(person), hint: 'Current owner' }]
     }
@@ -121,7 +125,8 @@ export function useGraphInspector(props, emit) {
   function labelOption(value, candidates) {
     const current = String(value || '').trim()
     if (!current || candidates.some(candidate => candidate.id === current)) return []
-    return [{ value: current, label: current, hint: 'Label from the Markdown source' }]
+    const target = relatedTarget(current)
+    return [{ value: current, label: target ? displayTitle(target) : current, hint: target ? `${human(target.kind)} entry` : 'Label from the Markdown source' }]
   }
   const relationOptions = computed(() => (
     RELATION_DEFINITIONS
@@ -158,7 +163,7 @@ export function useGraphInspector(props, emit) {
       .map((edge, index) => ({
         edge,
         index,
-        target: props.nodes.find(candidate => candidate.id === edge.target),
+        target: relatedTarget(edge.target),
       }))
       .filter(connection => !(
         node.value?.kind === 'issue'
@@ -169,30 +174,30 @@ export function useGraphInspector(props, emit) {
         && ['part_of', 'attended_by'].includes(connection.edge.relation)
       ))
   ))
+  const incomingConnections = computed(() => props.neighbors.filter(neighbor => (
+    neighbor.direction === 'incoming'
+    && neighbor.node.relations?.some(edge => edge.relation === neighbor.relation && edge.target === node.value.id)
+  )))
   const canAddConnection = computed(() => (
     Boolean(connectionRelation.value && connectionTarget.value)
     && !draft.value.relations.some(edge => (
       edge.relation === connectionRelation.value && edge.target === connectionTarget.value
     ))
   ))
-  const deliverableItems = computed(() => (
-    (node.value?.properties?.deliverables || [])
-      .map(item => (
-        typeof item === 'string'
-          ? { path: item, label: '' }
-          : { path: item?.path || '', label: item?.label || '' }
-      ))
-      .filter(item => item.path)
-  ))
-  const resourceItems = computed(() => (
-    (node.value?.properties?.files || [])
-      .map(item => (
-        typeof item === 'string'
-          ? { path: item, label: '' }
-          : { path: item?.path || '', label: item?.label || '' }
-      ))
-      .filter(item => item.path)
-  ))
+  const attachmentItems = computed(() => {
+    const items = new Map()
+    for (const item of [
+      ...draftFiles(draft.value.deliverables).map(item => ({ ...item, output: true })),
+      ...draftFiles(draft.value.files).map(item => ({ ...item, output: false })),
+    ]) {
+      const path = normalizeResourcePath(item.path)
+      const previous = items.get(path)
+      items.set(path, previous
+        ? { ...previous, label: previous.label || item.label, output: previous.output || item.output }
+        : item)
+    }
+    return [...items.values()]
+  })
   const canAddTeamResource = computed(() => (
     node.value?.provenance?.scopeId === 'team:main'
   ))
@@ -213,11 +218,6 @@ export function useGraphInspector(props, emit) {
   const unlinkedResourceItems = computed(() => teamResourceFiles.value.filter(resource => (
     !linkedTeamResourcePaths.value.has(normalizeResourcePath(resource.path))
   )))
-  const attentionLabel = computed(() => {
-    if (draft.value.snoozeUntil) return `Snoozed until ${readableDate(draft.value.snoozeUntil)}`
-    if (isOverdue(draft.value.dueDate)) return 'Overdue'
-    return 'Clear'
-  })
   const saveStateLabel = computed(() => {
     if (props.documentFile.saveState === 'failed') return 'Save failed'
     if (saving.value) return 'Saving…'
@@ -239,12 +239,15 @@ export function useGraphInspector(props, emit) {
   })
 
   watch(
-    () => [props.documentFile.id, node.value?.kind],
-    () => {
+    () => [props.documentFile.id, node.value?.id, node.value?.kind],
+    (next, previous) => {
+      if (previous && next.every((value, index) => value === previous[index])) return
       connectionRelation.value = defaultRelationFor(node.value?.kind)
       connectionTarget.value = ''
       attendeeToAdd.value = ''
       moreOpen.value = false
+      propertiesOpen.value = false
+      connectionOpen.value = false
       historyOpen.value = false
       historyEntries.value = []
       historyError.value = ''
@@ -255,18 +258,42 @@ export function useGraphInspector(props, emit) {
   )
 
   watch(
+    () => [draft.value.title, draft.value.summary, draft.value.deliverables, draft.value.files],
+    (values, previous) => {
+      values.forEach((value, index) => {
+        if (value !== previous[index]) grow(growingInputs[index].value)
+      })
+    },
+    { flush: 'post' },
+  )
+
+  watch(
+    () => growingInputs.map(input => input.value),
+    () => growAll(),
+    { flush: 'post' },
+  )
+
+  watch(
     () => [
       node.value?.id,
       node.value?.kind,
       node.value?.provenance?.scopeId,
       node.value?.provenance?.sourcePath,
     ],
-    () => {
-      void refreshHistoryAvailability()
-      void loadTeamResources()
+    (next, previous) => {
+      if (previous && next.every((value, index) => value === previous[index])) return
+      historyAvailabilityRequest += 1
+      teamResourceRequest += 1
+      fileHistoryAvailable.value = false
+      teamResourceFiles.value = []
+      if (moreOpen.value) void refreshHistoryAvailability()
+      if (propertiesOpen.value) void loadTeamResources()
     },
     { immediate: true },
   )
+
+  watch(moreOpen, open => { if (open) void refreshHistoryAvailability() })
+  watch(propertiesOpen, open => { if (open) void loadTeamResources() })
 
   function save() {
     emit('save')
@@ -287,6 +314,11 @@ export function useGraphInspector(props, emit) {
 
   function openRelated(id) {
     emit('openNode', id)
+  }
+
+  function relatedTarget(id) {
+    return props.nodes.find(candidate => candidate.id === id)
+      || props.neighbors.find(neighbor => neighbor.node.id === id)?.node
   }
 
   function revealReference(request) {
@@ -346,11 +378,6 @@ export function useGraphInspector(props, emit) {
     emit('draftChange')
   }
 
-  function changedAndGrow(event) {
-    changed()
-    grow(event.target)
-  }
-
   function updateDraft(field, value) {
     draft.value[field] = value
     changed()
@@ -369,6 +396,7 @@ export function useGraphInspector(props, emit) {
       legacy: false,
     })
     connectionTarget.value = ''
+    connectionOpen.value = false
     changed()
   }
 
@@ -379,14 +407,18 @@ export function useGraphInspector(props, emit) {
   }
 
   function growAll() {
-    for (const input of [titleInput.value, summaryInput.value, deliverablesInput.value, filesInput.value]) grow(input)
+    for (const input of growingInputs) grow(input.value)
   }
 
   // Respect each field's minimum height while it grows with its content.
   function grow(input) {
-    if (!input) return
+    if (!input?.isConnected || !input.clientWidth) return
+    const style = getComputedStyle(input)
+    // Editor content stays mounted in its narrow, hidden rail. Measuring there
+    // wraps each word onto extra lines and leaves an oversized inline height.
+    if (style.visibility === 'hidden') return
     input.style.height = '0px'
-    const floor = Number.parseFloat(getComputedStyle(input).minHeight) || 0
+    const floor = Number.parseFloat(style.minHeight) || 0
     input.style.height = `${Math.max(input.scrollHeight, floor)}px`
   }
 
@@ -397,7 +429,7 @@ export function useGraphInspector(props, emit) {
   }
 
   function connectionTitle(connection) {
-    return connection.target ? displayTitle(connection.target) : 'Unavailable object'
+    return connection.target ? displayTitle(connection.target) : 'Unavailable entry'
   }
 
   function remove() {
@@ -474,7 +506,6 @@ export function useGraphInspector(props, emit) {
       const path = await invoke('team_resource_import', { source: sourcePath })
       draft.value.files = [draft.value.files.trim(), path].filter(Boolean).join('\n')
       changed()
-      await nextTick(() => grow(filesInput.value))
     } catch (cause) {
       resourceError.value = cause instanceof Error ? cause.message : String(cause)
     }
@@ -516,11 +547,10 @@ export function useGraphInspector(props, emit) {
     if (!path || alreadyLinked) return
     draft.value.files = [draft.value.files.trim(), path].filter(Boolean).join('\n')
     changed()
-    await nextTick(() => grow(filesInput.value))
   }
 
   function onKeydown(event) {
-    if (event.isComposing || event.keyCode === 229) return
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
       event.preventDefault()
       save()
@@ -530,6 +560,19 @@ export function useGraphInspector(props, emit) {
       event.preventDefault()
       event.stopPropagation()
       moreOpen.value = false
+      inspectorRoot.value?.querySelector('[data-graph-control="focus-more"]')?.focus()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      if (historyOpen.value) { historyOpen.value = false; return }
+      if (connectionOpen.value) {
+        connectionOpen.value = false
+        void nextTick(() => inspectorRoot.value?.querySelector('[data-graph-control="entry-add-relation"]')?.focus())
+        return
+      }
+      emit('closeRequest')
     }
   }
 
@@ -554,11 +597,23 @@ export function useGraphInspector(props, emit) {
   }
 
   onBeforeUnmount(() => {
+    inputResizeObserver?.disconnect()
     if (props.viewState) props.viewState.scrollTop = inspectorRoot.value?.querySelector('.focus-scroll')?.scrollTop || 0
   })
 
   onMounted(() => {
     document.addEventListener('pointerdown', onDocumentPointerDown)
+    if (typeof ResizeObserver === 'function' && inspectorRoot.value) {
+      let previousWidth = null
+      inputResizeObserver = new ResizeObserver(([entry]) => {
+        const width = entry?.contentRect.width
+        if (width == null || width === previousWidth) return
+        previousWidth = width
+        // Ignore height-only notifications caused by sizing these fields.
+        growAll()
+      })
+      inputResizeObserver.observe(inspectorRoot.value)
+    }
     void nextTick(() => {
       const scroll = inspectorRoot.value?.querySelector('.focus-scroll')
       if (scroll && props.viewState) scroll.scrollTop = props.viewState.scrollTop
@@ -588,6 +643,8 @@ export function useGraphInspector(props, emit) {
     dirty,
     copiedFact,
     moreOpen,
+    propertiesOpen,
+    connectionOpen,
     historyOpen,
     historyLoading,
     historyError,
@@ -611,13 +668,12 @@ export function useGraphInspector(props, emit) {
     relationOptions,
     connectionTargetOptions,
     connectionRows,
+    incomingConnections,
     canAddConnection,
-    deliverableItems,
-    resourceItems,
+    attachmentItems,
     canAddTeamResource,
     canRecoverTeamResource,
     unlinkedResourceItems,
-    attentionLabel,
     saveStateLabel,
     saveStateClass,
     editableTags,
@@ -627,20 +683,19 @@ export function useGraphInspector(props, emit) {
     addMeetingAttendee,
     removeMeetingAttendee,
     openRelated,
+    relatedTarget,
     openSource,
     openUrl,
     openActivity,
     quickCreate,
     copyFact,
     changed,
-    changedAndGrow,
     updateDraft,
     selectConnectionRelation,
     addConnection,
     removeConnection,
     connectionTitle,
-    defaultRelationFor,
-  displayTitle,
+    displayTitle,
     remove,
     moreAction,
     toggleHistory,
@@ -665,6 +720,13 @@ export function useGraphInspector(props, emit) {
     context,
     exposed: { focusEntry, revealReference },
   }
+}
+
+function draftFiles(value) {
+  return String(value || '').split('\n').map(line => {
+    const [path, ...label] = line.split('|').map(part => part.trim())
+    return { path, label: label.join(' | ') }
+  }).filter(item => item.path)
 }
 
 function resourcePathsFromDraft(value) {

@@ -162,6 +162,8 @@ in Main. Preview, pinning, close, and session restore use the Editor tab
 lifecycle. Reopening an entry or its source selects the same tab and keeps
 its current view and draft. Working-note undo, caret, and scroll stay with the
 open tab; an external body replacement starts a fresh undo history.
+Title, summary, and file fields resize with their text and the Editor width.
+Sizing skips hidden rail content and runs again when the pane opens.
 **Details** and **Source** share one save queue.
 Changing views waits for pending writes and saves; a conflict keeps the draft
 and view intact. Details saves after a short pause; Source follows the Editor
@@ -181,6 +183,29 @@ baseline and the current draft; remount checks source identity before writing.
 Entry-open requests pass from `BusinessGraphApp` through `AppActivity` to the
 Workbench's mounted Editor. Workbench integration tests click Board, List,
 and Timeline entries through this route, including when the Editor is a rail.
+The full-component test also checks draft editing, close cancellation, and
+focus return to the Board row. Escape closes Details through the normal tab
+close check; open menus and link suggestions consume Escape first.
+
+Details puts the title, essential work fields, and working note first.
+Issues show status, priority, project, owner, and due date; a waiting reason
+appears when set or when status is Waiting. Project and owner fields include
+direct entry links. Existing files and explicit relations use compact rows.
+Incoming explicit relations appear under **Related**; body links appear only
+under **Links** and **Backlinks**. Those groups start collapsed, show counts
+and unavailable-link warnings, and disappear when empty. **More properties**
+holds reminders, snooze, tags, output/file path editors, and timestamps.
+Set reminders, snooze dates, and tags remain visible beside its toggle.
+Project overview also starts collapsed. These disclosures change presentation;
+the Graph schema and saved properties stay the same.
+
+Opening a listed entry uses its mounted scope to locate the source. Rust
+validates that source and its entry id; a stale path falls back to native
+lookup. This removes the separate full-entry read on the common opening path.
+Reopening the exact open tab reuses its snapshot and draft without a source
+read or a wait for its pending save. Git History availability runs when More
+actions opens; Team file discovery runs when More properties opens. References
+and neighbors load separately and do not block the initial document.
 
 In Work, search filters the loaded issues
 immediately by title, summary, tags, project, owner, and work details. Terms

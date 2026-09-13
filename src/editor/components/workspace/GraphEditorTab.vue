@@ -19,6 +19,7 @@
       @draft-change="files.graphDraftChanged(file)"
       @save="save"
       @source="$emit('source')"
+      @close-request="$emit('closeRequest')"
       @open-node="$emit('openGraph', $event)"
       @open-file="openFile"
       @open-url="$emit('openUrl', $event)"
@@ -70,7 +71,7 @@ import GraphConfirmDialog from '../../../mimir/apps/business-graph/GraphConfirmD
 import { useGraphMutations } from '../../../mimir/apps/business-graph/useGraphMutations.js'
 
 const props = defineProps({ file: { type: Object, required: true } })
-const emit = defineEmits(['source', 'openGraph', 'openFile', 'openUrl', 'openActivity', 'openMeeting', 'diagnostic'])
+const emit = defineEmits(['source', 'closeRequest', 'openGraph', 'openFile', 'openUrl', 'openActivity', 'openMeeting', 'diagnostic'])
 const viewState = graphDocumentViewState(props.file)
 const files = useFileStore()
 const graph = useBusinessGraphStore()

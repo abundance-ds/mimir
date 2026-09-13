@@ -56,6 +56,9 @@
         :meta="activityMeta"
       >
         <template v-if="settings.showMainTabs" #tabs><ActivityTabs :tabs="mainTabs" :active-id="workbench.activeActivityId || ''" :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds" @select="selectActivity" @close="closeMainTab" @rename="renameActivity" @new="openQuickOpen('tabs')" @reorder="workbench.reorderTabs" /></template>
+        <template v-if="!settings.showMainTabs && activeMainTab && !activeMainTab.unique" #title>
+          <ActivityTitle :activity="activeMainTab" :hidden="workbench.paneLayout.activity.state === 'rail'" @rename="renameActivity" />
+        </template>
         <template v-if="!settings.showMainTabs" #leading>
           <ActivityTabMenu label="Open views" :tabs="mainTabs" :active-id="workbench.activeActivityId || ''"
             :blocking-ids="activityRuntime.blockingInputActivityIds" :restoring-ids="activityRuntime.resumingActivityIds"
@@ -169,6 +172,7 @@
         @open-graph-file="openFileInEditor"
         @open-graph-activity="selectActivity"
         @open-graph-meeting="openScribeMeeting"
+        @focus-graph="focusGraph"
       />
     </template>
   </WorkbenchShell>
@@ -237,6 +241,7 @@ import { installManagedSyncLifecycle } from '../services/managedRepositories.js'
 import { useTodayStore } from '../stores/today.js'
 import FilesActivity from './activities/FilesActivity.vue'
 import ActivityTabs from './components/ActivityTabs.vue'
+import ActivityTitle from './components/ActivityTitle.vue'
 import ActivityTabMenu from './components/ActivityTabMenu.vue'
 import { activityCloseLabel } from './composables/useActivityNavigation.js'
 import RoutinesActivity from './activities/RoutinesActivity.vue'
@@ -1029,13 +1034,22 @@ async function openScribeMeeting(meetingId) {
 
 async function openGraphNode(request) {
   try {
-    await editorRef.value?.mimirOpenGraph(request)
+    const file = await editorRef.value?.mimirOpenGraph(request)
+    if (!file) return
     focusNarrowPane('editor')
     workbench.setPaneState('editor', 'expanded')
     diagnostic.value = ''
   } catch (cause) {
     diagnostic.value = `Entry could not open: ${errorMessage(cause)}`
   }
+}
+
+function focusGraph() {
+  const activity = activeActivity.value
+  if (activity?.source?.app?.id !== 'business-graph') return
+  focusNarrowPane('activity')
+  workbench.setPaneState('activity', 'expanded')
+  requestEntryFocus(activity.id)
 }
 
 async function stopMeetingCapture() {
