@@ -2398,27 +2398,38 @@ mod tests {
 
         let launch = result.activity.launch.as_ref().unwrap();
         assert_eq!(launch.command, harness.binary.to_string_lossy());
-        assert_eq!(&launch.args[..4], ["exec", "--model", "gpt 5", "-c"]);
         let scoped_mcp_url = activity_mcp_url(
             "http://127.0.0.1:29999/mcp",
             &result.activity.id,
             "codex",
             harness.workspace.to_str().unwrap(),
         );
-        assert_eq!(
-            launch.args[4],
-            format!(
-                "mcp_servers.mimir_workbench.url={}",
-                serde_json::to_string(&scoped_mcp_url).unwrap()
-            )
+        let scratchpad_directory = harness
+            .root
+            .path()
+            .join(".mimir")
+            .to_string_lossy()
+            .into_owned();
+        let mcp_setting = format!(
+            "mcp_servers.mimir_workbench.url={}",
+            serde_json::to_string(&scoped_mcp_url).unwrap()
         );
         assert_eq!(
-            &launch.args[5..7],
-            ["-c", r#"notify=["mimir","internal","codex-notify"]"#]
-        );
-        assert_eq!(
-            launch.args[7],
-            "Review the work tree and report sharp findings."
+            launch.args,
+            [
+                "exec",
+                "--model",
+                "gpt 5",
+                "--add-dir",
+                &scratchpad_directory,
+                "-c",
+                &mcp_setting,
+                "-c",
+                r#"notify=["mimir","internal","codex-notify"]"#,
+                "-c",
+                r#"tui.terminal_title=["app-name","status","activity"]"#,
+                "Review the work tree and report sharp findings.",
+            ]
         );
         assert_eq!(
             launch.env.get("MIMIR_TEST_ENV").map(String::as_str),
