@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 struct TrackedApp {
+    candidate_id: String,
     first_seen_millis: u64,
     last_seen_millis: u64,
     evidence: BTreeMap<i32, AppEvidence>,
@@ -23,6 +24,7 @@ struct TrackedApp {
 impl TrackedApp {
     fn new(now_millis: u64, evidence: AppEvidence) -> Self {
         Self {
+            candidate_id: format!("mic:{}", uuid::Uuid::new_v4()),
             first_seen_millis: now_millis,
             last_seen_millis: now_millis,
             evidence: BTreeMap::from([(evidence.process_id, evidence)]),
@@ -38,7 +40,7 @@ impl TrackedApp {
             .collect();
     }
 
-    fn candidate(&self, identity: &str) -> DetectionCandidate {
+    fn candidate(&self) -> DetectionCandidate {
         let process_ids = self.evidence.keys().copied().collect::<Vec<_>>();
         let best = self
             .evidence
@@ -58,7 +60,7 @@ impl TrackedApp {
         };
 
         DetectionCandidate {
-            id: format!("mic:{identity}"),
+            id: self.candidate_id.clone(),
             app_id,
             app_name: best.app_name.clone(),
             detected_at_millis: self.first_seen_millis,
@@ -127,7 +129,7 @@ impl DetectionPolicy {
         for identity in stale {
             if let Some(tracked) = self.tracked.remove(&identity) {
                 if tracked.suggestion_open {
-                    let candidate = tracked.candidate(&identity);
+                    let candidate = tracked.candidate();
                     self.suppressions.insert(
                         identity,
                         Suppression {
@@ -167,9 +169,7 @@ impl DetectionPolicy {
                     >= duration_millis(self.config.sustained_use)
             {
                 tracked.suggestion_open = true;
-                events.push(DetectionEvent::CandidateSuggested(
-                    tracked.candidate(&identity),
-                ));
+                events.push(DetectionEvent::CandidateSuggested(tracked.candidate()));
             }
         }
 
@@ -182,15 +182,13 @@ impl DetectionPolicy {
         now_millis: u64,
     ) -> Result<Option<DetectionEvent>, DetectError> {
         self.validate_now(now_millis)?;
-        let Some(identity) = candidate_id.strip_prefix("mic:") else {
+        let Some(identity) = self.tracked.iter().find_map(|(identity, tracked)| {
+            (tracked.suggestion_open && tracked.candidate_id == candidate_id)
+                .then(|| identity.clone())
+        }) else {
             return Ok(None);
         };
-        let Some(tracked) = self.tracked.remove(identity) else {
-            return Ok(None);
-        };
-        if !tracked.suggestion_open {
-            return Ok(None);
-        }
+        self.tracked.remove(&identity);
 
         self.suppressions.insert(
             identity.to_owned(),
@@ -211,7 +209,7 @@ impl DetectionPolicy {
         self.tracked
             .iter()
             .filter(|(_, tracked)| tracked.suggestion_open)
-            .map(|(identity, tracked)| tracked.candidate(identity))
+            .map(|(_, tracked)| tracked.candidate())
             .collect()
     }
 
@@ -220,8 +218,8 @@ impl DetectionPolicy {
             .tracked
             .iter()
             .filter(|(_, tracked)| tracked.suggestion_open)
-            .map(|(identity, tracked)| DetectionEvent::CandidateEnded {
-                candidate_id: tracked.candidate(identity).id,
+            .map(|(_, tracked)| DetectionEvent::CandidateEnded {
+                candidate_id: tracked.candidate().id,
                 reason,
             })
             .collect();
@@ -277,6 +275,38 @@ fn duration_millis(duration: std::time::Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn occurrence_ids_survive_updates_but_never_recur_after_end_or_reset() {
+        let mut policy = DetectionPolicy::new(DetectionConfig {
+            sustained_use: std::time::Duration::ZERO,
+            absence_grace: std::time::Duration::ZERO,
+            cooldown: std::time::Duration::ZERO,
+            ..DetectionConfig::default()
+        })
+        .unwrap();
+        let app = AppEvidence {
+            process_id: 7,
+            bundle_id: Some("us.zoom.xos".into()),
+            app_name: "Zoom".into(),
+        };
+        policy.observe(0, vec![app.clone()]).unwrap();
+        let first = policy.candidates()[0].id.clone();
+        policy.observe(1, vec![app.clone()]).unwrap();
+        assert_eq!(policy.candidates()[0].id, first);
+        policy.observe(2, Vec::new()).unwrap();
+        policy.observe(3, vec![app.clone()]).unwrap();
+        let second = policy.candidates()[0].id.clone();
+        assert_ne!(second, first);
+        assert!(policy.dismiss(&first, 3).unwrap().is_none());
+        assert_eq!(policy.candidates()[0].id, second);
+        policy.reset(CandidateEndReason::DetectionDisabled);
+        policy.observe(3, vec![app]).unwrap(); // even the same clock tick
+        assert_ne!(policy.candidates()[0].id, second);
+        let third = policy.candidates()[0].id.clone();
+        assert!(policy.dismiss(&third, 3).unwrap().is_some());
+        assert!(policy.candidates().is_empty());
+    }
 
     #[test]
     fn ended_candidate_is_cooled_down_after_absence() {

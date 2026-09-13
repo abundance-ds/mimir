@@ -308,3 +308,37 @@ fn library_and_summary_projections_have_explicit_payload_budgets() {
         .unwrap();
     assert_eq!(detail.summary.unwrap().len(), 100_000);
 }
+
+#[test]
+fn delayed_notification_and_consent_cannot_record_a_later_call_from_the_same_app() {
+    use mimir_meeting_detect::{AppEvidence, DetectionConfig, DetectionPolicy};
+    let fixture = make_fixture();
+    let mut detector = DetectionPolicy::new(DetectionConfig {
+        sustained_use: std::time::Duration::ZERO,
+        absence_grace: std::time::Duration::ZERO,
+        cooldown: std::time::Duration::ZERO,
+        ..DetectionConfig::default()
+    }).unwrap();
+    let app = AppEvidence { process_id: 42, bundle_id: Some("us.zoom.xos".into()), app_name: "Zoom".into() };
+    let project = |candidate: mimir_meeting_detect::DetectionCandidate| MeetingCandidate {
+        id: candidate.id, app_id: candidate.app_id, app_name: candidate.app_name,
+        detected_at: None, confidence: candidate.confidence,
+    };
+    detector.observe(0, vec![app.clone()]).unwrap();
+    let call_a = project(detector.candidates().remove(0));
+    fixture.platform.state.lock().unwrap().projection.candidates = vec![call_a.clone()];
+    // The notification was accepted, and consent was granted, before the
+    // renderer's delayed start resumes. Neither may authorize call B.
+    let authorized_a = start_request_for_candidate(&fixture.runtime, "notification-a", Some(&call_a.id));
+    detector.observe(1, Vec::new()).unwrap();
+    detector.observe(2, vec![app]).unwrap();
+    let call_b = project(detector.candidates().remove(0));
+    assert_ne!(call_a.id, call_b.id);
+    fixture.platform.state.lock().unwrap().projection.candidates = vec![call_b.clone()];
+    assert!(fixture.runtime.start_consent_context(Some(&call_a.id)).is_err());
+    assert!(fixture.runtime.start(authorized_a.clone()).is_err());
+    let mut retargeted = authorized_a;
+    retargeted.candidate_id = Some(call_b.id);
+    assert!(matches!(fixture.runtime.start(retargeted), Err(MeetingRuntimeError::ConsentContextChanged)));
+    assert!(fixture.capture.starts.lock().unwrap().is_empty());
+}

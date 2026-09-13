@@ -620,6 +620,7 @@ function normalizeCandidate(value) {
 function normalizeMeetingRecordRequest(value) {
   const request = object(value)
   return {
+    action: request.action === 'record' ? 'record' : 'open',
     candidateId: String(request.candidateId ?? request.candidate_id ?? '').trim(),
     appName: String(request.appName ?? request.app_name ?? 'Meeting app').trim() || 'Meeting app',
   }

@@ -439,11 +439,15 @@ describe('meetings service', () => {
 
   it('drains and listens for native notification record requests', async () => {
     vi.mocked(invoke).mockResolvedValue([
-      { candidate_id: 'candidate-zoom', app_name: 'Zoom' },
+      { candidate_id: 'candidate-zoom', app_name: 'Zoom', action: 'record' },
+      { candidateId: 'candidate-chrome', appName: 'Chrome', action: 'open' },
+      { candidateId: 'unknown-action', appName: 'Chrome', action: 'unexpected' },
       { candidateId: '', appName: 'Invalid' },
     ])
     await expect(takeMeetingRecordRequests()).resolves.toEqual([
-      { candidateId: 'candidate-zoom', appName: 'Zoom' },
+      { candidateId: 'candidate-zoom', appName: 'Zoom', action: 'record' },
+      { candidateId: 'candidate-chrome', appName: 'Chrome', action: 'open' },
+      { candidateId: 'unknown-action', appName: 'Chrome', action: 'open' },
     ])
     expect(invoke).toHaveBeenCalledWith('meetings_take_record_requests')
 

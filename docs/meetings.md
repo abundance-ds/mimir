@@ -6,8 +6,15 @@ signed end-to-end evidence.
 
 Scribe is a local-first meeting recorder. The user starts recording; detection
 can only suggest it. On macOS, a detection notification offers **RECORD**. That
-explicit action activates Mimir and uses the normal permission, consent, and
-candidate-validation path. A stale suggestion cannot start capture. Microphone
+explicit action opens Scribe and uses the normal permission, consent, and
+candidate-validation path. Clicking the banner body opens Scribe without
+starting capture. macOS responses use a retained callback delegate; ignored
+notifications create no waiting worker or repeated notification-list scan.
+Detection end, dismissal, disabling detection, and shutdown remove the owned
+notification. A late delivery is removed again when its submission completes.
+Each detection occurrence has a distinct opaque candidate id, carried through
+the notification queue and native consent/start checks. A stale suggestion or
+queued RECORD request cannot start a later call from the same app. Microphone
 use by another app is the detection signal, so a call with its microphone off
 is not visible to Scribe. Detection polls while enabled and does not require a
 routine app restart. Detection replaces listeners after microphone device

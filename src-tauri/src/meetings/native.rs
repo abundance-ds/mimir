@@ -35,15 +35,13 @@ use super::{
 };
 use crate::persistence::{ensure_private_directory, ensure_private_subdirectory};
 use chrono::Utc;
+#[cfg(target_os = "macos")]
+use mimir_meeting_detect::DetectionConfig;
 use mimir_meeting_detect::DetectionMonitor;
 #[cfg(test)]
 use mimir_meeting_detect::PermissionState;
 #[cfg(any(test, target_os = "macos"))]
 use mimir_meeting_detect::{DetectionCandidate, DetectorSnapshot};
-#[cfg(target_os = "macos")]
-use mimir_meeting_detect::{DetectionConfig, DetectionEvent};
-#[cfg(target_os = "macos")]
-use std::collections::HashSet;
 use std::{
     collections::VecDeque,
     path::Path,
@@ -53,19 +51,26 @@ use std::{
 };
 #[cfg(target_os = "macos")]
 use tauri::{Emitter, Manager};
-#[cfg(target_os = "macos")]
-use tauri_plugin_notification::NotificationExt;
+
+#[cfg(any(test, target_os = "macos"))]
+mod detection_notifications;
 
 const STORE_FILE_NAME: &str = "meetings.sqlite";
 const RETENTION_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
-#[cfg(target_os = "macos")]
-const RECORD_DETECTED_MEETING_ACTION: &str = "RECORD";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingRecordRequest {
+    pub action: MeetingNotificationAction,
     pub candidate_id: String,
     pub app_name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MeetingNotificationAction {
+    Open,
+    Record,
 }
 
 #[derive(Default)]
@@ -199,15 +204,15 @@ pub fn bootstrap_native_meeting_engine(
     let changes = TauriMeetingPlatformChangeSink::new(app);
     let record_requests = Arc::new(MeetingRecordRequestQueue::default());
     #[cfg(target_os = "macos")]
+    let notifications =
+        detection_notifications::DetectionNotifications::new(app, Arc::clone(&record_requests));
+    #[cfg(target_os = "macos")]
     let (detector, environment): (
         Option<Arc<DetectionMonitor>>,
         Arc<dyn MeetingEnvironmentProbe>,
     ) = {
         let callback_changes = Arc::clone(&changes);
-        let notification_app = app.clone();
-        let notified_candidates = Arc::new(Mutex::new(HashSet::<String>::new()));
-        let callback_notified_candidates = Arc::clone(&notified_candidates);
-        let callback_record_requests = Arc::clone(&record_requests);
+        let callback_notifications = notifications.as_ref().map(|owner| owner.event_handler());
         match DetectionMonitor::start(
             DetectionConfig {
                 // The durable native config is applied by platform
@@ -216,12 +221,9 @@ pub fn bootstrap_native_meeting_engine(
                 ..DetectionConfig::default()
             },
             move |event| {
-                handle_detection_notification(
-                    &notification_app,
-                    &callback_notified_candidates,
-                    &callback_record_requests,
-                    &event,
-                );
+                if let Some(notifications) = &callback_notifications {
+                    notifications(&event);
+                }
                 MeetingPlatformChangeSink::changed(callback_changes.as_ref(), "detection");
             },
         ) {
@@ -313,6 +315,8 @@ pub fn bootstrap_native_meeting_engine(
         record_requests,
         lifecycle: NativeMeetingLifecycle {
             detector,
+            #[cfg(target_os = "macos")]
+            notifications,
             retention,
             shutdown_result: OnceLock::new(),
         },
@@ -320,127 +324,21 @@ pub fn bootstrap_native_meeting_engine(
 }
 
 #[cfg(target_os = "macos")]
-fn handle_detection_notification(
-    app: &tauri::AppHandle,
-    active_candidates: &Arc<Mutex<HashSet<String>>>,
-    record_requests: &Arc<MeetingRecordRequestQueue>,
-    event: &DetectionEvent,
-) {
-    let Ok(mut notified) = active_candidates.lock() else {
-        log::warn!("Scribe candidate-notification state was poisoned");
-        return;
-    };
-    match event {
-        DetectionEvent::CandidateEnded { candidate_id, .. } => {
-            notified.remove(candidate_id);
+fn open_record_request(app: &tauri::AppHandle) {
+    let main = app
+        .get_webview_window("main")
+        .map(Ok)
+        .unwrap_or_else(|| crate::create_main_window(app, true));
+    match main {
+        Ok(main) => {
+            let _ = main.show();
+            let _ = main.set_focus();
+            let _ = main.emit(MEETING_RECORD_REQUESTED_EVENT, ());
         }
-        DetectionEvent::CandidateSuggested(candidate) => {
-            if !notified.insert(candidate.id.clone()) {
-                return;
-            }
-            show_detection_notification(
-                app.clone(),
-                Arc::clone(active_candidates),
-                Arc::clone(record_requests),
-                candidate.clone(),
-            );
+        Err(error) => {
+            log::error!("Scribe could not open Mimir for the notification action: {error}");
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-fn show_detection_notification(
-    app: tauri::AppHandle,
-    active_candidates: Arc<Mutex<HashSet<String>>>,
-    record_requests: Arc<MeetingRecordRequestQueue>,
-    candidate: DetectionCandidate,
-) {
-    let body = detection_notification_body(&candidate.app_name);
-    tauri::async_runtime::spawn_blocking(move || {
-        let application = if tauri::is_dev() {
-            "com.apple.Terminal"
-        } else {
-            app.config().identifier.as_str()
-        };
-        // The notification plugin and this action path share this process-wide
-        // application identity. AlreadySet means the plugin initialized it first.
-        let _ = mac_notification_sys::set_application(application);
-        let mut notification = mac_notification_sys::Notification::new();
-        notification
-            .title("Meeting detected")
-            .message(&body)
-            .main_button(mac_notification_sys::MainButton::SingleAction(
-                RECORD_DETECTED_MEETING_ACTION,
-            ));
-        let response = match notification.send() {
-            Ok(response) => response,
-            Err(error) => {
-                log::debug!(
-                    "Scribe actionable notification was unavailable; using the passive notification: {error}"
-                );
-                show_passive_detection_notification(&app, &body);
-                return;
-            }
-        };
-        if response
-            != mac_notification_sys::NotificationResponse::ActionButton(
-                RECORD_DETECTED_MEETING_ACTION.into(),
-            )
-            || !candidate_is_active(&active_candidates, &candidate.id)
-        {
-            return;
-        }
-
-        record_requests.enqueue(MeetingRecordRequest {
-            candidate_id: candidate.id,
-            app_name: candidate.app_name,
-        });
-        let main = app
-            .get_webview_window("main")
-            .map(Ok)
-            .unwrap_or_else(|| crate::create_main_window(&app, true));
-        match main {
-            Ok(main) => {
-                let _ = main.show();
-                let _ = main.set_focus();
-                let _ = main.emit(MEETING_RECORD_REQUESTED_EVENT, ());
-            }
-            Err(error) => {
-                log::error!("Scribe could not open Mimir for the RECORD action: {error}");
-            }
-        }
-    });
-}
-
-#[cfg(target_os = "macos")]
-fn show_passive_detection_notification(app: &tauri::AppHandle, body: &str) {
-    if let Err(error) = app
-        .notification()
-        .builder()
-        .title("Meeting detected")
-        .body(body)
-        .show()
-    {
-        // Notification permission is independent of capture permission.
-        // The in-app candidate remains authoritative and actionable.
-        log::debug!("Scribe meeting notification was not shown: {error}");
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn candidate_is_active(active_candidates: &Mutex<HashSet<String>>, candidate_id: &str) -> bool {
-    active_candidates
-        .lock()
-        .is_ok_and(|active| active.contains(candidate_id))
-}
-
-#[cfg(target_os = "macos")]
-fn detection_notification_body(app_name: &str) -> String {
-    let mut name = app_name.trim().chars().take(48).collect::<String>();
-    if app_name.trim().chars().count() > 48 {
-        name.push('…');
-    }
-    format!("Open Scribe to record {name}.")
 }
 
 #[cfg(target_os = "macos")]
@@ -594,6 +492,8 @@ impl MeetingCredentialResolver for EndpointBoundMeetingCredentialResolver {
 
 struct NativeMeetingLifecycle {
     detector: Option<Arc<DetectionMonitor>>,
+    #[cfg(target_os = "macos")]
+    notifications: Option<detection_notifications::DetectionNotifications>,
     retention: RetentionMaintenance,
     shutdown_result: OnceLock<Result<(), String>>,
 }
@@ -613,6 +513,10 @@ impl NativeMeetingLifecycle {
                         })
                     })
                     .unwrap_or(Ok(()));
+                #[cfg(target_os = "macos")]
+                if let Some(notifications) = &self.notifications {
+                    notifications.shutdown();
+                }
                 match (retention, detector) {
                     (Ok(()), Ok(())) => Ok(()),
                     (Err(first), Ok(())) | (Ok(()), Err(first)) => Err(first),
@@ -743,6 +647,8 @@ mod tests {
             });
             let lifecycle = Arc::new(NativeMeetingLifecycle {
                 detector: None,
+                #[cfg(target_os = "macos")]
+                notifications: None,
                 retention: RetentionMaintenance {
                     signal,
                     worker: Mutex::new(Some(worker)),
@@ -790,10 +696,12 @@ mod tests {
     fn notification_record_requests_are_deduplicated_and_drained() {
         let requests = MeetingRecordRequestQueue::default();
         requests.enqueue(MeetingRecordRequest {
+            action: MeetingNotificationAction::Record,
             candidate_id: "candidate-1".into(),
             app_name: "Zoom".into(),
         });
         requests.enqueue(MeetingRecordRequest {
+            action: MeetingNotificationAction::Record,
             candidate_id: "candidate-1".into(),
             app_name: "Duplicate".into(),
         });
@@ -801,6 +709,7 @@ mod tests {
         assert_eq!(
             requests.take(),
             vec![MeetingRecordRequest {
+                action: MeetingNotificationAction::Record,
                 candidate_id: "candidate-1".into(),
                 app_name: "Zoom".into(),
             }]
