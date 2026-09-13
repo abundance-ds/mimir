@@ -1,8 +1,15 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, reactive } from 'vue'
+import { graphDocumentState } from '../../../stores/graphDocuments.js'
+import { buildInspectorSave } from './graphInspectorPersistence.js'
+import { splitValues } from './graphInspectorModel.js'
 import { invoke } from '@tauri-apps/api/core'
 import GraphInspector from './GraphInspector.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
+import GraphReferences from './GraphReferences.vue'
+
+enableAutoUnmount(afterEach)
 
 const project = {
   id: 'project-atlas',
@@ -61,16 +68,112 @@ const baseProps = {
   ],
 }
 
+function makeDocumentFile(node) {
+  return reactive({
+    id: `graph:${node.id}`, kind: 'graph', path: node.provenance?.sourcePath,
+    content: node.body || '', dirty: false, saveState: 'idle',
+    graph: graphDocumentState({ node, sourceRevision: node.provenance?.sourceRevision, bodyFrom: 0 }),
+  })
+}
+
+function mountInspector({ props, ...options }) {
+  const { node = issue, documentFile = makeDocumentFile(node), ...rest } = props
+  return mount(GraphInspector, {
+    ...options,
+    props: {
+      ...rest, documentFile,
+      onDraftChange: () => { documentFile.dirty = true; documentFile.graph.version += 1 },
+    },
+  })
+}
+
+function savePayload(wrapper) {
+  const { node, draft } = wrapper.props('documentFile').graph
+  return buildInspectorSave({ node, draft, nodes: wrapper.props('nodes'),
+    tags: splitValues(node.kind === 'issue' ? draft.labels : draft.tags) })
+}
+
+async function replaceDocument(wrapper, node) {
+  const file = wrapper.props('documentFile')
+  file.graph = graphDocumentState({ node, sourceRevision: node.provenance?.sourceRevision, bodyFrom: 0 })
+  file.id = `graph:${node.id}`
+  file.content = node.body || ''
+  file.dirty = false
+  file.saveState = 'saved'
+  await nextTick()
+}
+
 describe('GraphInspector', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset()
   })
 
+  it('keeps draft ownership in the Editor file while opening links and backlinks', async () => {
+    const wrapper = mountInspector({ props: { ...baseProps, scopeIds: ['team:main'], graphRevision: 4 } })
+    const editor = wrapper.findComponent(GraphMarkdownEditor)
+    const file = wrapper.props('documentFile')
+    expect(editor.props('scopeIds')).toEqual(['team:main'])
+    expect(editor.props('graphRevision')).toBe(4)
+    editor.vm.setValue('Changed [Jon](mimir://graph/jon)')
+    await flushPromises()
+    expect(file.graph.draft.body).toBe('Changed [Jon](mimir://graph/jon)')
+    expect(file.dirty).toBe(true)
+    editor.vm.$emit('open-graph', 'jon')
+    expect(wrapper.emitted('openNode')).toEqual([['jon']])
+    const request = { id: 'source', targetId: issue.id, sourceRevision: 'source-1', from: 8, to: 40 }
+    wrapper.findComponent(GraphReferences).vm.$emit('open', request)
+    expect(wrapper.emitted('openNode')[1]).toEqual([request])
+    expect(wrapper.emitted('save')).toBeUndefined()
+    expect(file.graph.draft.body).toContain('mimir://graph/jon')
+  })
+
+  it('keeps typing available during a file save and emits save requests without payloads', async () => {
+    const wrapper = mountInspector({ props: baseProps })
+    const file = wrapper.props('documentFile')
+    const editor = wrapper.findComponent(GraphMarkdownEditor)
+    editor.vm.setValue('First edit')
+    await flushPromises()
+    editor.vm.$emit('save')
+    expect(wrapper.emitted('save')).toEqual([[]])
+    file.saveState = 'saving'
+    await nextTick()
+    expect(editor.get('.cm-content').attributes('contenteditable')).toBe('true')
+    editor.vm.setValue('First edit plus more typing')
+    await flushPromises()
+    file.graph.node = { ...issue, body: 'First edit', provenance: { ...issue.provenance, sourceRevision: 'revision-2' } }
+    file.graph.sourceRevision = 'revision-2'
+    file.saveState = 'idle'
+    await nextTick()
+    expect(editor.vm.getValue()).toBe('First edit plus more typing')
+    expect(file.dirty).toBe(true)
+    editor.vm.$emit('save')
+    expect(wrapper.emitted('save')).toEqual([[], []])
+    expect(savePayload(wrapper).payload.body).toBe('First edit plus more typing')
+  })
+
+  it('retains a failed file draft through navigation and Details remount', async () => {
+    const wrapper = mountInspector({ props: baseProps })
+    const file = wrapper.props('documentFile')
+    const editor = wrapper.findComponent(GraphMarkdownEditor)
+    editor.vm.setValue('Unsaved link [Jon](mimir://graph/jon)')
+    await flushPromises()
+    file.saveState = 'failed'
+    await wrapper.setProps({ error: 'The file changed on disk.' })
+    expect(wrapper.text()).toContain('Save failed')
+    expect(wrapper.text()).toContain('The file changed on disk.')
+    editor.vm.$emit('open-graph', 'jon')
+    expect(wrapper.emitted('openNode')).toEqual([['jon']])
+    expect(wrapper.emitted('save')).toBeUndefined()
+    wrapper.unmount()
+    const reopened = mountInspector({ props: { ...baseProps, documentFile: file } })
+    expect(reopened.findComponent(GraphMarkdownEditor).vm.getValue()).toContain('Unsaved link')
+    expect(file.dirty).toBe(true)
+  })
+
   it('opens highlighted note links while keeping the note editor enabled', async () => {
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       props: {
         ...baseProps,
-        mode: 'peek',
         node: { ...issue, body: 'Read https://example.com/docs then update the note.' },
       },
     })
@@ -87,36 +190,33 @@ describe('GraphInspector', () => {
       { path: 'outputs/map.xlsx', nodeId: issue.id },
     ]])
 
-    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
     await flushPromises()
     expect(wrapper.findComponent(GraphMarkdownEditor).props('openLinks')).toBe(true)
   })
 
-  it('keeps creation and update timestamps visible in Peek and Focus', async () => {
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'peek' },
+  it('keeps creation and update timestamps visible in Details', async () => {
+    const wrapper = mountInspector({
+      props: { ...baseProps, },
     })
 
     expect(wrapper.get('[data-inspector-created]').text()).toContain('2026')
     expect(wrapper.get('[data-inspector-updated]').text()).toContain('2026')
-    expect(wrapper.get('.peek-details').text().toLowerCase()).not.toContain('updated')
 
-    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
     await flushPromises()
     expect(wrapper.get('[data-inspector-created]').text()).toContain('2026')
     expect(wrapper.get('[data-inspector-updated]').text()).toContain('2026')
     expect(wrapper.find('.focus-source-section').exists()).toBe(false)
 
-    await wrapper.setProps({
-      node: { ...issue, createdAt: '', updatedAt: '' },
-    })
+    await replaceDocument(wrapper, { ...issue, createdAt: '', updatedAt: '' })
     expect(wrapper.get('[data-inspector-created]').text()).toBe('Unknown')
     expect(wrapper.get('[data-inspector-updated]').text()).toBe('Unknown')
   })
 
-  it('uses the same labeled primary metadata grammar in Peek and Focus', async () => {
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'peek' },
+  it('uses the same labeled primary metadata grammar in Details', async () => {
+    const wrapper = mountInspector({
+      props: { ...baseProps, },
     })
     const expected = [
       'Status',
@@ -129,18 +229,18 @@ describe('GraphInspector', () => {
       'Last updated',
     ]
 
-    expect(wrapper.findAll('.peek-hero .object-metadata-field > span').map(item => item.text()))
+    expect(wrapper.findAll('.focus-hero .object-metadata-field > span').map(item => item.text()))
       .toEqual(expected)
 
-    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
     await flushPromises()
     expect(wrapper.findAll('.focus-hero .object-metadata-field > span').map(item => item.text()))
       .toEqual(expected)
   })
 
-  it('keeps macOS autocorrect out of every editable Peek and Focus text field', async () => {
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'peek' },
+  it('keeps macOS autocorrect out of every editable Details text field', async () => {
+    const wrapper = mountInspector({
+      props: { ...baseProps, },
     })
     const expectManualText = (control, { structured = false } = {}) => {
       const field = wrapper.get(`[data-graph-control="${control}"]`)
@@ -149,10 +249,10 @@ describe('GraphInspector', () => {
       if (structured) expect(field.attributes('spellcheck')).toBe('false')
     }
 
-    expectManualText('peek-title')
-    expectManualText('peek-waiting', { structured: true })
+    expectManualText('focus-title')
+    expectManualText('focus-waiting', { structured: true })
 
-    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
     await flushPromises()
     expectManualText('focus-title')
     expectManualText('focus-waiting', { structured: true })
@@ -160,39 +260,21 @@ describe('GraphInspector', () => {
     expectManualText('focus-deliverables', { structured: true })
 
     const company = { ...issue, id: 'company-vandage', kind: 'company', relations: [] }
-    await wrapper.setProps({ mode: 'peek', node: company })
+    await replaceDocument(wrapper, company)
     await flushPromises()
-    expectManualText('peek-summary')
-    expectManualText('peek-company-roles', { structured: true })
+    expectManualText('focus-summary')
+    expectManualText('focus-company-roles', { structured: true })
 
-    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
     await flushPromises()
     expectManualText('focus-summary')
     expectManualText('focus-company-roles', { structured: true })
   })
 
-  it('lets a short Peek note fill the space above bottom-anchored Details', () => {
-    const wrapper = mount(GraphInspector, {
-      props: {
-        ...baseProps,
-        mode: 'peek',
-        node: {
-          ...issue,
-          body: 'Short note.',
-          properties: { ...issue.properties, deliverables: [] },
-        },
-      },
-    })
-
-    expect(wrapper.get('.peek-scroll').classes()).toContain('peek-scroll-fill-note')
-    expect(wrapper.get('.peek-scroll').element.lastElementChild)
-      .toBe(wrapper.get('.peek-details').element)
-  })
-
-  it('edits the operational properties of an object directly in Peek', async () => {
-    const wrapper = mount(GraphInspector, {
+  it('edits the operational properties of an object directly in Details', async () => {
+    const wrapper = mountInspector({
       attachTo: document.body,
-      props: { ...baseProps, mode: 'peek' },
+      props: { ...baseProps, },
     })
     await flushPromises()
 
@@ -208,30 +290,21 @@ describe('GraphInspector', () => {
     ]) {
       expect(wrapper.find(selector).exists(), `missing ${selector}`).toBe(true)
     }
-    const details = wrapper.get('.peek-details')
-    const contextStrip = details.get('[data-graph-relationship-line]')
-    expect(details.attributes('open')).toBeUndefined()
-    expect(details.get('summary').text()).toContain('Details')
-    expect(details.get('summary').text()).toContain('2 connections')
-    expect(contextStrip.text()).toContain('part of')
-    expect(contextStrip.text()).toContain('blocked by')
-    expect(wrapper.get('[data-related-node="project-atlas"]').text()).toBe('Project Atlas')
-    expect(wrapper.get('[data-related-node="issue-infra"]').text()).toBe('Infra migration')
-    expect(wrapper.get('[data-inspector-focus]').text()).toContain('Focus')
-    expect(wrapper.find('.peek-footer').exists()).toBe(false)
-    expect(wrapper.get('.peek-header').find('[data-inspector-focus]').exists()).toBe(true)
+    expect(wrapper.get('[data-related-node="project-atlas"]').text()).toContain('Project Atlas')
+    expect(wrapper.get('[data-related-node="issue-infra"]').text()).toContain('Infra migration')
+    expect(wrapper.find('[data-inspector-focus]').exists()).toBe(false)
 
     await wrapper.get('[data-inspector-title]').setValue('Synthesize pivotal evidence')
     await wrapper.get('[data-inspector-waiting]').setValue('Client confirmation')
-    wrapper.findComponent(GraphMarkdownEditor).vm.setValue('Reviewed in Peek.')
+    wrapper.findComponent(GraphMarkdownEditor).vm.setValue('Reviewed in Details.')
     await flushPromises()
-    wrapper.vm.commitThen(() => {})
+    await wrapper.get('[data-inspector-save]').trigger('click')
 
-    const patch = wrapper.emitted('save')[0][0]
+    const { payload: patch } = savePayload(wrapper)
     expect(patch).toEqual(expect.objectContaining({
       id: issue.id,
       title: 'Synthesize pivotal evidence',
-      body: 'Reviewed in Peek.',
+      body: 'Reviewed in Details.',
       relations: expect.arrayContaining([
         { relation: 'part_of', target: project.id, legacy: false },
       ]),
@@ -246,9 +319,9 @@ describe('GraphInspector', () => {
       relations: [],
       properties: { ...issue.properties, legacyProject: 'fde', legacyAssignee: 'Paul' },
     }
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       attachTo: document.body,
-      props: { ...baseProps, mode: 'peek', node: legacyIssue },
+      props: { ...baseProps, node: legacyIssue },
     })
     await flushPromises()
 
@@ -256,9 +329,9 @@ describe('GraphInspector', () => {
     expect(wrapper.get('[data-inspector-assignee]').text()).toBe('Paul')
 
     await wrapper.get('[data-inspector-waiting]').setValue('Anna')
-    wrapper.vm.commitThen(() => {})
+    await wrapper.get('[data-inspector-save]').trigger('click')
 
-    const patch = wrapper.emitted('save')[0][0]
+    const { payload: patch } = savePayload(wrapper)
     expect(patch.relations).toEqual([])
     expect(patch.setProperties).toEqual(expect.objectContaining({
       legacyProject: 'fde',
@@ -289,11 +362,10 @@ describe('GraphInspector', () => {
       properties: { teamMember: true, status: 'former' },
       scopeId: 'team:main',
     }
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       attachTo: document.body,
       props: {
         ...baseProps,
-        mode: 'peek',
         nodes: [...baseProps.nodes, activeTeamMember, externalContact, formerTeamMember],
       },
     })
@@ -323,15 +395,20 @@ describe('GraphInspector', () => {
         sourcePath: '/team/graph/project-atlas.md',
       },
     }
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, node: projectNode, mode: 'peek' },
+    const wrapper = mountInspector({
+      attachTo: document.body,
+      props: { ...baseProps, node: projectNode, },
     })
 
-    wrapper.vm.updateDraft('projectType', 'client-engagement')
-    wrapper.vm.updateDraft('projectStatus', 'active')
-    wrapper.vm.commitThen(() => {})
+    await wrapper.get('[aria-label="Project type"]').trigger('click')
+    document.querySelector('[data-graph-select-option="client-engagement"]').click()
+    await flushPromises()
+    await wrapper.get('[aria-label="Project status"]').trigger('click')
+    document.querySelector('[data-graph-select-option="active"]').click()
+    await flushPromises()
+    await wrapper.get('[data-inspector-save]').trigger('click')
 
-    expect(wrapper.emitted('save')[0][0]).toEqual(expect.objectContaining({
+    expect(savePayload(wrapper).payload).toEqual(expect.objectContaining({
       setProperties: {
         projectType: 'client-engagement',
         projectStatus: 'active',
@@ -340,34 +417,15 @@ describe('GraphInspector', () => {
     }))
   })
 
-  it('lets an explicit exit through after a rejected save instead of stranding the draft', async () => {
-    const wrapper = mount(GraphInspector, {
+  it('dismisses the entry action menu when attention moves elsewhere', async () => {
+    const wrapper = mountInspector({
       attachTo: document.body,
-      props: { ...baseProps, mode: 'peek' },
-    })
-    await flushPromises()
-
-    await wrapper.get('[data-inspector-waiting]').setValue('Anna')
-    await wrapper.get('[data-graph-control="peek-close"]').trigger('click')
-    expect(wrapper.emitted('save')).toHaveLength(1)
-    expect(wrapper.emitted('close')).toBeUndefined()
-
-    wrapper.emitted('save')[0][1].failed()
-    await wrapper.get('[data-graph-control="peek-close"]').trigger('click')
-    expect(wrapper.emitted('save')).toHaveLength(1)
-    expect(wrapper.emitted('close')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
-  it('dismisses the Peek action menu when attention moves elsewhere', async () => {
-    const wrapper = mount(GraphInspector, {
-      attachTo: document.body,
-      props: { ...baseProps, mode: 'peek' },
+      props: { ...baseProps, },
     })
     const outside = document.createElement('button')
     document.body.append(outside)
 
-    await wrapper.get('[data-graph-control="peek-more"]').trigger('click')
+    await wrapper.get('[data-graph-control="focus-more"]').trigger('click')
     expect(wrapper.find('[data-inspector-delete]').exists()).toBe(true)
     outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     await flushPromises()
@@ -375,19 +433,19 @@ describe('GraphInspector', () => {
     wrapper.unmount()
   })
 
-  it('uses one action header in Focus without repeating the relationship strip', async () => {
-    const wrapper = mount(GraphInspector, {
+  it('uses one action header in Details without repeating the relationship strip', async () => {
+    const wrapper = mountInspector({
       attachTo: document.body,
-      props: { ...baseProps, mode: 'focus' },
+      props: { ...baseProps, },
     })
     await flushPromises()
 
     const header = wrapper.get('.focus-header')
     expect(header.find('[data-inspector-save]').exists()).toBe(true)
-    expect(header.find('[data-graph-control="focus-source"]').exists()).toBe(true)
+    expect(header.find('[data-graph-control="entry-source"]').exists()).toBe(true)
     expect(header.find('[data-graph-control="focus-more"]').exists()).toBe(true)
-    expect(header.find('[data-graph-control="focus-close"]').exists()).toBe(true)
-    expect(header.get('[data-graph-control="focus-back"]').text()).toContain('Exit Focus')
+    expect(header.find('[data-graph-control="focus-close"]').exists()).toBe(false)
+    expect(header.find('[data-graph-control="focus-back"]').exists()).toBe(false)
     expect(wrapper.find('.focus-footer').exists()).toBe(false)
     expect(wrapper.find('[data-graph-relationship-line]').exists()).toBe(false)
 
@@ -397,32 +455,10 @@ describe('GraphInspector', () => {
     wrapper.unmount()
   })
 
-  it('provides destination-aware object history without showing raw ids', async () => {
-    const wrapper = mount(GraphInspector, {
-      props: {
-        ...baseProps,
-        mode: 'peek',
-        historyBack: { id: project.id, title: project.title },
-        historyForward: null,
-      },
-    })
-
-    const back = wrapper.get('[data-inspector-history-back]')
-    const forward = wrapper.get('[data-inspector-history-forward]')
-    expect(back.attributes('title')).toBe('Back to Project Atlas')
-    expect(back.attributes('disabled')).toBeUndefined()
-    expect(forward.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).not.toContain(issue.id)
-    expect(wrapper.text()).not.toContain(issue.provenance.sourceRevision)
-
-    await back.trigger('click')
-    expect(wrapper.emitted('navigateHistory')).toEqual([[-1]])
-  })
-
   it('opens a saved graph version through the Editor history diff', async () => {
-    vi.mocked(invoke)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce([{
+    vi.mocked(invoke).mockImplementation(command => {
+      if (command === 'git_file_history_available') return Promise.resolve(true)
+      if (command === 'git_file_history') return Promise.resolve([{
         hash: 'abcdef123456',
         shortHash: 'abcdef12',
         message: 'Mimir sync',
@@ -431,12 +467,14 @@ describe('GraphInspector', () => {
         binary: false,
         size: 120,
       }])
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'peek' },
+      return Promise.resolve(null)
+    })
+    const wrapper = mountInspector({
+      props: { ...baseProps, },
     })
     await flushPromises()
 
-    await wrapper.get('[data-graph-control="peek-more"]').trigger('click')
+    await wrapper.get('[data-graph-control="focus-more"]').trigger('click')
     await wrapper.get('[data-inspector-file-history]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-file-history-version="abcdef123456"]').trigger('click')
@@ -482,10 +520,9 @@ describe('GraphInspector', () => {
         sourcePath: '/team/graph/proposal-template.md',
       },
     }
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       props: {
         ...baseProps,
-        mode: 'focus',
         node: resource,
         nodes: [resource],
       },
@@ -497,10 +534,10 @@ describe('GraphInspector', () => {
     expect(wrapper.get('[data-inspector-files]').element.value).toContain('resources/orphan.html')
   })
 
-  it('puts every issue property and syntax-aware Markdown editing in Focus', async () => {
-    const wrapper = mount(GraphInspector, {
+  it('puts every issue property and syntax-aware Markdown editing in Details', async () => {
+    const wrapper = mountInspector({
       attachTo: document.body,
-      props: { ...baseProps, mode: 'focus' },
+      props: { ...baseProps, },
     })
     await flushPromises()
 
@@ -531,7 +568,7 @@ describe('GraphInspector', () => {
     await flushPromises()
     await wrapper.get('[data-inspector-save]').trigger('click')
 
-    const patch = wrapper.emitted('save')[0][0]
+    const { payload: patch } = savePayload(wrapper)
     expect(patch).toEqual(expect.objectContaining({
       id: issue.id,
       title: 'Synthesize pivotal evidence',
@@ -550,9 +587,9 @@ describe('GraphInspector', () => {
   })
 
   it('keeps issue tags after the save and canonical reparse cycle', async () => {
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       attachTo: document.body,
-      props: { ...baseProps, mode: 'focus' },
+      props: { ...baseProps, },
     })
     await flushPromises()
 
@@ -561,7 +598,7 @@ describe('GraphInspector', () => {
     await wrapper.get('[data-inspector-tags]').setValue('review, client')
     await wrapper.get('[data-inspector-save]').trigger('click')
 
-    const [patch, controls] = wrapper.emitted('save')[0]
+    const { payload: patch } = savePayload(wrapper)
     const canonicalNode = {
       ...issue,
       tags: ['review', 'client'],
@@ -580,20 +617,11 @@ describe('GraphInspector', () => {
     expect(patch.tags).toEqual(['review', 'client'])
     expect(patch.setProperties.labels.map(label => label.name)).toEqual(['review', 'client'])
 
-    await wrapper.setProps({ saving: true })
-    await wrapper.setProps({ node: canonicalNode })
-    controls.done()
-    await wrapper.setProps({ saving: false })
-    await wrapper.setProps({
-      node: {
-        ...canonicalNode,
-        provenance: {
-          ...canonicalNode.provenance,
-          sourceRevision: 'revision-3',
-        },
-      },
+    await replaceDocument(wrapper, canonicalNode)
+    await replaceDocument(wrapper, {
+      ...canonicalNode,
+      provenance: { ...canonicalNode.provenance, sourceRevision: 'revision-3' },
     })
-    await flushPromises()
 
     expect(wrapper.get('[data-inspector-tags]').element.value).toBe('review, client')
     wrapper.unmount()
@@ -607,41 +635,39 @@ describe('GraphInspector', () => {
         labels: [{ name: 'review', color: 'red' }],
       },
     }
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'focus', node: coloredIssue },
+    const wrapper = mountInspector({
+      props: { ...baseProps, node: coloredIssue },
     })
     await flushPromises()
 
     await wrapper.get('[data-inspector-title]').setValue('Updated title only')
     await wrapper.get('[data-inspector-save]').trigger('click')
-    expect(wrapper.emitted('save')[0][0].setProperties).not.toHaveProperty('labels')
+    expect(savePayload(wrapper).payload.setProperties).not.toHaveProperty('labels')
 
-    wrapper.emitted('save')[0][1].done()
     await wrapper.get('[data-inspector-tags]').setValue('review, client')
     await wrapper.get('[data-inspector-save]').trigger('click')
-    const labels = wrapper.emitted('save')[1][0].setProperties.labels
+    const labels = savePayload(wrapper).payload.setProperties.labels
     expect(labels.find(label => label.name === 'review')).toEqual({
       name: 'review',
       color: 'red',
     })
   })
 
-  it('renders each deliverable path once in either inspector mode', async () => {
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'peek' },
+  it('renders each deliverable path once in Details', async () => {
+    const wrapper = mountInspector({
+      props: { ...baseProps, },
     })
 
     expect(wrapper.findAll('[data-deliverable-path="outputs/map.xlsx"] small')).toHaveLength(1)
-    await wrapper.setProps({ mode: 'focus' })
+    await flushPromises()
     await flushPromises()
     expect(wrapper.findAll('[data-deliverable-path="outputs/map.xlsx"] small')).toHaveLength(1)
   })
 
   it('shows a spacious retrieval summary for non-issue objects', async () => {
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       props: {
         ...baseProps,
-        mode: 'focus',
         node: {
           ...project,
           summary: 'Global value evidence strategy.',
@@ -674,11 +700,10 @@ describe('GraphInspector', () => {
         sourcePath: '/private/graph/note-private-context.md',
       },
     }
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       attachTo: document.body,
       props: {
         ...baseProps,
-        mode: 'focus',
         node: note,
         nodes: [note, issue, project, person],
         scopes: [
@@ -702,25 +727,10 @@ describe('GraphInspector', () => {
     expect(wrapper.get('[data-graph-control="focus-connection-remove-0"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Project Atlas')
     await wrapper.get('[data-inspector-save]').trigger('click')
-    expect(wrapper.emitted('save')[0][0].relations).toEqual([
+    expect(savePayload(wrapper).payload.relations).toEqual([
       { relation: 'related_to', target: 'project-atlas', legacy: false },
     ])
     wrapper.unmount()
-  })
-
-  it('commits the latest edit before leaving Focus', async () => {
-    const wrapper = mount(GraphInspector, {
-      props: { ...baseProps, mode: 'focus' },
-    })
-    await flushPromises()
-
-    await wrapper.get('[data-inspector-title]').setValue('Updated before leaving')
-    await wrapper.get('[data-graph-control="focus-back"]').trigger('click')
-    expect(wrapper.emitted('save')).toHaveLength(1)
-    expect(wrapper.emitted('back')).toBeUndefined()
-
-    wrapper.emitted('save')[0][1].done()
-    expect(wrapper.emitted('back')).toHaveLength(1)
   })
 
   it('edits filed meeting context and opens the exact Scribe source', async () => {
@@ -748,11 +758,10 @@ describe('GraphInspector', () => {
         sourcePath: '/team/graph/meeting-1.md',
       },
     }
-    const wrapper = mount(GraphInspector, {
+    const wrapper = mountInspector({
       attachTo: document.body,
       props: {
         ...baseProps,
-        mode: 'focus',
         node: filedMeeting,
         nodes: [filedMeeting, project, person],
         scopes: [
@@ -774,11 +783,11 @@ describe('GraphInspector', () => {
     await wrapper.get('[data-graph-control="focus-meeting-person-remove-person-alex"]').trigger('click')
     await wrapper.get('[data-inspector-save]').trigger('click')
 
-    const [patch, , options] = wrapper.emitted('save')[0]
+    const { payload: patch, targetScopeId } = savePayload(wrapper)
     expect(patch.relations).toEqual([
       { relation: 'part_of', target: 'project-atlas', legacy: false },
     ])
-    expect(options).toEqual({ targetScopeId: 'private:local' })
+    expect(targetScopeId).toBe('private:local')
     wrapper.unmount()
   })
 })

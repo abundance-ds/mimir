@@ -1,22 +1,20 @@
 <template>
-  <aside
+  <section
     v-if="node"
     ref="inspectorRoot"
     data-graph-inspector
-    :data-inspector-mode="mode"
-    class="graph-object"
-    :class="mode === 'focus' ? 'graph-object-focus' : 'graph-object-peek'"
+    data-inspector-mode="details"
+    class="graph-object graph-object-document"
     tabindex="-1"
     @keydown="onKeydown"
+    @focusin="onFocusIn"
   >
-    <GraphInspectorPeek v-if="mode === 'peek'" />
-    <GraphInspectorFocus v-else />
-  </aside>
+    <GraphEntryDetails />
+  </section>
 </template>
 
 <script setup>
-import GraphInspectorFocus from './GraphInspectorFocus.vue'
-import GraphInspectorPeek from './GraphInspectorPeek.vue'
+import GraphEntryDetails from './GraphEntryDetails.vue'
 import { useGraphInspector } from './useGraphInspector.js'
 import './graph-inspector/inspector-shell.css'
 import './graph-inspector/inspector-fields.css'
@@ -24,27 +22,20 @@ import './graph-inspector/inspector-actions.css'
 import './graph-inspector/inspector-focus.css'
 
 const props = defineProps({
-  mode: {
-    type: String,
-    default: 'peek',
-    validator: value => ['peek', 'focus'].includes(value),
-  },
-  node: { type: Object, default: null },
+  documentFile: { type: Object, required: true },
+  viewState: { type: Object, default: null },
+  scopeIds: { type: Array, default: () => [] },
+  graphRevision: { type: [Number, String], default: 0 },
   neighbors: { type: Array, default: () => [] },
   scopes: { type: Array, default: () => [] },
   nodes: { type: Array, default: () => [] },
-  conflict: { type: Object, default: null },
   error: { type: String, default: '' },
-  saving: { type: Boolean, default: false },
   activities: { type: Array, default: () => [] },
-  historyBack: { type: Object, default: null },
-  historyForward: { type: Object, default: null },
 })
 
 const emit = defineEmits([
-  'back',
-  'close',
-  'focus',
+  'source',
+  'draftChange',
   'save',
   'openNode',
   'openFile',
@@ -52,12 +43,11 @@ const emit = defineEmits([
   'openActivity',
   'quickCreate',
   'delete',
-  'navigateHistory',
   'openMeeting',
 ])
 
 const { context, exposed } = useGraphInspector(props, emit)
-const { mode, node, inspectorRoot, onKeydown } = context
+const { node, inspectorRoot, onKeydown, onFocusIn } = context
 
 defineExpose(exposed)
 </script>

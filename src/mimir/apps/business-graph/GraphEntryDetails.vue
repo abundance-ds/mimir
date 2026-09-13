@@ -1,40 +1,8 @@
 <template>
 <header class="focus-header">
-  <button
-    type="button"
-    data-graph-control="focus-back"
-    class="object-secondary-action"
-    title="Exit Focus"
-    @click="requestExit('back')"
-  >
-    <IconArrowsMinimize :size="14" />
-    Exit Focus
-  </button>
-  <div class="object-history-controls" aria-label="Object history">
-    <button
-      type="button"
-      data-inspector-history-back
-      data-graph-control="focus-history-back"
-      class="object-icon-button"
-      :disabled="!historyBack"
-      :title="historyBack ? `Back to ${historyBack.title}` : 'No previous object'"
-      :aria-label="historyBack ? `Back to ${historyBack.title}` : 'No previous object'"
-      @click="emit('navigateHistory', -1)"
-    >
-      <IconChevronLeft :size="15" />
-    </button>
-    <button
-      type="button"
-      data-inspector-history-forward
-      data-graph-control="focus-history-forward"
-      class="object-icon-button"
-      :disabled="!historyForward"
-      :title="historyForward ? `Forward to ${historyForward.title}` : 'No next object'"
-      :aria-label="historyForward ? `Forward to ${historyForward.title}` : 'No next object'"
-      @click="emit('navigateHistory', 1)"
-    >
-      <IconChevronRight :size="15" />
-    </button>
+  <div class="graph-document-views" aria-label="Entry view">
+    <button type="button" data-graph-control="entry-details" aria-pressed="true" class="is-active">Details</button>
+    <button type="button" data-graph-control="entry-source" @click="emit('source')">Source</button>
   </div>
   <span class="object-header-spacer" />
   <span class="focus-save-state" :class="saveStateClass" aria-live="polite">
@@ -48,18 +16,7 @@
     :disabled="!dirty || saving || !draft.title.trim()"
     @click="save"
   >
-    {{ saving ? 'Saving…' : 'Save changes' }}
-    <kbd>⌘S</kbd>
-  </button>
-  <button
-    type="button"
-    data-graph-control="focus-source"
-    class="object-icon-button"
-    title="Open Markdown source"
-    aria-label="Open Markdown source"
-    @click="openSource(node.provenance?.sourcePath)"
-  >
-    <IconFileCode :size="15" />
+    {{ saving ? 'Saving…' : 'Save' }}
   </button>
   <div class="object-more-wrap" data-object-more-root>
     <button
@@ -116,25 +73,9 @@
       </button>
     </div>
   </div>
-  <button
-    type="button"
-    data-graph-control="focus-close"
-    class="object-icon-button"
-    title="Close object"
-    aria-label="Close object"
-    @click="requestExit('close')"
-  >
-    <IconX :size="15" />
-  </button>
 </header>
 
-<div v-if="conflict" data-graph-conflict role="alert" class="object-conflict">
-  <IconAlertTriangle :size="15" />
-  <span>
-    The source changed elsewhere. Mimir kept this draft; compare it with the Markdown source before saving again.
-  </span>
-</div>
-<div v-else-if="error" data-graph-save-error role="alert" class="object-conflict">
+<div v-if="error" data-graph-save-error role="alert" class="object-conflict">
   <IconAlertTriangle :size="15" />
   <span>{{ error }}</span>
 </div>
@@ -161,6 +102,7 @@
 <main class="focus-scroll">
   <article class="focus-document">
     <header class="focus-hero">
+      <p class="graph-entry-context">{{ human(node.kind) }} · {{ human(node.provenance?.scopeKind || node.provenance?.scopeId?.split(':')[0] || 'Graph') }}</p>
       <textarea
         ref="titleInput"
         v-model="draft.title"
@@ -170,7 +112,7 @@
         rows="1"
         autocorrect="off"
         autocapitalize="off"
-        aria-label="Object title"
+        aria-label="Entry title"
         @input="changedAndGrow"
       />
 
@@ -442,6 +384,14 @@
           <strong data-inspector-updated>{{ readableDateTime(node.updatedAt) || 'Unknown' }}</strong>
         </div>
       </div>
+      <div v-if="lookupFacts.length" class="graph-entry-facts">
+        <button v-for="fact in lookupFacts" :key="fact.label" type="button"
+          :data-graph-control="`entry-fact-${fact.label.toLowerCase()}`"
+          :title="`Copy ${fact.label.toLowerCase()}`" @click="copyFact(fact)">
+          <span>{{ copiedFact === fact.label ? 'Copied' : fact.label }}</span>
+          <strong>{{ fact.value }}</strong>
+        </button>
+      </div>
     </header>
 
     <ProjectStanding
@@ -455,11 +405,15 @@
     <section class="focus-note">
       <span class="object-section-label">Working note</span>
       <GraphMarkdownEditor
+        :key="node.id"
+        ref="noteEditor"
+        :view-state="viewState"
+        :scope-ids="scopeIds"
+        :graph-revision="graphRevision"
         v-model="draft.body"
         data-inspector-body
         data-graph-control="focus-working-note"
-        :disabled="saving"
-        :min-height="380"
+        :min-height="240"
         :framed="false"
         :open-links="true"
         control-id="focus-working-note"
@@ -468,8 +422,17 @@
         @save="save"
         @open-file="openSource"
         @open-url="openUrl"
+        @open-graph="openRelated"
       />
     </section>
+
+    <GraphReferences
+      :node="node"
+      :scope-ids="scopeIds"
+      :graph-revision="graphRevision"
+      :dirty="dirty"
+      @open="openRelated"
+    />
 
     <section class="focus-connections-section">
       <span class="object-section-label">Connections</span>
@@ -754,11 +717,8 @@ import {
   IconAlertTriangle,
   IconArrowForwardUp,
   IconArrowUpRight,
-  IconArrowsMinimize,
-  IconChevronLeft,
   IconChevronRight,
   IconDots,
-  IconFileCode,
   IconHistory,
   IconPaperclip,
   IconLink,
@@ -771,19 +731,22 @@ import GraphCheckbox from './GraphCheckbox.vue'
 import GraphDatePicker from './GraphDatePicker.vue'
 import GraphDateTimeField from './GraphDateTimeField.vue'
 import GraphMarkdownEditor from './GraphMarkdownEditor.vue'
+import GraphReferences from './GraphReferences.vue'
 import GraphSelect from './GraphSelect.vue'
 import ProjectStanding from './ProjectStanding.vue'
 import { GRAPH_INSPECTOR_CONTEXT } from './graphInspectorContext.js'
 
 const {
   node,
+  nodes,
+  viewState,
+  noteEditor,
+  scopeIds,
+  graphRevision,
   neighbors,
-  conflict,
   error,
   saving,
   activities,
-  historyBack,
-  historyForward,
   titleInput,
   summaryInput,
   deliverablesInput,
@@ -829,7 +792,6 @@ const {
   save,
   addMeetingAttendee,
   removeMeetingAttendee,
-  requestExit,
   openRelated,
   openSource,
   openUrl,
@@ -842,7 +804,6 @@ const {
   selectConnectionRelation,
   addConnection,
   removeConnection,
-  quickUpdate,
   connectionTitle,
   displayTitle,
   remove,

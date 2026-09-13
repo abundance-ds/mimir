@@ -12,6 +12,27 @@ describe('Business Graph dialogs', () => {
     document.body.innerHTML = ''
   })
 
+  it('keeps Create link lookup within the active scopes and does not close during IME input', async () => {
+    wrapper = mount(GraphCreateDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        scopes: [{ id: 'team:main', kind: 'team' }, { id: 'private:local', kind: 'private' }],
+        scopeIds: ['team:main'],
+      },
+    })
+    await flushPromises()
+    document.querySelector('[data-graph-control="create-toggle-context"]').click()
+    await flushPromises()
+    const editor = wrapper.findComponent(GraphMarkdownEditor)
+    expect(editor.props('scopeIds')).toEqual(['team:main'])
+    expect(editor.props('openLinks')).toBe(false)
+    editor.get('.cm-content').element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true }))
+    expect(wrapper.emitted('close')).toBeUndefined()
+    editor.get('.cm-content').element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
   it('keeps creation fast and reveals rich Markdown context progressively', async () => {
     wrapper = mount(GraphCreateDialog, {
       attachTo: document.body,

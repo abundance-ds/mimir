@@ -2,7 +2,6 @@
   <section
     ref="root"
     data-business-graph-app
-    :data-graph-mode="focusMode ? 'focus' : graph.selectedNode ? 'peek' : 'scan'"
     class="business-graph relative flex h-full min-h-0 flex-col overflow-hidden text-ink"
     tabindex="-1"
     @keydown="onKeydown"
@@ -50,7 +49,6 @@
     <GraphWorkspace
       v-if="workspacePath"
       ref="workspaceSurface"
-      :focus-mode="focusMode"
       :current-section="currentSection"
       :view-options="viewOptions"
       :project-filter="projectFilter"
@@ -81,9 +79,6 @@
       :unsearched-work-issues="unsearchedWorkIssues"
       :show-closed-issues="showClosedIssues"
       :show-empty-projects="showEmptyProjects"
-      :save-error="saveError"
-      :saving="saving"
-      :related-activities="relatedActivities"
       @set-view="setView"
       @update:project-filter="projectFilter = $event"
       @update:assignee-filter="assigneeFilter = $event"
@@ -107,18 +102,6 @@
       @bulk-move-issues="bulkMoveIssues"
       @reorder-issue="reorderIssue"
       @create-from-board="createFromBoard"
-      @return-to-peek="returnToPeek"
-      @finalize-object-close="finalizeObjectClose"
-      @save-node="saveNode"
-      @delete-node="deleteNode"
-      @open-related-node="openRelatedNode"
-      @open-file="openFile"
-      @open-url="openUrl"
-      @open-activity="$emit('openActivity', $event)"
-      @open-meeting="$emit('openMeeting', $event)"
-      @open-related-create="openRelatedCreate"
-      @navigate-object-history="navigateObjectHistory"
-      @enter-focus="enterFocus"
     />
 
     <DispatchBar
@@ -136,6 +119,8 @@
     />
 
     <GraphCreateDialog
+      :scope-ids="graph.activeScopeIds"
+      :graph-revision="graph.status?.graphRevision || 0"
       :open="createOpen"
       :scopes="graph.scopes"
       :initial-kind="createKind"
@@ -153,15 +138,6 @@
       @close="closeSummary"
       @launch="launchSummary"
     />
-    <GraphConfirmDialog
-      :open="deleteOpen"
-      :title="deleteTitle"
-      :copy="deleteCopy"
-      :busy="deleting"
-      :error="deleteError"
-      @close="closeDeleteDialog"
-      @confirm="confirmDelete"
-    />
   </section>
 </template>
 
@@ -174,11 +150,9 @@ import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import DispatchBar from './business-graph/DispatchBar.vue'
 import GraphAppFeedback from './business-graph/GraphAppFeedback.vue'
 import GraphAppHeader from './business-graph/GraphAppHeader.vue'
-import GraphConfirmDialog from './business-graph/GraphConfirmDialog.vue'
 import GraphCreateDialog from './business-graph/GraphCreateDialog.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 import GraphWorkspace from './business-graph/GraphWorkspace.vue'
-import { useGraphLifecycle } from './business-graph/useGraphLifecycle.js'
 import { useGraphKeyboard } from './business-graph/useGraphKeyboard.js'
 import { useGraphDispatch } from './business-graph/useGraphDispatch.js'
 import { useGraphMutations } from './business-graph/useGraphMutations.js'
@@ -193,12 +167,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'openFile',
-  'openActivity',
+  'openGraphNode',
   'startWork',
   'chooseWorkspace',
   'diagnostic',
-  'openMeeting',
 ])
 const activities = useActivitiesStore()
 const settings = useSettingsStore()
@@ -208,12 +180,6 @@ const root = ref(null)
 const appHeader = ref(null)
 const workspaceSurface = ref(null)
 const dispatchBar = ref(null)
-useGraphLifecycle({
-  graph,
-  active: () => props.active,
-  workspacePath: () => props.workspacePath,
-  diagnostic: message => emit('diagnostic', message),
-})
 
 const {
   allKindFilter,
@@ -279,19 +245,10 @@ const {
   startWork: request => emit('startWork', request),
 })
 const {
-  closeObject,
-  enterFocus,
-  finalizeObjectClose,
   focusEntry,
-  focusMode,
-  navigateObjectHistory,
-  openFile,
   openNode,
-  openRelatedNode,
-  openUrl,
   refresh,
   restoreGraphFocus,
-  returnToPeek,
   setSection,
   setView,
   toggleScope,
@@ -301,9 +258,8 @@ const {
   root,
   workspaceSurface,
   appHeader,
-  workspacePath: () => props.workspacePath,
   diagnostic: message => emit('diagnostic', message),
-  openFileResult: path => emit('openFile', path),
+  openGraphNode: request => emit('openGraphNode', request),
 })
 defineExpose({ focusEntry })
 watch(
@@ -338,8 +294,6 @@ const {
 const {
   bulkMoveIssues,
   bulkPatchIssues,
-  closeDeleteDialog,
-  confirmDelete,
   createError,
   createFromBoard,
   createKind,
@@ -347,20 +301,10 @@ const {
   createOpen,
   createStatus,
   creating,
-  deleteCopy,
-  deleteError,
-  deleteNode,
-  deleteOpen,
-  deleteTitle,
-  deleting,
   moveIssue,
   openCreate,
-  openRelatedCreate,
   patchIssue,
   reorderIssue,
-  saveError,
-  saveNode,
-  saving,
   undoDelete,
   undoError,
   closedIssueUndo,
@@ -374,20 +318,14 @@ const {
   diagnostic: message => emit('diagnostic', message),
   echoToolCall,
   restoreGraphFocus,
+  openNode,
 })
 const { onKeydown } = useGraphKeyboard({
-  graph,
   sections,
   appHeader,
   workspaceSurface,
   dispatchBar,
-  deleteOpen,
   createOpen,
-  focusMode,
-  closeDeleteDialog,
-  closeObject,
-  enterFocus,
-  navigateObjectHistory,
   openCreate,
   setSection,
 })
@@ -395,11 +333,6 @@ const { onKeydown } = useGraphKeyboard({
 // dispatch bar paint immediately; only the projection waits for the first
 // query, and a reload keeps the nodes already on screen.
 const composing = computed(() => graph.loading && !graph.nodes.length)
-const relatedActivities = computed(() => {
-  const nodeId = graph.selectedNode?.id
-  if (!nodeId) return []
-  return activities.activities.filter(activity => activity.source?.graphNodeId === nodeId)
-})
 </script>
 
 <style scoped>

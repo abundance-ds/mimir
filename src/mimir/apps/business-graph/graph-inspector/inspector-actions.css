@@ -1,72 +1,3 @@
-.peek-details {
-  flex: 0 0 auto;
-  margin-top: auto;
-  border-top: 1px solid var(--color-rule-light);
-  padding: 1px 18px 2px;
-}
-
-.peek-details[open] {
-  padding-bottom: 11px;
-}
-
-.peek-details summary {
-  display: flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  list-style: none;
-  color: var(--color-ink-4);
-  font-size: 9px;
-  font-weight: 620;
-}
-
-.peek-details summary small {
-  margin-left: auto;
-  color: var(--color-ink-4);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 400;
-}
-
-.peek-details summary::-webkit-details-marker {
-  display: none;
-}
-
-.peek-details summary::after {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 4px;
-  color: var(--color-ink-4);
-  content: "+";
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.peek-details[open] summary::after {
-  content: "−";
-}
-
-.peek-details summary:hover::after {
-  background: var(--color-chrome-mid);
-  color: var(--color-ink);
-}
-
-.peek-details summary:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
-  outline-offset: 2px;
-}
-
-.peek-details-content {
-  padding-top: 7px;
-}
-
-.peek-details-group .object-section-label {
-  margin-bottom: 6px;
-}
-
 .object-primary-action,
 .object-secondary-action {
   display: inline-flex;
@@ -98,14 +29,7 @@
 .object-secondary-action:hover {
   background: var(--color-chrome-mid);
   color: var(--color-ink);
-}
-
-.peek-focus-action {
-  min-height: 26px;
-  padding-inline: 7px;
-}
-
-.object-primary-action kbd,
+}.object-primary-action kbd,
 .object-secondary-action kbd,
 .focus-save-button kbd {
   margin-left: 2px;

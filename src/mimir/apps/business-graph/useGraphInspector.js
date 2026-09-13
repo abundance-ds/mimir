@@ -2,9 +2,9 @@ import {
   computed,
   nextTick,
   onMounted,
+  onBeforeUnmount,
   onUnmounted,
   provide,
-  reactive,
   ref,
   toRefs,
   watch,
@@ -13,11 +13,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { GRAPH_INSPECTOR_CONTEXT } from './graphInspectorContext.js'
 import {
-  buildInspectorSave,
-  hydrateInspectorDraft,
-} from './graphInspectorPersistence.js'
-import {
   activityStatusClass,
+  defaultRelationFor,
   displayTitle,
   entityStatuses,
   fileExtension,
@@ -31,35 +28,33 @@ import {
   readableDateTime,
   readableDuration,
   RELATION_DEFINITIONS,
-  splitValues,
   statuses,
   titleCase,
 } from './graphInspectorModel.js'
 
 export function useGraphInspector(props, emit) {
   const {
-    mode,
-    node,
     neighbors,
-    scopes,
     nodes,
-    conflict,
     error,
-    saving,
     activities,
-    historyBack,
-    historyForward,
+    scopeIds,
+    graphRevision,
+    viewState,
   } = toRefs(props)
+  const node = computed(() => props.documentFile.graph.node)
+  const draft = computed(() => props.documentFile.graph.draft)
+  const dirty = computed(() => props.documentFile.dirty)
+  const saving = computed(() => props.documentFile.saveState === 'saving')
+  const saved = computed(() => props.documentFile.saveState === 'saved')
+  const noteEditor = ref(null)
   const titleInput = ref(null)
   const inspectorRoot = ref(null)
   const summaryInput = ref(null)
   const deliverablesInput = ref(null)
   const filesInput = ref(null)
-  const dirty = ref(false)
-  const saveBlocked = ref(false)
   const copiedFact = ref('')
   let copiedFactTimer = null
-  const saved = ref(false)
   const moreOpen = ref(false)
   const historyOpen = ref(false)
   const historyLoading = ref(false)
@@ -71,40 +66,9 @@ export function useGraphInspector(props, emit) {
   const connectionRelation = ref('')
   const connectionTarget = ref('')
   const attendeeToAdd = ref('')
-  let autosaveTimer = null
-  let savedTimer = null
-  let editVersion = 0
-  let currentNodeId = ''
-  let pendingAction = null
   let historyAvailabilityRequest = 0
   let teamResourceRequest = 0
-  
-  const draft = reactive({
-    title: '',
-    summary: '',
-    body: '',
-    tags: '',
-    status: 'backlog',
-    priority: 'normal',
-    dueDate: '',
-    remindAt: '',
-    projectId: '',
-    scopeId: '',
-    attendeeIds: [],
-    assigneeId: '',
-    waitingFor: '',
-    snoozeUntil: '',
-    labels: '',
-    deliverables: '',
-    files: '',
-    projectType: '',
-    projectStatus: 'planned',
-    companyRoles: '',
-    entityStatus: 'active',
-    teamMember: false,
-    relations: [],
-  })
-  
+
   const projects = computed(() => props.nodes.filter(node => node.kind === 'project'))
   const people = computed(() => props.nodes.filter(node => node.kind === 'person'))
   const activeTeamPeople = computed(() => people.value.filter(person => (
@@ -113,7 +77,7 @@ export function useGraphInspector(props, emit) {
   )))
   const projectOptions = computed(() => [
     { value: '', label: 'No project', hint: 'Remove project relation' },
-    ...labelOption(draft.projectId, projects.value),
+    ...labelOption(draft.value.projectId, projects.value),
     ...projects.value.map(project => ({
       value: project.id,
       label: displayTitle(project),
@@ -122,7 +86,7 @@ export function useGraphInspector(props, emit) {
   ])
   const personOptions = computed(() => [
     { value: '', label: 'Unassigned', hint: 'Remove assignee relation' },
-    ...currentPersonOption(draft.assigneeId),
+    ...currentPersonOption(draft.value.assigneeId),
     ...activeTeamPeople.value.map(person => ({
       value: person.id,
       label: displayTitle(person),
@@ -134,14 +98,14 @@ export function useGraphInspector(props, emit) {
     label: scope.kind === 'project' ? 'Project' : titleCase(scope.kind),
     hint: scope.kind === 'project' ? 'Current workspace' : '',
   })))
-  const meetingAttendees = computed(() => draft.attendeeIds
+  const meetingAttendees = computed(() => draft.value.attendeeIds
     .map(id => people.value.find(person => person.id === id))
     .filter(Boolean))
   const meetingPersonOptions = computed(() => people.value
-    .filter(person => !draft.attendeeIds.includes(person.id))
+    .filter(person => !draft.value.attendeeIds.includes(person.id))
     .map(person => ({ value: person.id, label: displayTitle(person) }))
     .sort((left, right) => left.label.localeCompare(right.label)))
-  
+
   function currentPersonOption(value) {
     const current = String(value || '').trim()
     if (!current || activeTeamPeople.value.some(person => person.id === current)) return []
@@ -151,7 +115,7 @@ export function useGraphInspector(props, emit) {
     }
     return [{ value: current, label: current, hint: 'Label from the Markdown source' }]
   }
-  
+
   // A legacy source value is a label, not an id. Offering it keeps the control
   // showing what the Markdown actually says instead of reading as unassigned.
   function labelOption(value, candidates) {
@@ -162,7 +126,7 @@ export function useGraphInspector(props, emit) {
   const relationOptions = computed(() => (
     RELATION_DEFINITIONS
       .filter(definition => (
-        definition.from.includes('any') || definition.from.includes(props.node?.kind)
+        definition.from.includes('any') || definition.from.includes(node.value?.kind)
       ))
       .map(definition => ({
         value: definition.value,
@@ -177,9 +141,9 @@ export function useGraphInspector(props, emit) {
     const targetKinds = activeRelationDefinition.value?.to || ['any']
     return props.nodes
       .filter(candidate => (
-        candidate.id !== props.node?.id
+        candidate.id !== node.value?.id
         && (targetKinds.includes('any') || targetKinds.includes(candidate.kind))
-        && !draft.relations.some(edge => (
+        && !draft.value.relations.some(edge => (
           edge.relation === connectionRelation.value && edge.target === candidate.id
         ))
       ))
@@ -190,29 +154,29 @@ export function useGraphInspector(props, emit) {
       }))
   })
   const connectionRows = computed(() => (
-    draft.relations
+    draft.value.relations
       .map((edge, index) => ({
         edge,
         index,
         target: props.nodes.find(candidate => candidate.id === edge.target),
       }))
       .filter(connection => !(
-        props.node?.kind === 'issue'
+        node.value?.kind === 'issue'
         && ['part_of', 'assigned_to'].includes(connection.edge.relation)
       ))
       .filter(connection => !(
-        props.node?.kind === 'meeting'
+        node.value?.kind === 'meeting'
         && ['part_of', 'attended_by'].includes(connection.edge.relation)
       ))
   ))
   const canAddConnection = computed(() => (
     Boolean(connectionRelation.value && connectionTarget.value)
-    && !draft.relations.some(edge => (
+    && !draft.value.relations.some(edge => (
       edge.relation === connectionRelation.value && edge.target === connectionTarget.value
     ))
   ))
   const deliverableItems = computed(() => (
-    (props.node?.properties?.deliverables || [])
+    (node.value?.properties?.deliverables || [])
       .map(item => (
         typeof item === 'string'
           ? { path: item, label: '' }
@@ -221,7 +185,7 @@ export function useGraphInspector(props, emit) {
       .filter(item => item.path)
   ))
   const resourceItems = computed(() => (
-    (props.node?.properties?.files || [])
+    (node.value?.properties?.files || [])
       .map(item => (
         typeof item === 'string'
           ? { path: item, label: '' }
@@ -230,17 +194,17 @@ export function useGraphInspector(props, emit) {
       .filter(item => item.path)
   ))
   const canAddTeamResource = computed(() => (
-    props.node?.provenance?.scopeId === 'team:main'
+    node.value?.provenance?.scopeId === 'team:main'
   ))
   const canRecoverTeamResource = computed(() => (
-    canAddTeamResource.value && props.node?.kind === 'resource'
+    canAddTeamResource.value && node.value?.kind === 'resource'
   ))
   const linkedTeamResourcePaths = computed(() => {
     const linked = new Set()
     for (const candidate of props.nodes) {
       if (candidate.provenance?.scopeId !== 'team:main') continue
-      const values = candidate.id === props.node?.id
-        ? resourcePathsFromDraft(draft.files)
+      const values = candidate.id === node.value?.id
+        ? resourcePathsFromDraft(draft.value.files)
         : resourcePathsFromProperties(candidate.properties?.files)
       for (const path of values) linked.add(normalizeResourcePath(path))
     }
@@ -250,45 +214,52 @@ export function useGraphInspector(props, emit) {
     !linkedTeamResourcePaths.value.has(normalizeResourcePath(resource.path))
   )))
   const attentionLabel = computed(() => {
-    if (draft.snoozeUntil) return `Snoozed until ${readableDate(draft.snoozeUntil)}`
-    if (isOverdue(draft.dueDate)) return 'Overdue'
+    if (draft.value.snoozeUntil) return `Snoozed until ${readableDate(draft.value.snoozeUntil)}`
+    if (isOverdue(draft.value.dueDate)) return 'Overdue'
     return 'Clear'
   })
   const saveStateLabel = computed(() => {
-    if (props.conflict) return 'Conflict'
-    if (props.saving) return 'Saving…'
+    if (props.documentFile.saveState === 'failed') return 'Save failed'
+    if (saving.value) return 'Saving…'
     if (dirty.value) return 'Unsaved'
     if (saved.value) return 'Saved'
     return ''
   })
   const saveStateClass = computed(() => ({
-    'save-state-conflict': Boolean(props.conflict),
-    'save-state-dirty': dirty.value && !props.conflict,
-    'save-state-saved': saved.value && !dirty.value && !props.conflict,
+    'save-state-conflict': props.documentFile.saveState === 'failed',
+    'save-state-dirty': dirty.value,
+    'save-state-saved': saved.value && !dirty.value,
   }))
   const editableTags = computed({
-    get: () => props.node?.kind === 'issue' ? draft.labels : draft.tags,
+    get: () => node.value?.kind === 'issue' ? draft.value.labels : draft.value.tags,
     set: value => {
-      if (props.node?.kind === 'issue') draft.labels = value
-      else draft.tags = value
+      if (node.value?.kind === 'issue') draft.value.labels = value
+      else draft.value.tags = value
     },
   })
-  
+
   watch(
-    () => props.node,
-    (node) => {
-      if (!node) return
-      if (node.id !== currentNodeId || !dirty.value) resetDraft(node)
+    () => [props.documentFile.id, node.value?.kind],
+    () => {
+      connectionRelation.value = defaultRelationFor(node.value?.kind)
+      connectionTarget.value = ''
+      attendeeToAdd.value = ''
+      moreOpen.value = false
+      historyOpen.value = false
+      historyEntries.value = []
+      historyError.value = ''
+      resourceError.value = ''
+      void nextTick(growAll)
     },
     { immediate: true },
   )
 
   watch(
     () => [
-      props.node?.id,
-      props.node?.kind,
-      props.node?.provenance?.scopeId,
-      props.node?.provenance?.sourcePath,
+      node.value?.id,
+      node.value?.kind,
+      node.value?.provenance?.scopeId,
+      node.value?.provenance?.sourcePath,
     ],
     () => {
       void refreshHistoryAvailability()
@@ -296,129 +267,54 @@ export function useGraphInspector(props, emit) {
     },
     { immediate: true },
   )
-  
-  watch(() => props.mode, async () => {
-    moreOpen.value = false
-    await nextTick()
-    growAll()
-  })
-  
-  watch(() => props.saving, (saving, wasSaving) => {
-    if (saving || !wasSaving || dirty.value || !pendingAction) return
-    const action = pendingAction
-    pendingAction = null
-    action()
-  })
-  
-  function resetDraft(node) {
-    clearTimeout(autosaveTimer)
-    currentNodeId = node.id
-    connectionRelation.value = hydrateInspectorDraft(draft, node)
-    connectionTarget.value = ''
-    attendeeToAdd.value = ''
-    dirty.value = false
-    saveBlocked.value = false
-    saved.value = false
-    editVersion = 0
-    pendingAction = null
-    historyOpen.value = false
-    historyEntries.value = []
-    historyError.value = ''
-    resourceError.value = ''
-    void nextTick(growAll)
+
+  function save() {
+    emit('save')
   }
-  
-  function save(afterSave = null) {
-    if (typeof afterSave !== 'function') afterSave = null
-    clearTimeout(autosaveTimer)
-    if (!dirty.value || props.saving || !draft.title.trim()) return
-    const version = editVersion
-    const tags = splitValues(editableTags.value)
-    const { payload, targetScopeId } = buildInspectorSave({
-      node: props.node,
-      nodes: props.nodes,
-      draft,
-      tags,
-    })
-    emit('save', payload, {
-      done() {
-        saveBlocked.value = false
-        if (editVersion === version) {
-          dirty.value = false
-          saved.value = true
-          clearTimeout(savedTimer)
-          savedTimer = setTimeout(() => { saved.value = false }, 1600)
-          const action = pendingAction
-          pendingAction = null
-          afterSave?.()
-          action?.()
-        } else {
-          scheduleSave()
-        }
-      },
-      // A rejected save must not strand the draft: drop the queued navigation so
-      // the surface stays open with its error, and let the next explicit exit
-      // leave without retrying the same failing write.
-      failed() {
-        saveBlocked.value = true
-        pendingAction = null
-        clearTimeout(autosaveTimer)
-      },
-    }, { targetScopeId })
-  }
-  
+
   function addMeetingAttendee(id) {
-    if (id && !draft.attendeeIds.includes(id)) {
-      draft.attendeeIds = [...draft.attendeeIds, id]
+    if (id && !draft.value.attendeeIds.includes(id)) {
+      draft.value.attendeeIds = [...draft.value.attendeeIds, id]
       changed()
     }
     attendeeToAdd.value = ''
   }
-  
+
   function removeMeetingAttendee(id) {
-    draft.attendeeIds = draft.attendeeIds.filter(personId => personId !== id)
+    draft.value.attendeeIds = draft.value.attendeeIds.filter(personId => personId !== id)
     changed()
   }
-  
-  function requestExit(eventName) {
-    moreOpen.value = false
-    commitThen(() => emit(eventName))
-  }
-  
-  function requestClose() {
-    requestExit('close')
-  }
-  
-  function requestBack() {
-    requestExit('back')
-  }
-  
+
   function openRelated(id) {
-    commitThen(() => emit('openNode', id))
+    emit('openNode', id)
   }
-  
+
+  function revealReference(request) {
+    noteEditor.value?.revealReference(request, props.documentFile.graph.sourceRevision)
+  }
+
   function openSource(path) {
     if (!path) return
-    commitThen(() => emit('openFile', { path, nodeId: props.node?.id || null }))
+    emit('openFile', { path, nodeId: node.value?.id || null })
   }
-  
+
   function openUrl(url) {
     if (!url) return
-    commitThen(() => emit('openUrl', url))
+    emit('openUrl', url)
   }
-  
+
   function openActivity(id) {
-    commitThen(() => emit('openActivity', id))
+    emit('openActivity', id)
   }
-  
+
   function quickCreate(kind) {
-    commitThen(() => emit('quickCreate', { kind, parent: props.node }))
+    emit('quickCreate', { kind, parent: node.value })
   }
-  
+
   const lookupFacts = computed(() => {
-    if (props.node?.kind !== 'person') return []
-    const properties = props.node.properties || {}
-    const companyId = (props.node.relations || [])
+    if (node.value?.kind !== 'person') return []
+    const properties = node.value.properties || {}
+    const companyId = (node.value.relations || [])
       .find(edge => edge.relation === 'works_at')?.target || ''
     const company = companyId
       ? props.nodes.find(node => node.id === companyId)?.title || 'Unavailable company'
@@ -432,7 +328,7 @@ export function useGraphInspector(props, emit) {
       .filter(([, value]) => value)
       .map(([label, value]) => ({ label, value }))
   })
-  
+
   function copyFact(fact) {
     try {
       navigator.clipboard?.writeText(fact.value)
@@ -445,42 +341,29 @@ export function useGraphInspector(props, emit) {
       copiedFact.value = ''
     }, 1200)
   }
-  
-  function commitThen(action) {
-    if ((!dirty.value && !props.saving) || saveBlocked.value) {
-      action()
-      return
-    }
-    pendingAction = action
-    if (!props.saving) save()
-  }
-  
+
   function changed() {
-    editVersion += 1
-    dirty.value = true
-    saved.value = false
-    saveBlocked.value = false
-    scheduleSave()
+    emit('draftChange')
   }
-  
+
   function changedAndGrow(event) {
     changed()
     grow(event.target)
   }
-  
+
   function updateDraft(field, value) {
-    draft[field] = value
+    draft.value[field] = value
     changed()
   }
-  
+
   function selectConnectionRelation(value) {
     connectionRelation.value = value
     connectionTarget.value = ''
   }
-  
+
   function addConnection() {
     if (!canAddConnection.value) return
-    draft.relations.push({
+    draft.value.relations.push({
       relation: connectionRelation.value,
       target: connectionTarget.value,
       legacy: false,
@@ -488,58 +371,43 @@ export function useGraphInspector(props, emit) {
     connectionTarget.value = ''
     changed()
   }
-  
+
   function removeConnection(index) {
-    if (index < 0 || index >= draft.relations.length) return
-    draft.relations.splice(index, 1)
+    if (index < 0 || index >= draft.value.relations.length) return
+    draft.value.relations.splice(index, 1)
     changed()
   }
-  
-  function quickUpdate(field, value) {
-    draft[field] = value
-    changed()
-    clearTimeout(autosaveTimer)
-    autosaveTimer = setTimeout(save, 0)
-  }
-  
-  function scheduleSave() {
-    clearTimeout(autosaveTimer)
-    autosaveTimer = setTimeout(save, 900)
-  }
-  
+
   function growAll() {
     for (const input of [titleInput.value, summaryInput.value, deliverablesInput.value, filesInput.value]) grow(input)
   }
-  
-  // Peek and Focus size the same fields differently, so the floor comes from the
-  // element's own min-height rather than a mode-specific constant.
+
+  // Respect each field's minimum height while it grows with its content.
   function grow(input) {
     if (!input) return
     input.style.height = '0px'
     const floor = Number.parseFloat(getComputedStyle(input).minHeight) || 0
     input.style.height = `${Math.max(input.scrollHeight, floor)}px`
   }
-  
+
   function scopeFor(node) {
     const scopeId = node.provenance?.scopeId || node.scopeId
     const scope = props.scopes.find(candidate => candidate.id === scopeId)
     return scope?.kind || node.provenance?.scopeKind || 'visible'
   }
-  
+
   function connectionTitle(connection) {
     return connection.target ? displayTitle(connection.target) : 'Unavailable object'
   }
-  
+
   function remove() {
-    commitThen(() => {
-      emit('delete', {
-        id: props.node.id,
-        expectedRevision: props.node.provenance?.sourceRevision,
-        title: props.node.title,
-      })
+    emit('delete', {
+      id: node.value.id,
+      expectedRevision: props.documentFile.graph.sourceRevision,
+      title: draft.value.title,
     })
   }
-  
+
   function moreAction(action) {
     moreOpen.value = false
     action()
@@ -554,7 +422,7 @@ export function useGraphInspector(props, emit) {
     historyError.value = ''
     try {
       const entries = await invoke('git_file_history', {
-        path: props.node?.provenance?.sourcePath,
+        path: node.value?.provenance?.sourcePath,
         limit: 50,
       })
       historyEntries.value = Array.isArray(entries) ? entries : []
@@ -566,7 +434,7 @@ export function useGraphInspector(props, emit) {
   }
 
   async function openHistoryVersion(entry) {
-    const path = props.node?.provenance?.sourcePath
+    const path = node.value?.provenance?.sourcePath
     if (!path || !entry?.hash) return
     if (entry.binary) {
       if (!window.confirm('Restore this file version? The current version remains in History.')) return
@@ -581,7 +449,7 @@ export function useGraphInspector(props, emit) {
     historyOpen.value = false
     emit('openFile', {
       path,
-      nodeId: props.node?.id || null,
+      nodeId: node.value?.id || null,
       history: {
         hash: entry.hash,
         shortHash: entry.shortHash,
@@ -604,7 +472,7 @@ export function useGraphInspector(props, emit) {
       const sourcePath = typeof source === 'string' ? source : source?.path
       if (!sourcePath) return
       const path = await invoke('team_resource_import', { source: sourcePath })
-      draft.files = [draft.files.trim(), path].filter(Boolean).join('\n')
+      draft.value.files = [draft.value.files.trim(), path].filter(Boolean).join('\n')
       changed()
       await nextTick(() => grow(filesInput.value))
     } catch (cause) {
@@ -614,7 +482,7 @@ export function useGraphInspector(props, emit) {
 
   async function refreshHistoryAvailability() {
     const request = ++historyAvailabilityRequest
-    const path = String(props.node?.provenance?.sourcePath || '').trim()
+    const path = String(node.value?.provenance?.sourcePath || '').trim()
     fileHistoryAvailable.value = false
     if (!path) return
     try {
@@ -643,15 +511,16 @@ export function useGraphInspector(props, emit) {
 
   async function attachTeamResource(resource) {
     const path = normalizeResourcePath(resource?.path)
-    const alreadyLinked = resourcePathsFromDraft(draft.files)
+    const alreadyLinked = resourcePathsFromDraft(draft.value.files)
       .some(value => normalizeResourcePath(value) === path)
     if (!path || alreadyLinked) return
-    draft.files = [draft.files.trim(), path].filter(Boolean).join('\n')
+    draft.value.files = [draft.value.files.trim(), path].filter(Boolean).join('\n')
     changed()
     await nextTick(() => grow(filesInput.value))
   }
-  
+
   function onKeydown(event) {
+    if (event.isComposing || event.keyCode === 229) return
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
       event.preventDefault()
       save()
@@ -663,7 +532,7 @@ export function useGraphInspector(props, emit) {
       moreOpen.value = false
     }
   }
-  
+
   function onDocumentPointerDown(event) {
     if (
       moreOpen.value
@@ -672,125 +541,129 @@ export function useGraphInspector(props, emit) {
       moreOpen.value = false
     }
   }
-  
+
+  function onFocusIn(event) {
+    if (props.viewState) props.viewState.focusNote = Boolean(event.target.closest?.('[data-graph-markdown-editor]'))
+  }
+
   function focusEntry() {
-    const selector = modeEntryControl()
-    const target = inspectorRoot.value?.querySelector(selector)
-    if (target instanceof HTMLElement) target.focus()
-    else inspectorRoot.value?.focus()
+    if (props.viewState?.focusNote) { noteEditor.value?.focus(); return }
+    const target = inspectorRoot.value?.querySelector('[data-inspector-title]')
+    if (target instanceof HTMLElement) target.focus({ preventScroll: true })
+    else inspectorRoot.value?.focus({ preventScroll: true })
   }
-  
-  function modeEntryControl() {
-    return props.mode === 'focus'
-      ? '[data-graph-control="focus-back"]'
-      : '[data-graph-control="peek-title"]'
-  }
-  
-  
-  
+
+  onBeforeUnmount(() => {
+    if (props.viewState) props.viewState.scrollTop = inspectorRoot.value?.querySelector('.focus-scroll')?.scrollTop || 0
+  })
+
   onMounted(() => {
     document.addEventListener('pointerdown', onDocumentPointerDown)
+    void nextTick(() => {
+      const scroll = inspectorRoot.value?.querySelector('.focus-scroll')
+      if (scroll && props.viewState) scroll.scrollTop = props.viewState.scrollTop
+    })
   })
-  
+
   onUnmounted(() => {
     document.removeEventListener('pointerdown', onDocumentPointerDown)
-    clearTimeout(autosaveTimer)
-    clearTimeout(savedTimer)
+    clearTimeout(copiedFactTimer)
   })
 
   const context = {
     node,
-      neighbors,
-      conflict,
-      error,
-      saving,
-      activities,
-      historyBack,
-      historyForward,
-      titleInput,
-      summaryInput,
-      deliverablesInput,
-      filesInput,
-      dirty,
-      copiedFact,
-      moreOpen,
-      historyOpen,
-      historyLoading,
-      historyError,
-      historyEntries,
-      fileHistoryAvailable,
-      resourceError,
-      connectionRelation,
-      connectionTarget,
-      attendeeToAdd,
-      draft,
-      statuses,
-      priorities,
-      projectTypes,
-      projectStatuses,
-      entityStatuses,
-      projectOptions,
-      personOptions,
-      scopeOptions,
-      meetingAttendees,
-      meetingPersonOptions,
-      relationOptions,
-      connectionTargetOptions,
-      connectionRows,
-      canAddConnection,
-      deliverableItems,
-      resourceItems,
-      canAddTeamResource,
-      canRecoverTeamResource,
-      unlinkedResourceItems,
-      attentionLabel,
-      saveStateLabel,
-      saveStateClass,
-      editableTags,
-      lookupFacts,
-      emit,
-      save,
-      addMeetingAttendee,
-      removeMeetingAttendee,
-      requestExit,
-      openRelated,
-      openSource,
-      openUrl,
-      openActivity,
-      quickCreate,
-      copyFact,
-      changed,
-      changedAndGrow,
-      updateDraft,
-      selectConnectionRelation,
-      addConnection,
-      removeConnection,
-      quickUpdate,
-      connectionTitle,
-      displayTitle,
-      remove,
-      moreAction,
-      toggleHistory,
-      openHistoryVersion,
-      addResourceFile,
-      attachTeamResource,
-      readableDate,
-      readableDateTime,
-      readableDuration,
-      isOverdue,
-      activityStatusClass,
-      fileName,
-      fileExtension,
-      human,
+    nodes,
+    viewState,
+    noteEditor,
+    scopeIds,
+    graphRevision,
+    neighbors,
+    error,
+    saving,
+    activities,
+    titleInput,
+    summaryInput,
+    deliverablesInput,
+    filesInput,
+    dirty,
+    copiedFact,
+    moreOpen,
+    historyOpen,
+    historyLoading,
+    historyError,
+    historyEntries,
+    fileHistoryAvailable,
+    resourceError,
+    connectionRelation,
+    connectionTarget,
+    attendeeToAdd,
+    draft,
+    statuses,
+    priorities,
+    projectTypes,
+    projectStatuses,
+    entityStatuses,
+    projectOptions,
+    personOptions,
+    scopeOptions,
+    meetingAttendees,
+    meetingPersonOptions,
+    relationOptions,
+    connectionTargetOptions,
+    connectionRows,
+    canAddConnection,
+    deliverableItems,
+    resourceItems,
+    canAddTeamResource,
+    canRecoverTeamResource,
+    unlinkedResourceItems,
+    attentionLabel,
+    saveStateLabel,
+    saveStateClass,
+    editableTags,
+    lookupFacts,
+    emit,
+    save,
+    addMeetingAttendee,
+    removeMeetingAttendee,
+    openRelated,
+    openSource,
+    openUrl,
+    openActivity,
+    quickCreate,
+    copyFact,
+    changed,
+    changedAndGrow,
+    updateDraft,
+    selectConnectionRelation,
+    addConnection,
+    removeConnection,
+    connectionTitle,
+    defaultRelationFor,
+  displayTitle,
+    remove,
+    moreAction,
+    toggleHistory,
+    openHistoryVersion,
+    addResourceFile,
+    attachTeamResource,
+    readableDate,
+    readableDateTime,
+    readableDuration,
+    isOverdue,
+    activityStatusClass,
+    fileName,
+    fileExtension,
+    human,
     inspectorRoot,
-    mode,
     onKeydown,
+    onFocusIn,
   }
   provide(GRAPH_INSPECTOR_CONTEXT, context)
 
   return {
     context,
-    exposed: { requestClose, requestBack, commitThen, focusEntry, updateDraft },
+    exposed: { focusEntry, revealReference },
   }
 }
 

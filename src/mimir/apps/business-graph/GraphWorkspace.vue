@@ -1,179 +1,123 @@
 <template>
   <div class="graph-workspace relative flex min-h-0 flex-1">
-    <GraphInspector
-      v-if="graph.selectedNode && focusMode"
-      ref="inspector"
-      mode="focus"
-      :node="graph.selectedNode"
-      :neighbors="graph.selectedNeighbors"
-      :scopes="graph.scopes"
-      :nodes="graph.nodes"
-      :conflict="graph.conflict"
-      :error="saveError"
-      :saving="saving"
-      :activities="relatedActivities"
-      :history-back="graph.historyBack"
-      :history-forward="graph.historyForward"
-      @back="$emit('returnToPeek')"
-      @close="$emit('finalizeObjectClose')"
-      @save="forwardSave"
-      @delete="$emit('deleteNode', $event)"
-      @open-node="$emit('openRelatedNode', $event)"
-      @open-file="$emit('openFile', $event)"
-      @open-url="$emit('openUrl', $event)"
-      @open-activity="$emit('openActivity', $event)"
-      @open-meeting="$emit('openMeeting', $event)"
-      @quick-create="$emit('openRelatedCreate', $event)"
-      @navigate-history="$emit('navigateObjectHistory', $event)"
-    />
-
-    <template v-else>
-      <main class="flex min-w-0 flex-1 flex-col">
-        <GraphViewbar
-          ref="viewbar"
-          :section="graph.section"
-          :section-label="currentSection?.label"
-          :view="graph.view"
-          :view-options="viewOptions"
-          :project-filter="projectFilter"
-          :project-options="projectFilterOptions"
-          :assignee-filter="assigneeFilter"
-          :assignee-options="assigneeFilterOptions"
-          :group-by="boardGroup"
-          :group-options="boardGroupOptions"
-          :sort-by="boardSort"
-          :show-closed-issues="showClosedIssues"
-          :show-empty-projects="showEmptyProjects"
-          :sort-options="boardSortOptions"
-          :priority-filter="priorityFilter"
-          :priority-options="priorityFilterOptions"
-          :collapsed-statuses="collapsedBoardStatuses"
-          :statuses="boardStatuses"
-          :kind-filter="allKindFilter"
-          :kind-options="allKindOptions"
-          @set-view="$emit('setView', $event)"
-          @update:project-filter="$emit('update:projectFilter', $event)"
-          @update:assignee-filter="$emit('update:assigneeFilter', $event)"
-          @update:group-by="$emit('update:boardGroup', $event)"
-          @update:sort-by="$emit('update:boardSort', $event)"
-          @update:show-closed-issues="$emit('update:showClosedIssues', $event)"
-          @update:show-empty-projects="$emit('update:showEmptyProjects', $event)"
-          @update:priority-filter="$emit('update:priorityFilter', $event)"
-          @update:kind-filter="$emit('update:allKindFilter', $event)"
-          @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
-          @expand-all="$emit('expandAllBoardStatuses')"
-        />
-        <div v-if="composing" data-graph-loading class="graph-state">
-          <span class="graph-loading-mark" aria-hidden="true" />
-          <h2>Composing your graph</h2>
-          <p>Private, project, and team knowledge are being indexed.</p>
-        </div>
-        <EntityList
-          v-else-if="graph.searchQuery && graph.section !== 'work'"
-          ref="entityList"
-          :nodes="projectionNodes"
-          :lookup="graph.nodes"
-          :projects="graph.projects"
-          :scopes="graph.scopes"
-          :mode="graph.section === 'work' ? 'work' : 'generic'"
-          :self-id="selfPersonId"
-          :hide-project="projectScoped"
-          :empty-title="emptyTitle"
-          :empty-copy="emptyCopy"
-          @open="$emit('openNode', $event)"
-          @create="$emit('openCreate')"
-        />
-        <NowView
-          v-else-if="graph.section === 'all' && graph.view === 'changes'"
-          :events="graph.events"
-          :waiting="waitingOnYouIssues"
-          :nodes="graph.nodes"
-          :seen-at="nowSeenAt"
-          :total="graph.eventTotal"
-          :offset="graph.eventOffset"
-          :limit="graph.eventLimit"
-          :loading="graph.eventsLoading"
-          :can-summarise="canSummarise"
-          @open="$emit('openNode', $event)"
-          @page="$emit('loadNowPage', $event)"
-          @seen="$emit('markNowSeen', $event)"
-          @summarise="$emit('openSummary')"
-        />
-        <WorkBoard
-          v-else-if="graph.section === 'work' && graph.view === 'board'"
-          ref="workBoard"
-          :search-query="graph.searchQuery.trim()"
-          :empty-copy="emptyCopy"
-          :issues="boardIssues"
-          :unfiltered-issues="unsearchedWorkIssues"
-          :show-empty-projects="showEmptyProjects"
-          :statuses="boardStatuses"
-          :nodes="graph.nodes"
-          :projects="graph.projects"
-          :group-by="boardGroup"
-          :collapsed-statuses="collapsedBoardStatuses"
-          :self-id="selfPersonId"
-          :hide-project="projectScoped"
-          @open="$emit('openNode', $event)"
-          @move="$emit('moveIssue', $event)"
-          @patch="$emit('patchIssue', $event)"
-          @bulk-patch="$emit('bulkPatchIssues', $event)"
-          @bulk-move="$emit('bulkMoveIssues', $event)"
-          @reorder="$emit('reorderIssue', $event)"
-          @create="$emit('createFromBoard', $event)"
-          @expand-column="$emit('expandBoardStatus', $event)"
-        />
-        <TimelineView
-          v-else-if="graph.view === 'timeline'"
-          :nodes="projectionNodes"
-          @open="$emit('openNode', $event)"
-          @create="$emit('openCreate')"
-        />
-        <EntityList
-          v-else
-          ref="entityList"
-          :nodes="graph.section === 'work' ? boardIssues : projectionNodes"
-          :lookup="graph.nodes"
-          :projects="graph.projects"
-          :scopes="graph.scopes"
-          :mode="graph.section === 'work' ? 'work' : 'generic'"
-          :group-by="graph.section === 'work' ? listGroupBy : ''"
-          :self-id="selfPersonId"
-          :hide-project="projectScoped"
-          :empty-title="emptyTitle"
-          :empty-copy="emptyCopy"
-          @open="$emit('openNode', $event)"
-          @create="$emit('openCreate')"
-        />
-      </main>
-
-      <GraphInspector
-        v-if="graph.selectedNode"
-        ref="inspector"
-        mode="peek"
-        :node="graph.selectedNode"
-        :neighbors="graph.selectedNeighbors"
-        :scopes="graph.scopes"
-        :nodes="graph.nodes"
-        :conflict="graph.conflict"
-        :error="saveError"
-        :saving="saving"
-        :activities="relatedActivities"
-        :history-back="graph.historyBack"
-        :history-forward="graph.historyForward"
-        @focus="$emit('enterFocus')"
-        @close="$emit('finalizeObjectClose')"
-        @save="forwardSave"
-        @delete="$emit('deleteNode', $event)"
-        @open-node="$emit('openRelatedNode', $event)"
-        @open-file="$emit('openFile', $event)"
-        @open-url="$emit('openUrl', $event)"
-        @open-activity="$emit('openActivity', $event)"
-        @open-meeting="$emit('openMeeting', $event)"
-        @quick-create="$emit('openRelatedCreate', $event)"
-        @navigate-history="$emit('navigateObjectHistory', $event)"
+    <main class="flex min-w-0 flex-1 flex-col">
+      <GraphViewbar
+        ref="viewbar"
+        :section="graph.section"
+        :section-label="currentSection?.label"
+        :view="graph.view"
+        :view-options="viewOptions"
+        :project-filter="projectFilter"
+        :project-options="projectFilterOptions"
+        :assignee-filter="assigneeFilter"
+        :assignee-options="assigneeFilterOptions"
+        :group-by="boardGroup"
+        :group-options="boardGroupOptions"
+        :sort-by="boardSort"
+        :show-closed-issues="showClosedIssues"
+        :show-empty-projects="showEmptyProjects"
+        :sort-options="boardSortOptions"
+        :priority-filter="priorityFilter"
+        :priority-options="priorityFilterOptions"
+        :collapsed-statuses="collapsedBoardStatuses"
+        :statuses="boardStatuses"
+        :kind-filter="allKindFilter"
+        :kind-options="allKindOptions"
+        @set-view="$emit('setView', $event)"
+        @update:project-filter="$emit('update:projectFilter', $event)"
+        @update:assignee-filter="$emit('update:assigneeFilter', $event)"
+        @update:group-by="$emit('update:boardGroup', $event)"
+        @update:sort-by="$emit('update:boardSort', $event)"
+        @update:show-closed-issues="$emit('update:showClosedIssues', $event)"
+        @update:show-empty-projects="$emit('update:showEmptyProjects', $event)"
+        @update:priority-filter="$emit('update:priorityFilter', $event)"
+        @update:kind-filter="$emit('update:allKindFilter', $event)"
+        @toggle-status="$emit('toggleBoardStatusCollapse', $event)"
+        @expand-all="$emit('expandAllBoardStatuses')"
       />
-    </template>
+      <div v-if="composing" data-graph-loading class="graph-state">
+        <span class="graph-loading-mark" aria-hidden="true" />
+        <h2>Composing your graph</h2>
+        <p>Private, project, and team knowledge are being indexed.</p>
+      </div>
+      <EntityList
+        v-else-if="graph.searchQuery && graph.section !== 'work'"
+        ref="entityList"
+        :nodes="projectionNodes"
+        :lookup="graph.nodes"
+        :projects="graph.projects"
+        :scopes="graph.scopes"
+        :mode="graph.section === 'work' ? 'work' : 'generic'"
+        :self-id="selfPersonId"
+        :hide-project="projectScoped"
+        :empty-title="emptyTitle"
+        :empty-copy="emptyCopy"
+        @open="$emit('openNode', $event)"
+        @create="$emit('openCreate')"
+      />
+      <NowView
+        v-else-if="graph.section === 'all' && graph.view === 'changes'"
+        :events="graph.events"
+        :waiting="waitingOnYouIssues"
+        :nodes="graph.nodes"
+        :seen-at="nowSeenAt"
+        :total="graph.eventTotal"
+        :offset="graph.eventOffset"
+        :limit="graph.eventLimit"
+        :loading="graph.eventsLoading"
+        :can-summarise="canSummarise"
+        @open="$emit('openNode', $event)"
+        @page="$emit('loadNowPage', $event)"
+        @seen="$emit('markNowSeen', $event)"
+        @summarise="$emit('openSummary')"
+      />
+      <WorkBoard
+        v-else-if="graph.section === 'work' && graph.view === 'board'"
+        ref="workBoard"
+        :search-query="graph.searchQuery.trim()"
+        :empty-copy="emptyCopy"
+        :issues="boardIssues"
+        :unfiltered-issues="unsearchedWorkIssues"
+        :show-empty-projects="showEmptyProjects"
+        :statuses="boardStatuses"
+        :nodes="graph.nodes"
+        :projects="graph.projects"
+        :group-by="boardGroup"
+        :collapsed-statuses="collapsedBoardStatuses"
+        :self-id="selfPersonId"
+        :hide-project="projectScoped"
+        @open="$emit('openNode', $event)"
+        @move="$emit('moveIssue', $event)"
+        @patch="$emit('patchIssue', $event)"
+        @bulk-patch="$emit('bulkPatchIssues', $event)"
+        @bulk-move="$emit('bulkMoveIssues', $event)"
+        @reorder="$emit('reorderIssue', $event)"
+        @create="$emit('createFromBoard', $event)"
+        @expand-column="$emit('expandBoardStatus', $event)"
+      />
+      <TimelineView
+        v-else-if="graph.view === 'timeline'"
+        :nodes="projectionNodes"
+        @open="$emit('openNode', $event)"
+        @create="$emit('openCreate')"
+      />
+      <EntityList
+        v-else
+        ref="entityList"
+        :nodes="graph.section === 'work' ? boardIssues : projectionNodes"
+        :lookup="graph.nodes"
+        :projects="graph.projects"
+        :scopes="graph.scopes"
+        :mode="graph.section === 'work' ? 'work' : 'generic'"
+        :group-by="graph.section === 'work' ? listGroupBy : ''"
+        :self-id="selfPersonId"
+        :hide-project="projectScoped"
+        :empty-title="emptyTitle"
+        :empty-copy="emptyCopy"
+        @open="$emit('openNode', $event)"
+        @create="$emit('openCreate')"
+      />
+    </main>
   </div>
 </template>
 
@@ -181,14 +125,12 @@
 import { ref } from 'vue'
 import { useBusinessGraphStore } from '../../../stores/businessGraph.js'
 import EntityList from './EntityList.vue'
-import GraphInspector from './GraphInspector.vue'
 import GraphViewbar from './GraphViewbar.vue'
 import NowView from './NowView.vue'
 import TimelineView from './TimelineView.vue'
 import WorkBoard from './WorkBoard.vue'
 
 defineProps({
-  focusMode: { type: Boolean, default: false },
   currentSection: { type: Object, default: null },
   viewOptions: { type: Array, default: () => [] },
   projectFilter: { type: String, default: '' },
@@ -219,42 +161,25 @@ defineProps({
   unsearchedWorkIssues: { type: Array, default: () => [] },
   showClosedIssues: { type: Boolean, default: false },
   showEmptyProjects: { type: Boolean, default: false },
-  saveError: { type: String, default: '' },
-  saving: { type: Boolean, default: false },
-  relatedActivities: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits([
-  'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard', 'deleteNode', 'enterFocus',
-  'expandAllBoardStatuses', 'expandBoardStatus', 'finalizeObjectClose',
-  'loadNowPage', 'markNowSeen', 'moveIssue',
-  'navigateObjectHistory', 'openActivity', 'openCreate', 'openFile', 'openMeeting',
-  'openNode', 'openRelatedCreate', 'openRelatedNode', 'openSummary', 'openUrl',
-  'patchIssue', 'reorderIssue', 'returnToPeek', 'saveNode',
+defineEmits([
+  'bulkMoveIssues', 'bulkPatchIssues', 'createFromBoard',
+  'expandAllBoardStatuses', 'expandBoardStatus',
+  'loadNowPage', 'markNowSeen', 'moveIssue', 'openCreate',
+  'openNode', 'openSummary', 'patchIssue', 'reorderIssue',
   'setView', 'toggleBoardStatusCollapse', 'update:allKindFilter', 'update:assigneeFilter',
   'update:boardGroup', 'update:boardSort', 'update:priorityFilter', 'update:projectFilter',
-  'update:showClosedIssues',
-  'update:showEmptyProjects',
+  'update:showClosedIssues', 'update:showEmptyProjects',
 ])
 
 const graph = useBusinessGraphStore()
-const inspector = ref(null)
 const entityList = ref(null)
 const workBoard = ref(null)
 const viewbar = ref(null)
 
-function forwardSave(...args) {
-  emit('saveNode', ...args)
-}
-
 defineExpose({
   closeMenus: options => viewbar.value?.closeMenus(options) || false,
-  commitThen(action) {
-    if (!inspector.value?.commitThen) return false
-    inspector.value.commitThen(action)
-    return true
-  },
-  focusInspectorEntry: () => inspector.value?.focusEntry?.(),
   focusListEdge(edge) {
     if (workBoard.value) return workBoard.value.focusEdge(edge)
     if (!entityList.value) return false
@@ -262,8 +187,6 @@ defineExpose({
     return true
   },
   focusNode: id => entityList.value?.focusNode(id),
-  requestBack: () => inspector.value?.requestBack?.(),
-  requestClose: () => inspector.value?.requestClose?.(),
 })
 </script>
 

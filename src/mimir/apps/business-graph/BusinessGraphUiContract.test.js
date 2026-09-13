@@ -78,6 +78,14 @@ describe('Business Graph UI contract', () => {
     expect(viewActive).not.toMatch(/border|box-shadow/)
   })
 
+  it('keeps document details out of the projection shell', () => {
+    const workspace = readFileSync(join(graphDirectory, 'GraphWorkspace.vue'), 'utf8')
+    expect(workspace).not.toContain('GraphInspector')
+    expect(workspace).not.toContain('focusMode')
+    expect(appSource).toContain("openGraphNode: request => emit('openGraphNode', request)")
+    expect(appSource).not.toContain('useGraphLifecycle')
+  })
+
   it('keeps graph projections as direct navigation at every width', () => {
     expect(headerSource).toContain('v-for="item in sections"')
     expect(headerSource).not.toContain('orderedSections')
@@ -95,7 +103,6 @@ describe('Business Graph UI contract', () => {
       'data-context-',
       'data-related-',
       'data-deliverable-',
-      'data-peek-fact',
       'data-date-value',
       'data-board-',
       'data-card-',
@@ -120,7 +127,11 @@ describe('Business Graph UI contract', () => {
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphAppHeader.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphAppFeedback.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphMarkdownEditor.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphEntryDetails.vue')
+    expect(BUSINESS_GRAPH_SURFACES).not.toContain('GraphInspectorPeek.vue')
+    expect(BUSINESS_GRAPH_SURFACES).not.toContain('GraphInspectorFocus.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphRelationshipLine.vue')
+    expect(BUSINESS_GRAPH_SURFACES).toContain('GraphReferences.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphSummaryDialog.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphViewbar.vue')
     expect(BUSINESS_GRAPH_SURFACES).toContain('GraphWorkspace.vue')

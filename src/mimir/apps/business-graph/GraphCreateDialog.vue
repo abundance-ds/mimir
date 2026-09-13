@@ -13,7 +13,7 @@
         aria-modal="true"
         aria-labelledby="graph-create-title"
         @submit.prevent="submit"
-        @keydown.esc.prevent.stop="close"
+        @keydown.esc="onEscape"
         @keydown.tab="trapFocus"
       >
         <header class="create-header">
@@ -221,6 +221,9 @@
                 data-create-body
                 data-graph-control="create-working-note"
                 :min-height="210"
+                :scope-ids="scopeIds"
+                :graph-revision="graphRevision"
+                :disabled="saving"
                 control-id="create-working-note"
                 aria-label="Initial working note in Markdown"
                 placeholder="Add context, acceptance criteria, rationale, or notes…"
@@ -272,10 +275,12 @@ import { defaultGraphWriteScope } from '../../../stores/businessGraphScopes.js'
 const props = defineProps({
   open: { type: Boolean, default: false },
   scopes: { type: Array, default: () => [] },
+  scopeIds: { type: Array, default: () => [] },
   initialKind: { type: String, default: 'issue' },
   initialStatus: { type: String, default: 'backlog' },
   defaultScope: { type: String, default: 'team' },
   saving: { type: Boolean, default: false },
+  graphRevision: { type: [Number, String], default: 0 },
   error: { type: String, default: '' },
 })
 
@@ -455,6 +460,13 @@ function restoreDialogFocus() {
   const target = restoreFocusTo
   restoreFocusTo = null
   void nextTick(() => target?.isConnected && target.focus())
+}
+
+function onEscape(event) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  event.stopPropagation()
+  close()
 }
 
 function close() {

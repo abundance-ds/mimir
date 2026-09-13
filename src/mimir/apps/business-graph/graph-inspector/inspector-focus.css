@@ -1,12 +1,8 @@
-.focus-header {
-  min-height: 42px;
-  padding-inline: 10px;
-}
-
 .focus-save-state {
   color: var(--color-ink-4);
   font-size: 9px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .save-state-conflict {
@@ -22,9 +18,9 @@
 }
 
 .focus-document {
-  width: min(1080px, 100%);
+  width: min(820px, 100%);
   margin: 0 auto;
-  padding: 24px clamp(20px, 4cqw, 48px) 40px;
+  padding: 22px clamp(16px, 4cqw, 36px) 40px;
 }
 
 .focus-hero {
@@ -42,7 +38,7 @@
   background: transparent;
   padding: 6px 0 4px;
   color: var(--color-ink);
-  font-size: clamp(24px, 3.1cqw, 34px);
+  font-size: clamp(24px, 4cqw, 30px);
   font-weight: 690;
   letter-spacing: -0.035em;
   line-height: 1.18;
@@ -95,7 +91,7 @@
 
 .connection-composer {
   display: grid;
-  grid-template-columns: minmax(150px, 0.72fr) minmax(220px, 1.55fr) auto;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto;
   gap: 8px;
   align-items: stretch;
 }
@@ -299,7 +295,7 @@
 
 .focus-connected-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 20px;
 }
 
@@ -311,7 +307,7 @@
 }
 
 .focus-save-button {
-  min-width: 116px;
+  min-width: 48px;
 }
 
 .focus-save-button:disabled {
@@ -320,45 +316,33 @@
   filter: none;
 }
 
-@container business-graph (max-width: 840px) {
-  .graph-object-peek {
-    position: absolute;
-    z-index: 70;
-    inset: 0 0 0 auto;
-    width: min(430px, 100%);
-  }
-
-  .connection-composer {
-    grid-template-columns: 1fr 1.4fr auto;
-  }
-
-  .object-metadata-grid-focus {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+@container graph-document (max-width: 620px) {
+  .object-metadata-grid-focus { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .focus-property-grid { grid-template-columns: 1fr; }
+  .connection-composer { grid-template-columns: minmax(0, 1fr) auto; }
+  .connection-composer > :first-child { grid-column: 1 / -1; }
 }
 
-@container business-graph (max-width: 560px) {
-  .focus-header .object-secondary-action {
-    width: 34px;
-    padding: 0;
-    font-size: 0;
-  }
-
-  .focus-save-state {
-    display: none;
-  }
-
-  .focus-document {
-    padding: 22px 16px 40px;
-  }
-
-  .focus-property-grid,
-  .connection-composer {
-    grid-template-columns: 1fr;
-  }
-
-  .connection-add {
-    justify-self: start;
-  }
-
+.graph-document-views { display: flex; align-items: center; gap: 2px; }
+.graph-document-views button {
+  min-height: 28px;
+  border-radius: 3px;
+  padding: 0 9px;
+  color: var(--color-ink-4);
+  font-size: 11px;
+  font-weight: 550;
 }
+.graph-document-views button:hover { color: var(--color-ink); background: var(--color-chrome-mid); }
+.graph-document-views button.is-active { color: var(--color-ink); background: var(--color-chrome); }
+.graph-document-views button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.graph-document-views button:disabled { opacity: 0.45; cursor: default; }
+.focus-document, .focus-document * { box-sizing: border-box; }
+.focus-document .object-metadata-field { min-width: 0; }
+
+.graph-entry-context { margin: 0 0 7px; color: var(--color-ink-4); font-size: 10px; text-transform: capitalize; }
+.graph-entry-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 8px 14px; margin-top: 14px; }
+.graph-entry-facts button { min-width: 0; padding: 5px 0; text-align: left; }
+.graph-entry-facts span { display: block; margin-bottom: 4px; color: var(--color-ink-4); font-size: 10px; }
+.graph-entry-facts strong { display: block; overflow-wrap: anywhere; color: var(--color-ink-2); font-size: 12px; font-weight: 500; }
+.graph-entry-facts button:hover strong { color: var(--color-accent); }
+.graph-entry-facts button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }

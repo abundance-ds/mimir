@@ -40,7 +40,7 @@
           <p id="graph-confirm-copy">{{ copy }}</p>
           <div class="confirm-recovery">
             <IconHistory :size="15" />
-            <span>You can undo this immediately from the graph status bar.</span>
+            <span>Use Undo to restore the entry.</span>
           </div>
           <div v-if="error" data-graph-confirm-error role="alert" class="confirm-error">
             <IconAlertTriangle :size="15" />

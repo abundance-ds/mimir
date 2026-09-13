@@ -10,16 +10,16 @@ vi.mock('../../services/businessGraph.js', () => ({
   graphDiagnostics: vi.fn(),
   graphEvents: vi.fn(),
   graphNeighbors: vi.fn(),
+  lookupGraph: vi.fn(),
+  graphLinkTargets: vi.fn(),
+  graphReferences: vi.fn(),
   listenForGraphChanges: vi.fn(),
   openBusinessGraph: vi.fn(),
   queryGraph: vi.fn(),
   restoreGraphNode: vi.fn(),
+  refreshBusinessGraph: vi.fn(),
   searchGraph: vi.fn(),
   updateGraphNode: vi.fn(),
-}))
-
-vi.mock('../../services/externalLinks.js', () => ({
-  openExternalUrl: vi.fn(),
 }))
 
 import {
@@ -34,15 +34,14 @@ import {
   openBusinessGraph,
   queryGraph,
   searchGraph,
+  refreshBusinessGraph,
   updateGraphNode,
 } from '../../services/businessGraph.js'
-import { openExternalUrl } from '../../services/externalLinks.js'
 import { useBusinessGraphStore } from '../../stores/businessGraph.js'
 import { useLaunchersStore } from '../../stores/launchers.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import BusinessGraphApp from './BusinessGraphApp.vue'
 import DispatchBar from './business-graph/DispatchBar.vue'
-import GraphInspector from './business-graph/GraphInspector.vue'
 import GraphSummaryDialog from './business-graph/GraphSummaryDialog.vue'
 
 const scopeRows = [
@@ -187,11 +186,13 @@ describe('BusinessGraphApp', () => {
   })
 
   afterEach(async () => {
+    useBusinessGraphStore(pinia).stop()
     await useSettingsStore(pinia).flush()
     localStorage.removeItem('mimir:editor:settings:v1')
   })
 
-  function render() {
+  function render({ start = true } = {}) {
+    if (start) void useBusinessGraphStore(pinia).start('/alpha')
     return mount(BusinessGraphApp, {
       attachTo: document.body,
       props: {
@@ -202,44 +203,20 @@ describe('BusinessGraphApp', () => {
     })
   }
 
-  it('is one native scoped instrument with a real board and object history', async () => {
+  it('routes cards to Editor documents while keeping the board in place', async () => {
     const wrapper = render()
     await flushPromises()
-
-    expect(wrapper.get('[data-business-graph-app]').exists()).toBe(true)
     expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
-    expect(wrapper.get('[data-board-card="issue-1"]').text()).toContain('Extract evidence')
-    expect(wrapper.findAll('[data-graph-section]').map(tab => tab.text())).toEqual([
-      'Work',
-      'Graph',
-    ])
-    expect(wrapper.find('[data-graph-section-picker]').exists()).toBe(false)
-
+    expect(wrapper.findAll('[data-graph-section]').map(tab => tab.text())).toEqual(['Work', 'Graph'])
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-inspector-body] .cm-content').text()).toBe('Review extraction criteria.')
-    await wrapper.get('[data-inspector-focus]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('focus')
-    expect(wrapper.get('[data-inspector-body] .cm-content').text()).toBe('Review extraction criteria.')
-    expect(wrapper.find('[data-graph-context-trail]').exists()).toBe(false)
-
-    await wrapper.get('[data-graph-control="focus-related-project-alpha"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
-    expect(wrapper.find('[data-graph-context-trail]').exists()).toBe(false)
-    expect(wrapper.get('[data-inspector-history-back]').attributes('title'))
-      .toBe('Back to Extract evidence')
-
-    await wrapper.get('[data-inspector-history-back]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-inspector-title]').element.value).toBe('Extract evidence')
-    expect(wrapper.get('[data-inspector-history-forward]').attributes('title'))
-      .toBe('Forward to Project Alpha')
-
-    await wrapper.get('[data-inspector-history-forward]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-inspector-title]').element.value).toBe('Project Alpha')
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
+    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-board-column]')).toHaveLength(6)
+    expect(getGraphNode).not.toHaveBeenCalled()
+    await wrapper.get('[data-graph-section="all"]').trigger('click')
+    await wrapper.get('[data-graph-node="project-alpha"]').trigger('click')
+    expect(wrapper.emitted('openGraphNode').at(-1)).toEqual([{ id: 'project-alpha' }])
+    expect(wrapper.find('[data-graph-node="project-alpha"]').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -325,22 +302,6 @@ describe('BusinessGraphApp', () => {
     expect(wrapper.findAll('[data-graph-node]').map(row => row.attributes('data-graph-node')).sort()).toEqual(expectedIds)
     expect(wrapper.text()).not.toContain('deleted-project')
     expect(settings.businessGraphViewState.work.project).toBe('__unassigned__')
-    wrapper.unmount()
-  })
-
-  it('opens a web URL emitted by the editable working note', async () => {
-    const wrapper = render()
-    await flushPromises()
-    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-
-    wrapper.findComponent(GraphInspector).vm.$emit(
-      'open-url',
-      'https://example.com/docs',
-    )
-    await flushPromises()
-
-    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/docs')
     wrapper.unmount()
   })
 
@@ -543,58 +504,35 @@ describe('BusinessGraphApp', () => {
     expect(graph.requestedNodeId).toBe('issue-1')
     finishMount({ scopes: scopeRows })
     await flushPromises()
-    expect(getGraphNode).toHaveBeenCalledWith('issue-1')
-    expect(graph.selectedNode.id).toBe('issue-1')
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
+    expect(getGraphNode).not.toHaveBeenCalled()
     expect(graph.requestedNodeId).toBe('')
     wrapper.unmount()
   })
 
-  it('lets native graph mounting own the fixed Team root', async () => {
-    const wrapper = render()
+  it('uses the shared graph mount without restarting or stopping it', async () => {
+    const graph = useBusinessGraphStore()
+    await graph.start('/alpha')
+    const stop = vi.spyOn(graph, 'stop')
+    const wrapper = render({ start: false })
     await flushPromises()
     expect(openBusinessGraph).toHaveBeenCalledOnce()
-    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha')
     wrapper.unmount()
+    expect(stop).not.toHaveBeenCalled()
+    expect(graph.nodes).toHaveLength(3)
   })
 
-  it('stops a graph mount that finishes after the app unmounts', async () => {
+  it('allows shared graph hydration to finish after the projection unmounts', async () => {
     let resolveMount
     const unlisten = vi.fn()
-    vi.mocked(openBusinessGraph).mockImplementationOnce(() => new Promise(resolve => {
-      resolveMount = resolve
-    }))
+    vi.mocked(openBusinessGraph).mockImplementationOnce(() => new Promise(resolve => { resolveMount = resolve }))
     vi.mocked(listenForGraphChanges).mockResolvedValueOnce(unlisten)
     const wrapper = render()
-
-    expect(openBusinessGraph).toHaveBeenCalledWith('/alpha')
     wrapper.unmount()
-    resolveMount({
-      scopes: scopeRows,
-      nodeCount: 2,
-      diagnosticCount: 0,
-      graphRevision: 7,
-    })
+    resolveMount({ scopes: scopeRows, nodeCount: 3, diagnosticCount: 0, graphRevision: 7 })
     await flushPromises()
-
-    expect(unlisten).toHaveBeenCalledOnce()
-  })
-
-  it('saves an issue whose project is a legacy label instead of a graph node', async () => {
-    const wrapper = render()
-    await flushPromises()
-
-    await wrapper.get('[data-board-card="issue-legacy"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-inspector-waiting]').setValue('Anna')
-    await wrapper.get('[data-graph-control="peek-close"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-graph-save-error]').exists()).toBe(false)
-    const patch = vi.mocked(updateGraphNode).mock.calls.at(-1)[0]
-    expect(patch.relations).toEqual([])
-    expect(patch.setProperties.legacyProject).toBe('fde')
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
-    wrapper.unmount()
+    expect(unlisten).not.toHaveBeenCalled()
+    expect(useBusinessGraphStore().nodes).toHaveLength(3)
   })
 
   it('launches a selected interactive agent to summarise scoped change history', async () => {
@@ -799,66 +737,38 @@ describe('BusinessGraphApp', () => {
       scopeId: 'team:main',
       title: 'Draft evidence map',
     }))
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
     wrapper.unmount()
   })
 
-  it('supports scan, Peek, and Focus entirely from the keyboard', async () => {
+  it('keeps projection keyboard shortcuts separate from Editor navigation', async () => {
     const wrapper = render()
     await flushPromises()
-
-    await wrapper.get('[data-business-graph-app]').trigger('keydown', {
-      key: 'f',
-      metaKey: true,
-    })
+    await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'f', metaKey: true })
     expect(document.activeElement).toBe(wrapper.get('[data-graph-search]').element)
-
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: '/' })
     expect(document.activeElement).toBe(wrapper.get('[data-dispatch-input]').element)
-
-    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
+    await wrapper.get('[data-board-card="issue-1"]').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'f' })
-    await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('focus')
-
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'Escape' })
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
-    await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'Escape' })
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
+    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
+    expect(wrapper.emitted('openGraphNode')).toHaveLength(1)
     wrapper.unmount()
   })
 
-  it('keeps a real focus chain through board, Peek, Focus, Escape, and close', async () => {
+  it('restores projection entry focus to the last opened card', async () => {
     const wrapper = render()
     await flushPromises()
-
-    const card = wrapper.get('[data-board-card="issue-1"]')
-    card.element.focus()
+    const card = wrapper.get('[data-board-card="issue-legacy"]')
     await card.trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
-
-    const focusButton = wrapper.get('[data-inspector-focus]')
-    focusButton.element.focus()
-    await focusButton.trigger('click')
-    await flushPromises()
-    expect(document.activeElement).toBe(wrapper.get('[data-graph-control="focus-back"]').element)
-
-    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      bubbles: true,
-    }))
-    await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
-    expect(document.activeElement).toBe(wrapper.get('[data-inspector-title]').element)
-
-    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      bubbles: true,
-    }))
-    await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
-    expect(document.activeElement).toBe(wrapper.get('[data-board-card="issue-1"]').element)
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    outside.focus()
+    wrapper.vm.focusEntry()
+    expect(document.activeElement).toBe(card.element)
+    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
+    outside.remove()
     wrapper.unmount()
   })
 
@@ -882,7 +792,7 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('keeps dispatch focus usable after opening and closing a lookup result', async () => {
+  it('routes a dispatch lookup result to an Editor document', async () => {
     const wrapper = render()
     await flushPromises()
     vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
@@ -895,19 +805,20 @@ describe('BusinessGraphApp', () => {
     await input.trigger('keydown', { key: 'Tab' })
     await flushPromises()
 
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
     expect(document.activeElement).toBe(input.element)
     input.element.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Escape',
       bubbles: true,
     }))
     await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
+    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
+    await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'k', metaKey: true })
     expect(document.activeElement).toBe(input.element)
     wrapper.unmount()
   })
 
-  it('clears a populated search before allowing Escape to close Peek', async () => {
+  it('clears projection search without closing an Editor document', async () => {
     const wrapper = render()
     await flushPromises()
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
@@ -918,11 +829,11 @@ describe('BusinessGraphApp', () => {
     await search.setValue('evidence')
     await search.trigger('keydown', { key: 'Escape' })
     expect(search.element.value).toBe('')
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('peek')
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
 
     await search.trigger('keydown', { key: 'Escape' })
     await flushPromises()
-    expect(wrapper.get('[data-business-graph-app]').attributes('data-graph-mode')).toBe('scan')
+    expect(wrapper.find('[data-graph-inspector]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -1509,7 +1420,7 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('keeps create, save, and AI preparation errors inside the active surface', async () => {
+  it('keeps create and AI preparation errors inside the active surface', async () => {
     const wrapper = render()
     await flushPromises()
 
@@ -1526,16 +1437,6 @@ describe('BusinessGraphApp', () => {
     createDialog.querySelector('[data-graph-control="create-close"]').click()
     await flushPromises()
 
-    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-inspector-focus]').trigger('click')
-    await flushPromises()
-    vi.mocked(updateGraphNode).mockRejectedValueOnce(new Error('Write failed unexpectedly'))
-    await wrapper.get('[data-inspector-title]').setValue('Conflicting title')
-    await wrapper.get('[data-inspector-save]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-graph-save-error]').text()).toContain('Write failed unexpectedly')
-
     vi.mocked(searchGraph).mockResolvedValue([{ node: summaries[0] }])
     vi.mocked(graphContext).mockRejectedValue(new Error('Context could not be assembled'))
     const input = wrapper.get('[data-dispatch-input]')
@@ -1550,23 +1451,12 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('uses polished Vue listboxes instead of native dropdowns in every graph flow', async () => {
+  it('uses accessible listboxes for projection filters and creation', async () => {
     const wrapper = render()
     await flushPromises()
 
     expect(document.querySelector('select, datalist')).toBeNull()
     expect(wrapper.get('[data-board-sort]').attributes('role')).toBe('combobox')
-
-    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-inspector-status]').attributes('role')).toBe('combobox')
-    expect(wrapper.get('[data-inspector-project]').attributes('role')).toBe('combobox')
-
-    await wrapper.get('[data-inspector-focus]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-inspector-project]').attributes('role')).toBe('combobox')
-    expect(wrapper.get('[data-inspector-assignee]').attributes('role')).toBe('combobox')
-    expect(wrapper.get('[data-inspector-body] .cm-content').exists()).toBe(true)
 
     await wrapper.get('[data-business-graph-app]').trigger('keydown', { key: 'n' })
     const dialog = document.querySelector('[data-graph-create-dialog]')
@@ -1609,96 +1499,22 @@ describe('BusinessGraphApp', () => {
     wrapper.unmount()
   })
 
-  it('commits a Focus draft before refreshing or changing physical scope', async () => {
+  it('refreshes and changes projection scopes without editing open documents', async () => {
     const wrapper = render()
     await flushPromises()
     await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-inspector-focus]').trigger('click')
-    await wrapper.get('[data-inspector-title]').setValue('Evidence extraction — reviewed')
     vi.mocked(queryGraph).mockClear()
-
     await wrapper.get('[data-graph-refresh]').trigger('click')
     await flushPromises()
-
-    expect(updateGraphNode).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'issue-1',
-      title: 'Evidence extraction — reviewed',
-    }))
+    expect(refreshBusinessGraph).toHaveBeenCalledOnce()
     expect(queryGraph).toHaveBeenCalled()
-    expect(updateGraphNode.mock.invocationCallOrder.at(-1))
-      .toBeLessThan(queryGraph.mock.invocationCallOrder[0])
-
-    await wrapper.get('[data-inspector-title]').setValue('Evidence extraction — scoped')
     vi.mocked(queryGraph).mockClear()
     await wrapper.get('[data-graph-scope-trigger]').trigger('click')
     await wrapper.get('[data-scope-option="private:local"]').trigger('click')
     await flushPromises()
-
-    expect(updateGraphNode).toHaveBeenLastCalledWith(expect.objectContaining({
-      id: 'issue-1',
-      title: 'Evidence extraction — scoped',
-    }))
     expect(queryGraph).toHaveBeenCalled()
-    expect(updateGraphNode.mock.invocationCallOrder.at(-1))
-      .toBeLessThan(queryGraph.mock.invocationCallOrder[0])
-    wrapper.unmount()
-  })
-
-  it('uses a recoverable in-product confirmation before deletion', async () => {
-    const wrapper = render()
-    await flushPromises()
-    await wrapper.get('[data-board-card="issue-1"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-graph-control="peek-more"]').trigger('click')
-    await wrapper.get('[data-inspector-delete]').trigger('click')
-    await flushPromises()
-
-    const dialog = document.querySelector('[data-graph-confirm-dialog]')
-    expect(dialog).not.toBeNull()
-    expect(dialog.textContent).toContain('Move “Extract evidence” to Trash?')
-    expect(deleteGraphNode).not.toHaveBeenCalled()
-    dialog.querySelector('[data-graph-control="confirm-submit"]').click()
-    await flushPromises()
-
-    expect(deleteGraphNode).toHaveBeenCalledWith({
-      id: 'issue-1',
-      expectedRevision: 'issue-rev',
-    })
-    expect(document.querySelector('[data-graph-confirm-dialog]')).toBeNull()
-    expect(wrapper.get('[data-graph-undo]').text()).toContain('Extract evidence')
-    wrapper.unmount()
-  })
-
-  it('moves from project context to a correctly related decision', async () => {
-    const wrapper = render()
-    await flushPromises()
-    await wrapper.get('[data-graph-section="all"]').trigger('click')
-    await wrapper.get('[data-graph-node="project-alpha"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-inspector-focus]').trigger('click')
-    await wrapper.get('[data-graph-control="focus-more"]').trigger('click')
-    await wrapper.get('[data-inspector-record-decision]').trigger('click')
-    await flushPromises()
-
-    const dialog = document.querySelector('[data-graph-create-dialog]')
-    expect(dialog.querySelector('[data-create-kind]').textContent).toContain('Decision')
-    const title = dialog.querySelector('[data-create-title]')
-    title.value = 'Use the matched cohort'
-    title.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
-    dialog.querySelector('[data-create-submit]').click()
-    await flushPromises()
-
-    expect(createGraphNode).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'decision',
-      title: 'Use the matched cohort',
-      relations: [{
-        relation: 'part_of',
-        target: 'project-alpha',
-        legacy: false,
-      }],
-    }))
+    expect(updateGraphNode).not.toHaveBeenCalled()
+    expect(wrapper.emitted('openGraphNode')).toEqual([[{ id: 'issue-1' }]])
     wrapper.unmount()
   })
 

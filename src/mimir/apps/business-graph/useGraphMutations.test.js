@@ -174,3 +174,58 @@ describe('closed issue Undo', () => {
     expect(actions.undoingClosedIssues.value).toBe(false)
   })
 })
+
+describe('document navigation after graph mutations', () => {
+  let scope, graph, actions, openNode
+  beforeEach(() => {
+    scope = effectScope()
+    openNode = vi.fn()
+    graph = reactive({
+      section: 'work', workspaceProjectId: 'project-alpha',
+      create: vi.fn(async () => ({ id: 'created' })),
+      undoDelete: vi.fn(async () => ({ id: 'restored' })),
+    })
+    actions = scope.run(() => useGraphMutations({
+      graph, boardIssues: ref([]), diagnostic: vi.fn(), echoToolCall: vi.fn(),
+      restoreGraphFocus: vi.fn(), openNode,
+    }))
+  })
+  afterEach(() => scope.stop())
+
+  it('opens the saved entry after creation and keeps its project relationship', async () => {
+    actions.openCreate('issue')
+    await actions.createNode({ kind: 'issue', title: 'Created' }, { another: false })
+    expect(graph.create).toHaveBeenCalledWith(expect.objectContaining({
+      relations: [{ relation: 'part_of', target: 'project-alpha', legacy: false }],
+    }))
+    expect(actions.createOpen.value).toBe(false)
+    expect(openNode).toHaveBeenCalledWith('created')
+  })
+
+  it('keeps Create another in its form until the user finishes creation', async () => {
+    actions.openCreate('issue')
+    const reset = vi.fn()
+    await actions.createNode({ kind: 'issue', title: 'Created' }, { another: true, reset })
+    expect(reset).toHaveBeenCalledOnce()
+    expect(actions.createOpen.value).toBe(true)
+    expect(openNode).not.toHaveBeenCalled()
+  })
+
+  it('opens a restored entry after Undo but does not navigate after failure', async () => {
+    await actions.undoDelete()
+    expect(openNode).toHaveBeenCalledWith('restored')
+    graph.undoDelete.mockRejectedValueOnce(new Error('Restore conflict'))
+    await actions.undoDelete()
+    expect(actions.undoError.value).toBe('Restore conflict')
+    expect(openNode).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a failed create draft in the dialog without opening a document', async () => {
+    actions.openCreate('issue')
+    graph.create.mockRejectedValueOnce(new Error('Read-only scope'))
+    await actions.createNode({ kind: 'issue', title: 'Created' }, { another: false })
+    expect(actions.createOpen.value).toBe(true)
+    expect(actions.createError.value).toBe('Read-only scope')
+    expect(openNode).not.toHaveBeenCalled()
+  })
+})

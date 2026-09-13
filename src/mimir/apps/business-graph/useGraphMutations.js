@@ -2,7 +2,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { graphErrorMessage } from './graphErrors.js'
 import { isClosedIssue, workProjectId } from './workRow.js'
 
-export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall, restoreGraphFocus }) {
+export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall, restoreGraphFocus, openNode = () => {} }) {
   const createOpen = ref(false)
   const createError = ref('')
   const createKind = ref('issue')
@@ -98,7 +98,7 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
         ...createRelations.value,
         ...(projectId ? [{ relation: 'part_of', target: projectId, legacy: false }] : []),
       ])
-      await graph.create({
+      const created = await graph.create({
         ...create,
         relations,
         ...(projectId ? {
@@ -106,7 +106,10 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
         } : {}),
       })
       if (controls.another) controls.reset()
-      else createOpen.value = false
+      else {
+        createOpen.value = false
+        if (created?.id) openNode(created.id)
+      }
       echoToolCall(
         create.kind === 'issue' ? 'issues.create' : 'graph.create',
         create.kind === 'issue'
@@ -201,7 +204,8 @@ export function useGraphMutations({ graph, boardIssues, diagnostic, echoToolCall
   async function undoDelete() {
     undoError.value = ''
     try {
-      await graph.undoDelete()
+      const restored = await graph.undoDelete()
+      if (restored?.id) openNode(restored.id)
       echoToolCall('graph.restore', { undoToken: '‹token›' })
     } catch (cause) {
       undoError.value = graphErrorMessage(cause)
