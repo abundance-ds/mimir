@@ -91,6 +91,9 @@ must never replace or disturb the mounted Editor document and review state.
 - Settings > Appearance > Show main tabs saves `showMainTabs` (default true).
   When off, the existing Main title and status header returns, with Open views,
   New Activity, and Close. Open views reuses the searchable All Tabs menu.
+  Click the session title to rename it inline. Enter or Space on the focused
+  title, or F2, also starts the edit. The title uses the same save and cancel
+  rules as session tabs. Unique tools retain their names.
   Close uses Stop and archive for live PTYs, Archive for ended sessions, and
   Close for tools. Editor document tabs remain visible. The setting changes
   only navigation controls: selection, order, surfaces, and pane layout remain

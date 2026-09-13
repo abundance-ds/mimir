@@ -1,10 +1,11 @@
-import { createApp, h, ref } from 'vue'
+import { computed, createApp, h, ref } from 'vue'
 import { createPinia } from 'pinia'
 import '../src/shared/styles/app.css'
 import WorkbenchShell from '../src/mimir/components/WorkbenchShell.vue'
 import WorkbenchSidebar from '../src/mimir/components/WorkbenchSidebar.vue'
 import PaneFrame from '../src/mimir/components/PaneFrame.vue'
 import ActivityTabs from '../src/mimir/components/ActivityTabs.vue'
+import ActivityTitle from '../src/mimir/components/ActivityTitle.vue'
 import ActivityTabMenu from '../src/mimir/components/ActivityTabMenu.vue'
 import { IconPlus, IconX } from '@tabler/icons-vue'
 import PaneBand from '../src/shared/ui/chrome/PaneBand.vue'
@@ -26,8 +27,10 @@ const app = createApp({
     window.addEventListener('resize', () => { width.value = innerWidth })
     const tabs = ref(Array.from({ length: Number(params.get('tabs') || 3) }, (_, i) => ({ id: `tab-${i}`, title: ['Today', 'Terminal', 'Business graph'][i % 3], icon: 'terminal', unique: true })))
     const activeId = ref('tab-0')
+    const activeTab = computed(() => tabs.value.find(tab => tab.id === activeId.value))
     const showTabs = ref(!params.has('vertical'))
     const select = id => { activeId.value = id }
+    const rename = ({ id, title }) => { const tab = tabs.value.find(tab => tab.id === id); if (tab) tab.title = title }
     const close = id => { tabs.value = tabs.value.filter(tab => tab.id !== id); if (activeId.value === id) activeId.value = tabs.value[0]?.id || '' }
     const add = () => { const id = `tab-${Date.now()}`; tabs.value.push({ id, title: 'New terminal', icon: 'terminal' }); activeId.value = id }
     const fileIndex = ref(0)
@@ -40,8 +43,11 @@ const app = createApp({
       }, { files: () => h('div', { class: 'p-3' }, 'Files') }),
       activity: () => h(PaneFrame, { pane: 'activity', title: tabs.value.find(tab => tab.id === activeId.value)?.title || 'Activity', meta: 'Working' }, {
         ...(showTabs.value ? {
-          tabs: () => h(ActivityTabs, { tabs: tabs.value, activeId: activeId.value, onSelect: select, onClose: close, onNew: add }),
+          tabs: () => h(ActivityTabs, { tabs: tabs.value, activeId: activeId.value, onSelect: select, onClose: close, onNew: add, onRename: rename }),
         } : {
+          ...(activeTab.value && !activeTab.value.unique ? {
+            title: () => h(ActivityTitle, { activity: activeTab.value, hidden: store.paneLayout.activity.state === 'rail', onRename: rename }),
+          } : {}),
           leading: () => h(ActivityTabMenu, { label: 'Open views', tabs: tabs.value, activeId: activeId.value, onSelect: select, onNew: add }),
           actions: () => [
             h('button', { 'data-new-main-tab': '', class: 'pane-icon-button', 'aria-label': 'New Activity', onClick: add }, h(IconPlus, { size: 15 })),

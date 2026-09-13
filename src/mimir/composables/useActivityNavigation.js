@@ -19,6 +19,43 @@ export const activityNavigationStatus = (tab, props) =>
             ? 'Resuming'
             : ({ starting: 'Starting', working: 'Working', idle: 'Idle', done: 'Done', interrupted: 'Interrupted' }[tab.status] || '')
 
+export function useActivityRename(emit, { canRename, focus }) {
+  const renaming = ref(''), draft = ref(''), renameInput = ref(null)
+  async function beginRename(tab) {
+    if (!tab || tab.unique || !canRename()) return
+    renaming.value = tab.id
+    draft.value = tab.title
+    await nextTick()
+    const field = Array.isArray(renameInput.value)
+      ? renameInput.value[0]
+      : renameInput.value
+    field?.focus()
+    field?.select()
+  }
+  function cancelRename() {
+    renaming.value = ''
+  }
+  function renameKey(event) {
+    event.stopPropagation()
+    if (event.isComposing || event.keyCode === 229) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      const id = renaming.value
+      cancelRename()
+      focus(id)
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const title = draft.value.trim(), id = renaming.value
+      if (!title) return
+      cancelRename()
+      emit('rename', { id, title })
+      focus(id)
+    }
+  }
+  return { renaming, draft, renameInput, beginRename, cancelRename, renameKey }
+}
+
 // Main tabs and Sidebar rows send the same actions to the Workbench authority.
 // Only keyboard direction, geometry, and transient edit/menu state differ.
 export function useActivityNavigation(props, emit, {
@@ -29,11 +66,11 @@ export function useActivityNavigation(props, emit, {
   buttonSelector = '[role="tab"]',
   hidden = () => false,
 }) {
-  const context = ref(null),
-    contextId = ref(''),
-    renaming = ref(''),
-    draft = ref(''),
-    renameInput = ref(null)
+  const context = ref(null), contextId = ref('')
+  const { renaming, draft, renameInput, beginRename, cancelRename, renameKey } = useActivityRename(emit, {
+    canRename: () => !hidden() && !props.rail,
+    focus: focusTab,
+  })
   const contextTab = computed(() => props.tabs.find(tab => tab.id === contextId.value))
   const closeLabel = activityCloseLabel
   const status = (tab) => activityNavigationStatus(tab, props)
@@ -70,39 +107,6 @@ export function useActivityNavigation(props, emit, {
   })
   function select(id) {
     if (!reorder.suppressClick.value) emit('select', id)
-  }
-  async function beginRename(tab) {
-    if (!tab || tab.unique || hidden() || props.rail) return
-    renaming.value = tab.id
-    draft.value = tab.title
-    await nextTick()
-    const field = Array.isArray(renameInput.value)
-      ? renameInput.value[0]
-      : renameInput.value
-    field?.focus()
-    field?.select()
-  }
-  function cancelRename() {
-    renaming.value = ''
-  }
-  function renameKey(event) {
-    event.stopPropagation()
-    if (event.isComposing || event.keyCode === 229) return
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      const id = renaming.value
-      cancelRename()
-      focusTab(id)
-    }
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      const title = draft.value.trim(),
-        id = renaming.value
-      if (!title) return
-      cancelRename()
-      emit('rename', { id, title })
-      focusTab(id)
-    }
   }
   function rowFor(id) {
     return [...(root.value?.querySelectorAll(rowSelector) || [])]
